@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "seogeo"
+version = "0.1.0"
+description = "Fast SEO and GEO linting for static websites"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Christophe Henner" }
+]
+dependencies = []
+
+[project.scripts]
+seogeo = "seogeo.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

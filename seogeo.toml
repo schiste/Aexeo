@@ -1,0 +1,22 @@
+site_url = "https://example.com"
+source_dir = "."
+canonical_style = "extensionless"
+
+[checks]
+html = true
+links = true
+sitemap = true
+schema = true
+llm = true
+content = true
+structure = true
+
+[content_rules]
+min_page_size = 500
+required_feature_markers = ["Related features"]
+
+[schema_rules]
+required_types = []
+
+[link_rules]
+weak_anchor_text = ["click here", "learn more", "read more", "here", "more"]
