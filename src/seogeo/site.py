@@ -8,9 +8,15 @@ route-oriented model consumed by rules, generators, and fixers.
 
 from html.parser import HTMLParser
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING
 import xml.etree.ElementTree as ET
 
-from seogeo.models import Block, DetailsBlock, JsonLdBlock, Link, Page, PreBlock, Site
+from seogeo.cache import cache_key_for_text, ensure_cache_dir, read_json_cache, write_json_cache
+from seogeo.models import AlternateLink, Block, DetailsBlock, ImageReference, JsonLdBlock, Link, Page, PreBlock, Site
+
+if TYPE_CHECKING:
+    from seogeo.config import Config
 
 
 ASSET_EXTENSIONS = {
@@ -47,11 +53,14 @@ class PageParser(HTMLParser):
         self.h1_count = 0
         self.h1_texts: list[str] = []
         self.links: list[Link] = []
+        self.alternate_links: list[AlternateLink] = []
+        self.images: list[ImageReference] = []
         self.blocks: list[Block] = []
         self.details_blocks: list[DetailsBlock] = []
         self.pre_blocks: list[PreBlock] = []
         self.json_ld_blocks: list[JsonLdBlock] = []
         self.has_breadcrumb_nav = False
+        self.html_lang: str | None = None
 
         self._open_anchor: dict[str, object] | None = None
         self._open_blocks: list[Block] = []
@@ -67,64 +76,17 @@ class PageParser(HTMLParser):
         """Handle opening tags and collect relevant semantic signals."""
         line, column = self.getpos()
         attr_map = dict(attrs)
-
-        if tag == "title":
-            self.in_title = True
+        if self._handle_document_start_tag(tag, attr_map):
             return
-
-        if tag == "meta":
-            self._handle_meta(attr_map)
+        if self._handle_head_start_tag(tag, attr_map):
             return
-
-        if tag == "link":
-            self._handle_link_tag(attr_map)
+        if self._handle_navigation_start_tag(tag, attr_map):
             return
-
-        if tag in HEADING_TAGS:
-            self._handle_heading_start(tag)
+        if self._handle_linkish_start_tag(tag, attr_map, line, column):
             return
-
-        if tag == "nav" and self._is_breadcrumb_nav(attr_map):
-            self.has_breadcrumb_nav = True
+        if self._handle_semantic_start_tag(tag, attr_map, line, column):
             return
-
-        if tag == "a" and attr_map.get("href"):
-            self._open_anchor = {
-                "href": attr_map["href"],
-                "line": line,
-                "column": column + 1,
-                "parts": [],
-            }
-            return
-
-        if tag in BLOCK_TAGS:
-            self._open_blocks.append(
-                Block(tag=tag, data_ui=attr_map.get("data-ui"), line=line, column=column + 1)
-            )
-            return
-
-        if tag == "details":
-            self._open_details.append(DetailsBlock(line=line, column=column + 1))
-            return
-
-        if tag == "summary":
-            if self._open_details:
-                self._open_details[-1].has_summary = True
-            return
-
-        if tag == "pre":
-            self._open_pre.append(PreBlock(line=line, column=column + 1))
-            return
-
-        if tag == "code":
-            if self._open_pre:
-                self._open_pre[-1].has_code = True
-            return
-
-        if tag == "script" and (attr_map.get("type") or "").lower() == "application/ld+json":
-            self._capture_json_ld = True
-            self._json_ld_parts = []
-            self._json_ld_pos = (line, column + 1)
+        self._handle_script_start_tag(tag, attr_map, line, column)
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         """Treat self-closing tags the same as normal opening tags."""
@@ -132,37 +94,19 @@ class PageParser(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         """Finalize captured data when tags close."""
-        if tag == "title":
-            self.in_title = False
+        if self._handle_title_end_tag(tag):
             return
-
-        if tag == self._open_heading_tag:
-            self._finalize_heading()
+        if self._handle_heading_end_tag(tag):
             return
-
-        if tag == "a" and self._open_anchor is not None:
-            self._finalize_anchor()
+        if self._handle_anchor_end_tag(tag):
             return
-
-        if tag in BLOCK_TAGS and self._open_blocks:
-            self.blocks.append(self._open_blocks.pop())
+        if self._handle_block_end_tag(tag):
             return
-
-        if tag == "details" and self._open_details:
-            self.details_blocks.append(self._open_details.pop())
+        if self._handle_details_end_tag(tag):
             return
-
-        if tag == "pre" and self._open_pre:
-            self.pre_blocks.append(self._open_pre.pop())
+        if self._handle_pre_end_tag(tag):
             return
-
-        if tag == "script" and self._capture_json_ld:
-            line, column = self._json_ld_pos
-            self.json_ld_blocks.append(
-                JsonLdBlock(raw="".join(self._json_ld_parts).strip(), line=line, column=column)
-            )
-            self._capture_json_ld = False
-            self._json_ld_parts = []
+        self._handle_script_end_tag(tag)
 
     def handle_data(self, data: str) -> None:
         """Capture text content for title, anchors, headings, and JSON-LD blocks."""
@@ -172,6 +116,8 @@ class PageParser(HTMLParser):
             self._open_heading_parts.append(data)
         if self._open_anchor is not None:
             self._open_anchor["parts"].append(data)
+        if self._open_blocks:
+            self._open_blocks[-1].text += data
         if self._capture_json_ld:
             self._json_ld_parts.append(data)
 
@@ -193,6 +139,11 @@ class PageParser(HTMLParser):
             expanded.update(part for part in token.split() if part)
         if "canonical" in expanded:
             self.canonical = attr_map.get("href")
+        if "alternate" in expanded:
+            href = (attr_map.get("href") or "").strip()
+            hreflang = (attr_map.get("hreflang") or "").strip() or None
+            if href:
+                self.alternate_links.append(AlternateLink(href=href, hreflang=hreflang))
 
     def _handle_heading_start(self, tag: str) -> None:
         """Start a new heading capture context."""
@@ -231,6 +182,128 @@ class PageParser(HTMLParser):
         label = (attr_map.get("aria-label") or "").lower()
         class_name = (attr_map.get("class") or "").lower()
         return "breadcrumb" in label or "breadcrumb" in class_name
+
+    def _handle_document_start_tag(self, tag: str, attr_map: dict[str, str | None]) -> bool:
+        if tag == "title":
+            self.in_title = True
+            return True
+        if tag == "html":
+            lang_value = (attr_map.get("lang") or "").strip()
+            self.html_lang = lang_value or None
+            return True
+        return False
+
+    def _handle_head_start_tag(self, tag: str, attr_map: dict[str, str | None]) -> bool:
+        if tag == "meta":
+            self._handle_meta(attr_map)
+            return True
+        if tag == "link":
+            self._handle_link_tag(attr_map)
+            return True
+        if tag in HEADING_TAGS:
+            self._handle_heading_start(tag)
+            return True
+        return False
+
+    def _handle_navigation_start_tag(self, tag: str, attr_map: dict[str, str | None]) -> bool:
+        if tag == "nav" and self._is_breadcrumb_nav(attr_map):
+            self.has_breadcrumb_nav = True
+            return True
+        return False
+
+    def _handle_linkish_start_tag(self, tag: str, attr_map: dict[str, str | None], line: int, column: int) -> bool:
+        if tag == "a" and attr_map.get("href"):
+            self._open_anchor = {
+                "href": attr_map["href"],
+                "line": line,
+                "column": column + 1,
+                "parts": [],
+            }
+            return True
+        if tag == "img" and attr_map.get("src"):
+            self.images.append(
+                ImageReference(
+                    src=attr_map["src"],
+                    alt=(attr_map.get("alt") or "").strip() or None,
+                    line=line,
+                    column=column + 1,
+                )
+            )
+            return True
+        return False
+
+    def _handle_semantic_start_tag(self, tag: str, attr_map: dict[str, str | None], line: int, column: int) -> bool:
+        if tag in BLOCK_TAGS:
+            self._open_blocks.append(
+                Block(tag=tag, data_ui=attr_map.get("data-ui"), line=line, column=column + 1)
+            )
+            return True
+        if tag == "details":
+            self._open_details.append(DetailsBlock(line=line, column=column + 1))
+            return True
+        if tag == "summary":
+            if self._open_details:
+                self._open_details[-1].has_summary = True
+            return True
+        if tag == "pre":
+            self._open_pre.append(PreBlock(line=line, column=column + 1))
+            return True
+        if tag == "code":
+            if self._open_pre:
+                self._open_pre[-1].has_code = True
+            return True
+        return False
+
+    def _handle_script_start_tag(self, tag: str, attr_map: dict[str, str | None], line: int, column: int) -> None:
+        if tag == "script" and (attr_map.get("type") or "").lower() == "application/ld+json":
+            self._capture_json_ld = True
+            self._json_ld_parts = []
+            self._json_ld_pos = (line, column + 1)
+
+    def _handle_title_end_tag(self, tag: str) -> bool:
+        if tag == "title":
+            self.in_title = False
+            return True
+        return False
+
+    def _handle_heading_end_tag(self, tag: str) -> bool:
+        if tag == self._open_heading_tag:
+            self._finalize_heading()
+            return True
+        return False
+
+    def _handle_anchor_end_tag(self, tag: str) -> bool:
+        if tag == "a" and self._open_anchor is not None:
+            self._finalize_anchor()
+            return True
+        return False
+
+    def _handle_block_end_tag(self, tag: str) -> bool:
+        if tag in BLOCK_TAGS and self._open_blocks:
+            self.blocks.append(self._open_blocks.pop())
+            return True
+        return False
+
+    def _handle_details_end_tag(self, tag: str) -> bool:
+        if tag == "details" and self._open_details:
+            self.details_blocks.append(self._open_details.pop())
+            return True
+        return False
+
+    def _handle_pre_end_tag(self, tag: str) -> bool:
+        if tag == "pre" and self._open_pre:
+            self.pre_blocks.append(self._open_pre.pop())
+            return True
+        return False
+
+    def _handle_script_end_tag(self, tag: str) -> None:
+        if tag == "script" and self._capture_json_ld:
+            line, column = self._json_ld_pos
+            self.json_ld_blocks.append(
+                JsonLdBlock(raw="".join(self._json_ld_parts).strip(), line=line, column=column)
+            )
+            self._capture_json_ld = False
+            self._json_ld_parts = []
 
 
 def iter_html_files(root: Path) -> list[Path]:
@@ -320,6 +393,7 @@ def parse_html_document(
     route: str,
     url: str | None = None,
     status_code: int | None = None,
+    response_headers: dict[str, str] | None = None,
 ) -> Page:
     """Parse one HTML document into the reusable ``Page`` model."""
     parser = PageParser()
@@ -332,15 +406,19 @@ def parse_html_document(
         title="".join(parser.title).strip() or None,
         meta_description=parser.meta_description,
         canonical=parser.canonical,
+        html_lang=parser.html_lang,
         h1_count=parser.h1_count,
         raw_text=raw_text,
         url=url,
         status_code=status_code,
+        response_headers=response_headers or {},
         metadata=parser.metadata,
         h1_texts=parser.h1_texts,
         has_breadcrumb_nav=parser.has_breadcrumb_nav,
         links=parser.links,
         internal_links=internal_links,
+        alternate_links=parser.alternate_links,
+        images=parser.images,
         blocks=parser.blocks,
         details_blocks=parser.details_blocks,
         pre_blocks=parser.pre_blocks,
@@ -358,6 +436,89 @@ def parse_page(path: Path, root: Path) -> Page:
         relative_path=relative,
         route=route,
     )
+
+
+def serialize_page(page: Page) -> dict[str, object]:
+    """Serialize a parsed page for cache storage."""
+    return {
+        "relative_path": page.relative_path,
+        "route": page.route,
+        "title": page.title,
+        "meta_description": page.meta_description,
+        "canonical": page.canonical,
+        "html_lang": page.html_lang,
+        "h1_count": page.h1_count,
+        "raw_text": page.raw_text,
+        "response_headers": page.response_headers,
+        "metadata": page.metadata,
+        "h1_texts": page.h1_texts,
+        "has_breadcrumb_nav": page.has_breadcrumb_nav,
+        "links": [{"href": link.href, "target": link.target, "text": link.text, "line": link.line, "column": link.column} for link in page.links],
+        "internal_links": page.internal_links,
+        "alternate_links": [{"href": link.href, "hreflang": link.hreflang} for link in page.alternate_links],
+        "images": [{"src": image.src, "alt": image.alt, "line": image.line, "column": image.column} for image in page.images],
+        "blocks": [
+            {
+                "tag": block.tag,
+                "data_ui": block.data_ui,
+                "line": block.line,
+                "column": block.column,
+                "has_heading": block.has_heading,
+                "text": block.text,
+            }
+            for block in page.blocks
+        ],
+        "details_blocks": [{"line": block.line, "column": block.column, "has_summary": block.has_summary} for block in page.details_blocks],
+        "pre_blocks": [{"line": block.line, "column": block.column, "has_code": block.has_code} for block in page.pre_blocks],
+        "json_ld_blocks": [{"raw": block.raw, "line": block.line, "column": block.column} for block in page.json_ld_blocks],
+    }
+
+
+def deserialize_page(path: Path, payload: dict[str, object]) -> Page:
+    """Hydrate a cached page payload back into a ``Page``."""
+    from seogeo.models import AlternateLink, Block, DetailsBlock, ImageReference, JsonLdBlock, Link, PreBlock
+
+    return Page(
+        path=path,
+        relative_path=str(payload["relative_path"]),
+        route=str(payload["route"]),
+        title=payload.get("title"),
+        meta_description=payload.get("meta_description"),
+        canonical=payload.get("canonical"),
+        html_lang=payload.get("html_lang"),
+        h1_count=int(payload["h1_count"]),
+        raw_text=str(payload["raw_text"]),
+        response_headers=dict(payload.get("response_headers", {})),
+        metadata=dict(payload.get("metadata", {})),
+        h1_texts=list(payload.get("h1_texts", [])),
+        has_breadcrumb_nav=bool(payload.get("has_breadcrumb_nav", False)),
+        links=[Link(**item) for item in payload.get("links", [])],
+        internal_links=list(payload.get("internal_links", [])),
+        alternate_links=[AlternateLink(**item) for item in payload.get("alternate_links", [])],
+        images=[ImageReference(**item) for item in payload.get("images", [])],
+        blocks=[Block(**item) for item in payload.get("blocks", [])],
+        details_blocks=[DetailsBlock(**item) for item in payload.get("details_blocks", [])],
+        pre_blocks=[PreBlock(**item) for item in payload.get("pre_blocks", [])],
+        json_ld_blocks=[JsonLdBlock(**item) for item in payload.get("json_ld_blocks", [])],
+    )
+
+
+def parse_page_with_optional_cache(path: Path, root: Path, config: "Config | None") -> Page:
+    """Parse a page, optionally reusing a persistent serialized cache."""
+    if config is None or not config.enable_cache:
+        return parse_page(path, root)
+    cache_root = ensure_cache_dir(root / config.cache_dir / "pages")
+    relative = path.relative_to(root).as_posix()
+    cache_path = cache_root / f"{cache_key_for_text('page', relative)}.json"
+    stat = path.stat()
+    cached = read_json_cache(cache_path, ttl_seconds=config.cache_ttl_seconds)
+    if cached and cached.get("mtime") == stat.st_mtime and cached.get("size") == stat.st_size:
+        payload = cached.get("page")
+        if isinstance(payload, dict):
+            return deserialize_page(path, payload)
+    page = parse_page(path, root)
+    write_json_cache(cache_path, {"mtime": stat.st_mtime, "size": stat.st_size, "page": serialize_page(page)})
+    return page
 
 
 def build_inbound_link_map(pages: list[Page]) -> dict[str, set[str]]:
@@ -440,10 +601,16 @@ def build_site(
     )
 
 
-def load_site(root: Path) -> Site:
+def load_site(root: Path, config: "Config | None" = None) -> Site:
     """Load a site directory into the stable route-oriented inventory model."""
     indexed_paths = build_site_index(root)
-    pages = [parse_page(path, root) for path in iter_html_files(root)]
+    html_files = iter_html_files(root)
+    max_workers = max(config.max_workers, 1) if config is not None else 1
+    if max_workers > 1 and len(html_files) > 1:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            pages = list(pool.map(lambda path: parse_page_with_optional_cache(path, root, config), html_files))
+    else:
+        pages = [parse_page_with_optional_cache(path, root, config) for path in html_files]
     sitemap_routes: set[str] = set()
     sitemap_error: str | None = None
     sitemap_path = root / "sitemap.xml"

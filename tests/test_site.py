@@ -21,16 +21,20 @@ class SiteModelTests(unittest.TestCase):
                         '<details><summary>Q</summary><p>A</p></details>'
                         '<pre><code>echo ok</code></pre>'
                     ),
-                    head_extra='<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage"}</script>',
+                    head_extra='<link rel="alternate" hreflang="en" href="/guide"><script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage"}</script>',
                 ),
             )
+            path.write_text(path.read_text().replace("<html>", '<html lang="en">'))
             page = parse_page(path, root)
             self.assertEqual(page.route, "")
+            self.assertEqual(page.html_lang, "en")
             self.assertEqual(len(page.links), 1)
             self.assertEqual(page.links[0].target, "guide")
+            self.assertEqual(page.alternate_links[0].hreflang, "en")
             self.assertEqual(len(page.blocks), 1)
             self.assertEqual(page.blocks[0].data_ui, "hero")
             self.assertTrue(page.blocks[0].has_heading)
+            self.assertIn("Read guide", page.blocks[0].text)
             self.assertEqual(len(page.details_blocks), 1)
             self.assertTrue(page.details_blocks[0].has_summary)
             self.assertEqual(len(page.pre_blocks), 1)

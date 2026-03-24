@@ -28,6 +28,27 @@ class HtmlAndContentRuleTests(unittest.TestCase):
             self.assertIn("SEO002", rule_ids)
             self.assertIn("SEO004", rule_ids)
 
+    def test_html_rules_cover_lang_and_hreflang(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_text(
+                root,
+                "index.html",
+                (
+                    "<html><head><title>x</title><meta name=\"description\" content=\"y\">"
+                    "<link rel=\"canonical\" href=\"https://example.com/\">"
+                    "<link rel=\"alternate\" hreflang=\"fr\" href=\"/missing-fr\">"
+                    "</head><body><h1>x</h1></body></html>"
+                ),
+            )
+
+            findings = run_html_rules(load_site(root), Config(require_hreflang_self=True, site_url="https://example.com"))
+            rule_ids = {finding.rule_id for finding in findings}
+
+            self.assertIn("SEO007", rule_ids)
+            self.assertIn("SEO008", rule_ids)
+            self.assertIn("SEO009", rule_ids)
+
     def test_content_rules_flag_thin_feature_page_and_missing_markers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

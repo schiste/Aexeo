@@ -4,14 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "seogeo"
-version = "0.1.0"
-description = "Fast SEO and GEO linting for static websites"
+version = "0.2.0"
+description = "Internal SEO and GEO linting runtime for static websites"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
   { name = "Christophe Henner" }
 ]
 dependencies = []
+
+[project.optional-dependencies]
+browser = ["playwright>=1.54"]
+build = ["build>=1.2.2"]
+dev = ["mypy>=1.11", "coverage[toml]>=7.6"]
 
 [project.scripts]
 seogeo = "seogeo.cli:main"

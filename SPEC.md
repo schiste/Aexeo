@@ -1,58 +1,71 @@
 # seogeo Specification
 
-This document defines the current stability target for `seogeo`.
+This document defines the current public contract for `seogeo`.
 
-Its purpose is to separate product semantics from implementation language so the engine can later be rewritten in Rust without changing user-facing behavior.
+Its purpose is to freeze user-visible behavior independently from implementation details.
 
-## 1. Scope
+## 1. Product Scope
 
-`seogeo` is a deterministic SEO and GEO linter for static sites.
+`seogeo` is a deterministic SEO and GEO review runtime for static websites.
 
-The stable contract in this document covers:
-- config keys and their meaning
-- rule groups and rule identifiers
-- finding output shape
-- site inventory semantics
-- normalization behavior for internal paths
-- current non-goals
+The stable contract covers:
+- command names and core flags
+- finding structure and severity semantics
+- built-in rule-group names and rule identifiers
+- artifact/report behavior
+- runtime verification and regression semantics
 
-This document does not freeze internal implementation details such as parser class names, module structure, or data structures used in memory.
+It does not freeze:
+- internal parser structure
+- crate/module layout
+- temporary implementation details inside the Rust workspace
 
-## 2. CLI Contract
+## 2. Canonical Runtime
 
-Current commands:
+The canonical implementation is the Rust workspace.
+
+- `crates/seogeo-contracts` owns stable finding contracts
+- `crates/seogeo-core` owns runtime behavior
+- `crates/seogeo-cli` owns the supported CLI surface
+
+The Python implementation is not a supported runtime surface.
+
+## 3. CLI Contract
+
+Supported commands:
 
 ```bash
-seogeo check [PATH] [--config FILE] [--format text|json]
-seogeo rules
+seogeo check [PATH]
 seogeo crawl URL
+seogeo quality [PATH]
+seogeo generate KIND [PATH]
+seogeo docs generate|check [PATH]
+seogeo baseline [PATH]
+seogeo verify URL
+seogeo diff BASELINE CURRENT
+seogeo trend check|crawl|quality [PATH]
+seogeo fix [PATH]
+seogeo rules
+seogeo adapters
+seogeo plugin-check MODULE
 ```
 
-### `check`
+### Output formats
 
-Runs deterministic filesystem-based checks against a site root.
+Where supported:
+- `text`
+- `json`
+- `sarif`
 
-Inputs:
-- `PATH`: defaults to `.`
-- `--config FILE`: optional config path; if omitted, `seogeo.toml` is resolved relative to the site root
-- `--format text|json`: output mode; default `text`
+### Exit codes
 
-Exit codes:
-- `0`: no findings
-- `1`: one or more findings
-- `2`: usage error or unimplemented command path
+- `0`: success with no blocking findings or no regressions
+- `1`: one or more blocking findings or regressions
+- `2`: invalid command usage or unsupported input state
 
-### `rules`
+## 4. Finding Contract
 
-Prints the built-in rule groups, one per line.
-
-### `crawl`
-
-Reserved command. The current behavior is explicitly non-final.
-
-## 3. Finding Contract
-
-Each finding is a structured object with these fields:
+Each finding has these fields:
 
 - `rule_id: string`
 - `message: string`
@@ -60,291 +73,244 @@ Each finding is a structured object with these fields:
 - `line: integer`
 - `column: integer`
 - `severity: string`
+- `suggestion: string | null`
 
-Current severities:
+Supported severities:
 - `error`
 - `warning`
 
 ### Text rendering
 
-Text output format is:
+Canonical single-line rendering:
 
 ```text
-/path/to/file:line:column RULE_ID message
+path:line:column RULE_ID message [suggestion]
 ```
 
-### JSON rendering
+The suggestion block is omitted when absent.
 
-JSON output is a list of finding objects preserving the fields above.
+## 5. Built-In Rule Groups
 
-## 4. Rule Groups
-
-Built-in rule groups:
+Stable built-in group names:
 - `html`
 - `links`
 - `sitemap`
+- `robots`
+- `social`
 - `schema`
 - `llm`
 - `content`
 - `structure`
 
-These group names are part of the public config and CLI contract.
+These names are part of the config and reporting contract.
 
-## 5. Stable Rule IDs
+## 6. Stable Rule IDs
 
 ### HTML
-- `SEO001`: missing `<title>`
-- `SEO002`: missing meta description
-- `SEO004`: missing canonical link
-- `SEO005`: missing `<h1>`
-- `SEO006`: multiple `<h1>` tags
+- `SEO001`
+- `SEO002`
+- `SEO004`
+- `SEO005`
+- `SEO006`
+- `SEO007`
+- `SEO008`
+- `SEO009`
+- `SEO010`
+- `SEO011`
+- `SEO012`
 
 ### Links
-- `LNK001`: broken internal link
-- `LNK002`: orphan page
-- `LNK003`: weak internal anchor text
+- `LNK001`
+- `LNK002`
+- `LNK003`
+- `LNK004`
 
 ### Sitemap
-- `MAP001`: missing `sitemap.xml`
-- `MAP002`: invalid sitemap XML
-- `MAP003`: sitemap resolves to no URLs
-- `MAP004`: canonical URL missing from sitemap coverage
+- `MAP001`
+- `MAP002`
+- `MAP003`
+- `MAP004`
+
+### Robots
+- `ROB001`
+- `ROB002`
+- `ROB003`
+- `ROB004`
+- `ROB005`
+- `ROB006`
+- `ROB007`
+- `ROB008`
+
+### Social
+- `SOC001`
+- `SOC002`
+- `SOC003`
+- `SOC004`
+- `SOC005`
+- `SOC006`
+- `SOC007`
+- `SOC008`
+- `SOC009`
+- `SOC010`
+- `SOC011`
 
 ### Schema
-- `SCH001`: invalid JSON-LD
-- `SCH002`: missing required schema type from config
-- `SCH003`: visible FAQ-style `<details>` content without `FAQPage` JSON-LD
+- `SCH001`
+- `SCH002`
+- `SCH003`
+- `SCH004`
+- `SCH005`
+- `SCH006`
+- `SCH007`
+- `SCH008`
+- `SCH009`
+- `SCH010`
 
 ### LLM
-- `LLM001`: missing `llms.txt`
-- `LLM002`: empty `llms.txt`
-- `LLM003`: missing expected top-level page sections in `llms.txt`
-- `LLM004`: broken internal reference in `llms.txt`
-- `LLM005`: noncanonical `.html` internal link in `llms.txt` when extensionless canonicals are expected
-- `LLM006`: feature/category claim drift against `feature-data.json`
-- `LLM007`: feature-page count drift against `feature-data.json`
+- `LLM001`
+- `LLM002`
+- `LLM003`
+- `LLM004`
+- `LLM005`
+- `LLM006`
+- `LLM007`
 
 ### Content
-- `CNT001`: page is unusually small after markup stripping
-- `CNT002`: feature-like page is missing a configured marker section
+- `CNT001`
+- `CNT002`
+- `CNT003`
+- `CNT004`
 
-### Structure
-- `GEO001`: `<section>` missing `data-ui`
-- `GEO002`: `<article>` missing `data-ui`
-- `GEO003`: duplicate `data-ui` on a page
-- `GEO004`: `<section>` missing a heading
-- `GEO005`: `<details>` missing `<summary>`
-- `GEO006`: `<pre>` missing nested `<code>`
+### GEO / Retrieval Structure
+- `GEO001`
+- `GEO002`
+- `GEO003`
+- `GEO004`
+- `GEO005`
+- `GEO006`
+- `GEO007`
+- `GEO008`
+- `GEO009`
+- `GEO010`
+- `GEO011`
+- `GEO012`
+- `GEO013`
 
-Rule IDs should be treated as stable once released. Messages may improve, but semantics should remain materially consistent.
+### Runtime Crawl
+- `CRW001`
+- `CRW002`
 
-## 6. Config Contract
+### Internal Quality
+- `QLT003`
+- `QLT004`
+- `QLT005`
+- `QLT006`
+- `QLT007`
+- `QLT009`
+- `QLT010`
+- `QLT011`
+- `QLT012`
 
-Config file format: TOML.
+Rule IDs are stable product identifiers. Messages may improve, but the underlying meaning should remain materially consistent.
+
+## 7. Config Contract
+
+Config format: TOML.
 
 Default config filename:
 - `seogeo.toml`
 
-Current top-level keys:
+Important top-level keys include:
+- `site_url`
+- `source_dir`
+- `profile`
+- `adapter`
+- `plugins`
+- `canonical_style`
+- `audit_log_limit`
+- `browser_engine`
+- `browser_wait_until`
+- `baseline_file`
+- `checks`
+- `ignore_rules`
+- `ignore_paths`
+- `severity_overrides`
 
-```toml
-site_url = "https://example.com"
-source_dir = "."
-canonical_style = "extensionless"
-orphan_exclude = ["404.html"]
+Rule-policy keys include:
+- `orphan_exclude`
+- `min_inbound_links`
+- `link_suggestion_count`
+- `enable_link_autofix`
+- `related_links_heading`
+- `min_page_size`
+- `required_feature_markers`
+- `min_block_text_length`
+- `min_answer_blocks`
+- `require_fact_consistency`
+- `required_schema_types`
+- `required_schema_families`
+- `require_breadcrumb_schema`
+- `require_schema_title_alignment`
+- `require_html_lang`
+- `require_hreflang_self`
+- `require_meta_robots_consistency`
+- `require_open_graph`
+- `require_twitter_card`
+- `default_twitter_card`
+- `require_social_images`
+- `require_twitter_image`
+- `require_robots_sitemap`
+- `weak_anchor_text`
 
-[checks]
-html = true
-links = true
-sitemap = true
-schema = true
-llm = true
-content = true
-structure = true
+Internal quality and repo policy keys include:
+- `typecheck_command`
+- `coverage_threshold`
+- `complexity_threshold`
+- `performance_budget_file`
 
-[content_rules]
-min_page_size = 500
-required_feature_markers = ["Related features"]
+The generated config reference in [docs/config.md](docs/config.md) is part of the authoritative documentation surface.
 
-[schema_rules]
-required_types = ["SoftwareApplication"]
+## 8. Reporting Contract
 
-[link_rules]
-weak_anchor_text = ["click here", "learn more", "read more", "here", "more"]
+Audit runs write retained artifacts under:
+
+```text
+.seogeo-reports/
 ```
 
-### Key semantics
+For each command stream:
+- `*-latest.json` is the stable latest artifact
+- timestamped history logs are retained according to `audit_log_limit`
+- `*-trends.json` stores recent trend summaries
 
-- `site_url`
-  - Optional site base URL.
-  - Currently informational for most rules; retained as a stable field for future expansion.
+## 9. Runtime Verification Contract
 
-- `source_dir`
-  - Relative source directory hint.
-  - Current engine behavior does not materially depend on it yet; retained as a stable field.
+`crawl` runs a runtime audit against a served site.
 
-- `canonical_style`
-  - Current accepted value: `extensionless`
-  - Meaning: clean routes like `/features/foo` are preferred over `/features/foo.html`
+`verify` compares a runtime audit against a baseline artifact and returns:
+- new findings
+- resolved findings
+- unchanged findings
 
-- `orphan_exclude`
-  - Routes or filenames excluded from orphan detection.
+`--regressions-only` on supported commands reports only newly introduced findings relative to the chosen baseline.
 
-- `[checks]`
-  - Enables or disables entire rule groups.
+## 10. Plugin Contract
 
-- `[content_rules].min_page_size`
-  - Minimum visible text size after HTML stripping before `CNT001` triggers.
+`plugin-check` validates plugin manifests against the current contract.
 
-- `[content_rules].required_feature_markers`
-  - Literal strings expected on `features/*` routes before `CNT002` triggers.
+Current supported manifest expectations:
+- a declared plugin manifest
+- a dotted namespace
+- compatible API version range
+- a registration entrypoint
 
-- `[schema_rules].required_types`
-  - JSON-LD `@type` values required on each route page.
+Plugin validation is part of the public CLI contract. The internal plugin execution model may evolve as long as those compatibility semantics remain stable.
 
-- `[link_rules].weak_anchor_text`
-  - Anchor text phrases considered weak for internal links.
+## 11. Non-Goals
 
-## 7. Site Inventory Semantics
-
-The engine inventories the filesystem under the requested site root.
-
-### Indexed file types
-
-Currently, route and link normalization know about these file extensions as direct assets:
-- `.css`
-- `.gif`
-- `.html`
-- `.ico`
-- `.jpeg`
-- `.jpg`
-- `.js`
-- `.json`
-- `.mjs`
-- `.png`
-- `.svg`
-- `.txt`
-- `.webp`
-- `.xml`
-
-### Canonical route model
-
-The engine distinguishes between physical files and preferred route pages.
-
-Examples:
-- `index.html` -> route `""`
-- `features/index.html` -> route `"features"`
-- `features/foo/index.html` -> route `"features/foo"`
-- `features/foo.html` -> route `"features/foo"`
-
-When both a flat page and a clean-route page exist for the same route, the preferred representative page is:
-1. `index.html` variant
-2. otherwise the shorter relative path
-
-This preferred representative is called the route page.
-
-Rules that operate on canonical pages should use route pages rather than every physical HTML file.
-
-## 8. Internal Link Normalization
-
-Only root-relative internal links are normalized.
-
-Examples:
-- `/` -> `""`
-- `/features` -> `"features"`
-- `/features/` -> `"features"`
-- `/features/foo#faq` -> `"features/foo"`
-- `/style.css` -> `"style.css"`
-
-The following are ignored by internal-link rules:
-- absolute external URLs like `https://...`
-- protocol-relative URLs like `//...`
-- non-root-relative paths like `guide.html`
-
-This is intentional in the current model and should not change casually.
-
-## 9. Current Rule Semantics
-
-### HTML rules
-
-Run on route pages.
-
-### Link rules
-
-- Broken links are evaluated from discovered root-relative internal links.
-- Orphan detection is based on inbound links to route pages.
-- Self-links do not count as inbound support for orphan detection.
-
-### Sitemap rules
-
-- `sitemap.xml` may be either `urlset` or `sitemapindex`.
-- Nested sitemaps referenced from a local sitemap index are followed by local filename.
-- Canonical coverage is evaluated against route pages.
-
-### Schema rules
-
-- JSON-LD is read only from `<script type="application/ld+json">` blocks.
-- Required types are matched against any discovered `@type` in nested payloads.
-- Presence of visible FAQ-style `<details>` content without `FAQPage` schema triggers `SCH003`.
-
-### LLM rules
-
-- `llms.txt` is expected at site root.
-- Markdown links inside `llms.txt` are parsed and validated.
-- Claim drift checks currently derive counts from `feature-data.json` if present.
-
-### Structure rules
-
-These rules intentionally implement the deterministic subset of the Chau7 GEO playbook:
-- structural `data-ui`
-- section headings
-- summary-bearing FAQ blocks
-- machine-readable code blocks
-
-They do not attempt to score rhetoric, voice, or conceptual quality.
-
-## 10. Non-Goals In This Spec
-
-This spec does not yet freeze:
-- crawler/network behavior
-- redirect handling semantics
-- SARIF output
-- autofix output shape
-- plugin API
-- post-deploy verification APIs
-- heuristic rules like “one idea per block”
-
-Those should be specified separately before implementation is treated as stable.
-
-## 11. Porting Guidance
-
-A future Rust rewrite should preserve:
-- config keys and defaults
-- rule group names
-- rule IDs
-- exit-code semantics
-- text and JSON output shape
-- route normalization behavior
-- route-page preference behavior
-
-It does not need to preserve:
-- Python module layout
-- parser implementation details
-- in-memory class names
-
-## 12. Change Policy
-
-Changes to this spec should be treated as product changes, not refactors.
-
-Safe changes:
-- better wording in messages
-- better line/column precision
-- more tests
-- internal performance work
-
-Spec changes requiring explicit intent:
-- renaming rule IDs
-- changing config key names
-- changing route normalization semantics
-- changing which page variant is treated as canonical
-- reclassifying an existing rule from warning to error by default
+The current contract does not guarantee:
+- a hosted service
+- rank tracking
+- backlink intelligence
+- external analytics ingestion
+- browser automation as the default runtime crawl mode

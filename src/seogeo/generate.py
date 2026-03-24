@@ -6,10 +6,13 @@ import json
 from pathlib import Path
 import re
 
-from seogeo.models import Site
+from seogeo.models import Page, Site
+from seogeo.rules.content import visible_length
 
 
 TOKEN_RE = re.compile(r"[a-z0-9]+")
+TAG_RE = re.compile(r"<[^>]+>")
+WHITESPACE_RE = re.compile(r"\s+")
 
 
 def categorize_routes(site: Site) -> tuple[list[str], list[str]]:
@@ -69,6 +72,52 @@ def render_llms_txt(site: Site, site_url: str | None = None) -> str:
     return "\n".join(lines)
 
 
+def visible_text(raw_text: str) -> str:
+    """Strip HTML tags into compact plain text."""
+    stripped = TAG_RE.sub(" ", raw_text)
+    return WHITESPACE_RE.sub(" ", stripped).strip()
+
+
+def render_llms_full_txt(site: Site, site_url: str | None = None) -> str:
+    """Generate a richer llms-full style artifact with per-page summaries."""
+    lines = ["# Site Full Context", ""]
+    for route, page in sorted(site.route_pages.items()):
+        href = "/" if route == "" else f"/{route}"
+        label = page.title or (route or "Home")
+        lines.extend(
+            [
+                f"## {label}",
+                f"- URL: {href}",
+                f"- H1: {page.h1_texts[0] if page.h1_texts else '(none)'}",
+                f"- Description: {page.meta_description or '(none)'}",
+                f"- Summary: {visible_text(page.raw_text)[:600]}",
+                "",
+            ]
+        )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_markdown_mirror(site: Site) -> str:
+    """Generate a single deterministic markdown mirror of the site inventory."""
+    lines = ["# Site Mirror", ""]
+    for route, page in sorted(site.route_pages.items()):
+        title = page.title or (route or "Home")
+        lines.append(f"## {title}")
+        lines.append("")
+        lines.append(f"URL: `/{route}`" if route else "URL: `/`")
+        lines.append("")
+        for block in page.blocks:
+            heading = block.data_ui or block.tag
+            lines.append(f"### {heading}")
+            lines.append("")
+            lines.append(WHITESPACE_RE.sub(" ", block.text).strip() or "_No visible text._")
+            lines.append("")
+        if not page.blocks:
+            lines.append(visible_text(page.raw_text) or "_No visible text._")
+            lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def render_robots_txt(site_url: str) -> str:
     """Generate a minimal ``robots.txt`` with a sitemap declaration."""
     normalized = site_url.rstrip("/")
@@ -87,41 +136,68 @@ def tokenize_route(route: str) -> set[str]:
     return set(TOKEN_RE.findall(route.lower()))
 
 
-def suggest_internal_links(site: Site, top_n: int = 3) -> str:
-    """Generate deterministic internal-link suggestions for weakly linked pages."""
-    candidates = []
-    routes = sorted(route for route in site.route_pages if route)
-    for route in routes:
-        inbound = len({source for source in site.inbound_links.get(route, set()) if source != site.route_pages[route].relative_path})
-        if inbound > 1:
+def collect_page_tokens(page: Page) -> set[str]:
+    """Collect route and content tokens for smarter related-link scoring."""
+    tokens = tokenize_route(page.route)
+    for value in [page.title, page.meta_description, *page.h1_texts]:
+        if value:
+            tokens.update(TOKEN_RE.findall(value.lower()))
+    for block in page.blocks:
+        if block.data_ui:
+            tokens.update(TOKEN_RE.findall(block.data_ui.lower()))
+        if block.has_heading or visible_length(block.text) > 80:
+            tokens.update(TOKEN_RE.findall(block.text.lower())[:80])
+    return tokens
+
+
+def _score_link_candidate(site: Site, route_tokens: dict[str, set[str]], source: str, target: str) -> int:
+    source_tokens = route_tokens[source]
+    target_tokens = route_tokens[target]
+    shared_score = len(source_tokens & target_tokens)
+    prefix_score = 3 if source.split("/", 1)[0] == target.split("/", 1)[0] else 0
+    target_inbound = len(site.inbound_links.get(target, set()))
+    weakness_bonus = 3 if target_inbound < 2 else 1 if target_inbound < 4 else 0
+    return shared_score + prefix_score + weakness_bonus
+
+
+def _collect_link_candidate_scores(site: Site, route_tokens: dict[str, set[str]], source: str, routes: list[str]) -> list[tuple[int, str]]:
+    source_page = site.route_pages[source]
+    scored: list[tuple[int, str]] = []
+    for target in routes:
+        if target == source or target in source_page.internal_links:
             continue
-        route_tokens = tokenize_route(route)
-        scored: list[tuple[int, str]] = []
-        for other in routes:
-            if other == route:
-                continue
-            other_page = site.route_pages[other]
-            if route in other_page.internal_links:
-                continue
-            other_tokens = tokenize_route(other)
-            shared_score = len(route_tokens & other_tokens)
-            prefix_score = 2 if route.split("/", 1)[0] == other.split("/", 1)[0] else 0
-            score = shared_score + prefix_score
-            if score > 0:
-                scored.append((score, other))
-        scored.sort(key=lambda item: (-item[0], item[1]))
-        candidates.append((route, [target for _, target in scored[:top_n]]))
+        score = _score_link_candidate(site, route_tokens, source, target)
+        if score > 2:
+            scored.append((score, target))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return scored
+
+
+def build_link_suggestions(site: Site, top_n: int = 3) -> dict[str, list[str]]:
+    """Return source-page -> target-page suggestions using route and content similarity."""
+    route_tokens = {route: collect_page_tokens(page) for route, page in site.route_pages.items() if route != "404"}
+    candidates: dict[str, list[str]] = {}
+    routes = sorted(route for route in site.route_pages if route != "404")
+    for source in routes:
+        scored = _collect_link_candidate_scores(site, route_tokens, source, routes)
+        if scored:
+            candidates[source] = [target for _, target in scored[:top_n]]
+    return candidates
+
+
+def suggest_internal_links(site: Site, top_n: int = 3) -> str:
+    """Generate deterministic internal-link suggestions grouped by source page."""
+    candidates = build_link_suggestions(site, top_n=top_n)
 
     if not candidates:
         return "No internal-link suggestions."
 
     lines = ["# Internal Link Suggestions", ""]
-    for route, suggestions in candidates:
+    for route in sorted(candidates):
+        suggestions = candidates[route]
         lines.append(f"## /{route}")
         if suggestions:
             for suggestion in suggestions:
-                lines.append(f"- link from `/{suggestion}` to `/{route}`")
-        else:
-            lines.append("- no deterministic suggestions available")
+                lines.append(f"- add link to `/{suggestion}`")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"

@@ -1,82 +1,70 @@
-# seogeo
+# Aexeo / seogeo
 
-`seogeo` is a fast SEO and GEO linter for static websites.
+`seogeo` is an internal SEO and GEO linting runtime for websites.
 
-It is being built as developer infrastructure: think Ruff for search quality, retrieval structure, and AI-facing site hygiene.
+It is being built as developer infrastructure for private use: think Ruff for search quality, retrieval structure, AI-facing artifacts, deterministic cleanup, and runtime website audits.
 
-## What it checks
+## Internal Use
 
-- HTML metadata integrity: titles, descriptions, canonicals, H1s
-- Link graph quality: broken internal links, orphan pages, weak anchor text, and inbound-link thresholds
-- Sitemap coverage: sitemap indexes, canonical coverage
-- Robots hygiene: `robots.txt` presence and sitemap declarations
-- Social metadata: Open Graph and Twitter card coverage
-- Schema hygiene: JSON-LD parsing, required schema types, FAQ/schema alignment, breadcrumb/title alignment
-- LLM-facing artifacts: `llms.txt` presence, broken references, noncanonical paths, claim drift
-- Content policy: thin pages and required section markers for feature-like pages
-- Retrieval structure: `data-ui`, section headings, `<details><summary>`, `<pre><code>`
+This repository is private and intended for internal use only.
+
+- no public package publishing
+- no public release channel
+- install from the private repository or from internal build artifacts
+
+See [docs/install.md](docs/install.md) for supported installation and release paths.
+
+## Rust-First Architecture
+
+The Rust workspace is now the canonical entrypoint for Aexeo.
+
+- `crates/seogeo-contracts`: stable finding and audit contracts
+- `crates/seogeo-core`: config, rule inventory, reporting, docs, and diff/baseline primitives
+- `crates/seogeo-cli`: canonical CLI surface
+
+The CLI surface is fully native Rust. The Python tree remains in the repository only as historical reference material and for parity comparison while the new workspace settles.
 
 ## Commands
 
 ```bash
-seogeo check .
-seogeo check . --format sarif
-seogeo crawl http://localhost:8000
-seogeo generate llms .
-seogeo generate links .
-seogeo fix .
-seogeo quality .
-seogeo rules
+cargo run -p seogeo-cli -- check .
+cargo run -p seogeo-cli -- crawl http://localhost:8000 --engine auto
+cargo run -p seogeo-cli -- fix .
+cargo run -p seogeo-cli -- generate llms .
+cargo run -p seogeo-cli -- generate robots .
+cargo run -p seogeo-cli -- generate links .
+cargo run -p seogeo-cli -- baseline .
+cargo run -p seogeo-cli -- verify https://staging.example.com --baseline .seogeo-baseline.json
+cargo run -p seogeo-cli -- diff baseline.json current.json
+cargo run -p seogeo-cli -- docs generate .
+cargo run -p seogeo-cli -- docs check .
+cargo run -p seogeo-cli -- quality .
+cargo run -p seogeo-cli -- rules
+cargo run -p seogeo-cli -- adapters
 ```
 
-## Config
+## Current Product Areas
 
-Example `seogeo.toml`:
+- static linting for SEO/GEO structure and artifacts
+- runtime crawl with native HTTP orchestration and room for external browser-backed execution
+- deterministic artifact generation and safe HTML/artifact autofix
+- adapter and plugin architecture for framework-specific usage
+- baseline, diff, and post-deploy verification workflows
+- code-generated reference docs with drift enforcement
 
-```toml
-site_url = "https://example.com"
-source_dir = "."
-canonical_style = "extensionless"
-audit_log_limit = 5
+## Repository Docs
 
-[checks]
-html = true
-links = true
-sitemap = true
-robots = true
-social = true
-schema = true
-llm = true
-content = true
-structure = true
-
-[link_rules]
-min_inbound_links = 1
-weak_anchor_text = ["click here", "learn more", "read more", "here", "more"]
-
-[content_rules]
-min_page_size = 500
-required_feature_markers = ["Related features"]
-
-[social_rules]
-require_open_graph = true
-require_twitter_card = true
-
-[robots_rules]
-require_sitemap_declaration = true
-
-[schema_rules]
-required_types = ["SoftwareApplication"]
-require_breadcrumb_schema = false
-require_title_alignment = true
-```
+- [CONSTITUTION.md](CONSTITUTION.md): product framing
+- [SPEC.md](SPEC.md): stable contract and parity target
+- [docs/ENGINEERING.md](docs/ENGINEERING.md): engineering standards
+- [docs/architecture.md](docs/architecture.md): runtime, core, and integration boundaries
+- [docs/decisions.md](docs/decisions.md): enforced architecture decisions
+- [docs/install.md](docs/install.md): internal install and release instructions
+- [docs/cli.md](docs/cli.md): generated CLI reference
+- [docs/config.md](docs/config.md): generated config reference
+- [docs/rules.md](docs/rules.md): generated rule inventory
+- [docs/adapters.md](docs/adapters.md): generated adapter and plugin reference
 
 ## Notes
 
-The new `structure` rule pack is the reusable core extracted from the Chau7 GEO docs: semantic `data-ui`, headings on sections, extractable FAQ structure, and machine-readable code blocks.
-
-`seogeo quality .` is the internal quality gate for Aexeo itself. It enforces documentation, unique public function naming, required project docs, and minimum test coverage expectations using the same finding format as the site linter.
-
-`seogeo generate` and `seogeo fix` provide the first deterministic cleanup/runtime layer. They can generate `llms.txt`, generate `robots.txt`, generate link suggestions, normalize internal `llms.txt` paths, refresh derived counts, and add a safe sitemap declaration to `robots.txt`.
-
-See [CONSTITUTION.md](CONSTITUTION.md) for the product thesis and [docs/rules.md](docs/rules.md) for the rule inventory.
+`cargo run -p seogeo-cli -- docs generate .` refreshes the generated reference docs from the Rust codebase. `cargo run -p seogeo-cli -- docs check .` fails when those docs are stale.

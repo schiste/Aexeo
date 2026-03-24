@@ -48,6 +48,36 @@ class StructureAndSchemaTests(unittest.TestCase):
             self.assertIn("GEO005", ids)
             self.assertIn("GEO006", ids)
 
+    def test_structure_rules_cover_chunk_quality_and_fact_consistency(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_text(
+                root,
+                "index.html",
+                """
+<html>
+  <head>
+    <title>Alpha Product</title>
+    <meta name="description" content="desc">
+    <meta property="og:title" content="Beta Product">
+    <link rel="canonical" href="https://example.com/">
+    <script type="application/ld+json">{"@type":"WebPage","name":"Gamma Product"}</script>
+  </head>
+  <body>
+    <h1>Delta Product</h1>
+    <section data-ui="hero"><h2>Hero</h2><p>tiny</p></section>
+  </body>
+</html>
+""",
+            )
+
+            findings = run_structure_rules(load_site(root), Config(min_block_text_length=10, min_answer_blocks=2, require_fact_consistency=True))
+            ids = {f.rule_id for f in findings}
+
+            self.assertIn("GEO007", ids)
+            self.assertIn("GEO008", ids)
+            self.assertIn("GEO009", ids)
+
     def test_schema_requires_types_and_faq_schema_for_details(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -75,6 +105,32 @@ class StructureAndSchemaTests(unittest.TestCase):
 
             self.assertIn("SCH002", ids)
             self.assertIn("SCH003", ids)
+
+    def test_schema_family_rules_cover_missing_fields_and_url_alignment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_text(
+                root,
+                "index.html",
+                """
+<html>
+  <head>
+    <title>x</title>
+    <meta name="description" content="y">
+    <link rel="canonical" href="https://example.com/">
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"App","url":"https://example.com/wrong"}</script>
+  </head>
+  <body><h1>x</h1></body>
+</html>
+""",
+            )
+
+            findings = run_schema_rules(load_site(root), Config(required_schema_families=("Article",)))
+            ids = {f.rule_id for f in findings}
+
+            self.assertIn("SCH006", ids)
+            self.assertIn("SCH007", ids)
+            self.assertIn("SCH008", ids)
 
     def test_schema_accepts_valid_faq_json_ld(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

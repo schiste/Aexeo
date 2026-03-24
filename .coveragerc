@@ -1,0 +1,7 @@
+[run]
+branch = True
+source = src/seogeo
+
+[report]
+fail_under = 85
+skip_empty = True

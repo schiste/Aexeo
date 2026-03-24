@@ -12,10 +12,27 @@ from seogeo.models import Finding
 REQUIRED_DOC_FILES = (
     "CONSTITUTION.md",
     "SPEC.md",
+    "docs/architecture.md",
     "docs/ENGINEERING.md",
+    "docs/adapters.md",
+    "docs/cli.md",
+    "docs/config.md",
     "docs/rules.md",
 )
 ENTRYPOINT_NAMES = {"main"}
+QUALITY_RULES = (
+    ("QLT001", "missing module docstring in implementation code"),
+    ("QLT002", "missing docstring for a public function or public method"),
+    ("QLT003", "duplicate public function name across implementation modules"),
+    ("QLT004", "missing required project documentation file"),
+    ("QLT005", "built-in rule group missing from docs/rules.md"),
+    ("QLT006", "missing expected test module for a key implementation module"),
+    ("QLT007", "generated docs drift from code and must be regenerated"),
+    ("QLT008", "public function exceeds complexity budget"),
+    ("QLT009", "missing mypy configuration"),
+    ("QLT010", "missing coverage configuration"),
+    ("QLT011", "missing performance budget file"),
+)
 
 
 @dataclass(slots=True)
@@ -27,6 +44,7 @@ class FunctionDefinition:
     path: Path
     line: int
     docstring: str | None
+    complexity: int = 1
 
 
 def iter_python_files(root: Path) -> list[Path]:
@@ -89,6 +107,7 @@ def iter_function_definitions(root: Path, path: Path, tree: ast.Module) -> list[
                     path=relative,
                     line=node.lineno,
                     docstring=ast.get_docstring(node),
+                    complexity=measure_node_complexity(node),
                 )
             )
         elif isinstance(node, ast.ClassDef) and is_public_name(node.name):
@@ -101,9 +120,19 @@ def iter_function_definitions(root: Path, path: Path, tree: ast.Module) -> list[
                             path=relative,
                             line=class_node.lineno,
                             docstring=ast.get_docstring(class_node),
+                            complexity=measure_node_complexity(class_node),
                         )
                     )
     return definitions
+
+
+def measure_node_complexity(node: ast.AST) -> int:
+    """Estimate a simple branch-based complexity score for one function."""
+    score = 1
+    for child in ast.walk(node):
+        if isinstance(child, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.BoolOp, ast.With, ast.AsyncWith, ast.IfExp, ast.Match, ast.ExceptHandler, ast.comprehension)):
+            score += 1
+    return score
 
 
 def find_function_docstring_issues(definitions: list[FunctionDefinition]) -> list[Finding]:
@@ -152,6 +181,25 @@ def find_duplicate_function_name_issues(definitions: list[FunctionDefinition]) -
     return findings
 
 
+def find_complexity_issues(definitions: list[FunctionDefinition], threshold: int) -> list[Finding]:
+    """Check that public functions stay below the configured branch complexity threshold."""
+    findings: list[Finding] = []
+    for definition in definitions:
+        if definition.complexity <= threshold:
+            continue
+        findings.append(
+            Finding(
+                "QLT008",
+                f"public function {definition.qualified_name} has complexity {definition.complexity}, above threshold {threshold}",
+                definition.path,
+                line=definition.line,
+                column=1,
+                severity="warning",
+            )
+        )
+    return findings
+
+
 def find_missing_required_docs(root: Path) -> list[Finding]:
     """Check that the required project-level documentation files exist."""
     findings: list[Finding] = []
@@ -191,13 +239,22 @@ def find_missing_test_coverage(root: Path, test_text: str) -> list[Finding]:
     expected = {
         "src/seogeo/config.py": "tests/test_config.py",
         "src/seogeo/site.py": "tests/test_site.py",
+        "src/seogeo/assets.py": "tests/test_assets_cache.py",
+        "src/seogeo/cache.py": "tests/test_assets_cache.py",
+        "src/seogeo/engine.py": "tests/test_architecture_layers.py",
+        "src/seogeo/extensions.py": "tests/test_architecture_layers.py",
         "src/seogeo/registry.py": "tests/test_registry_cli.py",
+        "src/seogeo/adapters.py": "tests/test_extensions.py",
         "src/seogeo/cli.py": "tests/test_registry_cli.py",
         "src/seogeo/crawl.py": "tests/test_runtime_tools.py",
+        "src/seogeo/docsync.py": "tests/test_docsync.py",
         "src/seogeo/fix.py": "tests/test_runtime_tools.py",
         "src/seogeo/generate.py": "tests/test_runtime_tools.py",
         "src/seogeo/quality.py": "tests/test_quality.py",
         "src/seogeo/reporting.py": "tests/test_runtime_tools.py",
+        "src/seogeo/runtime.py": "tests/test_architecture_layers.py",
+        "src/seogeo/sdk.py": "tests/test_architecture_layers.py",
+        "src/seogeo/verification.py": "tests/test_verification.py",
         "src/seogeo/rules/html.py": "tests/test_html_content.py",
         "src/seogeo/rules/links.py": "tests/test_links.py",
         "src/seogeo/rules/content.py": "tests/test_html_content.py",
@@ -222,6 +279,34 @@ def find_missing_test_coverage(root: Path, test_text: str) -> list[Finding]:
     return findings
 
 
+def find_generated_doc_drift_issues(root: Path) -> list[Finding]:
+    """Check that generated docs on disk match the code-derived reference output."""
+    from seogeo.docsync import find_reference_doc_drift
+
+    findings: list[Finding] = []
+    for path in find_reference_doc_drift(root):
+        findings.append(
+            Finding(
+                "QLT007",
+                "generated docs drift from code; run `seogeo docs generate .`",
+                path.relative_to(root) if path.is_absolute() else path,
+            )
+        )
+    return findings
+
+
+def find_static_tooling_issues(root: Path) -> list[Finding]:
+    """Check that internal static-analysis and performance-budget files exist."""
+    findings: list[Finding] = []
+    if not (root / "mypy.ini").exists():
+        findings.append(Finding("QLT009", "missing mypy configuration", Path("mypy.ini")))
+    if not (root / ".coveragerc").exists():
+        findings.append(Finding("QLT010", "missing coverage configuration", Path(".coveragerc")))
+    if not (root / "performance-budget.json").exists():
+        findings.append(Finding("QLT011", "missing performance budget file", Path("performance-budget.json")))
+    return findings
+
+
 def run_repo_quality_checks(root: Path) -> list[Finding]:
     """Run deterministic quality checks against the ``seogeo`` repository itself."""
     findings: list[Finding] = []
@@ -234,10 +319,13 @@ def run_repo_quality_checks(root: Path) -> list[Finding]:
 
     findings.extend(find_function_docstring_issues(definitions))
     findings.extend(find_duplicate_function_name_issues(definitions))
+    findings.extend(find_complexity_issues(definitions, threshold=12))
     findings.extend(find_missing_required_docs(root))
     findings.extend(find_missing_rule_docs(root))
 
     test_files = sorted((root / "tests").glob("test_*.py"))
     test_text = "\n".join(path.relative_to(root).as_posix() for path in test_files)
     findings.extend(find_missing_test_coverage(root, test_text))
+    findings.extend(find_generated_doc_drift_issues(root))
+    findings.extend(find_static_tooling_issues(root))
     return findings

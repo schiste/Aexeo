@@ -146,6 +146,26 @@ def prune_old_audit_logs(artifact_dir: Path, command_name: str, keep: int = DEFA
         path.unlink(missing_ok=True)
 
 
+def update_trend_history(artifact_dir: Path, command_name: str, findings: list[Finding]) -> None:
+    """Append a compact trend summary for long-term command history."""
+    trend_path = artifact_dir / f"{command_name}-trends.json"
+    try:
+        payload = json.loads(trend_path.read_text()) if trend_path.exists() else []
+    except Exception:
+        payload = []
+    if not isinstance(payload, list):
+        payload = []
+    payload.append(
+        {
+            "timestamp": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "total": len(findings),
+            "errors": sum(1 for finding in findings if finding.severity != "warning"),
+            "warnings": sum(1 for finding in findings if finding.severity == "warning"),
+        }
+    )
+    trend_path.write_text(json.dumps(payload[-50:], indent=2))
+
+
 def write_audit_artifact(
     findings: list[Finding],
     base_dir: Path,
@@ -162,6 +182,7 @@ def write_audit_artifact(
     history_path.write_text(payload)
     artifact_path.write_text(payload)
     prune_old_audit_logs(artifact_dir, command_name, keep)
+    update_trend_history(artifact_dir, command_name, findings)
     return artifact_path
 
 

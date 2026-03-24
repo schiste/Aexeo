@@ -1,0 +1,5 @@
+{
+  "parse_page_ms": 10,
+  "load_site_100_pages_ms": 800,
+  "http_crawl_20_pages_ms": 2500
+}

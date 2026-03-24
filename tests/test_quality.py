@@ -22,7 +22,15 @@ class QualityTests(unittest.TestCase):
             (root / "CONSTITUTION.md").write_text("x")
             (root / "SPEC.md").write_text("x")
             (docs / "ENGINEERING.md").write_text("x")
-            (docs / "rules.md").write_text("## `html`\n## `links`\n## `sitemap`\n## `schema`\n## `llm`\n## `content`\n## `structure`\n")
+            (docs / "rules.md").write_text(
+                "## `html`\n## `links`\n## `sitemap`\n## `robots`\n## `social`\n## `schema`\n## `llm`\n## `content`\n## `structure`\n"
+            )
+            (docs / "adapters.md").write_text("x")
+            (docs / "cli.md").write_text("x")
+            (docs / "config.md").write_text("x")
+            (root / "mypy.ini").write_text("[mypy]\n")
+            (root / ".coveragerc").write_text("[run]\n")
+            (root / "performance-budget.json").write_text("{}")
 
             (src / "a.py").write_text('"""A."""\n\ndef repeated() -> None:\n    """One."""\n    return None\n')
             (src / "b.py").write_text('"""B."""\n\ndef repeated() -> None:\n    """Two."""\n    return None\n')

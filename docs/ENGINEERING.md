@@ -8,7 +8,7 @@ The codebase should be:
 - highly testable
 - highly documented
 - explicitly abstracted at module boundaries
-- easy to port to Rust without changing product semantics
+- stable as a Rust-first product without changing product semantics
 
 ## Function Design
 
@@ -33,6 +33,8 @@ At minimum, every public module and every non-trivial public function should hav
 Required documentation layers:
 - product contract: [SPEC.md](../SPEC.md)
 - product framing: [CONSTITUTION.md](../CONSTITUTION.md)
+- system architecture: [architecture.md](architecture.md)
+- architecture decisions: [decisions.md](decisions.md)
 - rule inventory: [rules.md](rules.md)
 - engineering expectations: this document
 
@@ -45,6 +47,7 @@ Expected coverage style:
 - parser/model tests for inventory logic
 - rule tests for each rule family
 - smoke tests for CLI behavior
+- binary-level integration tests for the supported Rust CLI surface
 
 The preferred pattern is deterministic fixture construction with small local HTML strings rather than large snapshots.
 
@@ -67,6 +70,6 @@ Bad abstractions:
 
 When adding behavior, ask:
 1. Is this product behavior or implementation detail?
-2. If we rewrote this in Rust, what would need to stay identical?
+2. If we refactor the Rust implementation, what must stay identical?
 
 If the answer is user-visible semantics, it belongs in [SPEC.md](../SPEC.md).

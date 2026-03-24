@@ -40,19 +40,20 @@ def load_feature_data_counts(root: Path) -> tuple[int, int] | None:
     return len(feature_slugs), len(categories)
 
 
-def run_llm_rules(site: Site, config: Config) -> list[Finding]:
-    """Validate ``llms.txt`` structure, links, and derived claim consistency."""
-    llms = site.root / "llms.txt"
+def _collect_llm_presence_findings(site: Site, llms_path: Path) -> list[Finding]:
     if site.llms_text is None:
-        return [Finding("LLM001", "missing llms.txt", llms)]
-
+        return [Finding("LLM001", "missing llms.txt", llms_path)]
     text = site.llms_text.strip()
-    findings: list[Finding] = []
     if not text:
-        return [Finding("LLM002", "llms.txt is empty", llms)]
+        return [Finding("LLM002", "llms.txt is empty", llms_path)]
+    findings: list[Finding] = []
     if "## Pages" not in text and "## Feature Pages" not in text:
-        findings.append(Finding("LLM003", "llms.txt is missing expected page sections", llms))
+        findings.append(Finding("LLM003", "llms.txt is missing expected page sections", llms_path))
+    return findings
 
+
+def _collect_llm_link_findings(text: str, site: Site, config: Config, llms_path: Path) -> list[Finding]:
+    findings: list[Finding] = []
     for href in LINK_RE.findall(text):
         if href.startswith("http://") or href.startswith("https://"):
             continue
@@ -60,45 +61,61 @@ def run_llm_rules(site: Site, config: Config) -> list[Finding]:
         if normalized is None:
             continue
         if normalized not in site.indexed_paths:
-            findings.append(Finding("LLM004", f"llms.txt references missing path: {href}", llms))
+            findings.append(Finding("LLM004", f"llms.txt references missing path: {href}", llms_path))
         if config.canonical_style == "extensionless" and href.endswith(".html"):
             findings.append(
                 Finding(
                     "LLM005",
                     f"llms.txt references noncanonical internal path: {href}",
-                    llms,
+                    llms_path,
                     severity="warning",
                 )
             )
+    return findings
 
-    counts = load_feature_data_counts(site.root)
-    if counts is not None:
-        feature_count, category_count = counts
-        match = FEATURES_ACROSS_RE.search(text)
-        if match:
-            claimed_features = int(match.group(1))
-            claimed_categories = int(match.group(2))
-            if claimed_features != feature_count or claimed_categories != category_count:
-                findings.append(
-                    Finding(
-                        "LLM006",
-                        f"llms.txt feature/category claim drift: expected {feature_count} features across {category_count} categories",
-                        llms,
-                        suggestion="regenerate llms.txt from site inventory",
-                    )
+
+def _collect_llm_claim_findings(text: str, root: Path, llms_path: Path) -> list[Finding]:
+    counts = load_feature_data_counts(root)
+    if counts is None:
+        return []
+    feature_count, category_count = counts
+    findings: list[Finding] = []
+    match = FEATURES_ACROSS_RE.search(text)
+    if match:
+        claimed_features = int(match.group(1))
+        claimed_categories = int(match.group(2))
+        if claimed_features != feature_count or claimed_categories != category_count:
+            findings.append(
+                Finding(
+                    "LLM006",
+                    f"llms.txt feature/category claim drift: expected {feature_count} features across {category_count} categories",
+                    llms_path,
+                    suggestion="regenerate llms.txt from site inventory",
                 )
+            )
 
-        feature_page_match = FEATURE_PAGE_COUNT_RE.search(text)
-        if feature_page_match:
-            claimed_feature_pages = int(feature_page_match.group(1))
-            if claimed_feature_pages != feature_count:
-                findings.append(
-                    Finding(
-                        "LLM007",
-                        f"llms.txt feature page count drift: expected {feature_count}",
-                        llms,
-                        suggestion="regenerate llms.txt from site inventory",
-                    )
+    feature_page_match = FEATURE_PAGE_COUNT_RE.search(text)
+    if feature_page_match:
+        claimed_feature_pages = int(feature_page_match.group(1))
+        if claimed_feature_pages != feature_count:
+            findings.append(
+                Finding(
+                    "LLM007",
+                    f"llms.txt feature page count drift: expected {feature_count}",
+                    llms_path,
+                    suggestion="regenerate llms.txt from site inventory",
                 )
+            )
+    return findings
 
+
+def run_llm_rules(site: Site, config: Config) -> list[Finding]:
+    """Validate ``llms.txt`` structure, links, and derived claim consistency."""
+    llms = site.root / "llms.txt"
+    findings = _collect_llm_presence_findings(site, llms)
+    if site.llms_text is None or not site.llms_text.strip():
+        return findings
+    text = site.llms_text.strip()
+    findings.extend(_collect_llm_link_findings(text, site, config, llms))
+    findings.extend(_collect_llm_claim_findings(text, site.root, llms))
     return findings

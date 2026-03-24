@@ -1,11 +1,17 @@
 site_url = "https://example.com"
 source_dir = "."
+adapter = "auto"
 canonical_style = "extensionless"
+browser_engine = "auto"
+audit_log_limit = 5
+baseline_file = ".seogeo-baseline.json"
 
 [checks]
 html = true
 links = true
 sitemap = true
+robots = true
+social = true
 schema = true
 llm = true
 content = true
@@ -18,5 +24,24 @@ required_feature_markers = ["Related features"]
 [schema_rules]
 required_types = []
 
+[social_rules]
+require_open_graph = true
+require_twitter_card = true
+default_twitter_card = "summary"
+require_social_images = false
+require_twitter_image = false
+
+[robots_rules]
+require_sitemap_declaration = true
+require_meta_robots_consistency = true
+
 [link_rules]
 weak_anchor_text = ["click here", "learn more", "read more", "here", "more"]
+suggestion_count = 3
+enable_autofix = false
+related_links_heading = "Related pages"
+
+[geo_rules]
+min_block_text_length = 120
+min_answer_blocks = 2
+require_fact_consistency = true
