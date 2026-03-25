@@ -35,6 +35,21 @@ Responsibilities:
 - generate CLI reference documentation
 - expose native Rust workflows for checks, crawl, fix, generate, baseline, verify, docs, rules, adapters, trends, and diff surfaces
 
+## Planned Monorepo Landing Shape
+
+When Aexeo moves into the future `website` monorepo, it should move as bounded
+packages, not as website application internals.
+
+Target package map:
+
+- `aexeo-contracts`
+- `aexeo-core`
+- `aexeo-cli`
+- `aexeo-payload-astro-bridge`
+
+The detailed ownership rules are documented in
+[package-boundaries.md](package-boundaries.md).
+
 ## Legacy Python Reference
 
 The Python implementation under [`src/seogeo`](../src/seogeo) remains in the repository only as reference material during the migration hardening period.

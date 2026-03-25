@@ -55,10 +55,12 @@ cargo run -p seogeo-cli -- adapters
 ## Repository Docs
 
 - [CONSTITUTION.md](CONSTITUTION.md): product framing
+- [CONTRACTS.md](CONTRACTS.md): stable vs provisional integration surface
 - [SPEC.md](SPEC.md): stable contract and parity target
 - [docs/ENGINEERING.md](docs/ENGINEERING.md): engineering standards
 - [docs/architecture.md](docs/architecture.md): runtime, core, and integration boundaries
 - [docs/decisions.md](docs/decisions.md): enforced architecture decisions
+- [docs/package-boundaries.md](docs/package-boundaries.md): target package map for the future `website` monorepo move
 - [docs/install.md](docs/install.md): internal install and release instructions
 - [docs/cli.md](docs/cli.md): generated CLI reference
 - [docs/config.md](docs/config.md): generated config reference

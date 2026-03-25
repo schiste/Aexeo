@@ -14,11 +14,13 @@ The stable contract covers:
 - built-in rule-group names and rule identifiers
 - artifact/report behavior
 - runtime verification and regression semantics
+- integration boundary categories documented in `CONTRACTS.md`
 
 It does not freeze:
 - internal parser structure
 - crate/module layout
 - temporary implementation details inside the Rust workspace
+- heuristic thresholds and recommendation tuning
 
 ## 2. Canonical Runtime
 
@@ -29,6 +31,17 @@ The canonical implementation is the Rust workspace.
 - `crates/seogeo-cli` owns the supported CLI surface
 
 The Python implementation is not a supported runtime surface.
+
+## 2.1 Stability Levels
+
+The repository distinguishes between:
+
+- stable external contracts
+- tunable engine behavior
+
+Stable external contracts are documented in [CONTRACTS.md](CONTRACTS.md).
+Heuristic thresholds, wording, and inference logic may still evolve without
+being treated as contract breaks.
 
 ## 3. CLI Contract
 
@@ -101,6 +114,8 @@ Stable built-in group names:
 - `llm`
 - `content`
 - `structure`
+- `runtime`
+- `deployment`
 
 These names are part of the config and reporting contract.
 
@@ -130,6 +145,9 @@ These names are part of the config and reporting contract.
 - `MAP002`
 - `MAP003`
 - `MAP004`
+- `MAP005`
+- `MAP006`
+- `MAP007`
 
 ### Robots
 - `ROB001`
@@ -165,6 +183,12 @@ These names are part of the config and reporting contract.
 - `SCH008`
 - `SCH009`
 - `SCH010`
+- `SCH011`
+- `SCH012`
+- `SCH013`
+- `SCH014`
+- `SCH015`
+- `SCH016`
 
 ### LLM
 - `LLM001`
@@ -197,8 +221,10 @@ These names are part of the config and reporting contract.
 - `GEO013`
 
 ### Runtime Crawl
-- `CRW001`
-- `CRW002`
+- `CRW003`
+
+### Deployment Model
+- `DEP001`
 
 ### Internal Quality
 - `QLT003`
@@ -269,6 +295,18 @@ Internal quality and repo policy keys include:
 - `performance_budget_file`
 
 The generated config reference in [docs/config.md](docs/config.md) is part of the authoritative documentation surface.
+
+## 7.1 Integration Boundary Contract
+
+Stable boundary categories:
+
+- document -> route resolution
+- document -> preview target resolution
+- static build output -> site input
+- runtime URL -> runtime audit target
+
+These boundary categories are stable even if the future integration package
+layout changes.
 
 ## 8. Reporting Contract
 

@@ -49,3 +49,13 @@ Plugin behavior must stay bounded by Aexeo contracts.
 Unit tests are not enough for the public command surface.
 
 The repository must keep Rust CLI integration tests that execute the built binary against controlled fixtures.
+
+## 7. A Move Into The Website Monorepo Must Preserve Package Isolation
+
+If Aexeo moves into the future `website` repo, it must move as a package set,
+not as blended application code.
+
+- `aexeo-contracts`, `aexeo-core`, and `aexeo-cli` remain explicit packages
+- website integration belongs in a separate bridge package
+- the standalone CLI remains a first-class product surface
+- website-specific schemas and adapters must not leak into the core engine

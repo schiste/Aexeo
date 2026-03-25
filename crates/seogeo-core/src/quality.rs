@@ -30,10 +30,12 @@ pub const QUALITY_RULES: &[(&str, &str)] = &[
 
 const REQUIRED_DOC_FILES: &[&str] = &[
     "CONSTITUTION.md",
+    "CONTRACTS.md",
     "SPEC.md",
     "docs/architecture.md",
     "docs/decisions.md",
     "docs/ENGINEERING.md",
+    "docs/package-boundaries.md",
     "docs/adapters.md",
     "docs/cli.md",
     "docs/config.md",
