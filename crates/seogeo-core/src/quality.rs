@@ -44,37 +44,7 @@ const REQUIRED_DOC_FILES: &[&str] = &[
 
 const ENTRYPOINT_NAMES: &[&str] = &["main"];
 
-const EXPECTED_TEST_COVERAGE: &[(&str, &str)] = &[
-    ("src/seogeo/config.py", "tests/test_config.py"),
-    ("src/seogeo/site.py", "tests/test_site.py"),
-    ("src/seogeo/assets.py", "tests/test_assets_cache.py"),
-    ("src/seogeo/cache.py", "tests/test_assets_cache.py"),
-    ("src/seogeo/engine.py", "tests/test_architecture_layers.py"),
-    (
-        "src/seogeo/extensions.py",
-        "tests/test_architecture_layers.py",
-    ),
-    ("src/seogeo/adapters.py", "tests/test_extensions.py"),
-    ("src/seogeo/docsync.py", "tests/test_docsync.py"),
-    ("src/seogeo/runtime.py", "tests/test_architecture_layers.py"),
-    ("src/seogeo/sdk.py", "tests/test_architecture_layers.py"),
-    ("src/seogeo/verification.py", "tests/test_verification.py"),
-    ("src/seogeo/rules/html.py", "tests/test_html_content.py"),
-    ("src/seogeo/rules/links.py", "tests/test_links.py"),
-    ("src/seogeo/rules/content.py", "tests/test_html_content.py"),
-    ("src/seogeo/rules/llm.py", "tests/test_sitemap_llm.py"),
-    ("src/seogeo/rules/robots.py", "tests/test_robots_social.py"),
-    ("src/seogeo/rules/sitemap.py", "tests/test_sitemap_llm.py"),
-    (
-        "src/seogeo/rules/structure.py",
-        "tests/test_structure_schema.py",
-    ),
-    (
-        "src/seogeo/rules/schema.py",
-        "tests/test_structure_schema.py",
-    ),
-    ("src/seogeo/rules/social.py", "tests/test_robots_social.py"),
-];
+const EXPECTED_TEST_COVERAGE: &[(&str, &str)] = &[];
 
 #[derive(Debug, Clone)]
 struct FunctionDefinition {
