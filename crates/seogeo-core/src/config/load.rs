@@ -5,6 +5,75 @@ use toml::Value;
 
 use super::Config;
 
+const VERSIONED_TOP_LEVEL_TABLES: &[&str] =
+    &["site", "runtime", "policy", "rules", "output", "quality"];
+const FLAT_TOP_LEVEL_KEYS: &[&str] = &[
+    "site_url",
+    "source_dir",
+    "profile",
+    "adapter",
+    "plugins",
+    "canonical_style",
+    "extends",
+    "audit_log_limit",
+    "browser_engine",
+    "browser_wait_until",
+    "baseline_file",
+    "max_workers",
+    "enable_cache",
+    "cache_dir",
+    "cache_ttl_seconds",
+    "crawl_headers",
+    "crawl_cookies",
+    "crawl_basic_auth",
+    "crawl_seeds",
+    "crawl_include_patterns",
+    "crawl_exclude_patterns",
+    "crawl_use_sitemap",
+    "crawl_capture_trace",
+    "crawl_capture_screenshot",
+    "crawl_capture_console",
+    "crawl_capture_network",
+    "crawl_artifact_dir",
+    "ignore_rules",
+    "ignore_paths",
+    "severity_overrides",
+    "suppressions",
+    "checks",
+    "orphan_exclude",
+    "repeatable_data_ui",
+    "utility_route_patterns",
+    "route_policy_overrides",
+    "min_inbound_links",
+    "link_suggestion_count",
+    "enable_link_autofix",
+    "related_links_heading",
+    "min_page_size",
+    "required_feature_markers",
+    "min_block_text_length",
+    "min_answer_blocks",
+    "require_fact_consistency",
+    "required_schema_types",
+    "required_schema_families",
+    "require_breadcrumb_schema",
+    "require_schema_title_alignment",
+    "require_html_lang",
+    "require_hreflang_self",
+    "require_meta_robots_consistency",
+    "require_open_graph",
+    "require_twitter_card",
+    "default_twitter_card",
+    "require_social_images",
+    "require_twitter_image",
+    "require_robots_sitemap",
+    "weak_anchor_text",
+    "plugin_settings",
+    "typecheck_command",
+    "coverage_threshold",
+    "complexity_threshold",
+    "performance_budget_file",
+];
+
 fn normalize_path(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
     for component in path.components() {
@@ -140,6 +209,220 @@ fn merge_bool_rule_toggles(
             checks_table.entry(key.to_string()).or_insert(value);
         }
     }
+}
+
+fn validate_allowed_keys(
+    table: &toml::map::Map<String, Value>,
+    allowed: &[&str],
+    context: &str,
+) -> Result<()> {
+    for key in table.keys() {
+        if !allowed.contains(&key.as_str()) {
+            bail!("unknown config key '{}' in {}", key, context);
+        }
+    }
+    Ok(())
+}
+
+fn expect_table<'a>(
+    value: &'a Value,
+    key: &str,
+    context: &str,
+) -> Result<&'a toml::map::Map<String, Value>> {
+    value
+        .as_table()
+        .ok_or_else(|| anyhow::anyhow!("config key '{}' in {} must be a TOML table", key, context))
+}
+
+fn validate_rules_table(table: &toml::map::Map<String, Value>) -> Result<()> {
+    validate_allowed_keys(
+        table,
+        &[
+            "html",
+            "links",
+            "sitemap",
+            "robots",
+            "social",
+            "schema",
+            "llm",
+            "content",
+            "structure",
+        ],
+        "[rules]",
+    )?;
+
+    for (key, value) in table {
+        if matches!(value, Value::Boolean(_)) {
+            continue;
+        }
+        match key.as_str() {
+            "content" => validate_allowed_keys(
+                expect_table(value, key, "[rules]")?,
+                &["min_page_size", "required_feature_markers"],
+                "[rules.content]",
+            )?,
+            "links" => validate_allowed_keys(
+                expect_table(value, key, "[rules]")?,
+                &[
+                    "min_inbound_links",
+                    "link_suggestion_count",
+                    "enable_link_autofix",
+                    "related_links_heading",
+                    "weak_anchor_text",
+                ],
+                "[rules.links]",
+            )?,
+            "schema" => validate_allowed_keys(
+                expect_table(value, key, "[rules]")?,
+                &[
+                    "required_types",
+                    "required_families",
+                    "require_breadcrumb_schema",
+                    "require_title_alignment",
+                ],
+                "[rules.schema]",
+            )?,
+            "social" => validate_allowed_keys(
+                expect_table(value, key, "[rules]")?,
+                &[
+                    "require_open_graph",
+                    "require_twitter_card",
+                    "default_twitter_card",
+                    "require_social_images",
+                    "require_twitter_image",
+                ],
+                "[rules.social]",
+            )?,
+            "robots" => validate_allowed_keys(
+                expect_table(value, key, "[rules]")?,
+                &["require_sitemap", "require_meta_consistency"],
+                "[rules.robots]",
+            )?,
+            "html" => validate_allowed_keys(
+                expect_table(value, key, "[rules]")?,
+                &["require_html_lang", "require_hreflang_self"],
+                "[rules.html]",
+            )?,
+            "structure" => validate_allowed_keys(
+                expect_table(value, key, "[rules]")?,
+                &[
+                    "repeatable_data_ui",
+                    "utility_route_patterns",
+                    "min_block_text_length",
+                    "min_answer_blocks",
+                    "require_fact_consistency",
+                ],
+                "[rules.structure]",
+            )?,
+            _ => bail!(
+                "config key '{}' in [rules] must be a boolean or nested TOML table",
+                key
+            ),
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_versioned_sections(root: &toml::map::Map<String, Value>) -> Result<()> {
+    if let Some(value) = root.get("site") {
+        validate_allowed_keys(
+            expect_table(value, "site", "config root")?,
+            &["url", "source_dir", "adapter", "canonical_style"],
+            "[site]",
+        )?;
+    }
+    if let Some(value) = root.get("runtime") {
+        validate_allowed_keys(
+            expect_table(value, "runtime", "config root")?,
+            &[
+                "engine",
+                "wait_until",
+                "headers",
+                "cookies",
+                "basic_auth",
+                "seeds",
+                "include_patterns",
+                "exclude_patterns",
+                "use_sitemap",
+                "capture_trace",
+                "capture_screenshot",
+                "capture_console",
+                "capture_network",
+                "artifact_dir",
+            ],
+            "[runtime]",
+        )?;
+    }
+    if let Some(value) = root.get("policy") {
+        validate_allowed_keys(
+            expect_table(value, "policy", "config root")?,
+            &[
+                "ignore_rules",
+                "ignore_paths",
+                "severity_overrides",
+                "suppressions",
+                "route_policy_overrides",
+            ],
+            "[policy]",
+        )?;
+    }
+    if let Some(value) = root.get("rules") {
+        validate_rules_table(expect_table(value, "rules", "config root")?)?;
+    }
+    if let Some(value) = root.get("output") {
+        validate_allowed_keys(
+            expect_table(value, "output", "config root")?,
+            &["baseline_file", "audit_log_limit"],
+            "[output]",
+        )?;
+    }
+    if let Some(value) = root.get("quality") {
+        validate_allowed_keys(
+            expect_table(value, "quality", "config root")?,
+            &[
+                "typecheck_command",
+                "coverage_threshold",
+                "complexity_threshold",
+                "performance_budget_file",
+            ],
+            "[quality]",
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_config_surface(value: &Value) -> Result<()> {
+    let root = value
+        .as_table()
+        .ok_or_else(|| anyhow::anyhow!("config root must be a TOML table"))?;
+    let version = match root.get("version") {
+        None => None,
+        Some(Value::Integer(version)) => Some(*version),
+        Some(_) => bail!("config version must be an integer"),
+    };
+    let has_versioned_tables = VERSIONED_TOP_LEVEL_TABLES
+        .iter()
+        .any(|key| root.contains_key(*key));
+
+    match version {
+        Some(1) => {
+            let mut allowed_keys = FLAT_TOP_LEVEL_KEYS.to_vec();
+            allowed_keys.extend(VERSIONED_TOP_LEVEL_TABLES);
+            allowed_keys.push("version");
+            validate_allowed_keys(root, &allowed_keys, "config root")?;
+            validate_versioned_sections(root)?;
+        }
+        Some(other) => bail!("unsupported config version {}; expected 1", other),
+        None => {
+            if has_versioned_tables {
+                bail!("nested config tables require `version = 1`");
+            }
+            validate_allowed_keys(root, FLAT_TOP_LEVEL_KEYS, "config root")?;
+        }
+    }
+
+    Ok(())
 }
 
 fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
@@ -372,7 +655,9 @@ pub fn load_config(root: &Path, explicit_path: Option<&Path>) -> Result<Config> 
     if !config_path.exists() {
         return Ok(Config::default());
     }
-    let merged = normalize_versioned_surface(load_config_value(&config_path, &mut Vec::new())?)?;
+    let merged = load_config_value(&config_path, &mut Vec::new())?;
+    validate_config_surface(&merged)?;
+    let merged = normalize_versioned_surface(merged)?;
     merged.try_into::<Config>().with_context(|| {
         format!(
             "failed to deserialize merged config at {}",
@@ -547,5 +832,79 @@ coverage_threshold = 90
         assert_eq!(config.baseline_file, "baseline.json");
         assert_eq!(config.audit_log_limit, 9);
         assert_eq!(config.coverage_threshold, 90);
+    }
+
+    #[test]
+    fn rejects_unsupported_config_version() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("seogeo.toml"), "version = 2\n").unwrap();
+
+        let error =
+            load_config(temp_dir.path(), None).expect_err("unsupported version should fail");
+        assert!(error.to_string().contains("unsupported config version"));
+    }
+
+    #[test]
+    fn rejects_nested_surface_without_version() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join("seogeo.toml"),
+            r#"
+[site]
+url = "https://example.com"
+"#,
+        )
+        .unwrap();
+
+        let error = load_config(temp_dir.path(), None)
+            .expect_err("nested config without version should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("nested config tables require `version = 1`")
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_top_level_key() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join("seogeo.toml"),
+            r#"
+site_url = "https://example.com"
+unknown_key = true
+"#,
+        )
+        .unwrap();
+
+        let error = load_config(temp_dir.path(), None).expect_err("unknown keys should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("unknown config key 'unknown_key'")
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_nested_key() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join("seogeo.toml"),
+            r#"
+version = 1
+
+[rules.links]
+unexpected = true
+"#,
+        )
+        .unwrap();
+
+        let error =
+            load_config(temp_dir.path(), None).expect_err("unknown nested keys should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("unknown config key 'unexpected' in [rules.links]")
+        );
     }
 }
