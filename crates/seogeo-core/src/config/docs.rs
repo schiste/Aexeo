@@ -297,7 +297,7 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
         ConfigFieldDoc {
             key: "plugin_settings",
             default_value: "(none)",
-            description: "Plugin-specific configuration grouped by plugin namespace.",
+            description: "Plugin-specific configuration grouped by plugin namespace. Use quoted TOML tables such as `[plugin_settings.\"example.plugin\"]`. Each namespace must be declared in `plugins` and accepted by a registered settings schema.",
         },
         ConfigFieldDoc {
             key: "typecheck_command",
@@ -663,7 +663,7 @@ fn flat_properties() -> Map<String, Value> {
                 "type": "object",
                 "additionalProperties": true
             },
-            "description": "Plugin-specific settings."
+            "description": "Plugin-specific settings keyed by plugin namespace. Use quoted TOML tables such as `[plugin_settings.\"example.plugin\"]`. Each namespace must also appear in `plugins`, and only registered plugin settings schemas are accepted."
         }),
     );
     properties.insert(

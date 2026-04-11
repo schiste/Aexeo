@@ -1,8 +1,11 @@
 use anyhow::{Result, bail};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use toml::Value;
 
 const PLUGIN_API_VERSION: usize = 1;
+const REGISTERED_PLUGIN_SETTINGS_SCHEMAS: &[PluginSettingsSchema] = &[];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginManifestCheck {
@@ -10,6 +13,12 @@ pub struct PluginManifestCheck {
     pub namespace: String,
     pub version: String,
     pub capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginSettingsSchema {
+    pub namespace: &'static str,
+    pub allowed_keys: &'static [&'static str],
 }
 
 fn python_module_candidates(module_name: &str) -> Vec<PathBuf> {
@@ -165,10 +174,50 @@ pub fn validate_python_plugin_module(module_name: &str) -> Result<PluginManifest
     validate_module_file(module_name, &path)
 }
 
+pub fn validate_plugin_settings(
+    plugins: &[String],
+    plugin_settings: &BTreeMap<String, BTreeMap<String, Value>>,
+) -> Result<()> {
+    for (namespace, settings) in plugin_settings {
+        if !plugins.iter().any(|plugin| plugin == namespace) {
+            bail!(
+                "plugin_settings.{} requires `plugins` to include '{}'",
+                namespace,
+                namespace
+            );
+        }
+
+        let Some(schema) = REGISTERED_PLUGIN_SETTINGS_SCHEMAS
+            .iter()
+            .find(|schema| schema.namespace == namespace)
+        else {
+            bail!(
+                "plugin_settings.{} is not supported because plugin '{}' does not publish a registered settings schema",
+                namespace,
+                namespace
+            );
+        };
+
+        for key in settings.keys() {
+            if !schema.allowed_keys.contains(&key.as_str()) {
+                bail!(
+                    "unknown config key '{}' in [plugin_settings.{}]",
+                    key,
+                    namespace
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{resolve_module_file, validate_module_file};
+    use super::{resolve_module_file, validate_module_file, validate_plugin_settings};
+    use std::collections::BTreeMap;
     use std::fs;
+    use toml::Value;
 
     #[test]
     fn validates_literal_python_plugin_manifest() {
@@ -187,6 +236,23 @@ mod tests {
         assert_eq!(
             manifest.capabilities,
             vec!["rules".to_string(), "adapters".to_string()]
+        );
+    }
+
+    #[test]
+    fn rejects_settings_for_undeclared_plugin_namespace() {
+        let error = validate_plugin_settings(
+            &[],
+            &BTreeMap::from([(
+                "example.plugin".to_string(),
+                BTreeMap::from([("enabled".to_string(), Value::Boolean(true))]),
+            )]),
+        )
+        .expect_err("settings without declared plugin should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("requires `plugins` to include 'example.plugin'")
         );
     }
 }

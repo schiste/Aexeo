@@ -5,6 +5,7 @@ use std::path::{Component, Path, PathBuf};
 use toml::Value;
 
 use super::Config;
+use crate::plugin::validate_plugin_settings;
 
 const VERSIONED_TOP_LEVEL_TABLES: &[&str] =
     &["site", "runtime", "policy", "rules", "output", "quality"];
@@ -815,6 +816,7 @@ pub fn load_config_with_diagnostics(
             config_path.display()
         )
     })?;
+    validate_plugin_settings(&config.plugins, &config.plugin_settings)?;
     Ok(LoadedConfig { config, warnings })
 }
 
@@ -1119,5 +1121,52 @@ html = true
         assert!(loaded.warnings.iter().any(|warning| {
             warning.code == "CFGDEP001" && warning.message.contains("rules.html")
         }));
+    }
+
+    #[test]
+    fn rejects_plugin_settings_for_undeclared_plugin() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join("seogeo.toml"),
+            r#"
+version = 1
+
+[plugin_settings."example.plugin"]
+enabled = true
+"#,
+        )
+        .unwrap();
+
+        let error =
+            load_config(temp_dir.path(), None).expect_err("undeclared plugin settings should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("plugin_settings.example.plugin requires `plugins`")
+        );
+    }
+
+    #[test]
+    fn rejects_plugin_settings_without_registered_schema() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join("seogeo.toml"),
+            r#"
+version = 1
+plugins = ["example.plugin"]
+
+[plugin_settings."example.plugin"]
+enabled = true
+"#,
+        )
+        .unwrap();
+
+        let error =
+            load_config(temp_dir.path(), None).expect_err("unregistered plugin schema should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("does not publish a registered settings schema")
+        );
     }
 }

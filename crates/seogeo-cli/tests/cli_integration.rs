@@ -289,6 +289,32 @@ browser_engine = "http"
 }
 
 #[test]
+fn config_print_rejects_plugin_settings_without_declared_plugin() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    write(
+        &temp_dir.path().join("seogeo.toml"),
+        r#"
+version = 1
+
+[plugin_settings."example.plugin"]
+enabled = true
+"#,
+    );
+    let output = Command::new(bin())
+        .arg("config")
+        .arg("print")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("plugin_settings.example.plugin"));
+    assert!(stderr.contains("requires `plugins`"));
+}
+
+#[test]
 fn check_json_contract_reports_summary_and_exit_code() {
     let temp_dir = tempfile::tempdir().unwrap();
     write(

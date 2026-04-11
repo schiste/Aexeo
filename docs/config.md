@@ -346,7 +346,7 @@ coverage_threshold = 85
 ## `plugin_settings`
 
 - Default: (none)
-- Meaning: Plugin-specific configuration grouped by plugin namespace.
+- Meaning: Plugin-specific configuration grouped by plugin namespace. Use quoted TOML tables such as `[plugin_settings."example.plugin"]`. Each namespace must be declared in `plugins` and accepted by a registered settings schema.
 
 ## `typecheck_command`
 

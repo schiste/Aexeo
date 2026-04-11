@@ -43,6 +43,7 @@ Plugin behavior must stay bounded by Aexeo contracts.
 - manifest validation may support legacy Python modules
 - the core execution model remains Rust-owned
 - future plugin execution should move toward explicit contracts, not implicit runtime coupling
+- plugin settings must be schema-validated; undeclared or opaque settings are rejected
 
 ## 6. The Repo Must Carry Binary-Level CLI Coverage
 
