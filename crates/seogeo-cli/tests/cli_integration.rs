@@ -188,3 +188,48 @@ fn crawl_uses_configured_runtime_engine_when_flag_is_omitted() {
     assert!(stdout.contains("CRW002"));
     handle.join().unwrap();
 }
+
+#[test]
+fn config_print_renders_resolved_canonical_config() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    write(
+        &temp_dir.path().join("base.toml"),
+        r#"
+version = 1
+profile = "chau7"
+
+[site]
+url = "https://example.com"
+
+[rules.links]
+enabled = false
+min_inbound_links = 2
+"#,
+    );
+    write(
+        &temp_dir.path().join("seogeo.toml"),
+        r#"
+extends = ["base.toml"]
+version = 1
+
+[site]
+source_dir = "dist"
+adapter = "astro-dist"
+"#,
+    );
+    let output = Command::new(bin())
+        .arg("config")
+        .arg("print")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"version\": 1"));
+    assert!(stdout.contains("\"profile\": \"chau7\""));
+    assert!(stdout.contains("\"adapter\": \"astro-dist\""));
+    assert!(stdout.contains("\"enabled\": false"));
+    assert!(stdout.contains("\"min_inbound_links\": 2"));
+}

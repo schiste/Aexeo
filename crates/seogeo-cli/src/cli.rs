@@ -75,6 +75,22 @@ pub fn build_cli() -> Command {
                 ),
         )
         .subcommand(
+            Command::new("config")
+                .about("Inspect resolved configuration")
+                .subcommand(
+                    Command::new("print")
+                        .about("Render the resolved config after extends and defaults")
+                        .arg(Arg::new("path").default_value("."))
+                        .arg(Arg::new("config").long("config").num_args(1))
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["toml", "json"])
+                                .default_value("toml"),
+                        ),
+                ),
+        )
+        .subcommand(
             Command::new("quality")
                 .about("Run self-quality checks against a seogeo repository")
                 .arg(Arg::new("path").default_value("."))

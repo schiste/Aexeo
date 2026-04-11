@@ -258,12 +258,13 @@ fn validate_rules_table(table: &toml::map::Map<String, Value>) -> Result<()> {
         match key.as_str() {
             "content" => validate_allowed_keys(
                 expect_table(value, key, "[rules]")?,
-                &["min_page_size", "required_feature_markers"],
+                &["enabled", "min_page_size", "required_feature_markers"],
                 "[rules.content]",
             )?,
             "links" => validate_allowed_keys(
                 expect_table(value, key, "[rules]")?,
                 &[
+                    "enabled",
                     "min_inbound_links",
                     "link_suggestion_count",
                     "enable_link_autofix",
@@ -275,6 +276,7 @@ fn validate_rules_table(table: &toml::map::Map<String, Value>) -> Result<()> {
             "schema" => validate_allowed_keys(
                 expect_table(value, key, "[rules]")?,
                 &[
+                    "enabled",
                     "required_types",
                     "required_families",
                     "require_breadcrumb_schema",
@@ -285,6 +287,7 @@ fn validate_rules_table(table: &toml::map::Map<String, Value>) -> Result<()> {
             "social" => validate_allowed_keys(
                 expect_table(value, key, "[rules]")?,
                 &[
+                    "enabled",
                     "require_open_graph",
                     "require_twitter_card",
                     "default_twitter_card",
@@ -295,17 +298,18 @@ fn validate_rules_table(table: &toml::map::Map<String, Value>) -> Result<()> {
             )?,
             "robots" => validate_allowed_keys(
                 expect_table(value, key, "[rules]")?,
-                &["require_sitemap", "require_meta_consistency"],
+                &["enabled", "require_sitemap", "require_meta_consistency"],
                 "[rules.robots]",
             )?,
             "html" => validate_allowed_keys(
                 expect_table(value, key, "[rules]")?,
-                &["require_html_lang", "require_hreflang_self"],
+                &["enabled", "require_html_lang", "require_hreflang_self"],
                 "[rules.html]",
             )?,
             "structure" => validate_allowed_keys(
                 expect_table(value, key, "[rules]")?,
                 &[
+                    "enabled",
                     "repeatable_data_ui",
                     "utility_route_patterns",
                     "min_block_text_length",
@@ -313,6 +317,11 @@ fn validate_rules_table(table: &toml::map::Map<String, Value>) -> Result<()> {
                     "require_fact_consistency",
                 ],
                 "[rules.structure]",
+            )?,
+            "sitemap" | "llm" => validate_allowed_keys(
+                expect_table(value, key, "[rules]")?,
+                &["enabled"],
+                &format!("[rules.{}]", key),
             )?,
             _ => bail!(
                 "config key '{}' in [rules] must be a boolean or nested TOML table",
@@ -510,6 +519,7 @@ fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
         merge_bool_rule_toggles(root, &mut rules_table);
 
         if let Some(Value::Table(mut table)) = rules_table.remove("content") {
+            move_table_field_if_absent_checks(root, &mut table, "content");
             move_table_field_if_absent(root, &mut table, "min_page_size", "min_page_size");
             move_table_field_if_absent(
                 root,
@@ -519,6 +529,7 @@ fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
             );
         }
         if let Some(Value::Table(mut table)) = rules_table.remove("links") {
+            move_table_field_if_absent_checks(root, &mut table, "links");
             move_table_field_if_absent(root, &mut table, "min_inbound_links", "min_inbound_links");
             move_table_field_if_absent(
                 root,
@@ -541,6 +552,7 @@ fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
             move_table_field_if_absent(root, &mut table, "weak_anchor_text", "weak_anchor_text");
         }
         if let Some(Value::Table(mut table)) = rules_table.remove("schema") {
+            move_table_field_if_absent_checks(root, &mut table, "schema");
             move_table_field_if_absent(root, &mut table, "required_types", "required_schema_types");
             move_table_field_if_absent(
                 root,
@@ -562,6 +574,7 @@ fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
             );
         }
         if let Some(Value::Table(mut table)) = rules_table.remove("social") {
+            move_table_field_if_absent_checks(root, &mut table, "social");
             move_table_field_if_absent(
                 root,
                 &mut table,
@@ -594,6 +607,7 @@ fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
             );
         }
         if let Some(Value::Table(mut table)) = rules_table.remove("robots") {
+            move_table_field_if_absent_checks(root, &mut table, "robots");
             move_table_field_if_absent(
                 root,
                 &mut table,
@@ -608,6 +622,7 @@ fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
             );
         }
         if let Some(Value::Table(mut table)) = rules_table.remove("html") {
+            move_table_field_if_absent_checks(root, &mut table, "html");
             move_table_field_if_absent(root, &mut table, "require_html_lang", "require_html_lang");
             move_table_field_if_absent(
                 root,
@@ -617,6 +632,7 @@ fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
             );
         }
         if let Some(Value::Table(mut table)) = rules_table.remove("structure") {
+            move_table_field_if_absent_checks(root, &mut table, "structure");
             move_table_field_if_absent(
                 root,
                 &mut table,
@@ -643,9 +659,30 @@ fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
                 "require_fact_consistency",
             );
         }
+        for key in ["sitemap", "llm"] {
+            if let Some(Value::Table(mut table)) = rules_table.remove(key) {
+                move_table_field_if_absent_checks(root, &mut table, key);
+            }
+        }
     }
 
     Ok(merged)
+}
+
+fn move_table_field_if_absent_checks(
+    root: &mut toml::map::Map<String, Value>,
+    table: &mut toml::map::Map<String, Value>,
+    rule_name: &str,
+) {
+    let Some(value) = table.remove("enabled") else {
+        return;
+    };
+    let checks_table = root
+        .entry("checks".to_string())
+        .or_insert_with(|| Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .expect("checks is always a table");
+    checks_table.entry(rule_name.to_string()).or_insert(value);
 }
 
 pub fn load_config(root: &Path, explicit_path: Option<&Path>) -> Result<Config> {
@@ -793,11 +830,14 @@ ignore_rules = ["SCH012"]
 [policy.severity_overrides]
 SEO001 = "warning"
 
-[rules]
-html = true
-links = false
+[rules.html]
+enabled = true
+
+[rules.links]
+enabled = false
 
 [rules.schema]
+enabled = true
 required_types = ["Organization"]
 require_title_alignment = false
 

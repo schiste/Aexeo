@@ -22,7 +22,9 @@ pub mod static_check;
 pub mod structure_rules;
 pub mod verification;
 
-pub use config::{Config, ConfigFieldDoc};
+pub use config::{
+    Config, ConfigFieldDoc, render_resolved_config_json, render_resolved_config_toml,
+};
 pub use content_rules::run_content_rules;
 pub use docs::{
     find_reference_doc_drift, reference_documents, render_adapter_reference,

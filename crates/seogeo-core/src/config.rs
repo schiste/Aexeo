@@ -1,9 +1,10 @@
 mod defaults;
 mod docs;
 mod load;
+mod render;
 mod views;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use self::defaults::{
@@ -25,6 +26,7 @@ use self::defaults::{
 pub use self::defaults::default_rule_switches;
 pub use self::docs::{config_field_docs, render_config_schema};
 pub use self::load::load_config;
+pub use self::render::{render_resolved_config_json, render_resolved_config_toml};
 pub use self::views::{
     OutputConfig, PolicyConfig, QualityConfig, RulesConfig, RuntimeConfig, SiteConfig,
 };
@@ -161,7 +163,7 @@ pub struct Config {
     pub performance_budget_file: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct RoutePolicyOverride {
     pub pattern: String,
     #[serde(default)]
@@ -170,7 +172,7 @@ pub struct RoutePolicyOverride {
     pub allow_nofollow: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct SuppressionRule {
     pub rule_id: String,
     pub path_pattern: String,

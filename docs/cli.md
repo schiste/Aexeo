@@ -84,6 +84,24 @@ Options:
           Print help
 ```
 
+## `config`
+
+Inspect resolved configuration
+
+```text
+Inspect resolved configuration
+
+Usage: config [COMMAND]
+
+Commands:
+  print  Render the resolved config after extends and defaults
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help
+```
+
 ## `quality`
 
 Run self-quality checks against a seogeo repository

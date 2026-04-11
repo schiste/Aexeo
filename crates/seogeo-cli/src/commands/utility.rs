@@ -2,6 +2,7 @@ use anyhow::{Result, bail};
 use clap::ArgMatches;
 
 use crate::commands::{
+    config::command_config,
     docs::{command_diff, command_docs, command_quality, command_trend},
     listings::{command_adapters, command_plugin_check, command_rules},
     runtime::{command_crawl, command_verify},
@@ -12,6 +13,7 @@ pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
     match matches.subcommand() {
         Some(("rules", _)) => Ok(command_rules()),
         Some(("adapters", _)) => Ok(command_adapters()),
+        Some(("config", submatches)) => command_config(submatches),
         Some(("check", submatches)) => command_check(submatches),
         Some(("quality", submatches)) => command_quality(
             submatches.get_one::<String>("path").unwrap(),

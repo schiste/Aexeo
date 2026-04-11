@@ -1,3 +1,4 @@
+pub mod config;
 pub mod docs;
 pub mod listings;
 pub mod runtime;
