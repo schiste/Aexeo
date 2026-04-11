@@ -36,12 +36,13 @@ fn normalize_internal_image_target(image_src: &str, config: &Config) -> Option<S
     if image_src.starts_with('/') {
         return normalize_internal_href(image_src);
     }
-    let base = config.site_url.as_deref()?.trim_end_matches('/');
+    let base = config.site().site_url?.trim_end_matches('/');
     let remainder = image_src.strip_prefix(base)?;
     normalize_internal_href(&format!("/{}", remainder.trim_start_matches('/')))
 }
 
 fn collect_page_size_findings(page: &Page, config: &Config) -> Vec<Finding> {
+    let rules = config.rules();
     if matches!(
         page.page_kind,
         PageKind::Search
@@ -53,9 +54,9 @@ fn collect_page_size_findings(page: &Page, config: &Config) -> Vec<Finding> {
         return Vec::new();
     }
     let minimum = if matches!(page.page_kind, PageKind::Listing | PageKind::Home) {
-        config.min_page_size / 2
+        rules.min_page_size / 2
     } else {
-        config.min_page_size
+        rules.min_page_size
     };
     if visible_length(&page.raw_text) < minimum {
         return vec![finding(
@@ -75,6 +76,7 @@ fn collect_feature_marker_findings(page: &Page, config: &Config) -> Vec<Finding>
         return Vec::new();
     }
     config
+        .rules()
         .required_feature_markers
         .iter()
         .filter(|marker| !marker.is_empty() && !page.raw_text.contains(*marker))

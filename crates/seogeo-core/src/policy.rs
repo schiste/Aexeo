@@ -45,28 +45,29 @@ fn suppression_matches(rule: &SuppressionRule, finding: &Finding) -> bool {
 }
 
 pub fn apply_policy(findings: Vec<Finding>, config: &Config) -> Vec<Finding> {
+    let policy = config.policy();
     findings
         .into_iter()
         .filter(|finding| {
-            !config
+            !policy
                 .ignore_rules
                 .iter()
                 .any(|rule| rule == &finding.rule_id)
         })
         .filter(|finding| {
-            !config
+            !policy
                 .ignore_paths
                 .iter()
                 .any(|pattern| !pattern.trim().is_empty() && finding.path.contains(pattern))
         })
         .map(|mut finding| {
-            if let Some(severity) = config.severity_overrides.get(&finding.rule_id) {
+            if let Some(severity) = policy.severity_overrides.get(&finding.rule_id) {
                 finding.severity = severity.clone();
             }
             finding
         })
         .filter(|finding| {
-            !config.suppressions.iter().any(|suppression| {
+            !policy.suppressions.iter().any(|suppression| {
                 !looks_expired(suppression.expires.as_deref())
                     && suppression_matches(suppression, finding)
             })

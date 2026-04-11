@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::config::Config;
+use crate::config::RuntimeConfig;
 use crate::site::normalize_internal_href;
 
 const ASSET_EXTENSIONS: &[&str] = &[
@@ -96,7 +96,7 @@ fn route_is_excluded(route: &str, patterns: &[String]) -> bool {
         .any(|pattern| route.contains(pattern.trim_matches('/')))
 }
 
-pub(crate) fn route_is_allowed(route: &str, config: &Config) -> bool {
-    !route_is_excluded(route, &config.crawl_exclude_patterns)
-        && route_matches_patterns(route, &config.crawl_include_patterns)
+pub(crate) fn route_is_allowed(route: &str, runtime: &RuntimeConfig<'_>) -> bool {
+    !route_is_excluded(route, runtime.crawl_exclude_patterns)
+        && route_matches_patterns(route, runtime.crawl_include_patterns)
 }

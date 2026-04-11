@@ -18,6 +18,7 @@ use crate::structure_rules::run_structure_rules;
 
 pub fn run_checks_for_site(site: &crate::site::Site, config: &Config) -> Vec<Finding> {
     let mut findings = Vec::new();
+    let rules = config.rules();
 
     if site.deployment_model == DeploymentModel::SsrWorker {
         findings.push(Finding {
@@ -34,31 +35,31 @@ pub fn run_checks_for_site(site: &crate::site::Site, config: &Config) -> Vec<Fin
         });
     }
 
-    if config.checks.get("html").copied().unwrap_or(true) {
+    if rules.checks.get("html").copied().unwrap_or(true) {
         findings.extend(run_html_rules(site, config));
     }
-    if config.checks.get("social").copied().unwrap_or(true) {
+    if rules.checks.get("social").copied().unwrap_or(true) {
         findings.extend(run_social_rules(site, config));
     }
-    if config.checks.get("robots").copied().unwrap_or(true) {
+    if rules.checks.get("robots").copied().unwrap_or(true) {
         findings.extend(run_robots_rules(site, config));
     }
-    if config.checks.get("links").copied().unwrap_or(true) {
+    if rules.checks.get("links").copied().unwrap_or(true) {
         findings.extend(run_link_rules(site, config));
     }
-    if config.checks.get("sitemap").copied().unwrap_or(true) {
+    if rules.checks.get("sitemap").copied().unwrap_or(true) {
         findings.extend(run_sitemap_rules(site, config));
     }
-    if config.checks.get("llm").copied().unwrap_or(true) {
+    if rules.checks.get("llm").copied().unwrap_or(true) {
         findings.extend(run_llm_rules(site, config));
     }
-    if config.checks.get("schema").copied().unwrap_or(true) {
+    if rules.checks.get("schema").copied().unwrap_or(true) {
         findings.extend(run_schema_rules(site, config));
     }
-    if config.checks.get("content").copied().unwrap_or(true) {
+    if rules.checks.get("content").copied().unwrap_or(true) {
         findings.extend(run_content_rules(site, config));
     }
-    if config.checks.get("structure").copied().unwrap_or(true) {
+    if rules.checks.get("structure").copied().unwrap_or(true) {
         findings.extend(run_structure_rules(site, config));
     }
 
@@ -66,8 +67,9 @@ pub fn run_checks_for_site(site: &crate::site::Site, config: &Config) -> Vec<Fin
 }
 
 pub fn can_run_native_static_audit(config: &Config) -> bool {
+    let rules = config.rules();
     default_rule_switches().into_iter().all(|(name, enabled)| {
-        let requested = config.checks.get(name).copied().unwrap_or(enabled);
+        let requested = rules.checks.get(name).copied().unwrap_or(enabled);
         !requested
             || matches!(
                 name,

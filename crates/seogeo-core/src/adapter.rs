@@ -8,10 +8,11 @@ fn canonical_or_original(path: &Path) -> PathBuf {
 }
 
 fn source_dir_override(root: &Path, config: &Config) -> Option<PathBuf> {
-    if config.source_dir == "." {
+    let site = config.site();
+    if site.source_dir == "." {
         return None;
     }
-    let candidate = root.join(&config.source_dir);
+    let candidate = root.join(site.source_dir);
     candidate
         .exists()
         .then(|| canonical_or_original(&candidate))
@@ -65,8 +66,9 @@ fn resolve_generic(root: &Path, config: &Config) -> PathBuf {
 }
 
 pub fn resolve_static_adapter_name(root: &Path, config: &Config) -> Result<&'static str> {
-    if config.adapter != "auto" {
-        return match config.adapter.as_str() {
+    let site = config.site();
+    if site.adapter != "auto" {
+        return match site.adapter {
             "nextjs-export" => Ok("nextjs-export"),
             "astro-dist" => Ok("astro-dist"),
             "docusaurus-build" => Ok("docusaurus-build"),

@@ -60,7 +60,9 @@ fn canonical_route(page: &Page, site_url: Option<&str>) -> Option<String> {
 
 pub fn run_html_rules(site: &Site, config: &Config) -> Vec<Finding> {
     let mut findings = Vec::new();
-    let site_url = config.site_url.as_deref();
+    let site_config = config.site();
+    let rules = config.rules();
+    let site_url = site_config.site_url;
 
     for page in site.route_pages.values() {
         if page.title.is_none() {
@@ -93,8 +95,7 @@ pub fn run_html_rules(site: &Site, config: &Config) -> Vec<Finding> {
                 "error",
             ));
         }
-        if config.require_html_lang && page.relative_path != "404.html" && page.html_lang.is_none()
-        {
+        if rules.require_html_lang && page.relative_path != "404.html" && page.html_lang.is_none() {
             findings.push(finding(
                 "SEO007",
                 "missing html lang attribute",
@@ -140,7 +141,7 @@ pub fn run_html_rules(site: &Site, config: &Config) -> Vec<Finding> {
             }
         }
 
-        if config.require_hreflang_self
+        if rules.require_hreflang_self
             && normalized_targets
                 .iter()
                 .all(|(_, target)| target != &canonical_route)
@@ -193,7 +194,7 @@ pub fn run_static_html_audit(
     explicit_config_path: Option<&Path>,
 ) -> Result<Vec<Finding>> {
     let config = load_config(root, explicit_config_path)?;
-    if !config.checks.get("html").copied().unwrap_or(true) {
+    if !config.rules().checks.get("html").copied().unwrap_or(true) {
         return Ok(Vec::new());
     }
     let site = load_site(&resolve_static_site_root(root, &config)?)?;

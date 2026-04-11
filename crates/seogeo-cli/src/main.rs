@@ -279,7 +279,8 @@ fn command_check(submatches: &ArgMatches) -> Result<i32> {
     }
 
     let (config, findings) = run_native_static_audit(&root, explicit_config.as_deref())?;
-    let audit_path = write_audit_artifact(&findings, &root, "check", config.audit_log_limit)?;
+    let output = config.output();
+    let audit_path = write_audit_artifact(&findings, &root, "check", output.audit_log_limit)?;
 
     let findings_to_render = if let Some(baseline_path) = baseline_path {
         let baseline_findings = load_findings_from_audit(Path::new(baseline_path))?;
@@ -329,20 +330,18 @@ fn command_generate(submatches: &ArgMatches) -> Result<i32> {
         .unwrap_or_else(|_| PathBuf::from(submatches.get_one::<String>("path").unwrap()));
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
     let config = load_config(&root, explicit_config.as_deref())?;
+    let site_config = config.site();
     let site = load_site(&resolve_static_site_root(&root, &config)?)?;
     match submatches
         .get_one::<String>("kind")
         .map(String::as_str)
         .unwrap()
     {
-        "llms" => println!("{}", render_llms_txt(&site, config.site_url.as_deref())),
-        "llms-full" => println!(
-            "{}",
-            render_llms_full_txt(&site, config.site_url.as_deref())
-        ),
+        "llms" => println!("{}", render_llms_txt(&site, site_config.site_url)),
+        "llms-full" => println!("{}", render_llms_full_txt(&site, site_config.site_url)),
         "markdown-mirror" => println!("{}", render_markdown_mirror(&site)),
         "robots" => {
-            let Some(site_url) = config.site_url.as_deref() else {
+            let Some(site_url) = site_config.site_url else {
                 println!("site_url is required to generate robots.txt");
                 return Ok(2);
             };
@@ -377,12 +376,13 @@ fn command_baseline(submatches: &ArgMatches) -> Result<i32> {
         .unwrap_or_else(|_| PathBuf::from(submatches.get_one::<String>("path").unwrap()));
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
     let config = load_config(&root, explicit_config.as_deref())?;
+    let output = config.output();
     let (_, findings) = run_native_static_audit(&root, explicit_config.as_deref())?;
     let output_path = submatches
         .get_one::<String>("output")
         .map(PathBuf::from)
         .map(|path| path.canonicalize().unwrap_or(path))
-        .unwrap_or_else(|| root.join(&config.baseline_file));
+        .unwrap_or_else(|| root.join(output.baseline_file));
     write_baseline_file(&findings, &output_path)?;
     println!("{}", output_path.display());
     Ok(0)
@@ -423,7 +423,7 @@ fn selected_runtime_engine<'a>(
     submatches
         .get_one::<String>("engine")
         .map(String::as_str)
-        .unwrap_or(config.browser_engine.as_str())
+        .unwrap_or(config.runtime().browser_engine)
 }
 
 fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
@@ -431,6 +431,7 @@ fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
     let mut config = load_config(&cwd, explicit_config.as_deref())?;
     apply_runtime_cli_overrides(&mut config, submatches);
+    let output = config.output();
     let baseline_path = submatches.get_one::<String>("baseline");
     let regressions_only = submatches.get_flag("regressions-only");
     if regressions_only && baseline_path.is_none() {
@@ -442,7 +443,7 @@ fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
         selected_runtime_engine(&config, submatches),
         &config,
     )?;
-    let audit_path = write_audit_artifact(&audit.findings, &cwd, "crawl", config.audit_log_limit)?;
+    let audit_path = write_audit_artifact(&audit.findings, &cwd, "crawl", output.audit_log_limit)?;
     let findings_to_render = if let Some(baseline_path) = baseline_path {
         let baseline_findings = load_findings_from_audit(Path::new(baseline_path))?;
         let diff = diff_finding_sets(&baseline_findings, &audit.findings);
@@ -485,6 +486,7 @@ fn command_verify(submatches: &ArgMatches) -> Result<i32> {
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
     let mut config = load_config(&cwd, explicit_config.as_deref())?;
     apply_runtime_cli_overrides(&mut config, submatches);
+    let output = config.output();
     let audit = run_runtime_audit(
         submatches.get_one::<String>("url").unwrap(),
         *submatches.get_one::<usize>("max-pages").unwrap_or(&200),
@@ -494,7 +496,7 @@ fn command_verify(submatches: &ArgMatches) -> Result<i32> {
     let baseline_path = submatches
         .get_one::<String>("baseline")
         .map(PathBuf::from)
-        .unwrap_or_else(|| cwd.join(&config.baseline_file));
+        .unwrap_or_else(|| cwd.join(output.baseline_file));
     let baseline_findings = if baseline_path.exists() {
         load_findings_from_audit(&baseline_path)?
     } else {

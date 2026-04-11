@@ -1,6 +1,7 @@
 mod defaults;
 mod docs;
 mod load;
+mod views;
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -24,6 +25,9 @@ use self::defaults::{
 pub use self::defaults::default_rule_switches;
 pub use self::docs::config_field_docs;
 pub use self::load::load_config;
+pub use self::views::{
+    OutputConfig, PolicyConfig, QualityConfig, RulesConfig, RuntimeConfig, SiteConfig,
+};
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Config {

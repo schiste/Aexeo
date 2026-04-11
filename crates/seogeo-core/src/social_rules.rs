@@ -26,14 +26,16 @@ fn normalize_internal_asset_target(value: &str, site_url: Option<&str>) -> Optio
 
 pub fn run_social_rules(site: &Site, config: &Config) -> Vec<Finding> {
     let mut findings = Vec::new();
-    let site_url = config.site_url.as_deref();
+    let site_config = config.site();
+    let rules = config.rules();
+    let site_url = site_config.site_url;
 
     for page in site.route_pages.values() {
         if page.relative_path == "404.html" {
             continue;
         }
 
-        if config.require_open_graph {
+        if rules.require_open_graph {
             if page.metadata("og:title").is_none() {
                 findings.push(finding("SOC001", "missing og:title", page));
             }
@@ -44,7 +46,7 @@ pub fn run_social_rules(site: &Site, config: &Config) -> Vec<Finding> {
                 findings.push(finding("SOC003", "missing og:type", page));
             }
         }
-        if config.require_twitter_card && page.metadata("twitter:card").is_none() {
+        if rules.require_twitter_card && page.metadata("twitter:card").is_none() {
             findings.push(finding("SOC004", "missing twitter:card", page));
         }
         if let (Some(canonical), Some(og_url)) =
@@ -57,10 +59,10 @@ pub fn run_social_rules(site: &Site, config: &Config) -> Vec<Finding> {
                 page,
             ));
         }
-        if config.require_social_images && page.metadata("og:image").is_none() {
+        if rules.require_social_images && page.metadata("og:image").is_none() {
             findings.push(finding("SOC006", "missing og:image", page));
         }
-        if config.require_twitter_image && page.metadata("twitter:image").is_none() {
+        if rules.require_twitter_image && page.metadata("twitter:image").is_none() {
             findings.push(finding("SOC007", "missing twitter:image", page));
         }
 

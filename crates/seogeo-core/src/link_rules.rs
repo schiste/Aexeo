@@ -36,13 +36,14 @@ fn finding(
 }
 
 fn is_weak_internal_anchor(link: &Link, site: &Site, config: &Config) -> bool {
+    let rules = config.rules();
     let Some(target) = link.target.as_deref() else {
         return false;
     };
     if !site.route_pages.contains_key(target) {
         return false;
     }
-    let weak_anchors = config
+    let weak_anchors = rules
         .weak_anchor_text
         .iter()
         .map(|value| normalize_anchor_text(value))
@@ -52,6 +53,7 @@ fn is_weak_internal_anchor(link: &Link, site: &Site, config: &Config) -> bool {
 
 fn is_orphan_candidate(page: &Page, config: &Config) -> bool {
     let excluded = config
+        .rules()
         .orphan_exclude
         .iter()
         .map(|value| value.trim_matches('/').to_string())
@@ -70,6 +72,7 @@ fn is_orphan_candidate(page: &Page, config: &Config) -> bool {
 }
 
 pub fn run_link_rules(site: &Site, config: &Config) -> Vec<Finding> {
+    let rules = config.rules();
     let mut findings = Vec::new();
     let suppress_graph_findings = site
         .crawl_meta
@@ -141,13 +144,13 @@ pub fn run_link_rules(site: &Site, config: &Config) -> Vec<Finding> {
             ));
             continue;
         }
-        if inbound.len() < config.min_inbound_links {
+        if inbound.len() < rules.min_inbound_links {
             findings.push(finding(
                 "LNK004",
                 format!(
                     "page has only {} inbound internal links; expected at least {}",
                     inbound.len(),
-                    config.min_inbound_links
+                    rules.min_inbound_links
                 ),
                 &page.path,
                 1,

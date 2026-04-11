@@ -44,6 +44,7 @@ fn route_matches_pattern(route: &str, pattern: &str) -> bool {
 
 fn is_utility_route(route: &str, config: &Config) -> bool {
     config
+        .rules()
         .utility_route_patterns
         .iter()
         .any(|pattern| route_matches_pattern(route, pattern))
@@ -51,20 +52,29 @@ fn is_utility_route(route: &str, config: &Config) -> bool {
 
 fn allows_canonical_noindex(route: &str, config: &Config) -> bool {
     is_utility_route(route, config)
-        || config.route_policy_overrides.iter().any(|override_rule| {
-            override_rule.allow_canonical_noindex
-                && route_matches_pattern(route, &override_rule.pattern)
-        })
+        || config
+            .policy()
+            .route_policy_overrides
+            .iter()
+            .any(|override_rule| {
+                override_rule.allow_canonical_noindex
+                    && route_matches_pattern(route, &override_rule.pattern)
+            })
 }
 
 fn allows_nofollow(route: &str, config: &Config) -> bool {
     is_utility_route(route, config)
-        || config.route_policy_overrides.iter().any(|override_rule| {
-            override_rule.allow_nofollow && route_matches_pattern(route, &override_rule.pattern)
-        })
+        || config
+            .policy()
+            .route_policy_overrides
+            .iter()
+            .any(|override_rule| {
+                override_rule.allow_nofollow && route_matches_pattern(route, &override_rule.pattern)
+            })
 }
 
 fn collect_robot_file_findings(site: &Site, config: &Config) -> Vec<Finding> {
+    let rules = config.rules();
     let robots_path = site.root.join("robots.txt");
     let Some(robots_text) = site.robots_text.as_deref() else {
         return vec![finding("ROB001", "missing robots.txt", &robots_path, None)];
@@ -72,7 +82,7 @@ fn collect_robot_file_findings(site: &Site, config: &Config) -> Vec<Finding> {
 
     let lines = normalize_robot_lines(robots_text);
     let mut findings = Vec::new();
-    if config.require_robots_sitemap && !lines.iter().any(|line| line.starts_with("sitemap:")) {
+    if rules.require_robots_sitemap && !lines.iter().any(|line| line.starts_with("sitemap:")) {
         findings.push(finding(
             "ROB002",
             "robots.txt is missing a Sitemap declaration",
@@ -165,8 +175,9 @@ fn collect_page_robot_findings(page: &Page, site: &Site, config: &Config) -> Vec
 }
 
 pub fn run_robots_rules(site: &Site, config: &Config) -> Vec<Finding> {
+    let rules = config.rules();
     let mut findings = collect_robot_file_findings(site, config);
-    if site.robots_text.is_none() || !config.require_meta_robots_consistency {
+    if site.robots_text.is_none() || !rules.require_meta_robots_consistency {
         return findings;
     }
     for page in site.route_pages.values() {

@@ -45,6 +45,7 @@ fn materialize_runtime_site(
     engine: &str,
     config: &Config,
 ) -> Result<(Site, Vec<Finding>)> {
+    let runtime = config.runtime();
     let normalized_base = normalize_base_url(base_url);
     let base_host = host_for_url(&normalized_base);
     let snapshot_root = unique_runtime_dir()?;
@@ -69,11 +70,11 @@ fn materialize_runtime_site(
         });
     }
 
-    for seed in &config.crawl_seeds {
+    for seed in runtime.crawl_seeds {
         let Some(route) = route_from_urlish(seed).or_else(|| normalize_internal_href(seed)) else {
             continue;
         };
-        if route_is_allowed(&route, config) {
+        if route_is_allowed(&route, &runtime) {
             let seed_url = if route.is_empty() {
                 normalized_base.clone()
             } else {
@@ -84,12 +85,12 @@ fn materialize_runtime_site(
         }
     }
 
-    if config.crawl_use_sitemap {
+    if runtime.crawl_use_sitemap {
         let sitemap_url = format!("{}sitemap.xml", normalized_base);
         let fetched = fetch_with_curl(
             &sitemap_url,
-            &config.crawl_headers,
-            &config.crawl_basic_auth,
+            runtime.crawl_headers,
+            runtime.crawl_basic_auth,
         )?;
         if fetched.status_code.unwrap_or(500) < 400
             && fetched
@@ -103,7 +104,7 @@ fn materialize_runtime_site(
                 let Some(route) = route_from_urlish(&loc) else {
                     continue;
                 };
-                if route_is_allowed(&route, config) {
+                if route_is_allowed(&route, &runtime) {
                     let seed_url = if route.is_empty() {
                         normalized_base.clone()
                     } else {
@@ -126,10 +127,10 @@ fn materialize_runtime_site(
         }
         visited.insert(current.clone());
         let current_route = route_from_urlish(&current).unwrap_or_default();
-        if !current_route.is_empty() && !route_is_allowed(&current_route, config) {
+        if !current_route.is_empty() && !route_is_allowed(&current_route, &runtime) {
             continue;
         }
-        let fetched = fetch_with_curl(&current, &config.crawl_headers, &config.crawl_basic_auth)?;
+        let fetched = fetch_with_curl(&current, runtime.crawl_headers, runtime.crawl_basic_auth)?;
         let Some(body) = fetched.body else {
             let route = route_from_urlish(&current).unwrap_or_default();
             crawl_findings.push(Finding {
@@ -162,7 +163,7 @@ fn materialize_runtime_site(
             if !should_enqueue_link(&target) {
                 continue;
             }
-            if !route_is_allowed(&target, config) {
+            if !route_is_allowed(&target, &runtime) {
                 continue;
             }
             discovered_routes.insert(target.clone());
@@ -181,22 +182,22 @@ fn materialize_runtime_site(
         &snapshot_root,
         &normalized_base,
         "robots.txt",
-        &config.crawl_headers,
-        &config.crawl_basic_auth,
+        runtime.crawl_headers,
+        runtime.crawl_basic_auth,
     )?;
     write_optional_artifact(
         &snapshot_root,
         &normalized_base,
         "llms.txt",
-        &config.crawl_headers,
-        &config.crawl_basic_auth,
+        runtime.crawl_headers,
+        runtime.crawl_basic_auth,
     )?;
     write_optional_artifact(
         &snapshot_root,
         &normalized_base,
         "sitemap.xml",
-        &config.crawl_headers,
-        &config.crawl_basic_auth,
+        runtime.crawl_headers,
+        runtime.crawl_basic_auth,
     )?;
 
     let mut site = load_site(&snapshot_root)?;
