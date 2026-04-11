@@ -1,6 +1,7 @@
 use anyhow::Result;
 use seogeo_contracts::Finding;
 use seogeo_core::DiffResult;
+use seogeo_core::config::ConfigWarning;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -24,7 +25,7 @@ pub struct AuditCommandOutput<'a> {
     audit_path: Option<String>,
     summary: FindingSummary,
     findings: &'a [Finding],
-    warnings: Vec<String>,
+    warnings: Vec<ConfigWarning>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -33,14 +34,14 @@ pub struct DiffCommandOutput<'a> {
     success: bool,
     summary: DiffSummary,
     diff: &'a DiffResult,
-    warnings: Vec<String>,
+    warnings: Vec<ConfigWarning>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ConfigCommandOutput<T> {
     command: &'static str,
     success: bool,
-    warnings: Vec<String>,
+    warnings: Vec<ConfigWarning>,
     config: T,
 }
 
@@ -66,7 +67,7 @@ pub fn render_audit_command_json(
     findings: &[Finding],
     success: bool,
     audit_path: Option<String>,
-    warnings: Vec<String>,
+    warnings: Vec<ConfigWarning>,
 ) -> Result<String> {
     Ok(serde_json::to_string_pretty(&AuditCommandOutput {
         command,
@@ -82,7 +83,7 @@ pub fn render_diff_command_json(
     command: &str,
     diff: &DiffResult,
     success: bool,
-    warnings: Vec<String>,
+    warnings: Vec<ConfigWarning>,
 ) -> Result<String> {
     Ok(serde_json::to_string_pretty(&DiffCommandOutput {
         command,
@@ -96,7 +97,7 @@ pub fn render_diff_command_json(
 pub fn render_config_command_json<T: Serialize>(
     command: &'static str,
     config: T,
-    warnings: Vec<String>,
+    warnings: Vec<ConfigWarning>,
 ) -> Result<String> {
     Ok(serde_json::to_string_pretty(&ConfigCommandOutput {
         command,
@@ -104,4 +105,10 @@ pub fn render_config_command_json<T: Serialize>(
         warnings,
         config,
     })?)
+}
+
+pub fn emit_config_warnings(warnings: &[ConfigWarning]) {
+    for warning in warnings {
+        eprintln!("{} {}", warning.code, warning.message);
+    }
 }

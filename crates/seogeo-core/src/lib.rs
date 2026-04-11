@@ -58,7 +58,9 @@ pub use site::{
 };
 pub use sitemap_rules::run_sitemap_rules;
 pub use social_rules::run_social_rules;
-pub use static_check::{can_run_native_static_audit, run_native_static_audit};
+pub use static_check::{
+    can_run_native_static_audit, run_native_static_audit, run_native_static_audit_with_config,
+};
 pub use structure_rules::run_structure_rules;
 pub use verification::{
     DiffResult, diff_finding_sets, load_findings_from_audit, render_diff_text, write_baseline_file,

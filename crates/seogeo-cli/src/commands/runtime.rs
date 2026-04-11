@@ -1,13 +1,13 @@
 use anyhow::{Result, bail};
 use clap::ArgMatches;
-use seogeo_core::config::load_config;
+use seogeo_core::config::load_config_with_diagnostics;
 use seogeo_core::{
     diff_finding_sets, load_findings_from_audit, render_diff_text, render_sarif, render_text,
     run_runtime_audit, verify_runtime_audit, write_audit_artifact,
 };
 use std::path::{Path, PathBuf};
 
-use crate::output::{render_audit_command_json, render_diff_command_json};
+use crate::output::{emit_config_warnings, render_audit_command_json, render_diff_command_json};
 
 fn apply_runtime_cli_overrides(config: &mut seogeo_core::Config, submatches: &ArgMatches) {
     if let Some(values) = submatches.get_many::<String>("seed") {
@@ -37,7 +37,9 @@ fn selected_runtime_engine<'a>(
 pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     let cwd = std::env::current_dir()?;
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
-    let mut config = load_config(&cwd, explicit_config.as_deref())?;
+    let loaded = load_config_with_diagnostics(&cwd, explicit_config.as_deref())?;
+    let mut config = loaded.config;
+    let warnings = loaded.warnings;
     apply_runtime_cli_overrides(&mut config, submatches);
     let baseline_path = submatches.get_one::<String>("baseline");
     let regressions_only = submatches.get_flag("regressions-only");
@@ -85,18 +87,21 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
                 &findings_to_render,
                 success,
                 Some(audit_path.display().to_string()),
-                Vec::new(),
+                warnings,
             )?
         ),
         "sarif" => println!("{}", render_sarif(&findings_to_render, "seogeo")?),
-        _ => println!(
-            "{}",
-            render_text(
-                &findings_to_render,
-                "All runtime checks passed.",
-                Some(&audit_path)
-            )
-        ),
+        _ => {
+            emit_config_warnings(&warnings);
+            println!(
+                "{}",
+                render_text(
+                    &findings_to_render,
+                    "All runtime checks passed.",
+                    Some(&audit_path)
+                )
+            );
+        }
     }
     let exit_code = if success { 0 } else { 1 };
     Ok(exit_code)
@@ -105,7 +110,9 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
 pub fn command_verify(submatches: &ArgMatches) -> Result<i32> {
     let cwd = std::env::current_dir()?;
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
-    let mut config = load_config(&cwd, explicit_config.as_deref())?;
+    let loaded = load_config_with_diagnostics(&cwd, explicit_config.as_deref())?;
+    let mut config = loaded.config;
+    let warnings = loaded.warnings;
     apply_runtime_cli_overrides(&mut config, submatches);
     let audit = run_runtime_audit(
         submatches.get_one::<String>("url").unwrap(),
@@ -130,9 +137,12 @@ pub fn command_verify(submatches: &ArgMatches) -> Result<i32> {
     {
         "json" => println!(
             "{}",
-            render_diff_command_json("verify", &diff, diff.new_findings.is_empty(), Vec::new())?
+            render_diff_command_json("verify", &diff, diff.new_findings.is_empty(), warnings)?
         ),
-        _ => println!("{}", render_diff_text(&diff)),
+        _ => {
+            emit_config_warnings(&warnings);
+            println!("{}", render_diff_text(&diff));
+        }
     }
     Ok(if diff.new_findings.is_empty() { 0 } else { 1 })
 }

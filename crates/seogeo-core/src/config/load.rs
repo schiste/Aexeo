@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use serde::Serialize;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use toml::Value;
@@ -73,6 +74,76 @@ const FLAT_TOP_LEVEL_KEYS: &[&str] = &[
     "complexity_threshold",
     "performance_budget_file",
 ];
+const DEPRECATED_FLAT_KEYS: &[&str] = &[
+    "site_url",
+    "source_dir",
+    "adapter",
+    "canonical_style",
+    "audit_log_limit",
+    "browser_engine",
+    "browser_wait_until",
+    "baseline_file",
+    "crawl_headers",
+    "crawl_cookies",
+    "crawl_basic_auth",
+    "crawl_seeds",
+    "crawl_include_patterns",
+    "crawl_exclude_patterns",
+    "crawl_use_sitemap",
+    "crawl_capture_trace",
+    "crawl_capture_screenshot",
+    "crawl_capture_console",
+    "crawl_capture_network",
+    "crawl_artifact_dir",
+    "ignore_rules",
+    "ignore_paths",
+    "severity_overrides",
+    "suppressions",
+    "checks",
+    "orphan_exclude",
+    "repeatable_data_ui",
+    "utility_route_patterns",
+    "route_policy_overrides",
+    "min_inbound_links",
+    "link_suggestion_count",
+    "enable_link_autofix",
+    "related_links_heading",
+    "min_page_size",
+    "required_feature_markers",
+    "min_block_text_length",
+    "min_answer_blocks",
+    "require_fact_consistency",
+    "required_schema_types",
+    "required_schema_families",
+    "require_breadcrumb_schema",
+    "require_schema_title_alignment",
+    "require_html_lang",
+    "require_hreflang_self",
+    "require_meta_robots_consistency",
+    "require_open_graph",
+    "require_twitter_card",
+    "default_twitter_card",
+    "require_social_images",
+    "require_twitter_image",
+    "require_robots_sitemap",
+    "weak_anchor_text",
+    "typecheck_command",
+    "coverage_threshold",
+    "complexity_threshold",
+    "performance_budget_file",
+];
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ConfigWarning {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct LoadedConfig {
+    pub config: Config,
+    pub warnings: Vec<ConfigWarning>,
+}
 
 fn normalize_path(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
@@ -434,6 +505,42 @@ fn validate_config_surface(value: &Value) -> Result<()> {
     Ok(())
 }
 
+fn deprecation_warning(message: impl Into<String>) -> ConfigWarning {
+    ConfigWarning {
+        code: "CFGDEP001".to_string(),
+        message: message.into(),
+    }
+}
+
+fn collect_deprecation_warnings(value: &Value) -> Vec<ConfigWarning> {
+    let Some(root) = value.as_table() else {
+        return Vec::new();
+    };
+    let mut warnings = Vec::new();
+
+    for key in DEPRECATED_FLAT_KEYS {
+        if root.contains_key(*key) {
+            warnings.push(deprecation_warning(format!(
+                "legacy flat config key '{}' is deprecated; prefer the versioned nested surface with `version = 1`",
+                key
+            )));
+        }
+    }
+
+    if let Some(Value::Table(rules)) = root.get("rules") {
+        for (rule_name, rule_value) in rules {
+            if matches!(rule_value, Value::Boolean(_)) {
+                warnings.push(deprecation_warning(format!(
+                    "legacy rule toggle `rules.{}` is deprecated; prefer `[rules.{}] enabled = ...`",
+                    rule_name, rule_name
+                )));
+            }
+        }
+    }
+
+    warnings
+}
+
 fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
     let Value::Table(ref mut root) = merged else {
         bail!("config root must be a TOML table");
@@ -685,27 +792,39 @@ fn move_table_field_if_absent_checks(
     checks_table.entry(rule_name.to_string()).or_insert(value);
 }
 
-pub fn load_config(root: &Path, explicit_path: Option<&Path>) -> Result<Config> {
+pub fn load_config_with_diagnostics(
+    root: &Path,
+    explicit_path: Option<&Path>,
+) -> Result<LoadedConfig> {
     let config_path = explicit_path
         .map(PathBuf::from)
         .unwrap_or_else(|| root.join("seogeo.toml"));
     if !config_path.exists() {
-        return Ok(Config::default());
+        return Ok(LoadedConfig {
+            config: Config::default(),
+            warnings: Vec::new(),
+        });
     }
     let merged = load_config_value(&config_path, &mut Vec::new())?;
     validate_config_surface(&merged)?;
+    let warnings = collect_deprecation_warnings(&merged);
     let merged = normalize_versioned_surface(merged)?;
-    merged.try_into::<Config>().with_context(|| {
+    let config = merged.try_into::<Config>().with_context(|| {
         format!(
             "failed to deserialize merged config at {}",
             config_path.display()
         )
-    })
+    })?;
+    Ok(LoadedConfig { config, warnings })
+}
+
+pub fn load_config(root: &Path, explicit_path: Option<&Path>) -> Result<Config> {
+    Ok(load_config_with_diagnostics(root, explicit_path)?.config)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::load_config;
+    use super::{load_config, load_config_with_diagnostics};
     use crate::config::default_rule_switches;
     use std::fs;
 
@@ -946,5 +1065,59 @@ unexpected = true
                 .to_string()
                 .contains("unknown config key 'unexpected' in [rules.links]")
         );
+    }
+
+    #[test]
+    fn reports_flat_key_deprecation_warnings() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join("seogeo.toml"),
+            r#"
+site_url = "https://example.com"
+browser_engine = "http"
+"#,
+        )
+        .unwrap();
+
+        let loaded = load_config_with_diagnostics(temp_dir.path(), None).unwrap();
+        let messages = loaded
+            .warnings
+            .iter()
+            .map(|warning| warning.message.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            loaded
+                .warnings
+                .iter()
+                .filter(|warning| warning.code == "CFGDEP001")
+                .count(),
+            2
+        );
+        assert!(messages.iter().any(|message| message.contains("site_url")));
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("browser_engine"))
+        );
+    }
+
+    #[test]
+    fn reports_legacy_rule_toggle_deprecation_warnings() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join("seogeo.toml"),
+            r#"
+version = 1
+
+[rules]
+html = true
+"#,
+        )
+        .unwrap();
+
+        let loaded = load_config_with_diagnostics(temp_dir.path(), None).unwrap();
+        assert!(loaded.warnings.iter().any(|warning| {
+            warning.code == "CFGDEP001" && warning.message.contains("rules.html")
+        }));
     }
 }

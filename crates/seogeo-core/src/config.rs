@@ -25,7 +25,7 @@ use self::defaults::{
 
 pub use self::defaults::default_rule_switches;
 pub use self::docs::{config_field_docs, render_config_schema};
-pub use self::load::load_config;
+pub use self::load::{ConfigWarning, LoadedConfig, load_config, load_config_with_diagnostics};
 pub use self::render::{render_resolved_config_json, render_resolved_config_toml};
 pub use self::views::{
     OutputConfig, PolicyConfig, QualityConfig, RulesConfig, RuntimeConfig, SiteConfig,

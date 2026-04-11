@@ -258,6 +258,37 @@ adapter = "astro-dist"
 }
 
 #[test]
+fn config_print_json_contract_reports_deprecation_warnings() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    write(
+        &temp_dir.path().join("seogeo.toml"),
+        r#"
+site_url = "https://example.com"
+browser_engine = "http"
+"#,
+    );
+    let output = Command::new(bin())
+        .arg("config")
+        .arg("print")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert!(payload["warnings"].is_array());
+    assert!(
+        payload["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning["code"] == "CFGDEP001"
+                && warning["message"].as_str().unwrap().contains("site_url"))
+    );
+}
+
+#[test]
 fn check_json_contract_reports_summary_and_exit_code() {
     let temp_dir = tempfile::tempdir().unwrap();
     write(

@@ -86,13 +86,20 @@ pub fn can_run_native_static_audit(config: &Config) -> bool {
     })
 }
 
+pub fn run_native_static_audit_with_config(root: &Path, config: &Config) -> Result<Vec<Finding>> {
+    let site = load_site(&resolve_static_site_root(root, config)?)?;
+    Ok(run_checks_for_site(&site, config))
+}
+
 pub fn run_native_static_audit(
     root: &Path,
     explicit_config_path: Option<&Path>,
 ) -> Result<(Config, Vec<Finding>)> {
     let config = load_config(root, explicit_config_path)?;
-    let site = load_site(&resolve_static_site_root(root, &config)?)?;
-    Ok((config.clone(), run_checks_for_site(&site, &config)))
+    Ok((
+        config.clone(),
+        run_native_static_audit_with_config(root, &config)?,
+    ))
 }
 
 #[cfg(test)]

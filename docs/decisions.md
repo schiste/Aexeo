@@ -59,3 +59,12 @@ not as blended application code.
 - website integration belongs in a separate bridge package
 - the standalone CLI remains a first-class product surface
 - website-specific schemas and adapters must not leak into the core engine
+
+## 8. Config Compatibility Must Be Explicitly Versioned
+
+The supported config contract is the nested `version = 1` TOML surface.
+
+- legacy flat keys remain compatibility inputs, not the forward-looking contract
+- compatibility mode must emit machine-readable deprecation warnings
+- CI should validate config through `seogeo config print --format json`
+- future config evolution should happen through versioned schema changes, not silent drift

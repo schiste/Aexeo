@@ -20,6 +20,8 @@ pub fn render_config_reference() -> String {
         String::new(),
         "The canonical config surface is the versioned nested format with `version = 1`. The legacy flat top-level keys remain supported for compatibility and are validated with the same strictness."
             .to_string(),
+        "Compatibility mode is no longer silent: commands emit `CFGDEP001` warnings whenever legacy flat keys or legacy `[rules]` boolean toggles are used."
+            .to_string(),
         String::new(),
         "Generated JSON Schema: `docs/config.schema.json`".to_string(),
         String::new(),
@@ -68,6 +70,8 @@ pub fn render_config_reference() -> String {
         "- CI validation: run `cargo run -q -p seogeo-cli -- config print . --format json > /dev/null` to fail fast on invalid, unknown, or unsupported config keys."
             .to_string(),
         "- Canonical normalization: `cargo run -q -p seogeo-cli -- config print . --format toml` renders the fully resolved versioned surface after defaults and `extends` merges."
+            .to_string(),
+        "- Migration diagnostics: parse the `warnings` array from `seogeo config print --format json` and treat `CFGDEP001` as a tracked deprecation signal in CI."
             .to_string(),
         String::new(),
         "## Top-Level Keys".to_string(),

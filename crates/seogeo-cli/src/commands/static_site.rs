@@ -1,15 +1,16 @@
 use anyhow::{Result, bail};
 use clap::ArgMatches;
 use seogeo_core::adapter::resolve_static_site_root;
-use seogeo_core::config::load_config;
+use seogeo_core::config::load_config_with_diagnostics;
 use seogeo_core::{
     apply_safe_fixes, diff_finding_sets, load_findings_from_audit, load_site, render_llms_full_txt,
     render_llms_txt, render_markdown_mirror, render_robots_txt, render_sarif, render_text,
-    run_native_static_audit, suggest_internal_links, write_audit_artifact, write_baseline_file,
+    run_native_static_audit_with_config, suggest_internal_links, write_audit_artifact,
+    write_baseline_file,
 };
 use std::path::{Path, PathBuf};
 
-use crate::output::render_audit_command_json;
+use crate::output::{emit_config_warnings, render_audit_command_json};
 
 fn canonicalize_or_keep(path: &str) -> PathBuf {
     PathBuf::from(path)
@@ -20,7 +21,9 @@ fn canonicalize_or_keep(path: &str) -> PathBuf {
 pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
     let root = canonicalize_or_keep(submatches.get_one::<String>("path").unwrap());
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
-    let _ = load_config(&root, explicit_config.as_deref())?;
+    let loaded = load_config_with_diagnostics(&root, explicit_config.as_deref())?;
+    let config = loaded.config;
+    let warnings = loaded.warnings;
 
     let baseline_path = submatches.get_one::<String>("baseline");
     let regressions_only = submatches.get_flag("regressions-only");
@@ -28,7 +31,7 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
         bail!("--regressions-only requires --baseline");
     }
 
-    let (config, findings) = run_native_static_audit(&root, explicit_config.as_deref())?;
+    let findings = run_native_static_audit_with_config(&root, &config)?;
     let audit_path =
         write_audit_artifact(&findings, &root, "check", config.output().audit_log_limit)?;
 
@@ -62,11 +65,12 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
                 &findings_to_render,
                 success,
                 Some(audit_path.display().to_string()),
-                Vec::new(),
+                warnings,
             )?
         ),
         "sarif" => println!("{}", render_sarif(&findings_to_render, "seogeo")?),
         _ => {
+            emit_config_warnings(&warnings);
             let success_message = if regressions_only {
                 "No regressions found."
             } else {
@@ -86,7 +90,9 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
 pub fn command_generate(submatches: &ArgMatches) -> Result<i32> {
     let root = canonicalize_or_keep(submatches.get_one::<String>("path").unwrap());
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
-    let config = load_config(&root, explicit_config.as_deref())?;
+    let loaded = load_config_with_diagnostics(&root, explicit_config.as_deref())?;
+    emit_config_warnings(&loaded.warnings);
+    let config = loaded.config;
     let site_config = config.site();
     let site = load_site(&resolve_static_site_root(&root, &config)?)?;
     match submatches
@@ -113,7 +119,9 @@ pub fn command_generate(submatches: &ArgMatches) -> Result<i32> {
 pub fn command_fix(submatches: &ArgMatches) -> Result<i32> {
     let root = canonicalize_or_keep(submatches.get_one::<String>("path").unwrap());
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
-    let config = load_config(&root, explicit_config.as_deref())?;
+    let loaded = load_config_with_diagnostics(&root, explicit_config.as_deref())?;
+    emit_config_warnings(&loaded.warnings);
+    let config = loaded.config;
     let changed = apply_safe_fixes(&resolve_static_site_root(&root, &config)?, &config)?;
     if changed.is_empty() {
         println!("No safe fixes applied.");
@@ -128,8 +136,10 @@ pub fn command_fix(submatches: &ArgMatches) -> Result<i32> {
 pub fn command_baseline(submatches: &ArgMatches) -> Result<i32> {
     let root = canonicalize_or_keep(submatches.get_one::<String>("path").unwrap());
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
-    let config = load_config(&root, explicit_config.as_deref())?;
-    let (_, findings) = run_native_static_audit(&root, explicit_config.as_deref())?;
+    let loaded = load_config_with_diagnostics(&root, explicit_config.as_deref())?;
+    emit_config_warnings(&loaded.warnings);
+    let config = loaded.config;
+    let findings = run_native_static_audit_with_config(&root, &config)?;
     let output_path = submatches
         .get_one::<String>("output")
         .map(PathBuf::from)

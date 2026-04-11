@@ -309,7 +309,9 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
+ "seogeo-contracts",
  "seogeo-core",
+ "serde",
  "serde_json",
  "tempfile",
 ]
