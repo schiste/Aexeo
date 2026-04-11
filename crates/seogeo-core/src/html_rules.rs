@@ -58,30 +58,6 @@ fn canonical_route(page: &Page, site_url: Option<&str>) -> Option<String> {
         .or_else(|| Some(page.route.clone()))
 }
 
-fn apply_config_overrides(findings: Vec<Finding>, config: &Config) -> Vec<Finding> {
-    findings
-        .into_iter()
-        .filter(|finding| {
-            !config
-                .ignore_rules
-                .iter()
-                .any(|rule| rule == &finding.rule_id)
-        })
-        .filter(|finding| {
-            !config
-                .ignore_paths
-                .iter()
-                .any(|pattern| finding.path.contains(pattern))
-        })
-        .map(|mut finding| {
-            if let Some(severity) = config.severity_overrides.get(&finding.rule_id) {
-                finding.severity = severity.clone();
-            }
-            finding
-        })
-        .collect()
-}
-
 pub fn run_html_rules(site: &Site, config: &Config) -> Vec<Finding> {
     let mut findings = Vec::new();
     let site_url = config.site_url.as_deref();
@@ -209,7 +185,7 @@ pub fn run_html_rules(site: &Site, config: &Config) -> Vec<Finding> {
         }
     }
 
-    apply_config_overrides(findings, config)
+    findings
 }
 
 pub fn run_static_html_audit(

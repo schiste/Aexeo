@@ -63,30 +63,6 @@ fn recommendation(
     }
 }
 
-fn apply_config_overrides(findings: Vec<Finding>, config: &Config) -> Vec<Finding> {
-    findings
-        .into_iter()
-        .filter(|finding| {
-            !config
-                .ignore_rules
-                .iter()
-                .any(|rule| rule == &finding.rule_id)
-        })
-        .filter(|finding| {
-            !config
-                .ignore_paths
-                .iter()
-                .any(|pattern| finding.path.contains(pattern))
-        })
-        .map(|mut finding| {
-            if let Some(severity) = config.severity_overrides.get(&finding.rule_id) {
-                finding.severity = severity.clone();
-            }
-            finding
-        })
-        .collect()
-}
-
 pub fn iter_schema_types(payload: &Value) -> Vec<String> {
     let mut found = Vec::new();
     match payload {
@@ -893,7 +869,7 @@ pub fn run_schema_rules(site: &Site, config: &Config) -> Vec<Finding> {
         ));
     }
     findings.extend(collect_sitewide_graph_findings(site, &sitewide_graphs));
-    apply_config_overrides(findings, config)
+    findings
 }
 
 #[cfg(test)]

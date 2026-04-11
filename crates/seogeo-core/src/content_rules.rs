@@ -24,30 +24,6 @@ fn finding(
     }
 }
 
-fn apply_config_overrides(findings: Vec<Finding>, config: &Config) -> Vec<Finding> {
-    findings
-        .into_iter()
-        .filter(|finding| {
-            !config
-                .ignore_rules
-                .iter()
-                .any(|rule| rule == &finding.rule_id)
-        })
-        .filter(|finding| {
-            !config
-                .ignore_paths
-                .iter()
-                .any(|pattern| finding.path.contains(pattern))
-        })
-        .map(|mut finding| {
-            if let Some(severity) = config.severity_overrides.get(&finding.rule_id) {
-                finding.severity = severity.clone();
-            }
-            finding
-        })
-        .collect()
-}
-
 fn visible_length(text: &str) -> usize {
     collapse_whitespace(&strip_tags(text)).len()
 }
@@ -159,7 +135,7 @@ pub fn run_content_rules(site: &Site, config: &Config) -> Vec<Finding> {
         findings.extend(collect_feature_marker_findings(page, config));
         findings.extend(collect_image_findings(page, site, config));
     }
-    apply_config_overrides(findings, config)
+    findings
 }
 
 #[cfg(test)]

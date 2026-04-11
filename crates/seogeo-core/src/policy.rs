@@ -48,6 +48,24 @@ pub fn apply_policy(findings: Vec<Finding>, config: &Config) -> Vec<Finding> {
     findings
         .into_iter()
         .filter(|finding| {
+            !config
+                .ignore_rules
+                .iter()
+                .any(|rule| rule == &finding.rule_id)
+        })
+        .filter(|finding| {
+            !config
+                .ignore_paths
+                .iter()
+                .any(|pattern| !pattern.trim().is_empty() && finding.path.contains(pattern))
+        })
+        .map(|mut finding| {
+            if let Some(severity) = config.severity_overrides.get(&finding.rule_id) {
+                finding.severity = severity.clone();
+            }
+            finding
+        })
+        .filter(|finding| {
             !config.suppressions.iter().any(|suppression| {
                 !looks_expired(suppression.expires.as_deref())
                     && suppression_matches(suppression, finding)
@@ -83,5 +101,51 @@ mod tests {
             ..Config::default()
         };
         assert!(apply_policy(findings, &config).is_empty());
+    }
+
+    #[test]
+    fn applies_ignore_rules_paths_and_severity_overrides() {
+        let findings = vec![
+            Finding {
+                rule_id: "SEO001".to_string(),
+                message: "missing title".to_string(),
+                path: "pages/index.html".to_string(),
+                line: 1,
+                column: 1,
+                severity: "error".to_string(),
+                suggestion: None,
+            },
+            Finding {
+                rule_id: "SEO002".to_string(),
+                message: "missing description".to_string(),
+                path: "legacy/about.html".to_string(),
+                line: 1,
+                column: 1,
+                severity: "error".to_string(),
+                suggestion: None,
+            },
+            Finding {
+                rule_id: "SEO004".to_string(),
+                message: "missing canonical".to_string(),
+                path: "pages/about.html".to_string(),
+                line: 1,
+                column: 1,
+                severity: "error".to_string(),
+                suggestion: None,
+            },
+        ];
+        let config = Config {
+            ignore_rules: vec!["SEO001".to_string()],
+            ignore_paths: vec!["legacy/".to_string()],
+            severity_overrides: vec![("SEO004".to_string(), "warning".to_string())]
+                .into_iter()
+                .collect(),
+            ..Config::default()
+        };
+
+        let filtered = apply_policy(findings, &config);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].rule_id, "SEO004");
+        assert_eq!(filtered[0].severity, "warning");
     }
 }
