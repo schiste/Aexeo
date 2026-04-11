@@ -6,6 +6,8 @@ The canonical config surface is the versioned nested format with `version = 1`. 
 
 Generated JSON Schema: `docs/config.schema.json`
 
+Editor hint: add `#:schema ../config.schema.json` at the top of a config file stored under `docs/examples/` or adjust the relative path for your repository layout.
+
 ## Canonical Example
 
 ```toml
@@ -23,11 +25,15 @@ use_sitemap = true
 [policy]
 ignore_rules = ["SCH012"]
 
-[rules]
-html = true
-links = true
+[rules.html]
+enabled = true
+
+[rules.links]
+enabled = true
+min_inbound_links = 1
 
 [rules.schema]
+enabled = true
 require_title_alignment = true
 
 [output]
@@ -36,6 +42,12 @@ baseline_file = ".seogeo-baseline.json"
 [quality]
 coverage_threshold = 85
 ```
+
+## Editor And CI Consumption
+
+- Editor schema hint: use a TOML schema comment such as `#:schema ./docs/config.schema.json` or a relative equivalent for the file you are editing.
+- CI validation: run `cargo run -q -p seogeo-cli -- config print . --format json > /dev/null` to fail fast on invalid, unknown, or unsupported config keys.
+- Canonical normalization: `cargo run -q -p seogeo-cli -- config print . --format toml` renders the fully resolved versioned surface after defaults and `extends` merges.
 
 ## Top-Level Keys
 

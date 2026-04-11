@@ -765,6 +765,7 @@ fn nested_properties() -> Map<String, Value> {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
+                        "enabled": { "type": "boolean" },
                         "require_html_lang": { "type": "boolean" },
                         "require_hreflang_self": { "type": "boolean" }
                     }
@@ -773,6 +774,7 @@ fn nested_properties() -> Map<String, Value> {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
+                        "enabled": { "type": "boolean" },
                         "min_inbound_links": { "type": "integer", "minimum": 0 },
                         "link_suggestion_count": { "type": "integer", "minimum": 0 },
                         "enable_link_autofix": { "type": "boolean" },
@@ -780,11 +782,18 @@ fn nested_properties() -> Map<String, Value> {
                         "weak_anchor_text": { "type": "array", "items": { "type": "string" } }
                     }
                 }]},
-                "sitemap": { "type": "boolean" },
+                "sitemap": { "oneOf": [{ "type": "boolean" }, {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": { "type": "boolean" }
+                    }
+                }]},
                 "robots": { "oneOf": [{ "type": "boolean" }, {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
+                        "enabled": { "type": "boolean" },
                         "require_sitemap": { "type": "boolean" },
                         "require_meta_consistency": { "type": "boolean" }
                     }
@@ -793,6 +802,7 @@ fn nested_properties() -> Map<String, Value> {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
+                        "enabled": { "type": "boolean" },
                         "require_open_graph": { "type": "boolean" },
                         "require_twitter_card": { "type": "boolean" },
                         "default_twitter_card": { "type": "string" },
@@ -804,17 +814,25 @@ fn nested_properties() -> Map<String, Value> {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
+                        "enabled": { "type": "boolean" },
                         "required_types": { "type": "array", "items": { "type": "string" } },
                         "required_families": { "type": "array", "items": { "type": "string" } },
                         "require_breadcrumb_schema": { "type": "boolean" },
                         "require_title_alignment": { "type": "boolean" }
                     }
                 }]},
-                "llm": { "type": "boolean" },
+                "llm": { "oneOf": [{ "type": "boolean" }, {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": { "type": "boolean" }
+                    }
+                }]},
                 "content": { "oneOf": [{ "type": "boolean" }, {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
+                        "enabled": { "type": "boolean" },
                         "min_page_size": { "type": "integer", "minimum": 0 },
                         "required_feature_markers": { "type": "array", "items": { "type": "string" } }
                     }
@@ -823,6 +841,7 @@ fn nested_properties() -> Map<String, Value> {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
+                        "enabled": { "type": "boolean" },
                         "repeatable_data_ui": { "type": "array", "items": { "type": "string" } },
                         "utility_route_patterns": { "type": "array", "items": { "type": "string" } },
                         "min_block_text_length": { "type": "integer", "minimum": 0 },

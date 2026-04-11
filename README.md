@@ -33,6 +33,7 @@ cargo run -p seogeo-cli -- fix .
 cargo run -p seogeo-cli -- generate llms .
 cargo run -p seogeo-cli -- generate robots .
 cargo run -p seogeo-cli -- generate links .
+cargo run -p seogeo-cli -- config print . --format toml
 cargo run -p seogeo-cli -- baseline .
 cargo run -p seogeo-cli -- verify https://staging.example.com --baseline .seogeo-baseline.json
 cargo run -p seogeo-cli -- diff baseline.json current.json
@@ -64,6 +65,7 @@ cargo run -p seogeo-cli -- adapters
 - [docs/install.md](docs/install.md): internal install and release instructions
 - [docs/cli.md](docs/cli.md): generated CLI reference
 - [docs/config.md](docs/config.md): generated config reference
+- [docs/config.schema.json](docs/config.schema.json): generated JSON Schema for config validation
 - [docs/rules.md](docs/rules.md): generated rule inventory
 - [docs/adapters.md](docs/adapters.md): generated adapter and plugin reference
 

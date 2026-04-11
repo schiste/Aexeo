@@ -486,6 +486,9 @@
             {
               "additionalProperties": false,
               "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
                 "min_page_size": {
                   "minimum": 0,
                   "type": "integer"
@@ -509,6 +512,9 @@
             {
               "additionalProperties": false,
               "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
                 "require_hreflang_self": {
                   "type": "boolean"
                 },
@@ -529,6 +535,9 @@
               "additionalProperties": false,
               "properties": {
                 "enable_link_autofix": {
+                  "type": "boolean"
+                },
+                "enabled": {
                   "type": "boolean"
                 },
                 "link_suggestion_count": {
@@ -554,7 +563,20 @@
           ]
         },
         "llm": {
-          "type": "boolean"
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            }
+          ]
         },
         "robots": {
           "oneOf": [
@@ -564,6 +586,9 @@
             {
               "additionalProperties": false,
               "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
                 "require_meta_consistency": {
                   "type": "boolean"
                 },
@@ -583,6 +608,9 @@
             {
               "additionalProperties": false,
               "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
                 "require_breadcrumb_schema": {
                   "type": "boolean"
                 },
@@ -607,7 +635,20 @@
           ]
         },
         "sitemap": {
-          "type": "boolean"
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            }
+          ]
         },
         "social": {
           "oneOf": [
@@ -619,6 +660,9 @@
               "properties": {
                 "default_twitter_card": {
                   "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
                 },
                 "require_open_graph": {
                   "type": "boolean"
@@ -645,6 +689,9 @@
             {
               "additionalProperties": false,
               "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
                 "min_answer_blocks": {
                   "minimum": 0,
                   "type": "integer"
