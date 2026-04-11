@@ -131,3 +131,4 @@ Reusable GEO rules extracted from the Chau7 website guidelines.
 - `QLT010`: missing Rust build script
 - `QLT011`: missing performance budget file
 - `QLT012`: missing Rust CLI integration test coverage
+- `QLT013`: missing install script

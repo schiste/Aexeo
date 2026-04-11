@@ -17,6 +17,7 @@ pub const QUALITY_RULES: &[(&str, &str)] = &[
     ("QLT010", "missing Rust build script"),
     ("QLT011", "missing performance budget file"),
     ("QLT012", "missing Rust CLI integration test coverage"),
+    ("QLT013", "missing install script"),
 ];
 
 const REQUIRED_DOC_FILES: &[&str] = &[
@@ -32,6 +33,8 @@ const REQUIRED_DOC_FILES: &[&str] = &[
     "docs/cli.md",
     "docs/config.md",
     "docs/config.schema.json",
+    "docs/install.md",
+    "docs/release.md",
     "docs/rules.md",
 ];
 
@@ -85,6 +88,11 @@ fn find_static_tooling_issues(root: &Path) -> Vec<Finding> {
             "QLT011",
             "performance-budget.json",
             "missing performance budget file",
+        ),
+        (
+            "QLT013",
+            "scripts/install-seogeo.sh",
+            "missing install script",
         ),
     ] {
         if !root.join(filename).exists() {
@@ -169,9 +177,12 @@ mod tests {
             "docs/cli.md",
             "docs/config.md",
             "docs/config.schema.json",
+            "docs/install.md",
+            "docs/release.md",
             "docs/rules.md",
             "Cargo.toml",
             "scripts/build-rust.sh",
+            "scripts/install-seogeo.sh",
             "performance-budget.json",
         ] {
             if let Some(parent) = std::path::Path::new(path).parent() {

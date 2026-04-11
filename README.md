@@ -11,6 +11,7 @@ This repository is private and intended for internal use only.
 - no public package publishing
 - no public release channel
 - install from the private repository or from internal build artifacts
+- use `sh scripts/install-seogeo.sh --from-binary target/release/seogeo-cli` for deterministic local installs
 
 See [docs/install.md](docs/install.md) for supported installation and release paths.
 
@@ -62,7 +63,8 @@ cargo run -p seogeo-cli -- adapters
 - [docs/architecture.md](docs/architecture.md): runtime, core, and integration boundaries
 - [docs/decisions.md](docs/decisions.md): enforced architecture decisions
 - [docs/package-boundaries.md](docs/package-boundaries.md): target package map for the future `website` monorepo move
-- [docs/install.md](docs/install.md): internal install and release instructions
+- [docs/install.md](docs/install.md): internal install and upgrade instructions
+- [docs/release.md](docs/release.md): internal release checklist and packaging flow
 - [docs/astro-ci.md](docs/astro-ci.md): Astro CI and deployment-gate workflow
 - [docs/cli.md](docs/cli.md): generated CLI reference
 - [docs/config.md](docs/config.md): generated config reference

@@ -1,14 +1,8 @@
 # Internal Install and Release
 
-This repository is private and intended for internal use only.
+This repository is private and intended for internal Rust binary distribution.
 
-## Local Install
-
-Build the Rust workspace:
-
-```bash
-cargo build
-```
+## Local Development
 
 Run the CLI directly from source:
 
@@ -16,38 +10,66 @@ Run the CLI directly from source:
 cargo run -p seogeo-cli -- check .
 ```
 
-## Install from Private GitHub Repository
-
-Clone and build:
+For a local release-style binary:
 
 ```bash
-git clone git@github.com:schiste/Aexeo.git
-cd Aexeo
 cargo build --release
 ```
 
-The production binary will be available at:
+The binary will be available at `target/release/seogeo-cli`.
+
+## Deterministic Binary Install
+
+Install a built binary into a stable destination directory:
 
 ```bash
-target/release/seogeo-cli
+sh scripts/install-seogeo.sh --from-binary target/release/seogeo-cli
 ```
+
+By default the installer writes to `~/.local/bin/seogeo-cli` and runs a `--help`
+smoke test after copying the binary.
+
+Override the destination when needed:
+
+```bash
+sh scripts/install-seogeo.sh \
+  --from-binary target/release/seogeo-cli \
+  --dest-dir /opt/aexeo/bin
+```
+
+## Upgrade Procedure
+
+1. Pull the target commit or release tag.
+2. Rebuild with `cargo build --release`.
+3. Re-run `sh scripts/install-seogeo.sh --from-binary target/release/seogeo-cli`.
+4. Confirm the installed binary with `seogeo-cli --help` or `seogeo-cli rules`.
 
 ## Build Internal Artifacts
 
+Create release artifacts:
+
 ```bash
-sh scripts/build-rust.sh
+sh scripts/build_internal_release.sh
 ```
 
-Artifacts are written under the Rust target/release output and any internal packaging paths used by the build script.
+This produces:
 
-## Internal Release Flow
+- `dist/seogeo-cli`
+- `dist/SHA256SUMS.txt`
 
-1. Run `cargo test`
-2. Run `cargo run -p seogeo-cli -- docs check .`
-3. Run `cargo run -p seogeo-cli -- quality .`
-4. Optionally refresh a baseline with `cargo run -p seogeo-cli -- baseline .`
-5. Build artifacts with `cargo build --release`
-6. Push a version tag to trigger the internal release workflow
+## Release Flow
+
+Use [docs/release.md](release.md) as the canonical release checklist.
+
+The minimum release gate is:
+
+```bash
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --all-targets
+cargo run -q -p seogeo-cli -- docs check .
+cargo run -q -p seogeo-cli -- quality .
+```
 
 ## Browser Crawl Notes
 
