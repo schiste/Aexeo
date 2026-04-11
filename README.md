@@ -63,6 +63,7 @@ cargo run -p seogeo-cli -- adapters
 - [docs/decisions.md](docs/decisions.md): enforced architecture decisions
 - [docs/package-boundaries.md](docs/package-boundaries.md): target package map for the future `website` monorepo move
 - [docs/install.md](docs/install.md): internal install and release instructions
+- [docs/astro-ci.md](docs/astro-ci.md): Astro CI and deployment-gate workflow
 - [docs/cli.md](docs/cli.md): generated CLI reference
 - [docs/config.md](docs/config.md): generated config reference
 - [docs/config.schema.json](docs/config.schema.json): generated JSON Schema for config validation
