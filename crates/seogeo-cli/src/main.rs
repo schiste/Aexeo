@@ -77,8 +77,7 @@ fn build_cli() -> Command {
                 .arg(
                     Arg::new("engine")
                         .long("engine")
-                        .value_parser(["auto", "http", "playwright"])
-                        .default_value("auto"),
+                        .value_parser(["auto", "http", "playwright"]),
                 )
                 .arg(
                     Arg::new("format")
@@ -166,8 +165,7 @@ fn build_cli() -> Command {
                 .arg(
                     Arg::new("engine")
                         .long("engine")
-                        .value_parser(["auto", "http", "playwright"])
-                        .default_value("auto"),
+                        .value_parser(["auto", "http", "playwright"]),
                 )
                 .arg(
                     Arg::new("format")
@@ -417,6 +415,16 @@ fn apply_runtime_cli_overrides(config: &mut seogeo_core::Config, submatches: &Ar
     }
 }
 
+fn selected_runtime_engine<'a>(
+    config: &'a seogeo_core::Config,
+    submatches: &'a ArgMatches,
+) -> &'a str {
+    submatches
+        .get_one::<String>("engine")
+        .map(String::as_str)
+        .unwrap_or(config.browser_engine.as_str())
+}
+
 fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     let cwd = std::env::current_dir()?;
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
@@ -430,10 +438,7 @@ fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     let audit = run_runtime_audit(
         submatches.get_one::<String>("url").unwrap(),
         *submatches.get_one::<usize>("max-pages").unwrap_or(&200),
-        submatches
-            .get_one::<String>("engine")
-            .map(String::as_str)
-            .unwrap_or("auto"),
+        selected_runtime_engine(&config, submatches),
         &config,
     )?;
     let audit_path = write_audit_artifact(&audit.findings, &cwd, "crawl", config.audit_log_limit)?;
@@ -482,10 +487,7 @@ fn command_verify(submatches: &ArgMatches) -> Result<i32> {
     let audit = run_runtime_audit(
         submatches.get_one::<String>("url").unwrap(),
         *submatches.get_one::<usize>("max-pages").unwrap_or(&200),
-        submatches
-            .get_one::<String>("engine")
-            .map(String::as_str)
-            .unwrap_or("auto"),
+        selected_runtime_engine(&config, submatches),
         &config,
     )?;
     let baseline_path = submatches

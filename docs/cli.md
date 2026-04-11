@@ -74,7 +74,6 @@ Options:
           
 
       --engine <engine>
-          [default: auto]
           [possible values: auto, http, playwright]
 
       --format <format>
@@ -212,7 +211,6 @@ Options:
           [default: 200]
 
       --engine <engine>
-          [default: auto]
           [possible values: auto, http, playwright]
 
       --format <format>

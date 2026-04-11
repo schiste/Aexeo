@@ -47,7 +47,7 @@
 ## `browser_engine`
 
 - Default: `auto`
-- Meaning: Default crawl engine. `auto` prefers Playwright when available, otherwise HTTP fetch.
+- Meaning: Default crawl engine. `auto` currently resolves to the native HTTP crawler; Playwright remains an explicit opt-in compatibility mode.
 
 ## `browser_wait_until`
 

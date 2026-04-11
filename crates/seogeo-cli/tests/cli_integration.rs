@@ -28,12 +28,11 @@ fn respond(mut stream: TcpStream, status: &str, content_type: &str, body: &str) 
     stream.flush().unwrap();
 }
 
-fn spawn_server() -> (String, thread::JoinHandle<()>) {
+fn spawn_server(expected_requests: usize) -> (String, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let handle = thread::spawn(move || {
-        // crawl + verify each fetch: sitemap seed, 2 HTML pages, robots, llms, sitemap artifact
-        for _ in 0..12 {
+        for _ in 0..expected_requests {
             let (mut stream, _) = listener.accept().unwrap();
             let mut buffer = [0_u8; 4096];
             let size = stream.read(&mut buffer).unwrap();
@@ -128,7 +127,7 @@ fn plugin_check_validates_python_manifest_literal() {
 
 #[test]
 fn crawl_and_verify_commands_work_end_to_end() {
-    let (base_url, handle) = spawn_server();
+    let (base_url, handle) = spawn_server(12);
     let temp_dir = tempfile::tempdir().unwrap();
     let crawl_output = Command::new(bin())
         .current_dir(temp_dir.path())
@@ -163,5 +162,29 @@ fn crawl_and_verify_commands_work_end_to_end() {
     assert!(verify_output.status.success());
     let verify_stdout = String::from_utf8_lossy(&verify_output.stdout);
     assert!(verify_stdout.contains("New findings: 0"));
+    handle.join().unwrap();
+}
+
+#[test]
+fn crawl_uses_configured_runtime_engine_when_flag_is_omitted() {
+    let (base_url, handle) = spawn_server(6);
+    let temp_dir = tempfile::tempdir().unwrap();
+    write(
+        &temp_dir.path().join("seogeo.toml"),
+        "browser_engine = \"playwright\"\n",
+    );
+    let output = Command::new(bin())
+        .current_dir(temp_dir.path())
+        .arg("crawl")
+        .arg(&base_url)
+        .arg("--max-pages")
+        .arg("10")
+        .arg("--format")
+        .arg("text")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("CRW002"));
     handle.join().unwrap();
 }

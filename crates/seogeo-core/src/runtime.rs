@@ -30,6 +30,15 @@ pub struct RuntimeAudit {
     pub findings: Vec<Finding>,
 }
 
+fn resolve_runtime_engine(engine: &str) -> Result<&'static str> {
+    match engine {
+        "auto" => Ok("http"),
+        "http" => Ok("http"),
+        "playwright" => Ok("playwright"),
+        other => anyhow::bail!("unknown runtime engine '{other}'"),
+    }
+}
+
 fn materialize_runtime_site(
     base_url: &str,
     max_pages: usize,
@@ -238,7 +247,7 @@ pub fn run_runtime_audit(
     engine: &str,
     config: &Config,
 ) -> Result<RuntimeAudit> {
-    let effective_engine = if engine == "auto" { "http" } else { engine };
+    let effective_engine = resolve_runtime_engine(engine)?;
     let (site, crawl_findings) =
         materialize_runtime_site(base_url, max_pages, effective_engine, config)?;
     let mut findings = crawl_findings.clone();
@@ -501,5 +510,12 @@ mod tests {
                 .any(|finding| finding.rule_id == "LNK001")
         );
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn runtime_audit_rejects_unknown_engine() {
+        let error = run_runtime_audit("https://example.com", 10, "invalid", &Config::default())
+            .expect_err("invalid engines should fail");
+        assert!(error.to_string().contains("unknown runtime engine"));
     }
 }
