@@ -13,8 +13,18 @@ cargo run -p seogeo-cli -- check .
 Install local git hooks after cloning:
 
 ```bash
+sh scripts/install-quality-tools.sh
 sh scripts/install-hooks.sh
 ```
+
+The hard local quality gate requires these Rust-side tools:
+
+- `cargo-audit`
+- `cargo-deny`
+- `cargo-udeps`
+- the `nightly` Rust toolchain with `rust-src` and `llvm-tools-preview`
+
+The installer script above provisions that exact set.
 
 For a local release-style binary:
 

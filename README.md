@@ -20,6 +20,7 @@ See [docs/install.md](docs/install.md) for supported installation and release pa
 Install the repository hooks once per clone:
 
 ```bash
+sh scripts/install-quality-tools.sh
 sh scripts/install-hooks.sh
 ```
 

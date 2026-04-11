@@ -84,8 +84,18 @@ The local system is specifically aggressive against:
 Install hooks once per clone:
 
 ```bash
+sh scripts/install-quality-tools.sh
 sh scripts/install-hooks.sh
 ```
+
+The hard local gate depends on:
+
+- `cargo-audit`
+- `cargo-deny`
+- `cargo-udeps`
+- `nightly` plus `rust-src` and `llvm-tools-preview`
+
+Use `sh scripts/install-quality-tools.sh` to provision them.
 
 Run the hardest local gate explicitly:
 
