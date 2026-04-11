@@ -171,7 +171,7 @@ fn crawl_uses_configured_runtime_engine_when_flag_is_omitted() {
     let temp_dir = tempfile::tempdir().unwrap();
     write(
         &temp_dir.path().join("seogeo.toml"),
-        "browser_engine = \"playwright\"\n",
+        "browser_engine = \"http\"\n",
     );
     let output = Command::new(bin())
         .current_dir(temp_dir.path())
@@ -185,7 +185,23 @@ fn crawl_uses_configured_runtime_engine_when_flag_is_omitted() {
         .unwrap();
     assert!(!output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("CRW002"));
+    assert!(stdout.contains("Audit results:"));
+    handle.join().unwrap();
+}
+
+#[test]
+fn crawl_rejects_reserved_playwright_engine() {
+    let (base_url, handle) = spawn_server(0);
+    let output = Command::new(bin())
+        .arg("crawl")
+        .arg(&base_url)
+        .arg("--engine")
+        .arg("playwright")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("not implemented"));
     handle.join().unwrap();
 }
 

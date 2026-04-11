@@ -16,7 +16,7 @@ pub(super) fn default_audit_log_limit() -> usize {
     5
 }
 pub(super) fn default_browser_engine() -> String {
-    "auto".to_string()
+    "http".to_string()
 }
 pub(super) fn default_browser_wait_until() -> String {
     "networkidle".to_string()

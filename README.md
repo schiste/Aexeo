@@ -28,7 +28,7 @@ The CLI surface is fully native Rust. The legacy Python implementation has been 
 
 ```bash
 cargo run -p seogeo-cli -- check .
-cargo run -p seogeo-cli -- crawl http://localhost:8000 --engine auto
+cargo run -p seogeo-cli -- crawl http://localhost:8000 --engine http
 cargo run -p seogeo-cli -- fix .
 cargo run -p seogeo-cli -- generate llms .
 cargo run -p seogeo-cli -- generate robots .

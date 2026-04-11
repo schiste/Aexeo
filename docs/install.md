@@ -54,5 +54,7 @@ Artifacts are written under the Rust target/release output and any internal pack
 Browser-backed crawl remains optional and may be layered in externally when needed.
 
 - the native runtime crawl uses HTTP fetch orchestration today
-- `--engine auto` resolves to the native HTTP path
+- `http` is the stable supported runtime engine today
+- `auto` is accepted only as a backward-compatible alias for `http`
+- `playwright` is reserved and should fail explicitly until a native browser engine exists
 - a browser engine can still be added later without changing the core CLI contract

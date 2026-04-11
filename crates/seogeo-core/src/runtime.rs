@@ -27,7 +27,9 @@ fn resolve_runtime_engine(engine: &str) -> Result<&'static str> {
     match engine {
         "auto" => Ok("http"),
         "http" => Ok("http"),
-        "playwright" => Ok("playwright"),
+        "playwright" => anyhow::bail!(
+            "runtime engine 'playwright' is reserved but not implemented in the native Rust runtime; use 'http' or omit --engine"
+        ),
         other => anyhow::bail!("unknown runtime engine '{other}'"),
     }
 }
@@ -42,20 +44,6 @@ fn materialize_runtime_site(
     let mut planner = CrawlPlanner::new(base_url, max_pages);
     let mut snapshot = RuntimeSnapshotBuilder::new(unique_runtime_dir()?);
     let mut crawl_findings = Vec::new();
-
-    if engine == "playwright" {
-        crawl_findings.push(Finding {
-            rule_id: "CRW002".to_string(),
-            message:
-                "Playwright crawl requested but native Rust runtime currently uses HTTP fallback"
-                    .to_string(),
-            path: "crawl/index.html".to_string(),
-            line: 1,
-            column: 1,
-            severity: "warning".to_string(),
-            suggestion: None,
-        });
-    }
 
     for seed in runtime.crawl_seeds {
         planner.seed_from_user_input(seed, &runtime);
@@ -395,6 +383,13 @@ mod tests {
                 .any(|finding| finding.rule_id == "LNK001")
         );
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn runtime_audit_rejects_unsupported_engine() {
+        let error = run_runtime_audit("https://example.com", 10, "playwright", &Config::default())
+            .expect_err("unsupported engines should fail");
+        assert!(error.to_string().contains("not implemented"));
     }
 
     #[test]

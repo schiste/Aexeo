@@ -188,7 +188,7 @@ mod tests {
     fn exposes_domain_config_views() {
         let config = Config::default();
         assert_eq!(config.site().adapter, "auto");
-        assert_eq!(config.runtime().browser_engine, "auto");
+        assert_eq!(config.runtime().browser_engine, "http");
         assert!(config.rules().checks.get("html").copied().unwrap_or(false));
         assert_eq!(config.output().baseline_file, ".seogeo-baseline.json");
         assert_eq!(config.quality().coverage_threshold, 85);

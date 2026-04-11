@@ -52,7 +52,7 @@ Use runtime verification against a deployed preview or staging URL:
 cargo run -q -p seogeo-cli -- verify https://preview.example.com --baseline .seogeo-baseline.json --engine http --max-pages 500
 ```
 
-If browser-backed verification becomes available in your environment, switch the engine explicitly rather than relying on assumptions about `auto`.
+If browser-backed verification becomes available in your environment, add it as a distinct supported engine rather than assuming `auto` will change behavior.
 
 ## GitHub Actions Example
 

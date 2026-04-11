@@ -93,8 +93,8 @@ coverage_threshold = 85
 
 ## `browser_engine`
 
-- Default: `auto`
-- Meaning: Default crawl engine. `auto` currently resolves to the native HTTP crawler; Playwright remains an explicit opt-in compatibility mode.
+- Default: `http`
+- Meaning: Default crawl engine. `http` is the stable native runtime path. `auto` remains a compatibility alias for `http`, and `playwright` is reserved until implemented.
 
 ## `browser_wait_until`
 
