@@ -22,8 +22,7 @@ pub mod static_check;
 pub mod structure_rules;
 pub mod verification;
 
-pub use adapter::{resolve_static_adapter_name, resolve_static_site_root};
-pub use config::{Config, ConfigFieldDoc, config_field_docs, default_rule_switches, load_config};
+pub use config::{Config, ConfigFieldDoc};
 pub use content_rules::run_content_rules;
 pub use docs::{
     find_reference_doc_drift, reference_documents, render_adapter_reference,
@@ -50,14 +49,14 @@ pub use reporting::{
 };
 pub use robots_rules::run_robots_rules;
 pub use runtime::{RuntimeAudit, run_runtime_audit, verify_runtime_audit};
-pub use schema_rules::{iter_schema_field_values, iter_schema_types, run_schema_rules};
+pub use schema_rules::run_schema_rules;
 pub use site::{
     AlternateLink, Link, Page, PageKind, Site, load_site, normalize_internal_href,
     route_from_urlish,
 };
 pub use sitemap_rules::run_sitemap_rules;
 pub use social_rules::run_social_rules;
-pub use static_check::{can_run_native_static_audit, run_checks_for_site, run_native_static_audit};
+pub use static_check::{can_run_native_static_audit, run_native_static_audit};
 pub use structure_rules::run_structure_rules;
 pub use verification::{
     DiffResult, diff_finding_sets, load_findings_from_audit, render_diff_text, write_baseline_file,

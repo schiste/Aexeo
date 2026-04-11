@@ -1,13 +1,14 @@
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Arg, ArgAction, ArgMatches, Command, value_parser};
+use seogeo_core::adapter::resolve_static_site_root;
+use seogeo_core::config::load_config;
 use seogeo_core::{
     apply_safe_fixes, diff_finding_sets, find_reference_doc_drift, list_adapter_names,
-    list_rule_group_names, load_config, load_findings_from_audit, load_site, render_diff_text,
-    render_json, render_llms_full_txt, render_llms_txt, render_markdown_mirror, render_robots_txt,
-    render_sarif, render_text, resolve_static_site_root, run_native_static_audit,
-    run_repo_quality_checks, run_runtime_audit, suggest_internal_links,
-    validate_python_plugin_module, verify_runtime_audit, write_audit_artifact, write_baseline_file,
-    write_reference_documents,
+    list_rule_group_names, load_findings_from_audit, load_site, render_diff_text, render_json,
+    render_llms_full_txt, render_llms_txt, render_markdown_mirror, render_robots_txt, render_sarif,
+    render_text, run_native_static_audit, run_repo_quality_checks, run_runtime_audit,
+    suggest_internal_links, validate_python_plugin_module, verify_runtime_audit,
+    write_audit_artifact, write_baseline_file, write_reference_documents,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
