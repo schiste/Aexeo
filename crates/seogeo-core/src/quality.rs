@@ -138,14 +138,27 @@ fn find_static_tooling_issues(root: &Path) -> Vec<Finding> {
 }
 
 fn find_missing_rust_integration_coverage(root: &Path) -> Vec<Finding> {
-    let path = root.join("crates/seogeo-cli/tests/cli_integration.rs");
-    if path.exists() {
+    let tests_dir = root.join("crates/seogeo-cli/tests");
+    if tests_dir.exists()
+        && fs::read_dir(&tests_dir)
+            .ok()
+            .into_iter()
+            .flat_map(|entries| entries.filter_map(std::result::Result::ok))
+            .map(|entry| entry.path())
+            .any(|path| {
+                path.extension().and_then(|ext| ext.to_str()) == Some("rs")
+                    && path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| name.ends_with("_integration.rs"))
+            })
+    {
         return Vec::new();
     }
     vec![Finding {
         rule_id: "QLT012".to_string(),
         message: "missing Rust CLI integration test coverage".to_string(),
-        path: "crates/seogeo-cli/tests/cli_integration.rs".to_string(),
+        path: "crates/seogeo-cli/tests".to_string(),
         line: 1,
         column: 1,
         severity: "error".to_string(),
@@ -388,7 +401,7 @@ mod tests {
         );
         write_fixture_file(
             root,
-            "crates/seogeo-cli/tests/cli_integration.rs",
+            "crates/seogeo-cli/tests/check_integration.rs",
             "// present\n",
         );
         let cli_reference =
@@ -413,7 +426,7 @@ mod tests {
         );
         write_fixture_file(
             root,
-            "crates/seogeo-cli/tests/cli_integration.rs",
+            "crates/seogeo-cli/tests/check_integration.rs",
             "// present\n",
         );
         let cli_reference =
@@ -438,7 +451,7 @@ mod tests {
         );
         write_fixture_file(
             root,
-            "crates/seogeo-cli/tests/cli_integration.rs",
+            "crates/seogeo-cli/tests/check_integration.rs",
             "// present\n",
         );
         let cli_reference =
@@ -463,7 +476,7 @@ mod tests {
         );
         write_fixture_file(
             root,
-            "crates/seogeo-cli/tests/cli_integration.rs",
+            "crates/seogeo-cli/tests/check_integration.rs",
             "// present\n",
         );
         let cli_reference =
