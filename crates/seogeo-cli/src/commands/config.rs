@@ -4,13 +4,8 @@ use seogeo_core::config::load_config_with_diagnostics;
 use seogeo_core::{render_resolved_config_json, render_resolved_config_toml};
 use std::path::PathBuf;
 
+use crate::commands::common::{canonicalize_or_keep, required_arg};
 use crate::output::{emit_config_warnings, render_config_command_json};
-
-fn canonicalize_or_keep(path: &str) -> PathBuf {
-    PathBuf::from(path)
-        .canonicalize()
-        .unwrap_or_else(|_| PathBuf::from(path))
-}
 
 pub fn command_config(submatches: &ArgMatches) -> Result<i32> {
     match submatches.subcommand() {
@@ -21,7 +16,7 @@ pub fn command_config(submatches: &ArgMatches) -> Result<i32> {
 }
 
 fn command_config_print(submatches: &ArgMatches) -> Result<i32> {
-    let root = canonicalize_or_keep(submatches.get_one::<String>("path").unwrap());
+    let root = canonicalize_or_keep(required_arg(submatches, "path")?);
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
     let loaded = load_config_with_diagnostics(&root, explicit_config.as_deref())?;
     let config = loaded.config;

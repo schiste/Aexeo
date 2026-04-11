@@ -7,6 +7,7 @@ use seogeo_core::{
 };
 use std::path::{Path, PathBuf};
 
+use crate::commands::common::required_arg;
 use crate::output::{emit_config_warnings, render_audit_command_json, render_diff_command_json};
 
 fn apply_runtime_cli_overrides(config: &mut seogeo_core::Config, submatches: &ArgMatches) {
@@ -47,7 +48,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
         bail!("--regressions-only requires --baseline");
     }
     let audit = run_runtime_audit(
-        submatches.get_one::<String>("url").unwrap(),
+        required_arg(submatches, "url")?,
         *submatches.get_one::<usize>("max-pages").unwrap_or(&200),
         selected_runtime_engine(&config, submatches),
         &config,
@@ -118,7 +119,7 @@ pub fn command_verify(submatches: &ArgMatches) -> Result<i32> {
     let warnings = loaded.warnings;
     apply_runtime_cli_overrides(&mut config, submatches);
     let audit = run_runtime_audit(
-        submatches.get_one::<String>("url").unwrap(),
+        required_arg(submatches, "url")?,
         *submatches.get_one::<usize>("max-pages").unwrap_or(&200),
         selected_runtime_engine(&config, submatches),
         &config,

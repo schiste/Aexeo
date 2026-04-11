@@ -906,7 +906,7 @@ fn nested_properties() -> Map<String, Value> {
     properties
 }
 
-pub fn render_config_schema() -> String {
+pub fn render_config_schema() -> anyhow::Result<String> {
     let mut properties = flat_properties();
     properties.insert(
         "version".to_string(),
@@ -918,7 +918,7 @@ pub fn render_config_schema() -> String {
     );
     properties.extend(nested_properties());
 
-    serde_json::to_string_pretty(&json!({
+    Ok(serde_json::to_string_pretty(&json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "seogeo configuration",
         "type": "object",
@@ -944,6 +944,5 @@ pub fn render_config_schema() -> String {
                 }
             }
         ]
-    }))
-    .expect("schema serialization should not fail")
+    }))?)
 }

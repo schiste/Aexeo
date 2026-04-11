@@ -159,22 +159,22 @@ pub fn render_adapter_reference() -> String {
     lines.join("\n")
 }
 
-pub fn reference_documents(cli_reference: String) -> BTreeMap<String, String> {
-    BTreeMap::from([
+pub fn reference_documents(cli_reference: String) -> Result<BTreeMap<String, String>> {
+    Ok(BTreeMap::from([
         ("docs/cli.md".to_string(), cli_reference),
         ("docs/config.md".to_string(), render_config_reference()),
         (
             "docs/config.schema.json".to_string(),
-            render_config_schema(),
+            render_config_schema()?,
         ),
         ("docs/rules.md".to_string(), render_rule_reference()),
         ("docs/adapters.md".to_string(), render_adapter_reference()),
-    ])
+    ]))
 }
 
 pub fn write_reference_documents(root: &Path, cli_reference: String) -> Result<Vec<PathBuf>> {
     let mut changed = Vec::new();
-    for (relative_path, expected) in reference_documents(cli_reference) {
+    for (relative_path, expected) in reference_documents(cli_reference)? {
         let path = root.join(relative_path);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -191,7 +191,7 @@ pub fn write_reference_documents(root: &Path, cli_reference: String) -> Result<V
 
 pub fn find_reference_doc_drift(root: &Path, cli_reference: String) -> Result<Vec<PathBuf>> {
     let mut drifted = Vec::new();
-    for (relative_path, expected) in reference_documents(cli_reference) {
+    for (relative_path, expected) in reference_documents(cli_reference)? {
         let path = root.join(relative_path);
         let actual = fs::read_to_string(&path).ok();
         if actual.as_deref() != Some(expected.as_str()) {
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn renders_reference_sections() {
         assert!(render_config_reference().contains("# Config Reference"));
-        assert!(render_config_schema().contains("\"$schema\""));
+        assert!(render_config_schema().unwrap().contains("\"$schema\""));
         assert!(render_rule_reference().contains("# Rule Inventory"));
         assert!(render_rule_reference().contains("## Internal Quality"));
         assert!(render_adapter_reference().contains("# Adapter Reference"));

@@ -10,16 +10,11 @@ use seogeo_core::{
 };
 use std::path::{Path, PathBuf};
 
+use crate::commands::common::{canonicalize_or_keep, required_arg};
 use crate::output::{emit_config_warnings, render_audit_command_json};
 
-fn canonicalize_or_keep(path: &str) -> PathBuf {
-    PathBuf::from(path)
-        .canonicalize()
-        .unwrap_or_else(|_| PathBuf::from(path))
-}
-
 pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
-    let root = canonicalize_or_keep(submatches.get_one::<String>("path").unwrap());
+    let root = canonicalize_or_keep(required_arg(submatches, "path")?);
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
     let loaded = load_config_with_diagnostics(&root, explicit_config.as_deref())?;
     let config = loaded.config;
@@ -91,7 +86,7 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
 }
 
 pub fn command_generate(submatches: &ArgMatches) -> Result<i32> {
-    let root = canonicalize_or_keep(submatches.get_one::<String>("path").unwrap());
+    let root = canonicalize_or_keep(required_arg(submatches, "path")?);
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
     let loaded = load_config_with_diagnostics(&root, explicit_config.as_deref())?;
     emit_config_warnings(&loaded.warnings);
@@ -101,7 +96,7 @@ pub fn command_generate(submatches: &ArgMatches) -> Result<i32> {
     match submatches
         .get_one::<String>("kind")
         .map(String::as_str)
-        .unwrap()
+        .ok_or_else(|| anyhow::anyhow!("missing required CLI argument 'kind'"))?
     {
         "llms" => println!("{}", render_llms_txt(&site, site_config.site_url)),
         "llms-full" => println!("{}", render_llms_full_txt(&site, site_config.site_url)),
@@ -120,7 +115,7 @@ pub fn command_generate(submatches: &ArgMatches) -> Result<i32> {
 }
 
 pub fn command_fix(submatches: &ArgMatches) -> Result<i32> {
-    let root = canonicalize_or_keep(submatches.get_one::<String>("path").unwrap());
+    let root = canonicalize_or_keep(required_arg(submatches, "path")?);
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
     let loaded = load_config_with_diagnostics(&root, explicit_config.as_deref())?;
     emit_config_warnings(&loaded.warnings);
@@ -137,7 +132,7 @@ pub fn command_fix(submatches: &ArgMatches) -> Result<i32> {
 }
 
 pub fn command_baseline(submatches: &ArgMatches) -> Result<i32> {
-    let root = canonicalize_or_keep(submatches.get_one::<String>("path").unwrap());
+    let root = canonicalize_or_keep(required_arg(submatches, "path")?);
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
     let loaded = load_config_with_diagnostics(&root, explicit_config.as_deref())?;
     emit_config_warnings(&loaded.warnings);

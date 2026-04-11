@@ -259,11 +259,12 @@ fn merge_bool_rule_toggles(
     root: &mut toml::map::Map<String, Value>,
     rules_table: &mut toml::map::Map<String, Value>,
 ) {
-    let checks_table = root
+    let checks_value = root
         .entry("checks".to_string())
-        .or_insert_with(|| Value::Table(toml::map::Map::new()))
-        .as_table_mut()
-        .expect("checks is always a table");
+        .or_insert_with(|| Value::Table(toml::map::Map::new()));
+    let Some(checks_table) = checks_value.as_table_mut() else {
+        return;
+    };
     for key in [
         "html",
         "links",
@@ -785,11 +786,12 @@ fn move_table_field_if_absent_checks(
     let Some(value) = table.remove("enabled") else {
         return;
     };
-    let checks_table = root
+    let checks_value = root
         .entry("checks".to_string())
-        .or_insert_with(|| Value::Table(toml::map::Map::new()))
-        .as_table_mut()
-        .expect("checks is always a table");
+        .or_insert_with(|| Value::Table(toml::map::Map::new()));
+    let Some(checks_table) = checks_value.as_table_mut() else {
+        return;
+    };
     checks_table.entry(rule_name.to_string()).or_insert(value);
 }
 

@@ -1,6 +1,7 @@
 use anyhow::{Result, bail};
 
 use crate::commands::{
+    common::required_arg,
     config::command_config,
     docs::{command_diff, command_docs, command_quality, command_trend},
     listings::{command_adapters, command_plugin_check, command_rules},
@@ -15,22 +16,22 @@ pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
         Some(("config", submatches)) => command_config(submatches),
         Some(("check", submatches)) => command_check(submatches),
         Some(("quality", submatches)) => command_quality(
-            submatches.get_one::<String>("path").unwrap(),
-            submatches.get_one::<String>("format").unwrap(),
+            required_arg(submatches, "path")?,
+            required_arg(submatches, "format")?,
         ),
         Some(("docs", submatches)) => command_docs(
-            submatches.get_one::<String>("action").unwrap(),
-            submatches.get_one::<String>("path").unwrap(),
+            required_arg(submatches, "action")?,
+            required_arg(submatches, "path")?,
         ),
         Some(("diff", submatches)) => command_diff(
-            submatches.get_one::<String>("baseline").unwrap(),
-            submatches.get_one::<String>("current").unwrap(),
-            submatches.get_one::<String>("format").unwrap(),
+            required_arg(submatches, "baseline")?,
+            required_arg(submatches, "current")?,
+            required_arg(submatches, "format")?,
         ),
         Some(("trend", submatches)) => command_trend(
-            submatches.get_one::<String>("command_name").unwrap(),
-            submatches.get_one::<String>("path").unwrap(),
-            submatches.get_one::<String>("format").unwrap(),
+            required_arg(submatches, "command_name")?,
+            required_arg(submatches, "path")?,
+            required_arg(submatches, "format")?,
         ),
         Some(("generate", submatches)) => command_generate(submatches),
         Some(("fix", submatches)) => command_fix(submatches),
