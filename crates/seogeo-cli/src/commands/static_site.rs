@@ -68,7 +68,10 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
                 warnings,
             )?
         ),
-        "sarif" => println!("{}", render_sarif(&findings_to_render, "seogeo")?),
+        "sarif" => {
+            emit_config_warnings(&warnings);
+            println!("{}", render_sarif(&findings_to_render, "seogeo")?);
+        }
         _ => {
             emit_config_warnings(&warnings);
             let success_message = if regressions_only {

@@ -4,6 +4,7 @@
 
 The canonical config surface is the versioned nested format with `version = 1`. The legacy flat top-level keys remain supported for compatibility and are validated with the same strictness.
 Compatibility mode is no longer silent: commands emit `CFGDEP001` warnings whenever legacy flat keys or legacy `[rules]` boolean toggles are used.
+The `plugin_settings` table is reserved until a plugin publishes a registered settings schema; no built-in schemas are currently shipped.
 
 Generated JSON Schema: `docs/config.schema.json`
 
@@ -346,7 +347,7 @@ coverage_threshold = 85
 ## `plugin_settings`
 
 - Default: (none)
-- Meaning: Plugin-specific configuration grouped by plugin namespace. Use quoted TOML tables such as `[plugin_settings."example.plugin"]`. Each namespace must be declared in `plugins` and accepted by a registered settings schema.
+- Meaning: Reserved plugin-specific configuration grouped by plugin namespace. Use quoted TOML tables such as `[plugin_settings."example.plugin"]` only when a plugin publishes a registered settings schema. No built-in plugin settings schemas are currently shipped.
 
 ## `typecheck_command`
 

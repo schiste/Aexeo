@@ -21,6 +21,10 @@ pub struct PluginSettingsSchema {
     pub allowed_keys: &'static [&'static str],
 }
 
+pub fn registered_plugin_settings_schemas() -> &'static [PluginSettingsSchema] {
+    REGISTERED_PLUGIN_SETTINGS_SCHEMAS
+}
+
 fn python_module_candidates(module_name: &str) -> Vec<PathBuf> {
     let relative = module_name.replace('.', "/");
     vec![

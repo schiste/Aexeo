@@ -265,11 +265,9 @@
       "type": "string"
     },
     "plugin_settings": {
-      "additionalProperties": {
-        "additionalProperties": true,
-        "type": "object"
-      },
-      "description": "Plugin-specific settings keyed by plugin namespace. Use quoted TOML tables such as `[plugin_settings.\"example.plugin\"]`. Each namespace must also appear in `plugins`, and only registered plugin settings schemas are accepted.",
+      "additionalProperties": false,
+      "description": "Reserved for future plugin-specific settings. No built-in plugins currently publish a registered settings schema.",
+      "maxProperties": 0,
       "type": "object"
     },
     "plugins": {

@@ -315,6 +315,53 @@ enabled = true
 }
 
 #[test]
+fn check_sarif_emits_config_warnings_on_stderr() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    write(
+        &temp_dir.path().join("seogeo.toml"),
+        "site_url = \"https://example.com\"\n",
+    );
+    write(
+        &temp_dir.path().join("index.html"),
+        "<html><head><title>Home</title></head><body><h1>Home</h1></body></html>",
+    );
+    let output = Command::new(bin())
+        .arg("check")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("sarif")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("CFGDEP001"));
+}
+
+#[test]
+fn crawl_sarif_emits_config_warnings_on_stderr() {
+    let (base_url, handle) = spawn_server(6);
+    let temp_dir = tempfile::tempdir().unwrap();
+    write(
+        &temp_dir.path().join("seogeo.toml"),
+        "browser_engine = \"http\"\n",
+    );
+    let output = Command::new(bin())
+        .current_dir(temp_dir.path())
+        .arg("crawl")
+        .arg(&base_url)
+        .arg("--max-pages")
+        .arg("10")
+        .arg("--format")
+        .arg("sarif")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("CFGDEP001"));
+    handle.join().unwrap();
+}
+
+#[test]
 fn check_json_contract_reports_summary_and_exit_code() {
     let temp_dir = tempfile::tempdir().unwrap();
     write(

@@ -1,6 +1,7 @@
 use serde_json::{Map, Value, json};
 
 use super::ConfigFieldDoc;
+use crate::plugin::registered_plugin_settings_schemas;
 
 pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
     &[
@@ -297,7 +298,7 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
         ConfigFieldDoc {
             key: "plugin_settings",
             default_value: "(none)",
-            description: "Plugin-specific configuration grouped by plugin namespace. Use quoted TOML tables such as `[plugin_settings.\"example.plugin\"]`. Each namespace must be declared in `plugins` and accepted by a registered settings schema.",
+            description: "Reserved plugin-specific configuration grouped by plugin namespace. Use quoted TOML tables such as `[plugin_settings.\"example.plugin\"]` only when a plugin publishes a registered settings schema. No built-in plugin settings schemas are currently shipped.",
         },
         ConfigFieldDoc {
             key: "typecheck_command",
@@ -392,6 +393,42 @@ fn rule_switch_schema() -> Value {
         "type": "object",
         "additionalProperties": { "type": "boolean" },
         "description": "Built-in rule-group toggles."
+    })
+}
+
+fn plugin_settings_schema() -> Value {
+    let schemas = registered_plugin_settings_schemas();
+    if schemas.is_empty() {
+        return json!({
+            "type": "object",
+            "additionalProperties": false,
+            "maxProperties": 0,
+            "description": "Reserved for future plugin-specific settings. No built-in plugins currently publish a registered settings schema."
+        });
+    }
+
+    let mut properties = Map::new();
+    for schema in schemas {
+        let mut setting_properties = Map::new();
+        for key in schema.allowed_keys {
+            setting_properties.insert((*key).to_string(), json!({}));
+        }
+        properties.insert(
+            schema.namespace.to_string(),
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": setting_properties,
+                "description": format!("Settings accepted by plugin '{}'.", schema.namespace),
+            }),
+        );
+    }
+
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": properties,
+        "description": "Plugin-specific settings keyed by plugin namespace. Each namespace must also appear in `plugins` and match a registered settings schema."
     })
 }
 
@@ -655,17 +692,7 @@ fn flat_properties() -> Map<String, Value> {
         "weak_anchor_text".to_string(),
         string_array_schema("Anchor texts treated as weak generic phrasing."),
     );
-    properties.insert(
-        "plugin_settings".to_string(),
-        json!({
-            "type": "object",
-            "additionalProperties": {
-                "type": "object",
-                "additionalProperties": true
-            },
-            "description": "Plugin-specific settings keyed by plugin namespace. Use quoted TOML tables such as `[plugin_settings.\"example.plugin\"]`. Each namespace must also appear in `plugins`, and only registered plugin settings schemas are accepted."
-        }),
-    );
+    properties.insert("plugin_settings".to_string(), plugin_settings_schema());
     properties.insert(
         "typecheck_command".to_string(),
         string_schema("Typecheck command used by repo quality checks."),

@@ -22,6 +22,8 @@ pub fn render_config_reference() -> String {
             .to_string(),
         "Compatibility mode is no longer silent: commands emit `CFGDEP001` warnings whenever legacy flat keys or legacy `[rules]` boolean toggles are used."
             .to_string(),
+        "The `plugin_settings` table is reserved until a plugin publishes a registered settings schema; no built-in schemas are currently shipped."
+            .to_string(),
         String::new(),
         "Generated JSON Schema: `docs/config.schema.json`".to_string(),
         String::new(),

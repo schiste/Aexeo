@@ -90,7 +90,10 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
                 warnings,
             )?
         ),
-        "sarif" => println!("{}", render_sarif(&findings_to_render, "seogeo")?),
+        "sarif" => {
+            emit_config_warnings(&warnings);
+            println!("{}", render_sarif(&findings_to_render, "seogeo")?);
+        }
         _ => {
             emit_config_warnings(&warnings);
             println!(
