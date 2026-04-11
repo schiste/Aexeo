@@ -1,3 +1,4 @@
+pub mod adapter;
 pub mod config;
 pub mod content_rules;
 pub mod docs;
@@ -21,6 +22,7 @@ pub mod static_check;
 pub mod structure_rules;
 pub mod verification;
 
+pub use adapter::{resolve_static_adapter_name, resolve_static_site_root};
 pub use config::{Config, ConfigFieldDoc, config_field_docs, default_rule_switches, load_config};
 pub use content_rules::run_content_rules;
 pub use docs::{

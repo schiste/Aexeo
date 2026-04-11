@@ -4,9 +4,10 @@ use seogeo_core::{
     apply_safe_fixes, diff_finding_sets, find_reference_doc_drift, list_adapter_names,
     list_rule_group_names, load_config, load_findings_from_audit, load_site, render_diff_text,
     render_json, render_llms_full_txt, render_llms_txt, render_markdown_mirror, render_robots_txt,
-    render_sarif, render_text, run_native_static_audit, run_repo_quality_checks, run_runtime_audit,
-    suggest_internal_links, validate_python_plugin_module, verify_runtime_audit,
-    write_audit_artifact, write_baseline_file, write_reference_documents,
+    render_sarif, render_text, resolve_static_site_root, run_native_static_audit,
+    run_repo_quality_checks, run_runtime_audit, suggest_internal_links,
+    validate_python_plugin_module, verify_runtime_audit, write_audit_artifact, write_baseline_file,
+    write_reference_documents,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -323,21 +324,13 @@ fn command_check(submatches: &ArgMatches) -> Result<i32> {
     Ok(exit_code)
 }
 
-fn site_root_from_config(root: &Path, config: &seogeo_core::Config) -> PathBuf {
-    if config.source_dir == "." {
-        root.to_path_buf()
-    } else {
-        root.join(&config.source_dir)
-    }
-}
-
 fn command_generate(submatches: &ArgMatches) -> Result<i32> {
     let root = PathBuf::from(submatches.get_one::<String>("path").unwrap())
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(submatches.get_one::<String>("path").unwrap()));
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
     let config = load_config(&root, explicit_config.as_deref())?;
-    let site = load_site(&site_root_from_config(&root, &config))?;
+    let site = load_site(&resolve_static_site_root(&root, &config)?)?;
     match submatches
         .get_one::<String>("kind")
         .map(String::as_str)
@@ -368,7 +361,7 @@ fn command_fix(submatches: &ArgMatches) -> Result<i32> {
         .unwrap_or_else(|_| PathBuf::from(submatches.get_one::<String>("path").unwrap()));
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
     let config = load_config(&root, explicit_config.as_deref())?;
-    let changed = apply_safe_fixes(&site_root_from_config(&root, &config), &config)?;
+    let changed = apply_safe_fixes(&resolve_static_site_root(&root, &config)?, &config)?;
     if changed.is_empty() {
         println!("No safe fixes applied.");
         return Ok(0);

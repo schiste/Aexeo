@@ -1,8 +1,9 @@
 use anyhow::Result;
 use seogeo_contracts::Finding;
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use crate::adapter::resolve_static_site_root;
 use crate::config::{Config, load_config};
 use crate::site::{Page, Site, load_site, normalize_internal_href};
 
@@ -219,12 +220,7 @@ pub fn run_static_html_audit(
     if !config.checks.get("html").copied().unwrap_or(true) {
         return Ok(Vec::new());
     }
-    let site_root = if config.source_dir == "." {
-        PathBuf::from(root)
-    } else {
-        root.join(&config.source_dir)
-    };
-    let site = load_site(&site_root)?;
+    let site = load_site(&resolve_static_site_root(root, &config)?)?;
     Ok(run_html_rules(&site, &config))
 }
 

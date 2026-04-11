@@ -1,7 +1,8 @@
 use anyhow::Result;
 use seogeo_contracts::Finding;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use crate::adapter::resolve_static_site_root;
 use crate::config::{Config, default_rule_switches, load_config};
 use crate::content_rules::run_content_rules;
 use crate::html_rules::run_html_rules;
@@ -14,14 +15,6 @@ use crate::site::{DeploymentModel, load_site};
 use crate::sitemap_rules::run_sitemap_rules;
 use crate::social_rules::run_social_rules;
 use crate::structure_rules::run_structure_rules;
-
-fn site_root(root: &Path, config: &Config) -> PathBuf {
-    if config.source_dir == "." {
-        root.to_path_buf()
-    } else {
-        root.join(&config.source_dir)
-    }
-}
 
 pub fn run_checks_for_site(site: &crate::site::Site, config: &Config) -> Vec<Finding> {
     let mut findings = Vec::new();
@@ -96,7 +89,7 @@ pub fn run_native_static_audit(
     explicit_config_path: Option<&Path>,
 ) -> Result<(Config, Vec<Finding>)> {
     let config = load_config(root, explicit_config_path)?;
-    let site = load_site(&site_root(root, &config))?;
+    let site = load_site(&resolve_static_site_root(root, &config)?)?;
     Ok((config.clone(), run_checks_for_site(&site, &config)))
 }
 
