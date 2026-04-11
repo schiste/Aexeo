@@ -21,8 +21,7 @@ What it enforces:
 
 - staged diff sanity with `git diff --cached --check`
 - staged secret and credential leakage detection
-- staged-file placeholder and debug marker rejection in Rust and shell
-- staged-file `unsafe` marker rejection
+- staged diff rejection for newly added `TODO` and `FIXME` markers in Rust and shell files
 - repo-wide `cargo fmt --check`
 - strict non-test Clippy policy from `scripts/clippy-strict.sh`
 - repo-wide `cargo clippy --workspace --all-targets -- -D warnings`
@@ -71,8 +70,9 @@ This repository is small enough that broad repo-wide Rust validation is still pr
 
 The local system is specifically aggressive against:
 
+- newly added `TODO` and `FIXME` markers in staged Rust and shell diffs
 - `unwrap` and `expect` in non-test Rust code
-- `todo!`, `unimplemented!`, `dbg!`, and shell placeholder markers
+- `todo!`, `unimplemented!`, and `dbg!` in non-test Rust code
 - `unsafe` in production Rust code
 - undocumented drift between code and generated docs
 - missing hook scripts or missing local quality tooling
