@@ -1,5 +1,6 @@
-use super::SchemaObject;
 use serde_json::Value;
+
+pub(super) type SchemaObject = (Value, usize);
 
 pub fn iter_schema_types(payload: &Value) -> Vec<String> {
     let mut found = Vec::new();

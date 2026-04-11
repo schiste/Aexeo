@@ -7,8 +7,8 @@ use self::intent::{
     profile_prefers_catalog, profile_prefers_docs, schema_titles_align,
     should_enforce_required_fields, software_application_schema_looks_app_shaped,
 };
+use self::json_ld::{SchemaObject, iter_schema_objects, required_fields_for_type};
 pub use self::json_ld::{iter_schema_field_values, iter_schema_types};
-use self::json_ld::{iter_schema_objects, required_fields_for_type};
 use seogeo_contracts::Finding;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -17,7 +17,6 @@ use std::path::Path;
 use crate::config::Config;
 use crate::site::{Site, route_from_urlish};
 
-type SchemaObject = (Value, usize);
 type ParsedSchemaPage = (
     Vec<Finding>,
     BTreeSet<String>,
@@ -206,12 +205,6 @@ fn update_sitewide_graphs(
                 .insert(value.trim().to_string());
         }
     }
-}
-
-fn has_any_field(schema_object: &serde_json::Map<String, Value>, field_names: &[&str]) -> bool {
-    field_names
-        .iter()
-        .any(|field_name| schema_object.get(*field_name).is_some())
 }
 
 fn collect_schema_family_findings(

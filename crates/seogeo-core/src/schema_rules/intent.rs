@@ -1,7 +1,8 @@
-use super::SchemaObject;
 use crate::site::{Page, PageKind};
 use serde_json::Value;
 use std::collections::BTreeSet;
+
+use super::json_ld::SchemaObject;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SchemaPageIntent {
@@ -222,7 +223,7 @@ pub(super) fn software_application_schema_looks_app_shaped(
             _ => Vec::new(),
         };
         object_types.contains(&"SoftwareApplication")
-            && super::has_any_field(
+            && has_any_field(
                 map,
                 &[
                     "applicationCategory",
@@ -257,7 +258,7 @@ pub(super) fn should_enforce_required_fields(
                     && !is_docs_like_route(&page.route))
                     || page_supports_software_application(page)
                     || profile_prefers_app(profile)
-                    || super::has_any_field(
+                    || has_any_field(
                         schema_object,
                         &[
                             "applicationCategory",
@@ -270,8 +271,14 @@ pub(super) fn should_enforce_required_fields(
         }
         "Article" | "TechArticle" | "HowTo" => {
             matches!(intent, SchemaPageIntent::Docs | SchemaPageIntent::Generic)
-                || super::has_any_field(schema_object, &["headline", "step", "author", "name"])
+                || has_any_field(schema_object, &["headline", "step", "author", "name"])
         }
         _ => true,
     }
+}
+
+fn has_any_field(schema_object: &serde_json::Map<String, Value>, field_names: &[&str]) -> bool {
+    field_names
+        .iter()
+        .any(|field_name| schema_object.get(*field_name).is_some())
 }
