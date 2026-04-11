@@ -30,6 +30,7 @@ const REQUIRED_DOC_FILES: &[&str] = &[
     "docs/adapters.md",
     "docs/cli.md",
     "docs/config.md",
+    "docs/config.schema.json",
     "docs/rules.md",
 ];
 
@@ -167,6 +168,7 @@ mod tests {
             "docs/adapters.md",
             "docs/cli.md",
             "docs/config.md",
+            "docs/config.schema.json",
             "docs/rules.md",
             "Cargo.toml",
             "scripts/build-rust.sh",

@@ -23,7 +23,7 @@ use self::defaults::{
 };
 
 pub use self::defaults::default_rule_switches;
-pub use self::docs::config_field_docs;
+pub use self::docs::{config_field_docs, render_config_schema};
 pub use self::load::load_config;
 pub use self::views::{
     OutputConfig, PolicyConfig, QualityConfig, RulesConfig, RuntimeConfig, SiteConfig,
