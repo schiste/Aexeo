@@ -1,9 +1,9 @@
 use crate::cli::render_cli_reference;
+use crate::output::{render_audit_command_json, render_diff_command_json};
 use anyhow::{Result, anyhow};
 use seogeo_core::{
-    find_reference_doc_drift, load_findings_from_audit, render_diff_text, render_json,
-    render_sarif, render_text, run_repo_quality_checks, write_audit_artifact,
-    write_reference_documents,
+    find_reference_doc_drift, load_findings_from_audit, render_diff_text, render_sarif,
+    render_text, run_repo_quality_checks, write_audit_artifact, write_reference_documents,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,7 +20,16 @@ pub fn command_quality(path: &str, output_format: &str) -> Result<i32> {
     let findings = run_repo_quality_checks(&root, &cli_reference)?;
     let audit_path = write_audit_artifact(&findings, &root, "quality", 5)?;
     match output_format {
-        "json" => println!("{}", render_json(&findings)?),
+        "json" => println!(
+            "{}",
+            render_audit_command_json(
+                "quality",
+                &findings,
+                !findings.iter().any(|finding| finding.is_error()),
+                Some(audit_path.display().to_string()),
+                Vec::new(),
+            )?
+        ),
         "sarif" => println!("{}", render_sarif(&findings, "seogeo")?),
         _ => println!(
             "{}",
@@ -64,7 +73,10 @@ pub fn command_diff(baseline: &str, current: &str, output_format: &str) -> Resul
     let current_findings = load_findings_from_audit(Path::new(current))?;
     let diff = seogeo_core::diff_finding_sets(&baseline_findings, &current_findings);
     match output_format {
-        "json" => println!("{}", serde_json::to_string_pretty(&diff)?),
+        "json" => println!(
+            "{}",
+            render_diff_command_json("diff", &diff, diff.new_findings.is_empty(), Vec::new())?
+        ),
         _ => println!("{}", render_diff_text(&diff)),
     }
     Ok(if diff.new_findings.is_empty() { 0 } else { 1 })

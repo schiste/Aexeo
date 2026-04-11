@@ -1,3 +1,4 @@
+use serde_json::Value;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -84,6 +85,10 @@ fn rules_command_lists_builtin_groups() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("html"));
     assert!(stdout.contains("structure"));
+}
+
+fn parse_json(output: &[u8]) -> Value {
+    serde_json::from_slice(output).unwrap()
 }
 
 #[test]
@@ -242,10 +247,129 @@ adapter = "astro-dist"
         .output()
         .unwrap();
     assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"version\": 1"));
-    assert!(stdout.contains("\"profile\": \"chau7\""));
-    assert!(stdout.contains("\"adapter\": \"astro-dist\""));
-    assert!(stdout.contains("\"enabled\": false"));
-    assert!(stdout.contains("\"min_inbound_links\": 2"));
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "config print");
+    assert_eq!(payload["success"], true);
+    assert_eq!(payload["config"]["version"], 1);
+    assert_eq!(payload["config"]["profile"], "chau7");
+    assert_eq!(payload["config"]["site"]["adapter"], "astro-dist");
+    assert_eq!(payload["config"]["rules"]["links"]["enabled"], false);
+    assert_eq!(payload["config"]["rules"]["links"]["min_inbound_links"], 2);
+}
+
+#[test]
+fn check_json_contract_reports_summary_and_exit_code() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    write(
+        &temp_dir.path().join("index.html"),
+        "<html><head><title>Home</title></head><body><h1>Home</h1><a href=\"/missing\">Learn more</a></body></html>",
+    );
+    let output = Command::new(bin())
+        .arg("check")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "check");
+    assert_eq!(payload["success"], false);
+    assert!(
+        payload["audit_path"]
+            .as_str()
+            .unwrap()
+            .ends_with("check-latest.json")
+    );
+    assert!(payload["summary"]["total"].as_u64().unwrap() >= 1);
+    assert!(payload["findings"].is_array());
+}
+
+#[test]
+fn quality_json_contract_reports_summary_and_exit_code() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let output = Command::new(bin())
+        .arg("quality")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "quality");
+    assert_eq!(payload["success"], false);
+    assert!(payload["summary"]["errors"].as_u64().unwrap() >= 1);
+    assert!(payload["findings"].is_array());
+}
+
+#[test]
+fn crawl_json_contract_reports_summary_and_exit_code() {
+    let (base_url, handle) = spawn_server(6);
+    let temp_dir = tempfile::tempdir().unwrap();
+    let output = Command::new(bin())
+        .current_dir(temp_dir.path())
+        .arg("crawl")
+        .arg(&base_url)
+        .arg("--engine")
+        .arg("http")
+        .arg("--max-pages")
+        .arg("10")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "crawl");
+    assert_eq!(payload["success"], false);
+    assert!(
+        payload["audit_path"]
+            .as_str()
+            .unwrap()
+            .ends_with("crawl-latest.json")
+    );
+    assert!(payload["findings"].is_array());
+    handle.join().unwrap();
+}
+
+#[test]
+fn verify_json_contract_reports_diff_summary() {
+    let (base_url, handle) = spawn_server(12);
+    let temp_dir = tempfile::tempdir().unwrap();
+    let crawl_output = Command::new(bin())
+        .current_dir(temp_dir.path())
+        .arg("crawl")
+        .arg(&base_url)
+        .arg("--engine")
+        .arg("http")
+        .arg("--max-pages")
+        .arg("10")
+        .arg("--format")
+        .arg("text")
+        .output()
+        .unwrap();
+    assert!(!crawl_output.status.success());
+
+    let verify_output = Command::new(bin())
+        .current_dir(temp_dir.path())
+        .arg("verify")
+        .arg(&base_url)
+        .arg("--engine")
+        .arg("http")
+        .arg("--max-pages")
+        .arg("10")
+        .arg("--baseline")
+        .arg(".seogeo-reports/crawl-latest.json")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(verify_output.status.success());
+    let payload = parse_json(&verify_output.stdout);
+    assert_eq!(payload["command"], "verify");
+    assert_eq!(payload["success"], true);
+    assert_eq!(payload["summary"]["new"], 0);
+    assert!(payload["diff"]["new_findings"].is_array());
+    handle.join().unwrap();
 }

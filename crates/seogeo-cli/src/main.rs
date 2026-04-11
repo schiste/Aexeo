@@ -1,5 +1,6 @@
 mod cli;
 mod commands;
+mod output;
 
 use anyhow::Result;
 use std::process::ExitCode;

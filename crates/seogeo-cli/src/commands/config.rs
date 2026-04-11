@@ -4,6 +4,8 @@ use seogeo_core::config::load_config;
 use seogeo_core::{render_resolved_config_json, render_resolved_config_toml};
 use std::path::PathBuf;
 
+use crate::output::render_config_command_json;
+
 fn canonicalize_or_keep(path: &str) -> PathBuf {
     PathBuf::from(path)
         .canonicalize()
@@ -27,7 +29,14 @@ fn command_config_print(submatches: &ArgMatches) -> Result<i32> {
         .map(String::as_str)
         .unwrap_or("toml")
     {
-        "json" => println!("{}", render_resolved_config_json(&config)?),
+        "json" => {
+            let rendered =
+                serde_json::from_str::<serde_json::Value>(&render_resolved_config_json(&config)?)?;
+            println!(
+                "{}",
+                render_config_command_json("config print", rendered, Vec::new())?
+            );
+        }
         "toml" => println!("{}", render_resolved_config_toml(&config)?),
         other => bail!("unsupported config format: {}", other),
     }

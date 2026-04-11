@@ -37,7 +37,7 @@ fn resolve_runtime_engine(engine: &str) -> Result<&'static str> {
 fn materialize_runtime_site(
     base_url: &str,
     max_pages: usize,
-    engine: &str,
+    _engine: &str,
     config: &Config,
 ) -> Result<(Site, Vec<Finding>)> {
     let runtime = config.runtime();

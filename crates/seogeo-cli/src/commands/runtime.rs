@@ -2,10 +2,12 @@ use anyhow::{Result, bail};
 use clap::ArgMatches;
 use seogeo_core::config::load_config;
 use seogeo_core::{
-    diff_finding_sets, load_findings_from_audit, render_diff_text, render_json, render_sarif,
-    render_text, run_runtime_audit, verify_runtime_audit, write_audit_artifact,
+    diff_finding_sets, load_findings_from_audit, render_diff_text, render_sarif, render_text,
+    run_runtime_audit, verify_runtime_audit, write_audit_artifact,
 };
 use std::path::{Path, PathBuf};
+
+use crate::output::{render_audit_command_json, render_diff_command_json};
 
 fn apply_runtime_cli_overrides(config: &mut seogeo_core::Config, submatches: &ArgMatches) {
     if let Some(values) = submatches.get_many::<String>("seed") {
@@ -65,12 +67,27 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     } else {
         audit.findings.clone()
     };
+    let success = if regressions_only {
+        findings_to_render.is_empty()
+    } else {
+        !findings_to_render.iter().any(|finding| finding.is_error())
+    };
+
     match submatches
         .get_one::<String>("format")
         .map(String::as_str)
         .unwrap_or("text")
     {
-        "json" => println!("{}", render_json(&findings_to_render)?),
+        "json" => println!(
+            "{}",
+            render_audit_command_json(
+                "crawl",
+                &findings_to_render,
+                success,
+                Some(audit_path.display().to_string()),
+                Vec::new(),
+            )?
+        ),
         "sarif" => println!("{}", render_sarif(&findings_to_render, "seogeo")?),
         _ => println!(
             "{}",
@@ -81,13 +98,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
             )
         ),
     }
-    let exit_code = if regressions_only {
-        if findings_to_render.is_empty() { 0 } else { 1 }
-    } else if findings_to_render.iter().any(|finding| finding.is_error()) {
-        1
-    } else {
-        0
-    };
+    let exit_code = if success { 0 } else { 1 };
     Ok(exit_code)
 }
 
@@ -117,7 +128,10 @@ pub fn command_verify(submatches: &ArgMatches) -> Result<i32> {
         .map(String::as_str)
         .unwrap_or("text")
     {
-        "json" => println!("{}", serde_json::to_string_pretty(&diff)?),
+        "json" => println!(
+            "{}",
+            render_diff_command_json("verify", &diff, diff.new_findings.is_empty(), Vec::new())?
+        ),
         _ => println!("{}", render_diff_text(&diff)),
     }
     Ok(if diff.new_findings.is_empty() { 0 } else { 1 })

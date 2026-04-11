@@ -3,12 +3,13 @@ use clap::ArgMatches;
 use seogeo_core::adapter::resolve_static_site_root;
 use seogeo_core::config::load_config;
 use seogeo_core::{
-    apply_safe_fixes, diff_finding_sets, load_findings_from_audit, load_site, render_json,
-    render_llms_full_txt, render_llms_txt, render_markdown_mirror, render_robots_txt, render_sarif,
-    render_text, run_native_static_audit, suggest_internal_links, write_audit_artifact,
-    write_baseline_file,
+    apply_safe_fixes, diff_finding_sets, load_findings_from_audit, load_site, render_llms_full_txt,
+    render_llms_txt, render_markdown_mirror, render_robots_txt, render_sarif, render_text,
+    run_native_static_audit, suggest_internal_links, write_audit_artifact, write_baseline_file,
 };
 use std::path::{Path, PathBuf};
+
+use crate::output::render_audit_command_json;
 
 fn canonicalize_or_keep(path: &str) -> PathBuf {
     PathBuf::from(path)
@@ -43,12 +44,27 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
         findings.clone()
     };
 
+    let success = if regressions_only {
+        findings_to_render.is_empty()
+    } else {
+        !findings_to_render.iter().any(|finding| finding.is_error())
+    };
+
     match submatches
         .get_one::<String>("format")
         .map(String::as_str)
         .unwrap_or("text")
     {
-        "json" => println!("{}", render_json(&findings_to_render)?),
+        "json" => println!(
+            "{}",
+            render_audit_command_json(
+                "check",
+                &findings_to_render,
+                success,
+                Some(audit_path.display().to_string()),
+                Vec::new(),
+            )?
+        ),
         "sarif" => println!("{}", render_sarif(&findings_to_render, "seogeo")?),
         _ => {
             let success_message = if regressions_only {
@@ -63,13 +79,7 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
         }
     }
 
-    let exit_code = if regressions_only {
-        if findings_to_render.is_empty() { 0 } else { 1 }
-    } else if findings_to_render.iter().any(|finding| finding.is_error()) {
-        1
-    } else {
-        0
-    };
+    let exit_code = if success { 0 } else { 1 };
     Ok(exit_code)
 }
 
