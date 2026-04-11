@@ -1,10 +1,11 @@
-use anyhow::{Context, Result};
+mod graph;
+mod http;
+
+use anyhow::Result;
 use seogeo_contracts::Finding;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command as ProcessCommand;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::PathBuf;
 
 use crate::config::Config;
 use crate::policy::apply_policy;
@@ -13,232 +14,20 @@ use crate::site::{
 };
 use crate::static_check::run_checks_for_site;
 use crate::verification::{DiffResult, diff_finding_sets};
+use graph::{
+    extract_internal_links, read_loc_values, response_report_path, route_is_allowed,
+    should_enqueue_link, snapshot_path_for_route,
+};
+use http::{
+    fetch_with_curl, host_for_url, is_html_content_type, normalize_base_url, unique_runtime_dir,
+    write_optional_artifact,
+};
 
 #[derive(Debug, Clone)]
 pub struct RuntimeAudit {
     pub site: Site,
     pub crawl_findings: Vec<Finding>,
     pub findings: Vec<Finding>,
-}
-
-#[derive(Debug, Clone)]
-struct FetchResult {
-    status_code: Option<u16>,
-    content_type: Option<String>,
-    body: Option<String>,
-    headers: BTreeMap<String, String>,
-    effective_url: String,
-}
-
-const ASSET_EXTENSIONS: &[&str] = &[
-    ".css", ".gif", ".html", ".ico", ".jpeg", ".jpg", ".js", ".json", ".mjs", ".png", ".svg",
-    ".txt", ".webp", ".xml",
-];
-
-fn unique_runtime_dir() -> Result<PathBuf> {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let path =
-        std::env::temp_dir().join(format!("seogeo-runtime-{}-{}", std::process::id(), nonce));
-    fs::create_dir_all(&path)?;
-    Ok(path)
-}
-
-fn normalize_base_url(base_url: &str) -> String {
-    format!("{}/", base_url.trim_end_matches('/'))
-}
-
-fn host_for_url(url: &str) -> String {
-    let after_scheme = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
-    after_scheme
-        .split('/')
-        .next()
-        .unwrap_or_default()
-        .to_string()
-}
-
-fn response_report_path(route: &str) -> String {
-    if route.is_empty() {
-        "crawl/index.html".to_string()
-    } else {
-        format!("crawl/{}/index.html", route)
-    }
-}
-
-fn snapshot_path_for_route(root: &Path, route: &str) -> PathBuf {
-    if route.is_empty() {
-        root.join("index.html")
-    } else {
-        root.join(route).join("index.html")
-    }
-}
-
-fn attr_value(snippet: &str, attr: &str) -> Option<String> {
-    let lower = snippet.to_ascii_lowercase();
-    let marker = format!("{}=", attr.to_ascii_lowercase());
-    let index = lower.find(&marker)?;
-    let after = &snippet[index + marker.len()..];
-    let mut chars = after.chars();
-    let quote = chars.next()?;
-    if quote != '"' && quote != '\'' {
-        return None;
-    }
-    let rest = &after[quote.len_utf8()..];
-    let end = rest.find(quote)?;
-    Some(rest[..end].to_string())
-}
-
-fn extract_internal_links(raw: &str) -> Vec<String> {
-    let mut links = Vec::new();
-    let mut offset = 0;
-    while let Some(index) = raw[offset..].find("<a") {
-        let start = offset + index;
-        let Some(open_end_rel) = raw[start..].find('>') else {
-            break;
-        };
-        let open_end = start + open_end_rel;
-        let snippet = &raw[start..=open_end];
-        if let Some(href) = attr_value(snippet, "href")
-            && let Some(target) = normalize_internal_href(&href)
-        {
-            links.push(target);
-        }
-        offset = open_end + 1;
-    }
-    links
-}
-
-fn should_enqueue_link(target: &str) -> bool {
-    let suffix = Path::new(target)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| format!(".{}", ext.to_ascii_lowercase()))
-        .unwrap_or_default();
-    suffix.is_empty() || !ASSET_EXTENSIONS.contains(&suffix.as_str()) || suffix == ".html"
-}
-
-fn read_loc_values(text: &str) -> Vec<String> {
-    let mut values = Vec::new();
-    let mut offset = 0;
-    while let Some(start_rel) = text[offset..].find("<loc>") {
-        let start = offset + start_rel + 5;
-        let Some(end_rel) = text[start..].find("</loc>") else {
-            break;
-        };
-        let end = start + end_rel;
-        values.push(text[start..end].trim().to_string());
-        offset = end + 6;
-    }
-    values
-}
-
-fn route_matches_patterns(route: &str, patterns: &[String]) -> bool {
-    patterns.is_empty()
-        || patterns
-            .iter()
-            .any(|pattern| route.contains(pattern.trim_matches('/')))
-}
-
-fn route_is_excluded(route: &str, patterns: &[String]) -> bool {
-    patterns
-        .iter()
-        .any(|pattern| route.contains(pattern.trim_matches('/')))
-}
-
-fn route_is_allowed(route: &str, config: &Config) -> bool {
-    !route_is_excluded(route, &config.crawl_exclude_patterns)
-        && route_matches_patterns(route, &config.crawl_include_patterns)
-}
-
-fn parse_headers(raw: &str) -> BTreeMap<String, String> {
-    let mut headers = BTreeMap::new();
-    for line in raw.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with("HTTP/") {
-            continue;
-        }
-        if let Some((key, value)) = trimmed.split_once(':') {
-            headers.insert(key.trim().to_ascii_lowercase(), value.trim().to_string());
-        }
-    }
-    headers
-}
-
-fn fetch_with_curl(
-    url: &str,
-    headers: &BTreeMap<String, String>,
-    basic_auth: &BTreeMap<String, String>,
-) -> Result<FetchResult> {
-    let body_path = unique_runtime_dir()?.join("body.txt");
-    let headers_path = unique_runtime_dir()?.join("headers.txt");
-    let mut command = ProcessCommand::new("curl");
-    command.arg("-sS").arg("-L");
-    command.arg("-D").arg(&headers_path);
-    command.arg("-o").arg(&body_path);
-    command
-        .arg("-w")
-        .arg("%{http_code}\n%{content_type}\n%{url_effective}");
-    for (key, value) in headers {
-        command.arg("-H").arg(format!("{}: {}", key, value));
-    }
-    if let (Some(username), Some(password)) =
-        (basic_auth.get("username"), basic_auth.get("password"))
-    {
-        command.arg("-u").arg(format!("{}:{}", username, password));
-    }
-    command.arg(url);
-    let output = command
-        .output()
-        .with_context(|| format!("failed to run curl for {}", url))?;
-    let metadata = String::from_utf8_lossy(&output.stdout);
-    let mut lines = metadata.lines();
-    let status_code = lines.next().and_then(|value| value.parse::<u16>().ok());
-    let content_type = lines
-        .next()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    let effective_url = lines.next().unwrap_or(url).trim().to_string();
-    let body = fs::read_to_string(&body_path).ok();
-    let headers_map = fs::read_to_string(&headers_path)
-        .map(|raw| parse_headers(&raw))
-        .unwrap_or_default();
-    let _ = fs::remove_file(body_path);
-    let _ = fs::remove_file(headers_path);
-    if !output.status.success() && body.is_none() {
-        return Ok(FetchResult {
-            status_code,
-            content_type: None,
-            body: None,
-            headers: BTreeMap::new(),
-            effective_url,
-        });
-    }
-    Ok(FetchResult {
-        status_code,
-        content_type,
-        body,
-        headers: headers_map,
-        effective_url,
-    })
-}
-
-fn write_optional_artifact(
-    snapshot_root: &Path,
-    base_url: &str,
-    name: &str,
-    headers: &BTreeMap<String, String>,
-    basic_auth: &BTreeMap<String, String>,
-) -> Result<()> {
-    let artifact_url = format!("{}{}", base_url, name);
-    let fetched = fetch_with_curl(&artifact_url, headers, basic_auth)?;
-    if let Some(body) = fetched.body
-        && fetched.status_code.unwrap_or(200) < 400
-    {
-        fs::write(snapshot_root.join(name), body)?;
-    }
-    Ok(())
 }
 
 fn materialize_runtime_site(
@@ -345,7 +134,7 @@ fn materialize_runtime_site(
             });
             continue;
         };
-        if fetched.content_type.as_deref().unwrap_or_default() != "text/html" {
+        if !is_html_content_type(fetched.content_type.as_deref()) {
             continue;
         }
         let effective_host = host_for_url(&fetched.effective_url);
@@ -583,6 +372,73 @@ mod tests {
     fn runtime_audit_crawls_http_site() {
         let (base_url, handle) = spawn_server(5);
         let audit = run_runtime_audit(&base_url, 10, "http", &html_only_config()).unwrap();
+        assert!(audit.site.route_pages.contains_key(""));
+        assert!(audit.site.route_pages.contains_key("about"));
+        assert!(
+            audit
+                .findings
+                .iter()
+                .any(|finding| finding.rule_id == "SEO001" || finding.rule_id == "SEO004")
+        );
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn runtime_audit_accepts_html_charset_content_types() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let handle = thread::spawn(move || {
+            for _ in 0..4 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buffer = [0_u8; 4096];
+                let size = stream.read(&mut buffer).unwrap();
+                let request = String::from_utf8_lossy(&buffer[..size]);
+                let path = request
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/");
+                match path {
+                    "/" => respond(
+                        stream,
+                        "200 OK",
+                        "text/html; charset=utf-8",
+                        "<html><head><meta name=\"description\" content=\"Root\"><link rel=\"canonical\" href=\"http://example.test/\"></head><body><h1>Home</h1><a href=\"/about\">About</a></body></html>",
+                        &[],
+                    ),
+                    "/about" => respond(
+                        stream,
+                        "200 OK",
+                        "text/html; charset=utf-8",
+                        "<html><head><meta name=\"description\" content=\"About page\"></head><body><h1>About</h1></body></html>",
+                        &[],
+                    ),
+                    "/robots.txt" => respond(
+                        stream,
+                        "200 OK",
+                        "text/plain; charset=utf-8",
+                        "User-agent: *\nAllow: /\n",
+                        &[],
+                    ),
+                    "/llms.txt" => respond(
+                        stream,
+                        "404 Not Found",
+                        "text/plain; charset=utf-8",
+                        "missing",
+                        &[],
+                    ),
+                    _ => respond(stream, "404 Not Found", "text/plain", "missing", &[]),
+                }
+            }
+        });
+
+        let audit = run_runtime_audit(
+            &format!("http://{}", address),
+            10,
+            "http",
+            &html_only_config(),
+        )
+        .unwrap();
         assert!(audit.site.route_pages.contains_key(""));
         assert!(audit.site.route_pages.contains_key("about"));
         assert!(
