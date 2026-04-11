@@ -22,7 +22,7 @@ The Rust workspace is now the canonical entrypoint for Aexeo.
 - `crates/seogeo-core`: config, rule inventory, reporting, docs, and diff/baseline primitives
 - `crates/seogeo-cli`: canonical CLI surface
 
-The CLI surface is fully native Rust. The Python tree remains in the repository only as historical reference material and for parity comparison while the new workspace settles.
+The CLI surface is fully native Rust. The legacy Python implementation has been removed from the repository; only plugin manifest validation still accepts Python-style plugin modules as an integration input.
 
 ## Commands
 

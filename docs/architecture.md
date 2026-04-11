@@ -50,12 +50,12 @@ Target package map:
 The detailed ownership rules are documented in
 [package-boundaries.md](package-boundaries.md).
 
-## Legacy Python Reference
+## Plugin Compatibility
 
-The Python implementation under [`src/seogeo`](../src/seogeo) remains in the repository only as reference material during the migration hardening period.
+The repository no longer carries the legacy Python runtime implementation.
 
 Boundary rules:
 - the Rust CLI is the only supported command surface
 - contracts, docs, reporting, runtime audit, and verification behavior are owned by Rust
-- Python should not gain new platform semantics
+- plugin manifest validation may still accept Python-style modules as an external compatibility surface
 - browser or framework-specific tooling may still be invoked externally when that is materially more practical

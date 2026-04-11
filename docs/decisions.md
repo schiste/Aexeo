@@ -10,14 +10,14 @@ The supported command surface is the Rust workspace.
 - `crates/seogeo-core` owns product behavior
 - `crates/seogeo-cli` owns the user-facing CLI
 
-No new product behavior should be added to the Python implementation.
+The legacy Python runtime has been removed from the repository and must not be reintroduced as a second implementation surface.
 
-## 2. Python Is Legacy Reference Only
+## 2. Plugin Compatibility May Accept Python Modules
 
-`src/seogeo` remains in the repository only as migration reference material.
+Python remains relevant only as an external plugin manifest format accepted by `plugin-check`.
 
-- it may be used for parity comparison
-- it must not become the primary runtime again
+- it is a compatibility input, not an in-repo runtime
+- it must not become the primary execution model again
 - docs, CI, and release flow must target Rust first
 
 ## 3. CI And Releases Are Binary-Oriented

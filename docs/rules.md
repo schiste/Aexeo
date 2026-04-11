@@ -124,10 +124,8 @@ Reusable GEO rules extracted from the Chau7 website guidelines.
 
 ## Internal Quality
 
-- `QLT003`: duplicate public function name across implementation modules
 - `QLT004`: missing required project documentation file
 - `QLT005`: built-in rule group missing from docs/rules.md
-- `QLT006`: missing expected test module for a key implementation module
 - `QLT007`: generated docs drift from code and must be regenerated
 - `QLT009`: missing Cargo workspace manifest
 - `QLT010`: missing Rust build script

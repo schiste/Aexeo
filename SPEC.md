@@ -30,7 +30,7 @@ The canonical implementation is the Rust workspace.
 - `crates/seogeo-core` owns runtime behavior
 - `crates/seogeo-cli` owns the supported CLI surface
 
-The Python implementation is not a supported runtime surface.
+The Rust workspace is the only supported in-repository runtime surface.
 
 ## 2.1 Stability Levels
 
@@ -227,10 +227,8 @@ These names are part of the config and reporting contract.
 - `DEP001`
 
 ### Internal Quality
-- `QLT003`
 - `QLT004`
 - `QLT005`
-- `QLT006`
 - `QLT007`
 - `QLT009`
 - `QLT010`
