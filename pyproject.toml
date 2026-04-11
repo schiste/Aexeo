@@ -18,9 +18,6 @@ browser = ["playwright>=1.54"]
 build = ["build>=1.2.2"]
 dev = ["mypy>=1.11", "coverage[toml]>=7.6"]
 
-[project.scripts]
-seogeo = "seogeo.cli:main"
-
 [tool.setuptools]
 package-dir = {"" = "src"}
 
