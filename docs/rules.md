@@ -132,3 +132,10 @@ Reusable GEO rules extracted from the Chau7 website guidelines.
 - `QLT011`: missing performance budget file
 - `QLT012`: missing Rust CLI integration test coverage
 - `QLT013`: missing install script
+- `QLT014`: missing local CI script
+- `QLT015`: missing git hook installation script
+- `QLT016`: missing pre-commit hook
+- `QLT017`: missing pre-push hook
+- `QLT018`: debug or placeholder macro in non-test Rust source
+- `QLT019`: unwrap or expect in non-test Rust source
+- `QLT020`: unsafe Rust marker in non-test Rust source
