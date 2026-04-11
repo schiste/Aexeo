@@ -1,27 +1,20 @@
 mod graph;
 mod http;
+mod planner;
+mod snapshot;
 
 use anyhow::Result;
 use seogeo_contracts::Finding;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::fs;
-use std::path::PathBuf;
 
 use crate::config::Config;
 use crate::policy::apply_policy;
-use crate::site::{
-    CrawlMeta, DeploymentModel, Site, load_site, normalize_internal_href, route_from_urlish,
-};
+use crate::site::{Site, route_from_urlish};
 use crate::static_check::run_checks_for_site;
 use crate::verification::{DiffResult, diff_finding_sets};
-use graph::{
-    extract_internal_links, read_loc_values, response_report_path, route_is_allowed,
-    should_enqueue_link, snapshot_path_for_route,
-};
-use http::{
-    fetch_with_curl, host_for_url, is_html_content_type, normalize_base_url, unique_runtime_dir,
-    write_optional_artifact,
-};
+use graph::{extract_internal_links, read_loc_values, response_report_path, should_enqueue_link};
+use http::{fetch_with_curl, host_for_url, is_html_content_type, unique_runtime_dir};
+use planner::CrawlPlanner;
+use snapshot::RuntimeSnapshotBuilder;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeAudit {
@@ -46,15 +39,9 @@ fn materialize_runtime_site(
     config: &Config,
 ) -> Result<(Site, Vec<Finding>)> {
     let runtime = config.runtime();
-    let normalized_base = normalize_base_url(base_url);
-    let base_host = host_for_url(&normalized_base);
-    let snapshot_root = unique_runtime_dir()?;
-    let mut queue = VecDeque::from([normalized_base.clone()]);
-    let mut visited = BTreeSet::new();
-    let mut discovered_routes = BTreeSet::from([String::new()]);
-    let mut response_headers = BTreeMap::<String, BTreeMap<String, String>>::new();
+    let mut planner = CrawlPlanner::new(base_url, max_pages);
+    let mut snapshot = RuntimeSnapshotBuilder::new(unique_runtime_dir()?);
     let mut crawl_findings = Vec::new();
-    let mut truncated = false;
 
     if engine == "playwright" {
         crawl_findings.push(Finding {
@@ -71,22 +58,11 @@ fn materialize_runtime_site(
     }
 
     for seed in runtime.crawl_seeds {
-        let Some(route) = route_from_urlish(seed).or_else(|| normalize_internal_href(seed)) else {
-            continue;
-        };
-        if route_is_allowed(&route, &runtime) {
-            let seed_url = if route.is_empty() {
-                normalized_base.clone()
-            } else {
-                format!("{}{}", normalized_base, route)
-            };
-            queue.push_back(seed_url);
-            discovered_routes.insert(route);
-        }
+        planner.seed_from_user_input(seed, &runtime);
     }
 
     if runtime.crawl_use_sitemap {
-        let sitemap_url = format!("{}sitemap.xml", normalized_base);
+        let sitemap_url = format!("{}sitemap.xml", planner.normalized_base());
         let fetched = fetch_with_curl(
             &sitemap_url,
             runtime.crawl_headers,
@@ -101,35 +77,12 @@ fn materialize_runtime_site(
             && let Some(body) = fetched.body
         {
             for loc in read_loc_values(&body) {
-                let Some(route) = route_from_urlish(&loc) else {
-                    continue;
-                };
-                if route_is_allowed(&route, &runtime) {
-                    let seed_url = if route.is_empty() {
-                        normalized_base.clone()
-                    } else {
-                        format!("{}{}", normalized_base, route)
-                    };
-                    queue.push_back(seed_url);
-                    discovered_routes.insert(route);
-                }
+                planner.seed_from_sitemap_loc(&loc, &runtime);
             }
         }
     }
 
-    while let Some(current) = queue.pop_front() {
-        if visited.len() >= max_pages {
-            truncated = true;
-            break;
-        }
-        if visited.contains(&current) {
-            continue;
-        }
-        visited.insert(current.clone());
-        let current_route = route_from_urlish(&current).unwrap_or_default();
-        if !current_route.is_empty() && !route_is_allowed(&current_route, &runtime) {
-            continue;
-        }
+    while let Some(current) = planner.next_url(&runtime) {
         let fetched = fetch_with_curl(&current, runtime.crawl_headers, runtime.crawl_basic_auth)?;
         let Some(body) = fetched.body else {
             let route = route_from_urlish(&current).unwrap_or_default();
@@ -148,97 +101,28 @@ fn materialize_runtime_site(
             continue;
         }
         let effective_host = host_for_url(&fetched.effective_url);
-        if effective_host != base_host {
+        if effective_host != planner.base_host() {
             continue;
         }
         let route = route_from_urlish(&fetched.effective_url).unwrap_or_default();
-        let page_path = snapshot_path_for_route(&snapshot_root, &route);
-        if let Some(parent) = page_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(&page_path, &body)?;
-        response_headers.insert(route.clone(), fetched.headers.clone());
+        snapshot.write_page(&route, &body, &fetched.headers)?;
 
         for target in extract_internal_links(&body) {
             if !should_enqueue_link(&target) {
                 continue;
             }
-            if !route_is_allowed(&target, &runtime) {
-                continue;
-            }
-            discovered_routes.insert(target.clone());
-            let child = if target.is_empty() {
-                normalized_base.clone()
-            } else {
-                format!("{}{}", normalized_base, target)
-            };
-            if host_for_url(&child) == base_host {
-                queue.push_back(child);
-            }
+            planner.discover_link_target(&target, &runtime);
         }
     }
 
-    write_optional_artifact(
-        &snapshot_root,
-        &normalized_base,
-        "robots.txt",
-        runtime.crawl_headers,
-        runtime.crawl_basic_auth,
-    )?;
-    write_optional_artifact(
-        &snapshot_root,
-        &normalized_base,
-        "llms.txt",
-        runtime.crawl_headers,
-        runtime.crawl_basic_auth,
-    )?;
-    write_optional_artifact(
-        &snapshot_root,
-        &normalized_base,
-        "sitemap.xml",
-        runtime.crawl_headers,
-        runtime.crawl_basic_auth,
-    )?;
-
-    let mut site = load_site(&snapshot_root)?;
-    site.root = PathBuf::from("crawl");
-    site.deployment_model = DeploymentModel::RuntimeSnapshot;
-    site.deployment_markers = vec!["runtime crawl snapshot".to_string()];
-    site.crawl_meta = Some(CrawlMeta {
-        visited_pages: visited.len(),
+    snapshot.write_optional_artifacts(planner.normalized_base(), &runtime)?;
+    let (site, snapshot_findings) = snapshot.finalize(
+        planner.visited_count(),
         max_pages,
-        discovered_internal_routes: discovered_routes.len(),
-        truncated,
-    });
-    for page in site.pages.iter_mut() {
-        page.path = PathBuf::from(response_report_path(&page.route));
-        if let Some(headers) = response_headers.get(&page.route) {
-            page.response_headers = headers.clone();
-        }
-    }
-    site.route_pages = site
-        .pages
-        .iter()
-        .cloned()
-        .map(|page| (page.route.clone(), page))
-        .collect();
-    if let Some(crawl_meta) = &site.crawl_meta
-        && crawl_meta.truncated
-    {
-        crawl_findings.push(Finding {
-            rule_id: "CRW003".to_string(),
-            message: format!(
-                "crawl stopped at max_pages={} after visiting {} pages; discovered at least {} internal routes, so graph-dependent findings may be incomplete",
-                crawl_meta.max_pages, crawl_meta.visited_pages, crawl_meta.discovered_internal_routes
-            ),
-            path: "crawl/index.html".to_string(),
-            line: 1,
-            column: 1,
-            severity: "warning".to_string(),
-            suggestion: Some("increase --max-pages for a more complete runtime audit".to_string()),
-        });
-    }
-    let _ = fs::remove_dir_all(&snapshot_root);
+        planner.discovered_route_count(),
+        planner.truncated(),
+    )?;
+    crawl_findings.extend(snapshot_findings);
     Ok((site, crawl_findings))
 }
 
