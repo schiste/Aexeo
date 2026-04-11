@@ -10,6 +10,7 @@ resolver = "2"
 version = "0.2.0"
 edition = "2024"
 authors = ["Christophe Henner"]
+publish = false
 
 [workspace.dependencies]
 anyhow = "1.0"

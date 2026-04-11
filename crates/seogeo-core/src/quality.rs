@@ -28,6 +28,8 @@ pub const QUALITY_RULES: &[(&str, &str)] = &[
     ),
     ("QLT019", "unwrap or expect in non-test Rust source"),
     ("QLT020", "unsafe Rust marker in non-test Rust source"),
+    ("QLT021", "missing cargo-deny policy file"),
+    ("QLT022", "missing dependency hygiene script"),
 ];
 
 const REQUIRED_DOC_FILES: &[&str] = &[
@@ -105,11 +107,17 @@ fn find_static_tooling_issues(root: &Path) -> Vec<Finding> {
             "scripts/install-seogeo.sh",
             "missing install script",
         ),
+        ("QLT021", "deny.toml", "missing cargo-deny policy file"),
         ("QLT014", "scripts/ci-local.sh", "missing local CI script"),
         (
             "QLT015",
             "scripts/install-hooks.sh",
             "missing git hook installation script",
+        ),
+        (
+            "QLT022",
+            "scripts/check-deps.sh",
+            "missing dependency hygiene script",
         ),
         ("QLT016", ".githooks/pre-commit", "missing pre-commit hook"),
         ("QLT017", ".githooks/pre-push", "missing pre-push hook"),
@@ -341,7 +349,9 @@ mod tests {
             "docs/release.md",
             "docs/rules.md",
             "Cargo.toml",
+            "deny.toml",
             "scripts/build-rust.sh",
+            "scripts/check-deps.sh",
             "scripts/ci-local.sh",
             "scripts/install-hooks.sh",
             "scripts/install-seogeo.sh",

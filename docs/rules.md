@@ -139,3 +139,5 @@ Reusable GEO rules extracted from the Chau7 website guidelines.
 - `QLT018`: debug or placeholder macro in non-test Rust source
 - `QLT019`: unwrap or expect in non-test Rust source
 - `QLT020`: unsafe Rust marker in non-test Rust source
+- `QLT021`: missing cargo-deny policy file
+- `QLT022`: missing dependency hygiene script
