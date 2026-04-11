@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone)]
@@ -14,13 +15,20 @@ pub(crate) struct FetchResult {
     pub(crate) effective_url: String,
 }
 
+static RUNTIME_NONCE: AtomicU64 = AtomicU64::new(0);
+
 pub(crate) fn unique_runtime_dir() -> Result<PathBuf> {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let path =
-        std::env::temp_dir().join(format!("seogeo-runtime-{}-{}", std::process::id(), nonce));
+    let sequence = RUNTIME_NONCE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "seogeo-runtime-{}-{}-{}",
+        std::process::id(),
+        nonce,
+        sequence
+    ));
     fs::create_dir_all(&path)?;
     Ok(path)
 }

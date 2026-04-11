@@ -34,8 +34,6 @@ const REQUIRED_DOC_FILES: &[&str] = &[
     "docs/rules.md",
 ];
 
-const ENTRYPOINT_NAMES: &[&str] = &["main"];
-
 fn find_missing_required_docs(root: &Path) -> Vec<Finding> {
     REQUIRED_DOC_FILES
         .iter()

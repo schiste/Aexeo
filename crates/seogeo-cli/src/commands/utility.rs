@@ -1,5 +1,4 @@
 use anyhow::{Result, bail};
-use clap::ArgMatches;
 
 use crate::commands::{
     config::command_config,
