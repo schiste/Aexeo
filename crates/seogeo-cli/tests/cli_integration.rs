@@ -91,6 +91,58 @@ fn parse_json(output: &[u8]) -> Value {
     serde_json::from_slice(output).unwrap()
 }
 
+fn write_minimal_site(root: &Path) {
+    write(
+        &root.join("index.html"),
+        "<html><head><title>Home</title><meta name=\"description\" content=\"Home page\"><link rel=\"canonical\" href=\"https://example.com/\"></head><body><h1>Home</h1><a href=\"/about\">About</a></body></html>",
+    );
+    write(
+        &root.join("about/index.html"),
+        "<html><head><title>About</title><meta name=\"description\" content=\"About page\"><link rel=\"canonical\" href=\"https://example.com/about/\"></head><body><h1>About</h1></body></html>",
+    );
+    write(
+        &root.join("seogeo.toml"),
+        "version = 1\n\n[site]\nurl = \"https://example.com\"\nsource_dir = \".\"\nadapter = \"auto\"\n",
+    );
+}
+
+#[test]
+fn rules_json_contract_lists_builtin_groups() {
+    let output = Command::new(bin())
+        .arg("rules")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "rules");
+    assert_eq!(payload["success"], true);
+    assert!(payload["items"].is_array());
+    assert!(
+        payload["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "html")
+    );
+}
+
+#[test]
+fn adapters_json_contract_lists_registered_adapters() {
+    let output = Command::new(bin())
+        .arg("adapters")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "adapters");
+    assert_eq!(payload["success"], true);
+    assert!(payload["items"].is_array());
+}
+
 #[test]
 fn check_command_reports_findings_for_temp_site() {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -128,6 +180,29 @@ fn plugin_check_validates_python_manifest_literal() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Example Plugin"));
     assert!(stdout.contains("example.plugin"));
+}
+
+#[test]
+fn plugin_check_json_contract_reports_manifest() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    write(
+        &temp_dir.path().join("example/plugin.py"),
+        "SEOGEO_PLUGIN_API_VERSION = 1\nSEOGEO_PLUGIN_MANIFEST = {'name':'Example Plugin','namespace':'example.plugin','version':'1.0.0','capabilities':['rules','adapters']}\ndef seogeo_register(registry):\n    return None\n",
+    );
+    let output = Command::new(bin())
+        .env("PYTHONPATH", temp_dir.path())
+        .arg("plugin-check")
+        .arg("example.plugin")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "plugin-check");
+    assert_eq!(payload["success"], true);
+    assert_eq!(payload["plugin"]["namespace"], "example.plugin");
+    assert!(payload["plugin"]["capabilities"].is_array());
 }
 
 #[test]
@@ -315,6 +390,108 @@ enabled = true
 }
 
 #[test]
+fn generate_json_contract_reports_kind_and_output() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    write_minimal_site(temp_dir.path());
+    let output = Command::new(bin())
+        .arg("generate")
+        .arg("llms")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "generate");
+    assert_eq!(payload["success"], true);
+    assert_eq!(payload["kind"], "llms");
+    assert!(payload["output"].as_str().unwrap().contains("#"));
+}
+
+#[test]
+fn fix_json_contract_reports_changed_paths() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    write_minimal_site(temp_dir.path());
+    let output = Command::new(bin())
+        .arg("fix")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "fix");
+    assert_eq!(payload["success"], true);
+    assert_eq!(payload["action"], "apply");
+    assert!(payload["paths"].is_array());
+}
+
+#[test]
+fn baseline_json_contract_reports_output_path() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    write_minimal_site(temp_dir.path());
+    let output = Command::new(bin())
+        .arg("baseline")
+        .arg(temp_dir.path())
+        .arg("--output")
+        .arg(temp_dir.path().join("custom-baseline.json"))
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "baseline");
+    assert_eq!(payload["success"], true);
+    assert!(
+        payload["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("custom-baseline.json")
+    );
+}
+
+#[test]
+fn docs_generate_json_contract_reports_changed_paths() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let output = Command::new(bin())
+        .arg("docs")
+        .arg("generate")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "docs");
+    assert_eq!(payload["success"], true);
+    assert_eq!(payload["action"], "generate");
+    assert!(payload["paths"].is_array());
+}
+
+#[test]
+fn docs_check_json_contract_reports_drift_paths() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let output = Command::new(bin())
+        .arg("docs")
+        .arg("check")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "docs");
+    assert_eq!(payload["success"], false);
+    assert_eq!(payload["action"], "check");
+    assert!(payload["paths"].is_array());
+}
+
+#[test]
 fn check_sarif_emits_config_warnings_on_stderr() {
     let temp_dir = tempfile::tempdir().unwrap();
     write(
@@ -476,4 +653,84 @@ fn verify_json_contract_reports_diff_summary() {
     assert_eq!(payload["summary"]["new"], 0);
     assert!(payload["diff"]["new_findings"].is_array());
     handle.join().unwrap();
+}
+
+#[test]
+fn diff_json_contract_reports_summary() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    write(
+        &temp_dir.path().join("index.html"),
+        "<html><head><title>Home</title></head><body><h1>Home</h1></body></html>",
+    );
+    let first = Command::new(bin())
+        .arg("check")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(!first.status.success());
+    let first_payload = parse_json(&first.stdout);
+    let baseline_path = temp_dir.path().join("baseline-audit.json");
+    fs::copy(
+        first_payload["audit_path"].as_str().unwrap(),
+        &baseline_path,
+    )
+    .unwrap();
+
+    write(
+        &temp_dir.path().join("index.html"),
+        "<html><head><title>Home</title><meta name=\"description\" content=\"Home page\"></head><body><h1>Home</h1><a href=\"/missing\">Learn more</a></body></html>",
+    );
+    let second = Command::new(bin())
+        .arg("check")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(!second.status.success());
+    let second_payload = parse_json(&second.stdout);
+    let current_path = second_payload["audit_path"].as_str().unwrap().to_string();
+
+    let diff_output = Command::new(bin())
+        .arg("diff")
+        .arg(&baseline_path)
+        .arg(&current_path)
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(!diff_output.status.success());
+    let payload = parse_json(&diff_output.stdout);
+    assert_eq!(payload["command"], "diff");
+    assert_eq!(payload["success"], false);
+    assert!(payload["summary"]["new"].as_u64().unwrap() >= 1);
+    assert!(payload["diff"]["new_findings"].is_array());
+}
+
+#[test]
+fn trend_json_contract_reports_history_entries() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let output = Command::new(bin())
+        .arg("quality")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+
+    let trend_output = Command::new(bin())
+        .arg("trend")
+        .arg("quality")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(trend_output.status.success());
+    let payload = parse_json(&trend_output.stdout);
+    assert!(payload.is_array());
+    assert!(!payload.as_array().unwrap().is_empty());
 }

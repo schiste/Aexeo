@@ -11,7 +11,10 @@ use seogeo_core::{
 use std::path::{Path, PathBuf};
 
 use crate::commands::common::{canonicalize_or_keep, required_arg};
-use crate::output::{emit_config_warnings, render_audit_command_json};
+use crate::output::{
+    emit_config_warnings, render_audit_command_json, render_path_command_json,
+    render_paths_command_json, render_text_command_json,
+};
 
 pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
     let root = canonicalize_or_keep(required_arg(submatches, "path")?);
@@ -93,23 +96,37 @@ pub fn command_generate(submatches: &ArgMatches) -> Result<i32> {
     let config = loaded.config;
     let site_config = config.site();
     let site = load_site(&resolve_static_site_root(&root, &config)?)?;
-    match submatches
+    let kind = submatches
         .get_one::<String>("kind")
         .map(String::as_str)
-        .ok_or_else(|| anyhow::anyhow!("missing required CLI argument 'kind'"))?
-    {
-        "llms" => println!("{}", render_llms_txt(&site, site_config.site_url)),
-        "llms-full" => println!("{}", render_llms_full_txt(&site, site_config.site_url)),
-        "markdown-mirror" => println!("{}", render_markdown_mirror(&site)),
+        .ok_or_else(|| anyhow::anyhow!("missing required CLI argument 'kind'"))?;
+    let output = match kind {
+        "llms" => render_llms_txt(&site, site_config.site_url),
+        "llms-full" => render_llms_full_txt(&site, site_config.site_url),
+        "markdown-mirror" => render_markdown_mirror(&site),
         "robots" => {
             let Some(site_url) = site_config.site_url else {
                 println!("site_url is required to generate robots.txt");
                 return Ok(2);
             };
-            println!("{}", render_robots_txt(site_url));
+            render_robots_txt(site_url)
         }
-        "links" => println!("{}", suggest_internal_links(&site, 3)),
+        "links" => suggest_internal_links(&site, 3),
         other => bail!("unsupported generate kind: {}", other),
+    };
+    match submatches
+        .get_one::<String>("format")
+        .map(String::as_str)
+        .unwrap_or("text")
+    {
+        "json" => println!(
+            "{}",
+            render_text_command_json("generate", kind, output, loaded.warnings)?
+        ),
+        _ => {
+            emit_config_warnings(&loaded.warnings);
+            println!("{}", output);
+        }
     }
     Ok(0)
 }
@@ -121,12 +138,29 @@ pub fn command_fix(submatches: &ArgMatches) -> Result<i32> {
     emit_config_warnings(&loaded.warnings);
     let config = loaded.config;
     let changed = apply_safe_fixes(&resolve_static_site_root(&root, &config)?, &config)?;
-    if changed.is_empty() {
-        println!("No safe fixes applied.");
-        return Ok(0);
-    }
-    for path in changed {
-        println!("{}", path.display());
+    let changed_paths = changed
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>();
+    match submatches
+        .get_one::<String>("format")
+        .map(String::as_str)
+        .unwrap_or("text")
+    {
+        "json" => println!(
+            "{}",
+            render_paths_command_json("fix", "apply", true, changed_paths, loaded.warnings)?
+        ),
+        _ if changed.is_empty() => {
+            emit_config_warnings(&loaded.warnings);
+            println!("No safe fixes applied.");
+        }
+        _ => {
+            emit_config_warnings(&loaded.warnings);
+            for path in changed {
+                println!("{}", path.display());
+            }
+        }
     }
     Ok(0)
 }
@@ -144,6 +178,24 @@ pub fn command_baseline(submatches: &ArgMatches) -> Result<i32> {
         .map(|path| path.canonicalize().unwrap_or(path))
         .unwrap_or_else(|| root.join(config.output().baseline_file));
     write_baseline_file(&findings, &output_path)?;
-    println!("{}", output_path.display());
+    match submatches
+        .get_one::<String>("format")
+        .map(String::as_str)
+        .unwrap_or("text")
+    {
+        "json" => println!(
+            "{}",
+            render_path_command_json(
+                "baseline",
+                true,
+                output_path.display().to_string(),
+                loaded.warnings,
+            )?
+        ),
+        _ => {
+            emit_config_warnings(&loaded.warnings);
+            println!("{}", output_path.display());
+        }
+    }
     Ok(0)
 }

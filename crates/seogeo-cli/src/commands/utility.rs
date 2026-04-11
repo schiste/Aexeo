@@ -11,8 +11,8 @@ use crate::commands::{
 
 pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
     match matches.subcommand() {
-        Some(("rules", _)) => Ok(command_rules()),
-        Some(("adapters", _)) => Ok(command_adapters()),
+        Some(("rules", submatches)) => command_rules(submatches),
+        Some(("adapters", submatches)) => command_adapters(submatches),
         Some(("config", submatches)) => command_config(submatches),
         Some(("check", submatches)) => command_check(submatches),
         Some(("quality", submatches)) => command_quality(
@@ -22,6 +22,7 @@ pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
         Some(("docs", submatches)) => command_docs(
             required_arg(submatches, "action")?,
             required_arg(submatches, "path")?,
+            required_arg(submatches, "format")?,
         ),
         Some(("diff", submatches)) => command_diff(
             required_arg(submatches, "baseline")?,

@@ -1,4 +1,5 @@
 use anyhow::{Result, bail};
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,7 +8,7 @@ use toml::Value;
 const PLUGIN_API_VERSION: usize = 1;
 const REGISTERED_PLUGIN_SETTINGS_SCHEMAS: &[PluginSettingsSchema] = &[];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PluginManifestCheck {
     pub name: String,
     pub namespace: String,

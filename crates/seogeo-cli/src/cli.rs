@@ -112,7 +112,13 @@ pub fn build_cli() -> Command {
                     "links",
                 ]))
                 .arg(Arg::new("path").default_value("."))
-                .arg(Arg::new("config").long("config").num_args(1)),
+                .arg(Arg::new("config").long("config").num_args(1))
+                .arg(
+                    Arg::new("format")
+                        .long("format")
+                        .value_parser(["text", "json"])
+                        .default_value("text"),
+                ),
         )
         .subcommand(
             Command::new("docs")
@@ -122,14 +128,26 @@ pub fn build_cli() -> Command {
                         .required(true)
                         .value_parser(["generate", "check"]),
                 )
-                .arg(Arg::new("path").default_value(".")),
+                .arg(Arg::new("path").default_value("."))
+                .arg(
+                    Arg::new("format")
+                        .long("format")
+                        .value_parser(["text", "json"])
+                        .default_value("text"),
+                ),
         )
         .subcommand(
             Command::new("baseline")
                 .about("Save a baseline audit for later regression comparison")
                 .arg(Arg::new("path").default_value("."))
                 .arg(Arg::new("config").long("config").num_args(1))
-                .arg(Arg::new("output").long("output").num_args(1)),
+                .arg(Arg::new("output").long("output").num_args(1))
+                .arg(
+                    Arg::new("format")
+                        .long("format")
+                        .value_parser(["text", "json"])
+                        .default_value("text"),
+                ),
         )
         .subcommand(
             Command::new("verify")
@@ -210,14 +228,44 @@ pub fn build_cli() -> Command {
             Command::new("fix")
                 .about("Apply safe deterministic fixes")
                 .arg(Arg::new("path").default_value("."))
-                .arg(Arg::new("config").long("config").num_args(1)),
+                .arg(Arg::new("config").long("config").num_args(1))
+                .arg(
+                    Arg::new("format")
+                        .long("format")
+                        .value_parser(["text", "json"])
+                        .default_value("text"),
+                ),
         )
-        .subcommand(Command::new("rules").about("List built-in rule groups"))
-        .subcommand(Command::new("adapters").about("List registered site adapters"))
+        .subcommand(
+            Command::new("rules")
+                .about("List built-in rule groups")
+                .arg(
+                    Arg::new("format")
+                        .long("format")
+                        .value_parser(["text", "json"])
+                        .default_value("text"),
+                ),
+        )
+        .subcommand(
+            Command::new("adapters")
+                .about("List registered site adapters")
+                .arg(
+                    Arg::new("format")
+                        .long("format")
+                        .value_parser(["text", "json"])
+                        .default_value("text"),
+                ),
+        )
         .subcommand(
             Command::new("plugin-check")
                 .about("Validate one plugin module manifest and compatibility")
-                .arg(Arg::new("module_name").required(true)),
+                .arg(Arg::new("module_name").required(true))
+                .arg(
+                    Arg::new("format")
+                        .long("format")
+                        .value_parser(["text", "json"])
+                        .default_value("text"),
+                ),
         )
 }
 

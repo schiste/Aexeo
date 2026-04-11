@@ -144,6 +144,10 @@ Options:
       --config <config>
           
 
+      --format <format>
+          [default: text]
+          [possible values: text, json]
+
   -h, --help
           Print help
 ```
@@ -155,7 +159,7 @@ Generate or verify code-derived repository docs
 ```text
 Generate or verify code-derived repository docs
 
-Usage: docs <action> [path]
+Usage: docs [OPTIONS] <action> [path]
 
 Arguments:
   <action>
@@ -165,6 +169,10 @@ Arguments:
           [default: .]
 
 Options:
+      --format <format>
+          [default: text]
+          [possible values: text, json]
+
   -h, --help
           Print help
 ```
@@ -188,6 +196,10 @@ Options:
 
       --output <output>
           
+
+      --format <format>
+          [default: text]
+          [possible values: text, json]
 
   -h, --help
           Print help
@@ -306,6 +318,10 @@ Options:
       --config <config>
           
 
+      --format <format>
+          [default: text]
+          [possible values: text, json]
+
   -h, --help
           Print help
 ```
@@ -317,9 +333,13 @@ List built-in rule groups
 ```text
 List built-in rule groups
 
-Usage: rules
+Usage: rules [OPTIONS]
 
 Options:
+      --format <format>
+          [default: text]
+          [possible values: text, json]
+
   -h, --help
           Print help
 ```
@@ -331,9 +351,13 @@ List registered site adapters
 ```text
 List registered site adapters
 
-Usage: adapters
+Usage: adapters [OPTIONS]
 
 Options:
+      --format <format>
+          [default: text]
+          [possible values: text, json]
+
   -h, --help
           Print help
 ```
@@ -345,13 +369,17 @@ Validate one plugin module manifest and compatibility
 ```text
 Validate one plugin module manifest and compatibility
 
-Usage: plugin-check <module_name>
+Usage: plugin-check [OPTIONS] <module_name>
 
 Arguments:
   <module_name>
           
 
 Options:
+      --format <format>
+          [default: text]
+          [possible values: text, json]
+
   -h, --help
           Print help
 ```

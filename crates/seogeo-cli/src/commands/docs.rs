@@ -1,5 +1,7 @@
 use crate::cli::render_cli_reference;
-use crate::output::{render_audit_command_json, render_diff_command_json};
+use crate::output::{
+    render_audit_command_json, render_diff_command_json, render_paths_command_json,
+};
 use anyhow::{Result, anyhow};
 use seogeo_core::{
     find_reference_doc_drift, load_findings_from_audit, render_diff_text, render_sarif,
@@ -43,29 +45,48 @@ pub fn command_quality(path: &str, output_format: &str) -> Result<i32> {
     })
 }
 
-pub fn command_docs(action: &str, path: &str) -> Result<i32> {
+pub fn command_docs(action: &str, path: &str, output_format: &str) -> Result<i32> {
     let root = canonicalize_or_keep(path);
     let cli_reference = render_cli_reference()?;
     if action == "generate" {
         let changed = write_reference_documents(&root, cli_reference)?;
-        if changed.is_empty() {
-            println!("Generated docs already up to date.");
-            return Ok(0);
-        }
-        for item in changed {
-            println!("{}", item.display());
+        let changed_paths = changed
+            .iter()
+            .map(|item| item.display().to_string())
+            .collect::<Vec<_>>();
+        match output_format {
+            "json" => println!(
+                "{}",
+                render_paths_command_json("docs", action, true, changed_paths, Vec::new())?
+            ),
+            _ if changed.is_empty() => println!("Generated docs already up to date."),
+            _ => {
+                for item in changed {
+                    println!("{}", item.display());
+                }
+            }
         }
         return Ok(0);
     }
     let drifted = find_reference_doc_drift(&root, cli_reference)?;
-    if drifted.is_empty() {
-        println!("Generated docs are up to date.");
-        return Ok(0);
+    let success = drifted.is_empty();
+    let drifted_paths = drifted
+        .iter()
+        .map(|item| item.display().to_string())
+        .collect::<Vec<_>>();
+    match output_format {
+        "json" => println!(
+            "{}",
+            render_paths_command_json("docs", action, success, drifted_paths, Vec::new())?
+        ),
+        _ if success => println!("Generated docs are up to date."),
+        _ => {
+            for item in drifted {
+                println!("{}", item.display());
+            }
+        }
     }
-    for item in drifted {
-        println!("{}", item.display());
-    }
-    Ok(1)
+    Ok(if success { 0 } else { 1 })
 }
 
 pub fn command_diff(baseline: &str, current: &str, output_format: &str) -> Result<i32> {
