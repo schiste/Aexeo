@@ -7,11 +7,8 @@ This repository is private and released through internal Rust build artifacts.
 Run the required validation sequence from the repository root:
 
 ```bash
-cargo fmt --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --all-targets
-cargo run -q -p seogeo-cli -- docs check .
-cargo run -q -p seogeo-cli -- quality .
+sh scripts/check-repo.sh
+sh scripts/pre-push.sh
 ```
 
 ## Build And Package

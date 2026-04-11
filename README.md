@@ -15,6 +15,22 @@ This repository is private and intended for internal use only.
 
 See [docs/install.md](docs/install.md) for supported installation and release paths.
 
+## Local Quality
+
+Install the repository hooks once per clone:
+
+```bash
+sh scripts/install-hooks.sh
+```
+
+`pre-commit` is intentionally the hardest local gate in this repository. It runs staged-file safeguards plus the full repo quality sequence from `scripts/check-repo.sh`.
+
+For a full local validation pass before opening a PR:
+
+```bash
+sh scripts/ci-local.sh
+```
+
 ## Rust-First Architecture
 
 The Rust workspace is now the canonical entrypoint for Aexeo.
@@ -64,6 +80,7 @@ cargo run -p seogeo-cli -- adapters
 - [docs/decisions.md](docs/decisions.md): enforced architecture decisions
 - [docs/package-boundaries.md](docs/package-boundaries.md): target package map for the future `website` monorepo move
 - [docs/install.md](docs/install.md): internal install and upgrade instructions
+- [docs/local-quality.md](docs/local-quality.md): local hook model and repo-quality enforcement
 - [docs/release.md](docs/release.md): internal release checklist and packaging flow
 - [docs/astro-ci.md](docs/astro-ci.md): Astro CI and deployment-gate workflow
 - [docs/cli.md](docs/cli.md): generated CLI reference

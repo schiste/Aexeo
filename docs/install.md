@@ -10,6 +10,12 @@ Run the CLI directly from source:
 cargo run -p seogeo-cli -- check .
 ```
 
+Install local git hooks after cloning:
+
+```bash
+sh scripts/install-hooks.sh
+```
+
 For a local release-style binary:
 
 ```bash
@@ -61,14 +67,16 @@ This produces:
 
 Use [docs/release.md](release.md) as the canonical release checklist.
 
-The minimum release gate is:
+The minimum repo-quality gate is:
 
 ```bash
-cargo fmt --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --all-targets
-cargo run -q -p seogeo-cli -- docs check .
-cargo run -q -p seogeo-cli -- quality .
+sh scripts/check-repo.sh
+```
+
+The local CI superset is:
+
+```bash
+sh scripts/ci-local.sh
 ```
 
 ## Browser Crawl Notes

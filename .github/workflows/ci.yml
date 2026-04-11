@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,15 +14,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Run fmt check
-        run: cargo fmt --check
-      - name: Run clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Run tests
-        run: cargo test --workspace --all-targets
-      - name: Check generated docs
-        run: cargo run -q -p seogeo-cli -- docs check .
-      - name: Run repository quality gate
-        run: cargo run -q -p seogeo-cli -- quality . --format text
-      - name: Build release binary
-        run: cargo build --release
+      - name: Run repo quality gate
+        run: sh scripts/check-repo.sh
+      - name: Run release install smoke
+        run: sh scripts/pre-push.sh

@@ -1,47 +1,55 @@
-site_url = "https://example.com"
+version = 1
+profile = "generic"
+
+[site]
+url = "https://example.com"
 source_dir = "."
 adapter = "auto"
 canonical_style = "extensionless"
-browser_engine = "auto"
-audit_log_limit = 5
-baseline_file = ".seogeo-baseline.json"
 
-[checks]
-html = true
-links = true
-sitemap = true
-robots = true
-social = true
-schema = true
-llm = true
-content = true
-structure = true
+[runtime]
+engine = "http"
 
-[content_rules]
-min_page_size = 500
-required_feature_markers = ["Related features"]
+[rules.html]
+enabled = true
 
-[schema_rules]
-required_types = []
+[rules.links]
+enabled = true
+link_suggestion_count = 3
+enable_link_autofix = false
+related_links_heading = "Related pages"
+weak_anchor_text = ["click here", "learn more", "read more", "here", "more"]
 
-[social_rules]
+[rules.sitemap]
+enabled = true
+
+[rules.robots]
+enabled = true
+require_sitemap = true
+require_meta_consistency = true
+
+[rules.social]
+enabled = true
 require_open_graph = true
 require_twitter_card = true
 default_twitter_card = "summary"
 require_social_images = false
 require_twitter_image = false
 
-[robots_rules]
-require_sitemap_declaration = true
-require_meta_robots_consistency = true
+[rules.schema]
+enabled = true
+required_types = []
 
-[link_rules]
-weak_anchor_text = ["click here", "learn more", "read more", "here", "more"]
-suggestion_count = 3
-enable_autofix = false
-related_links_heading = "Related pages"
+[rules.llm]
+enabled = true
 
-[geo_rules]
+[rules.content]
+enabled = true
+min_page_size = 500
+required_feature_markers = ["Related features"]
+
+[rules.structure]
+enabled = true
 min_block_text_length = 120
 min_answer_blocks = 2
 require_fact_consistency = true

@@ -21,10 +21,10 @@ That is what "every function must be unique" means in this project:
 - no separate source of truth for the same behavior in multiple modules
 
 Examples already enforced in the codebase:
-- route/page selection lives in `site.py`
-- rule registration lives in `registry.py`
-- config parsing lives in `config.py`
-- output shape lives in `models.py`
+- route/page selection lives in `site.rs`
+- rule registration lives in `registry.rs`
+- config parsing lives in `config/`
+- output shape lives in `contracts`
 
 ## Documentation Standard
 
@@ -50,6 +50,18 @@ Expected coverage style:
 - binary-level integration tests for the supported Rust CLI surface
 
 The preferred pattern is deterministic fixture construction with small local HTML strings rather than large snapshots.
+
+## Local Enforcement
+
+This repository treats `pre-commit` as the hardest local quality gate.
+
+That means:
+- staged-file protections should stay fast and high-signal
+- repo-wide Rust validation is allowed at commit time
+- `unwrap`, `expect`, `todo!`, `unimplemented!`, `dbg!`, and `unsafe` in non-test Rust code are policy failures
+- release and install smoke belong in `pre-push` or `ci-local`, not hidden ad hoc scripts
+
+The canonical local workflow is documented in [local-quality.md](local-quality.md).
 
 ## Abstraction Standard
 
