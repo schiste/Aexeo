@@ -73,6 +73,12 @@ Options:
       --checkpoint-every <checkpoint-every>
           [default: 25]
 
+      --artifact-every <artifact-every>
+          [default: 25]
+
+      --artifact-min-interval-ms <artifact-min-interval-ms>
+          [default: 15000]
+
       --retry-budget <retry-budget>
           [default: 2]
 
@@ -267,6 +273,12 @@ Options:
 
       --checkpoint-every <checkpoint-every>
           [default: 25]
+
+      --artifact-every <artifact-every>
+          [default: 25]
+
+      --artifact-min-interval-ms <artifact-min-interval-ms>
+          [default: 15000]
 
       --retry-budget <retry-budget>
           [default: 2]

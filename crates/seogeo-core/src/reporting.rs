@@ -363,15 +363,39 @@ fn artifact_status_lines(artifact: &AuditArtifact) -> Vec<String> {
     }
     if let Some(crawl) = artifact.crawl.as_ref() {
         lines.push(format!(
-            "- Crawl stats: engine={} visited={} discovered={} queued={} retries={} fetch_failures={} skipped_non_html={}",
+            "- Crawl stats: engine={} visited={} discovered={} queued={} retries={} fetch_failures={} skipped_non_html={} elapsed_ms={} pages_per_minute={}",
             crawl.engine,
             crawl.visited_pages,
             crawl.discovered_internal_routes,
             crawl.queued_routes_remaining,
             crawl.fetch_retries,
             crawl.fetch_failures,
-            crawl.skipped_non_html
+            crawl.skipped_non_html,
+            crawl.elapsed_ms,
+            crawl.pages_per_minute
         ));
+        lines.push(format!(
+            "- Runtime timings: avg_fetch_ms={} avg_page_process_ms={} avg_partial_audit_ms={} checkpoints_written={} partial_artifacts_written={}",
+            crawl.average_fetch_ms,
+            crawl.average_page_process_ms,
+            crawl.average_partial_audit_ms,
+            crawl.checkpoints_written,
+            crawl.partial_artifacts_written
+        ));
+        if !crawl.slowest_paths.is_empty() {
+            let slowest = crawl
+                .slowest_paths
+                .iter()
+                .map(|path| {
+                    format!(
+                        "{} (fetch={}ms process={}ms)",
+                        path.url, path.fetch_ms, path.process_ms
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!("- Slowest paths: {}", slowest));
+        }
     }
     lines
 }
@@ -482,6 +506,34 @@ pub fn render_markdown_artifact(artifact: &AuditArtifact, audit_path: Option<&Pa
     lines.push(format!("- Warnings: `{}`", artifact.summary.warnings));
     lines.push(format!("- Actionable: `{}`", artifact.summary.actionable));
     lines.push(format!("- Heuristic: `{}`", artifact.summary.heuristic));
+    if let Some(crawl) = artifact.crawl.as_ref() {
+        lines.push(format!(
+            "- Crawl: engine=`{}` visited=`{}` discovered=`{}` queued=`{}` elapsed_ms=`{}` pages_per_minute=`{}`",
+            crawl.engine,
+            crawl.visited_pages,
+            crawl.discovered_internal_routes,
+            crawl.queued_routes_remaining,
+            crawl.elapsed_ms,
+            crawl.pages_per_minute
+        ));
+        lines.push(format!(
+            "- Timings: avg_fetch_ms=`{}` avg_page_process_ms=`{}` avg_partial_audit_ms=`{}` checkpoints_written=`{}` partial_artifacts_written=`{}`",
+            crawl.average_fetch_ms,
+            crawl.average_page_process_ms,
+            crawl.average_partial_audit_ms,
+            crawl.checkpoints_written,
+            crawl.partial_artifacts_written
+        ));
+        if !crawl.slowest_paths.is_empty() {
+            lines.push("- Slowest paths:".to_string());
+            for path in &crawl.slowest_paths {
+                lines.push(format!(
+                    "  - `{}` fetch=`{}ms` process=`{}ms`",
+                    path.url, path.fetch_ms, path.process_ms
+                ));
+            }
+        }
+    }
     lines.push(String::new());
 
     for scope in [
@@ -776,14 +828,31 @@ mod tests {
                 fetch_retries: 2,
                 skipped_non_html: 3,
                 truncated: true,
+                elapsed_ms: 1_200,
+                pages_per_minute: 500,
+                checkpoints_written: 2,
+                partial_artifacts_written: 1,
+                total_fetch_ms: 400,
+                average_fetch_ms: 40,
+                total_page_process_ms: 300,
+                average_page_process_ms: 30,
+                total_partial_audit_ms: 80,
+                average_partial_audit_ms: 80,
+                slowest_paths: vec![seogeo_contracts::SlowCrawlPath {
+                    url: "https://example.test/about".into(),
+                    fetch_ms: 55,
+                    process_ms: 44,
+                }],
             }),
             Some("hit max-pages budget".into()),
         );
         let text = render_text_artifact(&artifact, "ok", None);
         assert!(text.contains("Status: partial"));
         assert!(text.contains("Completion ratio"));
+        assert!(text.contains("Runtime timings"));
         let markdown = render_markdown_artifact(&artifact, None);
         assert!(markdown.contains("## Summary"));
+        assert!(markdown.contains("Slowest paths"));
         let json = render_audit_artifact_json(&artifact).unwrap();
         assert!(json.contains("\"status\": \"partial\""));
     }

@@ -65,7 +65,7 @@ fn print_progress(mode: &str, event: RuntimeProgressEvent) {
         "plain" => {
             if event.phase == "complete" {
                 eprintln!(
-                    "crawl complete: engine={} visited={} discovered={} queued={} retries={} failures={} skipped_non_html={} truncated={}",
+                    "crawl complete: engine={} visited={} discovered={} queued={} retries={} failures={} skipped_non_html={} truncated={} elapsed_ms={} ppm={} avg_fetch_ms={} avg_process_ms={} avg_partial_audit_ms={} checkpoints={} partial_artifacts={}",
                     event.engine,
                     event.visited_pages,
                     event.discovered_internal_routes,
@@ -73,14 +73,27 @@ fn print_progress(mode: &str, event: RuntimeProgressEvent) {
                     event.fetch_retries,
                     event.fetch_failures,
                     event.skipped_non_html,
-                    event.truncated
+                    event.truncated,
+                    event.elapsed_ms,
+                    event.pages_per_minute,
+                    event.average_fetch_ms,
+                    event.average_page_process_ms,
+                    event.average_partial_audit_ms,
+                    event.checkpoints_written,
+                    event.partial_artifacts_written
                 );
             } else {
                 eprintln!(
-                    "crawl progress: visited={} discovered={} queued={} url={}",
+                    "crawl progress: visited={} discovered={} queued={} ppm={} avg_fetch_ms={} avg_process_ms={} avg_partial_audit_ms={} checkpoints={} partial_artifacts={} url={}",
                     event.visited_pages,
                     event.discovered_internal_routes,
                     event.queued_routes_remaining,
+                    event.pages_per_minute,
+                    event.average_fetch_ms,
+                    event.average_page_process_ms,
+                    event.average_partial_audit_ms,
+                    event.checkpoints_written,
+                    event.partial_artifacts_written,
                     event.current_url.as_deref().unwrap_or("-")
                 );
             }
@@ -100,6 +113,10 @@ fn runtime_options_from_cli<'a>(
         checkpoint_every: *submatches
             .get_one::<usize>("checkpoint-every")
             .unwrap_or(&25),
+        partial_artifact_every: *submatches.get_one::<usize>("artifact-every").unwrap_or(&25),
+        partial_artifact_min_interval_ms: *submatches
+            .get_one::<u64>("artifact-min-interval-ms")
+            .unwrap_or(&15_000),
         resume_from: submatches.get_one::<String>("resume").map(Path::new),
         fetch_retry_budget: *submatches.get_one::<usize>("retry-budget").unwrap_or(&2),
         progress,

@@ -64,6 +64,18 @@ pub fn build_cli() -> Command {
                         .default_value("25"),
                 )
                 .arg(
+                    Arg::new("artifact-every")
+                        .long("artifact-every")
+                        .value_parser(value_parser!(usize))
+                        .default_value("25"),
+                )
+                .arg(
+                    Arg::new("artifact-min-interval-ms")
+                        .long("artifact-min-interval-ms")
+                        .value_parser(value_parser!(u64))
+                        .default_value("15000"),
+                )
+                .arg(
                     Arg::new("retry-budget")
                         .long("retry-budget")
                         .value_parser(value_parser!(usize))
@@ -216,6 +228,18 @@ pub fn build_cli() -> Command {
                         .long("checkpoint-every")
                         .value_parser(value_parser!(usize))
                         .default_value("25"),
+                )
+                .arg(
+                    Arg::new("artifact-every")
+                        .long("artifact-every")
+                        .value_parser(value_parser!(usize))
+                        .default_value("25"),
+                )
+                .arg(
+                    Arg::new("artifact-min-interval-ms")
+                        .long("artifact-min-interval-ms")
+                        .value_parser(value_parser!(u64))
+                        .default_value("15000"),
                 )
                 .arg(
                     Arg::new("retry-budget")
