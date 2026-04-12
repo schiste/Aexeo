@@ -1,12 +1,12 @@
 use anyhow::{Context, Result, bail};
-use csv::ReaderBuilder;
+use csv::{ReaderBuilder, Writer};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use url::Url;
 
 use crate::config::{Config, load_config};
@@ -83,6 +83,72 @@ pub struct BingAiImportReport {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BingAiOpportunity {
+    pub url: String,
+    pub route: String,
+    pub citations: u64,
+    pub audit_findings: usize,
+    pub audit_errors: usize,
+    pub audit_warnings: usize,
+    pub score: u64,
+    pub priority: String,
+    pub rationale: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BingAiOpportunityReport {
+    pub rows_read: usize,
+    pub urls_seen: usize,
+    pub clean_cited_urls: usize,
+    pub opportunities: Vec<BingAiOpportunity>,
+    pub unmatched_urls: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BingAiTrendRoute {
+    pub url: String,
+    pub route: String,
+    pub citations: u64,
+    pub audit_findings: usize,
+    pub audit_errors: usize,
+    pub audit_warnings: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BingAiTrendSnapshot {
+    pub imported_at: u64,
+    pub source_path: String,
+    pub audit_path: Option<String>,
+    pub rows_read: usize,
+    pub urls_seen: usize,
+    pub total_citations: u64,
+    pub routes: Vec<BingAiTrendRoute>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BingAiTrendDelta {
+    pub url: String,
+    pub route: String,
+    pub previous_citations: u64,
+    pub current_citations: u64,
+    pub citation_delta: i64,
+    pub audit_findings: usize,
+    pub audit_errors: usize,
+    pub audit_warnings: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BingAiTrendReport {
+    pub snapshots: usize,
+    pub current: Option<BingAiTrendSnapshot>,
+    pub previous: Option<BingAiTrendSnapshot>,
+    pub increased: Vec<BingAiTrendDelta>,
+    pub decreased: Vec<BingAiTrendDelta>,
+    pub newly_cited: Vec<BingAiTrendDelta>,
+    pub no_longer_cited: Vec<BingAiTrendDelta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SearchConsoleExportRow {
     pub route: String,
     pub url: Option<String>,
@@ -99,9 +165,43 @@ pub struct PublishHookReport {
     pub changed_routes: Vec<String>,
     pub finding_count: usize,
     pub findings_by_route: BTreeMap<String, usize>,
+    pub audit_path: String,
+    pub search_console_export_path: String,
+    pub indexnow_ledger_path: Option<String>,
     pub search_console_rows: Vec<SearchConsoleExportRow>,
     pub indexnow_validation: Option<IndexNowValidation>,
     pub indexnow_submission: Option<IndexNowSubmission>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IndexNowLedgerEntry {
+    pub submitted_at: u64,
+    pub attempt: usize,
+    pub endpoint: String,
+    pub site_url: String,
+    pub host: String,
+    pub key_location: String,
+    pub urls: Vec<String>,
+    pub submitted_urls: usize,
+    pub status_code: Option<u16>,
+    pub success: bool,
+    pub retryable: bool,
+    pub response_body: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct IndexNowLedger {
+    pub entries: Vec<IndexNowLedgerEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IndexNowRetryReport {
+    pub ledger_path: String,
+    pub attempted: usize,
+    pub succeeded: usize,
+    pub failed: usize,
+    pub entries: Vec<IndexNowLedgerEntry>,
 }
 
 fn normalize_directives(page: &Page) -> BTreeSet<String> {
@@ -116,6 +216,31 @@ fn normalize_directives(page: &Page) -> BTreeSet<String> {
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| !value.is_empty())
         .collect()
+}
+
+fn now_epoch_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn ensure_reports_dir(root: &Path) -> Result<PathBuf> {
+    let reports_dir = root.join(".seogeo-reports");
+    fs::create_dir_all(&reports_dir)?;
+    Ok(reports_dir)
+}
+
+fn indexnow_ledger_path(root: &Path) -> PathBuf {
+    root.join(".seogeo-reports/indexnow-ledger.json")
+}
+
+fn bing_ai_trend_path(root: &Path) -> PathBuf {
+    root.join(".seogeo-reports/bing-ai-trends.json")
+}
+
+fn publish_hook_search_console_path(root: &Path) -> PathBuf {
+    root.join(".seogeo-reports/publish-hook-search-console.csv")
 }
 
 fn restrictive_max_snippet(directives: &BTreeSet<String>) -> Option<String> {
@@ -347,6 +472,144 @@ pub fn submit_indexnow(
     })
 }
 
+pub fn load_indexnow_ledger(root: &Path) -> Result<IndexNowLedger> {
+    let path = indexnow_ledger_path(root);
+    if !path.exists() {
+        return Ok(IndexNowLedger::default());
+    }
+    Ok(serde_json::from_str(&fs::read_to_string(path)?)?)
+}
+
+fn write_indexnow_ledger(root: &Path, ledger: &IndexNowLedger) -> Result<PathBuf> {
+    let path = indexnow_ledger_path(root);
+    ensure_reports_dir(root)?;
+    fs::write(&path, serde_json::to_string_pretty(ledger)?)?;
+    Ok(path)
+}
+
+fn is_retryable_indexnow_status(status_code: u16) -> bool {
+    status_code == 429 || status_code >= 500
+}
+
+fn next_attempt_number(
+    ledger: &IndexNowLedger,
+    endpoint: &str,
+    site_url: &str,
+    urls: &[String],
+) -> usize {
+    ledger
+        .entries
+        .iter()
+        .filter(|entry| {
+            entry.endpoint == endpoint && entry.site_url == site_url && entry.urls == urls
+        })
+        .map(|entry| entry.attempt)
+        .max()
+        .unwrap_or(0)
+        + 1
+}
+
+pub fn submit_indexnow_with_ledger(
+    root: &Path,
+    endpoint: &str,
+    site_url: &str,
+    key: &str,
+    urls: &[String],
+) -> Result<IndexNowLedgerEntry> {
+    let validation = validate_indexnow(site_url, key, Some(root))?;
+    if !validation.errors.is_empty() {
+        bail!(
+            "IndexNow validation failed: {}",
+            validation.errors.join("; ")
+        );
+    }
+    let mut ledger = load_indexnow_ledger(root)?;
+    let attempt = next_attempt_number(&ledger, endpoint, site_url, urls);
+    let entry = match submit_indexnow(endpoint, site_url, key, urls) {
+        Ok(submission) => IndexNowLedgerEntry {
+            submitted_at: now_epoch_seconds(),
+            attempt,
+            endpoint: endpoint.to_string(),
+            site_url: site_url.to_string(),
+            host: submission.host,
+            key_location: submission.key_location,
+            urls: urls.to_vec(),
+            submitted_urls: submission.submitted_urls,
+            status_code: Some(submission.status_code),
+            success: submission.success,
+            retryable: is_retryable_indexnow_status(submission.status_code),
+            response_body: submission.response_body,
+            error: None,
+        },
+        Err(error) => IndexNowLedgerEntry {
+            submitted_at: now_epoch_seconds(),
+            attempt,
+            endpoint: endpoint.to_string(),
+            site_url: site_url.to_string(),
+            host: validation.host,
+            key_location: validation.key_location,
+            urls: urls.to_vec(),
+            submitted_urls: urls.len(),
+            status_code: None,
+            success: false,
+            retryable: true,
+            response_body: None,
+            error: Some(error.to_string()),
+        },
+    };
+    ledger.entries.push(entry.clone());
+    let _ = write_indexnow_ledger(root, &ledger)?;
+    Ok(entry)
+}
+
+pub fn retry_indexnow_submissions(
+    root: &Path,
+    key: &str,
+    limit: usize,
+) -> Result<IndexNowRetryReport> {
+    let ledger = load_indexnow_ledger(root)?;
+    let ledger_path = indexnow_ledger_path(root);
+    let mut latest_by_batch = BTreeMap::<(String, String, Vec<String>), IndexNowLedgerEntry>::new();
+    for entry in &ledger.entries {
+        let key = (
+            entry.endpoint.clone(),
+            entry.site_url.clone(),
+            entry.urls.clone(),
+        );
+        let should_replace = latest_by_batch
+            .get(&key)
+            .is_none_or(|existing| entry.attempt > existing.attempt);
+        if should_replace {
+            latest_by_batch.insert(key, entry.clone());
+        }
+    }
+    let pending = latest_by_batch
+        .into_values()
+        .filter(|entry| !entry.success && entry.retryable)
+        .take(limit)
+        .collect::<Vec<_>>();
+    let mut retried = Vec::new();
+    let mut succeeded = 0usize;
+    let mut failed = 0usize;
+    for entry in pending {
+        let result =
+            submit_indexnow_with_ledger(root, &entry.endpoint, &entry.site_url, key, &entry.urls)?;
+        if result.success {
+            succeeded += 1;
+        } else {
+            failed += 1;
+        }
+        retried.push(result);
+    }
+    Ok(IndexNowRetryReport {
+        ledger_path: ledger_path.to_string_lossy().into_owned(),
+        attempted: retried.len(),
+        succeeded,
+        failed,
+        entries: retried,
+    })
+}
+
 fn normalize_export_key(key: &str) -> String {
     key.to_ascii_lowercase()
         .chars()
@@ -497,6 +760,267 @@ pub fn import_bing_ai_export(path: &Path, audit_path: Option<&Path>) -> Result<B
     })
 }
 
+fn priority_label(score: u64) -> String {
+    if score >= 200 {
+        "critical".to_string()
+    } else if score >= 80 {
+        "high".to_string()
+    } else if score >= 40 {
+        "medium".to_string()
+    } else {
+        "low".to_string()
+    }
+}
+
+fn opportunity_score(summary: &BingAiUrlSummary, unmatched: bool) -> (u64, Vec<String>) {
+    let mut score = summary.citations.saturating_mul(5);
+    let mut rationale = Vec::new();
+    if summary.citations > 0 {
+        rationale.push(format!("{} Bing AI citations", summary.citations));
+    }
+    if summary.audit_errors > 0 {
+        score = score.saturating_add((summary.audit_errors as u64).saturating_mul(50));
+        rationale.push(format!("{} audit errors", summary.audit_errors));
+    }
+    if summary.audit_warnings > 0 {
+        score = score.saturating_add((summary.audit_warnings as u64).saturating_mul(10));
+        rationale.push(format!("{} audit warnings", summary.audit_warnings));
+    }
+    if unmatched {
+        score = score.saturating_add(75);
+        rationale.push("URL is cited by Bing AI but missing from the audit artifact".to_string());
+    }
+    (score, rationale)
+}
+
+pub fn build_bing_ai_opportunity_report(
+    path: &Path,
+    audit_path: &Path,
+) -> Result<BingAiOpportunityReport> {
+    let imported = import_bing_ai_export(path, Some(audit_path))?;
+    let unmatched = imported
+        .unmatched_urls
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let opportunities = imported
+        .cited_urls
+        .iter()
+        .filter_map(|summary| {
+            let is_unmatched = unmatched.contains(&summary.url);
+            let (score, rationale) = opportunity_score(summary, is_unmatched);
+            if score == 0 {
+                return None;
+            }
+            Some(BingAiOpportunity {
+                url: summary.url.clone(),
+                route: summary.route.clone(),
+                citations: summary.citations,
+                audit_findings: summary.audit_findings,
+                audit_errors: summary.audit_errors,
+                audit_warnings: summary.audit_warnings,
+                score,
+                priority: priority_label(score),
+                rationale,
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut opportunities = opportunities;
+    opportunities.sort_by(|left, right| {
+        right
+            .score
+            .cmp(&left.score)
+            .then_with(|| left.url.cmp(&right.url))
+    });
+    Ok(BingAiOpportunityReport {
+        rows_read: imported.rows_read,
+        urls_seen: imported.urls_seen,
+        clean_cited_urls: imported
+            .cited_urls
+            .iter()
+            .filter(|summary| summary.audit_findings == 0)
+            .count(),
+        opportunities,
+        unmatched_urls: imported.unmatched_urls,
+    })
+}
+
+fn build_bing_ai_trend_snapshot(
+    source_path: &Path,
+    audit_path: Option<&Path>,
+) -> Result<BingAiTrendSnapshot> {
+    let imported = import_bing_ai_export(source_path, audit_path)?;
+    let routes = imported
+        .cited_urls
+        .iter()
+        .map(|summary| BingAiTrendRoute {
+            url: summary.url.clone(),
+            route: summary.route.clone(),
+            citations: summary.citations,
+            audit_findings: summary.audit_findings,
+            audit_errors: summary.audit_errors,
+            audit_warnings: summary.audit_warnings,
+        })
+        .collect::<Vec<_>>();
+    Ok(BingAiTrendSnapshot {
+        imported_at: now_epoch_seconds(),
+        source_path: source_path.to_string_lossy().into_owned(),
+        audit_path: audit_path.map(|path| path.to_string_lossy().into_owned()),
+        rows_read: imported.rows_read,
+        urls_seen: imported.urls_seen,
+        total_citations: routes.iter().map(|route| route.citations).sum(),
+        routes,
+    })
+}
+
+pub fn record_bing_ai_trend(
+    root: &Path,
+    source_path: &Path,
+    audit_path: Option<&Path>,
+) -> Result<BingAiTrendSnapshot> {
+    let mut history = load_bing_ai_trends(root)?;
+    let snapshot = build_bing_ai_trend_snapshot(source_path, audit_path)?;
+    history.push(snapshot.clone());
+    ensure_reports_dir(root)?;
+    fs::write(
+        bing_ai_trend_path(root),
+        serde_json::to_string_pretty(&history)?,
+    )?;
+    Ok(snapshot)
+}
+
+pub fn load_bing_ai_trends(root: &Path) -> Result<Vec<BingAiTrendSnapshot>> {
+    let path = bing_ai_trend_path(root);
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    Ok(serde_json::from_str(&fs::read_to_string(path)?)?)
+}
+
+fn compare_bing_ai_routes(
+    current: &BingAiTrendSnapshot,
+    previous: Option<&BingAiTrendSnapshot>,
+) -> BingAiTrendReport {
+    let previous_routes = previous
+        .map(|snapshot| {
+            snapshot
+                .routes
+                .iter()
+                .map(|route| (route.route.clone(), route.clone()))
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
+    let current_routes = current
+        .routes
+        .iter()
+        .map(|route| (route.route.clone(), route.clone()))
+        .collect::<BTreeMap<_, _>>();
+
+    let mut increased = Vec::new();
+    let mut decreased = Vec::new();
+    let mut newly_cited = Vec::new();
+    let mut no_longer_cited = Vec::new();
+
+    for (route, current_route) in &current_routes {
+        match previous_routes.get(route) {
+            Some(previous_route) => {
+                let delta = current_route.citations as i64 - previous_route.citations as i64;
+                if delta > 0 {
+                    increased.push(BingAiTrendDelta {
+                        url: current_route.url.clone(),
+                        route: route.clone(),
+                        previous_citations: previous_route.citations,
+                        current_citations: current_route.citations,
+                        citation_delta: delta,
+                        audit_findings: current_route.audit_findings,
+                        audit_errors: current_route.audit_errors,
+                        audit_warnings: current_route.audit_warnings,
+                    });
+                } else if delta < 0 {
+                    decreased.push(BingAiTrendDelta {
+                        url: current_route.url.clone(),
+                        route: route.clone(),
+                        previous_citations: previous_route.citations,
+                        current_citations: current_route.citations,
+                        citation_delta: delta,
+                        audit_findings: current_route.audit_findings,
+                        audit_errors: current_route.audit_errors,
+                        audit_warnings: current_route.audit_warnings,
+                    });
+                }
+            }
+            None => newly_cited.push(BingAiTrendDelta {
+                url: current_route.url.clone(),
+                route: route.clone(),
+                previous_citations: 0,
+                current_citations: current_route.citations,
+                citation_delta: current_route.citations as i64,
+                audit_findings: current_route.audit_findings,
+                audit_errors: current_route.audit_errors,
+                audit_warnings: current_route.audit_warnings,
+            }),
+        }
+    }
+
+    for (route, previous_route) in &previous_routes {
+        if !current_routes.contains_key(route) {
+            no_longer_cited.push(BingAiTrendDelta {
+                url: previous_route.url.clone(),
+                route: route.clone(),
+                previous_citations: previous_route.citations,
+                current_citations: 0,
+                citation_delta: -(previous_route.citations as i64),
+                audit_findings: previous_route.audit_findings,
+                audit_errors: previous_route.audit_errors,
+                audit_warnings: previous_route.audit_warnings,
+            });
+        }
+    }
+
+    for deltas in [
+        &mut increased,
+        &mut decreased,
+        &mut newly_cited,
+        &mut no_longer_cited,
+    ] {
+        deltas.sort_by(|left, right| {
+            right
+                .citation_delta
+                .abs()
+                .cmp(&left.citation_delta.abs())
+                .then_with(|| left.route.cmp(&right.route))
+        });
+    }
+
+    BingAiTrendReport {
+        snapshots: if previous.is_some() { 2 } else { 1 },
+        current: Some(current.clone()),
+        previous: previous.cloned(),
+        increased,
+        decreased,
+        newly_cited,
+        no_longer_cited,
+    }
+}
+
+pub fn build_bing_ai_trend_report(root: &Path) -> Result<BingAiTrendReport> {
+    let history = load_bing_ai_trends(root)?;
+    let current = history.last().cloned();
+    let previous = history.iter().rev().nth(1).cloned();
+    Ok(match current {
+        Some(snapshot) => compare_bing_ai_routes(&snapshot, previous.as_ref()),
+        None => BingAiTrendReport {
+            snapshots: 0,
+            current: None,
+            previous: None,
+            increased: Vec::new(),
+            decreased: Vec::new(),
+            newly_cited: Vec::new(),
+            no_longer_cited: Vec::new(),
+        },
+    })
+}
+
 pub fn export_search_console_rows(
     audit_path: &Path,
     site_url: Option<&str>,
@@ -547,6 +1071,33 @@ pub fn export_search_console_rows(
     Ok(rows)
 }
 
+fn render_search_console_rows_csv(rows: &[SearchConsoleExportRow]) -> Result<String> {
+    let mut writer = Writer::from_writer(Vec::new());
+    writer.write_record([
+        "route",
+        "url",
+        "findings",
+        "errors",
+        "warnings",
+        "heuristic",
+        "rule_groups",
+        "rule_ids",
+    ])?;
+    for row in rows {
+        writer.write_record([
+            row.route.as_str(),
+            row.url.as_deref().unwrap_or(""),
+            &row.findings.to_string(),
+            &row.errors.to_string(),
+            &row.warnings.to_string(),
+            &row.heuristic.to_string(),
+            &row.rule_groups.join("|"),
+            &row.rule_ids.join("|"),
+        ])?;
+    }
+    Ok(String::from_utf8(writer.into_inner()?)?)
+}
+
 pub fn build_publish_hook_report(
     root: &Path,
     explicit_config_path: Option<&Path>,
@@ -574,6 +1125,7 @@ pub fn build_publish_hook_report_with_config(
     submit_indexnow_request: bool,
     indexnow_endpoint: &str,
 ) -> Result<PublishHookReport> {
+    ensure_reports_dir(root)?;
     let findings = run_native_static_audit_with_config(root, config)?;
     let changed_routes = changed_urls
         .iter()
@@ -609,25 +1161,47 @@ pub fn build_publish_hook_report_with_config(
         .into_iter()
         .filter(|row| changed_routes.iter().any(|route| route == &row.route))
         .collect::<Vec<_>>();
+    let search_console_csv = render_search_console_rows_csv(&search_console_rows)?;
+    let search_console_export_path = publish_hook_search_console_path(root);
+    fs::write(&search_console_export_path, search_console_csv)?;
     let indexnow_validation = match (config.site().site_url, indexnow_key) {
         (Some(site_url), Some(key)) => Some(validate_indexnow(site_url, key, Some(root))?),
         _ => None,
     };
-    let indexnow_submission =
+    let (indexnow_submission, indexnow_ledger_path) =
         if submit_indexnow_request && !changed_urls.is_empty() && indexnow_validation.is_some() {
-            Some(submit_indexnow(
+            let ledger_entry = submit_indexnow_with_ledger(
+                root,
                 indexnow_endpoint,
                 config.site().site_url.unwrap_or_default(),
                 indexnow_key.unwrap_or_default(),
                 changed_urls,
-            )?)
+            )?;
+            (
+                Some(IndexNowSubmission {
+                    endpoint: ledger_entry.endpoint.clone(),
+                    host: ledger_entry.host.clone(),
+                    submitted_urls: ledger_entry.submitted_urls,
+                    key_location: ledger_entry.key_location.clone(),
+                    status_code: ledger_entry.status_code.unwrap_or_default(),
+                    success: ledger_entry.success,
+                    response_body: ledger_entry
+                        .response_body
+                        .clone()
+                        .or(ledger_entry.error.clone()),
+                }),
+                Some(indexnow_ledger_path(root).to_string_lossy().into_owned()),
+            )
         } else {
-            None
+            (None, None)
         };
     Ok(PublishHookReport {
         changed_routes,
         finding_count: findings.len(),
         findings_by_route,
+        audit_path: audit_path.to_string_lossy().into_owned(),
+        search_console_export_path: search_console_export_path.to_string_lossy().into_owned(),
+        indexnow_ledger_path,
         search_console_rows,
         indexnow_validation,
         indexnow_submission,
@@ -637,12 +1211,15 @@ pub fn build_publish_hook_report_with_config(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_publish_hook_report, export_search_console_rows, import_bing_ai_export,
-        inspect_snippet_controls_path, submit_indexnow, validate_indexnow,
+        build_bing_ai_opportunity_report, build_bing_ai_trend_report, build_publish_hook_report,
+        export_search_console_rows, import_bing_ai_export, inspect_snippet_controls_path,
+        load_indexnow_ledger, record_bing_ai_trend, retry_indexnow_submissions, submit_indexnow,
+        submit_indexnow_with_ledger, validate_indexnow,
     };
     use std::fs;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    use std::path::Path;
     use std::thread;
 
     fn write(path: &std::path::Path, text: &str) {
@@ -675,6 +1252,26 @@ mod tests {
         assert_eq!(report.rows_read, 2);
         assert_eq!(report.urls_seen, 1);
         assert_eq!(report.cited_urls[0].citations, 5);
+    }
+
+    #[test]
+    fn builds_bing_ai_opportunity_reports() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let export_path = temp_dir.path().join("bing-ai.csv");
+        let audit_path = temp_dir.path().join("audit.json");
+        write(
+            &export_path,
+            "url,query,citations\nhttps://example.com/docs,what is docs,5\n",
+        );
+        fs::write(
+            &audit_path,
+            r#"{"version":2,"command":"check","status":"complete","generated_at":0,"summary":{"total":2,"errors":1,"warnings":1,"actionable":2,"heuristic":0},"findings":[{"rule_id":"SEO001","message":"missing <title>","path":"crawl/docs/index.html","line":1,"column":1,"severity":"error","scope":"page"},{"rule_id":"SEO002","message":"missing meta description","path":"crawl/docs/index.html","line":1,"column":1,"severity":"warning","scope":"page"}]}"#,
+        )
+        .unwrap();
+        let report = build_bing_ai_opportunity_report(&export_path, &audit_path).unwrap();
+        assert_eq!(report.opportunities.len(), 1);
+        assert!(report.opportunities[0].score > 0);
+        assert_eq!(report.opportunities[0].priority, "high");
     }
 
     #[test]
@@ -728,6 +1325,8 @@ mod tests {
         .unwrap();
         assert_eq!(report.changed_routes, vec![String::new()]);
         assert!(report.indexnow_validation.is_some());
+        assert!(Path::new(&report.audit_path).exists());
+        assert!(Path::new(&report.search_console_export_path).exists());
     }
 
     #[test]
@@ -755,5 +1354,73 @@ mod tests {
         assert!(submission.success);
         assert_eq!(submission.status_code, 200);
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn writes_and_retries_indexnow_ledger_entries() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(&root.join("abc123.txt"), "abc123");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let handle = thread::spawn(move || {
+            for status in ["429 Too Many Requests", "200 OK"] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buffer = [0_u8; 4096];
+                let _ = stream.read(&mut buffer).unwrap();
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                );
+                stream.write_all(response.as_bytes()).unwrap();
+                stream.flush().unwrap();
+            }
+        });
+        let first = submit_indexnow_with_ledger(
+            root,
+            &format!("http://{address}"),
+            "https://example.com",
+            "abc123",
+            &["https://example.com/a".to_string()],
+        )
+        .unwrap();
+        assert!(!first.success);
+        assert!(first.retryable);
+        let ledger = load_indexnow_ledger(root).unwrap();
+        assert_eq!(ledger.entries.len(), 1);
+
+        let retry = retry_indexnow_submissions(root, "abc123", 10).unwrap();
+        assert_eq!(retry.attempted, 1);
+        assert_eq!(retry.succeeded, 1);
+        let ledger = load_indexnow_ledger(root).unwrap();
+        assert_eq!(ledger.entries.len(), 2);
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn records_and_compares_bing_ai_trends() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        let audit_path = root.join("audit.json");
+        fs::write(
+            &audit_path,
+            r#"{"version":2,"command":"check","status":"complete","generated_at":0,"summary":{"total":1,"errors":0,"warnings":1,"actionable":1,"heuristic":0},"findings":[{"rule_id":"SEO002","message":"missing meta description","path":"crawl/docs/index.html","line":1,"column":1,"severity":"warning","scope":"page"}]}"#,
+        )
+        .unwrap();
+        let export_one = root.join("bing-one.csv");
+        let export_two = root.join("bing-two.csv");
+        write(
+            &export_one,
+            "url,query,citations\nhttps://example.com/docs,what is docs,2\n",
+        );
+        write(
+            &export_two,
+            "url,query,citations\nhttps://example.com/docs,what is docs,5\nhttps://example.com/new,what is new,1\n",
+        );
+        record_bing_ai_trend(root, &export_one, Some(&audit_path)).unwrap();
+        record_bing_ai_trend(root, &export_two, Some(&audit_path)).unwrap();
+        let report = build_bing_ai_trend_report(root).unwrap();
+        assert_eq!(report.snapshots, 2);
+        assert_eq!(report.increased[0].route, "docs");
+        assert_eq!(report.newly_cited[0].route, "new");
     }
 }
