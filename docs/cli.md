@@ -19,13 +19,13 @@ Arguments:
 
 Options:
       --config <config>
-          
+
 
       --baseline <baseline>
-          
+
 
       --regressions-only
-          
+
 
       --format <format>
           [default: text]
@@ -46,32 +46,48 @@ Usage: crawl [OPTIONS] <url>
 
 Arguments:
   <url>
-          
+
 
 Options:
       --seed <seed>
-          
+
 
       --include-pattern <include-pattern>
-          
+
 
       --exclude-pattern <exclude-pattern>
-          
+
 
       --no-sitemap-seed
-          
+
 
       --max-pages <max-pages>
           [default: 200]
 
+      --checkpoint <checkpoint>
+
+
+      --resume <resume>
+
+
+      --checkpoint-every <checkpoint-every>
+          [default: 25]
+
+      --retry-budget <retry-budget>
+          [default: 2]
+
+      --progress <progress>
+          [default: plain]
+          [possible values: plain, json, off]
+
       --config <config>
-          
+
 
       --baseline <baseline>
-          
+
 
       --regressions-only
-          
+
 
       --engine <engine>
           [possible values: auto, http, playwright]
@@ -142,7 +158,7 @@ Arguments:
 
 Options:
       --config <config>
-          
+
 
       --format <format>
           [default: text]
@@ -192,10 +208,10 @@ Arguments:
 
 Options:
       --config <config>
-          
+
 
       --output <output>
-          
+
 
       --format <format>
           [default: text]
@@ -216,33 +232,92 @@ Usage: verify [OPTIONS] <url>
 
 Arguments:
   <url>
-          
+
 
 Options:
       --seed <seed>
-          
+
 
       --include-pattern <include-pattern>
-          
+
 
       --exclude-pattern <exclude-pattern>
-          
+
 
       --no-sitemap-seed
-          
+
 
       --config <config>
-          
+
 
       --baseline <baseline>
-          
+
+
+      --allow-partial-baseline
+
 
       --max-pages <max-pages>
           [default: 200]
 
+      --checkpoint <checkpoint>
+
+
+      --resume <resume>
+
+
+      --checkpoint-every <checkpoint-every>
+          [default: 25]
+
+      --retry-budget <retry-budget>
+          [default: 2]
+
+      --progress <progress>
+          [default: plain]
+          [possible values: plain, json, off]
+
       --engine <engine>
           [possible values: auto, http, playwright]
 
+      --format <format>
+          [default: text]
+          [possible values: text, json]
+
+  -h, --help
+          Print help
+```
+
+## `report`
+
+Render an audit artifact into a human or machine readable report
+
+```text
+Render an audit artifact into a human or machine readable report
+
+Usage: report [COMMAND]
+
+Commands:
+  render  Render an audit JSON artifact
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help
+```
+
+## `doctor`
+
+Inspect local runtime capabilities
+
+```text
+Inspect local runtime capabilities
+
+Usage: doctor [OPTIONS] <target>
+
+Arguments:
+  <target>
+          [possible values: runtime]
+
+Options:
       --format <format>
           [default: text]
           [possible values: text, json]
@@ -262,10 +337,10 @@ Usage: diff [OPTIONS] <baseline> <current>
 
 Arguments:
   <baseline>
-          
+
 
   <current>
-          
+
 
 Options:
       --format <format>
@@ -316,7 +391,7 @@ Arguments:
 
 Options:
       --config <config>
-          
+
 
       --format <format>
           [default: text]
@@ -373,7 +448,7 @@ Usage: plugin-check [OPTIONS] <module_name>
 
 Arguments:
   <module_name>
-          
+
 
 Options:
       --format <format>

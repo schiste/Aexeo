@@ -64,6 +64,14 @@ sh scripts/ci-local.sh --with-audit
 
 `ci-local.sh` runs the full pre-commit gate, then the pre-push gate, and optionally `cargo audit` when available.
 
+It now also enforces release-mode benchmark budgets through:
+
+```bash
+sh scripts/check-performance.sh
+```
+
+This compares the static and runtime benchmark fixtures against `performance-budget.json` and writes `.seogeo-reports/benchmarks-latest.json`.
+
 ## Why The Gate Is Strict
 
 This repository is small enough that broad repo-wide Rust validation is still practical locally, and the cost of letting low-signal code through is higher than the cost of a slower commit.
@@ -113,6 +121,18 @@ Run the full local pipeline:
 
 ```bash
 sh scripts/ci-local.sh
+```
+
+Inspect browser-runtime readiness explicitly:
+
+```bash
+cargo run -p seogeo-cli -- doctor runtime --format text
+```
+
+Render a saved audit artifact into Markdown or text:
+
+```bash
+cargo run -p seogeo-cli -- report render .seogeo-reports/crawl-latest.json --format md
 ```
 
 ## CI Alignment

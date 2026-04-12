@@ -117,3 +117,25 @@ This exercises:
 
 - a generated static site fixture for native static audits
 - a local HTTP fixture server for runtime HTTP audits
+
+To enforce the configured benchmark budgets locally:
+
+```bash
+sh scripts/check-performance.sh
+```
+
+This writes `.seogeo-reports/benchmarks-latest.json` and fails if the measured averages exceed `performance-budget.json`.
+
+## Runtime Operations
+
+Check browser-runtime readiness:
+
+```bash
+cargo run -p seogeo-cli -- doctor runtime --format text
+```
+
+Render a saved audit artifact into Markdown:
+
+```bash
+cargo run -p seogeo-cli -- report render .seogeo-reports/crawl-latest.json --format md
+```

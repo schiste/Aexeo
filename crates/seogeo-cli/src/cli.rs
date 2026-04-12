@@ -364,6 +364,10 @@ pub fn render_cli_reference() -> Result<String> {
         lines.push(
             String::from_utf8(buffer)
                 .context("CLI help should be UTF-8")?
+                .lines()
+                .map(str::trim_end)
+                .collect::<Vec<_>>()
+                .join("\n")
                 .trim()
                 .to_string(),
         );
