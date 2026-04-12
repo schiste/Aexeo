@@ -67,6 +67,13 @@ pub struct AuditSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct SlowCrawlPath {
+    pub url: String,
+    pub fetch_ms: u64,
+    pub process_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct CrawlStats {
     pub engine: String,
     pub visited_pages: usize,
@@ -77,6 +84,17 @@ pub struct CrawlStats {
     pub fetch_retries: usize,
     pub skipped_non_html: usize,
     pub truncated: bool,
+    pub elapsed_ms: u64,
+    pub pages_per_minute: usize,
+    pub checkpoints_written: usize,
+    pub partial_artifacts_written: usize,
+    pub total_fetch_ms: u64,
+    pub average_fetch_ms: u64,
+    pub total_page_process_ms: u64,
+    pub average_page_process_ms: u64,
+    pub total_partial_audit_ms: u64,
+    pub average_partial_audit_ms: u64,
+    pub slowest_paths: Vec<SlowCrawlPath>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
