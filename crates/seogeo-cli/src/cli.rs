@@ -204,11 +204,41 @@ pub fn build_cli() -> Command {
                         .arg(Arg::new("endpoint").required(true))
                         .arg(Arg::new("site_url").required(true))
                         .arg(Arg::new("key").required(true))
+                        .arg(Arg::new("path").long("path").num_args(1))
                         .arg(
                             Arg::new("url")
                                 .required(true)
                                 .num_args(1..)
                                 .action(ArgAction::Append),
+                        )
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "json"])
+                                .default_value("text"),
+                        ),
+                )
+                .subcommand(
+                    Command::new("ledger")
+                        .about("Inspect the local IndexNow submission ledger")
+                        .arg(Arg::new("path").default_value("."))
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "json"])
+                                .default_value("text"),
+                        ),
+                )
+                .subcommand(
+                    Command::new("retry")
+                        .about("Retry failed retryable IndexNow submissions from the ledger")
+                        .arg(Arg::new("path").long("path").num_args(1).default_value("."))
+                        .arg(Arg::new("key").required(true))
+                        .arg(
+                            Arg::new("limit")
+                                .long("limit")
+                                .value_parser(value_parser!(usize))
+                                .default_value("10"),
                         )
                         .arg(
                             Arg::new("format")
@@ -231,6 +261,46 @@ pub fn build_cli() -> Command {
                                 .long("format")
                                 .value_parser(["text", "json"])
                                 .default_value("text"),
+                        ),
+                )
+                .subcommand(
+                    Command::new("opportunities")
+                        .about("Rank cited Bing AI URLs by audit severity and exposure")
+                        .arg(Arg::new("path").required(true))
+                        .arg(Arg::new("audit").long("audit").required(true).num_args(1))
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "json"])
+                                .default_value("text"),
+                        ),
+                )
+                .subcommand(
+                    Command::new("trend")
+                        .about("Persist and compare Bing AI import history")
+                        .subcommand(
+                            Command::new("import")
+                                .about("Record one Bing AI export into local trend history")
+                                .arg(Arg::new("path").required(true))
+                                .arg(Arg::new("root").long("root").default_value("."))
+                                .arg(Arg::new("audit").long("audit").num_args(1))
+                                .arg(
+                                    Arg::new("format")
+                                        .long("format")
+                                        .value_parser(["text", "json"])
+                                        .default_value("text"),
+                                ),
+                        )
+                        .subcommand(
+                            Command::new("show")
+                                .about("Show the latest Bing AI trend comparison")
+                                .arg(Arg::new("path").default_value("."))
+                                .arg(
+                                    Arg::new("format")
+                                        .long("format")
+                                        .value_parser(["text", "json"])
+                                        .default_value("text"),
+                                ),
                         ),
                 ),
         )

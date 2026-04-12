@@ -3,9 +3,12 @@ use clap::ArgMatches;
 use csv::Writer;
 use seogeo_core::config::load_config_with_diagnostics;
 use seogeo_core::{
-    BingAiImportReport, PublishHookReport, SearchConsoleExportRow, SnippetInspection,
+    BingAiImportReport, BingAiOpportunityReport, BingAiTrendReport, BingAiTrendSnapshot,
+    IndexNowLedger, IndexNowRetryReport, PublishHookReport, SearchConsoleExportRow,
+    SnippetInspection, build_bing_ai_opportunity_report, build_bing_ai_trend_report,
     build_publish_hook_report_with_config, export_search_console_rows, import_bing_ai_export,
-    inspect_snippet_controls_path, inspect_snippet_controls_url, submit_indexnow,
+    inspect_snippet_controls_path, inspect_snippet_controls_url, load_indexnow_ledger,
+    record_bing_ai_trend, retry_indexnow_submissions, submit_indexnow, submit_indexnow_with_ledger,
     validate_indexnow,
 };
 use std::path::{Path, PathBuf};
@@ -25,6 +28,8 @@ pub fn command_indexnow(submatches: &ArgMatches) -> Result<i32> {
     match submatches.subcommand() {
         Some(("validate", validate_matches)) => command_indexnow_validate(validate_matches),
         Some(("submit", submit_matches)) => command_indexnow_submit(submit_matches),
+        Some(("ledger", ledger_matches)) => command_indexnow_ledger(ledger_matches),
+        Some(("retry", retry_matches)) => command_indexnow_retry(retry_matches),
         Some((other, _)) => bail!("unsupported indexnow command: {}", other),
         None => bail!("missing indexnow subcommand"),
     }
@@ -33,6 +38,15 @@ pub fn command_indexnow(submatches: &ArgMatches) -> Result<i32> {
 pub fn command_bing_ai(submatches: &ArgMatches) -> Result<i32> {
     match submatches.subcommand() {
         Some(("import", import_matches)) => command_bing_ai_import(import_matches),
+        Some(("opportunities", opportunities_matches)) => {
+            command_bing_ai_opportunities(opportunities_matches)
+        }
+        Some(("trend", trend_matches)) => match trend_matches.subcommand() {
+            Some(("import", import_matches)) => command_bing_ai_trend_import(import_matches),
+            Some(("show", show_matches)) => command_bing_ai_trend_show(show_matches),
+            Some((other, _)) => bail!("unsupported bing-ai trend command: {}", other),
+            None => bail!("missing bing-ai trend subcommand"),
+        },
         Some((other, _)) => bail!("unsupported bing-ai command: {}", other),
         None => bail!("missing bing-ai subcommand"),
     }
@@ -157,6 +171,54 @@ fn indexnow_submission_text(submission: &seogeo_core::IndexNowSubmission) -> Str
     lines.join("\n")
 }
 
+fn indexnow_ledger_text(ledger: &IndexNowLedger) -> String {
+    let mut lines = vec![
+        "IndexNow Ledger".to_string(),
+        String::new(),
+        format!("Entries: {}", ledger.entries.len()),
+    ];
+    for entry in ledger.entries.iter().rev().take(10) {
+        lines.push(format!(
+            "- ts={} attempt={} success={} retryable={} status={} urls={} endpoint={}",
+            entry.submitted_at,
+            entry.attempt,
+            entry.success,
+            entry.retryable,
+            entry
+                .status_code
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "transport_error".to_string()),
+            entry.submitted_urls,
+            entry.endpoint
+        ));
+    }
+    lines.join("\n")
+}
+
+fn indexnow_retry_text(report: &IndexNowRetryReport) -> String {
+    let mut lines = vec![
+        "IndexNow Retry".to_string(),
+        String::new(),
+        format!("Ledger: {}", report.ledger_path),
+        format!("Attempted: {}", report.attempted),
+        format!("Succeeded: {}", report.succeeded),
+        format!("Failed: {}", report.failed),
+    ];
+    for entry in &report.entries {
+        lines.push(format!(
+            "- attempt={} success={} status={} urls={}",
+            entry.attempt,
+            entry.success,
+            entry
+                .status_code
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "transport_error".to_string()),
+            entry.submitted_urls
+        ));
+    }
+    lines.join("\n")
+}
+
 fn bing_ai_import_text(report: &BingAiImportReport) -> String {
     let mut lines = vec![
         "Bing AI Import".to_string(),
@@ -185,6 +247,109 @@ fn bing_ai_import_text(report: &BingAiImportReport) -> String {
         lines.push("Unmatched URLs:".to_string());
         for url in report.unmatched_urls.iter().take(10) {
             lines.push(format!("- {}", url));
+        }
+    }
+    lines.join("\n")
+}
+
+fn bing_ai_opportunities_text(report: &BingAiOpportunityReport) -> String {
+    let mut lines = vec![
+        "Bing AI Opportunities".to_string(),
+        String::new(),
+        format!("Rows read: {}", report.rows_read),
+        format!("URLs seen: {}", report.urls_seen),
+        format!("Clean cited URLs: {}", report.clean_cited_urls),
+        format!("Unmatched URLs: {}", report.unmatched_urls.len()),
+    ];
+    if !report.opportunities.is_empty() {
+        lines.push(String::new());
+        lines.push("Top opportunities:".to_string());
+        for item in report.opportunities.iter().take(10) {
+            lines.push(format!(
+                "- {} score={} priority={} citations={} errors={} warnings={} findings={}",
+                item.url,
+                item.score,
+                item.priority,
+                item.citations,
+                item.audit_errors,
+                item.audit_warnings,
+                item.audit_findings
+            ));
+        }
+    }
+    lines.join("\n")
+}
+
+fn bing_ai_snapshot_text(snapshot: &BingAiTrendSnapshot) -> String {
+    let mut lines = vec![
+        "Bing AI Trend Snapshot".to_string(),
+        String::new(),
+        format!("Imported at: {}", snapshot.imported_at),
+        format!("Source: {}", snapshot.source_path),
+        format!("Rows read: {}", snapshot.rows_read),
+        format!("URLs seen: {}", snapshot.urls_seen),
+        format!("Total citations: {}", snapshot.total_citations),
+    ];
+    for route in snapshot.routes.iter().take(10) {
+        lines.push(format!(
+            "- {} citations={} findings={} errors={} warnings={}",
+            route.url,
+            route.citations,
+            route.audit_findings,
+            route.audit_errors,
+            route.audit_warnings
+        ));
+    }
+    lines.join("\n")
+}
+
+fn bing_ai_trend_text(report: &BingAiTrendReport) -> String {
+    let mut lines = vec![
+        "Bing AI Trend".to_string(),
+        String::new(),
+        format!("Snapshots: {}", report.snapshots),
+    ];
+    if let Some(current) = &report.current {
+        lines.push(format!("Current imported_at: {}", current.imported_at));
+        lines.push(format!(
+            "Current total citations: {}",
+            current.total_citations
+        ));
+    }
+    if let Some(previous) = &report.previous {
+        lines.push(format!("Previous imported_at: {}", previous.imported_at));
+        lines.push(format!(
+            "Previous total citations: {}",
+            previous.total_citations
+        ));
+    }
+    lines.push(format!("Increased routes: {}", report.increased.len()));
+    lines.push(format!("Decreased routes: {}", report.decreased.len()));
+    lines.push(format!("Newly cited routes: {}", report.newly_cited.len()));
+    lines.push(format!(
+        "No longer cited routes: {}",
+        report.no_longer_cited.len()
+    ));
+    for label in ["Increased", "Newly cited"] {
+        let items = if label == "Increased" {
+            &report.increased
+        } else {
+            &report.newly_cited
+        };
+        if !items.is_empty() {
+            lines.push(String::new());
+            lines.push(format!("{label}:"));
+            for item in items.iter().take(10) {
+                lines.push(format!(
+                    "- {} delta={} current={} findings={} errors={} warnings={}",
+                    item.url,
+                    item.citation_delta,
+                    item.current_citations,
+                    item.audit_findings,
+                    item.audit_errors,
+                    item.audit_warnings
+                ));
+            }
         }
     }
     lines.join("\n")
@@ -257,6 +422,11 @@ fn publish_hook_text(report: &PublishHookReport) -> String {
         String::new(),
         format!("Changed routes: {}", report.changed_routes.len()),
         format!("Finding count: {}", report.finding_count),
+        format!("Audit artifact: {}", report.audit_path),
+        format!(
+            "Search Console export: {}",
+            report.search_console_export_path
+        ),
     ];
     if !report.findings_by_route.is_empty() {
         lines.push(String::new());
@@ -285,6 +455,9 @@ fn publish_hook_text(report: &PublishHookReport) -> String {
             "IndexNow submission: status={} success={}",
             submission.status_code, submission.success
         ));
+    }
+    if let Some(ledger_path) = &report.indexnow_ledger_path {
+        lines.push(format!("IndexNow ledger: {}", ledger_path));
     }
     lines.join("\n")
 }
@@ -356,12 +529,34 @@ fn command_indexnow_submit(submatches: &ArgMatches) -> Result<i32> {
         .ok_or_else(|| anyhow!("missing required CLI argument 'url'"))?
         .cloned()
         .collect::<Vec<_>>();
-    let submission = match submit_indexnow(
-        required_arg(submatches, "endpoint")?,
-        required_arg(submatches, "site_url")?,
-        required_arg(submatches, "key")?,
-        &urls,
-    ) {
+    let root = submatches
+        .get_one::<String>("path")
+        .map(|path| canonicalize_or_keep(path));
+    let submission_result = match root.as_deref() {
+        Some(root) => submit_indexnow_with_ledger(
+            root,
+            required_arg(submatches, "endpoint")?,
+            required_arg(submatches, "site_url")?,
+            required_arg(submatches, "key")?,
+            &urls,
+        )
+        .map(|entry| seogeo_core::IndexNowSubmission {
+            endpoint: entry.endpoint,
+            host: entry.host,
+            submitted_urls: entry.submitted_urls,
+            key_location: entry.key_location,
+            status_code: entry.status_code.unwrap_or_default(),
+            success: entry.success,
+            response_body: entry.response_body.or(entry.error),
+        }),
+        None => submit_indexnow(
+            required_arg(submatches, "endpoint")?,
+            required_arg(submatches, "site_url")?,
+            required_arg(submatches, "key")?,
+            &urls,
+        ),
+    };
+    let submission = match submission_result {
         Ok(submission) => submission,
         Err(error) => return emit_integration_failure("indexnow submit", format, error),
     };
@@ -372,6 +567,42 @@ fn command_indexnow_submit(submatches: &ArgMatches) -> Result<i32> {
             render_data_command_json("indexnow submit", success, submission.clone(), Vec::new())?
         ),
         _ => println!("{}", indexnow_submission_text(&submission)),
+    }
+    Ok(if success { 0 } else { 1 })
+}
+
+fn command_indexnow_ledger(submatches: &ArgMatches) -> Result<i32> {
+    let root = canonicalize_or_keep(required_arg(submatches, "path")?);
+    let format = required_arg(submatches, "format")?;
+    let ledger = match load_indexnow_ledger(&root) {
+        Ok(ledger) => ledger,
+        Err(error) => return emit_integration_failure("indexnow ledger", format, error),
+    };
+    match format {
+        "json" => println!(
+            "{}",
+            render_data_command_json("indexnow ledger", true, ledger.clone(), Vec::new())?
+        ),
+        _ => println!("{}", indexnow_ledger_text(&ledger)),
+    }
+    Ok(0)
+}
+
+fn command_indexnow_retry(submatches: &ArgMatches) -> Result<i32> {
+    let root = canonicalize_or_keep(required_arg(submatches, "path")?);
+    let format = required_arg(submatches, "format")?;
+    let limit = *submatches.get_one::<usize>("limit").unwrap_or(&10);
+    let report = match retry_indexnow_submissions(&root, required_arg(submatches, "key")?, limit) {
+        Ok(report) => report,
+        Err(error) => return emit_integration_failure("indexnow retry", format, error),
+    };
+    let success = report.failed == 0;
+    match format {
+        "json" => println!(
+            "{}",
+            render_data_command_json("indexnow retry", success, report.clone(), Vec::new())?
+        ),
+        _ => println!("{}", indexnow_retry_text(&report)),
     }
     Ok(if success { 0 } else { 1 })
 }
@@ -390,6 +621,63 @@ fn command_bing_ai_import(submatches: &ArgMatches) -> Result<i32> {
             render_data_command_json("bing-ai import", true, report.clone(), Vec::new())?
         ),
         _ => println!("{}", bing_ai_import_text(&report)),
+    }
+    Ok(0)
+}
+
+fn command_bing_ai_opportunities(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let report = match build_bing_ai_opportunity_report(
+        Path::new(required_arg(submatches, "path")?),
+        Path::new(required_arg(submatches, "audit")?),
+    ) {
+        Ok(report) => report,
+        Err(error) => return emit_integration_failure("bing-ai opportunities", format, error),
+    };
+    match format {
+        "json" => println!(
+            "{}",
+            render_data_command_json("bing-ai opportunities", true, report.clone(), Vec::new())?
+        ),
+        _ => println!("{}", bing_ai_opportunities_text(&report)),
+    }
+    Ok(0)
+}
+
+fn command_bing_ai_trend_import(submatches: &ArgMatches) -> Result<i32> {
+    let root = canonicalize_or_keep(required_arg(submatches, "root")?);
+    let format = required_arg(submatches, "format")?;
+    let snapshot = match record_bing_ai_trend(
+        &root,
+        Path::new(required_arg(submatches, "path")?),
+        submatches.get_one::<String>("audit").map(Path::new),
+    ) {
+        Ok(snapshot) => snapshot,
+        Err(error) => return emit_integration_failure("bing-ai trend import", format, error),
+    };
+    match format {
+        "json" => println!(
+            "{}",
+            render_data_command_json("bing-ai trend import", true, snapshot.clone(), Vec::new())?
+        ),
+        _ => println!("{}", bing_ai_snapshot_text(&snapshot)),
+    }
+    Ok(0)
+}
+
+fn command_bing_ai_trend_show(submatches: &ArgMatches) -> Result<i32> {
+    let root = canonicalize_or_keep(required_arg(submatches, "path")?);
+    let format = required_arg(submatches, "format")?;
+    let report = match build_bing_ai_trend_report(&root) {
+        Ok(report) => report,
+        Err(error) => return emit_integration_failure("bing-ai trend show", format, error),
+    };
+    match format {
+        "json" => println!(
+            "{}",
+            render_data_command_json("bing-ai trend show", true, report.clone(), Vec::new())?
+        ),
+        _ => println!("{}", bing_ai_trend_text(&report)),
     }
     Ok(0)
 }

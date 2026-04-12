@@ -210,6 +210,8 @@ Usage: indexnow [COMMAND]
 Commands:
   validate  Validate IndexNow key format and key-file placement
   submit    Submit changed URLs to an IndexNow endpoint
+  ledger    Inspect the local IndexNow submission ledger
+  retry     Retry failed retryable IndexNow submissions from the ledger
   help      Print this message or the help of the given subcommand(s)
 
 Options:
@@ -227,8 +229,10 @@ Import Bing AI Performance exports and align them with audit findings
 Usage: bing-ai [COMMAND]
 
 Commands:
-  import  Import a Bing AI export from CSV or JSON
-  help    Print this message or the help of the given subcommand(s)
+  import         Import a Bing AI export from CSV or JSON
+  opportunities  Rank cited Bing AI URLs by audit severity and exposure
+  trend          Persist and compare Bing AI import history
+  help           Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help
