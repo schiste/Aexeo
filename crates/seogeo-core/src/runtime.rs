@@ -874,7 +874,7 @@ mod tests {
 
     #[test]
     fn runtime_audit_reports_truncated_crawl_coverage() {
-        let (base_url, handle) = spawn_server(5);
+        let (base_url, handle) = spawn_server(1);
         let mut config = html_only_config();
         config.checks.insert("links".to_string(), true);
         let audit = run_runtime_audit(&base_url, 1, "http", &config).unwrap();
@@ -947,6 +947,24 @@ mod tests {
                     .contains("requires a local Playwright runtime")
             );
         }
+    }
+
+    #[test]
+    fn runtime_audit_reuses_playwright_session_across_multiple_pages() {
+        if !super::playwright_is_available() {
+            return;
+        }
+        let (base_url, handle) = spawn_server(5);
+        let audit = run_runtime_audit(&base_url, 2, "playwright", &html_only_config()).unwrap();
+        assert!(audit.site.route_pages.contains_key(""));
+        assert!(audit.site.route_pages.contains_key("about"));
+        assert!(
+            !audit
+                .findings
+                .iter()
+                .any(|finding| finding.rule_id == "CRW001")
+        );
+        handle.join().unwrap();
     }
 
     #[test]

@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use super::http::FetchResult;
 use crate::config::RuntimeConfig;
@@ -15,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
 
-const spec = JSON.parse(Buffer.from(process.argv[2], 'base64').toString('utf8'));
+const spec = JSON.parse(Buffer.from(process.argv.at(-1), 'base64').toString('utf8'));
 
 function sanitizeSegment(value) {
   return (value || 'index').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'index';
@@ -151,7 +153,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { chromium } from 'playwright';
 
-const baseSpec = JSON.parse(Buffer.from(process.argv[2], 'base64').toString('utf8'));
+const baseSpec = JSON.parse(Buffer.from(process.argv.at(-1), 'base64').toString('utf8'));
 
 function sanitizeSegment(value) {
   return (value || 'index').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'index';
@@ -312,6 +314,7 @@ try {
     process.stdout.write(JSON.stringify(payload) + '\n');
   }
 } finally {
+  rl.close();
   await context.close();
   await browser.close();
 }
@@ -504,9 +507,18 @@ impl PlaywrightSession {
 
     fn fetch(&mut self, url: &str) -> Result<FetchResult> {
         let request = BASE64.encode(serde_json::to_vec(&serde_json::json!({ "url": url }))?);
-        self.stdin.write_all(request.as_bytes())?;
-        self.stdin.write_all(b"\n")?;
-        self.stdin.flush()?;
+        if let Err(error) = self.stdin.write_all(request.as_bytes()) {
+            let stderr = self.read_stderr();
+            bail!("failed to send playwright request for {url}: {error}; {stderr}");
+        }
+        if let Err(error) = self.stdin.write_all(b"\n") {
+            let stderr = self.read_stderr();
+            bail!("failed to terminate playwright request for {url}: {error}; {stderr}");
+        }
+        if let Err(error) = self.stdin.flush() {
+            let stderr = self.read_stderr();
+            bail!("failed to flush playwright request for {url}: {error}; {stderr}");
+        }
 
         let mut line = String::new();
         let read = self.stdout.read_line(&mut line)?;
@@ -536,6 +548,15 @@ impl Drop for PlaywrightSession {
     fn drop(&mut self) {
         let _ = self.stdin.write_all(b"__SEOGEO_EXIT__\n");
         let _ = self.stdin.flush();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            match self.child.try_wait() {
+                Ok(Some(_)) => return,
+                Ok(None) => thread::sleep(Duration::from_millis(25)),
+                Err(_) => break,
+            }
+        }
+        let _ = self.child.kill();
         let _ = self.child.wait();
     }
 }
