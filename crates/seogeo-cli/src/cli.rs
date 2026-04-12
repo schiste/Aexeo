@@ -183,6 +183,67 @@ pub fn build_cli() -> Command {
                 ),
         )
         .subcommand(
+            Command::new("intelligence")
+                .about("Run higher-level GEO intelligence analyses")
+                .subcommand(
+                    Command::new("grounding-map")
+                        .about("Infer page topics, grounding intents, and answer-coverage gaps")
+                        .arg(Arg::new("path").default_value("."))
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "json"])
+                                .default_value("text"),
+                        ),
+                )
+                .subcommand(
+                    Command::new("truth")
+                        .about("Assess structured truth readiness and cross-surface consistency")
+                        .subcommand(
+                            Command::new("assess")
+                                .about("Assess schema and optional truth manifest consistency")
+                                .arg(Arg::new("path").default_value("."))
+                                .arg(Arg::new("manifest").long("manifest").num_args(1))
+                                .arg(
+                                    Arg::new("format")
+                                        .long("format")
+                                        .value_parser(["text", "json"])
+                                        .default_value("text"),
+                                ),
+                        ),
+                )
+                .subcommand(
+                    Command::new("trust-surface")
+                        .about("Import and reconcile trusted external surfaces against site truth")
+                        .subcommand(
+                            Command::new("import")
+                                .about("Normalize trust-surface CSV or JSON records")
+                                .arg(Arg::new("path").required(true))
+                                .arg(Arg::new("root").long("root").num_args(1))
+                                .arg(
+                                    Arg::new("format")
+                                        .long("format")
+                                        .value_parser(["text", "json"])
+                                        .default_value("text"),
+                                ),
+                        )
+                        .subcommand(
+                            Command::new("reconcile")
+                                .about("Compare imported trust surfaces against site routes and truth")
+                                .arg(Arg::new("input").required(true))
+                                .arg(Arg::new("path").default_value("."))
+                                .arg(Arg::new("manifest").long("manifest").num_args(1))
+                                .arg(Arg::new("site_url").long("site-url").num_args(1))
+                                .arg(
+                                    Arg::new("format")
+                                        .long("format")
+                                        .value_parser(["text", "json"])
+                                        .default_value("text"),
+                                ),
+                        ),
+                ),
+        )
+        .subcommand(
             Command::new("indexnow")
                 .about("Validate or submit IndexNow notifications")
                 .subcommand(

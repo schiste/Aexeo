@@ -198,6 +198,26 @@ Options:
           Print help
 ```
 
+## `intelligence`
+
+Run higher-level GEO intelligence analyses
+
+```text
+Run higher-level GEO intelligence analyses
+
+Usage: intelligence [COMMAND]
+
+Commands:
+  grounding-map  Infer page topics, grounding intents, and answer-coverage gaps
+  truth          Assess structured truth readiness and cross-surface consistency
+  trust-surface  Import and reconcile trusted external surfaces against site truth
+  help           Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help
+```
+
 ## `indexnow`
 
 Validate or submit IndexNow notifications
