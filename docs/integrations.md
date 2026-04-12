@@ -2,6 +2,106 @@
 
 `seogeo` now exposes a small integration surface for snippet eligibility, Bing AI export alignment, Search Console-oriented exports, and IndexNow freshness workflows.
 
+## Intelligence
+
+Use the intelligence surface when you want product-style GEO analysis rather than rule-by-rule lint output.
+
+### Grounding Map
+
+Grounding map infers:
+
+- primary topic per route
+- secondary topics
+- grounding intent families
+- answer-coverage gaps
+
+Example:
+
+```bash
+cargo run -p seogeo-cli -- intelligence grounding-map .
+```
+
+The command writes `.seogeo-reports/grounding-map-latest.json` and reports:
+
+- pages analyzed
+- topic clusters
+- intent distribution
+- route-level gaps such as weak comparison structure or missing direct answers
+
+### Truth Assessment
+
+Truth assessment compares:
+
+- visible titles and headings
+- schema.org JSON-LD
+- optional Aexeo truth manifest
+- preferred and forbidden terminology
+
+Examples:
+
+```bash
+cargo run -p seogeo-cli -- intelligence truth assess .
+cargo run -p seogeo-cli -- intelligence truth assess . --manifest ./aexeo-truth.json --format json
+```
+
+Manifest discovery order:
+
+- explicit `--manifest`
+- `./aexeo-truth.json`
+- `./.well-known/aexeo-truth.json`
+
+The score is intentionally capped when no structured truth source is present:
+
+- no schema and no manifest: low ceiling
+- schema only or manifest only: medium ceiling
+- schema plus manifest: full ceiling
+
+### Trust Surface Import and Reconciliation
+
+Trust surfaces are imported records from sanctioned external sources such as:
+
+- Bing AI exports
+- Reddit URL lists
+- GitHub docs inventories
+- partner directory CSVs
+
+The feature is import-based rather than scraper-based so that it stays deterministic and portable.
+
+Example import:
+
+```bash
+cargo run -p seogeo-cli -- intelligence trust-surface import trust-surfaces.csv --root .
+```
+
+Supported columns:
+
+- `source_type`
+- `url`
+- `title`
+- `snippet`
+- `entity`
+- `observed_at`
+- any additional numeric columns, which are retained as metrics
+
+Reconciliation compares those imported surfaces against:
+
+- the audited site graph
+- optional canonical site URL
+- optional truth manifest terminology and descriptors
+
+Example:
+
+```bash
+cargo run -p seogeo-cli -- intelligence trust-surface reconcile trust-surfaces.csv . --site-url https://example.com
+```
+
+The reconciliation report highlights:
+
+- first-party URLs that do not map to audited routes
+- records that omit canonical entity labels
+- forbidden terminology usage
+- descriptor gaps where external text does not reflect the canonical product framing
+
 ## Snippet Inspection
 
 Use snippet inspection when you need to understand whether a route or live URL is suppressing reuse in search or AI summaries.
