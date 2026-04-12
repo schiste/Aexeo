@@ -135,6 +135,8 @@ Render a saved audit artifact into Markdown or text:
 cargo run -p seogeo-cli -- report render .seogeo-reports/crawl-latest.json --format md
 ```
 
+For large runtime audits, the latest crawl artifact is now refreshed during checkpoint intervals. If a live crawl is interrupted or still in progress, `crawl-latest.json` can still be rendered as a partial audit with current crawl stats.
+
 ## CI Alignment
 
 GitHub Actions should reuse the same shell entrypoints rather than duplicating raw Cargo commands. The goal is one quality model with different execution environments, not separate local and remote rule sets.

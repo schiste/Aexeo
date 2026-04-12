@@ -95,7 +95,7 @@ Browser-backed crawl is now supported locally when the repository Node dependenc
 
 - `http` is the stable native runtime crawl path and works without Node
 - `auto` prefers `playwright` when a local Playwright runtime is available, otherwise it falls back to `http`
-- `playwright` is supported and requires a local Node runtime plus the repository dependency install
+- `playwright` now uses a long-lived local browser session during a crawl instead of relaunching Chromium for every page fetch
 - install the browser runtime once from the repository root:
 
 ```bash
@@ -139,3 +139,5 @@ Render a saved audit artifact into Markdown:
 ```bash
 cargo run -p seogeo-cli -- report render .seogeo-reports/crawl-latest.json --format md
 ```
+
+For long live crawls, `crawl-latest.json` is refreshed during checkpoint flushes. That means an interrupted large-site audit can still be rendered as a partial report instead of leaving only a stale previous artifact.
