@@ -1,4 +1,4 @@
-use seogeo_contracts::Finding;
+use seogeo_contracts::{Finding, FindingScope};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
@@ -90,6 +90,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
             column: 1,
             severity: "error".to_string(),
             suggestion: None,
+            scope: FindingScope::Sitewide,
         }];
     };
     let text = text.trim();
@@ -102,6 +103,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
             column: 1,
             severity: "error".to_string(),
             suggestion: None,
+            scope: FindingScope::Sitewide,
         }];
     }
 
@@ -134,6 +136,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
             column: 1,
             severity: "error".to_string(),
             suggestion: Some("regenerate llms.txt from site inventory so it mirrors the current route and feature structure".to_string()),
+            scope: FindingScope::Sitewide,
         });
     }
 
@@ -158,6 +161,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
                     "remove the stale link or regenerate llms.txt from the current site inventory"
                         .to_string(),
                 ),
+                scope: FindingScope::Sitewide,
             });
         }
         if config.canonical_style == "extensionless" && href.ends_with(".html") {
@@ -169,6 +173,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
                 column: 1,
                 severity: "warning".to_string(),
                 suggestion: Some("prefer clean routes in llms.txt or regenerate the artifact from canonical URLs".to_string()),
+                scope: FindingScope::Sitewide,
             });
         }
     }
@@ -191,6 +196,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
                     "regenerate llms.txt from site inventory so key facts match the current feature data"
                         .to_string(),
                 ),
+                scope: FindingScope::Sitewide,
             });
         }
         if let Some(claimed_feature_pages) = feature_page_count(text)
@@ -210,6 +216,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
                     "regenerate llms.txt from site inventory so the feature-page count matches the current routes"
                         .to_string(),
                 ),
+                scope: FindingScope::Sitewide,
             });
         }
     }

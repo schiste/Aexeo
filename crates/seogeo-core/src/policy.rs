@@ -79,7 +79,7 @@ pub fn apply_policy(findings: Vec<Finding>, config: &Config) -> Vec<Finding> {
 mod tests {
     use super::apply_policy;
     use crate::config::{Config, SuppressionRule};
-    use seogeo_contracts::Finding;
+    use seogeo_contracts::{Finding, FindingScope};
 
     #[test]
     fn suppresses_matching_active_findings() {
@@ -91,6 +91,7 @@ mod tests {
             column: 1,
             severity: "error".to_string(),
             suggestion: None,
+            scope: FindingScope::Page,
         }];
         let config = Config {
             suppressions: vec![SuppressionRule {
@@ -115,6 +116,7 @@ mod tests {
                 column: 1,
                 severity: "error".to_string(),
                 suggestion: None,
+                scope: FindingScope::Page,
             },
             Finding {
                 rule_id: "SEO002".to_string(),
@@ -124,6 +126,7 @@ mod tests {
                 column: 1,
                 severity: "error".to_string(),
                 suggestion: None,
+                scope: FindingScope::Page,
             },
             Finding {
                 rule_id: "SEO004".to_string(),
@@ -133,6 +136,7 @@ mod tests {
                 column: 1,
                 severity: "error".to_string(),
                 suggestion: None,
+                scope: FindingScope::Page,
             },
         ];
         let config = Config {

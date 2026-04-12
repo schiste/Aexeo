@@ -48,11 +48,15 @@ pub use registry::{
     list_adapter_names, list_rule_group_names,
 };
 pub use reporting::{
-    DEFAULT_AUDIT_LOG_LIMIT, build_recap_lines, render_json, render_sarif, render_text,
-    rule_group_name, write_audit_artifact,
+    DEFAULT_AUDIT_LOG_LIMIT, build_audit_artifact, build_recap_lines, render_audit_artifact_json,
+    render_json, render_markdown_artifact, render_sarif, render_text, render_text_artifact,
+    rule_group_name, summarize_findings, write_audit_artifact,
 };
 pub use robots_rules::run_robots_rules;
-pub use runtime::{RuntimeAudit, run_runtime_audit, verify_runtime_audit};
+pub use runtime::{
+    PlaywrightDoctor, RuntimeAudit, RuntimeAuditOptions, RuntimeProgressEvent, RuntimeProgressMode,
+    run_runtime_audit, run_runtime_audit_with_options, runtime_doctor, verify_runtime_audit,
+};
 pub use schema_rules::run_schema_rules;
 pub use site::{
     AlternateLink, Link, Page, PageKind, Site, load_site, normalize_internal_href,
@@ -65,5 +69,6 @@ pub use static_check::{
 };
 pub use structure_rules::run_structure_rules;
 pub use verification::{
-    DiffResult, diff_finding_sets, load_findings_from_audit, render_diff_text, write_baseline_file,
+    DiffResult, diff_finding_sets, load_audit_artifact, load_findings_from_audit, render_diff_text,
+    write_baseline_file,
 };

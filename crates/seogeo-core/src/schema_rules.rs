@@ -9,7 +9,7 @@ use self::intent::{
 };
 use self::json_ld::{SchemaObject, iter_schema_objects, required_fields_for_type};
 pub use self::json_ld::{iter_schema_field_values, iter_schema_types};
-use seogeo_contracts::Finding;
+use seogeo_contracts::{Finding, FindingScope};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -40,6 +40,7 @@ fn finding(
         column,
         severity: severity.to_string(),
         suggestion: None,
+        scope: FindingScope::Page,
     }
 }
 
@@ -59,6 +60,7 @@ fn recommendation(
         column,
         severity: "warning".to_string(),
         suggestion: Some(suggestion.into()),
+        scope: FindingScope::Page,
     }
 }
 

@@ -1,4 +1,4 @@
-use seogeo_contracts::Finding;
+use seogeo_contracts::{Finding, FindingScope};
 
 use crate::config::Config;
 use crate::site::{Page, Site};
@@ -17,6 +17,7 @@ fn finding(
         column: 1,
         severity: "warning".to_string(),
         suggestion: suggestion.map(str::to_string),
+        scope: FindingScope::Sitewide,
     }
 }
 

@@ -1,15 +1,8 @@
 use anyhow::Result;
-use seogeo_contracts::Finding;
+use seogeo_contracts::AuditArtifact;
 use seogeo_core::DiffResult;
 use seogeo_core::config::ConfigWarning;
 use serde::Serialize;
-
-#[derive(Debug, Clone, Serialize)]
-struct FindingSummary {
-    total: usize,
-    errors: usize,
-    warnings: usize,
-}
 
 #[derive(Debug, Clone, Serialize)]
 struct DiffSummary {
@@ -23,8 +16,9 @@ struct AuditCommandOutput<'a> {
     command: &'a str,
     success: bool,
     audit_path: Option<String>,
-    summary: FindingSummary,
-    findings: &'a [Finding],
+    summary: &'a seogeo_contracts::AuditSummary,
+    findings: &'a [seogeo_contracts::Finding],
+    artifact: &'a AuditArtifact,
     warnings: Vec<ConfigWarning>,
 }
 
@@ -37,13 +31,12 @@ struct DiffCommandOutput<'a> {
     warnings: Vec<ConfigWarning>,
 }
 
-fn finding_summary(findings: &[Finding]) -> FindingSummary {
-    let errors = findings.iter().filter(|finding| finding.is_error()).count();
-    FindingSummary {
-        total: findings.len(),
-        errors,
-        warnings: findings.len().saturating_sub(errors),
-    }
+#[derive(Debug, Clone, Serialize)]
+struct FailedCommandOutput {
+    command: String,
+    success: bool,
+    error: String,
+    warnings: Vec<ConfigWarning>,
 }
 
 fn diff_summary(diff: &DiffResult) -> DiffSummary {
@@ -56,7 +49,7 @@ fn diff_summary(diff: &DiffResult) -> DiffSummary {
 
 pub fn render_audit_command_json(
     command: &str,
-    findings: &[Finding],
+    artifact: &AuditArtifact,
     success: bool,
     audit_path: Option<String>,
     warnings: Vec<ConfigWarning>,
@@ -65,8 +58,9 @@ pub fn render_audit_command_json(
         command,
         success,
         audit_path,
-        summary: finding_summary(findings),
-        findings,
+        summary: &artifact.summary,
+        findings: &artifact.findings,
+        artifact,
         warnings,
     })?)
 }
@@ -82,6 +76,19 @@ pub fn render_diff_command_json(
         success,
         summary: diff_summary(diff),
         diff,
+        warnings,
+    })?)
+}
+
+pub fn render_failed_command_json(
+    command: &str,
+    error: impl Into<String>,
+    warnings: Vec<ConfigWarning>,
+) -> Result<String> {
+    Ok(serde_json::to_string_pretty(&FailedCommandOutput {
+        command: command.to_string(),
+        success: false,
+        error: error.into(),
         warnings,
     })?)
 }

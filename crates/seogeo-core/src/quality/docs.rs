@@ -1,5 +1,5 @@
 use anyhow::Result;
-use seogeo_contracts::Finding;
+use seogeo_contracts::{Finding, FindingScope};
 use std::fs;
 use std::path::Path;
 
@@ -36,6 +36,7 @@ pub(super) fn find_missing_required_docs(root: &Path) -> Vec<Finding> {
             column: 1,
             severity: "error".to_string(),
             suggestion: None,
+            scope: FindingScope::Sitewide,
         })
         .collect()
 }
@@ -57,6 +58,7 @@ pub(super) fn find_missing_rule_docs(root: &Path) -> Result<Vec<Finding>> {
             column: 1,
             severity: "error".to_string(),
             suggestion: None,
+            scope: FindingScope::Sitewide,
         })
         .collect())
 }

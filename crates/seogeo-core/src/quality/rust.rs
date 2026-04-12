@@ -1,5 +1,5 @@
 use anyhow::Result;
-use seogeo_contracts::Finding;
+use seogeo_contracts::{Finding, FindingScope};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -61,6 +61,7 @@ fn scan_non_test_rust_source(
                     column: 1,
                     severity: "error".to_string(),
                     suggestion: None,
+                    scope: FindingScope::Sitewide,
                 });
                 break;
             }

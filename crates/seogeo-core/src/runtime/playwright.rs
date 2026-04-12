@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::PathBuf;
@@ -158,6 +159,14 @@ struct PlaywrightSpec<'a> {
     artifact_dir: &'a str,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PlaywrightDoctor {
+    pub available: bool,
+    pub mode: String,
+    pub executable: String,
+    pub message: String,
+}
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -186,25 +195,52 @@ fn encode_spec(spec: &PlaywrightSpec<'_>) -> Result<String> {
 }
 
 pub(crate) fn playwright_is_available() -> bool {
-    if let Some(executable) = configured_playwright_executable() {
-        return executable.exists();
-    }
-    playwright_is_available_with(None)
+    probe_playwright_runtime().available
 }
 
-fn playwright_is_available_with(executable: Option<PathBuf>) -> bool {
+pub(crate) fn probe_playwright_runtime() -> PlaywrightDoctor {
+    probe_playwright_runtime_with(configured_playwright_executable())
+}
+
+fn probe_playwright_runtime_with(executable: Option<PathBuf>) -> PlaywrightDoctor {
     if let Some(executable) = executable {
-        return executable.exists();
+        return PlaywrightDoctor {
+            available: executable.exists(),
+            mode: "custom_runner".to_string(),
+            executable: executable.display().to_string(),
+            message: if executable.exists() {
+                "custom Playwright runner path exists".to_string()
+            } else {
+                "custom Playwright runner path does not exist".to_string()
+            },
+        };
     }
     let output = Command::new("node")
         .arg("--input-type=module")
         .arg("-e")
-        .arg("import('playwright').then(() => process.exit(0)).catch(() => process.exit(1))")
+        .arg("import('playwright').then(async ({ chromium }) => { const browser = await chromium.launch({ headless: true }); await browser.close(); process.stdout.write('ok'); }).catch((error) => { console.error(String(error)); process.exit(1); })")
         .current_dir(repo_root())
         .output();
-    output
-        .map(|result| result.status.success())
-        .unwrap_or(false)
+    match output {
+        Ok(result) if result.status.success() => PlaywrightDoctor {
+            available: true,
+            mode: "node_module".to_string(),
+            executable: "node".to_string(),
+            message: "Playwright module imported and Chromium launched successfully".to_string(),
+        },
+        Ok(result) => PlaywrightDoctor {
+            available: false,
+            mode: "node_module".to_string(),
+            executable: "node".to_string(),
+            message: String::from_utf8_lossy(&result.stderr).trim().to_string(),
+        },
+        Err(error) => PlaywrightDoctor {
+            available: false,
+            mode: "node_module".to_string(),
+            executable: "node".to_string(),
+            message: error.to_string(),
+        },
+    }
 }
 
 pub(crate) fn fetch_with_playwright(url: &str, runtime: &RuntimeConfig<'_>) -> Result<FetchResult> {
@@ -287,7 +323,7 @@ fn fetch_with_playwright_using(
 
 #[cfg(test)]
 mod tests {
-    use super::{fetch_with_playwright_using, playwright_is_available_with};
+    use super::{fetch_with_playwright_using, probe_playwright_runtime_with};
     use crate::config::Config;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
@@ -300,7 +336,7 @@ mod tests {
         let mut permissions = fs::metadata(&runner).unwrap().permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&runner, permissions).unwrap();
-        assert!(playwright_is_available_with(Some(runner)));
+        assert!(probe_playwright_runtime_with(Some(runner)).available);
     }
 
     #[test]

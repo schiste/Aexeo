@@ -1,4 +1,4 @@
-use seogeo_contracts::Finding;
+use seogeo_contracts::{Finding, FindingScope};
 use std::fs;
 use std::path::Path;
 
@@ -21,6 +21,7 @@ fn finding(
         column,
         severity: severity.to_string(),
         suggestion: None,
+        scope: FindingScope::Page,
     }
 }
 

@@ -1,12 +1,13 @@
 use anyhow::{Result, bail};
 use clap::ArgMatches;
+use seogeo_contracts::AuditStatus;
 use seogeo_core::adapter::resolve_static_site_root;
 use seogeo_core::config::load_config_with_diagnostics;
 use seogeo_core::{
-    apply_safe_fixes, diff_finding_sets, load_findings_from_audit, load_site, render_llms_full_txt,
-    render_llms_txt, render_markdown_mirror, render_robots_txt, render_sarif, render_text,
-    run_native_static_audit_with_config, suggest_internal_links, write_audit_artifact,
-    write_baseline_file,
+    apply_safe_fixes, build_audit_artifact, diff_finding_sets, load_findings_from_audit, load_site,
+    render_llms_full_txt, render_llms_txt, render_markdown_mirror, render_robots_txt, render_sarif,
+    render_text_artifact, run_native_static_audit_with_config, suggest_internal_links,
+    write_audit_artifact, write_baseline_file,
 };
 use std::path::{Path, PathBuf};
 
@@ -30,8 +31,14 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
     }
 
     let findings = run_native_static_audit_with_config(&root, &config)?;
-    let audit_path =
-        write_audit_artifact(&findings, &root, "check", config.output().audit_log_limit)?;
+    let audit_artifact =
+        build_audit_artifact("check", &findings, AuditStatus::Complete, None, None);
+    let audit_path = write_audit_artifact(
+        &audit_artifact,
+        &root,
+        "check",
+        config.output().audit_log_limit,
+    )?;
 
     let findings_to_render = if let Some(baseline_path) = baseline_path {
         let baseline_findings = load_findings_from_audit(Path::new(baseline_path))?;
@@ -60,7 +67,13 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
             "{}",
             render_audit_command_json(
                 "check",
-                &findings_to_render,
+                &build_audit_artifact(
+                    "check",
+                    &findings_to_render,
+                    AuditStatus::Complete,
+                    None,
+                    None
+                ),
                 success,
                 Some(audit_path.display().to_string()),
                 warnings,
@@ -79,7 +92,17 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
             };
             println!(
                 "{}",
-                render_text(&findings_to_render, success_message, Some(&audit_path))
+                render_text_artifact(
+                    &build_audit_artifact(
+                        "check",
+                        &findings_to_render,
+                        AuditStatus::Complete,
+                        None,
+                        None,
+                    ),
+                    success_message,
+                    Some(&audit_path),
+                )
             );
         }
     }

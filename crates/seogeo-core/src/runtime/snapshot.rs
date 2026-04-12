@@ -1,5 +1,6 @@
 use anyhow::Result;
-use seogeo_contracts::Finding;
+use seogeo_contracts::{Finding, FindingScope};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -11,10 +12,18 @@ use crate::site::{
     build_site_from_parts,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct CapturedPage {
     body: String,
     headers: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub(crate) struct RuntimeSnapshotState {
+    pages: BTreeMap<String, CapturedPage>,
+    robots_text: Option<String>,
+    llms_text: Option<String>,
+    sitemap_text: Option<String>,
 }
 
 pub(crate) struct RuntimeSnapshotBuilder {
@@ -31,6 +40,24 @@ impl RuntimeSnapshotBuilder {
             robots_text: None,
             llms_text: None,
             sitemap_text: None,
+        }
+    }
+
+    pub(crate) fn from_state(state: RuntimeSnapshotState) -> Self {
+        Self {
+            pages: state.pages,
+            robots_text: state.robots_text,
+            llms_text: state.llms_text,
+            sitemap_text: state.sitemap_text,
+        }
+    }
+
+    pub(crate) fn checkpoint_state(&self) -> RuntimeSnapshotState {
+        RuntimeSnapshotState {
+            pages: self.pages.clone(),
+            robots_text: self.robots_text.clone(),
+            llms_text: self.llms_text.clone(),
+            sitemap_text: self.sitemap_text.clone(),
         }
     }
 
@@ -129,6 +156,7 @@ impl RuntimeSnapshotBuilder {
                 column: 1,
                 severity: "warning".to_string(),
                 suggestion: Some("increase --max-pages for a more complete runtime audit".to_string()),
+                scope: FindingScope::Sitewide,
             });
         }
         Ok((site, crawl_findings))
@@ -145,7 +173,7 @@ fn relative_html_path(route: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::RuntimeSnapshotBuilder;
+    use super::{RuntimeSnapshotBuilder, RuntimeSnapshotState};
     use crate::site::DeploymentModel;
 
     #[test]
@@ -166,5 +194,26 @@ mod tests {
             site.route_pages.get("about").unwrap().path,
             std::path::PathBuf::from("crawl/about/index.html")
         );
+    }
+
+    #[test]
+    fn snapshot_builder_round_trips_checkpoint_state() {
+        let mut builder = RuntimeSnapshotBuilder::new();
+        builder
+            .write_page(
+                "docs",
+                "<html><head><title>Docs</title><meta name=\"description\" content=\"Docs\"></head><body><h1>Docs</h1></body></html>",
+                &std::collections::BTreeMap::new(),
+            )
+            .unwrap();
+        let state = builder.checkpoint_state();
+        let restored = RuntimeSnapshotBuilder::from_state(RuntimeSnapshotState {
+            pages: state.pages,
+            robots_text: state.robots_text,
+            llms_text: state.llms_text,
+            sitemap_text: state.sitemap_text,
+        });
+        let (site, _) = restored.finalize(1, 10, 1, false).unwrap();
+        assert!(site.route_pages.contains_key("docs"));
     }
 }

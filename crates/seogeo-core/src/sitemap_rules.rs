@@ -1,4 +1,4 @@
-use seogeo_contracts::Finding;
+use seogeo_contracts::{Finding, FindingScope};
 use std::fs;
 
 use crate::config::Config;
@@ -37,6 +37,7 @@ fn sitemap_error_finding(site: &Site, sitemap: &std::path::Path) -> Finding {
         column: 1,
         severity: "error".to_string(),
         suggestion: None,
+        scope: FindingScope::Sitewide,
     }
 }
 
@@ -60,6 +61,7 @@ pub fn run_sitemap_rules(site: &Site, _config: &Config) -> Vec<Finding> {
             column: 1,
             severity: "error".to_string(),
             suggestion: None,
+            scope: FindingScope::Sitewide,
         }];
     }
 
@@ -80,6 +82,7 @@ pub fn run_sitemap_rules(site: &Site, _config: &Config) -> Vec<Finding> {
                 column: 1,
                 severity: "error".to_string(),
                 suggestion: None,
+                scope: FindingScope::Page,
             });
         }
     }

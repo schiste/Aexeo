@@ -5,8 +5,11 @@ mod playwright;
 mod snapshot;
 
 use anyhow::Result;
-use seogeo_contracts::Finding;
+use seogeo_contracts::{AuditStatus, CrawlStats, Finding, FindingScope};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use std::fs;
+use std::path::Path;
 
 use crate::config::Config;
 use crate::policy::apply_policy;
@@ -15,15 +18,77 @@ use crate::static_check::run_checks_for_site;
 use crate::verification::{DiffResult, diff_finding_sets};
 use graph::{extract_internal_links, read_loc_values, response_report_path, should_enqueue_link};
 use http::{fetch_with_http, host_for_url, is_html_content_type, same_site_host};
-use planner::CrawlPlanner;
-use playwright::{fetch_with_playwright, playwright_is_available};
-use snapshot::RuntimeSnapshotBuilder;
+use planner::{CrawlPlanner, CrawlPlannerState};
+pub use playwright::PlaywrightDoctor;
+use playwright::{fetch_with_playwright, playwright_is_available, probe_playwright_runtime};
+use snapshot::{RuntimeSnapshotBuilder, RuntimeSnapshotState};
 
 #[derive(Debug, Clone)]
 pub struct RuntimeAudit {
     pub site: Site,
     pub crawl_findings: Vec<Finding>,
     pub findings: Vec<Finding>,
+    pub status: AuditStatus,
+    pub crawl_stats: CrawlStats,
+    pub truncation_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeCheckpoint {
+    pub(crate) version: u32,
+    pub(crate) base_url: String,
+    pub(crate) engine: String,
+    pub(crate) planner: CrawlPlannerState,
+    pub(crate) snapshot: RuntimeSnapshotState,
+    pub(crate) crawl_findings: Vec<Finding>,
+    pub(crate) crawl_stats: CrawlStats,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RuntimeProgressEvent {
+    pub phase: String,
+    pub engine: String,
+    pub current_url: Option<String>,
+    pub visited_pages: usize,
+    pub discovered_internal_routes: usize,
+    pub queued_routes_remaining: usize,
+    pub fetch_failures: usize,
+    pub fetch_retries: usize,
+    pub skipped_non_html: usize,
+    pub truncated: bool,
+}
+
+pub struct RuntimeAuditOptions<'a> {
+    pub checkpoint_path: Option<&'a Path>,
+    pub checkpoint_every: usize,
+    pub resume_from: Option<&'a Path>,
+    pub fetch_retry_budget: usize,
+    pub progress: RuntimeProgressMode<'a>,
+}
+
+#[derive(Default)]
+pub enum RuntimeProgressMode<'a> {
+    #[default]
+    Off,
+    Callback(&'a mut dyn FnMut(RuntimeProgressEvent)),
+}
+
+impl<'a> Default for RuntimeAuditOptions<'a> {
+    fn default() -> Self {
+        Self {
+            checkpoint_path: None,
+            checkpoint_every: 25,
+            resume_from: None,
+            fetch_retry_budget: 2,
+            progress: RuntimeProgressMode::Off,
+        }
+    }
+}
+
+impl RuntimeAudit {
+    pub fn is_partial(&self) -> bool {
+        self.status == AuditStatus::Partial
+    }
 }
 
 fn resolve_runtime_engine(engine: &str) -> Result<&'static str> {
@@ -35,11 +100,13 @@ fn resolve_runtime_engine(engine: &str) -> Result<&'static str> {
         }),
         "http" => Ok("http"),
         "playwright" => {
-            if playwright_is_available() {
+            let doctor = probe_playwright_runtime();
+            if doctor.available {
                 Ok("playwright")
             } else {
                 anyhow::bail!(
-                    "runtime engine 'playwright' requires a local Playwright runtime; run `npm install` in the repo root or set SEOGEO_PLAYWRIGHT_EXECUTABLE"
+                    "runtime engine 'playwright' requires a local Playwright runtime; {}",
+                    doctor.message
                 )
             }
         }
@@ -47,38 +114,119 @@ fn resolve_runtime_engine(engine: &str) -> Result<&'static str> {
     }
 }
 
+fn emit_progress(options: &mut RuntimeAuditOptions<'_>, event: RuntimeProgressEvent) {
+    if let RuntimeProgressMode::Callback(callback) = &mut options.progress {
+        callback(event);
+    }
+}
+
+fn checkpoint_state(
+    checkpoint_path: &Path,
+    base_url: &str,
+    engine: &str,
+    planner: &CrawlPlanner,
+    snapshot: &RuntimeSnapshotBuilder,
+    crawl_findings: &[Finding],
+    crawl_stats: &CrawlStats,
+) -> Result<()> {
+    let checkpoint = RuntimeCheckpoint {
+        version: 1,
+        base_url: base_url.to_string(),
+        engine: engine.to_string(),
+        planner: planner.checkpoint_state(),
+        snapshot: snapshot.checkpoint_state(),
+        crawl_findings: crawl_findings.to_vec(),
+        crawl_stats: crawl_stats.clone(),
+    };
+    fs::write(checkpoint_path, serde_json::to_string_pretty(&checkpoint)?)?;
+    Ok(())
+}
+
+fn load_checkpoint(checkpoint_path: &Path, max_pages: usize) -> Result<RuntimeCheckpoint> {
+    let text = fs::read_to_string(checkpoint_path)?;
+    let mut checkpoint = serde_json::from_str::<RuntimeCheckpoint>(&text)?;
+    checkpoint.planner.max_pages = max_pages;
+    checkpoint.crawl_stats.max_pages = max_pages;
+    Ok(checkpoint)
+}
+
 fn materialize_runtime_site(
     base_url: &str,
     max_pages: usize,
     engine: &str,
     config: &Config,
-) -> Result<(Site, Vec<Finding>)> {
+    options: &mut RuntimeAuditOptions<'_>,
+) -> Result<(Site, Vec<Finding>, CrawlStats, Option<String>)> {
     let runtime = config.runtime();
-    let mut planner = CrawlPlanner::new(base_url, max_pages);
-    let mut snapshot = RuntimeSnapshotBuilder::new();
-    let mut crawl_findings = Vec::new();
+    let (mut planner, mut snapshot, mut crawl_findings, mut crawl_stats) =
+        if let Some(resume_from) = options.resume_from {
+            let checkpoint = load_checkpoint(resume_from, max_pages)?;
+            (
+                CrawlPlanner::from_checkpoint(checkpoint.planner, max_pages),
+                RuntimeSnapshotBuilder::from_state(checkpoint.snapshot),
+                checkpoint.crawl_findings,
+                checkpoint.crawl_stats,
+            )
+        } else {
+            (
+                CrawlPlanner::new(base_url, max_pages),
+                RuntimeSnapshotBuilder::new(),
+                Vec::new(),
+                CrawlStats {
+                    engine: engine.to_string(),
+                    max_pages,
+                    ..CrawlStats::default()
+                },
+            )
+        };
 
-    for seed in runtime.crawl_seeds {
-        planner.seed_from_user_input(seed, &runtime);
-    }
+    if options.resume_from.is_none() {
+        for seed in runtime.crawl_seeds {
+            planner.seed_from_user_input(seed, &runtime);
+        }
 
-    if runtime.crawl_use_sitemap {
-        let mut visited_sitemaps = BTreeSet::new();
-        let sitemap_base = planner.normalized_base().to_string();
-        for sitemap_name in ["sitemap.xml", "sitemap-index.xml", "sitemap_index.xml"] {
-            seed_routes_from_sitemap(
-                &mut planner,
-                &format!("{}{}", sitemap_base, sitemap_name),
-                &runtime,
-                &mut visited_sitemaps,
-            )?;
+        if runtime.crawl_use_sitemap {
+            let mut visited_sitemaps = BTreeSet::new();
+            let sitemap_base = planner.normalized_base().to_string();
+            for sitemap_name in ["sitemap.xml", "sitemap-index.xml", "sitemap_index.xml"] {
+                let _ = seed_routes_from_sitemap(
+                    &mut planner,
+                    &format!("{}{}", sitemap_base, sitemap_name),
+                    &runtime,
+                    &mut visited_sitemaps,
+                );
+            }
         }
     }
 
     while let Some(current) = planner.next_url(&runtime) {
-        let fetched = fetch_runtime_page(engine, &current, &runtime)?;
+        let fetched = match fetch_runtime_page(
+            engine,
+            &current,
+            &runtime,
+            options.fetch_retry_budget,
+            &mut crawl_stats,
+        ) {
+            Ok(fetched) => fetched,
+            Err(error) => {
+                let route = route_from_urlish(&current).unwrap_or_default();
+                crawl_stats.fetch_failures += 1;
+                crawl_findings.push(Finding {
+                    rule_id: "CRW001".to_string(),
+                    message: format!("failed to fetch URL: {} ({})", current, error),
+                    path: response_report_path(&route),
+                    line: 1,
+                    column: 1,
+                    severity: "error".to_string(),
+                    suggestion: None,
+                    scope: FindingScope::Page,
+                });
+                continue;
+            }
+        };
         let Some(body) = fetched.body else {
             let route = route_from_urlish(&current).unwrap_or_default();
+            crawl_stats.fetch_failures += 1;
             crawl_findings.push(Finding {
                 rule_id: "CRW001".to_string(),
                 message: format!("failed to fetch URL: {}", current),
@@ -87,10 +235,12 @@ fn materialize_runtime_site(
                 column: 1,
                 severity: "error".to_string(),
                 suggestion: None,
+                scope: FindingScope::Page,
             });
             continue;
         };
         if !is_html_content_type(fetched.content_type.as_deref()) {
+            crawl_stats.skipped_non_html += 1;
             continue;
         }
         let effective_host = host_for_url(&fetched.effective_url);
@@ -107,33 +257,103 @@ fn materialize_runtime_site(
             }
             planner.discover_link_target(&target, &runtime);
         }
+
+        crawl_stats.visited_pages = planner.visited_count();
+        crawl_stats.discovered_internal_routes = planner.discovered_route_count();
+        crawl_stats.queued_routes_remaining = planner.queued_count();
+        crawl_stats.truncated = planner.truncated();
+        emit_progress(
+            options,
+            RuntimeProgressEvent {
+                phase: "progress".to_string(),
+                engine: engine.to_string(),
+                current_url: Some(fetched.effective_url),
+                visited_pages: crawl_stats.visited_pages,
+                discovered_internal_routes: crawl_stats.discovered_internal_routes,
+                queued_routes_remaining: crawl_stats.queued_routes_remaining,
+                fetch_failures: crawl_stats.fetch_failures,
+                fetch_retries: crawl_stats.fetch_retries,
+                skipped_non_html: crawl_stats.skipped_non_html,
+                truncated: crawl_stats.truncated,
+            },
+        );
+        if let Some(checkpoint_path) = options.checkpoint_path
+            && crawl_stats.visited_pages % options.checkpoint_every.max(1) == 0
+        {
+            checkpoint_state(
+                checkpoint_path,
+                base_url,
+                engine,
+                &planner,
+                &snapshot,
+                &crawl_findings,
+                &crawl_stats,
+            )?;
+        }
     }
 
-    snapshot.capture_optional_artifacts(planner.normalized_base(), &runtime)?;
+    let _ = snapshot.capture_optional_artifacts(planner.normalized_base(), &runtime);
     let (site, snapshot_findings) = snapshot.finalize(
         planner.visited_count(),
         max_pages,
         planner.discovered_route_count(),
         planner.truncated(),
     )?;
+    crawl_stats.visited_pages = planner.visited_count();
+    crawl_stats.discovered_internal_routes = planner.discovered_route_count();
+    crawl_stats.queued_routes_remaining = planner.queued_count();
+    crawl_stats.truncated = planner.truncated();
     crawl_findings.extend(snapshot_findings);
-    Ok((site, crawl_findings))
+    let truncation_reason = if planner.truncated() {
+        Some(format!(
+            "crawl stopped at max_pages={} after visiting {} pages while at least {} routes were discovered",
+            max_pages,
+            planner.visited_count(),
+            planner.discovered_route_count()
+        ))
+    } else {
+        None
+    };
+    if let Some(checkpoint_path) = options.checkpoint_path
+        && site
+            .crawl_meta
+            .as_ref()
+            .map(|meta| !meta.truncated)
+            .unwrap_or(true)
+    {
+        let _ = fs::remove_file(checkpoint_path);
+    }
+    Ok((site, crawl_findings, crawl_stats, truncation_reason))
 }
 
 fn fetch_runtime_page(
     engine: &str,
     url: &str,
     runtime: &crate::config::RuntimeConfig<'_>,
+    fetch_retry_budget: usize,
+    crawl_stats: &mut CrawlStats,
 ) -> Result<http::FetchResult> {
-    match engine {
-        "http" => fetch_with_http(
-            url,
-            runtime.crawl_headers,
-            runtime.crawl_cookies,
-            runtime.crawl_basic_auth,
-        ),
-        "playwright" => fetch_with_playwright(url, runtime),
-        other => anyhow::bail!("unsupported runtime engine '{other}'"),
+    let mut attempt = 0usize;
+    loop {
+        let result = match engine {
+            "http" => fetch_with_http(
+                url,
+                runtime.crawl_headers,
+                runtime.crawl_cookies,
+                runtime.crawl_basic_auth,
+            ),
+            "playwright" => fetch_with_playwright(url, runtime),
+            other => anyhow::bail!("unsupported runtime engine '{other}'"),
+        };
+        match result {
+            Ok(fetched) => return Ok(fetched),
+            Err(error) if attempt < fetch_retry_budget => {
+                attempt += 1;
+                crawl_stats.fetch_retries += 1;
+                continue;
+            }
+            Err(error) => return Err(error),
+        }
     }
 }
 
@@ -180,16 +400,55 @@ pub fn run_runtime_audit(
     engine: &str,
     config: &Config,
 ) -> Result<RuntimeAudit> {
+    run_runtime_audit_with_options(
+        base_url,
+        max_pages,
+        engine,
+        config,
+        &mut RuntimeAuditOptions::default(),
+    )
+}
+
+pub fn run_runtime_audit_with_options(
+    base_url: &str,
+    max_pages: usize,
+    engine: &str,
+    config: &Config,
+    options: &mut RuntimeAuditOptions<'_>,
+) -> Result<RuntimeAudit> {
     let effective_engine = resolve_runtime_engine(engine)?;
-    let (site, crawl_findings) =
-        materialize_runtime_site(base_url, max_pages, effective_engine, config)?;
+    let (site, crawl_findings, crawl_stats, truncation_reason) =
+        materialize_runtime_site(base_url, max_pages, effective_engine, config, options)?;
     let mut findings = crawl_findings.clone();
     findings.extend(run_checks_for_site(&site, config));
     findings = apply_policy(findings, config);
+    let status = if crawl_stats.truncated {
+        AuditStatus::Partial
+    } else {
+        AuditStatus::Complete
+    };
+    emit_progress(
+        options,
+        RuntimeProgressEvent {
+            phase: "complete".to_string(),
+            engine: effective_engine.to_string(),
+            current_url: None,
+            visited_pages: crawl_stats.visited_pages,
+            discovered_internal_routes: crawl_stats.discovered_internal_routes,
+            queued_routes_remaining: crawl_stats.queued_routes_remaining,
+            fetch_failures: crawl_stats.fetch_failures,
+            fetch_retries: crawl_stats.fetch_retries,
+            skipped_non_html: crawl_stats.skipped_non_html,
+            truncated: crawl_stats.truncated,
+        },
+    );
     Ok(RuntimeAudit {
         site,
         crawl_findings,
         findings,
+        status,
+        crawl_stats,
+        truncation_reason,
     })
 }
 
@@ -197,11 +456,15 @@ pub fn verify_runtime_audit(audit: &RuntimeAudit, baseline_findings: &[Finding])
     diff_finding_sets(baseline_findings, &audit.findings)
 }
 
+pub fn runtime_doctor() -> PlaywrightDoctor {
+    probe_playwright_runtime()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{run_runtime_audit, verify_runtime_audit};
     use crate::config::{Config, default_rule_switches};
-    use seogeo_contracts::Finding;
+    use seogeo_contracts::{AuditStatus, CrawlStats, Finding, FindingScope};
     use std::collections::{BTreeMap, BTreeSet};
     use std::io::ErrorKind;
     use std::io::{Read, Write};
@@ -519,7 +782,15 @@ mod tests {
                 column: 1,
                 severity: "error".to_string(),
                 suggestion: None,
+                scope: FindingScope::Page,
             }],
+            status: AuditStatus::Complete,
+            crawl_stats: CrawlStats {
+                engine: "http".to_string(),
+                max_pages: 10,
+                ..CrawlStats::default()
+            },
+            truncation_reason: None,
         };
         let diff = verify_runtime_audit(&audit, &[]);
         assert_eq!(diff.new_findings.len(), 1);

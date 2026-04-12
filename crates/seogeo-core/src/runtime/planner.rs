@@ -1,9 +1,21 @@
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, VecDeque};
 
 use super::graph::route_is_allowed;
 use super::http::{host_for_url, normalize_base_url, origin_for_url, same_site_host};
 use crate::config::RuntimeConfig;
 use crate::site::{normalize_internal_href, route_from_urlish};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct CrawlPlannerState {
+    pub(crate) normalized_base: String,
+    pub(crate) base_host: String,
+    pub(crate) queue: Vec<String>,
+    pub(crate) visited: Vec<String>,
+    pub(crate) discovered_routes: Vec<String>,
+    pub(crate) max_pages: usize,
+    pub(crate) truncated: bool,
+}
 
 #[derive(Debug)]
 pub(crate) struct CrawlPlanner {
@@ -46,8 +58,36 @@ impl CrawlPlanner {
         self.visited.len()
     }
 
+    pub(crate) fn queued_count(&self) -> usize {
+        self.queue.len()
+    }
+
     pub(crate) fn truncated(&self) -> bool {
         self.truncated
+    }
+
+    pub(crate) fn checkpoint_state(&self) -> CrawlPlannerState {
+        CrawlPlannerState {
+            normalized_base: self.normalized_base.clone(),
+            base_host: self.base_host.clone(),
+            queue: self.queue.iter().cloned().collect(),
+            visited: self.visited.iter().cloned().collect(),
+            discovered_routes: self.discovered_routes.iter().cloned().collect(),
+            max_pages: self.max_pages,
+            truncated: self.truncated,
+        }
+    }
+
+    pub(crate) fn from_checkpoint(state: CrawlPlannerState, max_pages: usize) -> Self {
+        Self {
+            normalized_base: state.normalized_base,
+            base_host: state.base_host,
+            queue: VecDeque::from(state.queue),
+            visited: state.visited.into_iter().collect(),
+            discovered_routes: state.discovered_routes.into_iter().collect(),
+            max_pages,
+            truncated: state.truncated,
+        }
     }
 
     pub(crate) fn seed_from_user_input(&mut self, seed: &str, runtime: &RuntimeConfig<'_>) {
@@ -115,7 +155,7 @@ impl CrawlPlanner {
 
 #[cfg(test)]
 mod tests {
-    use super::CrawlPlanner;
+    use super::{CrawlPlanner, CrawlPlannerState};
     use crate::config::Config;
 
     #[test]
@@ -152,5 +192,26 @@ mod tests {
             planner.next_url(&runtime).as_deref(),
             Some("https://www.example.com/docs")
         );
+    }
+
+    #[test]
+    fn planner_round_trips_checkpoint_state() {
+        let config = Config::default();
+        let runtime = config.runtime();
+        let mut planner = CrawlPlanner::new("https://example.com", 10);
+        planner.seed_from_user_input("/docs", &runtime);
+        let _ = planner.next_url(&runtime);
+
+        let state = planner.checkpoint_state();
+        let restored = CrawlPlanner::from_checkpoint(
+            CrawlPlannerState {
+                max_pages: 20,
+                ..state
+            },
+            20,
+        );
+        assert_eq!(restored.base_host(), "example.com");
+        assert_eq!(restored.discovered_route_count(), 2);
+        assert_eq!(restored.visited_count(), 1);
     }
 }

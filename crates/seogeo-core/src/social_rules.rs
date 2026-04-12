@@ -1,4 +1,4 @@
-use seogeo_contracts::Finding;
+use seogeo_contracts::{Finding, FindingScope};
 
 use crate::config::Config;
 use crate::site::{Page, Site, normalize_internal_href};
@@ -12,6 +12,7 @@ fn finding(rule_id: &str, message: impl Into<String>, page: &Page) -> Finding {
         column: 1,
         severity: "warning".to_string(),
         suggestion: None,
+        scope: FindingScope::Page,
     }
 }
 

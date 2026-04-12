@@ -1,5 +1,5 @@
 use anyhow::Result;
-use seogeo_contracts::Finding;
+use seogeo_contracts::{Finding, FindingScope};
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -16,6 +16,7 @@ fn finding(rule_id: &str, message: impl Into<String>, path: &Path, severity: &st
         column: 1,
         severity: severity.to_string(),
         suggestion: None,
+        scope: FindingScope::Page,
     }
 }
 

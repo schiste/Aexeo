@@ -3,9 +3,9 @@ use anyhow::{Result, bail};
 use crate::commands::{
     common::required_arg,
     config::command_config,
-    docs::{command_diff, command_docs, command_quality, command_trend},
+    docs::{command_diff, command_docs, command_quality, command_report_render, command_trend},
     listings::{command_adapters, command_plugin_check, command_rules},
-    runtime::{command_crawl, command_verify},
+    runtime::{command_crawl, command_doctor, command_verify},
     static_site::{command_baseline, command_check, command_fix, command_generate},
 };
 
@@ -29,6 +29,15 @@ pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
             required_arg(submatches, "current")?,
             required_arg(submatches, "format")?,
         ),
+        Some(("report", submatches)) => match submatches.subcommand() {
+            Some(("render", render_matches)) => command_report_render(
+                required_arg(render_matches, "audit")?,
+                required_arg(render_matches, "format")?,
+            ),
+            Some((other, _)) => bail!("unsupported report subcommand: {}", other),
+            None => bail!("missing report subcommand"),
+        },
+        Some(("doctor", submatches)) => command_doctor(submatches),
         Some(("trend", submatches)) => command_trend(
             required_arg(submatches, "command_name")?,
             required_arg(submatches, "path")?,

@@ -55,6 +55,26 @@ pub fn build_cli() -> Command {
                         .value_parser(value_parser!(usize))
                         .default_value("200"),
                 )
+                .arg(Arg::new("checkpoint").long("checkpoint").num_args(1))
+                .arg(Arg::new("resume").long("resume").num_args(1))
+                .arg(
+                    Arg::new("checkpoint-every")
+                        .long("checkpoint-every")
+                        .value_parser(value_parser!(usize))
+                        .default_value("25"),
+                )
+                .arg(
+                    Arg::new("retry-budget")
+                        .long("retry-budget")
+                        .value_parser(value_parser!(usize))
+                        .default_value("2"),
+                )
+                .arg(
+                    Arg::new("progress")
+                        .long("progress")
+                        .value_parser(["plain", "json", "off"])
+                        .default_value("plain"),
+                )
                 .arg(Arg::new("config").long("config").num_args(1))
                 .arg(Arg::new("baseline").long("baseline").num_args(1))
                 .arg(
@@ -179,16 +199,67 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("config").long("config").num_args(1))
                 .arg(Arg::new("baseline").long("baseline").num_args(1))
                 .arg(
+                    Arg::new("allow-partial-baseline")
+                        .long("allow-partial-baseline")
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
                     Arg::new("max-pages")
                         .long("max-pages")
                         .value_parser(value_parser!(usize))
                         .default_value("200"),
+                )
+                .arg(Arg::new("checkpoint").long("checkpoint").num_args(1))
+                .arg(Arg::new("resume").long("resume").num_args(1))
+                .arg(
+                    Arg::new("checkpoint-every")
+                        .long("checkpoint-every")
+                        .value_parser(value_parser!(usize))
+                        .default_value("25"),
+                )
+                .arg(
+                    Arg::new("retry-budget")
+                        .long("retry-budget")
+                        .value_parser(value_parser!(usize))
+                        .default_value("2"),
+                )
+                .arg(
+                    Arg::new("progress")
+                        .long("progress")
+                        .value_parser(["plain", "json", "off"])
+                        .default_value("plain"),
                 )
                 .arg(
                     Arg::new("engine")
                         .long("engine")
                         .value_parser(["auto", "http", "playwright"]),
                 )
+                .arg(
+                    Arg::new("format")
+                        .long("format")
+                        .value_parser(["text", "json"])
+                        .default_value("text"),
+                ),
+        )
+        .subcommand(
+            Command::new("report")
+                .about("Render an audit artifact into a human or machine readable report")
+                .subcommand(
+                    Command::new("render")
+                        .about("Render an audit JSON artifact")
+                        .arg(Arg::new("audit").required(true))
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "md", "json", "sarif"])
+                                .default_value("text"),
+                        ),
+                ),
+        )
+        .subcommand(
+            Command::new("doctor")
+                .about("Inspect local runtime capabilities")
+                .arg(Arg::new("target").required(true).value_parser(["runtime"]))
                 .arg(
                     Arg::new("format")
                         .long("format")

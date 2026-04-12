@@ -1,4 +1,4 @@
-use seogeo_contracts::Finding;
+use seogeo_contracts::{Finding, FindingScope};
 use std::fs;
 use std::path::Path;
 
@@ -45,6 +45,7 @@ pub(super) fn find_static_tooling_issues(root: &Path) -> Vec<Finding> {
                 column: 1,
                 severity: "error".to_string(),
                 suggestion: None,
+                scope: FindingScope::Sitewide,
             });
         }
     }
@@ -57,6 +58,7 @@ pub(super) fn find_static_tooling_issues(root: &Path) -> Vec<Finding> {
             column: 1,
             severity: "error".to_string(),
             suggestion: Some("run `npm install` in the repository root to capture a reproducible Playwright runtime".to_string()),
+            scope: FindingScope::Sitewide,
         });
     }
     findings
@@ -88,5 +90,6 @@ pub(super) fn find_missing_rust_integration_coverage(root: &Path) -> Vec<Finding
         column: 1,
         severity: "error".to_string(),
         suggestion: None,
+        scope: FindingScope::Sitewide,
     }]
 }

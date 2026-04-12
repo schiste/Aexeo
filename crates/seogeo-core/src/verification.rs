@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use seogeo_contracts::{Finding, FindingFingerprint};
+use seogeo_contracts::{AuditArtifact, AuditStatus, Finding, FindingFingerprint};
+
+use crate::reporting::{build_audit_artifact, summarize_findings};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiffResult {
@@ -13,14 +15,25 @@ pub struct DiffResult {
     pub unchanged_findings: Vec<Finding>,
 }
 
-pub fn load_findings_from_audit(path: &Path) -> Result<Vec<Finding>> {
+pub fn load_audit_artifact(path: &Path) -> Result<AuditArtifact> {
     let text = fs::read_to_string(path)?;
-    let payload = serde_json::from_str::<Vec<Finding>>(&text)?;
-    Ok(payload)
+    if let Ok(artifact) = serde_json::from_str::<AuditArtifact>(&text) {
+        return Ok(artifact);
+    }
+    let findings = serde_json::from_str::<Vec<Finding>>(&text)?;
+    let mut artifact = build_audit_artifact("legacy", &findings, AuditStatus::Complete, None, None);
+    artifact.generated_at = 0;
+    artifact.summary = summarize_findings(&artifact.findings);
+    Ok(artifact)
+}
+
+pub fn load_findings_from_audit(path: &Path) -> Result<Vec<Finding>> {
+    Ok(load_audit_artifact(path)?.findings)
 }
 
 pub fn write_baseline_file(findings: &[Finding], path: &Path) -> Result<()> {
-    fs::write(path, serde_json::to_string_pretty(findings)?)?;
+    let artifact = build_audit_artifact("baseline", findings, AuditStatus::Complete, None, None);
+    fs::write(path, serde_json::to_string_pretty(&artifact)?)?;
     Ok(())
 }
 
@@ -86,8 +99,8 @@ pub fn render_diff_text(diff: &DiffResult) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{diff_finding_sets, render_diff_text};
-    use seogeo_contracts::Finding;
+    use super::{diff_finding_sets, load_audit_artifact, render_diff_text, write_baseline_file};
+    use seogeo_contracts::{AuditStatus, Finding, FindingScope};
 
     fn finding(rule_id: &str, path: &str) -> Finding {
         Finding {
@@ -98,6 +111,7 @@ mod tests {
             column: 1,
             severity: "error".into(),
             suggestion: None,
+            scope: FindingScope::Page,
         }
     }
 
@@ -109,5 +123,29 @@ mod tests {
         assert_eq!(diff.new_findings.len(), 1);
         assert_eq!(diff.unchanged_findings.len(), 1);
         assert!(render_diff_text(&diff).contains("New findings: 1"));
+    }
+
+    #[test]
+    fn loads_legacy_findings_arrays() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("legacy.json");
+        std::fs::write(
+            &path,
+            serde_json::to_string_pretty(&vec![finding("SEO001", "a.html")]).unwrap(),
+        )
+        .unwrap();
+        let artifact = load_audit_artifact(&path).unwrap();
+        assert_eq!(artifact.status, AuditStatus::Complete);
+        assert_eq!(artifact.findings.len(), 1);
+    }
+
+    #[test]
+    fn writes_structured_baseline_files() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("baseline.json");
+        write_baseline_file(&[finding("SEO001", "a.html")], &path).unwrap();
+        let artifact = load_audit_artifact(&path).unwrap();
+        assert_eq!(artifact.command, "baseline");
+        assert_eq!(artifact.findings.len(), 1);
     }
 }

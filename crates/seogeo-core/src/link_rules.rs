@@ -1,4 +1,4 @@
-use seogeo_contracts::Finding;
+use seogeo_contracts::{Finding, FindingScope};
 use std::path::Path;
 
 use crate::config::Config;
@@ -32,6 +32,7 @@ fn finding(
         }
         .to_string(),
         suggestion: suggestion.map(str::to_string),
+        scope: FindingScope::Page,
     }
 }
 

@@ -3,9 +3,11 @@ use crate::output::{
     render_audit_command_json, render_diff_command_json, render_paths_command_json,
 };
 use anyhow::{Result, anyhow};
+use seogeo_contracts::AuditStatus;
 use seogeo_core::{
-    find_reference_doc_drift, load_findings_from_audit, render_diff_text, render_sarif,
-    render_text, run_repo_quality_checks, write_audit_artifact, write_reference_documents,
+    build_audit_artifact, find_reference_doc_drift, load_audit_artifact, load_findings_from_audit,
+    render_audit_artifact_json, render_diff_text, render_markdown_artifact, render_sarif,
+    render_text_artifact, run_repo_quality_checks, write_audit_artifact, write_reference_documents,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,13 +22,15 @@ pub fn command_quality(path: &str, output_format: &str) -> Result<i32> {
     let root = canonicalize_or_keep(path);
     let cli_reference = render_cli_reference()?;
     let findings = run_repo_quality_checks(&root, &cli_reference)?;
-    let audit_path = write_audit_artifact(&findings, &root, "quality", 5)?;
+    let audit_artifact =
+        build_audit_artifact("quality", &findings, AuditStatus::Complete, None, None);
+    let audit_path = write_audit_artifact(&audit_artifact, &root, "quality", 5)?;
     match output_format {
         "json" => println!(
             "{}",
             render_audit_command_json(
                 "quality",
-                &findings,
+                &audit_artifact,
                 !findings.iter().any(|finding| finding.is_error()),
                 Some(audit_path.display().to_string()),
                 Vec::new(),
@@ -35,7 +39,11 @@ pub fn command_quality(path: &str, output_format: &str) -> Result<i32> {
         "sarif" => println!("{}", render_sarif(&findings, "seogeo")?),
         _ => println!(
             "{}",
-            render_text(&findings, "All quality checks passed.", Some(&audit_path))
+            render_text_artifact(
+                &audit_artifact,
+                "All quality checks passed.",
+                Some(&audit_path)
+            )
         ),
     }
     Ok(if findings.iter().any(|finding| finding.is_error()) {
@@ -145,6 +153,23 @@ pub fn command_trend(command_name: &str, path: &str, output_format: &str) -> Res
                 .and_then(|v| v.as_u64())
                 .unwrap_or_default(),
         );
+    }
+    Ok(0)
+}
+
+pub fn command_report_render(audit: &str, output_format: &str) -> Result<i32> {
+    let artifact = load_audit_artifact(Path::new(audit))?;
+    match output_format {
+        "json" => println!("{}", render_audit_artifact_json(&artifact)?),
+        "md" => println!(
+            "{}",
+            render_markdown_artifact(&artifact, Some(Path::new(audit)))
+        ),
+        "sarif" => println!("{}", render_sarif(&artifact.findings, "seogeo")?),
+        _ => println!(
+            "{}",
+            render_text_artifact(&artifact, "All checks passed.", Some(Path::new(audit)))
+        ),
     }
     Ok(0)
 }

@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::registry::rule_metadata_for_id;
-use seogeo_contracts::Finding;
-use seogeo_contracts::RuleClass;
+use seogeo_contracts::{
+    AuditArtifact, AuditStatus, AuditSummary, CrawlStats, Finding, FindingScope, RuleClass,
+};
 
 pub const DEFAULT_AUDIT_LOG_LIMIT: usize = 5;
 
@@ -50,13 +51,105 @@ impl FindingCluster {
     fn merge(&mut self, finding: &Finding) {
         self.count += 1;
         let example = format!("{}:{}:{}", finding.path, finding.line, finding.column);
-        if self.examples.len() < 3 && !self.examples.contains(&example) {
+        if self.examples.len() < 5 && !self.examples.contains(&example) {
             self.examples.push(example);
         }
     }
 
     fn confidence_tag(&self) -> String {
         rule_metadata_for_id(&self.rule_id).render_tag()
+    }
+}
+
+pub fn summarize_findings(findings: &[Finding]) -> AuditSummary {
+    let errors = findings.iter().filter(|finding| finding.is_error()).count();
+    let actionable = findings
+        .iter()
+        .filter(|finding| !is_heuristic_finding(finding))
+        .count();
+    AuditSummary {
+        total: findings.len(),
+        errors,
+        warnings: findings.len().saturating_sub(errors),
+        actionable,
+        heuristic: findings.len().saturating_sub(actionable),
+    }
+}
+
+fn rule_is_sitewide(rule_id: &str) -> bool {
+    matches!(
+        rule_id,
+        id if id.starts_with("MAP")
+            || id.starts_with("ROB")
+            || id.starts_with("LLM")
+            || id.starts_with("DEP")
+            || id.starts_with("QLT")
+            || matches!(id, "SCH009" | "SEO011" | "CRW003")
+    )
+}
+
+pub fn normalize_finding_scopes(findings: &[Finding]) -> Vec<Finding> {
+    let repeated: BTreeMap<(String, String), usize> =
+        findings
+            .iter()
+            .fold(BTreeMap::new(), |mut counts, finding| {
+                *counts
+                    .entry((finding.rule_id.clone(), finding.message.clone()))
+                    .or_default() += 1;
+                counts
+            });
+    findings
+        .iter()
+        .cloned()
+        .map(|mut finding| {
+            if finding.scope != FindingScope::Page {
+                return finding;
+            }
+            finding.scope = if rule_is_sitewide(&finding.rule_id) {
+                FindingScope::Sitewide
+            } else if repeated
+                .get(&(finding.rule_id.clone(), finding.message.clone()))
+                .copied()
+                .unwrap_or(0)
+                >= 3
+            {
+                FindingScope::Template
+            } else {
+                FindingScope::Page
+            };
+            finding
+        })
+        .collect()
+}
+
+fn completion_ratio(crawl: &CrawlStats) -> Option<String> {
+    if crawl.discovered_internal_routes == 0 {
+        return None;
+    }
+    Some(format!(
+        "{:.1}%",
+        (crawl.visited_pages as f64 / crawl.discovered_internal_routes as f64) * 100.0
+    ))
+}
+
+pub fn build_audit_artifact(
+    command: &str,
+    findings: &[Finding],
+    status: AuditStatus,
+    crawl: Option<CrawlStats>,
+    truncation_reason: Option<String>,
+) -> AuditArtifact {
+    let findings = normalize_finding_scopes(findings);
+    AuditArtifact {
+        version: 2,
+        command: command.to_string(),
+        status,
+        generated_at: now_epoch_seconds(),
+        summary: summarize_findings(&findings),
+        completion_ratio: crawl.as_ref().and_then(completion_ratio),
+        truncation_reason,
+        crawl,
+        findings,
     }
 }
 
@@ -120,10 +213,18 @@ fn section_title(is_heuristic: bool) -> &'static str {
     }
 }
 
-fn section_findings(findings: &[Finding], is_heuristic: bool) -> Vec<Finding> {
+fn scope_title(scope: FindingScope) -> &'static str {
+    match scope {
+        FindingScope::Sitewide => "Sitewide Findings",
+        FindingScope::Template => "Template Findings",
+        FindingScope::Page => "Page Findings",
+    }
+}
+
+fn scope_findings(findings: &[Finding], scope: FindingScope, is_heuristic: bool) -> Vec<Finding> {
     findings
         .iter()
-        .filter(|finding| is_heuristic_finding(finding) == is_heuristic)
+        .filter(|finding| finding.scope == scope && is_heuristic_finding(finding) == is_heuristic)
         .cloned()
         .collect()
 }
@@ -148,9 +249,9 @@ fn repeated_issue_summary(findings: &[Finding], is_heuristic: bool) -> Option<St
     }
     repeated.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     let label = if is_heuristic {
-        "Heuristic observations"
+        "heuristic observations"
     } else {
-        "Actionable issues"
+        "actionable issues"
     };
     let top_repeats = repeated
         .into_iter()
@@ -158,11 +259,7 @@ fn repeated_issue_summary(findings: &[Finding], is_heuristic: bool) -> Option<St
         .map(|((rule_id, message), count)| format!("{} {} x{}", rule_id, message, count))
         .collect::<Vec<_>>()
         .join(", ");
-    Some(format!(
-        "- Most repeated {}: {}",
-        label.to_lowercase(),
-        top_repeats
-    ))
+    Some(format!("- Most repeated {}: {}", label, top_repeats))
 }
 
 pub fn rule_group_name(rule_id: &str) -> &'static str {
@@ -188,30 +285,37 @@ pub fn rule_group_name(rule_id: &str) -> &'static str {
 }
 
 pub fn build_recap_lines(findings: &[Finding]) -> Vec<String> {
-    let total = findings.len();
-    let error_count = findings.iter().filter(|finding| finding.is_error()).count();
-    let warning_count = total.saturating_sub(error_count);
+    let summary = summarize_findings(findings);
     let (confidence, classes) = summarize_metadata(findings);
-    let actionable_count = findings
-        .iter()
-        .filter(|finding| !is_heuristic_finding(finding))
-        .count();
-    let heuristic_count = total.saturating_sub(actionable_count);
     let mut by_group: BTreeMap<String, usize> = BTreeMap::new();
+    let mut by_scope: BTreeMap<&'static str, usize> =
+        BTreeMap::from([("sitewide", 0), ("template", 0), ("page", 0)]);
     for finding in findings {
         *by_group
             .entry(rule_group_name(&finding.rule_id).to_string())
             .or_default() += 1;
+        let scope_key = match finding.scope {
+            FindingScope::Sitewide => "sitewide",
+            FindingScope::Template => "template",
+            FindingScope::Page => "page",
+        };
+        *by_scope.entry(scope_key).or_default() += 1;
     }
     let mut ranked_groups: Vec<(String, usize)> = by_group.into_iter().collect();
     ranked_groups.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     let mut lines = vec![
         "Recap".to_string(),
-        format!("- Actionable findings: {}", actionable_count),
-        format!("- Heuristic observations: {}", heuristic_count),
-        format!("- Total findings: {}", total),
-        format!("- Errors: {}", error_count),
-        format!("- Warnings: {}", warning_count),
+        format!("- Actionable findings: {}", summary.actionable),
+        format!("- Heuristic observations: {}", summary.heuristic),
+        format!("- Total findings: {}", summary.total),
+        format!("- Errors: {}", summary.errors),
+        format!("- Warnings: {}", summary.warnings),
+        format!(
+            "- Finding scopes: sitewide {}, template {}, page {}",
+            by_scope.get("sitewide").copied().unwrap_or(0),
+            by_scope.get("template").copied().unwrap_or(0),
+            by_scope.get("page").copied().unwrap_or(0)
+        ),
     ];
     if !ranked_groups.is_empty() {
         let sections = ranked_groups
@@ -243,12 +347,49 @@ pub fn build_recap_lines(findings: &[Finding]) -> Vec<String> {
     lines
 }
 
-pub fn render_text(
-    findings: &[Finding],
+fn artifact_status_lines(artifact: &AuditArtifact) -> Vec<String> {
+    let mut lines = Vec::new();
+    if artifact.status != AuditStatus::Complete {
+        lines.push(format!(
+            "- Status: {}",
+            artifact_status_label(artifact.status)
+        ));
+    }
+    if let Some(ratio) = artifact.completion_ratio.as_deref() {
+        lines.push(format!("- Completion ratio: {}", ratio));
+    }
+    if let Some(reason) = artifact.truncation_reason.as_deref() {
+        lines.push(format!("- Truncation reason: {}", reason));
+    }
+    if let Some(crawl) = artifact.crawl.as_ref() {
+        lines.push(format!(
+            "- Crawl stats: engine={} visited={} discovered={} queued={} retries={} fetch_failures={} skipped_non_html={}",
+            crawl.engine,
+            crawl.visited_pages,
+            crawl.discovered_internal_routes,
+            crawl.queued_routes_remaining,
+            crawl.fetch_retries,
+            crawl.fetch_failures,
+            crawl.skipped_non_html
+        ));
+    }
+    lines
+}
+
+fn artifact_status_label(status: AuditStatus) -> &'static str {
+    match status {
+        AuditStatus::Complete => "complete",
+        AuditStatus::Partial => "partial",
+        AuditStatus::Failed => "failed",
+    }
+}
+
+pub fn render_text_artifact(
+    artifact: &AuditArtifact,
     success_message: &str,
     audit_path: Option<&Path>,
 ) -> String {
-    if findings.is_empty() {
+    if artifact.findings.is_empty() && artifact.status == AuditStatus::Complete {
         let mut lines = vec![success_message.to_string()];
         if let Some(path) = audit_path {
             lines.push(String::new());
@@ -258,44 +399,59 @@ pub fn render_text(
     }
 
     let mut lines = vec!["Audit Report".to_string(), String::new()];
-    for is_heuristic in [false, true] {
-        let section_findings = section_findings(findings, is_heuristic);
-        if section_findings.is_empty() {
+    lines.extend(artifact_status_lines(artifact));
+    if !lines.last().is_some_and(|line| line.is_empty()) {
+        lines.push(String::new());
+    }
+
+    for scope in [
+        FindingScope::Sitewide,
+        FindingScope::Template,
+        FindingScope::Page,
+    ] {
+        let actionable = scope_findings(&artifact.findings, scope, false);
+        let heuristic = scope_findings(&artifact.findings, scope, true);
+        let scope_total = actionable.len() + heuristic.len();
+        if scope_total == 0 {
             continue;
         }
-        let grouped = cluster_findings(&section_findings);
-        let section_count = section_findings.len();
-        lines.push(format!(
-            "{} ({})",
-            section_title(is_heuristic),
-            section_count
-        ));
-        for (group_name, group_clusters) in grouped {
-            let group_count = group_clusters
-                .iter()
-                .map(|cluster| cluster.count)
-                .sum::<usize>();
-            lines.push(format!("{} ({})", group_name, group_count));
-            for cluster in group_clusters {
-                let mut line = format!(
-                    "- {} {} [{}] {}",
-                    cluster.examples.first().cloned().unwrap_or_default(),
-                    cluster.rule_id,
-                    cluster.confidence_tag(),
-                    cluster.message
-                );
-                if cluster.count > 1 {
-                    line.push_str(&format!(" ({} occurrences)", cluster.count));
-                    if !cluster.examples.is_empty() {
-                        line.push_str(&format!("; examples: {}", cluster.examples.join(", ")));
-                    }
-                }
-                lines.push(line);
+        lines.push(format!("{} ({})", scope_title(scope), scope_total));
+        for (is_heuristic, section_findings) in [(false, actionable), (true, heuristic)] {
+            if section_findings.is_empty() {
+                continue;
             }
-            lines.push(String::new());
+            lines.push(format!(
+                "{} ({})",
+                section_title(is_heuristic),
+                section_findings.len()
+            ));
+            for (group_name, group_clusters) in cluster_findings(&section_findings) {
+                let group_count = group_clusters
+                    .iter()
+                    .map(|cluster| cluster.count)
+                    .sum::<usize>();
+                lines.push(format!("{} ({})", group_name, group_count));
+                for cluster in group_clusters {
+                    let mut line = format!(
+                        "- {} {} [{}] {}",
+                        cluster.examples.first().cloned().unwrap_or_default(),
+                        cluster.rule_id,
+                        cluster.confidence_tag(),
+                        cluster.message
+                    );
+                    if cluster.count > 1 {
+                        line.push_str(&format!(" ({} occurrences)", cluster.count));
+                        if !cluster.examples.is_empty() {
+                            line.push_str(&format!("; examples: {}", cluster.examples.join(", ")));
+                        }
+                    }
+                    lines.push(line);
+                }
+                lines.push(String::new());
+            }
         }
     }
-    lines.extend(build_recap_lines(findings));
+    lines.extend(build_recap_lines(&artifact.findings));
     if let Some(path) = audit_path {
         lines.push(String::new());
         lines.push(format!("Audit results: {}", path.display()));
@@ -303,8 +459,81 @@ pub fn render_text(
     lines.join("\n")
 }
 
+pub fn render_markdown_artifact(artifact: &AuditArtifact, audit_path: Option<&Path>) -> String {
+    let mut lines = vec!["# Audit Report".to_string(), String::new()];
+    lines.push(format!("- Command: `{}`", artifact.command));
+    lines.push(format!(
+        "- Status: `{}`",
+        artifact_status_label(artifact.status)
+    ));
+    if let Some(ratio) = artifact.completion_ratio.as_deref() {
+        lines.push(format!("- Completion ratio: `{}`", ratio));
+    }
+    if let Some(reason) = artifact.truncation_reason.as_deref() {
+        lines.push(format!("- Truncation reason: {}", reason));
+    }
+    if let Some(path) = audit_path {
+        lines.push(format!("- Audit artifact: `{}`", path.display()));
+    }
+    lines.push(String::new());
+    lines.push("## Summary".to_string());
+    lines.push(format!("- Total findings: `{}`", artifact.summary.total));
+    lines.push(format!("- Errors: `{}`", artifact.summary.errors));
+    lines.push(format!("- Warnings: `{}`", artifact.summary.warnings));
+    lines.push(format!("- Actionable: `{}`", artifact.summary.actionable));
+    lines.push(format!("- Heuristic: `{}`", artifact.summary.heuristic));
+    lines.push(String::new());
+
+    for scope in [
+        FindingScope::Sitewide,
+        FindingScope::Template,
+        FindingScope::Page,
+    ] {
+        let scoped = artifact
+            .findings
+            .iter()
+            .filter(|finding| finding.scope == scope)
+            .cloned()
+            .collect::<Vec<_>>();
+        if scoped.is_empty() {
+            continue;
+        }
+        lines.push(format!("## {}", scope_title(scope)));
+        for (group_name, group_clusters) in cluster_findings(&scoped) {
+            lines.push(format!("### {}", group_name));
+            for cluster in group_clusters {
+                let mut line = format!(
+                    "- `{}` `{}` {}",
+                    cluster.examples.first().cloned().unwrap_or_default(),
+                    cluster.rule_id,
+                    cluster.message
+                );
+                if cluster.count > 1 {
+                    line.push_str(&format!(" (`{} occurrences`)", cluster.count));
+                }
+                lines.push(line);
+            }
+            lines.push(String::new());
+        }
+    }
+    lines.join("\n")
+}
+
+pub fn render_text(
+    findings: &[Finding],
+    success_message: &str,
+    audit_path: Option<&Path>,
+) -> String {
+    let artifact = build_audit_artifact("audit", findings, AuditStatus::Complete, None, None);
+    render_text_artifact(&artifact, success_message, audit_path)
+}
+
 pub fn render_json(findings: &[Finding]) -> Result<String> {
     Ok(serde_json::to_string_pretty(findings)?)
+}
+
+pub fn render_audit_artifact_json(artifact: &AuditArtifact) -> Result<String> {
+    Ok(serde_json::to_string_pretty(artifact)?)
 }
 
 pub fn render_sarif(findings: &[Finding], tool_name: &str) -> Result<String> {
@@ -369,7 +598,7 @@ pub fn prune_old_audit_logs(artifact_dir: &Path, command_name: &str, keep: usize
 pub fn update_trend_history(
     artifact_dir: &Path,
     command_name: &str,
-    findings: &[Finding],
+    artifact: &AuditArtifact,
 ) -> Result<()> {
     let trend_path = artifact_dir.join(format!("{}-trends.json", command_name));
     let mut payload: Vec<serde_json::Value> = fs::read_to_string(&trend_path)
@@ -377,10 +606,13 @@ pub fn update_trend_history(
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
     payload.push(json!({
-        "timestamp": now_epoch_seconds(),
-        "total": findings.len(),
-        "errors": findings.iter().filter(|finding| finding.is_error()).count(),
-        "warnings": findings.iter().filter(|finding| !finding.is_error()).count(),
+        "timestamp": artifact.generated_at,
+        "status": artifact_status_label(artifact.status),
+        "total": artifact.summary.total,
+        "errors": artifact.summary.errors,
+        "warnings": artifact.summary.warnings,
+        "actionable": artifact.summary.actionable,
+        "heuristic": artifact.summary.heuristic,
     }));
     let slice_start = payload.len().saturating_sub(50);
     fs::write(
@@ -391,28 +623,32 @@ pub fn update_trend_history(
 }
 
 pub fn write_audit_artifact(
-    findings: &[Finding],
+    artifact: &AuditArtifact,
     base_dir: &Path,
     command_name: &str,
     keep: usize,
 ) -> Result<PathBuf> {
     let artifact_dir = base_dir.join(".seogeo-reports");
     fs::create_dir_all(&artifact_dir)?;
-    let timestamp = now_epoch_seconds();
+    let timestamp = artifact.generated_at;
     let history_path = artifact_dir.join(format!("{}-{}.json", command_name, timestamp));
     let latest_path = artifact_dir.join(format!("{}-latest.json", command_name));
-    let payload = render_json(findings)?;
+    let payload = render_audit_artifact_json(artifact)?;
     fs::write(&history_path, &payload)?;
     fs::write(&latest_path, payload)?;
     prune_old_audit_logs(&artifact_dir, command_name, keep)?;
-    update_trend_history(&artifact_dir, command_name, findings)?;
+    update_trend_history(&artifact_dir, command_name, artifact)?;
     Ok(latest_path)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{build_recap_lines, render_sarif, render_text, write_audit_artifact};
-    use seogeo_contracts::Finding;
+    use super::{
+        build_audit_artifact, build_recap_lines, render_audit_artifact_json,
+        render_markdown_artifact, render_sarif, render_text, render_text_artifact,
+        write_audit_artifact,
+    };
+    use seogeo_contracts::{AuditStatus, CrawlStats, Finding, FindingScope};
 
     fn sample_finding() -> Finding {
         Finding {
@@ -423,6 +659,7 @@ mod tests {
             column: 1,
             severity: "error".into(),
             suggestion: None,
+            scope: FindingScope::Page,
         }
     }
 
@@ -448,8 +685,14 @@ mod tests {
     #[test]
     fn writes_audit_artifacts() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let latest =
-            write_audit_artifact(&[sample_finding()], temp_dir.path(), "check", 5).unwrap();
+        let artifact = build_audit_artifact(
+            "check",
+            &[sample_finding()],
+            AuditStatus::Complete,
+            None,
+            None,
+        );
+        let latest = write_audit_artifact(&artifact, temp_dir.path(), "check", 5).unwrap();
         assert!(latest.exists());
     }
 
@@ -461,13 +704,13 @@ mod tests {
             ..sample_finding()
         };
         let text = render_text(&[finding_a, finding_b], "ok", None);
-        assert!(text.contains("2 occurrences"));
+        assert!(text.contains("Finding scopes"));
         assert!(text.contains("Confidence mix"));
         assert!(text.contains("Rule classes"));
     }
 
     #[test]
-    fn separates_actionable_and_heuristic_sections() {
+    fn separates_sitewide_template_and_page_sections() {
         let actionable = sample_finding();
         let heuristic = Finding {
             rule_id: "GEO007".into(),
@@ -477,12 +720,39 @@ mod tests {
             column: 1,
             severity: "warning".into(),
             suggestion: None,
+            scope: FindingScope::Page,
         };
         let text = render_text(&[actionable, heuristic], "ok", None);
-        let actionable_pos = text.find("Actionable Findings").unwrap();
-        let heuristic_pos = text.find("Heuristic Observations").unwrap();
-        assert!(actionable_pos < heuristic_pos);
+        assert!(text.contains("Page Findings"));
         assert!(text.contains("Actionable findings: 1"));
         assert!(text.contains("Heuristic observations: 1"));
+    }
+
+    #[test]
+    fn renders_partial_artifact_metadata() {
+        let artifact = build_audit_artifact(
+            "crawl",
+            &[sample_finding()],
+            AuditStatus::Partial,
+            Some(CrawlStats {
+                engine: "http".into(),
+                visited_pages: 10,
+                discovered_internal_routes: 40,
+                queued_routes_remaining: 30,
+                max_pages: 10,
+                fetch_failures: 1,
+                fetch_retries: 2,
+                skipped_non_html: 3,
+                truncated: true,
+            }),
+            Some("hit max-pages budget".into()),
+        );
+        let text = render_text_artifact(&artifact, "ok", None);
+        assert!(text.contains("Status: partial"));
+        assert!(text.contains("Completion ratio"));
+        let markdown = render_markdown_artifact(&artifact, None);
+        assert!(markdown.contains("## Summary"));
+        let json = render_audit_artifact_json(&artifact).unwrap();
+        assert!(json.contains("\"status\": \"partial\""));
     }
 }

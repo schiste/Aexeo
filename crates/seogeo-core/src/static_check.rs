@@ -1,5 +1,5 @@
 use anyhow::Result;
-use seogeo_contracts::Finding;
+use seogeo_contracts::{Finding, FindingScope};
 use std::path::Path;
 
 use crate::adapter::resolve_static_site_root;
@@ -32,6 +32,7 @@ pub fn run_checks_for_site(site: &crate::site::Site, config: &Config) -> Vec<Fin
             column: 1,
             severity: "warning".to_string(),
             suggestion: None,
+            scope: FindingScope::Sitewide,
         });
     }
 

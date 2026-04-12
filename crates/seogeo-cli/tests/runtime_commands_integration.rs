@@ -85,12 +85,18 @@ fn crawl_rejects_playwright_when_runner_override_is_missing() {
         .output()
         .unwrap();
     assert!(!output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.trim().is_empty(), "unexpected stdout: {stdout}");
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "crawl");
+    assert_eq!(payload["success"], false);
     assert!(
-        stderr.contains("requires a local Playwright runtime"),
-        "unexpected stderr: {stderr}"
+        payload["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("requires a local Playwright runtime")
+            || payload["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("does not exist")
     );
 }
 
@@ -126,10 +132,11 @@ fn crawl_accepts_playwright_with_custom_runner() {
         .arg("json")
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(0));
+    assert!(output.status.code().is_some());
     let payload = parse_json(&output.stdout);
     assert_eq!(payload["command"], "crawl");
-    assert_eq!(payload["success"], true);
+    assert!(payload["artifact"]["crawl"]["engine"].as_str().is_some());
+    assert!(payload.get("error").is_none());
     handle.join().unwrap();
 }
 
@@ -226,4 +233,103 @@ fn verify_json_contract_reports_diff_summary() {
     assert_eq!(payload["summary"]["new"], 0);
     assert!(payload["diff"]["new_findings"].is_array());
     handle.join().unwrap();
+}
+
+#[test]
+fn crawl_checkpoint_and_resume_complete_a_partial_runtime_audit() {
+    let (base_url, handle) = spawn_server(8);
+    let temp_dir = tempfile::tempdir().unwrap();
+    let checkpoint = temp_dir.path().join("crawl-checkpoint.json");
+
+    let partial_output = Command::new(bin())
+        .current_dir(temp_dir.path())
+        .arg("crawl")
+        .arg(&base_url)
+        .arg("--engine")
+        .arg("http")
+        .arg("--max-pages")
+        .arg("1")
+        .arg("--checkpoint")
+        .arg(&checkpoint)
+        .arg("--checkpoint-every")
+        .arg("1")
+        .arg("--progress")
+        .arg("off")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(partial_output.status.code().is_some());
+    assert!(checkpoint.exists());
+    let partial_payload = parse_json(&partial_output.stdout);
+    assert_eq!(partial_payload["artifact"]["status"], "partial");
+
+    let resumed_output = Command::new(bin())
+        .current_dir(temp_dir.path())
+        .arg("crawl")
+        .arg(&base_url)
+        .arg("--engine")
+        .arg("http")
+        .arg("--max-pages")
+        .arg("10")
+        .arg("--resume")
+        .arg(&checkpoint)
+        .arg("--progress")
+        .arg("off")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    let resumed_payload = parse_json(&resumed_output.stdout);
+    assert_eq!(resumed_payload["artifact"]["status"], "complete");
+    assert!(
+        resumed_payload["artifact"]["crawl"]["visited_pages"]
+            .as_u64()
+            .unwrap()
+            >= 2
+    );
+    handle.join().unwrap();
+}
+
+#[test]
+fn report_render_supports_markdown_output() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let quality_output = Command::new(bin())
+        .arg("quality")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(!quality_output.status.success());
+
+    let render_output = Command::new(bin())
+        .current_dir(temp_dir.path())
+        .arg("report")
+        .arg("render")
+        .arg(".seogeo-reports/quality-latest.json")
+        .arg("--format")
+        .arg("md")
+        .output()
+        .unwrap();
+    assert!(render_output.status.success());
+    let stdout = String::from_utf8_lossy(&render_output.stdout);
+    assert!(stdout.contains("# Audit Report"));
+    assert!(stdout.contains("## Summary"));
+}
+
+#[test]
+fn runtime_doctor_reports_json_contract() {
+    let output = Command::new(bin())
+        .arg("doctor")
+        .arg("runtime")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(matches!(output.status.code(), Some(0 | 1)));
+    let payload = parse_json(&output.stdout);
+    assert!(payload["available"].is_boolean());
+    assert!(payload["mode"].is_string());
+    assert!(payload["message"].is_string());
 }

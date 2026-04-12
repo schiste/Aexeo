@@ -6,7 +6,7 @@ mod rust_audit;
 mod tooling_audit;
 
 use anyhow::Result;
-use seogeo_contracts::Finding;
+use seogeo_contracts::{Finding, FindingScope};
 use std::path::Path;
 
 use crate::docs::find_reference_doc_drift;
@@ -60,6 +60,7 @@ pub fn run_repo_quality_checks(root: &Path, cli_reference: &str) -> Result<Vec<F
                 column: 1,
                 severity: "error".to_string(),
                 suggestion: None,
+                scope: FindingScope::Sitewide,
             }),
     );
     findings.extend(tooling_audit::find_static_tooling_issues(root));
