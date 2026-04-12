@@ -7,6 +7,7 @@ pub mod docs;
 pub mod fix;
 pub mod generate;
 pub mod html_rules;
+pub mod integrations;
 pub mod link_rules;
 pub mod llm_rules;
 pub mod plugin;
@@ -38,6 +39,13 @@ pub use generate::{
     render_robots_txt, suggest_internal_links,
 };
 pub use html_rules::{run_html_rules, run_static_html_audit};
+pub use integrations::{
+    BingAiImportReport, BingAiRecord, BingAiUrlSummary, IndexNowSubmission, IndexNowValidation,
+    PublishHookReport, SearchConsoleExportRow, SnippetInspection, build_publish_hook_report,
+    build_publish_hook_report_with_config, export_search_console_rows, import_bing_ai_export,
+    inspect_snippet_controls_path, inspect_snippet_controls_site, inspect_snippet_controls_url,
+    inspect_snippet_controls_with_config, submit_indexnow, validate_indexnow,
+};
 pub use link_rules::run_link_rules;
 pub use llm_rules::run_llm_rules;
 pub use plugin::{PluginManifestCheck, validate_python_plugin_module};
