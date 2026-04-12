@@ -69,8 +69,35 @@ pub struct AuditSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct SlowCrawlPath {
     pub url: String,
+    #[serde(default)]
+    pub fetch_us: u64,
+    #[serde(default)]
+    pub process_us: u64,
     pub fetch_ms: u64,
     pub process_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct PhaseTiming {
+    pub name: String,
+    pub elapsed_us: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RuleTiming {
+    pub group: String,
+    pub elapsed_us: u64,
+    pub findings: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AuditPerformance {
+    #[serde(default)]
+    pub elapsed_us: u64,
+    #[serde(default)]
+    pub phases: Vec<PhaseTiming>,
+    #[serde(default)]
+    pub rule_groups: Vec<RuleTiming>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -84,16 +111,46 @@ pub struct CrawlStats {
     pub fetch_retries: usize,
     pub skipped_non_html: usize,
     pub truncated: bool,
+    #[serde(default)]
+    pub elapsed_us: u64,
     pub elapsed_ms: u64,
     pub pages_per_minute: usize,
     pub checkpoints_written: usize,
+    #[serde(default)]
+    pub progress_artifacts_written: usize,
     pub partial_artifacts_written: usize,
+    #[serde(default)]
+    pub total_fetch_us: u64,
     pub total_fetch_ms: u64,
+    #[serde(default)]
+    pub average_fetch_us: u64,
     pub average_fetch_ms: u64,
+    #[serde(default)]
+    pub total_page_process_us: u64,
     pub total_page_process_ms: u64,
+    #[serde(default)]
+    pub average_page_process_us: u64,
     pub average_page_process_ms: u64,
+    #[serde(default)]
+    pub total_partial_audit_us: u64,
     pub total_partial_audit_ms: u64,
+    #[serde(default)]
+    pub average_partial_audit_us: u64,
     pub average_partial_audit_ms: u64,
+    #[serde(default)]
+    pub total_optional_artifact_fetch_us: u64,
+    #[serde(default)]
+    pub total_snapshot_build_us: u64,
+    #[serde(default)]
+    pub total_link_extraction_us: u64,
+    #[serde(default)]
+    pub total_rule_evaluation_us: u64,
+    #[serde(default)]
+    pub total_policy_apply_us: u64,
+    #[serde(default)]
+    pub total_final_audit_us: u64,
+    #[serde(default)]
+    pub total_overhead_us: u64,
     pub slowest_paths: Vec<SlowCrawlPath>,
 }
 
@@ -114,6 +171,8 @@ pub struct AuditArtifact {
     pub truncation_reason: Option<String>,
     #[serde(default)]
     pub crawl: Option<CrawlStats>,
+    #[serde(default)]
+    pub performance: Option<AuditPerformance>,
     #[serde(default)]
     pub findings: Vec<Finding>,
 }
@@ -187,6 +246,7 @@ impl Default for AuditArtifact {
             completion_ratio: None,
             truncation_reason: None,
             crawl: None,
+            performance: None,
             findings: Vec::new(),
         }
     }

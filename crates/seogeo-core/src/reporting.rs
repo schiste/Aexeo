@@ -150,6 +150,7 @@ pub fn build_audit_artifact(
         truncation_reason,
         crawl,
         findings,
+        performance: None,
     }
 }
 
@@ -397,6 +398,34 @@ fn artifact_status_lines(artifact: &AuditArtifact) -> Vec<String> {
             lines.push(format!("- Slowest paths: {}", slowest));
         }
     }
+    if let Some(performance) = artifact.performance.as_ref() {
+        if !performance.phases.is_empty() {
+            let phases = performance
+                .phases
+                .iter()
+                .map(|phase| format!("{}={}ms", phase.name, phase.elapsed_us / 1_000))
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!("- Phase timings: {}", phases));
+        }
+        if !performance.rule_groups.is_empty() {
+            let groups = performance
+                .rule_groups
+                .iter()
+                .take(5)
+                .map(|timing| {
+                    format!(
+                        "{}={}ms/{} findings",
+                        timing.group,
+                        timing.elapsed_us / 1_000,
+                        timing.findings
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!("- Slowest rule groups: {}", groups));
+        }
+    }
     lines
 }
 
@@ -529,7 +558,32 @@ pub fn render_markdown_artifact(artifact: &AuditArtifact, audit_path: Option<&Pa
             for path in &crawl.slowest_paths {
                 lines.push(format!(
                     "  - `{}` fetch=`{}ms` process=`{}ms`",
-                    path.url, path.fetch_ms, path.process_ms
+                    path.url,
+                    path.fetch_us / 1_000,
+                    path.process_us / 1_000
+                ));
+            }
+        }
+    }
+    if let Some(performance) = artifact.performance.as_ref() {
+        if !performance.phases.is_empty() {
+            lines.push("- Phase timings:".to_string());
+            for phase in &performance.phases {
+                lines.push(format!(
+                    "  - `{}` elapsed=`{}ms`",
+                    phase.name,
+                    phase.elapsed_us / 1_000
+                ));
+            }
+        }
+        if !performance.rule_groups.is_empty() {
+            lines.push("- Slowest rule groups:".to_string());
+            for timing in performance.rule_groups.iter().take(10) {
+                lines.push(format!(
+                    "  - `{}` elapsed=`{}ms` findings=`{}`",
+                    timing.group,
+                    timing.elapsed_us / 1_000,
+                    timing.findings
                 ));
             }
         }
@@ -665,6 +719,13 @@ pub fn update_trend_history(
         "warnings": artifact.summary.warnings,
         "actionable": artifact.summary.actionable,
         "heuristic": artifact.summary.heuristic,
+        "elapsed_ms": artifact.crawl.as_ref().map(|crawl| crawl.elapsed_us / 1_000),
+        "pages_per_minute": artifact.crawl.as_ref().map(|crawl| crawl.pages_per_minute),
+        "avg_fetch_ms": artifact.crawl.as_ref().map(|crawl| crawl.average_fetch_us / 1_000),
+        "avg_partial_audit_ms": artifact
+            .crawl
+            .as_ref()
+            .map(|crawl| crawl.average_partial_audit_us / 1_000),
     }));
     let slice_start = payload.len().saturating_sub(50);
     fs::write(
@@ -705,12 +766,24 @@ pub fn write_partial_audit_artifact(
     Ok(latest_path)
 }
 
+pub fn write_progress_audit_artifact(
+    artifact: &AuditArtifact,
+    base_dir: &Path,
+    command_name: &str,
+) -> Result<PathBuf> {
+    let artifact_dir = base_dir.join(".seogeo-reports");
+    fs::create_dir_all(&artifact_dir)?;
+    let latest_path = artifact_dir.join(format!("{}-progress-latest.json", command_name));
+    fs::write(&latest_path, render_audit_artifact_json(artifact)?)?;
+    Ok(latest_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         build_audit_artifact, build_recap_lines, render_audit_artifact_json,
         render_markdown_artifact, render_sarif, render_text, render_text_artifact,
-        write_audit_artifact, write_partial_audit_artifact,
+        write_audit_artifact, write_partial_audit_artifact, write_progress_audit_artifact,
     };
     use seogeo_contracts::{AuditStatus, CrawlStats, Finding, FindingScope};
 
@@ -781,6 +854,21 @@ mod tests {
     }
 
     #[test]
+    fn writes_progress_audit_artifact_to_progress_path() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let artifact = build_audit_artifact(
+            "crawl",
+            &[sample_finding()],
+            AuditStatus::Partial,
+            None,
+            Some("checkpoint".into()),
+        );
+        let latest = write_progress_audit_artifact(&artifact, temp_dir.path(), "crawl").unwrap();
+        assert!(latest.exists());
+        assert!(latest.ends_with(".seogeo-reports/crawl-progress-latest.json"));
+    }
+
+    #[test]
     fn clusters_repeated_findings_in_text_output() {
         let finding_a = sample_finding();
         let finding_b = Finding {
@@ -829,17 +917,34 @@ mod tests {
                 skipped_non_html: 3,
                 truncated: true,
                 elapsed_ms: 1_200,
+                elapsed_us: 1_200_000,
                 pages_per_minute: 500,
                 checkpoints_written: 2,
+                progress_artifacts_written: 1,
                 partial_artifacts_written: 1,
                 total_fetch_ms: 400,
+                total_fetch_us: 400_000,
                 average_fetch_ms: 40,
+                average_fetch_us: 40_000,
                 total_page_process_ms: 300,
+                total_page_process_us: 300_000,
                 average_page_process_ms: 30,
+                average_page_process_us: 30_000,
                 total_partial_audit_ms: 80,
+                total_partial_audit_us: 80_000,
                 average_partial_audit_ms: 80,
+                average_partial_audit_us: 80_000,
+                total_optional_artifact_fetch_us: 10_000,
+                total_snapshot_build_us: 20_000,
+                total_link_extraction_us: 30_000,
+                total_rule_evaluation_us: 40_000,
+                total_policy_apply_us: 10_000,
+                total_final_audit_us: 50_000,
+                total_overhead_us: 260_000,
                 slowest_paths: vec![seogeo_contracts::SlowCrawlPath {
                     url: "https://example.test/about".into(),
+                    fetch_us: 55_000,
+                    process_us: 44_000,
                     fetch_ms: 55,
                     process_ms: 44,
                 }],

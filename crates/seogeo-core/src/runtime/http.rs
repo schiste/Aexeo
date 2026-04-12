@@ -3,8 +3,12 @@ use reqwest::blocking::{Client, RequestBuilder};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::redirect::Policy;
 use std::collections::BTreeMap;
+use std::sync::mpsc;
+use std::thread;
 use std::time::Duration;
 use url::Url;
+
+use super::fetcher::FetchOutcome;
 
 #[derive(Debug, Clone)]
 pub(crate) struct FetchResult {
@@ -142,6 +146,50 @@ impl HttpFetcher {
             headers,
             effective_url,
         })
+    }
+
+    pub(crate) fn fetch_batch(
+        &self,
+        urls: &[String],
+        fetch_retry_budget: usize,
+    ) -> Vec<FetchOutcome> {
+        let (sender, receiver) = mpsc::channel();
+        for (index, url) in urls.iter().cloned().enumerate() {
+            let sender = sender.clone();
+            let fetcher = self.clone();
+            thread::spawn(move || {
+                let started_at = std::time::Instant::now();
+                let mut retries = 0usize;
+                let result = loop {
+                    match fetcher.fetch(&url) {
+                        Ok(fetched) => break Ok(fetched),
+                        Err(error) if retries < fetch_retry_budget => {
+                            retries += 1;
+                        }
+                        Err(error) => break Err(error),
+                    }
+                };
+                let _ = sender.send((
+                    index,
+                    FetchOutcome {
+                        url,
+                        result,
+                        retries,
+                        elapsed_us: started_at.elapsed().as_micros() as u64,
+                    },
+                ));
+            });
+        }
+        drop(sender);
+        let mut outcomes = Vec::with_capacity(urls.len());
+        while let Ok((index, outcome)) = receiver.recv() {
+            outcomes.push((index, outcome));
+            if outcomes.len() == urls.len() {
+                break;
+            }
+        }
+        outcomes.sort_by_key(|(index, _)| *index);
+        outcomes.into_iter().map(|(_, outcome)| outcome).collect()
     }
 }
 

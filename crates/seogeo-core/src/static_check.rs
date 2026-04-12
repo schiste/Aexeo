@@ -1,6 +1,7 @@
 use anyhow::Result;
-use seogeo_contracts::{Finding, FindingScope};
+use seogeo_contracts::{Finding, FindingScope, RuleTiming};
 use std::path::Path;
+use std::time::Instant;
 
 use crate::adapter::resolve_static_site_root;
 use crate::config::{Config, default_rule_switches, load_config};
@@ -16,8 +17,40 @@ use crate::sitemap_rules::run_sitemap_rules;
 use crate::social_rules::run_social_rules;
 use crate::structure_rules::run_structure_rules;
 
-pub fn run_checks_for_site(site: &crate::site::Site, config: &Config) -> Vec<Finding> {
+#[derive(Debug, Clone, Default)]
+pub struct SiteCheckProfile {
+    pub findings: Vec<Finding>,
+    pub rule_timings: Vec<RuleTiming>,
+    pub policy_apply_us: u64,
+}
+
+fn time_rule_group<F>(
+    enabled: bool,
+    group: &str,
+    timings: &mut Vec<RuleTiming>,
+    findings: &mut Vec<Finding>,
+    run: F,
+) where
+    F: FnOnce() -> Vec<Finding>,
+{
+    if !enabled {
+        return;
+    }
+    let started_at = Instant::now();
+    let produced = run();
+    let elapsed_us = started_at.elapsed().as_micros() as u64;
+    let finding_count = produced.len();
+    findings.extend(produced);
+    timings.push(RuleTiming {
+        group: group.to_string(),
+        elapsed_us,
+        findings: finding_count,
+    });
+}
+
+pub fn run_checks_for_site_profiled(site: &crate::site::Site, config: &Config) -> SiteCheckProfile {
     let mut findings = Vec::new();
+    let mut rule_timings = Vec::new();
     let rules = config.rules();
 
     if site.deployment_model == DeploymentModel::SsrWorker {
@@ -36,35 +69,89 @@ pub fn run_checks_for_site(site: &crate::site::Site, config: &Config) -> Vec<Fin
         });
     }
 
-    if rules.checks.get("html").copied().unwrap_or(true) {
-        findings.extend(run_html_rules(site, config));
-    }
-    if rules.checks.get("social").copied().unwrap_or(true) {
-        findings.extend(run_social_rules(site, config));
-    }
-    if rules.checks.get("robots").copied().unwrap_or(true) {
-        findings.extend(run_robots_rules(site, config));
-    }
-    if rules.checks.get("links").copied().unwrap_or(true) {
-        findings.extend(run_link_rules(site, config));
-    }
-    if rules.checks.get("sitemap").copied().unwrap_or(true) {
-        findings.extend(run_sitemap_rules(site, config));
-    }
-    if rules.checks.get("llm").copied().unwrap_or(true) {
-        findings.extend(run_llm_rules(site, config));
-    }
-    if rules.checks.get("schema").copied().unwrap_or(true) {
-        findings.extend(run_schema_rules(site, config));
-    }
-    if rules.checks.get("content").copied().unwrap_or(true) {
-        findings.extend(run_content_rules(site, config));
-    }
-    if rules.checks.get("structure").copied().unwrap_or(true) {
-        findings.extend(run_structure_rules(site, config));
-    }
+    time_rule_group(
+        rules.checks.get("html").copied().unwrap_or(true),
+        "html",
+        &mut rule_timings,
+        &mut findings,
+        || run_html_rules(site, config),
+    );
+    time_rule_group(
+        rules.checks.get("social").copied().unwrap_or(true),
+        "social",
+        &mut rule_timings,
+        &mut findings,
+        || run_social_rules(site, config),
+    );
+    time_rule_group(
+        rules.checks.get("robots").copied().unwrap_or(true),
+        "robots",
+        &mut rule_timings,
+        &mut findings,
+        || run_robots_rules(site, config),
+    );
+    time_rule_group(
+        rules.checks.get("links").copied().unwrap_or(true),
+        "links",
+        &mut rule_timings,
+        &mut findings,
+        || run_link_rules(site, config),
+    );
+    time_rule_group(
+        rules.checks.get("sitemap").copied().unwrap_or(true),
+        "sitemap",
+        &mut rule_timings,
+        &mut findings,
+        || run_sitemap_rules(site, config),
+    );
+    time_rule_group(
+        rules.checks.get("llm").copied().unwrap_or(true),
+        "llm",
+        &mut rule_timings,
+        &mut findings,
+        || run_llm_rules(site, config),
+    );
+    time_rule_group(
+        rules.checks.get("schema").copied().unwrap_or(true),
+        "schema",
+        &mut rule_timings,
+        &mut findings,
+        || run_schema_rules(site, config),
+    );
+    time_rule_group(
+        rules.checks.get("content").copied().unwrap_or(true),
+        "content",
+        &mut rule_timings,
+        &mut findings,
+        || run_content_rules(site, config),
+    );
+    time_rule_group(
+        rules.checks.get("structure").copied().unwrap_or(true),
+        "structure",
+        &mut rule_timings,
+        &mut findings,
+        || run_structure_rules(site, config),
+    );
 
-    apply_policy(findings, config)
+    let policy_started_at = Instant::now();
+    let findings = apply_policy(findings, config);
+    let policy_apply_us = policy_started_at.elapsed().as_micros() as u64;
+    rule_timings.sort_by(|left, right| {
+        right
+            .elapsed_us
+            .cmp(&left.elapsed_us)
+            .then_with(|| left.group.cmp(&right.group))
+    });
+
+    SiteCheckProfile {
+        findings,
+        rule_timings,
+        policy_apply_us,
+    }
+}
+
+pub fn run_checks_for_site(site: &crate::site::Site, config: &Config) -> Vec<Finding> {
+    run_checks_for_site_profiled(site, config).findings
 }
 
 pub fn can_run_native_static_audit(config: &Config) -> bool {

@@ -1,8 +1,9 @@
 use anyhow::Result;
 use seogeo_contracts::{Finding, FindingScope};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
+use std::time::Instant;
 
 use super::graph::response_report_path;
 use super::http::fetch_with_http;
@@ -20,14 +21,14 @@ struct CapturedPage {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct RuntimeSnapshotState {
-    pages: BTreeMap<String, CapturedPage>,
+    pages: HashMap<String, CapturedPage>,
     robots_text: Option<String>,
     llms_text: Option<String>,
     sitemap_text: Option<String>,
 }
 
 pub(crate) struct RuntimeSnapshotBuilder {
-    pages: BTreeMap<String, CapturedPage>,
+    pages: HashMap<String, CapturedPage>,
     robots_text: Option<String>,
     llms_text: Option<String>,
     sitemap_text: Option<String>,
@@ -36,7 +37,7 @@ pub(crate) struct RuntimeSnapshotBuilder {
 impl RuntimeSnapshotBuilder {
     pub(crate) fn new() -> Self {
         Self {
-            pages: BTreeMap::new(),
+            pages: HashMap::new(),
             robots_text: None,
             llms_text: None,
             sitemap_text: None,
@@ -81,7 +82,8 @@ impl RuntimeSnapshotBuilder {
         &mut self,
         base_url: &str,
         runtime: &RuntimeConfig<'_>,
-    ) -> Result<()> {
+    ) -> Result<u64> {
+        let started_at = Instant::now();
         for artifact in ["robots.txt", "llms.txt", "sitemap.xml"] {
             let artifact_url = format!("{}{}", base_url, artifact);
             let fetched = fetch_with_http(
@@ -103,7 +105,7 @@ impl RuntimeSnapshotBuilder {
                 _ => {}
             }
         }
-        Ok(())
+        Ok(started_at.elapsed().as_micros() as u64)
     }
 
     pub(crate) fn finalize(
@@ -154,23 +156,28 @@ impl RuntimeSnapshotBuilder {
 }
 
 fn build_runtime_site(
-    pages: &BTreeMap<String, CapturedPage>,
+    pages: &HashMap<String, CapturedPage>,
     artifacts: SiteArtifacts,
     crawl_meta: CrawlMeta,
 ) -> Result<(Site, Vec<Finding>)> {
     let mut crawl_findings = Vec::new();
-    let pages = pages
+    let mut routes = pages.keys().cloned().collect::<Vec<_>>();
+    routes.sort();
+    let pages = routes
         .iter()
-        .map(|(route, captured)| {
+        .map(|route| -> Result<_> {
+            let captured = pages
+                .get(route)
+                .ok_or_else(|| anyhow::anyhow!("missing captured page for route '{route}'"))?;
             let relative_path = relative_html_path(route);
-            build_page_from_source(
+            Ok(build_page_from_source(
                 PathBuf::from(response_report_path(route)),
                 relative_path,
                 captured.body.clone(),
                 captured.headers.clone(),
-            )
+            ))
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
     let site = build_site_from_parts(SiteBuildInput {
         root: PathBuf::from("crawl"),
         pages,

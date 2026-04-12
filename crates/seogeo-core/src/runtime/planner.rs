@@ -102,7 +102,7 @@ impl CrawlPlanner {
                 .filter_map(|entry| canonicalize_route_entry(&entry))
                 .collect(),
             max_pages,
-            truncated: state.truncated,
+            truncated: false,
         }
     }
 

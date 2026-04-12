@@ -7,7 +7,8 @@ mod snapshot;
 
 use anyhow::Result;
 use seogeo_contracts::{
-    AuditArtifact, AuditStatus, CrawlStats, Finding, FindingScope, SlowCrawlPath,
+    AuditArtifact, AuditPerformance, AuditStatus, CrawlStats, Finding, FindingScope, PhaseTiming,
+    SlowCrawlPath,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -16,12 +17,11 @@ use std::path::Path;
 use std::time::Instant;
 
 use crate::config::Config;
-use crate::policy::apply_policy;
 use crate::reporting::build_audit_artifact;
 use crate::site::{Site, route_from_urlish};
-use crate::static_check::run_checks_for_site;
+use crate::static_check::run_checks_for_site_profiled;
 use crate::verification::{DiffResult, diff_finding_sets};
-use fetcher::RuntimeFetcher;
+use fetcher::{FetchOutcome, RuntimeFetcher};
 use graph::{extract_internal_links, read_loc_values, response_report_path, should_enqueue_link};
 use http::{fetch_with_http, host_for_url, is_html_content_type, same_site_host};
 use planner::{CrawlPlanner, CrawlPlannerState};
@@ -37,6 +37,7 @@ pub struct RuntimeAudit {
     pub status: AuditStatus,
     pub crawl_stats: CrawlStats,
     pub truncation_reason: Option<String>,
+    pub performance: Option<AuditPerformance>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,24 +64,29 @@ pub struct RuntimeProgressEvent {
     pub skipped_non_html: usize,
     pub truncated: bool,
     pub elapsed_ms: u64,
+    pub elapsed_us: u64,
     pub pages_per_minute: usize,
     pub average_fetch_ms: u64,
     pub average_page_process_ms: u64,
     pub average_partial_audit_ms: u64,
     pub checkpoints_written: usize,
+    pub progress_artifacts_written: usize,
     pub partial_artifacts_written: usize,
 }
 
 pub struct RuntimeAuditOptions<'a> {
     pub checkpoint_path: Option<&'a Path>,
     pub checkpoint_every: usize,
-    pub partial_artifact_every: usize,
-    pub partial_artifact_min_interval_ms: u64,
+    pub progress_artifact_every: usize,
+    pub progress_artifact_min_interval_ms: u64,
+    pub partial_audit_every: usize,
+    pub partial_audit_min_interval_ms: u64,
     pub resume_from: Option<&'a Path>,
     pub fetch_retry_budget: usize,
     pub progress: RuntimeProgressMode<'a>,
     pub artifact_command: &'a str,
-    pub partial_artifact: RuntimeArtifactMode<'a>,
+    pub progress_artifact: RuntimeArtifactMode<'a>,
+    pub partial_audit_artifact: RuntimeArtifactMode<'a>,
 }
 
 #[derive(Default)]
@@ -102,13 +108,16 @@ impl<'a> Default for RuntimeAuditOptions<'a> {
         Self {
             checkpoint_path: None,
             checkpoint_every: 25,
-            partial_artifact_every: 25,
-            partial_artifact_min_interval_ms: 15_000,
+            progress_artifact_every: 10,
+            progress_artifact_min_interval_ms: 5_000,
+            partial_audit_every: 50,
+            partial_audit_min_interval_ms: 30_000,
             resume_from: None,
             fetch_retry_budget: 2,
             progress: RuntimeProgressMode::Off,
             artifact_command: "crawl",
-            partial_artifact: RuntimeArtifactMode::Off,
+            progress_artifact: RuntimeArtifactMode::Off,
+            partial_audit_artifact: RuntimeArtifactMode::Off,
         }
     }
 }
@@ -122,12 +131,21 @@ impl RuntimeAudit {
 #[derive(Debug, Clone, Default)]
 struct RuntimePerformance {
     started_at: Option<Instant>,
-    total_fetch_ms: u64,
-    total_page_process_ms: u64,
-    total_partial_audit_ms: u64,
+    total_fetch_us: u64,
+    total_page_process_us: u64,
+    total_link_extraction_us: u64,
+    total_optional_artifact_fetch_us: u64,
+    total_snapshot_build_us: u64,
+    total_partial_audit_us: u64,
+    total_final_audit_us: u64,
+    total_rule_evaluation_us: u64,
+    total_policy_apply_us: u64,
     partial_audits_built: usize,
     checkpoints_written: usize,
+    progress_artifacts_written: usize,
     partial_artifacts_written: usize,
+    last_progress_emit_at: Option<Instant>,
+    last_progress_emit_page: usize,
     last_partial_emit_at: Option<Instant>,
     last_partial_emit_page: usize,
     slowest_paths: Vec<SlowCrawlPath>,
@@ -141,29 +159,31 @@ impl RuntimePerformance {
         }
     }
 
-    fn from_started_elapsed(elapsed_ms: u64) -> Self {
+    fn from_started_elapsed(elapsed_us: u64) -> Self {
         let mut performance = Self::new();
-        if elapsed_ms > 0 {
+        if elapsed_us > 0 {
             performance.started_at =
-                Some(Instant::now() - std::time::Duration::from_millis(elapsed_ms));
+                Some(Instant::now() - std::time::Duration::from_micros(elapsed_us));
         }
         performance
     }
 
-    fn record_fetch(&mut self, duration_ms: u64) {
-        self.total_fetch_ms = self.total_fetch_ms.saturating_add(duration_ms);
+    fn record_fetch(&mut self, duration_us: u64) {
+        self.total_fetch_us = self.total_fetch_us.saturating_add(duration_us);
     }
 
-    fn record_page_process(&mut self, url: &str, fetch_ms: u64, process_ms: u64) {
-        self.total_page_process_ms = self.total_page_process_ms.saturating_add(process_ms);
+    fn record_page_process(&mut self, url: &str, fetch_us: u64, process_us: u64) {
+        self.total_page_process_us = self.total_page_process_us.saturating_add(process_us);
         self.slowest_paths.push(SlowCrawlPath {
             url: url.to_string(),
-            fetch_ms,
-            process_ms,
+            fetch_us,
+            process_us,
+            fetch_ms: fetch_us / 1_000,
+            process_ms: process_us / 1_000,
         });
         self.slowest_paths.sort_by(|left, right| {
-            let left_total = left.fetch_ms.saturating_add(left.process_ms);
-            let right_total = right.fetch_ms.saturating_add(right.process_ms);
+            let left_total = left.fetch_us.saturating_add(left.process_us);
+            let right_total = right.fetch_us.saturating_add(right.process_us);
             right_total
                 .cmp(&left_total)
                 .then_with(|| left.url.cmp(&right.url))
@@ -171,11 +191,59 @@ impl RuntimePerformance {
         self.slowest_paths.truncate(5);
     }
 
+    fn record_link_extraction(&mut self, duration_us: u64) {
+        self.total_link_extraction_us = self.total_link_extraction_us.saturating_add(duration_us);
+    }
+
+    fn record_optional_artifact_fetch(&mut self, duration_us: u64) {
+        self.total_optional_artifact_fetch_us = self
+            .total_optional_artifact_fetch_us
+            .saturating_add(duration_us);
+    }
+
+    fn record_snapshot_build(&mut self, duration_us: u64) {
+        self.total_snapshot_build_us = self.total_snapshot_build_us.saturating_add(duration_us);
+    }
+
+    fn record_final_audit(&mut self, duration_us: u64) {
+        self.total_final_audit_us = self.total_final_audit_us.saturating_add(duration_us);
+    }
+
+    fn record_rule_evaluation(&mut self, duration_us: u64) {
+        self.total_rule_evaluation_us = self.total_rule_evaluation_us.saturating_add(duration_us);
+    }
+
+    fn record_policy_apply(&mut self, duration_us: u64) {
+        self.total_policy_apply_us = self.total_policy_apply_us.saturating_add(duration_us);
+    }
+
     fn record_checkpoint(&mut self) {
         self.checkpoints_written += 1;
     }
 
-    fn should_emit_partial_artifact(
+    fn should_emit_progress_artifact(
+        &self,
+        visited_pages: usize,
+        options: &RuntimeAuditOptions<'_>,
+    ) -> bool {
+        if visited_pages == 0 {
+            return false;
+        }
+        if self.progress_artifacts_written == 0 {
+            return true;
+        }
+        let page_delta = visited_pages.saturating_sub(self.last_progress_emit_page);
+        let page_budget_hit = page_delta >= options.progress_artifact_every.max(1);
+        let time_budget_hit = self
+            .last_progress_emit_at
+            .map(|instant| {
+                instant.elapsed().as_millis() as u64 >= options.progress_artifact_min_interval_ms
+            })
+            .unwrap_or(false);
+        (page_budget_hit || time_budget_hit) && page_delta > 0
+    }
+
+    fn should_emit_partial_audit(
         &self,
         visited_pages: usize,
         options: &RuntimeAuditOptions<'_>,
@@ -187,18 +255,24 @@ impl RuntimePerformance {
             return true;
         }
         let page_delta = visited_pages.saturating_sub(self.last_partial_emit_page);
-        let page_budget_hit = page_delta >= options.partial_artifact_every.max(1);
+        let page_budget_hit = page_delta >= options.partial_audit_every.max(1);
         let time_budget_hit = self
             .last_partial_emit_at
             .map(|instant| {
-                instant.elapsed().as_millis() as u64 >= options.partial_artifact_min_interval_ms
+                instant.elapsed().as_millis() as u64 >= options.partial_audit_min_interval_ms
             })
             .unwrap_or(false);
         (page_budget_hit || time_budget_hit) && page_delta > 0
     }
 
-    fn record_partial_audit(&mut self, visited_pages: usize, duration_ms: u64) {
-        self.total_partial_audit_ms = self.total_partial_audit_ms.saturating_add(duration_ms);
+    fn record_progress_artifact(&mut self, visited_pages: usize) {
+        self.progress_artifacts_written += 1;
+        self.last_progress_emit_page = visited_pages;
+        self.last_progress_emit_at = Some(Instant::now());
+    }
+
+    fn record_partial_audit(&mut self, visited_pages: usize, duration_us: u64) {
+        self.total_partial_audit_us = self.total_partial_audit_us.saturating_add(duration_us);
         self.partial_audits_built += 1;
         self.partial_artifacts_written += 1;
         self.last_partial_emit_page = visited_pages;
@@ -206,10 +280,21 @@ impl RuntimePerformance {
     }
 
     fn apply_to(&self, crawl_stats: &mut CrawlStats) {
-        let elapsed_ms = self
+        let elapsed_us = self
             .started_at
-            .map(|instant| instant.elapsed().as_millis() as u64)
+            .map(|instant| instant.elapsed().as_micros() as u64)
             .unwrap_or(0);
+        let tracked_us = self.total_fetch_us
+            + self.total_page_process_us
+            + self.total_link_extraction_us
+            + self.total_optional_artifact_fetch_us
+            + self.total_snapshot_build_us
+            + self.total_partial_audit_us
+            + self.total_final_audit_us
+            + self.total_rule_evaluation_us
+            + self.total_policy_apply_us;
+        let elapsed_ms = elapsed_us / 1_000;
+        crawl_stats.elapsed_us = elapsed_us;
         crawl_stats.elapsed_ms = elapsed_ms;
         crawl_stats.pages_per_minute = if elapsed_ms == 0 {
             0
@@ -217,28 +302,110 @@ impl RuntimePerformance {
             (((crawl_stats.visited_pages as u128) * 60_000) / (elapsed_ms as u128)) as usize
         };
         crawl_stats.checkpoints_written = self.checkpoints_written;
+        crawl_stats.progress_artifacts_written = self.progress_artifacts_written;
         crawl_stats.partial_artifacts_written = self.partial_artifacts_written;
-        crawl_stats.total_fetch_ms = self.total_fetch_ms;
+        crawl_stats.total_fetch_us = self.total_fetch_us;
+        crawl_stats.total_fetch_ms = self.total_fetch_us / 1_000;
+        crawl_stats.average_fetch_us = if crawl_stats.visited_pages == 0 {
+            0
+        } else {
+            self.total_fetch_us / crawl_stats.visited_pages as u64
+        };
         crawl_stats.average_fetch_ms = if crawl_stats.visited_pages == 0 {
             0
         } else {
-            self.total_fetch_ms / crawl_stats.visited_pages as u64
+            (self.total_fetch_us / crawl_stats.visited_pages as u64) / 1_000
         };
-        crawl_stats.total_page_process_ms = self.total_page_process_ms;
+        crawl_stats.total_page_process_us = self.total_page_process_us;
+        crawl_stats.total_page_process_ms = self.total_page_process_us / 1_000;
+        crawl_stats.average_page_process_us = if crawl_stats.visited_pages == 0 {
+            0
+        } else {
+            self.total_page_process_us / crawl_stats.visited_pages as u64
+        };
         crawl_stats.average_page_process_ms = if crawl_stats.visited_pages == 0 {
             0
         } else {
-            self.total_page_process_ms / crawl_stats.visited_pages as u64
+            (self.total_page_process_us / crawl_stats.visited_pages as u64) / 1_000
         };
-        crawl_stats.total_partial_audit_ms = self.total_partial_audit_ms;
+        crawl_stats.total_partial_audit_us = self.total_partial_audit_us;
+        crawl_stats.total_partial_audit_ms = self.total_partial_audit_us / 1_000;
+        crawl_stats.average_partial_audit_us = if self.partial_audits_built == 0 {
+            0
+        } else {
+            self.total_partial_audit_us / self.partial_audits_built as u64
+        };
         crawl_stats.average_partial_audit_ms = if self.partial_audits_built == 0 {
             0
         } else {
-            self.total_partial_audit_ms / self.partial_audits_built as u64
+            (self.total_partial_audit_us / self.partial_audits_built as u64) / 1_000
         };
+        crawl_stats.total_optional_artifact_fetch_us = self.total_optional_artifact_fetch_us;
+        crawl_stats.total_snapshot_build_us = self.total_snapshot_build_us;
+        crawl_stats.total_link_extraction_us = self.total_link_extraction_us;
+        crawl_stats.total_rule_evaluation_us = self.total_rule_evaluation_us;
+        crawl_stats.total_policy_apply_us = self.total_policy_apply_us;
+        crawl_stats.total_final_audit_us = self.total_final_audit_us;
+        crawl_stats.total_overhead_us = elapsed_us.saturating_sub(tracked_us);
         crawl_stats.slowest_paths = self.slowest_paths.clone();
     }
+
+    fn phase_timings(&self, crawl_stats: &CrawlStats) -> Vec<PhaseTiming> {
+        let mut phases = vec![
+            PhaseTiming {
+                name: "fetch".to_string(),
+                elapsed_us: self.total_fetch_us,
+            },
+            PhaseTiming {
+                name: "page_process".to_string(),
+                elapsed_us: self.total_page_process_us,
+            },
+            PhaseTiming {
+                name: "link_extraction".to_string(),
+                elapsed_us: self.total_link_extraction_us,
+            },
+            PhaseTiming {
+                name: "optional_artifact_fetch".to_string(),
+                elapsed_us: self.total_optional_artifact_fetch_us,
+            },
+            PhaseTiming {
+                name: "snapshot_build".to_string(),
+                elapsed_us: self.total_snapshot_build_us,
+            },
+            PhaseTiming {
+                name: "partial_audit".to_string(),
+                elapsed_us: self.total_partial_audit_us,
+            },
+            PhaseTiming {
+                name: "final_audit".to_string(),
+                elapsed_us: self.total_final_audit_us,
+            },
+            PhaseTiming {
+                name: "rule_evaluation".to_string(),
+                elapsed_us: self.total_rule_evaluation_us,
+            },
+            PhaseTiming {
+                name: "policy_apply".to_string(),
+                elapsed_us: self.total_policy_apply_us,
+            },
+            PhaseTiming {
+                name: "overhead".to_string(),
+                elapsed_us: crawl_stats.total_overhead_us,
+            },
+        ];
+        phases.retain(|phase| phase.elapsed_us > 0);
+        phases.sort_by(|left, right| right.elapsed_us.cmp(&left.elapsed_us));
+        phases
+    }
 }
+
+type RuntimeMaterialization = (
+    Site,
+    Vec<Finding>,
+    CrawlStats,
+    Option<String>,
+    RuntimePerformance,
+);
 
 fn resolve_runtime_engine(engine: &str) -> Result<&'static str> {
     match engine {
@@ -269,38 +436,33 @@ fn emit_progress(options: &mut RuntimeAuditOptions<'_>, event: RuntimeProgressEv
     }
 }
 
-fn emit_partial_artifact(
+fn emit_progress_artifact(
     options: &mut RuntimeAuditOptions<'_>,
     artifact: &AuditArtifact,
 ) -> Result<()> {
-    if let RuntimeArtifactMode::Callback(callback) = &mut options.partial_artifact {
+    if let RuntimeArtifactMode::Callback(callback) = &mut options.progress_artifact {
         callback(artifact)?;
     }
     Ok(())
 }
 
-fn build_partial_runtime_artifact(
+fn emit_partial_audit_artifact(
+    options: &mut RuntimeAuditOptions<'_>,
+    artifact: &AuditArtifact,
+) -> Result<()> {
+    if let RuntimeArtifactMode::Callback(callback) = &mut options.partial_audit_artifact {
+        callback(artifact)?;
+    }
+    Ok(())
+}
+
+fn build_progress_runtime_artifact(
     command: &str,
-    snapshot: &RuntimeSnapshotBuilder,
     planner: &CrawlPlanner,
     crawl_findings: &[Finding],
     crawl_stats: &CrawlStats,
-    config: &Config,
-) -> Result<AuditArtifact> {
-    let mut partial_crawl_stats = crawl_stats.clone();
-    partial_crawl_stats.partial_artifacts_written = partial_crawl_stats
-        .partial_artifacts_written
-        .saturating_add(1);
-    let (site, snapshot_findings) = snapshot.preview(
-        planner.visited_count(),
-        partial_crawl_stats.max_pages,
-        planner.discovered_route_count(),
-        planner.truncated(),
-    )?;
-    let mut findings = crawl_findings.to_vec();
-    findings.extend(snapshot_findings);
-    findings.extend(run_checks_for_site(&site, config));
-    findings = apply_policy(findings, config);
+    performance: &RuntimePerformance,
+) -> AuditArtifact {
     let status = if planner.queued_count() > 0 || planner.truncated() {
         AuditStatus::Partial
     } else {
@@ -322,13 +484,67 @@ fn build_partial_runtime_artifact(
     } else {
         None
     };
-    Ok(build_audit_artifact(
+    let mut artifact = build_audit_artifact(
+        command,
+        crawl_findings,
+        status,
+        Some(crawl_stats.clone()),
+        truncation_reason,
+    );
+    artifact.performance = Some(AuditPerformance {
+        elapsed_us: crawl_stats.elapsed_us,
+        phases: performance.phase_timings(crawl_stats),
+        rule_groups: Vec::new(),
+    });
+    artifact
+}
+
+fn build_partial_runtime_artifact(
+    command: &str,
+    snapshot: &RuntimeSnapshotBuilder,
+    planner: &CrawlPlanner,
+    crawl_findings: &[Finding],
+    crawl_stats: &CrawlStats,
+    config: &Config,
+    performance: &RuntimePerformance,
+) -> Result<AuditArtifact> {
+    let snapshot_started_at = Instant::now();
+    let (site, snapshot_findings) = snapshot.preview(
+        planner.visited_count(),
+        crawl_stats.max_pages,
+        planner.discovered_route_count(),
+        planner.truncated(),
+    )?;
+    let snapshot_build_us = snapshot_started_at.elapsed().as_micros() as u64;
+    let mut findings = crawl_findings.to_vec();
+    findings.extend(snapshot_findings);
+    let profiled = run_checks_for_site_profiled(&site, config);
+    findings.extend(profiled.findings.clone());
+    let mut artifact = build_audit_artifact(
         command,
         &findings,
-        status,
-        Some(partial_crawl_stats),
-        truncation_reason,
-    ))
+        AuditStatus::Partial,
+        Some(crawl_stats.clone()),
+        Some(format!(
+            "checkpoint after visiting {} pages with {} routes still queued",
+            planner.visited_count(),
+            planner.queued_count()
+        )),
+    );
+    artifact.performance = Some(AuditPerformance {
+        elapsed_us: crawl_stats.elapsed_us,
+        phases: {
+            let mut phases = performance.phase_timings(crawl_stats);
+            phases.push(PhaseTiming {
+                name: "partial_snapshot_build".to_string(),
+                elapsed_us: snapshot_build_us,
+            });
+            phases.sort_by(|left, right| right.elapsed_us.cmp(&left.elapsed_us));
+            phases
+        },
+        rule_groups: profiled.rule_timings,
+    });
+    Ok(artifact)
 }
 
 fn checkpoint_state(
@@ -367,18 +583,18 @@ fn materialize_runtime_site(
     engine: &str,
     config: &Config,
     options: &mut RuntimeAuditOptions<'_>,
-) -> Result<(Site, Vec<Finding>, CrawlStats, Option<String>)> {
+) -> Result<RuntimeMaterialization> {
     let runtime = config.runtime();
     let (mut planner, mut snapshot, mut crawl_findings, mut crawl_stats, mut performance) =
         if let Some(resume_from) = options.resume_from {
             let checkpoint = load_checkpoint(resume_from, max_pages)?;
-            let resumed_elapsed_ms = checkpoint.crawl_stats.elapsed_ms;
+            let resumed_elapsed_us = checkpoint.crawl_stats.elapsed_us;
             (
                 CrawlPlanner::from_checkpoint(checkpoint.planner, max_pages),
                 RuntimeSnapshotBuilder::from_state(checkpoint.snapshot),
                 checkpoint.crawl_findings,
                 checkpoint.crawl_stats,
-                RuntimePerformance::from_started_elapsed(resumed_elapsed_ms),
+                RuntimePerformance::from_started_elapsed(resumed_elapsed_us),
             )
         } else {
             (
@@ -414,24 +630,59 @@ fn materialize_runtime_site(
     }
 
     let mut fetcher = RuntimeFetcher::new(engine, &runtime)?;
-    while let Some(current) = planner.next_url(&runtime) {
-        let fetch_started_at = Instant::now();
-        let fetched = match fetch_runtime_page(
-            &mut fetcher,
-            &current,
-            options.fetch_retry_budget,
-            &mut crawl_stats,
-        ) {
-            Ok(fetched) => fetched,
-            Err(error) => {
-                let fetch_duration_ms = fetch_started_at.elapsed().as_millis() as u64;
-                performance.record_fetch(fetch_duration_ms);
+    let effective_workers = if engine == "http" {
+        runtime.max_workers.max(1)
+    } else {
+        1
+    };
+    loop {
+        let mut batch = Vec::new();
+        while batch.len() < effective_workers {
+            let Some(next_url) = planner.next_url(&runtime) else {
+                break;
+            };
+            batch.push(next_url);
+        }
+        if batch.is_empty() {
+            break;
+        }
+
+        let outcomes = fetcher.fetch_batch(&batch, options.fetch_retry_budget);
+        for outcome in outcomes {
+            crawl_stats.fetch_retries += outcome.retries;
+            performance.record_fetch(outcome.elapsed_us);
+            let FetchOutcome {
+                url: current,
+                result,
+                retries: _,
+                elapsed_us: fetch_elapsed_us,
+            } = outcome;
+            let fetched = match result {
+                Ok(fetched) => fetched,
+                Err(error) => {
+                    let route = route_from_urlish(&current).unwrap_or_default();
+                    crawl_stats.fetch_failures += 1;
+                    performance.apply_to(&mut crawl_stats);
+                    crawl_findings.push(Finding {
+                        rule_id: "CRW001".to_string(),
+                        message: format!("failed to fetch URL: {} ({})", current, error),
+                        path: response_report_path(&route),
+                        line: 1,
+                        column: 1,
+                        severity: "error".to_string(),
+                        suggestion: None,
+                        scope: FindingScope::Page,
+                    });
+                    continue;
+                }
+            };
+            let Some(body) = fetched.body else {
                 let route = route_from_urlish(&current).unwrap_or_default();
                 crawl_stats.fetch_failures += 1;
                 performance.apply_to(&mut crawl_stats);
                 crawl_findings.push(Finding {
                     rule_id: "CRW001".to_string(),
-                    message: format!("failed to fetch URL: {} ({})", current, error),
+                    message: format!("failed to fetch URL: {}", current),
                     path: response_report_path(&route),
                     line: 1,
                     column: 1,
@@ -440,78 +691,70 @@ fn materialize_runtime_site(
                     scope: FindingScope::Page,
                 });
                 continue;
-            }
-        };
-        let fetch_duration_ms = fetch_started_at.elapsed().as_millis() as u64;
-        performance.record_fetch(fetch_duration_ms);
-        let Some(body) = fetched.body else {
-            let route = route_from_urlish(&current).unwrap_or_default();
-            crawl_stats.fetch_failures += 1;
-            performance.apply_to(&mut crawl_stats);
-            crawl_findings.push(Finding {
-                rule_id: "CRW001".to_string(),
-                message: format!("failed to fetch URL: {}", current),
-                path: response_report_path(&route),
-                line: 1,
-                column: 1,
-                severity: "error".to_string(),
-                suggestion: None,
-                scope: FindingScope::Page,
-            });
-            continue;
-        };
-        if !is_html_content_type(fetched.content_type.as_deref()) {
-            crawl_stats.skipped_non_html += 1;
-            performance.apply_to(&mut crawl_stats);
-            continue;
-        }
-        let effective_host = host_for_url(&fetched.effective_url);
-        if !same_site_host(&effective_host, planner.base_host()) {
-            performance.apply_to(&mut crawl_stats);
-            continue;
-        }
-        let process_started_at = Instant::now();
-        planner.align_with_effective_url(&fetched.effective_url);
-        let route = route_from_urlish(&fetched.effective_url).unwrap_or_default();
-        snapshot.write_page(&route, &body, &fetched.headers)?;
-
-        for target in extract_internal_links(&body, planner.base_host()) {
-            if !should_enqueue_link(&target) {
+            };
+            if !is_html_content_type(fetched.content_type.as_deref()) {
+                crawl_stats.skipped_non_html += 1;
+                performance.apply_to(&mut crawl_stats);
                 continue;
             }
-            planner.discover_link_target(&target, &runtime);
+            let effective_host = host_for_url(&fetched.effective_url);
+            if !same_site_host(&effective_host, planner.base_host()) {
+                performance.apply_to(&mut crawl_stats);
+                continue;
+            }
+            let process_started_at = Instant::now();
+            planner.align_with_effective_url(&fetched.effective_url);
+            let route = route_from_urlish(&fetched.effective_url).unwrap_or_default();
+            snapshot.write_page(&route, &body, &fetched.headers)?;
+
+            let extraction_started_at = Instant::now();
+            for target in extract_internal_links(&body, planner.base_host()) {
+                if !should_enqueue_link(&target) {
+                    continue;
+                }
+                planner.discover_link_target(&target, &runtime);
+            }
+            performance.record_link_extraction(extraction_started_at.elapsed().as_micros() as u64);
+
+            crawl_stats.visited_pages = planner.visited_count();
+            crawl_stats.discovered_internal_routes = planner.discovered_route_count();
+            crawl_stats.queued_routes_remaining = planner.queued_count();
+            crawl_stats.truncated = planner.truncated();
+            let page_process_us = process_started_at.elapsed().as_micros() as u64;
+            performance.record_page_process(
+                &fetched.effective_url,
+                fetch_elapsed_us,
+                page_process_us,
+            );
+            performance.apply_to(&mut crawl_stats);
+            emit_progress(
+                options,
+                RuntimeProgressEvent {
+                    phase: "progress".to_string(),
+                    engine: engine.to_string(),
+                    current_url: Some(fetched.effective_url),
+                    visited_pages: crawl_stats.visited_pages,
+                    discovered_internal_routes: crawl_stats.discovered_internal_routes,
+                    queued_routes_remaining: crawl_stats.queued_routes_remaining,
+                    fetch_failures: crawl_stats.fetch_failures,
+                    fetch_retries: crawl_stats.fetch_retries,
+                    skipped_non_html: crawl_stats.skipped_non_html,
+                    truncated: crawl_stats.truncated,
+                    elapsed_ms: crawl_stats.elapsed_ms,
+                    elapsed_us: crawl_stats.elapsed_us,
+                    pages_per_minute: crawl_stats.pages_per_minute,
+                    average_fetch_ms: crawl_stats.average_fetch_ms,
+                    average_page_process_ms: crawl_stats.average_page_process_ms,
+                    average_partial_audit_ms: crawl_stats.average_partial_audit_ms,
+                    checkpoints_written: crawl_stats.checkpoints_written,
+                    progress_artifacts_written: crawl_stats.progress_artifacts_written,
+                    partial_artifacts_written: crawl_stats.partial_artifacts_written,
+                },
+            );
         }
 
-        crawl_stats.visited_pages = planner.visited_count();
-        crawl_stats.discovered_internal_routes = planner.discovered_route_count();
-        crawl_stats.queued_routes_remaining = planner.queued_count();
-        crawl_stats.truncated = planner.truncated();
-        let page_process_ms = process_started_at.elapsed().as_millis() as u64;
-        performance.record_page_process(&fetched.effective_url, fetch_duration_ms, page_process_ms);
-        performance.apply_to(&mut crawl_stats);
-        emit_progress(
-            options,
-            RuntimeProgressEvent {
-                phase: "progress".to_string(),
-                engine: engine.to_string(),
-                current_url: Some(fetched.effective_url),
-                visited_pages: crawl_stats.visited_pages,
-                discovered_internal_routes: crawl_stats.discovered_internal_routes,
-                queued_routes_remaining: crawl_stats.queued_routes_remaining,
-                fetch_failures: crawl_stats.fetch_failures,
-                fetch_retries: crawl_stats.fetch_retries,
-                skipped_non_html: crawl_stats.skipped_non_html,
-                truncated: crawl_stats.truncated,
-                elapsed_ms: crawl_stats.elapsed_ms,
-                pages_per_minute: crawl_stats.pages_per_minute,
-                average_fetch_ms: crawl_stats.average_fetch_ms,
-                average_page_process_ms: crawl_stats.average_page_process_ms,
-                average_partial_audit_ms: crawl_stats.average_partial_audit_ms,
-                checkpoints_written: crawl_stats.checkpoints_written,
-                partial_artifacts_written: crawl_stats.partial_artifacts_written,
-            },
-        );
         if let Some(checkpoint_path) = options.checkpoint_path
+            && crawl_stats.visited_pages > 0
             && crawl_stats.visited_pages % options.checkpoint_every.max(1) == 0
         {
             performance.record_checkpoint();
@@ -526,7 +769,19 @@ fn materialize_runtime_site(
                 &crawl_stats,
             )?;
         }
-        if performance.should_emit_partial_artifact(crawl_stats.visited_pages, options) {
+        if performance.should_emit_progress_artifact(crawl_stats.visited_pages, options) {
+            let artifact = build_progress_runtime_artifact(
+                options.artifact_command,
+                &planner,
+                &crawl_findings,
+                &crawl_stats,
+                &performance,
+            );
+            emit_progress_artifact(options, &artifact)?;
+            performance.record_progress_artifact(crawl_stats.visited_pages);
+            performance.apply_to(&mut crawl_stats);
+        }
+        if performance.should_emit_partial_audit(crawl_stats.visited_pages, options) {
             let partial_started_at = Instant::now();
             let artifact = build_partial_runtime_artifact(
                 options.artifact_command,
@@ -535,21 +790,26 @@ fn materialize_runtime_site(
                 &crawl_findings,
                 &crawl_stats,
                 config,
+                &performance,
             )?;
-            emit_partial_artifact(options, &artifact)?;
-            let partial_duration_ms = partial_started_at.elapsed().as_millis() as u64;
-            performance.record_partial_audit(crawl_stats.visited_pages, partial_duration_ms);
+            emit_partial_audit_artifact(options, &artifact)?;
+            let partial_duration_us = partial_started_at.elapsed().as_micros() as u64;
+            performance.record_partial_audit(crawl_stats.visited_pages, partial_duration_us);
             performance.apply_to(&mut crawl_stats);
         }
     }
 
-    let _ = snapshot.capture_optional_artifacts(planner.normalized_base(), &runtime);
+    let optional_fetch_us =
+        snapshot.capture_optional_artifacts(planner.normalized_base(), &runtime)?;
+    performance.record_optional_artifact_fetch(optional_fetch_us);
+    let snapshot_started_at = Instant::now();
     let (site, snapshot_findings) = snapshot.finalize(
         planner.visited_count(),
         max_pages,
         planner.discovered_route_count(),
         planner.truncated(),
     )?;
+    performance.record_snapshot_build(snapshot_started_at.elapsed().as_micros() as u64);
     crawl_stats.visited_pages = planner.visited_count();
     crawl_stats.discovered_internal_routes = planner.discovered_route_count();
     crawl_stats.queued_routes_remaining = planner.queued_count();
@@ -575,28 +835,13 @@ fn materialize_runtime_site(
     {
         let _ = fs::remove_file(checkpoint_path);
     }
-    Ok((site, crawl_findings, crawl_stats, truncation_reason))
-}
-
-fn fetch_runtime_page(
-    fetcher: &mut RuntimeFetcher,
-    url: &str,
-    fetch_retry_budget: usize,
-    crawl_stats: &mut CrawlStats,
-) -> Result<http::FetchResult> {
-    let mut attempt = 0usize;
-    loop {
-        let result = fetcher.fetch(url);
-        match result {
-            Ok(fetched) => return Ok(fetched),
-            Err(error) if attempt < fetch_retry_budget => {
-                attempt += 1;
-                crawl_stats.fetch_retries += 1;
-                continue;
-            }
-            Err(error) => return Err(error),
-        }
-    }
+    Ok((
+        site,
+        crawl_findings,
+        crawl_stats,
+        truncation_reason,
+        performance,
+    ))
 }
 
 fn seed_routes_from_sitemap(
@@ -659,15 +904,31 @@ pub fn run_runtime_audit_with_options(
     options: &mut RuntimeAuditOptions<'_>,
 ) -> Result<RuntimeAudit> {
     let effective_engine = resolve_runtime_engine(engine)?;
-    let (site, crawl_findings, crawl_stats, truncation_reason) =
+    let (site, crawl_findings, mut crawl_stats, truncation_reason, mut performance) =
         materialize_runtime_site(base_url, max_pages, effective_engine, config, options)?;
+    let final_started_at = Instant::now();
+    let profiled = run_checks_for_site_profiled(&site, config);
+    performance.record_rule_evaluation(
+        profiled
+            .rule_timings
+            .iter()
+            .map(|timing| timing.elapsed_us)
+            .sum(),
+    );
+    performance.record_policy_apply(profiled.policy_apply_us);
+    performance.record_final_audit(final_started_at.elapsed().as_micros() as u64);
+    performance.apply_to(&mut crawl_stats);
     let mut findings = crawl_findings.clone();
-    findings.extend(run_checks_for_site(&site, config));
-    findings = apply_policy(findings, config);
+    findings.extend(profiled.findings.clone());
     let status = if crawl_stats.truncated {
         AuditStatus::Partial
     } else {
         AuditStatus::Complete
+    };
+    let performance_summary = AuditPerformance {
+        elapsed_us: crawl_stats.elapsed_us,
+        phases: performance.phase_timings(&crawl_stats),
+        rule_groups: profiled.rule_timings,
     };
     emit_progress(
         options,
@@ -683,11 +944,13 @@ pub fn run_runtime_audit_with_options(
             skipped_non_html: crawl_stats.skipped_non_html,
             truncated: crawl_stats.truncated,
             elapsed_ms: crawl_stats.elapsed_ms,
+            elapsed_us: crawl_stats.elapsed_us,
             pages_per_minute: crawl_stats.pages_per_minute,
             average_fetch_ms: crawl_stats.average_fetch_ms,
             average_page_process_ms: crawl_stats.average_page_process_ms,
             average_partial_audit_ms: crawl_stats.average_partial_audit_ms,
             checkpoints_written: crawl_stats.checkpoints_written,
+            progress_artifacts_written: crawl_stats.progress_artifacts_written,
             partial_artifacts_written: crawl_stats.partial_artifacts_written,
         },
     );
@@ -698,6 +961,7 @@ pub fn run_runtime_audit_with_options(
         status,
         crawl_stats,
         truncation_reason,
+        performance: Some(performance_summary),
     })
 }
 
@@ -1043,6 +1307,7 @@ mod tests {
                 ..CrawlStats::default()
             },
             truncation_reason: None,
+            performance: None,
         };
         let diff = verify_runtime_audit(&audit, &[]);
         assert_eq!(diff.new_findings.len(), 1);
@@ -1080,10 +1345,11 @@ mod tests {
             };
         let mut options = RuntimeAuditOptions {
             checkpoint_every: 1,
-            partial_artifact_every: 100,
+            partial_audit_every: 100,
             progress: RuntimeProgressMode::Off,
             artifact_command: "crawl",
-            partial_artifact: RuntimeArtifactMode::Callback(&mut artifact_callback),
+            progress_artifact: RuntimeArtifactMode::Off,
+            partial_audit_artifact: RuntimeArtifactMode::Callback(&mut artifact_callback),
             ..RuntimeAuditOptions::default()
         };
 
@@ -1099,7 +1365,7 @@ mod tests {
                 .all(|artifact| artifact.status == AuditStatus::Partial)
         );
         assert!(partial_artifacts.iter().all(|artifact| {
-            !artifact
+            artifact
                 .findings
                 .iter()
                 .any(|finding| finding.rule_id == "CRW003")
@@ -1112,7 +1378,7 @@ mod tests {
     #[test]
     fn runtime_audit_handles_playwright_according_to_local_runtime() {
         if super::playwright_is_available() {
-            let (base_url, handle) = spawn_server(5);
+            let (base_url, handle) = spawn_server(8);
             let audit = run_runtime_audit(&base_url, 1, "playwright", &html_only_config())
                 .expect("playwright should run when the local runtime is installed");
             assert!(
@@ -1139,7 +1405,7 @@ mod tests {
         if !super::playwright_is_available() {
             return;
         }
-        let (base_url, handle) = spawn_server(5);
+        let (base_url, handle) = spawn_server(8);
         let audit = run_runtime_audit(&base_url, 2, "playwright", &html_only_config()).unwrap();
         assert!(audit.site.route_pages.contains_key(""));
         assert!(audit.site.route_pages.contains_key("about"));
