@@ -113,43 +113,78 @@ impl RuntimeSnapshotBuilder {
         discovered_internal_routes: usize,
         truncated: bool,
     ) -> Result<(Site, Vec<Finding>)> {
-        let mut crawl_findings = Vec::new();
-        let pages = self
-            .pages
-            .iter()
-            .map(|(route, captured)| {
-                let relative_path = relative_html_path(route);
-                build_page_from_source(
-                    PathBuf::from(response_report_path(route)),
-                    relative_path,
-                    captured.body.clone(),
-                    captured.headers.clone(),
-                )
-            })
-            .collect();
-        let site = build_site_from_parts(SiteBuildInput {
-            root: PathBuf::from("crawl"),
-            pages,
-            artifacts: SiteArtifacts {
+        build_runtime_site(
+            &self.pages,
+            SiteArtifacts {
                 llms_text: self.llms_text,
                 robots_text: self.robots_text,
                 sitemap_text: self.sitemap_text,
             },
-            deployment_model: DeploymentModel::RuntimeSnapshot,
-            deployment_markers: vec!["runtime crawl snapshot".to_string()],
-            crawl_meta: Some(CrawlMeta {
+            CrawlMeta {
                 visited_pages,
                 max_pages,
                 discovered_internal_routes,
                 truncated,
-            }),
-        })?;
-        if truncated {
-            crawl_findings.push(Finding {
+            },
+        )
+    }
+
+    pub(crate) fn preview(
+        &self,
+        visited_pages: usize,
+        max_pages: usize,
+        discovered_internal_routes: usize,
+        truncated: bool,
+    ) -> Result<(Site, Vec<Finding>)> {
+        build_runtime_site(
+            &self.pages,
+            SiteArtifacts {
+                llms_text: self.llms_text.clone(),
+                robots_text: self.robots_text.clone(),
+                sitemap_text: self.sitemap_text.clone(),
+            },
+            CrawlMeta {
+                visited_pages,
+                max_pages,
+                discovered_internal_routes,
+                truncated,
+            },
+        )
+    }
+}
+
+fn build_runtime_site(
+    pages: &BTreeMap<String, CapturedPage>,
+    artifacts: SiteArtifacts,
+    crawl_meta: CrawlMeta,
+) -> Result<(Site, Vec<Finding>)> {
+    let mut crawl_findings = Vec::new();
+    let pages = pages
+        .iter()
+        .map(|(route, captured)| {
+            let relative_path = relative_html_path(route);
+            build_page_from_source(
+                PathBuf::from(response_report_path(route)),
+                relative_path,
+                captured.body.clone(),
+                captured.headers.clone(),
+            )
+        })
+        .collect();
+    let site = build_site_from_parts(SiteBuildInput {
+        root: PathBuf::from("crawl"),
+        pages,
+        artifacts,
+        deployment_model: DeploymentModel::RuntimeSnapshot,
+        deployment_markers: vec!["runtime crawl snapshot".to_string()],
+        crawl_meta: Some(crawl_meta.clone()),
+    })?;
+    if crawl_meta.truncated {
+        crawl_findings.push(Finding {
                 rule_id: "CRW003".to_string(),
                 message: format!(
                     "crawl stopped at max_pages={} after visiting {} pages; discovered at least {} internal routes, so graph-dependent findings may be incomplete",
-                    max_pages, visited_pages, discovered_internal_routes
+                    crawl_meta.max_pages, crawl_meta.visited_pages, crawl_meta.discovered_internal_routes
                 ),
                 path: "crawl/index.html".to_string(),
                 line: 1,
@@ -158,9 +193,8 @@ impl RuntimeSnapshotBuilder {
                 suggestion: Some("increase --max-pages for a more complete runtime audit".to_string()),
                 scope: FindingScope::Sitewide,
             });
-        }
-        Ok((site, crawl_findings))
     }
+    Ok((site, crawl_findings))
 }
 
 fn relative_html_path(route: &str) -> String {

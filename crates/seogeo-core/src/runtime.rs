@@ -1,3 +1,4 @@
+mod fetcher;
 mod graph;
 mod http;
 mod planner;
@@ -5,7 +6,7 @@ mod playwright;
 mod snapshot;
 
 use anyhow::Result;
-use seogeo_contracts::{AuditStatus, CrawlStats, Finding, FindingScope};
+use seogeo_contracts::{AuditArtifact, AuditStatus, CrawlStats, Finding, FindingScope};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs;
@@ -13,14 +14,16 @@ use std::path::Path;
 
 use crate::config::Config;
 use crate::policy::apply_policy;
+use crate::reporting::build_audit_artifact;
 use crate::site::{Site, route_from_urlish};
 use crate::static_check::run_checks_for_site;
 use crate::verification::{DiffResult, diff_finding_sets};
+use fetcher::RuntimeFetcher;
 use graph::{extract_internal_links, read_loc_values, response_report_path, should_enqueue_link};
 use http::{fetch_with_http, host_for_url, is_html_content_type, same_site_host};
 use planner::{CrawlPlanner, CrawlPlannerState};
 pub use playwright::PlaywrightDoctor;
-use playwright::{fetch_with_playwright, playwright_is_available, probe_playwright_runtime};
+use playwright::{playwright_is_available, probe_playwright_runtime};
 use snapshot::{RuntimeSnapshotBuilder, RuntimeSnapshotState};
 
 #[derive(Debug, Clone)]
@@ -64,6 +67,8 @@ pub struct RuntimeAuditOptions<'a> {
     pub resume_from: Option<&'a Path>,
     pub fetch_retry_budget: usize,
     pub progress: RuntimeProgressMode<'a>,
+    pub artifact_command: &'a str,
+    pub partial_artifact: RuntimeArtifactMode<'a>,
 }
 
 #[derive(Default)]
@@ -71,6 +76,13 @@ pub enum RuntimeProgressMode<'a> {
     #[default]
     Off,
     Callback(&'a mut dyn FnMut(RuntimeProgressEvent)),
+}
+
+#[derive(Default)]
+pub enum RuntimeArtifactMode<'a> {
+    #[default]
+    Off,
+    Callback(&'a mut dyn FnMut(&AuditArtifact) -> Result<()>),
 }
 
 impl<'a> Default for RuntimeAuditOptions<'a> {
@@ -81,6 +93,8 @@ impl<'a> Default for RuntimeAuditOptions<'a> {
             resume_from: None,
             fetch_retry_budget: 2,
             progress: RuntimeProgressMode::Off,
+            artifact_command: "crawl",
+            partial_artifact: RuntimeArtifactMode::Off,
         }
     }
 }
@@ -118,6 +132,64 @@ fn emit_progress(options: &mut RuntimeAuditOptions<'_>, event: RuntimeProgressEv
     if let RuntimeProgressMode::Callback(callback) = &mut options.progress {
         callback(event);
     }
+}
+
+fn emit_partial_artifact(
+    options: &mut RuntimeAuditOptions<'_>,
+    artifact: &AuditArtifact,
+) -> Result<()> {
+    if let RuntimeArtifactMode::Callback(callback) = &mut options.partial_artifact {
+        callback(artifact)?;
+    }
+    Ok(())
+}
+
+fn build_partial_runtime_artifact(
+    command: &str,
+    snapshot: &RuntimeSnapshotBuilder,
+    planner: &CrawlPlanner,
+    crawl_findings: &[Finding],
+    crawl_stats: &CrawlStats,
+    config: &Config,
+) -> Result<AuditArtifact> {
+    let (site, snapshot_findings) = snapshot.preview(
+        planner.visited_count(),
+        crawl_stats.max_pages,
+        planner.discovered_route_count(),
+        planner.truncated() || planner.queued_count() > 0,
+    )?;
+    let mut findings = crawl_findings.to_vec();
+    findings.extend(snapshot_findings);
+    findings.extend(run_checks_for_site(&site, config));
+    findings = apply_policy(findings, config);
+    let status = if planner.queued_count() > 0 || planner.truncated() {
+        AuditStatus::Partial
+    } else {
+        AuditStatus::Complete
+    };
+    let truncation_reason = if planner.truncated() {
+        Some(format!(
+            "crawl stopped at max_pages={} after visiting {} pages while at least {} routes were discovered",
+            crawl_stats.max_pages,
+            planner.visited_count(),
+            planner.discovered_route_count()
+        ))
+    } else if planner.queued_count() > 0 {
+        Some(format!(
+            "checkpoint after visiting {} pages with {} routes still queued",
+            planner.visited_count(),
+            planner.queued_count()
+        ))
+    } else {
+        None
+    };
+    Ok(build_audit_artifact(
+        command,
+        &findings,
+        status,
+        Some(crawl_stats.clone()),
+        truncation_reason,
+    ))
 }
 
 fn checkpoint_state(
@@ -199,11 +271,11 @@ fn materialize_runtime_site(
         }
     }
 
+    let mut fetcher = RuntimeFetcher::new(engine, &runtime)?;
     while let Some(current) = planner.next_url(&runtime) {
         let fetched = match fetch_runtime_page(
-            engine,
+            &mut fetcher,
             &current,
-            &runtime,
             options.fetch_retry_budget,
             &mut crawl_stats,
         ) {
@@ -290,6 +362,17 @@ fn materialize_runtime_site(
                 &crawl_stats,
             )?;
         }
+        if crawl_stats.visited_pages % options.checkpoint_every.max(1) == 0 {
+            let artifact = build_partial_runtime_artifact(
+                options.artifact_command,
+                &snapshot,
+                &planner,
+                &crawl_findings,
+                &crawl_stats,
+                config,
+            )?;
+            emit_partial_artifact(options, &artifact)?;
+        }
     }
 
     let _ = snapshot.capture_optional_artifacts(planner.normalized_base(), &runtime);
@@ -327,24 +410,14 @@ fn materialize_runtime_site(
 }
 
 fn fetch_runtime_page(
-    engine: &str,
+    fetcher: &mut RuntimeFetcher,
     url: &str,
-    runtime: &crate::config::RuntimeConfig<'_>,
     fetch_retry_budget: usize,
     crawl_stats: &mut CrawlStats,
 ) -> Result<http::FetchResult> {
     let mut attempt = 0usize;
     loop {
-        let result = match engine {
-            "http" => fetch_with_http(
-                url,
-                runtime.crawl_headers,
-                runtime.crawl_cookies,
-                runtime.crawl_basic_auth,
-            ),
-            "playwright" => fetch_with_playwright(url, runtime),
-            other => anyhow::bail!("unsupported runtime engine '{other}'"),
-        };
+        let result = fetcher.fetch(url);
         match result {
             Ok(fetched) => return Ok(fetched),
             Err(error) if attempt < fetch_retry_budget => {
@@ -462,7 +535,10 @@ pub fn runtime_doctor() -> PlaywrightDoctor {
 
 #[cfg(test)]
 mod tests {
-    use super::{run_runtime_audit, verify_runtime_audit};
+    use super::{
+        RuntimeArtifactMode, RuntimeAuditOptions, RuntimeProgressMode, run_runtime_audit,
+        run_runtime_audit_with_options, verify_runtime_audit,
+    };
     use crate::config::{Config, default_rule_switches};
     use seogeo_contracts::{AuditStatus, CrawlStats, Finding, FindingScope};
     use std::collections::{BTreeMap, BTreeSet};
@@ -813,6 +889,37 @@ mod tests {
                 .findings
                 .iter()
                 .any(|finding| finding.rule_id == "LNK001")
+        );
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn runtime_audit_emits_partial_artifacts_during_checkpoint_flushes() {
+        let (base_url, handle) = spawn_server(6);
+        let mut partial_statuses = Vec::new();
+        let mut artifact_callback =
+            |artifact: &seogeo_contracts::AuditArtifact| -> anyhow::Result<()> {
+                partial_statuses.push(artifact.status);
+                Ok(())
+            };
+        let mut options = RuntimeAuditOptions {
+            checkpoint_every: 1,
+            progress: RuntimeProgressMode::Off,
+            artifact_command: "crawl",
+            partial_artifact: RuntimeArtifactMode::Callback(&mut artifact_callback),
+            ..RuntimeAuditOptions::default()
+        };
+
+        let audit =
+            run_runtime_audit_with_options(&base_url, 1, "http", &html_only_config(), &mut options)
+                .unwrap();
+
+        assert_eq!(audit.status, AuditStatus::Partial);
+        assert!(!partial_statuses.is_empty());
+        assert!(
+            partial_statuses
+                .iter()
+                .all(|status| *status == AuditStatus::Partial)
         );
         handle.join().unwrap();
     }

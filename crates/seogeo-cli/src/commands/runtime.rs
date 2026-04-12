@@ -6,7 +6,7 @@ use seogeo_core::{
     RuntimeAudit, RuntimeAuditOptions, RuntimeProgressEvent, RuntimeProgressMode,
     build_audit_artifact, diff_finding_sets, load_audit_artifact, load_findings_from_audit,
     render_diff_text, render_sarif, render_text_artifact, run_runtime_audit_with_options,
-    runtime_doctor, verify_runtime_audit, write_audit_artifact,
+    runtime_doctor, verify_runtime_audit, write_audit_artifact, write_partial_audit_artifact,
 };
 use std::path::{Path, PathBuf};
 
@@ -92,6 +92,8 @@ fn print_progress(mode: &str, event: RuntimeProgressEvent) {
 fn runtime_options_from_cli<'a>(
     submatches: &'a ArgMatches,
     progress: RuntimeProgressMode<'a>,
+    artifact_command: &'a str,
+    partial_artifact: seogeo_core::runtime::RuntimeArtifactMode<'a>,
 ) -> RuntimeAuditOptions<'a> {
     RuntimeAuditOptions {
         checkpoint_path: submatches.get_one::<String>("checkpoint").map(Path::new),
@@ -101,6 +103,8 @@ fn runtime_options_from_cli<'a>(
         resume_from: submatches.get_one::<String>("resume").map(Path::new),
         fetch_retry_budget: *submatches.get_one::<usize>("retry-budget").unwrap_or(&2),
         progress,
+        artifact_command,
+        partial_artifact,
     }
 }
 
@@ -144,12 +148,18 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
         .map(String::as_str)
         .unwrap_or("plain");
     let mut callback = |event: RuntimeProgressEvent| print_progress(progress_mode, event);
+    let mut partial_writer = |artifact: &seogeo_contracts::AuditArtifact| -> Result<()> {
+        let _ = write_partial_audit_artifact(artifact, &cwd, "crawl")?;
+        Ok(())
+    };
     let mut options = runtime_options_from_cli(
         submatches,
         match progress_mode {
             "off" => RuntimeProgressMode::Off,
             _ => RuntimeProgressMode::Callback(&mut callback),
         },
+        "crawl",
+        seogeo_core::runtime::RuntimeArtifactMode::Callback(&mut partial_writer),
     );
 
     let audit = match run_runtime_audit_with_options(
@@ -234,12 +244,18 @@ pub fn command_verify(submatches: &ArgMatches) -> Result<i32> {
         .map(String::as_str)
         .unwrap_or("plain");
     let mut callback = |event: RuntimeProgressEvent| print_progress(progress_mode, event);
+    let mut partial_writer = |artifact: &seogeo_contracts::AuditArtifact| -> Result<()> {
+        let _ = write_partial_audit_artifact(artifact, &cwd, "verify")?;
+        Ok(())
+    };
     let mut options = runtime_options_from_cli(
         submatches,
         match progress_mode {
             "off" => RuntimeProgressMode::Off,
             _ => RuntimeProgressMode::Callback(&mut callback),
         },
+        "verify",
+        seogeo_core::runtime::RuntimeArtifactMode::Callback(&mut partial_writer),
     );
     let audit = match run_runtime_audit_with_options(
         required_arg(submatches, "url")?,

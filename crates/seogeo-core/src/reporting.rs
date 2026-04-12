@@ -641,12 +641,24 @@ pub fn write_audit_artifact(
     Ok(latest_path)
 }
 
+pub fn write_partial_audit_artifact(
+    artifact: &AuditArtifact,
+    base_dir: &Path,
+    command_name: &str,
+) -> Result<PathBuf> {
+    let artifact_dir = base_dir.join(".seogeo-reports");
+    fs::create_dir_all(&artifact_dir)?;
+    let latest_path = artifact_dir.join(format!("{}-latest.json", command_name));
+    fs::write(&latest_path, render_audit_artifact_json(artifact)?)?;
+    Ok(latest_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         build_audit_artifact, build_recap_lines, render_audit_artifact_json,
         render_markdown_artifact, render_sarif, render_text, render_text_artifact,
-        write_audit_artifact,
+        write_audit_artifact, write_partial_audit_artifact,
     };
     use seogeo_contracts::{AuditStatus, CrawlStats, Finding, FindingScope};
 
@@ -694,6 +706,26 @@ mod tests {
         );
         let latest = write_audit_artifact(&artifact, temp_dir.path(), "check", 5).unwrap();
         assert!(latest.exists());
+    }
+
+    #[test]
+    fn writes_partial_audit_artifact_without_history() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let artifact = build_audit_artifact(
+            "crawl",
+            &[sample_finding()],
+            AuditStatus::Partial,
+            None,
+            Some("checkpoint".into()),
+        );
+        let latest = write_partial_audit_artifact(&artifact, temp_dir.path(), "crawl").unwrap();
+        assert!(latest.exists());
+        assert!(
+            !temp_dir
+                .path()
+                .join(".seogeo-reports/crawl-trends.json")
+                .exists()
+        );
     }
 
     #[test]

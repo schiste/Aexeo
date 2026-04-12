@@ -15,6 +15,13 @@ pub(crate) struct FetchResult {
     pub(crate) effective_url: String,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct HttpFetcher {
+    client: Client,
+    cookies: Vec<BTreeMap<String, String>>,
+    basic_auth: BTreeMap<String, String>,
+}
+
 pub(crate) fn normalize_base_url(base_url: &str) -> String {
     format!("{}/", base_url.trim_end_matches('/'))
 }
@@ -105,6 +112,39 @@ fn build_client(headers: &BTreeMap<String, String>) -> Result<Client> {
         .build()?)
 }
 
+impl HttpFetcher {
+    pub(crate) fn new(runtime: &crate::config::RuntimeConfig<'_>) -> Result<Self> {
+        Ok(Self {
+            client: build_client(runtime.crawl_headers)?,
+            cookies: runtime.crawl_cookies.to_vec(),
+            basic_auth: runtime.crawl_basic_auth.clone(),
+        })
+    }
+
+    pub(crate) fn fetch(&self, url: &str) -> Result<FetchResult> {
+        let response =
+            apply_runtime_credentials(self.client.get(url), &self.cookies, &self.basic_auth)
+                .send()
+                .with_context(|| format!("failed to fetch URL: {url}"))?;
+        let status_code = Some(response.status().as_u16());
+        let effective_url = response.url().to_string();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        let headers = response_headers(response.headers());
+        let body = response.text().ok();
+        Ok(FetchResult {
+            status_code,
+            content_type,
+            body,
+            headers,
+            effective_url,
+        })
+    }
+}
+
 fn apply_runtime_credentials(
     request: RequestBuilder,
     cookies: &[BTreeMap<String, String>],
@@ -155,26 +195,27 @@ pub(crate) fn fetch_with_http(
     cookies: &[BTreeMap<String, String>],
     basic_auth: &BTreeMap<String, String>,
 ) -> Result<FetchResult> {
-    let client = build_client(headers)?;
-    let response = apply_runtime_credentials(client.get(url), cookies, basic_auth)
-        .send()
-        .with_context(|| format!("failed to fetch URL: {url}"))?;
-    let status_code = Some(response.status().as_u16());
-    let effective_url = response.url().to_string();
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
-    let headers = response_headers(response.headers());
-    let body = response.text().ok();
-    Ok(FetchResult {
-        status_code,
-        content_type,
-        body,
-        headers,
-        effective_url,
-    })
+    let runtime = crate::config::RuntimeConfig {
+        browser_engine: "http",
+        browser_wait_until: "networkidle",
+        max_workers: 1,
+        enable_cache: false,
+        cache_dir: "",
+        cache_ttl_seconds: 0,
+        crawl_headers: headers,
+        crawl_cookies: cookies,
+        crawl_basic_auth: basic_auth,
+        crawl_seeds: &[],
+        crawl_include_patterns: &[],
+        crawl_exclude_patterns: &[],
+        crawl_use_sitemap: true,
+        crawl_capture_trace: false,
+        crawl_capture_screenshot: false,
+        crawl_capture_console: false,
+        crawl_capture_network: false,
+        crawl_artifact_dir: "",
+    };
+    HttpFetcher::new(&runtime)?.fetch(url)
 }
 
 #[cfg(test)]

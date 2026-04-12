@@ -3,9 +3,9 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 
 use super::http::FetchResult;
 use crate::config::RuntimeConfig;
@@ -145,6 +145,178 @@ try {
 }
 "#;
 
+const PLAYWRIGHT_SESSION_RUNNER: &str = r#"
+import fs from 'node:fs';
+import path from 'node:path';
+import readline from 'node:readline';
+import { chromium } from 'playwright';
+
+const baseSpec = JSON.parse(Buffer.from(process.argv[2], 'base64').toString('utf8'));
+
+function sanitizeSegment(value) {
+  return (value || 'index').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'index';
+}
+
+function artifactStem(urlString) {
+  try {
+    const url = new URL(urlString);
+    const pathname = url.pathname === '/' ? 'index' : url.pathname.replace(/^\/+/, '').replace(/\/+$/, '') || 'index';
+    return sanitizeSegment(pathname);
+  } catch {
+    return 'page';
+  }
+}
+
+function normalizeCookies(cookies, urlString) {
+  return (cookies || [])
+    .map((cookie) => {
+      if (!cookie || typeof cookie !== 'object') return null;
+      if (typeof cookie.name !== 'string' || typeof cookie.value !== 'string') return null;
+      return {
+        name: cookie.name,
+        value: cookie.value,
+        url: typeof cookie.url === 'string' ? cookie.url : urlString,
+        domain: typeof cookie.domain === 'string' ? cookie.domain : undefined,
+        path: typeof cookie.path === 'string' ? cookie.path : undefined,
+        httpOnly: Boolean(cookie.httpOnly),
+        secure: Boolean(cookie.secure),
+        expires: typeof cookie.expires === 'number' ? cookie.expires : undefined,
+        sameSite: typeof cookie.sameSite === 'string' ? cookie.sameSite : undefined
+      };
+    })
+    .filter(Boolean);
+}
+
+const browser = await chromium.launch({ headless: true });
+const contextOptions = {
+  extraHTTPHeaders: baseSpec.headers || {},
+};
+if (baseSpec.basicAuth && baseSpec.basicAuth.username && baseSpec.basicAuth.password) {
+  contextOptions.httpCredentials = {
+    username: baseSpec.basicAuth.username,
+    password: baseSpec.basicAuth.password
+  };
+}
+const context = await browser.newContext(contextOptions);
+const initialCookies = normalizeCookies(baseSpec.cookies, baseSpec.initialUrl || 'https://example.com');
+if (initialCookies.length > 0) {
+  await context.addCookies(initialCookies);
+}
+const page = await context.newPage();
+
+async function fetchUrl(url) {
+  const consoleEvents = [];
+  const networkEvents = [];
+  const consoleListener = (message) => {
+    consoleEvents.push({ type: message.type(), text: message.text() });
+  };
+  const networkListener = async (response) => {
+    networkEvents.push({
+      url: response.url(),
+      status: response.status(),
+      resourceType: response.request().resourceType()
+    });
+  };
+
+  if (baseSpec.captureConsole) {
+    page.on('console', consoleListener);
+  }
+  if (baseSpec.captureNetwork) {
+    page.on('response', networkListener);
+  }
+  if (baseSpec.captureTrace) {
+    await context.tracing.start({ screenshots: true, snapshots: true });
+  }
+
+  try {
+    const mainResponse = await page.goto(url, { waitUntil: baseSpec.waitUntil || 'networkidle' });
+    const html = await page.content();
+    const effectiveUrl = page.url();
+    const headers = mainResponse ? await mainResponse.allHeaders() : {};
+    const contentTypeHeader = Object.entries(headers).find(([key]) => key.toLowerCase() === 'content-type');
+    const artifactDir = baseSpec.artifactDir ? path.resolve(baseSpec.artifactDir) : null;
+    let screenshotPath = null;
+    let tracePath = null;
+    let consolePath = null;
+    let networkPath = null;
+
+    if (artifactDir) {
+      fs.mkdirSync(artifactDir, { recursive: true });
+      const stem = artifactStem(effectiveUrl);
+      if (baseSpec.captureScreenshot) {
+        screenshotPath = path.join(artifactDir, `${stem}.png`);
+        await page.screenshot({ path: screenshotPath, fullPage: true });
+      }
+      if (baseSpec.captureConsole && consoleEvents.length > 0) {
+        consolePath = path.join(artifactDir, `${stem}.console.json`);
+        fs.writeFileSync(consolePath, JSON.stringify(consoleEvents, null, 2));
+      }
+      if (baseSpec.captureNetwork && networkEvents.length > 0) {
+        networkPath = path.join(artifactDir, `${stem}.network.json`);
+        fs.writeFileSync(networkPath, JSON.stringify(networkEvents, null, 2));
+      }
+      if (baseSpec.captureTrace) {
+        tracePath = path.join(artifactDir, `${stem}.trace.zip`);
+        await context.tracing.stop({ path: tracePath });
+      }
+    } else if (baseSpec.captureTrace) {
+      await context.tracing.stop();
+    }
+
+    return {
+      ok: true,
+      statusCode: mainResponse ? mainResponse.status() : null,
+      contentType: contentTypeHeader ? contentTypeHeader[1] : 'text/html; charset=utf-8',
+      body: html,
+      headers,
+      effectiveUrl,
+      artifacts: {
+        screenshotPath,
+        tracePath,
+        consolePath,
+        networkPath
+      }
+    };
+  } catch (error) {
+    if (baseSpec.captureTrace) {
+      try {
+        await context.tracing.stop();
+      } catch {}
+    }
+    return {
+      ok: false,
+      error: String(error)
+    };
+  } finally {
+    if (baseSpec.captureConsole) {
+      page.off('console', consoleListener);
+    }
+    if (baseSpec.captureNetwork) {
+      page.off('response', networkListener);
+    }
+  }
+}
+
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+try {
+  for await (const line of rl) {
+    if (!line) continue;
+    if (line === '__SEOGEO_EXIT__') break;
+    let payload;
+    try {
+      const request = JSON.parse(Buffer.from(line, 'base64').toString('utf8'));
+      payload = await fetchUrl(request.url);
+    } catch (error) {
+      payload = { ok: false, error: String(error) };
+    }
+    process.stdout.write(JSON.stringify(payload) + '\n');
+  }
+} finally {
+  await context.close();
+  await browser.close();
+}
+"#;
+
 #[derive(Debug, Clone)]
 struct PlaywrightSpec<'a> {
     url: &'a str,
@@ -165,6 +337,33 @@ pub struct PlaywrightDoctor {
     pub mode: String,
     pub executable: String,
     pub message: String,
+}
+
+#[derive(Debug)]
+pub(crate) struct PlaywrightSession {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+    stderr: ChildStderr,
+}
+
+#[derive(Debug)]
+pub(crate) enum PlaywrightFetcher {
+    Session(PlaywrightSession),
+    OneShot(PathBuf, PlaywrightOwnedConfig),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PlaywrightOwnedConfig {
+    headers: BTreeMap<String, String>,
+    cookies: Vec<BTreeMap<String, String>>,
+    basic_auth: BTreeMap<String, String>,
+    wait_until: String,
+    capture_trace: bool,
+    capture_screenshot: bool,
+    capture_console: bool,
+    capture_network: bool,
+    artifact_dir: String,
 }
 
 fn repo_root() -> PathBuf {
@@ -200,6 +399,145 @@ pub(crate) fn playwright_is_available() -> bool {
 
 pub(crate) fn probe_playwright_runtime() -> PlaywrightDoctor {
     probe_playwright_runtime_with(configured_playwright_executable())
+}
+
+impl PlaywrightFetcher {
+    pub(crate) fn new(runtime: &RuntimeConfig<'_>) -> Result<Self> {
+        if let Some(executable) = configured_playwright_executable() {
+            return Ok(Self::OneShot(
+                executable,
+                PlaywrightOwnedConfig::from_runtime(runtime),
+            ));
+        }
+        Ok(Self::Session(PlaywrightSession::spawn(runtime)?))
+    }
+
+    pub(crate) fn fetch(&mut self, url: &str) -> Result<FetchResult> {
+        match self {
+            Self::Session(session) => session.fetch(url),
+            Self::OneShot(executable, config) => {
+                fetch_with_playwright_spec(Some(executable.clone()), &config.spec_for_url(url))
+            }
+        }
+    }
+}
+
+impl PlaywrightOwnedConfig {
+    fn from_runtime(runtime: &RuntimeConfig<'_>) -> Self {
+        Self {
+            headers: runtime.crawl_headers.clone(),
+            cookies: runtime.crawl_cookies.to_vec(),
+            basic_auth: runtime.crawl_basic_auth.clone(),
+            wait_until: runtime.browser_wait_until.to_string(),
+            capture_trace: runtime.crawl_capture_trace,
+            capture_screenshot: runtime.crawl_capture_screenshot,
+            capture_console: runtime.crawl_capture_console,
+            capture_network: runtime.crawl_capture_network,
+            artifact_dir: runtime.crawl_artifact_dir.to_string(),
+        }
+    }
+
+    fn spec_for_url<'a>(&'a self, url: &'a str) -> PlaywrightSpec<'a> {
+        PlaywrightSpec {
+            url,
+            headers: &self.headers,
+            cookies: &self.cookies,
+            basic_auth: &self.basic_auth,
+            wait_until: &self.wait_until,
+            capture_trace: self.capture_trace,
+            capture_screenshot: self.capture_screenshot,
+            capture_console: self.capture_console,
+            capture_network: self.capture_network,
+            artifact_dir: &self.artifact_dir,
+        }
+    }
+}
+
+impl PlaywrightSession {
+    fn spawn(runtime: &RuntimeConfig<'_>) -> Result<Self> {
+        let encoded_spec = encode_spec(&PlaywrightSpec {
+            url: runtime
+                .crawl_seeds
+                .first()
+                .map(String::as_str)
+                .unwrap_or("https://example.com"),
+            headers: runtime.crawl_headers,
+            cookies: runtime.crawl_cookies,
+            basic_auth: runtime.crawl_basic_auth,
+            wait_until: runtime.browser_wait_until,
+            capture_trace: runtime.crawl_capture_trace,
+            capture_screenshot: runtime.crawl_capture_screenshot,
+            capture_console: runtime.crawl_capture_console,
+            capture_network: runtime.crawl_capture_network,
+            artifact_dir: runtime.crawl_artifact_dir,
+        })?;
+        let mut child = Command::new("node")
+            .arg("--input-type=module")
+            .arg("-e")
+            .arg(PLAYWRIGHT_SESSION_RUNNER)
+            .arg(&encoded_spec)
+            .current_dir(repo_root())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .context("failed to spawn persistent playwright runtime")?;
+        let stdin = child
+            .stdin
+            .take()
+            .context("playwright session stdin unavailable")?;
+        let stdout = child
+            .stdout
+            .take()
+            .context("playwright session stdout unavailable")?;
+        let stderr = child
+            .stderr
+            .take()
+            .context("playwright session stderr unavailable")?;
+        Ok(Self {
+            child,
+            stdin,
+            stdout: BufReader::new(stdout),
+            stderr,
+        })
+    }
+
+    fn fetch(&mut self, url: &str) -> Result<FetchResult> {
+        let request = BASE64.encode(serde_json::to_vec(&serde_json::json!({ "url": url }))?);
+        self.stdin.write_all(request.as_bytes())?;
+        self.stdin.write_all(b"\n")?;
+        self.stdin.flush()?;
+
+        let mut line = String::new();
+        let read = self.stdout.read_line(&mut line)?;
+        if read == 0 {
+            let stderr = self.read_stderr();
+            bail!("playwright runtime terminated while fetching {url}: {stderr}");
+        }
+        let payload: serde_json::Value = serde_json::from_str(line.trim_end())
+            .with_context(|| format!("invalid persistent playwright response for {url}"))?;
+        if !payload["ok"].as_bool().unwrap_or(false) {
+            bail!(
+                "playwright runtime failed for {url}: {}",
+                payload["error"].as_str().unwrap_or("unknown error")
+            );
+        }
+        Ok(fetch_result_from_payload(url, &payload))
+    }
+
+    fn read_stderr(&mut self) -> String {
+        let mut stderr = String::new();
+        let _ = self.stderr.read_to_string(&mut stderr);
+        stderr.trim().to_string()
+    }
+}
+
+impl Drop for PlaywrightSession {
+    fn drop(&mut self) {
+        let _ = self.stdin.write_all(b"__SEOGEO_EXIT__\n");
+        let _ = self.stdin.flush();
+        let _ = self.child.wait();
+    }
 }
 
 fn probe_playwright_runtime_with(executable: Option<PathBuf>) -> PlaywrightDoctor {
@@ -243,28 +581,34 @@ fn probe_playwright_runtime_with(executable: Option<PathBuf>) -> PlaywrightDocto
     }
 }
 
-pub(crate) fn fetch_with_playwright(url: &str, runtime: &RuntimeConfig<'_>) -> Result<FetchResult> {
-    fetch_with_playwright_using(configured_playwright_executable(), url, runtime)
-}
-
+#[cfg(test)]
 fn fetch_with_playwright_using(
     executable: Option<PathBuf>,
     url: &str,
     runtime: &RuntimeConfig<'_>,
 ) -> Result<FetchResult> {
-    let spec = PlaywrightSpec {
-        url,
-        headers: runtime.crawl_headers,
-        cookies: runtime.crawl_cookies,
-        basic_auth: runtime.crawl_basic_auth,
-        wait_until: runtime.browser_wait_until,
-        capture_trace: runtime.crawl_capture_trace,
-        capture_screenshot: runtime.crawl_capture_screenshot,
-        capture_console: runtime.crawl_capture_console,
-        capture_network: runtime.crawl_capture_network,
-        artifact_dir: runtime.crawl_artifact_dir,
-    };
-    let encoded_spec = encode_spec(&spec)?;
+    fetch_with_playwright_spec(
+        executable,
+        &PlaywrightSpec {
+            url,
+            headers: runtime.crawl_headers,
+            cookies: runtime.crawl_cookies,
+            basic_auth: runtime.crawl_basic_auth,
+            wait_until: runtime.browser_wait_until,
+            capture_trace: runtime.crawl_capture_trace,
+            capture_screenshot: runtime.crawl_capture_screenshot,
+            capture_console: runtime.crawl_capture_console,
+            capture_network: runtime.crawl_capture_network,
+            artifact_dir: runtime.crawl_artifact_dir,
+        },
+    )
+}
+
+fn fetch_with_playwright_spec(
+    executable: Option<PathBuf>,
+    spec: &PlaywrightSpec<'_>,
+) -> Result<FetchResult> {
+    let encoded_spec = encode_spec(spec)?;
     let mut command = if let Some(executable) = executable.as_ref() {
         let mut command = Command::new(executable);
         command.arg(&encoded_spec);
@@ -283,7 +627,7 @@ fn fetch_with_playwright_using(
 
     let mut child = command
         .spawn()
-        .with_context(|| format!("failed to spawn playwright runtime for {url}"))?;
+        .with_context(|| format!("failed to spawn playwright runtime for {}", spec.url))?;
     if executable.is_none()
         && let Some(stdin) = child.stdin.as_mut()
     {
@@ -291,13 +635,17 @@ fn fetch_with_playwright_using(
     }
     let output = child
         .wait_with_output()
-        .with_context(|| format!("failed to execute playwright runtime for {url}"))?;
+        .with_context(|| format!("failed to execute playwright runtime for {}", spec.url))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("playwright runtime failed for {url}: {stderr}");
+        bail!("playwright runtime failed for {}: {stderr}", spec.url);
     }
     let payload: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .with_context(|| format!("invalid playwright runtime response for {url}"))?;
+        .with_context(|| format!("invalid playwright runtime response for {}", spec.url))?;
+    Ok(fetch_result_from_payload(spec.url, &payload))
+}
+
+fn fetch_result_from_payload(url: &str, payload: &serde_json::Value) -> FetchResult {
     let headers = payload["headers"]
         .as_object()
         .map(|headers| {
@@ -309,7 +657,7 @@ fn fetch_with_playwright_using(
                 .collect::<BTreeMap<_, _>>()
         })
         .unwrap_or_default();
-    Ok(FetchResult {
+    FetchResult {
         status_code: payload["statusCode"].as_u64().map(|value| value as u16),
         content_type: payload["contentType"].as_str().map(str::to_string),
         body: payload["body"].as_str().map(str::to_string),
@@ -318,7 +666,7 @@ fn fetch_with_playwright_using(
             .as_str()
             .map(str::to_string)
             .unwrap_or_else(|| url.to_string()),
-    })
+    }
 }
 
 #[cfg(test)]

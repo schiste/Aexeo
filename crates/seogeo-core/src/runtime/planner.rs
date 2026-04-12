@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 
 use super::graph::route_is_allowed;
 use super::http::{host_for_url, normalize_base_url, origin_for_url, same_site_host};
@@ -22,8 +22,9 @@ pub(crate) struct CrawlPlanner {
     normalized_base: String,
     base_host: String,
     queue: VecDeque<String>,
-    visited: BTreeSet<String>,
-    discovered_routes: BTreeSet<String>,
+    queued: HashSet<String>,
+    visited: HashSet<String>,
+    discovered_routes: HashSet<String>,
     max_pages: usize,
     truncated: bool,
 }
@@ -33,10 +34,11 @@ impl CrawlPlanner {
         let normalized_base = normalize_base_url(base_url);
         Self {
             base_host: host_for_url(&normalized_base),
-            queue: VecDeque::from([normalized_base.clone()]),
+            queue: VecDeque::from([String::new()]),
             normalized_base,
-            visited: BTreeSet::new(),
-            discovered_routes: BTreeSet::from([String::new()]),
+            queued: HashSet::from([String::new()]),
+            visited: HashSet::new(),
+            discovered_routes: HashSet::from([String::new()]),
             max_pages,
             truncated: false,
         }
@@ -71,20 +73,34 @@ impl CrawlPlanner {
             normalized_base: self.normalized_base.clone(),
             base_host: self.base_host.clone(),
             queue: self.queue.iter().cloned().collect(),
-            visited: self.visited.iter().cloned().collect(),
-            discovered_routes: self.discovered_routes.iter().cloned().collect(),
+            visited: sorted_vec(&self.visited),
+            discovered_routes: sorted_vec(&self.discovered_routes),
             max_pages: self.max_pages,
             truncated: self.truncated,
         }
     }
 
     pub(crate) fn from_checkpoint(state: CrawlPlannerState, max_pages: usize) -> Self {
+        let queue_routes = state
+            .queue
+            .iter()
+            .filter_map(|entry| canonicalize_route_entry(entry))
+            .collect::<Vec<_>>();
         Self {
             normalized_base: state.normalized_base,
             base_host: state.base_host,
-            queue: VecDeque::from(state.queue),
-            visited: state.visited.into_iter().collect(),
-            discovered_routes: state.discovered_routes.into_iter().collect(),
+            queue: VecDeque::from(queue_routes.clone()),
+            queued: HashSet::from_iter(queue_routes),
+            visited: state
+                .visited
+                .into_iter()
+                .filter_map(|entry| canonicalize_route_entry(&entry))
+                .collect(),
+            discovered_routes: state
+                .discovered_routes
+                .into_iter()
+                .filter_map(|entry| canonicalize_route_entry(&entry))
+                .collect(),
             max_pages,
             truncated: state.truncated,
         }
@@ -105,26 +121,29 @@ impl CrawlPlanner {
     }
 
     pub(crate) fn next_url(&mut self, runtime: &RuntimeConfig<'_>) -> Option<String> {
-        while let Some(current) = self.queue.pop_front() {
+        while let Some(route) = self.queue.pop_front() {
+            self.queued.remove(&route);
             if self.visited.len() >= self.max_pages {
                 self.truncated = true;
                 return None;
             }
-            if self.visited.contains(&current) {
+            if self.visited.contains(&route) {
                 continue;
             }
-            self.visited.insert(current.clone());
-            let current_route = route_from_urlish(&current).unwrap_or_default();
-            if !current_route.is_empty() && !route_is_allowed(&current_route, runtime) {
+            if !route.is_empty() && !route_is_allowed(&route, runtime) {
                 continue;
             }
-            return Some(current);
+            self.visited.insert(route.clone());
+            return Some(self.url_for_route(&route));
         }
         None
     }
 
     pub(crate) fn discover_link_target(&mut self, target: &str, runtime: &RuntimeConfig<'_>) {
-        self.enqueue_route(target.to_string(), runtime);
+        let Some(route) = canonicalize_route_entry(target) else {
+            return;
+        };
+        self.enqueue_route(route, runtime);
     }
 
     pub(crate) fn align_with_effective_url(&mut self, effective_url: &str) {
@@ -140,17 +159,40 @@ impl CrawlPlanner {
         if !route_is_allowed(&route, runtime) {
             return;
         }
-        let url = if route.is_empty() {
-            self.normalized_base.clone()
-        } else {
-            format!("{}{}", self.normalized_base, route)
-        };
+        let url = self.url_for_route(&route);
         if host_for_url(&url) != self.base_host {
             return;
         }
-        self.discovered_routes.insert(route);
-        self.queue.push_back(url);
+        self.discovered_routes.insert(route.clone());
+        if self.visited.contains(&route) || !self.queued.insert(route.clone()) {
+            return;
+        }
+        self.queue.push_back(route);
     }
+
+    fn url_for_route(&self, route: &str) -> String {
+        if route.is_empty() {
+            self.normalized_base.clone()
+        } else {
+            format!("{}{}", self.normalized_base, route)
+        }
+    }
+}
+
+fn canonicalize_route_entry(entry: &str) -> Option<String> {
+    if entry.is_empty() {
+        return Some(String::new());
+    }
+    if entry.contains("://") || entry.starts_with('/') {
+        return route_from_urlish(entry).or_else(|| normalize_internal_href(entry));
+    }
+    Some(entry.trim_matches('/').to_string())
+}
+
+fn sorted_vec(values: &HashSet<String>) -> Vec<String> {
+    let mut entries = values.iter().cloned().collect::<Vec<_>>();
+    entries.sort();
+    entries
 }
 
 #[cfg(test)]
@@ -186,7 +228,7 @@ mod tests {
         assert_eq!(planner.normalized_base(), "https://www.example.com/");
         assert_eq!(
             planner.next_url(&runtime).as_deref(),
-            Some("https://example.com/")
+            Some("https://www.example.com/")
         );
         assert_eq!(
             planner.next_url(&runtime).as_deref(),
@@ -213,5 +255,27 @@ mod tests {
         assert_eq!(restored.base_host(), "example.com");
         assert_eq!(restored.discovered_route_count(), 2);
         assert_eq!(restored.visited_count(), 1);
+    }
+
+    #[test]
+    fn planner_deduplicates_discovered_routes_in_queue() {
+        let config = Config::default();
+        let runtime = config.runtime();
+        let mut planner = CrawlPlanner::new("https://example.com", 10);
+        planner.discover_link_target("docs", &runtime);
+        planner.discover_link_target("/docs", &runtime);
+        planner.discover_link_target("https://example.com/docs", &runtime);
+
+        assert_eq!(planner.discovered_route_count(), 2);
+        assert_eq!(planner.queued_count(), 2);
+        assert_eq!(
+            planner.next_url(&runtime).as_deref(),
+            Some("https://example.com/")
+        );
+        assert_eq!(
+            planner.next_url(&runtime).as_deref(),
+            Some("https://example.com/docs")
+        );
+        assert!(planner.next_url(&runtime).is_none());
     }
 }
