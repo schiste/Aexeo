@@ -18,7 +18,7 @@ pub(super) fn read_sitemap_routes(path: &Path, root: &Path) -> (BTreeSet<String>
 
 pub(super) fn read_sitemap_routes_from_text(text: &str) -> Result<BTreeSet<String>> {
     if text.contains("<sitemapindex") {
-        anyhow::bail!("runtime sitemap text must be a resolved urlset, not a sitemap index")
+        return Ok(BTreeSet::new());
     }
     if !text.contains("<urlset") {
         anyhow::bail!("invalid sitemap XML")

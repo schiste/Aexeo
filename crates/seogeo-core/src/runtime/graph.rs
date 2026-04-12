@@ -97,13 +97,15 @@ fn route_is_excluded(route: &str, patterns: &[String]) -> bool {
 }
 
 pub(crate) fn route_is_allowed(route: &str, runtime: &RuntimeConfig<'_>) -> bool {
-    !route_is_excluded(route, runtime.crawl_exclude_patterns)
+    !route.starts_with("cdn-cgi/")
+        && !route_is_excluded(route, runtime.crawl_exclude_patterns)
         && route_matches_patterns(route, runtime.crawl_include_patterns)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::extract_internal_links;
+    use super::{extract_internal_links, route_is_allowed};
+    use crate::config::Config;
 
     #[test]
     fn extracts_relative_and_absolute_same_site_links() {
@@ -121,5 +123,13 @@ mod tests {
                 String::from("legal"),
             ]
         );
+    }
+
+    #[test]
+    fn rejects_cloudflare_infrastructure_routes() {
+        let config = Config::default();
+        let runtime = config.runtime();
+        assert!(!route_is_allowed("cdn-cgi/l/email-protection", &runtime));
+        assert!(route_is_allowed("features/terminal-search", &runtime));
     }
 }

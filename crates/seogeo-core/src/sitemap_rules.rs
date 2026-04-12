@@ -48,6 +48,10 @@ fn read_sitemap_text(site: &Site, sitemap: &Path) -> String {
         .unwrap_or_else(|| fs::read_to_string(sitemap).unwrap_or_default())
 }
 
+fn is_sitemap_index(text: &str) -> bool {
+    text.to_ascii_lowercase().contains("<sitemapindex")
+}
+
 fn read_tag_values(text: &str, tag: &str) -> Vec<String> {
     let mut values = Vec::new();
     let start_tag = format!("<{tag}>");
@@ -86,10 +90,18 @@ fn looks_like_iso_lastmod(value: &str) -> bool {
 
 pub fn run_sitemap_rules(site: &Site, _config: &Config) -> Vec<Finding> {
     let sitemap = site.root.join("sitemap.xml");
+    let sitemap_text = read_sitemap_text(site, &sitemap);
+    let sitemap_is_index = is_sitemap_index(&sitemap_text);
     if site.sitemap_error.is_some() {
+        if sitemap_is_index && !site.sitemap_routes.is_empty() {
+            return Vec::new();
+        }
         return vec![sitemap_error_finding(site, &sitemap)];
     }
     if site.sitemap_routes.is_empty() {
+        if sitemap_is_index {
+            return Vec::new();
+        }
         let rule_id = if sitemap.exists() { "MAP003" } else { "MAP001" };
         let message = if sitemap.exists() {
             "sitemap set contains no URLs"
@@ -129,7 +141,6 @@ pub fn run_sitemap_rules(site: &Site, _config: &Config) -> Vec<Finding> {
             });
         }
     }
-    let sitemap_text = read_sitemap_text(site, &sitemap);
     if !sitemap_text.is_empty() {
         let lastmods = read_tag_values(&sitemap_text, "lastmod");
         if lastmods.is_empty() {
@@ -255,5 +266,26 @@ mod tests {
         );
         let findings = run_sitemap_rules(&load_site(root).unwrap(), &Config::default());
         assert!(findings.iter().any(|finding| finding.rule_id == "MAP009"));
+    }
+
+    #[test]
+    fn accepts_sitemap_indexes_without_empty_sitemap_findings() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><title>x</title><meta name=\"description\" content=\"y\"><link rel=\"canonical\" href=\"https://example.com/\"></head><body><h1>x</h1></body></html>",
+        );
+        write(
+            &root.join("nested-sitemap.xml"),
+            "<urlset><url><loc>https://example.com/</loc></url></urlset>",
+        );
+        write(
+            &root.join("sitemap.xml"),
+            "<sitemapindex><sitemap><loc>https://example.com/nested-sitemap.xml</loc></sitemap></sitemapindex>",
+        );
+        let findings = run_sitemap_rules(&load_site(root).unwrap(), &Config::default());
+        assert!(!findings.iter().any(|finding| finding.rule_id == "MAP005"));
+        assert!(!findings.iter().any(|finding| finding.rule_id == "MAP003"));
     }
 }

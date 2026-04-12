@@ -72,6 +72,14 @@ fn is_orphan_candidate(page: &Page, config: &Config) -> bool {
         || excluded.contains(&page.route))
 }
 
+fn is_graph_validated_target(target: &str) -> bool {
+    !target.starts_with("cdn-cgi/")
+        && Path::new(target)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_none_or(|ext| ext.eq_ignore_ascii_case("html"))
+}
+
 pub fn run_link_rules(site: &Site, config: &Config) -> Vec<Finding> {
     let rules = config.rules();
     let mut findings = Vec::new();
@@ -86,7 +94,10 @@ pub fn run_link_rules(site: &Site, config: &Config) -> Vec<Finding> {
             let Some(target) = link.target.as_deref() else {
                 continue;
             };
-            if !suppress_graph_findings && !site.indexed_paths.contains(target) {
+            if !suppress_graph_findings
+                && is_graph_validated_target(target)
+                && !site.indexed_paths.contains(target)
+            {
                 findings.push(finding(
                     "LNK001",
                     format!("broken internal link: /{}", target),
@@ -221,5 +232,29 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>();
         assert!(!ids.contains("LNK001"));
         assert!(!ids.contains("LNK002"));
+    }
+
+    #[test]
+    fn does_not_flag_non_html_internal_assets_as_broken_pages() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><title>x</title><meta name=\"description\" content=\"y\"><link rel=\"canonical\" href=\"https://example.com/\"></head><body><h1>x</h1><a href=\"/feature-data.json\">Data</a></body></html>",
+        );
+        let findings = run_link_rules(&load_site(root).unwrap(), &Config::default());
+        assert!(!findings.iter().any(|finding| finding.rule_id == "LNK001"));
+    }
+
+    #[test]
+    fn ignores_cloudflare_infrastructure_links() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><title>x</title><meta name=\"description\" content=\"y\"><link rel=\"canonical\" href=\"https://example.com/\"></head><body><h1>x</h1><a href=\"/cdn-cgi/l/email-protection\">Email</a></body></html>",
+        );
+        let findings = run_link_rules(&load_site(root).unwrap(), &Config::default());
+        assert!(!findings.iter().any(|finding| finding.rule_id == "LNK001"));
     }
 }
