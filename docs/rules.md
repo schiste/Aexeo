@@ -17,6 +17,11 @@
 - `SEO010`: invalid hreflang locale code
 - `SEO011`: hreflang cluster is missing x-default
 - `SEO012`: hreflang alternate is not reciprocally linked
+- `SEO013`: page suppresses snippets via nosnippet
+- `SEO014`: page restricts snippets via max-snippet
+- `SEO015`: page uses data-nosnippet blocks
+- `SEO016`: page canonicals to another crawlable route
+- `SEO017`: duplicate title and meta description cluster
 
 ## `links`
 
@@ -34,6 +39,8 @@
 - `MAP005`: sitemap.xml exists but is empty
 - `MAP006`: sitemap endpoint returned HTML instead of sitemap XML
 - `MAP007`: sitemap endpoint exists but is not recognizable sitemap XML
+- `MAP008`: sitemap.xml is missing lastmod values
+- `MAP009`: sitemap.xml has invalid lastmod values
 
 ## `robots`
 
@@ -78,6 +85,8 @@
 - `SCH014`: docs-like page likely wants docs-oriented schema
 - `SCH015`: search page could expose SearchAction schema
 - `SCH016`: utility page should not repeat Organization schema inline
+- `SCH017`: editorial schema author is not visible on the page
+- `SCH018`: editorial schema dates are not visible on the page
 
 ## `llm`
 
@@ -95,6 +104,7 @@
 - `CNT002`: feature-like page is missing a configured section marker
 - `CNT003`: inline image is missing alt text
 - `CNT004`: inline image is too large
+- `CNT005`: duplicate visible content cluster
 
 ## `structure`
 

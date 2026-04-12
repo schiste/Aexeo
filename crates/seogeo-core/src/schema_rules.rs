@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::config::Config;
-use crate::site::{Site, route_from_urlish};
+use crate::site::{Site, route_from_urlish, strip_tags};
 
 type ParsedSchemaPage = (
     Vec<Finding>,
@@ -188,6 +188,103 @@ fn collect_schema_page_policy_findings(
             "warning",
         ));
     }
+    findings
+}
+
+fn is_editorial_schema_type(schema_types: &BTreeSet<String>) -> bool {
+    schema_types.iter().any(|schema_type| {
+        matches!(
+            schema_type.as_str(),
+            "Article" | "BlogPosting" | "NewsArticle" | "TechArticle"
+        )
+    })
+}
+
+fn year_fragments(values: &[String]) -> BTreeSet<String> {
+    values
+        .iter()
+        .filter_map(|value| value.get(0..4))
+        .filter(|fragment| fragment.chars().all(|ch| ch.is_ascii_digit()))
+        .map(str::to_string)
+        .collect()
+}
+
+fn strip_non_visible_blocks(raw: &str) -> String {
+    let mut cleaned = raw.to_string();
+    for (start_tag, end_tag) in [
+        ("<script", "</script>"),
+        ("<style", "</style>"),
+        ("<noscript", "</noscript>"),
+    ] {
+        while let Some(start) = cleaned.find(start_tag) {
+            let Some(end_rel) = cleaned[start..].find(end_tag) else {
+                cleaned.truncate(start);
+                break;
+            };
+            let end = start + end_rel + end_tag.len();
+            cleaned.replace_range(start..end, "");
+        }
+    }
+    cleaned
+}
+
+fn visible_page_text(page: &crate::site::Page) -> String {
+    let cleaned = strip_non_visible_blocks(&page.raw_text);
+    strip_tags(&cleaned).to_ascii_lowercase()
+}
+
+fn collect_editorial_visibility_findings(
+    page: &crate::site::Page,
+    schema_types: &BTreeSet<String>,
+) -> Vec<Finding> {
+    if !is_editorial_schema_type(schema_types) {
+        return Vec::new();
+    }
+    let visible_text = visible_page_text(page);
+    let mut author_names = BTreeSet::new();
+    let mut date_values = Vec::new();
+
+    for block in &page.json_ld_blocks {
+        let Ok(payload) = serde_json::from_str::<Value>(&block.raw) else {
+            continue;
+        };
+        author_names.extend(iter_schema_field_values(&payload, "author"));
+        date_values.extend(iter_schema_field_values(&payload, "datePublished"));
+        date_values.extend(iter_schema_field_values(&payload, "dateModified"));
+    }
+
+    let mut findings = Vec::new();
+    let visible_author = author_names
+        .iter()
+        .map(|name| name.trim())
+        .filter(|name| !name.is_empty())
+        .any(|name| visible_text.contains(&name.to_ascii_lowercase()));
+    if !author_names.is_empty() && !visible_author {
+        findings.push(recommendation(
+            "SCH017",
+            "editorial schema declares an author that is not visible in page content",
+            &page.path,
+            1,
+            1,
+            "surface the author name visibly so structured metadata matches user-visible content",
+        ));
+    }
+
+    let years = year_fragments(&date_values);
+    let visible_year = years
+        .iter()
+        .any(|year| visible_text.contains(&year.to_ascii_lowercase()));
+    if !years.is_empty() && !visible_year {
+        findings.push(recommendation(
+            "SCH018",
+            "editorial schema declares publish/update dates that are not visible in page content",
+            &page.path,
+            1,
+            1,
+            "surface the publish or update date visibly so structured metadata matches user-visible content",
+        ));
+    }
+
     findings
 }
 
@@ -493,6 +590,7 @@ pub fn run_schema_rules(site: &Site, config: &Config) -> Vec<Finding> {
             &schema_types,
             &schema_titles,
         ));
+        findings.extend(collect_editorial_visibility_findings(page, &schema_types));
         findings.extend(collect_schema_object_findings(
             page,
             &schema_objects,
@@ -609,5 +707,21 @@ mod tests {
         assert!(!ids.contains("SCH015"));
         assert!(!ids.contains("SCH013"));
         assert!(!ids.contains("SCH005"));
+    }
+
+    #[test]
+    fn flags_editorial_schema_without_visible_author_or_date() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("article/index.html"),
+            r#"<html><head><title>Story</title><meta name="description" content="Story"><link rel="canonical" href="https://example.com/article"><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Story","author":"Jane Example","datePublished":"2026-03-04"}</script></head><body><h1>Story</h1><p>Body only.</p></body></html>"#,
+        );
+        let ids = run_schema_rules(&load_site(root).unwrap(), &Config::default())
+            .into_iter()
+            .map(|finding| finding.rule_id)
+            .collect::<BTreeSet<_>>();
+        assert!(ids.contains("SCH017"));
+        assert!(ids.contains("SCH018"));
     }
 }

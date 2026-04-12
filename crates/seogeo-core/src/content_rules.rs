@@ -1,4 +1,5 @@
 use seogeo_contracts::{Finding, FindingScope};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -27,6 +28,10 @@ fn finding(
 
 fn visible_length(text: &str) -> usize {
     collapse_whitespace(&strip_tags(text)).len()
+}
+
+fn normalized_visible_text(text: &str) -> String {
+    collapse_whitespace(&strip_tags(text)).to_ascii_lowercase()
 }
 
 fn is_feature_route(route: &str) -> bool {
@@ -133,10 +138,55 @@ fn collect_image_findings(page: &Page, site: &Site, config: &Config) -> Vec<Find
 
 pub fn run_content_rules(site: &Site, config: &Config) -> Vec<Finding> {
     let mut findings = Vec::new();
+    let mut duplicate_clusters = BTreeMap::<String, Vec<String>>::new();
+
+    for page in site.route_pages() {
+        if matches!(
+            page.page_kind,
+            PageKind::Search
+                | PageKind::Admin
+                | PageKind::Feed
+                | PageKind::Utility
+                | PageKind::NotFound
+        ) {
+            continue;
+        }
+        let normalized = normalized_visible_text(&page.raw_text);
+        if normalized.len() >= config.rules().min_page_size {
+            duplicate_clusters
+                .entry(normalized)
+                .or_default()
+                .push(page.route.clone());
+        }
+    }
+
     for page in site.route_pages() {
         findings.extend(collect_page_size_findings(page, config));
         findings.extend(collect_feature_marker_findings(page, config));
         findings.extend(collect_image_findings(page, site, config));
+        let normalized = normalized_visible_text(&page.raw_text);
+        if let Some(routes) = duplicate_clusters.get(&normalized)
+            && routes.len() > 1
+        {
+            let examples = routes
+                .iter()
+                .filter(|route| *route != &page.route)
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>();
+            findings.push(finding(
+                "CNT005",
+                format!(
+                    "page duplicates the visible text of {} other route(s): {}",
+                    routes.len().saturating_sub(1),
+                    examples.join(", ")
+                ),
+                &page.path,
+                1,
+                1,
+                "warning",
+            ));
+        }
     }
     findings
 }
@@ -202,5 +252,20 @@ mod tests {
         );
         let findings = run_content_rules(&load_site(root).unwrap(), &Config::default());
         assert!(!findings.iter().any(|finding| finding.rule_id == "CNT001"));
+    }
+
+    #[test]
+    fn flags_duplicate_visible_text_clusters() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        let body = "<p>This is a long enough body to count as duplicate visible content across multiple pages for testing duplicate detection and clustering in the content rules.</p>";
+        write(&root.join("one/index.html"), &make_page("one", body));
+        write(&root.join("two/index.html"), &make_page("two", body));
+        let config = Config {
+            min_page_size: 40,
+            ..Config::default()
+        };
+        let findings = run_content_rules(&load_site(root).unwrap(), &config);
+        assert!(findings.iter().any(|finding| finding.rule_id == "CNT005"));
     }
 }

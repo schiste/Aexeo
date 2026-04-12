@@ -127,6 +127,7 @@ pub struct Site {
     pub inbound_links: BTreeMap<String, BTreeSet<String>>,
     pub llms_text: Option<String>,
     pub robots_text: Option<String>,
+    pub sitemap_text: Option<String>,
     pub sitemap_routes: BTreeSet<String>,
     pub sitemap_error: Option<String>,
     pub deployment_model: DeploymentModel,
@@ -495,7 +496,7 @@ pub fn build_site_from_parts(input: SiteBuildInput) -> Result<Site> {
         }
     }
     let (sitemap_routes, sitemap_error) = match artifacts.sitemap_text {
-        Some(text) => match sitemap::read_sitemap_routes_from_text(&text) {
+        Some(ref text) => match sitemap::read_sitemap_routes_from_text(text) {
             Ok(routes) => (routes, None),
             Err(error) => (BTreeSet::new(), Some(error.to_string())),
         },
@@ -507,6 +508,7 @@ pub fn build_site_from_parts(input: SiteBuildInput) -> Result<Site> {
         inbound_links: build_inbound_link_map(&pages),
         llms_text: artifacts.llms_text,
         robots_text: artifacts.robots_text,
+        sitemap_text: artifacts.sitemap_text.clone(),
         sitemap_routes,
         sitemap_error,
         deployment_model,

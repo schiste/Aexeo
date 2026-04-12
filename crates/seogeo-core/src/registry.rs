@@ -160,6 +160,26 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                     rule_id: "SEO012",
                     summary: "hreflang alternate is not reciprocally linked",
                 },
+                RuleDescriptor {
+                    rule_id: "SEO013",
+                    summary: "page suppresses snippets via nosnippet",
+                },
+                RuleDescriptor {
+                    rule_id: "SEO014",
+                    summary: "page restricts snippets via max-snippet",
+                },
+                RuleDescriptor {
+                    rule_id: "SEO015",
+                    summary: "page uses data-nosnippet blocks",
+                },
+                RuleDescriptor {
+                    rule_id: "SEO016",
+                    summary: "page canonicals to another crawlable route",
+                },
+                RuleDescriptor {
+                    rule_id: "SEO017",
+                    summary: "duplicate title and meta description cluster",
+                },
             ],
         },
         RuleGroupDefinition {
@@ -217,6 +237,14 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                 RuleDescriptor {
                     rule_id: "MAP007",
                     summary: "sitemap endpoint exists but is not recognizable sitemap XML",
+                },
+                RuleDescriptor {
+                    rule_id: "MAP008",
+                    summary: "sitemap.xml is missing lastmod values",
+                },
+                RuleDescriptor {
+                    rule_id: "MAP009",
+                    summary: "sitemap.xml has invalid lastmod values",
                 },
             ],
         },
@@ -379,6 +407,14 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                     rule_id: "SCH016",
                     summary: "utility page should not repeat Organization schema inline",
                 },
+                RuleDescriptor {
+                    rule_id: "SCH017",
+                    summary: "editorial schema author is not visible on the page",
+                },
+                RuleDescriptor {
+                    rule_id: "SCH018",
+                    summary: "editorial schema dates are not visible on the page",
+                },
             ],
         },
         RuleGroupDefinition {
@@ -436,6 +472,10 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                 RuleDescriptor {
                     rule_id: "CNT004",
                     summary: "inline image is too large",
+                },
+                RuleDescriptor {
+                    rule_id: "CNT005",
+                    summary: "duplicate visible content cluster",
                 },
             ],
         },

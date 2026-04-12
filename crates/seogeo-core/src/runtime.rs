@@ -1413,6 +1413,7 @@ mod tests {
                 inbound_links: BTreeMap::new(),
                 llms_text: None,
                 robots_text: None,
+                sitemap_text: None,
                 sitemap_routes: BTreeSet::new(),
                 sitemap_error: None,
                 deployment_model: crate::site::DeploymentModel::RuntimeSnapshot,

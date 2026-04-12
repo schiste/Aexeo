@@ -84,7 +84,7 @@ fn rule_is_sitewide(rule_id: &str) -> bool {
             || id.starts_with("LLM")
             || id.starts_with("DEP")
             || id.starts_with("QLT")
-            || matches!(id, "SCH009" | "SEO011" | "CRW003")
+            || matches!(id, "SCH009" | "SEO011" | "SEO017" | "CRW003")
     )
 }
 
