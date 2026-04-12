@@ -35,9 +35,11 @@ pub struct IndexNowValidation {
     pub host: String,
     pub key: String,
     pub key_location: String,
+    pub validation_mode: String,
     pub key_file_path: Option<String>,
     pub key_file_present: bool,
     pub key_file_matches: bool,
+    pub remote_status_code: Option<u16>,
     pub errors: Vec<String>,
     pub warnings: Vec<String>,
 }
@@ -390,20 +392,59 @@ pub fn validate_indexnow(
     let host = indexnow_host(site_url)?;
     let key_location = format!("{}/{}.txt", site_url.trim_end_matches('/'), key);
     let key_file_path = root.map(|value| value.join(format!("{key}.txt")));
-    let (key_file_present, key_file_matches, file_warning) = if let Some(path) = &key_file_path {
-        if !path.exists() {
-            (
-                false,
-                false,
-                Some(format!("missing key file at {}", path.display())),
-            )
+    let (validation_mode, key_file_present, key_file_matches, remote_status_code, file_warning) =
+        if let Some(path) = &key_file_path {
+            if !path.exists() {
+                (
+                    "local".to_string(),
+                    false,
+                    false,
+                    None,
+                    Some(format!("missing key file at {}", path.display())),
+                )
+            } else {
+                let content = fs::read_to_string(path).unwrap_or_default();
+                ("local".to_string(), true, content.trim() == key, None, None)
+            }
         } else {
-            let content = fs::read_to_string(path).unwrap_or_default();
-            (true, content.trim() == key, None)
-        }
-    } else {
-        (false, false, None)
-    };
+            let client = Client::builder().timeout(Duration::from_secs(15)).build()?;
+            match client.get(&key_location).send() {
+                Ok(response) => {
+                    let status_code = response.status().as_u16();
+                    if !response.status().is_success() {
+                        (
+                            "remote".to_string(),
+                            false,
+                            false,
+                            Some(status_code),
+                            Some(format!(
+                                "remote key file check returned HTTP {} from {}",
+                                status_code, key_location
+                            )),
+                        )
+                    } else {
+                        let content = response.text().unwrap_or_default();
+                        (
+                            "remote".to_string(),
+                            true,
+                            content.trim() == key,
+                            Some(status_code),
+                            None,
+                        )
+                    }
+                }
+                Err(error) => (
+                    "remote".to_string(),
+                    false,
+                    false,
+                    None,
+                    Some(format!(
+                        "failed to fetch remote key file {}: {}",
+                        key_location, error
+                    )),
+                ),
+            }
+        };
     let mut errors = validate_indexnow_key_format(key);
     let mut warnings = Vec::new();
     if let Some(warning) = file_warning {
@@ -419,9 +460,11 @@ pub fn validate_indexnow(
         host,
         key: key.to_string(),
         key_location,
+        validation_mode,
         key_file_path: key_file_path.map(|path| path.to_string_lossy().into_owned()),
         key_file_present,
         key_file_matches,
+        remote_status_code,
         errors,
         warnings,
     })
@@ -1236,8 +1279,36 @@ mod tests {
         write(&root.join("abc123.txt"), "abc123");
         let result = validate_indexnow("https://example.com", "abc123", Some(root)).unwrap();
         assert!(result.errors.is_empty());
+        assert_eq!(result.validation_mode, "local");
         assert!(result.key_file_present);
         assert!(result.key_file_matches);
+        assert_eq!(result.remote_status_code, None);
+    }
+
+    #[test]
+    fn validates_indexnow_remote_key_files() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0_u8; 2048];
+            let _ = stream.read(&mut buffer).unwrap();
+            let body = "abc123";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.flush().unwrap();
+        });
+        let result = validate_indexnow(&format!("http://{}", address), "abc123", None).unwrap();
+        assert!(result.errors.is_empty());
+        assert_eq!(result.validation_mode, "remote");
+        assert!(result.key_file_present);
+        assert!(result.key_file_matches);
+        assert_eq!(result.remote_status_code, Some(200));
+        handle.join().unwrap();
     }
 
     #[test]

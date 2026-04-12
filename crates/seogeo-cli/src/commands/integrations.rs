@@ -129,6 +129,7 @@ fn indexnow_validation_text(validation: &seogeo_core::IndexNowValidation) -> Str
         String::new(),
         format!("Site: {}", validation.site_url),
         format!("Host: {}", validation.host),
+        format!("Validation mode: {}", validation.validation_mode),
         format!("Key location: {}", validation.key_location),
         format!(
             "Key file: {}",
@@ -137,6 +138,9 @@ fn indexnow_validation_text(validation: &seogeo_core::IndexNowValidation) -> Str
         format!("Key file present: {}", validation.key_file_present),
         format!("Key file matches: {}", validation.key_file_matches),
     ];
+    if let Some(status_code) = validation.remote_status_code {
+        lines.push(format!("Remote status code: {}", status_code));
+    }
     if !validation.warnings.is_empty() {
         lines.push(String::new());
         lines.push("Warnings:".to_string());

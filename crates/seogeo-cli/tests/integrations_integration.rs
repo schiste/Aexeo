@@ -95,6 +95,43 @@ fn indexnow_validate_json_contract_reports_key_mismatches() {
 }
 
 #[test]
+fn indexnow_validate_json_contract_supports_remote_live_checks() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut buffer = [0_u8; 2048];
+        let _ = stream.read(&mut buffer).unwrap();
+        let body = "abc123";
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+        stream.flush().unwrap();
+    });
+    let output = Command::new(bin())
+        .arg("indexnow")
+        .arg("validate")
+        .arg(format!("http://{}", address))
+        .arg("abc123")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "indexnow validate");
+    assert_eq!(payload["success"], true);
+    assert_eq!(payload["result"]["validation_mode"], "remote");
+    assert_eq!(payload["result"]["key_file_present"], true);
+    assert_eq!(payload["result"]["key_file_matches"], true);
+    assert_eq!(payload["result"]["remote_status_code"], 200);
+    handle.join().unwrap();
+}
+
+#[test]
 fn indexnow_submit_json_contract_posts_urls() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();

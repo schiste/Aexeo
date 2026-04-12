@@ -35,6 +35,11 @@ cargo run -p seogeo-cli -- indexnow ledger .
 cargo run -p seogeo-cli -- indexnow retry --path . abc123
 ```
 
+`indexnow validate` supports two modes:
+
+- with `--path`, it validates the local key file in the build root
+- without `--path`, it performs a live HTTP check against the deployed `keyLocation`
+
 `indexnow submit` sends a standards-shaped payload with:
 
 - `host`
