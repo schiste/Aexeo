@@ -76,6 +76,18 @@ pub fn build_cli() -> Command {
                         .default_value("15000"),
                 )
                 .arg(
+                    Arg::new("partial-audit-every")
+                        .long("partial-audit-every")
+                        .value_parser(value_parser!(usize))
+                        .default_value("100"),
+                )
+                .arg(
+                    Arg::new("partial-audit-min-interval-ms")
+                        .long("partial-audit-min-interval-ms")
+                        .value_parser(value_parser!(u64))
+                        .default_value("60000"),
+                )
+                .arg(
                     Arg::new("retry-budget")
                         .long("retry-budget")
                         .value_parser(value_parser!(usize))
@@ -242,6 +254,18 @@ pub fn build_cli() -> Command {
                         .default_value("15000"),
                 )
                 .arg(
+                    Arg::new("partial-audit-every")
+                        .long("partial-audit-every")
+                        .value_parser(value_parser!(usize))
+                        .default_value("100"),
+                )
+                .arg(
+                    Arg::new("partial-audit-min-interval-ms")
+                        .long("partial-audit-min-interval-ms")
+                        .value_parser(value_parser!(u64))
+                        .default_value("60000"),
+                )
+                .arg(
                     Arg::new("retry-budget")
                         .long("retry-budget")
                         .value_parser(value_parser!(usize))
@@ -263,6 +287,86 @@ pub fn build_cli() -> Command {
                         .long("format")
                         .value_parser(["text", "json"])
                         .default_value("text"),
+                ),
+        )
+        .subcommand(
+            Command::new("profile")
+                .about("Profile runtime crawl performance for a live site")
+                .subcommand(
+                    Command::new("runtime")
+                        .about("Profile runtime crawl phases and rule-group costs")
+                        .arg(Arg::new("url").required(true))
+                        .arg(
+                            Arg::new("seed")
+                                .long("seed")
+                                .num_args(1)
+                                .action(ArgAction::Append),
+                        )
+                        .arg(
+                            Arg::new("include-pattern")
+                                .long("include-pattern")
+                                .num_args(1)
+                                .action(ArgAction::Append),
+                        )
+                        .arg(
+                            Arg::new("exclude-pattern")
+                                .long("exclude-pattern")
+                                .num_args(1)
+                                .action(ArgAction::Append),
+                        )
+                        .arg(
+                            Arg::new("no-sitemap-seed")
+                                .long("no-sitemap-seed")
+                                .action(ArgAction::SetTrue),
+                        )
+                        .arg(Arg::new("config").long("config").num_args(1))
+                        .arg(
+                            Arg::new("max-pages")
+                                .long("max-pages")
+                                .value_parser(value_parser!(usize))
+                                .default_value("20"),
+                        )
+                        .arg(
+                            Arg::new("artifact-every")
+                                .long("artifact-every")
+                                .value_parser(value_parser!(usize))
+                                .default_value("25"),
+                        )
+                        .arg(
+                            Arg::new("artifact-min-interval-ms")
+                                .long("artifact-min-interval-ms")
+                                .value_parser(value_parser!(u64))
+                                .default_value("15000"),
+                        )
+                        .arg(
+                            Arg::new("partial-audit-every")
+                                .long("partial-audit-every")
+                                .value_parser(value_parser!(usize))
+                                .default_value("100"),
+                        )
+                        .arg(
+                            Arg::new("partial-audit-min-interval-ms")
+                                .long("partial-audit-min-interval-ms")
+                                .value_parser(value_parser!(u64))
+                                .default_value("60000"),
+                        )
+                        .arg(
+                            Arg::new("retry-budget")
+                                .long("retry-budget")
+                                .value_parser(value_parser!(usize))
+                                .default_value("2"),
+                        )
+                        .arg(Arg::new("engine").long("engine").value_parser([
+                            "auto",
+                            "http",
+                            "playwright",
+                        ]))
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "json"])
+                                .default_value("text"),
+                        ),
                 ),
         )
         .subcommand(

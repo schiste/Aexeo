@@ -5,7 +5,7 @@ use crate::commands::{
     config::command_config,
     docs::{command_diff, command_docs, command_quality, command_report_render, command_trend},
     listings::{command_adapters, command_plugin_check, command_rules},
-    runtime::{command_crawl, command_doctor, command_verify},
+    runtime::{command_crawl, command_doctor, command_profile_runtime, command_verify},
     static_site::{command_baseline, command_check, command_fix, command_generate},
 };
 
@@ -38,6 +38,11 @@ pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
             None => bail!("missing report subcommand"),
         },
         Some(("doctor", submatches)) => command_doctor(submatches),
+        Some(("profile", submatches)) => match submatches.subcommand() {
+            Some(("runtime", runtime_matches)) => command_profile_runtime(runtime_matches),
+            Some((other, _)) => bail!("unsupported profile subcommand: {}", other),
+            None => bail!("missing profile subcommand"),
+        },
         Some(("trend", submatches)) => command_trend(
             required_arg(submatches, "command_name")?,
             required_arg(submatches, "path")?,

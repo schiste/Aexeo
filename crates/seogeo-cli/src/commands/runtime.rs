@@ -7,6 +7,7 @@ use seogeo_core::{
     build_audit_artifact, diff_finding_sets, load_audit_artifact, load_findings_from_audit,
     render_diff_text, render_sarif, render_text_artifact, run_runtime_audit_with_options,
     runtime_doctor, verify_runtime_audit, write_audit_artifact, write_partial_audit_artifact,
+    write_progress_audit_artifact,
 };
 use std::path::{Path, PathBuf};
 
@@ -46,13 +47,15 @@ fn runtime_output_artifact(
     audit: &RuntimeAudit,
     findings: &[seogeo_contracts::Finding],
 ) -> seogeo_contracts::AuditArtifact {
-    build_audit_artifact(
+    let mut artifact = build_audit_artifact(
         command,
         findings,
         audit.status,
         Some(audit.crawl_stats.clone()),
         audit.truncation_reason.clone(),
-    )
+    );
+    artifact.performance = audit.performance.clone();
+    artifact
 }
 
 fn print_progress(mode: &str, event: RuntimeProgressEvent) {
@@ -65,7 +68,7 @@ fn print_progress(mode: &str, event: RuntimeProgressEvent) {
         "plain" => {
             if event.phase == "complete" {
                 eprintln!(
-                    "crawl complete: engine={} visited={} discovered={} queued={} retries={} failures={} skipped_non_html={} truncated={} elapsed_ms={} ppm={} avg_fetch_ms={} avg_process_ms={} avg_partial_audit_ms={} checkpoints={} partial_artifacts={}",
+                    "crawl complete: engine={} visited={} discovered={} queued={} retries={} failures={} skipped_non_html={} truncated={} elapsed_ms={} ppm={} avg_fetch_ms={} avg_process_ms={} avg_partial_audit_ms={} checkpoints={} progress_artifacts={} partial_artifacts={}",
                     event.engine,
                     event.visited_pages,
                     event.discovered_internal_routes,
@@ -80,11 +83,12 @@ fn print_progress(mode: &str, event: RuntimeProgressEvent) {
                     event.average_page_process_ms,
                     event.average_partial_audit_ms,
                     event.checkpoints_written,
+                    event.progress_artifacts_written,
                     event.partial_artifacts_written
                 );
             } else {
                 eprintln!(
-                    "crawl progress: visited={} discovered={} queued={} ppm={} avg_fetch_ms={} avg_process_ms={} avg_partial_audit_ms={} checkpoints={} partial_artifacts={} url={}",
+                    "crawl progress: visited={} discovered={} queued={} ppm={} avg_fetch_ms={} avg_process_ms={} avg_partial_audit_ms={} checkpoints={} progress_artifacts={} partial_artifacts={} url={}",
                     event.visited_pages,
                     event.discovered_internal_routes,
                     event.queued_routes_remaining,
@@ -93,6 +97,7 @@ fn print_progress(mode: &str, event: RuntimeProgressEvent) {
                     event.average_page_process_ms,
                     event.average_partial_audit_ms,
                     event.checkpoints_written,
+                    event.progress_artifacts_written,
                     event.partial_artifacts_written,
                     event.current_url.as_deref().unwrap_or("-")
                 );
@@ -106,22 +111,54 @@ fn runtime_options_from_cli<'a>(
     submatches: &'a ArgMatches,
     progress: RuntimeProgressMode<'a>,
     artifact_command: &'a str,
+    progress_artifact: seogeo_core::runtime::RuntimeArtifactMode<'a>,
     partial_artifact: seogeo_core::runtime::RuntimeArtifactMode<'a>,
 ) -> RuntimeAuditOptions<'a> {
     RuntimeAuditOptions {
-        checkpoint_path: submatches.get_one::<String>("checkpoint").map(Path::new),
+        checkpoint_path: submatches
+            .try_get_one::<String>("checkpoint")
+            .ok()
+            .flatten()
+            .map(Path::new),
         checkpoint_every: *submatches
-            .get_one::<usize>("checkpoint-every")
+            .try_get_one::<usize>("checkpoint-every")
+            .ok()
+            .flatten()
             .unwrap_or(&25),
-        partial_artifact_every: *submatches.get_one::<usize>("artifact-every").unwrap_or(&25),
-        partial_artifact_min_interval_ms: *submatches
-            .get_one::<u64>("artifact-min-interval-ms")
+        progress_artifact_every: *submatches
+            .try_get_one::<usize>("artifact-every")
+            .ok()
+            .flatten()
+            .unwrap_or(&25),
+        progress_artifact_min_interval_ms: *submatches
+            .try_get_one::<u64>("artifact-min-interval-ms")
+            .ok()
+            .flatten()
             .unwrap_or(&15_000),
-        resume_from: submatches.get_one::<String>("resume").map(Path::new),
-        fetch_retry_budget: *submatches.get_one::<usize>("retry-budget").unwrap_or(&2),
+        partial_audit_every: *submatches
+            .try_get_one::<usize>("partial-audit-every")
+            .ok()
+            .flatten()
+            .unwrap_or(&100),
+        partial_audit_min_interval_ms: *submatches
+            .try_get_one::<u64>("partial-audit-min-interval-ms")
+            .ok()
+            .flatten()
+            .unwrap_or(&60_000),
+        resume_from: submatches
+            .try_get_one::<String>("resume")
+            .ok()
+            .flatten()
+            .map(Path::new),
+        fetch_retry_budget: *submatches
+            .try_get_one::<usize>("retry-budget")
+            .ok()
+            .flatten()
+            .unwrap_or(&2),
         progress,
         artifact_command,
-        partial_artifact,
+        progress_artifact,
+        partial_audit_artifact: partial_artifact,
     }
 }
 
@@ -165,6 +202,10 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
         .map(String::as_str)
         .unwrap_or("plain");
     let mut callback = |event: RuntimeProgressEvent| print_progress(progress_mode, event);
+    let mut progress_writer = |artifact: &seogeo_contracts::AuditArtifact| -> Result<()> {
+        let _ = write_progress_audit_artifact(artifact, &cwd, "crawl")?;
+        Ok(())
+    };
     let mut partial_writer = |artifact: &seogeo_contracts::AuditArtifact| -> Result<()> {
         let _ = write_partial_audit_artifact(artifact, &cwd, "crawl")?;
         Ok(())
@@ -176,6 +217,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
             _ => RuntimeProgressMode::Callback(&mut callback),
         },
         "crawl",
+        seogeo_core::runtime::RuntimeArtifactMode::Callback(&mut progress_writer),
         seogeo_core::runtime::RuntimeArtifactMode::Callback(&mut partial_writer),
     );
 
@@ -261,6 +303,10 @@ pub fn command_verify(submatches: &ArgMatches) -> Result<i32> {
         .map(String::as_str)
         .unwrap_or("plain");
     let mut callback = |event: RuntimeProgressEvent| print_progress(progress_mode, event);
+    let mut progress_writer = |artifact: &seogeo_contracts::AuditArtifact| -> Result<()> {
+        let _ = write_progress_audit_artifact(artifact, &cwd, "verify")?;
+        Ok(())
+    };
     let mut partial_writer = |artifact: &seogeo_contracts::AuditArtifact| -> Result<()> {
         let _ = write_partial_audit_artifact(artifact, &cwd, "verify")?;
         Ok(())
@@ -272,6 +318,7 @@ pub fn command_verify(submatches: &ArgMatches) -> Result<i32> {
             _ => RuntimeProgressMode::Callback(&mut callback),
         },
         "verify",
+        seogeo_core::runtime::RuntimeArtifactMode::Callback(&mut progress_writer),
         seogeo_core::runtime::RuntimeArtifactMode::Callback(&mut partial_writer),
     );
     let audit = match run_runtime_audit_with_options(
@@ -310,6 +357,97 @@ pub fn command_verify(submatches: &ArgMatches) -> Result<i32> {
         }
     }
     Ok(if diff.new_findings.is_empty() { 0 } else { 1 })
+}
+
+pub fn command_profile_runtime(submatches: &ArgMatches) -> Result<i32> {
+    let cwd = std::env::current_dir()?;
+    let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
+    let loaded = load_config_with_diagnostics(&cwd, explicit_config.as_deref())?;
+    let mut config = loaded.config;
+    let warnings = loaded.warnings;
+    apply_runtime_cli_overrides(&mut config, submatches);
+    let format = submatches
+        .get_one::<String>("format")
+        .map(String::as_str)
+        .unwrap_or("text");
+    let mut options = runtime_options_from_cli(
+        submatches,
+        RuntimeProgressMode::Off,
+        "profile",
+        seogeo_core::runtime::RuntimeArtifactMode::Off,
+        seogeo_core::runtime::RuntimeArtifactMode::Off,
+    );
+    let audit = run_runtime_audit_with_options(
+        required_arg(submatches, "url")?,
+        *submatches.get_one::<usize>("max-pages").unwrap_or(&20),
+        selected_runtime_engine(&config, submatches),
+        &config,
+        &mut options,
+    )?;
+    match format {
+        "json" => {
+            let artifact = runtime_output_artifact("profile", &audit, &audit.findings);
+            println!("{}", serde_json::to_string_pretty(&artifact)?);
+        }
+        _ => {
+            emit_config_warnings(&warnings);
+            let crawl = &audit.crawl_stats;
+            println!("Runtime Profile");
+            println!();
+            println!("- Engine: {}", crawl.engine);
+            println!("- Status: {:?}", audit.status);
+            println!("- Visited pages: {}", crawl.visited_pages);
+            println!("- Discovered routes: {}", crawl.discovered_internal_routes);
+            println!("- Queued routes: {}", crawl.queued_routes_remaining);
+            println!("- Elapsed: {}ms", crawl.elapsed_ms);
+            println!("- Throughput: {} pages/min", crawl.pages_per_minute);
+            println!("- Average fetch: {}ms", crawl.average_fetch_ms);
+            println!(
+                "- Average page process: {}ms",
+                crawl.average_page_process_ms
+            );
+            println!(
+                "- Average partial audit: {}ms",
+                crawl.average_partial_audit_ms
+            );
+            println!();
+            if let Some(performance) = audit.performance.as_ref() {
+                if !performance.phases.is_empty() {
+                    println!("Phase Timings");
+                    for phase in &performance.phases {
+                        println!("- {}: {}ms", phase.name, phase.elapsed_us / 1_000);
+                    }
+                    println!();
+                }
+                if !performance.rule_groups.is_empty() {
+                    println!("Slowest Rule Groups");
+                    for group in performance.rule_groups.iter().take(10) {
+                        println!(
+                            "- {}: {}ms ({} findings)",
+                            group.group,
+                            group.elapsed_us / 1_000,
+                            group.findings
+                        );
+                    }
+                    println!();
+                }
+            }
+            if !crawl.slowest_paths.is_empty() {
+                println!("Slowest Paths");
+                for path in &crawl.slowest_paths {
+                    println!(
+                        "- {}: fetch={}ms process={}ms",
+                        path.url, path.fetch_ms, path.process_ms
+                    );
+                }
+            }
+        }
+    }
+    Ok(if audit.status == AuditStatus::Failed {
+        1
+    } else {
+        0
+    })
 }
 
 pub fn command_doctor(submatches: &ArgMatches) -> Result<i32> {
