@@ -133,10 +133,18 @@ struct RuntimePerformance {
     started_at: Option<Instant>,
     total_fetch_us: u64,
     total_page_process_us: u64,
+    total_snapshot_write_us: u64,
+    total_queue_selection_us: u64,
+    total_planner_update_us: u64,
     total_link_extraction_us: u64,
+    total_progress_callback_us: u64,
+    total_checkpoint_write_us: u64,
+    total_progress_artifact_write_us: u64,
     total_optional_artifact_fetch_us: u64,
     total_snapshot_build_us: u64,
     total_partial_audit_us: u64,
+    total_partial_audit_build_us: u64,
+    total_partial_artifact_write_us: u64,
     total_final_audit_us: u64,
     total_rule_evaluation_us: u64,
     total_policy_apply_us: u64,
@@ -191,8 +199,35 @@ impl RuntimePerformance {
         self.slowest_paths.truncate(5);
     }
 
+    fn record_queue_selection(&mut self, duration_us: u64) {
+        self.total_queue_selection_us = self.total_queue_selection_us.saturating_add(duration_us);
+    }
+
+    fn record_snapshot_write(&mut self, duration_us: u64) {
+        self.total_snapshot_write_us = self.total_snapshot_write_us.saturating_add(duration_us);
+    }
+
+    fn record_planner_update(&mut self, duration_us: u64) {
+        self.total_planner_update_us = self.total_planner_update_us.saturating_add(duration_us);
+    }
+
     fn record_link_extraction(&mut self, duration_us: u64) {
         self.total_link_extraction_us = self.total_link_extraction_us.saturating_add(duration_us);
+    }
+
+    fn record_progress_callback(&mut self, duration_us: u64) {
+        self.total_progress_callback_us =
+            self.total_progress_callback_us.saturating_add(duration_us);
+    }
+
+    fn record_checkpoint_write(&mut self, duration_us: u64) {
+        self.total_checkpoint_write_us = self.total_checkpoint_write_us.saturating_add(duration_us);
+    }
+
+    fn record_progress_artifact_write(&mut self, duration_us: u64) {
+        self.total_progress_artifact_write_us = self
+            .total_progress_artifact_write_us
+            .saturating_add(duration_us);
     }
 
     fn record_optional_artifact_fetch(&mut self, duration_us: u64) {
@@ -279,17 +314,35 @@ impl RuntimePerformance {
         self.last_partial_emit_at = Some(Instant::now());
     }
 
+    fn record_partial_audit_build(&mut self, duration_us: u64) {
+        self.total_partial_audit_build_us = self
+            .total_partial_audit_build_us
+            .saturating_add(duration_us);
+    }
+
+    fn record_partial_artifact_write(&mut self, duration_us: u64) {
+        self.total_partial_artifact_write_us = self
+            .total_partial_artifact_write_us
+            .saturating_add(duration_us);
+    }
+
     fn apply_to(&self, crawl_stats: &mut CrawlStats) {
         let elapsed_us = self
             .started_at
             .map(|instant| instant.elapsed().as_micros() as u64)
             .unwrap_or(0);
         let tracked_us = self.total_fetch_us
-            + self.total_page_process_us
+            + self.total_queue_selection_us
+            + self.total_snapshot_write_us
+            + self.total_planner_update_us
             + self.total_link_extraction_us
+            + self.total_progress_callback_us
+            + self.total_checkpoint_write_us
+            + self.total_progress_artifact_write_us
             + self.total_optional_artifact_fetch_us
             + self.total_snapshot_build_us
-            + self.total_partial_audit_us
+            + self.total_partial_audit_build_us
+            + self.total_partial_artifact_write_us
             + self.total_final_audit_us
             + self.total_rule_evaluation_us
             + self.total_policy_apply_us;
@@ -342,7 +395,15 @@ impl RuntimePerformance {
         };
         crawl_stats.total_optional_artifact_fetch_us = self.total_optional_artifact_fetch_us;
         crawl_stats.total_snapshot_build_us = self.total_snapshot_build_us;
+        crawl_stats.total_snapshot_write_us = self.total_snapshot_write_us;
+        crawl_stats.total_queue_selection_us = self.total_queue_selection_us;
+        crawl_stats.total_planner_update_us = self.total_planner_update_us;
         crawl_stats.total_link_extraction_us = self.total_link_extraction_us;
+        crawl_stats.total_progress_callback_us = self.total_progress_callback_us;
+        crawl_stats.total_checkpoint_write_us = self.total_checkpoint_write_us;
+        crawl_stats.total_progress_artifact_write_us = self.total_progress_artifact_write_us;
+        crawl_stats.total_partial_audit_build_us = self.total_partial_audit_build_us;
+        crawl_stats.total_partial_artifact_write_us = self.total_partial_artifact_write_us;
         crawl_stats.total_rule_evaluation_us = self.total_rule_evaluation_us;
         crawl_stats.total_policy_apply_us = self.total_policy_apply_us;
         crawl_stats.total_final_audit_us = self.total_final_audit_us;
@@ -357,12 +418,32 @@ impl RuntimePerformance {
                 elapsed_us: self.total_fetch_us,
             },
             PhaseTiming {
-                name: "page_process".to_string(),
-                elapsed_us: self.total_page_process_us,
+                name: "queue_selection".to_string(),
+                elapsed_us: self.total_queue_selection_us,
+            },
+            PhaseTiming {
+                name: "snapshot_write".to_string(),
+                elapsed_us: self.total_snapshot_write_us,
+            },
+            PhaseTiming {
+                name: "planner_update".to_string(),
+                elapsed_us: self.total_planner_update_us,
             },
             PhaseTiming {
                 name: "link_extraction".to_string(),
                 elapsed_us: self.total_link_extraction_us,
+            },
+            PhaseTiming {
+                name: "progress_callback".to_string(),
+                elapsed_us: self.total_progress_callback_us,
+            },
+            PhaseTiming {
+                name: "checkpoint_write".to_string(),
+                elapsed_us: self.total_checkpoint_write_us,
+            },
+            PhaseTiming {
+                name: "progress_artifact_write".to_string(),
+                elapsed_us: self.total_progress_artifact_write_us,
             },
             PhaseTiming {
                 name: "optional_artifact_fetch".to_string(),
@@ -373,8 +454,12 @@ impl RuntimePerformance {
                 elapsed_us: self.total_snapshot_build_us,
             },
             PhaseTiming {
-                name: "partial_audit".to_string(),
-                elapsed_us: self.total_partial_audit_us,
+                name: "partial_audit_build".to_string(),
+                elapsed_us: self.total_partial_audit_build_us,
+            },
+            PhaseTiming {
+                name: "partial_artifact_write".to_string(),
+                elapsed_us: self.total_partial_artifact_write_us,
             },
             PhaseTiming {
                 name: "final_audit".to_string(),
@@ -391,6 +476,14 @@ impl RuntimePerformance {
             PhaseTiming {
                 name: "overhead".to_string(),
                 elapsed_us: crawl_stats.total_overhead_us,
+            },
+            PhaseTiming {
+                name: "page_process_total".to_string(),
+                elapsed_us: self.total_page_process_us,
+            },
+            PhaseTiming {
+                name: "partial_audit_total".to_string(),
+                elapsed_us: self.total_partial_audit_us,
             },
         ];
         phases.retain(|phase| phase.elapsed_us > 0);
@@ -636,6 +729,7 @@ fn materialize_runtime_site(
         1
     };
     loop {
+        let queue_selection_started_at = Instant::now();
         let mut batch = Vec::new();
         while batch.len() < effective_workers {
             let Some(next_url) = planner.next_url(&runtime) else {
@@ -643,6 +737,7 @@ fn materialize_runtime_site(
             };
             batch.push(next_url);
         }
+        performance.record_queue_selection(queue_selection_started_at.elapsed().as_micros() as u64);
         if batch.is_empty() {
             break;
         }
@@ -703,9 +798,13 @@ fn materialize_runtime_site(
                 continue;
             }
             let process_started_at = Instant::now();
+            let planner_started_at = Instant::now();
             planner.align_with_effective_url(&fetched.effective_url);
             let route = route_from_urlish(&fetched.effective_url).unwrap_or_default();
+            let snapshot_write_started_at = Instant::now();
             snapshot.write_page(&route, &body, &fetched.headers)?;
+            performance
+                .record_snapshot_write(snapshot_write_started_at.elapsed().as_micros() as u64);
 
             let extraction_started_at = Instant::now();
             for target in extract_internal_links(&body, planner.base_host()) {
@@ -715,6 +814,7 @@ fn materialize_runtime_site(
                 planner.discover_link_target(&target, &runtime);
             }
             performance.record_link_extraction(extraction_started_at.elapsed().as_micros() as u64);
+            performance.record_planner_update(planner_started_at.elapsed().as_micros() as u64);
 
             crawl_stats.visited_pages = planner.visited_count();
             crawl_stats.discovered_internal_routes = planner.discovered_route_count();
@@ -727,6 +827,7 @@ fn materialize_runtime_site(
                 page_process_us,
             );
             performance.apply_to(&mut crawl_stats);
+            let progress_started_at = Instant::now();
             emit_progress(
                 options,
                 RuntimeProgressEvent {
@@ -751,6 +852,7 @@ fn materialize_runtime_site(
                     partial_artifacts_written: crawl_stats.partial_artifacts_written,
                 },
             );
+            performance.record_progress_callback(progress_started_at.elapsed().as_micros() as u64);
         }
 
         if let Some(checkpoint_path) = options.checkpoint_path
@@ -759,6 +861,7 @@ fn materialize_runtime_site(
         {
             performance.record_checkpoint();
             performance.apply_to(&mut crawl_stats);
+            let checkpoint_started_at = Instant::now();
             checkpoint_state(
                 checkpoint_path,
                 base_url,
@@ -768,6 +871,7 @@ fn materialize_runtime_site(
                 &crawl_findings,
                 &crawl_stats,
             )?;
+            performance.record_checkpoint_write(checkpoint_started_at.elapsed().as_micros() as u64);
         }
         if performance.should_emit_progress_artifact(crawl_stats.visited_pages, options) {
             let artifact = build_progress_runtime_artifact(
@@ -777,12 +881,16 @@ fn materialize_runtime_site(
                 &crawl_stats,
                 &performance,
             );
+            let progress_artifact_started_at = Instant::now();
             emit_progress_artifact(options, &artifact)?;
+            performance.record_progress_artifact_write(
+                progress_artifact_started_at.elapsed().as_micros() as u64,
+            );
             performance.record_progress_artifact(crawl_stats.visited_pages);
             performance.apply_to(&mut crawl_stats);
         }
         if performance.should_emit_partial_audit(crawl_stats.visited_pages, options) {
-            let partial_started_at = Instant::now();
+            let partial_build_started_at = Instant::now();
             let artifact = build_partial_runtime_artifact(
                 options.artifact_command,
                 &snapshot,
@@ -792,8 +900,14 @@ fn materialize_runtime_site(
                 config,
                 &performance,
             )?;
+            let partial_build_duration_us = partial_build_started_at.elapsed().as_micros() as u64;
+            performance.record_partial_audit_build(partial_build_duration_us);
+            let partial_write_started_at = Instant::now();
             emit_partial_audit_artifact(options, &artifact)?;
-            let partial_duration_us = partial_started_at.elapsed().as_micros() as u64;
+            let partial_write_duration_us = partial_write_started_at.elapsed().as_micros() as u64;
+            performance.record_partial_artifact_write(partial_write_duration_us);
+            let partial_duration_us =
+                partial_build_duration_us.saturating_add(partial_write_duration_us);
             performance.record_partial_audit(crawl_stats.visited_pages, partial_duration_us);
             performance.apply_to(&mut crawl_stats);
         }
@@ -925,11 +1039,7 @@ pub fn run_runtime_audit_with_options(
     } else {
         AuditStatus::Complete
     };
-    let performance_summary = AuditPerformance {
-        elapsed_us: crawl_stats.elapsed_us,
-        phases: performance.phase_timings(&crawl_stats),
-        rule_groups: profiled.rule_timings,
-    };
+    let progress_started_at = Instant::now();
     emit_progress(
         options,
         RuntimeProgressEvent {
@@ -954,6 +1064,13 @@ pub fn run_runtime_audit_with_options(
             partial_artifacts_written: crawl_stats.partial_artifacts_written,
         },
     );
+    performance.record_progress_callback(progress_started_at.elapsed().as_micros() as u64);
+    performance.apply_to(&mut crawl_stats);
+    let performance_summary = AuditPerformance {
+        elapsed_us: crawl_stats.elapsed_us,
+        phases: performance.phase_timings(&crawl_stats),
+        rule_groups: profiled.rule_timings,
+    };
     Ok(RuntimeAudit {
         site,
         crawl_findings,

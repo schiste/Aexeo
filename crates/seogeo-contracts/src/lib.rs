@@ -142,7 +142,23 @@ pub struct CrawlStats {
     #[serde(default)]
     pub total_snapshot_build_us: u64,
     #[serde(default)]
+    pub total_snapshot_write_us: u64,
+    #[serde(default)]
+    pub total_queue_selection_us: u64,
+    #[serde(default)]
+    pub total_planner_update_us: u64,
+    #[serde(default)]
     pub total_link_extraction_us: u64,
+    #[serde(default)]
+    pub total_progress_callback_us: u64,
+    #[serde(default)]
+    pub total_checkpoint_write_us: u64,
+    #[serde(default)]
+    pub total_progress_artifact_write_us: u64,
+    #[serde(default)]
+    pub total_partial_audit_build_us: u64,
+    #[serde(default)]
+    pub total_partial_artifact_write_us: u64,
     #[serde(default)]
     pub total_rule_evaluation_us: u64,
     #[serde(default)]
