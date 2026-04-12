@@ -1,6 +1,11 @@
 [licenses]
 allow = [
     "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
     "MIT",
     "Unicode-3.0",
     "Unlicense",
@@ -16,6 +21,9 @@ wildcards = "deny"
 highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
+skip = [
+    { crate = "windows-sys@0.52.0", reason = "older Windows shim pinned transitively by upstream TLS and platform crates; duplicate is Windows-only and not practically consolidatable from this workspace" },
+]
 
 [sources]
 unknown-registry = "deny"

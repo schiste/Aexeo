@@ -14,4 +14,4 @@ seogeo-core = { version = "0.2.0", path = "../seogeo-core" }
 seogeo-contracts = { version = "0.2.0", path = "../seogeo-contracts" }
 
 [dev-dependencies]
-tempfile = "3.15"
+tempfile = { version = "0.2.0", path = "../tempfile" }

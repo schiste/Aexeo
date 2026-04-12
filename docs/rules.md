@@ -141,3 +141,4 @@ Reusable GEO rules extracted from the Chau7 website guidelines.
 - `QLT020`: unsafe Rust marker in non-test Rust source
 - `QLT021`: missing cargo-deny policy file
 - `QLT022`: missing dependency hygiene script
+- `QLT023`: missing Node package lockfile for browser runtime
