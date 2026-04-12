@@ -8,6 +8,7 @@ pub mod fix;
 pub mod generate;
 pub mod html_rules;
 pub mod integrations;
+pub mod intelligence;
 pub mod link_rules;
 pub mod llm_rules;
 pub mod plugin;
@@ -50,6 +51,14 @@ pub use integrations::{
     inspect_snippet_controls_with_config, load_bing_ai_trends, load_indexnow_ledger,
     record_bing_ai_trend, retry_indexnow_submissions, submit_indexnow, submit_indexnow_with_ledger,
     validate_indexnow,
+};
+pub use intelligence::{
+    GroundingCoverageGap, GroundingIntentFamily, GroundingRouteAnalysis, GroundingSiteAnalysis,
+    TrustSurfaceIssue, TrustSurfaceIssueKind, TrustSurfaceReconciliation, TrustSurfaceRecord,
+    TrustSurfaceSourceSummary, TruthAssessment, TruthEntity, TruthManifest, TruthMismatch,
+    TruthMismatchSeverity, TruthStructuredSource, assess_truth_layer, discover_truth_manifest,
+    import_trust_surface_records, load_truth_manifest, map_grounding_queries,
+    reconcile_trust_surfaces,
 };
 pub use link_rules::run_link_rules;
 pub use llm_rules::run_llm_rules;
