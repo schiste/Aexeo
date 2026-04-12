@@ -102,7 +102,7 @@ fn crawl_rejects_playwright_when_runner_override_is_missing() {
 
 #[test]
 fn crawl_accepts_playwright_with_custom_runner() {
-    let (base_url, handle) = spawn_server(3);
+    let (base_url, handle) = spawn_server(8);
     let temp_dir = tempfile::tempdir().unwrap();
     let runner = temp_dir.path().join("playwright-runner.sh");
     write(

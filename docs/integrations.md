@@ -31,6 +31,8 @@ Examples:
 ```bash
 cargo run -p seogeo-cli -- indexnow validate https://example.com abc123 --path .
 cargo run -p seogeo-cli -- indexnow submit https://api.indexnow.org/indexnow https://example.com abc123 https://example.com/a https://example.com/b
+cargo run -p seogeo-cli -- indexnow ledger .
+cargo run -p seogeo-cli -- indexnow retry --path . abc123
 ```
 
 `indexnow submit` sends a standards-shaped payload with:
@@ -39,6 +41,17 @@ cargo run -p seogeo-cli -- indexnow submit https://api.indexnow.org/indexnow htt
 - `key`
 - `keyLocation`
 - `urlList`
+
+When `--path` is provided on submit, Aexeo records the attempt into `.seogeo-reports/indexnow-ledger.json`. The ledger stores:
+
+- submission timestamp
+- attempt number
+- endpoint
+- submitted URLs
+- status code or transport error
+- success/retryable status
+
+Use `indexnow retry` to replay the latest retryable failed batch per unique endpoint/site/url set.
 
 ## Bing AI Import
 
@@ -49,6 +62,7 @@ Examples:
 ```bash
 cargo run -p seogeo-cli -- bing-ai import bing-ai.csv --audit .seogeo-reports/crawl-latest.json
 cargo run -p seogeo-cli -- bing-ai import bing-ai.json --format json
+cargo run -p seogeo-cli -- bing-ai opportunities bing-ai.csv --audit .seogeo-reports/crawl-latest.json
 ```
 
 Supported inputs:
@@ -57,6 +71,36 @@ Supported inputs:
 - JSON exports with a top-level array or `rows` field
 
 The importer normalizes URLs into routes, rolls up citation counts, and reports unmatched URLs that do not map cleanly to the audit artifact.
+
+`bing-ai opportunities` ranks cited URLs by:
+
+- citation exposure
+- audit error count
+- audit warning count
+- audit coverage gaps
+
+Use it to decide which cited URLs to fix first.
+
+## Bing AI Trends
+
+Use the trend workflow to persist repeated Bing AI imports and compare week-over-week citation movement against audit severity.
+
+Examples:
+
+```bash
+cargo run -p seogeo-cli -- bing-ai trend import bing-ai-week-1.csv --root . --audit .seogeo-reports/crawl-latest.json
+cargo run -p seogeo-cli -- bing-ai trend import bing-ai-week-2.csv --root . --audit .seogeo-reports/crawl-latest.json
+cargo run -p seogeo-cli -- bing-ai trend show .
+```
+
+Trend history is written to `.seogeo-reports/bing-ai-trends.json`.
+
+The trend report highlights:
+
+- routes with increased citations
+- routes with decreased citations
+- newly cited routes
+- routes that are no longer cited
 
 ## Search Console Export
 
@@ -99,8 +143,11 @@ The report includes:
 - changed routes
 - finding counts by changed route
 - Search Console export rows for the changed routes
+- persisted audit artifact path
+- persisted Search Console CSV path
 - optional IndexNow validation
 - optional IndexNow submission result
+- optional IndexNow ledger path when submission is enabled
 
 ## Operational Notes
 
