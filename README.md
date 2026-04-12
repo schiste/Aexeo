@@ -12,6 +12,7 @@ This repository is private and intended for internal use only.
 - no public release channel
 - install from the private repository or from internal build artifacts
 - use `sh scripts/install-seogeo.sh --from-binary target/release/seogeo-cli` for deterministic local installs
+- run `npm install` in the repository root if you want the optional Playwright-backed runtime engine
 
 See [docs/install.md](docs/install.md) for supported installation and release paths.
 
@@ -65,11 +66,12 @@ cargo run -p seogeo-cli -- adapters
 ## Current Product Areas
 
 - static linting for SEO/GEO structure and artifacts
-- runtime crawl with native HTTP orchestration and room for external browser-backed execution
+- runtime crawl with native HTTP orchestration and optional local Playwright-backed browser execution
 - deterministic artifact generation and safe HTML/artifact autofix
 - adapter and plugin architecture for framework-specific usage
 - baseline, diff, and post-deploy verification workflows
 - code-generated reference docs with drift enforcement
+- release-mode benchmark fixtures for static and runtime audit paths via `sh scripts/bench.sh`
 
 ## Repository Docs
 

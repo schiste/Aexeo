@@ -48,7 +48,7 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
         ConfigFieldDoc {
             key: "browser_engine",
             default_value: "`http`",
-            description: "Default crawl engine. `http` is the stable native runtime path. `auto` remains a compatibility alias for `http`, and `playwright` is reserved until implemented.",
+            description: "Default crawl engine. `http` is the stable native runtime path. `auto` prefers `playwright` when a local Playwright runtime is installed, otherwise it falls back to `http`. `playwright` requires local Node and the `playwright` package from the repository root.",
         },
         ConfigFieldDoc {
             key: "browser_wait_until",

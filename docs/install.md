@@ -91,10 +91,29 @@ sh scripts/ci-local.sh
 
 ## Browser Crawl Notes
 
-Browser-backed crawl remains optional and may be layered in externally when needed.
+Browser-backed crawl is now supported locally when the repository Node dependency is installed.
 
-- the native runtime crawl uses HTTP fetch orchestration today
-- `http` is the stable supported runtime engine today
-- `auto` is accepted only as a backward-compatible alias for `http`
-- `playwright` is reserved and should fail explicitly until a native browser engine exists
-- a browser engine can still be added later without changing the core CLI contract
+- `http` is the stable native runtime crawl path and works without Node
+- `auto` prefers `playwright` when a local Playwright runtime is available, otherwise it falls back to `http`
+- `playwright` is supported and requires a local Node runtime plus the repository dependency install
+- install the browser runtime once from the repository root:
+
+```bash
+npm install
+```
+
+- use `SEOGEO_PLAYWRIGHT_EXECUTABLE=/absolute/path/to/runner` only when you need to override the default local runner discovery
+- browser-only artifacts such as traces, screenshots, console logs, and network logs still depend on the corresponding crawl capture flags
+
+## Benchmarks
+
+The repository ships release-mode benchmark fixtures for the static and runtime audit paths:
+
+```bash
+sh scripts/bench.sh
+```
+
+This exercises:
+
+- a generated static site fixture for native static audits
+- a local HTTP fixture server for runtime HTTP audits

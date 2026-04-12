@@ -97,7 +97,7 @@ coverage_threshold = 85
 ## `browser_engine`
 
 - Default: `http`
-- Meaning: Default crawl engine. `http` is the stable native runtime path. `auto` remains a compatibility alias for `http`, and `playwright` is reserved until implemented.
+- Meaning: Default crawl engine. `http` is the stable native runtime path. `auto` prefers `playwright` when a local Playwright runtime is installed, otherwise it falls back to `http`. `playwright` requires local Node and the `playwright` package from the repository root.
 
 ## `browser_wait_until`
 
