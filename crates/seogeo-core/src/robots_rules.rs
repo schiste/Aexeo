@@ -181,7 +181,7 @@ pub fn run_robots_rules(site: &Site, config: &Config) -> Vec<Finding> {
     if site.robots_text.is_none() || !rules.require_meta_robots_consistency {
         return findings;
     }
-    for page in site.route_pages.values() {
+    for page in site.route_pages() {
         findings.extend(collect_page_robot_findings(page, site, config));
     }
     findings

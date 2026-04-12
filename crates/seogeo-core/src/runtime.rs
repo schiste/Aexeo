@@ -140,6 +140,7 @@ struct RuntimePerformance {
     total_progress_callback_us: u64,
     total_checkpoint_write_us: u64,
     total_progress_artifact_write_us: u64,
+    total_sitemap_seed_us: u64,
     total_optional_artifact_fetch_us: u64,
     total_snapshot_build_us: u64,
     total_partial_audit_us: u64,
@@ -234,6 +235,10 @@ impl RuntimePerformance {
         self.total_optional_artifact_fetch_us = self
             .total_optional_artifact_fetch_us
             .saturating_add(duration_us);
+    }
+
+    fn record_sitemap_seed(&mut self, duration_us: u64) {
+        self.total_sitemap_seed_us = self.total_sitemap_seed_us.saturating_add(duration_us);
     }
 
     fn record_snapshot_build(&mut self, duration_us: u64) {
@@ -339,6 +344,7 @@ impl RuntimePerformance {
             + self.total_progress_callback_us
             + self.total_checkpoint_write_us
             + self.total_progress_artifact_write_us
+            + self.total_sitemap_seed_us
             + self.total_optional_artifact_fetch_us
             + self.total_snapshot_build_us
             + self.total_partial_audit_build_us
@@ -402,6 +408,7 @@ impl RuntimePerformance {
         crawl_stats.total_progress_callback_us = self.total_progress_callback_us;
         crawl_stats.total_checkpoint_write_us = self.total_checkpoint_write_us;
         crawl_stats.total_progress_artifact_write_us = self.total_progress_artifact_write_us;
+        crawl_stats.total_sitemap_seed_us = self.total_sitemap_seed_us;
         crawl_stats.total_partial_audit_build_us = self.total_partial_audit_build_us;
         crawl_stats.total_partial_artifact_write_us = self.total_partial_artifact_write_us;
         crawl_stats.total_rule_evaluation_us = self.total_rule_evaluation_us;
@@ -444,6 +451,10 @@ impl RuntimePerformance {
             PhaseTiming {
                 name: "progress_artifact_write".to_string(),
                 elapsed_us: self.total_progress_artifact_write_us,
+            },
+            PhaseTiming {
+                name: "sitemap_seed".to_string(),
+                elapsed_us: self.total_sitemap_seed_us,
             },
             PhaseTiming {
                 name: "optional_artifact_fetch".to_string(),
@@ -711,6 +722,7 @@ fn materialize_runtime_site(
         if runtime.crawl_use_sitemap {
             let mut visited_sitemaps = BTreeSet::new();
             let sitemap_base = planner.normalized_base().to_string();
+            let sitemap_seed_started_at = Instant::now();
             for sitemap_name in ["sitemap.xml", "sitemap-index.xml", "sitemap_index.xml"] {
                 let _ = seed_routes_from_sitemap(
                     &mut planner,
@@ -719,6 +731,7 @@ fn materialize_runtime_site(
                     &mut visited_sitemaps,
                 );
             }
+            performance.record_sitemap_seed(sitemap_seed_started_at.elapsed().as_micros() as u64);
         }
     }
 
@@ -1302,8 +1315,8 @@ mod tests {
     fn runtime_audit_crawls_http_site() {
         let (base_url, handle) = spawn_server(6);
         let audit = run_runtime_audit(&base_url, 10, "http", &html_only_config()).unwrap();
-        assert!(audit.site.route_pages.contains_key(""));
-        assert!(audit.site.route_pages.contains_key("about"));
+        assert!(audit.site.has_route(""));
+        assert!(audit.site.has_route("about"));
         assert!(
             audit
                 .findings
@@ -1369,8 +1382,8 @@ mod tests {
             &html_only_config(),
         )
         .unwrap();
-        assert!(audit.site.route_pages.contains_key(""));
-        assert!(audit.site.route_pages.contains_key("about"));
+        assert!(audit.site.has_route(""));
+        assert!(audit.site.has_route("about"));
         assert!(
             audit
                 .findings
@@ -1384,8 +1397,8 @@ mod tests {
     fn runtime_audit_seeds_from_sitemap_indexes() {
         let (base_url, handle) = spawn_sitemap_index_server(9);
         let audit = run_runtime_audit(&base_url, 10, "http", &html_only_config()).unwrap();
-        assert!(audit.site.route_pages.contains_key(""));
-        assert!(audit.site.route_pages.contains_key("from-sitemap"));
+        assert!(audit.site.has_route(""));
+        assert!(audit.site.has_route("from-sitemap"));
         handle.join().unwrap();
     }
 
@@ -1395,7 +1408,7 @@ mod tests {
             site: crate::site::Site {
                 root: PathBuf::new(),
                 pages: Vec::new(),
-                route_pages: BTreeMap::new(),
+                route_page_indices: BTreeMap::new(),
                 indexed_paths: BTreeSet::new(),
                 inbound_links: BTreeMap::new(),
                 llms_text: None,
@@ -1524,8 +1537,8 @@ mod tests {
         }
         let (base_url, handle) = spawn_server(8);
         let audit = run_runtime_audit(&base_url, 2, "playwright", &html_only_config()).unwrap();
-        assert!(audit.site.route_pages.contains_key(""));
-        assert!(audit.site.route_pages.contains_key("about"));
+        assert!(audit.site.has_route(""));
+        assert!(audit.site.has_route("about"));
         assert!(
             !audit
                 .findings

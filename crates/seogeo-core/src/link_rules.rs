@@ -41,7 +41,7 @@ fn is_weak_internal_anchor(link: &Link, site: &Site, config: &Config) -> bool {
     let Some(target) = link.target.as_deref() else {
         return false;
     };
-    if !site.route_pages.contains_key(target) {
+    if !site.has_route(target) {
         return false;
     }
     let weak_anchors = rules
@@ -81,7 +81,7 @@ pub fn run_link_rules(site: &Site, config: &Config) -> Vec<Finding> {
         .map(|meta| meta.truncated)
         .unwrap_or(false);
 
-    for page in site.route_pages.values() {
+    for page in site.route_pages() {
         for link in &page.links {
             let Some(target) = link.target.as_deref() else {
                 continue;
@@ -122,7 +122,7 @@ pub fn run_link_rules(site: &Site, config: &Config) -> Vec<Finding> {
         return findings;
     }
 
-    for page in site.route_pages.values() {
+    for page in site.route_pages() {
         if !is_orphan_candidate(page, config) {
             continue;
         }

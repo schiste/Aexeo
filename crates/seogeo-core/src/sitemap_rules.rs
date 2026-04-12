@@ -66,7 +66,7 @@ pub fn run_sitemap_rules(site: &Site, _config: &Config) -> Vec<Finding> {
     }
 
     let mut findings = Vec::new();
-    for page in site.route_pages.values() {
+    for page in site.route_pages() {
         if page.relative_path == "404.html" {
             continue;
         }

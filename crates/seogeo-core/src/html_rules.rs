@@ -65,7 +65,7 @@ pub fn run_html_rules(site: &Site, config: &Config) -> Vec<Finding> {
     let rules = config.rules();
     let site_url = site_config.site_url;
 
-    for page in site.route_pages.values() {
+    for page in site.route_pages() {
         if page.title.is_none() {
             findings.push(finding("SEO001", "missing <title>", &page.path, "error"));
         }
@@ -165,7 +165,7 @@ pub fn run_html_rules(site: &Site, config: &Config) -> Vec<Finding> {
         }
 
         for (_, target) in normalized_targets {
-            let Some(target_page) = site.route_pages.get(&target) else {
+            let Some(target_page) = site.page(&target) else {
                 continue;
             };
             let reciprocal_targets: BTreeSet<String> = target_page

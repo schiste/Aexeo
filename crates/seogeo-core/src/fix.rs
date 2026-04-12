@@ -85,7 +85,7 @@ fn inject_head_tags(raw_text: &str, tags: &[String]) -> String {
 
 fn apply_html_metadata_fixes(site: &Site, config: &Config) -> Result<Vec<PathBuf>> {
     let mut changed = Vec::new();
-    for page in site.route_pages.values() {
+    for page in site.route_pages() {
         let raw_text = fs::read_to_string(&page.path)?;
         let updated = inject_head_tags(&raw_text, &render_missing_head_tags(page, config));
         if updated != raw_text {
@@ -140,7 +140,7 @@ fn apply_related_link_insertions(site: &Site, config: &Config) -> Result<Vec<Pat
     let suggestions = build_link_suggestions(site, config.link_suggestion_count);
     let mut changed = Vec::new();
     for (source_route, target_routes) in suggestions {
-        let Some(source_page) = site.route_pages.get(&source_route) else {
+        let Some(source_page) = site.page(&source_route) else {
             continue;
         };
         let raw_text = fs::read_to_string(&source_page.path)?;

@@ -934,6 +934,7 @@ mod tests {
                 total_partial_audit_us: 80_000,
                 average_partial_audit_ms: 80,
                 average_partial_audit_us: 80_000,
+                total_sitemap_seed_us: 9_000,
                 total_optional_artifact_fetch_us: 10_000,
                 total_snapshot_build_us: 20_000,
                 total_snapshot_write_us: 15_000,

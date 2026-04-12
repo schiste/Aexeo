@@ -38,29 +38,39 @@ pub(super) fn build_page_from_source(
         .collect();
     let h1_texts = capture_paired_tag_texts(&raw, "h1");
     let route = capture_route_for_relative_path(&relative_path);
+    let title = capture_tag_text(&raw, "title");
+    let canonical = capture_canonical_href(&raw);
+    let html_lang = capture_html_lang(&raw);
+    let has_breadcrumb_nav = capture_breadcrumb_nav(&raw);
+    let alternate_links = capture_alternate_links(&raw);
+    let images = capture_images(&raw);
+    let blocks = capture_semantic_blocks(&raw);
+    let details_blocks = capture_details_blocks(&raw);
+    let pre_blocks = capture_pre_blocks(&raw);
+    let json_ld_blocks = capture_json_ld_blocks(&raw);
     Page {
         path,
         relative_path: relative_path.clone(),
         route: route.clone(),
         page_kind: classify_page_kind(&relative_path, &route),
-        raw_text: raw.clone(),
-        title: capture_tag_text(&raw, "title"),
+        raw_text: raw,
+        title,
         meta_by_name,
         meta_by_property,
-        canonical: capture_canonical_href(&raw),
-        html_lang: capture_html_lang(&raw),
+        canonical,
+        html_lang,
         h1_count: h1_texts.len(),
         h1_texts,
-        has_breadcrumb_nav: capture_breadcrumb_nav(&raw),
+        has_breadcrumb_nav,
         response_headers,
         links,
         internal_links,
-        alternate_links: capture_alternate_links(&raw),
-        images: capture_images(&raw),
-        blocks: capture_semantic_blocks(&raw),
-        details_blocks: capture_details_blocks(&raw),
-        pre_blocks: capture_pre_blocks(&raw),
-        json_ld_blocks: capture_json_ld_blocks(&raw),
+        alternate_links,
+        images,
+        blocks,
+        details_blocks,
+        pre_blocks,
+        json_ld_blocks,
     }
 }
 

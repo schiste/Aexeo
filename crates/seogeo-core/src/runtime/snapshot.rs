@@ -115,8 +115,8 @@ impl RuntimeSnapshotBuilder {
         discovered_internal_routes: usize,
         truncated: bool,
     ) -> Result<(Site, Vec<Finding>)> {
-        build_runtime_site(
-            &self.pages,
+        build_runtime_site_from_owned_pages(
+            self.pages,
             SiteArtifacts {
                 llms_text: self.llms_text,
                 robots_text: self.robots_text,
@@ -138,7 +138,7 @@ impl RuntimeSnapshotBuilder {
         discovered_internal_routes: usize,
         truncated: bool,
     ) -> Result<(Site, Vec<Finding>)> {
-        build_runtime_site(
+        build_runtime_site_from_borrowed_pages(
             &self.pages,
             SiteArtifacts {
                 llms_text: self.llms_text.clone(),
@@ -155,15 +155,35 @@ impl RuntimeSnapshotBuilder {
     }
 }
 
-fn build_runtime_site(
+fn build_runtime_site_from_owned_pages(
+    pages: HashMap<String, CapturedPage>,
+    artifacts: SiteArtifacts,
+    crawl_meta: CrawlMeta,
+) -> Result<(Site, Vec<Finding>)> {
+    let mut routes = pages.into_iter().collect::<Vec<_>>();
+    routes.sort_by(|left, right| left.0.cmp(&right.0));
+    let built_pages = routes
+        .into_iter()
+        .map(|(route, captured)| {
+            build_page_from_source(
+                PathBuf::from(response_report_path(&route)),
+                relative_html_path(&route),
+                captured.body,
+                captured.headers,
+            )
+        })
+        .collect::<Vec<_>>();
+    build_runtime_site_from_pages(built_pages, artifacts, crawl_meta)
+}
+
+fn build_runtime_site_from_borrowed_pages(
     pages: &HashMap<String, CapturedPage>,
     artifacts: SiteArtifacts,
     crawl_meta: CrawlMeta,
 ) -> Result<(Site, Vec<Finding>)> {
-    let mut crawl_findings = Vec::new();
     let mut routes = pages.keys().cloned().collect::<Vec<_>>();
     routes.sort();
-    let pages = routes
+    let built_pages = routes
         .iter()
         .map(|route| -> Result<_> {
             let captured = pages
@@ -178,6 +198,15 @@ fn build_runtime_site(
             ))
         })
         .collect::<Result<Vec<_>>>()?;
+    build_runtime_site_from_pages(built_pages, artifacts, crawl_meta)
+}
+
+fn build_runtime_site_from_pages(
+    pages: Vec<crate::site::Page>,
+    artifacts: SiteArtifacts,
+    crawl_meta: CrawlMeta,
+) -> Result<(Site, Vec<Finding>)> {
+    let mut crawl_findings = Vec::new();
     let site = build_site_from_parts(SiteBuildInput {
         root: PathBuf::from("crawl"),
         pages,
@@ -232,7 +261,7 @@ mod tests {
         assert!(findings.is_empty());
         assert_eq!(site.deployment_model, DeploymentModel::RuntimeSnapshot);
         assert_eq!(
-            site.route_pages.get("about").unwrap().path,
+            site.page("about").unwrap().path,
             std::path::PathBuf::from("crawl/about/index.html")
         );
     }
@@ -255,6 +284,6 @@ mod tests {
             sitemap_text: state.sitemap_text,
         });
         let (site, _) = restored.finalize(1, 10, 1, false).unwrap();
-        assert!(site.route_pages.contains_key("docs"));
+        assert!(site.has_route("docs"));
     }
 }

@@ -133,7 +133,7 @@ fn collect_image_findings(page: &Page, site: &Site, config: &Config) -> Vec<Find
 
 pub fn run_content_rules(site: &Site, config: &Config) -> Vec<Finding> {
     let mut findings = Vec::new();
-    for page in site.route_pages.values() {
+    for page in site.route_pages() {
         findings.extend(collect_page_size_findings(page, config));
         findings.extend(collect_feature_marker_findings(page, config));
         findings.extend(collect_image_findings(page, site, config));

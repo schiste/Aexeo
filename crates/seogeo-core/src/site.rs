@@ -122,7 +122,7 @@ pub struct Page {
 pub struct Site {
     pub root: PathBuf,
     pub pages: Vec<Page>,
-    pub route_pages: BTreeMap<String, Page>,
+    pub(crate) route_page_indices: BTreeMap<String, usize>,
     pub indexed_paths: BTreeSet<String>,
     pub inbound_links: BTreeMap<String, BTreeSet<String>>,
     pub llms_text: Option<String>,
@@ -145,6 +145,34 @@ impl Page {
             .get(&lower)
             .or_else(|| self.meta_by_property.get(&lower))
             .map(String::as_str)
+    }
+}
+
+impl Site {
+    pub fn page(&self, route: &str) -> Option<&Page> {
+        self.route_page_indices
+            .get(route)
+            .and_then(|index| self.pages.get(*index))
+    }
+
+    pub fn has_route(&self, route: &str) -> bool {
+        self.route_page_indices.contains_key(route)
+    }
+
+    pub fn route_pages(&self) -> impl Iterator<Item = &Page> {
+        self.route_page_indices
+            .values()
+            .filter_map(|index| self.pages.get(*index))
+    }
+
+    pub fn route_keys(&self) -> impl Iterator<Item = &String> {
+        self.route_page_indices.keys()
+    }
+
+    pub fn route_page_pairs(&self) -> impl Iterator<Item = (&String, &Page)> {
+        self.route_page_indices
+            .iter()
+            .filter_map(|(route, index)| self.pages.get(*index).map(|page| (route, page)))
     }
 }
 
@@ -457,10 +485,13 @@ pub fn build_site_from_parts(input: SiteBuildInput) -> Result<Site> {
         deployment_markers,
         crawl_meta,
     } = input;
-    let mut route_pages = BTreeMap::new();
-    for page in &pages {
-        if prefer_page(route_pages.get(&page.route), page) {
-            route_pages.insert(page.route.clone(), page.clone());
+    let mut route_page_indices = BTreeMap::new();
+    for (index, page) in pages.iter().enumerate() {
+        let current = route_page_indices
+            .get(&page.route)
+            .and_then(|existing| pages.get(*existing));
+        if prefer_page(current, page) {
+            route_page_indices.insert(page.route.clone(), index);
         }
     }
     let (sitemap_routes, sitemap_error) = match artifacts.sitemap_text {
@@ -482,7 +513,7 @@ pub fn build_site_from_parts(input: SiteBuildInput) -> Result<Site> {
         deployment_markers,
         crawl_meta,
         pages,
-        route_pages,
+        route_page_indices,
         indexed_paths,
     })
 }
@@ -564,12 +595,12 @@ mod tests {
         );
         write(&root.join("llms.txt"), "# Site\n\n## Pages\n");
         let site = load_site(root).unwrap();
-        assert!(site.route_pages.contains_key(""));
-        assert!(site.route_pages.contains_key("guide"));
+        assert!(site.has_route(""));
+        assert!(site.has_route("guide"));
         assert!(site.indexed_paths.contains("guide"));
         assert!(site.sitemap_routes.contains("guide"));
         assert!(site.llms_text.is_some());
-        let home = site.route_pages.get("").unwrap();
+        let home = site.page("").unwrap();
         assert_eq!(
             home.meta_by_property.get("og:title").map(String::as_str),
             Some("Open Graph")
@@ -580,7 +611,7 @@ mod tests {
         assert_eq!(home.json_ld_blocks.len(), 1);
         let inbound = site.inbound_links.get("guide").unwrap();
         assert!(inbound.contains("index.html"));
-        let guide = site.route_pages.get("guide").unwrap();
+        let guide = site.page("guide").unwrap();
         assert_eq!(guide.alternate_links.len(), 1);
         assert_eq!(guide.details_blocks.len(), 1);
         assert_eq!(guide.pre_blocks.len(), 1);
@@ -595,7 +626,7 @@ mod tests {
             "<html><head><title>Terminal Search | Chau7 Terminal</title><meta name=\"description\" content=\"Search feature\"><link rel=\"canonical\" href=\"https://example.com/features/terminal-search\"></head><body><h1>Terminal Search</h1></body></html>",
         );
         let site = load_site(root).unwrap();
-        let page = site.route_pages.get("features/terminal-search").unwrap();
+        let page = site.page("features/terminal-search").unwrap();
         assert_eq!(page.page_kind, PageKind::Detail);
     }
 
@@ -608,7 +639,7 @@ mod tests {
             "<html><head><title>Search</title><meta name=\"description\" content=\"Find things\"></head><body><h1>Search</h1></body></html>",
         );
         let site = load_site(root).unwrap();
-        let page = site.route_pages.get("search").unwrap();
+        let page = site.page("search").unwrap();
         assert_eq!(page.page_kind, PageKind::Search);
     }
 

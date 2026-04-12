@@ -114,8 +114,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
         .iter()
         .any(|heading| heading.starts_with("Feature Pages"));
     let has_feature_routes = site
-        .route_pages
-        .keys()
+        .route_keys()
         .any(|route| route.starts_with("features/"));
     let mut missing_sections = Vec::new();
     if !has_pages {

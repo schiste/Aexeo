@@ -25,7 +25,7 @@ fn tokenize_text(text: &str) -> BTreeSet<String> {
 fn categorize_routes(site: &Site) -> (Vec<String>, Vec<String>) {
     let mut pages = Vec::new();
     let mut features = Vec::new();
-    for route in site.route_pages.keys().cloned().collect::<Vec<_>>() {
+    for route in site.route_keys().cloned().collect::<Vec<_>>() {
         if route.is_empty() || route == "404" {
             continue;
         }
@@ -394,7 +394,7 @@ fn visible_text(raw_text: &str) -> String {
 
 pub fn render_llms_full_txt(site: &Site, _site_url: Option<&str>) -> String {
     let mut lines = vec!["# Site Full Context".to_string(), String::new()];
-    for (route, page) in &site.route_pages {
+    for (route, page) in site.route_page_pairs() {
         let label = page.title.clone().unwrap_or_else(|| {
             if route.is_empty() {
                 "Home".to_string()
@@ -411,7 +411,7 @@ pub fn render_llms_full_txt(site: &Site, _site_url: Option<&str>) -> String {
 
 pub fn render_markdown_mirror(site: &Site) -> String {
     let mut lines = vec!["# Site Mirror".to_string(), String::new()];
-    for (route, page) in &site.route_pages {
+    for (route, page) in site.route_page_pairs() {
         let title = page.title.clone().unwrap_or_else(|| {
             if route.is_empty() {
                 "Home".to_string()
@@ -522,7 +522,7 @@ fn collect_link_candidate_scores(
     source: &str,
     routes: &[String],
 ) -> Vec<(usize, String)> {
-    let Some(source_page) = site.route_pages.get(source) else {
+    let Some(source_page) = site.page(source) else {
         return Vec::new();
     };
     let mut scored = Vec::new();
@@ -541,14 +541,15 @@ fn collect_link_candidate_scores(
 
 pub fn build_link_suggestions(site: &Site, top_n: usize) -> BTreeMap<String, Vec<String>> {
     let route_tokens: BTreeMap<String, BTreeSet<String>> = site
-        .route_pages
-        .iter()
-        .filter(|(route, _)| route.as_str() != "404")
-        .map(|(route, page)| (route.clone(), collect_page_tokens(page)))
+        .route_keys()
+        .filter(|route| route.as_str() != "404")
+        .filter_map(|route| {
+            site.page(route)
+                .map(|page| (route.clone(), collect_page_tokens(page)))
+        })
         .collect();
     let routes: Vec<String> = site
-        .route_pages
-        .keys()
+        .route_keys()
         .filter(|route| route.as_str() != "404")
         .cloned()
         .collect();

@@ -31,7 +31,7 @@ pub fn run_social_rules(site: &Site, config: &Config) -> Vec<Finding> {
     let rules = config.rules();
     let site_url = site_config.site_url;
 
-    for page in site.route_pages.values() {
+    for page in site.route_pages() {
         if page.relative_path == "404.html" {
             continue;
         }

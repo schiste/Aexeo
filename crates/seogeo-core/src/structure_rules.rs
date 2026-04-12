@@ -552,7 +552,7 @@ fn collect_fact_consistency_findings(page: &crate::site::Page, config: &Config) 
 
 pub fn run_structure_rules(site: &Site, config: &Config) -> Vec<Finding> {
     let mut findings = Vec::new();
-    for page in site.route_pages.values() {
+    for page in site.route_pages() {
         let mut seen_data_ui = BTreeSet::new();
         let mut answer_like_blocks = Vec::new();
         let strong_answer_blocks = strong_answer_block_count(page, config);

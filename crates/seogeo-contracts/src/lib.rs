@@ -140,6 +140,8 @@ pub struct CrawlStats {
     #[serde(default)]
     pub total_optional_artifact_fetch_us: u64,
     #[serde(default)]
+    pub total_sitemap_seed_us: u64,
+    #[serde(default)]
     pub total_snapshot_build_us: u64,
     #[serde(default)]
     pub total_snapshot_write_us: u64,

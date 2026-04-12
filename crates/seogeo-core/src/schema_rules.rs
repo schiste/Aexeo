@@ -482,7 +482,7 @@ pub fn run_schema_rules(site: &Site, config: &Config) -> Vec<Finding> {
         ("WebSite.name".to_string(), BTreeSet::new()),
         ("WebSite.url".to_string(), BTreeSet::new()),
     ]);
-    for page in site.route_pages.values() {
+    for page in site.route_pages() {
         let (parse_findings, schema_types, schema_titles, schema_objects) =
             parse_page_schema_blocks(page);
         findings.extend(parse_findings);
