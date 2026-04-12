@@ -5,7 +5,7 @@ use std::time::Instant;
 use crate::schema_rules::iter_schema_types;
 use crate::site::{Page, PageKind, Site};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GroundingIntentFamily {
     Definition,
@@ -17,6 +17,22 @@ pub enum GroundingIntentFamily {
     Feature,
     Reference,
     Generic,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GroundingIntentConfidence {
+    Strong,
+    Medium,
+    Weak,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GroundingIntentMatch {
+    pub intent: GroundingIntentFamily,
+    pub confidence: GroundingIntentConfidence,
+    pub score: u8,
+    pub reasons: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,7 +51,10 @@ pub struct GroundingRouteAnalysis {
     pub page_kind: String,
     pub primary_topic: String,
     pub secondary_topics: Vec<String>,
+    pub primary_intent: GroundingIntentFamily,
+    pub secondary_intents: Vec<GroundingIntentFamily>,
     pub intents: Vec<GroundingIntentFamily>,
+    pub intent_matches: Vec<GroundingIntentMatch>,
     pub schema_types: Vec<String>,
     pub signals: Vec<String>,
     pub coverage_gaps: Vec<GroundingCoverageGap>,
@@ -48,6 +67,7 @@ pub struct GroundingSiteAnalysis {
     pub pages_analyzed: usize,
     pub routes_with_topics: usize,
     pub intent_distribution: BTreeMap<String, usize>,
+    pub primary_intent_distribution: BTreeMap<String, usize>,
     pub topic_clusters: BTreeMap<String, Vec<String>>,
     pub routes: Vec<GroundingRouteAnalysis>,
     pub elapsed_us: u64,
@@ -62,6 +82,7 @@ pub fn map_grounding_queries(site: &Site) -> GroundingSiteAnalysis {
     routes.sort_by(|left, right| left.route.cmp(&right.route));
 
     let mut intent_distribution = BTreeMap::new();
+    let mut primary_intent_distribution = BTreeMap::new();
     let mut topic_clusters: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for route in &routes {
         for intent in &route.intents {
@@ -69,6 +90,9 @@ pub fn map_grounding_queries(site: &Site) -> GroundingSiteAnalysis {
                 .entry(intent_label(intent).to_string())
                 .or_insert(0) += 1;
         }
+        *primary_intent_distribution
+            .entry(intent_label(&route.primary_intent).to_string())
+            .or_insert(0) += 1;
         topic_clusters
             .entry(route.primary_topic.clone())
             .or_default()
@@ -85,6 +109,7 @@ pub fn map_grounding_queries(site: &Site) -> GroundingSiteAnalysis {
             .filter(|route| route.primary_topic != "(unclassified)")
             .count(),
         intent_distribution,
+        primary_intent_distribution,
         topic_clusters,
         routes,
         elapsed_us: started.elapsed().as_micros() as u64,
@@ -105,18 +130,29 @@ fn analyze_page_grounding(page: &Page) -> GroundingRouteAnalysis {
         .unwrap_or_else(|| "(unclassified)".to_string());
     let secondary_topics = topics.iter().skip(1).take(4).cloned().collect::<Vec<_>>();
 
-    let intent_signals = build_intent_signals(page, &title, &h1, &h2s, &h3s, &schema_types);
-    let intents = infer_intents(page, &intent_signals);
-    let coverage_gaps = infer_coverage_gaps(page, &intents, &intent_signals);
+    let intent_matches = infer_intent_matches(page, &title, &h1, &h2s, &h3s, &schema_types);
+    let intents = selected_intents(&intent_matches);
+    let primary_intent = intents
+        .first()
+        .cloned()
+        .unwrap_or(GroundingIntentFamily::Generic);
+    let secondary_intents = intents.iter().skip(1).cloned().collect::<Vec<_>>();
+    let coverage_gaps = infer_coverage_gaps(page, &intent_matches, &intents);
 
     GroundingRouteAnalysis {
         route: page.route.clone(),
         page_kind: format!("{:?}", page.page_kind).to_ascii_lowercase(),
         primary_topic,
         secondary_topics,
+        primary_intent,
+        secondary_intents,
         intents,
+        intent_matches: intent_matches.clone(),
         schema_types,
-        signals: intent_signals.into_iter().collect(),
+        signals: intent_matches
+            .iter()
+            .flat_map(|item| item.reasons.iter().cloned())
+            .collect(),
         coverage_gaps,
         answer_blocks: answer_block_count(page),
         heading_count: 1 + h2s.len() + h3s.len(),
@@ -144,117 +180,264 @@ fn answer_block_count(page: &Page) -> usize {
         .count()
 }
 
-fn build_intent_signals(
+fn infer_intent_matches(
     page: &Page,
     title: &str,
     h1: &str,
     h2s: &[String],
     h3s: &[String],
     schema_types: &[String],
-) -> BTreeSet<String> {
-    let mut signals = BTreeSet::new();
+) -> Vec<GroundingIntentMatch> {
     let route = page.route.to_ascii_lowercase();
-    let combined = [title, h1, &h2s.join(" "), &h3s.join(" "), &page.raw_text]
+    let title_lower = title.to_ascii_lowercase();
+    let h1_lower = h1.to_ascii_lowercase();
+    let headings_lower = [h2s.join(" "), h3s.join(" ")]
         .join(" ")
         .to_ascii_lowercase();
-
-    if combined.contains("what is ")
-        || combined.contains("what’s ")
-        || combined.contains("what is")
-        || combined.contains("overview")
-        || matches!(page.page_kind, PageKind::Docs | PageKind::Listing)
-    {
-        signals.insert("definition".to_string());
-    }
-    if combined.contains("how to")
-        || combined.contains(" step ")
-        || combined.contains(" tutorial")
-        || combined.contains(" install")
-        || combined.contains(" setup")
-        || combined.contains(" configure")
-    {
-        signals.insert("procedural".to_string());
-    }
-    if route.contains("/vs")
-        || combined.contains(" versus ")
-        || combined.contains(" vs ")
-        || combined.contains("alternative")
-        || combined.contains("compare")
-    {
-        signals.insert("comparison".to_string());
-    }
-    if combined.contains("pricing")
-        || combined.contains("price")
-        || combined.contains("cost")
-        || combined.contains("quote")
-        || combined.contains("plan")
-    {
-        signals.insert("pricing".to_string());
-    }
-    if combined.contains("error")
-        || combined.contains("issue")
-        || combined.contains("fix")
-        || combined.contains("troubleshoot")
-        || combined.contains("faq")
-    {
-        signals.insert("troubleshooting".to_string());
-    }
-    if combined.contains("template")
-        || combined.contains("checklist")
-        || combined.contains("worksheet")
-        || combined.contains("download")
-    {
-        signals.insert("asset".to_string());
-    }
-    if combined.contains("feature")
-        || combined.contains("capability")
-        || route.starts_with("features/")
-    {
-        signals.insert("feature".to_string());
-    }
-    if schema_types
+    let body_lower = page.raw_text.to_ascii_lowercase();
+    let answer_blocks = answer_block_count(page);
+    let has_table = body_lower.contains("<table");
+    let has_ordered_list = body_lower.contains("<ol");
+    let has_faq_schema = schema_types.iter().any(|item| item == "FAQPage");
+    let has_howto_schema = schema_types.iter().any(|item| item == "HowTo");
+    let has_article_schema = schema_types
         .iter()
-        .any(|item| matches!(item.as_str(), "HowTo" | "TechArticle" | "FAQPage"))
-    {
-        signals.insert("reference".to_string());
-    }
-    if signals.is_empty() {
-        signals.insert("generic".to_string());
-    }
-    signals
-}
+        .any(|item| matches!(item.as_str(), "TechArticle" | "Article"));
 
-fn infer_intents(page: &Page, signals: &BTreeSet<String>) -> Vec<GroundingIntentFamily> {
-    let mut intents = Vec::new();
-    for signal in signals {
-        match signal.as_str() {
-            "definition" => intents.push(GroundingIntentFamily::Definition),
-            "procedural" => intents.push(GroundingIntentFamily::Procedural),
-            "comparison" => intents.push(GroundingIntentFamily::Comparison),
-            "pricing" => intents.push(GroundingIntentFamily::Pricing),
-            "troubleshooting" => intents.push(GroundingIntentFamily::Troubleshooting),
-            "asset" => intents.push(GroundingIntentFamily::Asset),
-            "feature" => intents.push(GroundingIntentFamily::Feature),
-            "reference" => intents.push(GroundingIntentFamily::Reference),
-            "generic" => intents.push(GroundingIntentFamily::Generic),
-            _ => {}
-        }
+    let mut matches = Vec::new();
+
+    let mut definition_score = 0_u8;
+    let mut definition_reasons = Vec::new();
+    if title_or_h1_contains(&title_lower, &h1_lower, &["what is", "overview"]) {
+        definition_score += 5;
+        definition_reasons.push("title_or_h1_definition_cue".to_string());
     }
-    if intents.is_empty() {
-        intents.push(match page.page_kind {
-            PageKind::Docs => GroundingIntentFamily::Reference,
-            PageKind::Listing => GroundingIntentFamily::Definition,
-            PageKind::Detail => GroundingIntentFamily::Feature,
-            _ => GroundingIntentFamily::Generic,
+    if headings_lower.contains("what is") {
+        definition_score += 4;
+        definition_reasons.push("heading_definition_cue".to_string());
+    } else if headings_lower.contains("overview") {
+        definition_score += 2;
+        definition_reasons.push("heading_overview_cue".to_string());
+    }
+    if matches!(page.page_kind, PageKind::Docs | PageKind::Listing) {
+        definition_score += 2;
+        definition_reasons.push("page_kind_definition_bias".to_string());
+    }
+    if answer_blocks >= 2 {
+        definition_score += 1;
+        definition_reasons.push("sufficient_answer_blocks".to_string());
+    }
+    push_intent_match(
+        &mut matches,
+        GroundingIntentFamily::Definition,
+        definition_score,
+        definition_reasons,
+    );
+
+    let mut procedural_score = 0_u8;
+    let mut procedural_reasons = Vec::new();
+    if title_or_h1_contains(
+        &title_lower,
+        &h1_lower,
+        &["how to", "setup", "configure", "install", "workflow"],
+    ) {
+        procedural_score += 5;
+        procedural_reasons.push("title_or_h1_procedural_cue".to_string());
+    }
+    if headings_lower.contains("how to")
+        || headings_lower.contains("step")
+        || headings_lower.contains("setup")
+        || headings_lower.contains("configure")
+    {
+        procedural_score += 2;
+        procedural_reasons.push("heading_procedural_cue".to_string());
+    }
+    if body_lower.contains("step 1")
+        || body_lower.contains("step one")
+        || body_lower.contains("step-by-step")
+    {
+        procedural_score += 2;
+        procedural_reasons.push("body_step_cue".to_string());
+    }
+    if has_ordered_list || has_howto_schema {
+        procedural_score += 2;
+        procedural_reasons.push("ordered_or_howto_structure".to_string());
+    }
+    push_intent_match(
+        &mut matches,
+        GroundingIntentFamily::Procedural,
+        procedural_score,
+        procedural_reasons,
+    );
+
+    let mut comparison_score = 0_u8;
+    let mut comparison_reasons = Vec::new();
+    if route.starts_with("compare/") || route.contains("/vs-") || route.contains("/vs/") {
+        comparison_score += 5;
+        comparison_reasons.push("route_comparison_cue".to_string());
+    }
+    if title_or_h1_contains(
+        &title_lower,
+        &h1_lower,
+        &[" vs ", "versus", "compare", "alternative", "alternatives"],
+    ) {
+        comparison_score += 4;
+        comparison_reasons.push("title_or_h1_comparison_cue".to_string());
+    }
+    if has_table {
+        comparison_score += 2;
+        comparison_reasons.push("table_structure".to_string());
+    }
+    push_intent_match(
+        &mut matches,
+        GroundingIntentFamily::Comparison,
+        comparison_score,
+        comparison_reasons,
+    );
+
+    let mut pricing_score = 0_u8;
+    let mut pricing_reasons = Vec::new();
+    if route.contains("pricing") || route.ends_with("/plans") {
+        pricing_score += 5;
+        pricing_reasons.push("route_pricing_cue".to_string());
+    }
+    if title_or_h1_contains(
+        &title_lower,
+        &h1_lower,
+        &["pricing", "plans", "price", "quote"],
+    ) {
+        pricing_score += 4;
+        pricing_reasons.push("title_or_h1_pricing_cue".to_string());
+    }
+    if headings_lower.contains("pricing")
+        || headings_lower.contains("plans")
+        || body_lower.contains("$")
+        || body_lower.contains("€")
+        || body_lower.contains(" per month")
+        || body_lower.contains("/month")
+    {
+        pricing_score += 2;
+        pricing_reasons.push("visible_pricing_signal".to_string());
+    }
+    push_intent_match(
+        &mut matches,
+        GroundingIntentFamily::Pricing,
+        pricing_score,
+        pricing_reasons,
+    );
+
+    let mut troubleshooting_score = 0_u8;
+    let mut troubleshooting_reasons = Vec::new();
+    if route.contains("troubleshoot") || route.contains("error") || route.contains("faq") {
+        troubleshooting_score += 5;
+        troubleshooting_reasons.push("route_support_cue".to_string());
+    }
+    if title_or_h1_contains(
+        &title_lower,
+        &h1_lower,
+        &["troubleshoot", "fix", "error", "faq", "problem"],
+    ) {
+        troubleshooting_score += 4;
+        troubleshooting_reasons.push("title_or_h1_support_cue".to_string());
+    }
+    if headings_lower.contains("faq") || headings_lower.contains("troubleshoot") {
+        troubleshooting_score += 2;
+        troubleshooting_reasons.push("heading_support_cue".to_string());
+    }
+    if has_faq_schema {
+        troubleshooting_score += 1;
+        troubleshooting_reasons.push("faq_schema".to_string());
+    }
+    push_intent_match(
+        &mut matches,
+        GroundingIntentFamily::Troubleshooting,
+        troubleshooting_score,
+        troubleshooting_reasons,
+    );
+
+    let mut asset_score = 0_u8;
+    let mut asset_reasons = Vec::new();
+    if title_or_h1_contains(
+        &title_lower,
+        &h1_lower,
+        &[
+            "template",
+            "checklist",
+            "worksheet",
+            "download",
+            "cheatsheet",
+        ],
+    ) {
+        asset_score += 4;
+        asset_reasons.push("title_or_h1_asset_cue".to_string());
+    }
+    if route.contains("template") || route.contains("checklist") || route.contains("download") {
+        asset_score += 3;
+        asset_reasons.push("route_asset_cue".to_string());
+    }
+    push_intent_match(
+        &mut matches,
+        GroundingIntentFamily::Asset,
+        asset_score,
+        asset_reasons,
+    );
+
+    let mut feature_score = 0_u8;
+    let mut feature_reasons = Vec::new();
+    if matches!(page.page_kind, PageKind::Detail) || route.starts_with("features/") {
+        feature_score += 5;
+        feature_reasons.push("feature_route_or_kind".to_string());
+    }
+    if title_or_h1_contains(&title_lower, &h1_lower, &["feature", "capability"]) {
+        feature_score += 3;
+        feature_reasons.push("title_or_h1_feature_cue".to_string());
+    }
+    push_intent_match(
+        &mut matches,
+        GroundingIntentFamily::Feature,
+        feature_score,
+        feature_reasons,
+    );
+
+    let mut reference_score = 0_u8;
+    let mut reference_reasons = Vec::new();
+    if matches!(page.page_kind, PageKind::Docs | PageKind::Legal) {
+        reference_score += 4;
+        reference_reasons.push("reference_page_kind".to_string());
+    }
+    if has_howto_schema || has_article_schema || has_faq_schema {
+        reference_score += 2;
+        reference_reasons.push("schema_reference_signal".to_string());
+    }
+    push_intent_match(
+        &mut matches,
+        GroundingIntentFamily::Reference,
+        reference_score,
+        reference_reasons,
+    );
+
+    if matches.is_empty() {
+        matches.push(GroundingIntentMatch {
+            intent: GroundingIntentFamily::Generic,
+            confidence: GroundingIntentConfidence::Weak,
+            score: 1,
+            reasons: vec!["fallback_generic".to_string()],
         });
     }
-    intents
+
+    matches.sort_by(|left, right| {
+        right
+            .score
+            .cmp(&left.score)
+            .then_with(|| intent_priority(&left.intent).cmp(&intent_priority(&right.intent)))
+    });
+    matches
 }
 
 fn infer_coverage_gaps(
     page: &Page,
+    intent_matches: &[GroundingIntentMatch],
     intents: &[GroundingIntentFamily],
-    signals: &BTreeSet<String>,
 ) -> Vec<GroundingCoverageGap> {
     let mut gaps = Vec::new();
     let text = page.raw_text.to_ascii_lowercase();
@@ -282,13 +465,96 @@ fn infer_coverage_gaps(
     {
         gaps.push(GroundingCoverageGap::WeakComparisonStructure);
     }
-    if intents.contains(&GroundingIntentFamily::Pricing) && !signals.contains("pricing") {
+    if strongest_intent_score(intent_matches, GroundingIntentFamily::Pricing) >= 4
+        && !has_visible_pricing_signals(&text)
+    {
         gaps.push(GroundingCoverageGap::MissingPricingSignals);
     }
 
     gaps.sort_by_key(gap_order);
     gaps.dedup();
     gaps
+}
+
+fn selected_intents(matches: &[GroundingIntentMatch]) -> Vec<GroundingIntentFamily> {
+    let mut selected = matches
+        .iter()
+        .filter(|item| item.score >= 4)
+        .map(|item| item.intent.clone())
+        .collect::<Vec<_>>();
+    if selected.is_empty() {
+        if let Some(best) = matches.first() {
+            if best.score >= 3 {
+                selected.push(best.intent.clone());
+            } else {
+                selected.push(GroundingIntentFamily::Generic);
+            }
+        } else {
+            selected.push(GroundingIntentFamily::Generic);
+        }
+    }
+    selected
+}
+
+fn push_intent_match(
+    matches: &mut Vec<GroundingIntentMatch>,
+    intent: GroundingIntentFamily,
+    score: u8,
+    reasons: Vec<String>,
+) {
+    if score == 0 {
+        return;
+    }
+    let confidence = if score >= 5 {
+        GroundingIntentConfidence::Strong
+    } else if score >= 3 {
+        GroundingIntentConfidence::Medium
+    } else {
+        GroundingIntentConfidence::Weak
+    };
+    matches.push(GroundingIntentMatch {
+        intent,
+        confidence,
+        score,
+        reasons,
+    });
+}
+
+fn strongest_intent_score(matches: &[GroundingIntentMatch], intent: GroundingIntentFamily) -> u8 {
+    matches
+        .iter()
+        .find(|item| item.intent == intent)
+        .map(|item| item.score)
+        .unwrap_or(0)
+}
+
+fn intent_priority(intent: &GroundingIntentFamily) -> u8 {
+    match intent {
+        GroundingIntentFamily::Comparison => 0,
+        GroundingIntentFamily::Pricing => 1,
+        GroundingIntentFamily::Procedural => 2,
+        GroundingIntentFamily::Feature => 3,
+        GroundingIntentFamily::Asset => 4,
+        GroundingIntentFamily::Troubleshooting => 5,
+        GroundingIntentFamily::Reference => 6,
+        GroundingIntentFamily::Definition => 7,
+        GroundingIntentFamily::Generic => 8,
+    }
+}
+
+fn has_visible_pricing_signals(text: &str) -> bool {
+    text.contains("$")
+        || text.contains("€")
+        || text.contains("pricing")
+        || text.contains("plans")
+        || text.contains("per month")
+        || text.contains("/month")
+}
+
+fn title_or_h1_contains(title: &str, h1: &str, needles: &[&str]) -> bool {
+    needles
+        .iter()
+        .any(|needle| title.contains(needle) || h1.contains(needle))
 }
 
 fn comparison_cue_count(text: &str) -> usize {
@@ -446,6 +712,10 @@ mod tests {
             route.primary_topic,
             "contract lifecycle management software"
         );
+        assert!(matches!(
+            route.primary_intent,
+            GroundingIntentFamily::Definition | GroundingIntentFamily::Procedural
+        ));
         assert!(route.intents.contains(&GroundingIntentFamily::Definition));
         assert!(route.intents.contains(&GroundingIntentFamily::Procedural));
     }
@@ -460,10 +730,24 @@ mod tests {
         .unwrap();
         let site = load_site(temp.path()).unwrap();
         let route = &map_grounding_queries(&site).routes[0];
+        assert_eq!(route.primary_intent, GroundingIntentFamily::Comparison);
         assert!(
             route
                 .coverage_gaps
                 .contains(&GroundingCoverageGap::WeakComparisonStructure)
         );
+    }
+
+    #[test]
+    fn does_not_overclassify_pricing_from_generic_cost_language() {
+        let temp = tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("index.html"),
+            r#"<html><head><title>Observe your agents</title></head><body><h1>Observe your agents</h1><section><h2>Cost visibility</h2><p>Understand agent cost drift across sessions.</p></section><section><h2>Analytics</h2><p>Operational telemetry for agents.</p></section></body></html>"#,
+        )
+        .unwrap();
+        let site = load_site(temp.path()).unwrap();
+        let route = &map_grounding_queries(&site).routes[0];
+        assert!(!route.intents.contains(&GroundingIntentFamily::Pricing));
     }
 }
