@@ -1,5 +1,8 @@
 {
-  "parse_page_ms": 10,
-  "load_site_100_pages_ms": 800,
-  "http_crawl_20_pages_ms": 2500
+  "static_audit/full_fixture_75_pages": {
+    "max_avg_ms": 50
+  },
+  "runtime_audit/http_fixture_20_pages": {
+    "max_avg_ms": 1500
+  }
 }

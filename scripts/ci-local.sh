@@ -8,3 +8,4 @@ fi
 
 sh scripts/check-repo.sh
 sh scripts/pre-push.sh
+sh scripts/check-performance.sh

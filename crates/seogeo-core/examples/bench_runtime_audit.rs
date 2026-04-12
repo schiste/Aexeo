@@ -108,8 +108,12 @@ fn benchmark_once(config: &Config) -> Duration {
 }
 
 fn main() {
-    let iterations = std::env::args()
-        .nth(1)
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    let json_mode = args.iter().any(|arg| arg == "--json");
+    let iterations = args
+        .iter()
+        .find(|arg| arg.as_str() != "--json")
+        .cloned()
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(10);
     let config = benchmark_config();
@@ -117,10 +121,23 @@ fn main() {
     for _ in 0..iterations {
         total += benchmark_once(&config);
     }
-    println!(
-        "runtime_audit/http_fixture_20_pages: iterations={} total_ms={} avg_ms={}",
-        iterations,
-        total.as_millis(),
-        total.as_millis() / iterations as u128
-    );
+    let avg_ms = total.as_millis() / iterations as u128;
+    if json_mode {
+        println!(
+            "{}",
+            serde_json::json!({
+                "name": "runtime_audit/http_fixture_20_pages",
+                "iterations": iterations,
+                "total_ms": total.as_millis(),
+                "avg_ms": avg_ms,
+            })
+        );
+    } else {
+        println!(
+            "runtime_audit/http_fixture_20_pages: iterations={} total_ms={} avg_ms={}",
+            iterations,
+            total.as_millis(),
+            avg_ms
+        );
+    }
 }
