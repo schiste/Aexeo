@@ -43,6 +43,14 @@ struct PluginCheckCommandOutput {
     plugin: PluginManifestCheck,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct DataCommandOutput<T> {
+    command: &'static str,
+    success: bool,
+    result: T,
+    warnings: Vec<ConfigWarning>,
+}
+
 pub fn render_list_command_json<T: Serialize>(command: &'static str, items: T) -> Result<String> {
     Ok(serde_json::to_string_pretty(&ListCommandOutput {
         command,
@@ -101,5 +109,19 @@ pub fn render_plugin_check_command_json(plugin: PluginManifestCheck) -> Result<S
         command: "plugin-check",
         success: true,
         plugin,
+    })?)
+}
+
+pub fn render_data_command_json<T: Serialize>(
+    command: &'static str,
+    success: bool,
+    result: T,
+    warnings: Vec<ConfigWarning>,
+) -> Result<String> {
+    Ok(serde_json::to_string_pretty(&DataCommandOutput {
+        command,
+        success,
+        result,
+        warnings,
     })?)
 }

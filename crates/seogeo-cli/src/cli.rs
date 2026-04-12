@@ -165,6 +165,126 @@ pub fn build_cli() -> Command {
                 ),
         )
         .subcommand(
+            Command::new("snippet")
+                .about("Inspect snippet-control eligibility on a built site or live URL")
+                .subcommand(
+                    Command::new("inspect")
+                        .about("Inspect snippet controls for one route or URL")
+                        .arg(Arg::new("path").long("path").num_args(1))
+                        .arg(Arg::new("url").long("url").num_args(1))
+                        .arg(Arg::new("route").long("route").num_args(1))
+                        .arg(Arg::new("config").long("config").num_args(1))
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "json"])
+                                .default_value("text"),
+                        ),
+                ),
+        )
+        .subcommand(
+            Command::new("indexnow")
+                .about("Validate or submit IndexNow notifications")
+                .subcommand(
+                    Command::new("validate")
+                        .about("Validate IndexNow key format and key-file placement")
+                        .arg(Arg::new("site_url").required(true))
+                        .arg(Arg::new("key").required(true))
+                        .arg(Arg::new("path").long("path").num_args(1))
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "json"])
+                                .default_value("text"),
+                        ),
+                )
+                .subcommand(
+                    Command::new("submit")
+                        .about("Submit changed URLs to an IndexNow endpoint")
+                        .arg(Arg::new("endpoint").required(true))
+                        .arg(Arg::new("site_url").required(true))
+                        .arg(Arg::new("key").required(true))
+                        .arg(
+                            Arg::new("url")
+                                .required(true)
+                                .num_args(1..)
+                                .action(ArgAction::Append),
+                        )
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "json"])
+                                .default_value("text"),
+                        ),
+                ),
+        )
+        .subcommand(
+            Command::new("bing-ai")
+                .about("Import Bing AI Performance exports and align them with audit findings")
+                .subcommand(
+                    Command::new("import")
+                        .about("Import a Bing AI export from CSV or JSON")
+                        .arg(Arg::new("path").required(true))
+                        .arg(Arg::new("audit").long("audit").num_args(1))
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "json"])
+                                .default_value("text"),
+                        ),
+                ),
+        )
+        .subcommand(
+            Command::new("search-console")
+                .about("Export audit findings into Search Console-oriented URL summaries")
+                .subcommand(
+                    Command::new("export")
+                        .about("Export one audit artifact as route-level rows")
+                        .arg(Arg::new("audit").required(true))
+                        .arg(Arg::new("site_url").long("site-url").num_args(1))
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "json", "csv"])
+                                .default_value("text"),
+                        ),
+                ),
+        )
+        .subcommand(
+            Command::new("publish-hook")
+                .about("Run post-publish checks and optional freshness notifications")
+                .subcommand(
+                    Command::new("run")
+                        .about("Audit changed URLs, export Search Console rows, and optionally notify IndexNow")
+                        .arg(Arg::new("path").default_value("."))
+                        .arg(Arg::new("config").long("config").num_args(1))
+                        .arg(
+                            Arg::new("changed-url")
+                                .long("changed-url")
+                                .num_args(1)
+                                .action(ArgAction::Append),
+                        )
+                        .arg(Arg::new("indexnow-key").long("indexnow-key").num_args(1))
+                        .arg(
+                            Arg::new("submit-indexnow")
+                                .long("submit-indexnow")
+                                .action(ArgAction::SetTrue),
+                        )
+                        .arg(
+                            Arg::new("indexnow-endpoint")
+                                .long("indexnow-endpoint")
+                                .num_args(1)
+                                .default_value("https://api.indexnow.org/indexnow"),
+                        )
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "json"])
+                                .default_value("text"),
+                        ),
+                ),
+        )
+        .subcommand(
             Command::new("docs")
                 .about("Generate or verify code-derived repository docs")
                 .arg(

@@ -8,6 +8,7 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+csv.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 seogeo-core = { version = "0.2.0", path = "../seogeo-core" }

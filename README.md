@@ -59,6 +59,11 @@ cargo run -p seogeo-cli -- diff baseline.json current.json
 cargo run -p seogeo-cli -- docs generate .
 cargo run -p seogeo-cli -- docs check .
 cargo run -p seogeo-cli -- quality .
+cargo run -p seogeo-cli -- snippet inspect --path . --route about
+cargo run -p seogeo-cli -- indexnow validate https://example.com abc123 --path .
+cargo run -p seogeo-cli -- bing-ai import bing-ai.csv --audit .seogeo-reports/crawl-latest.json
+cargo run -p seogeo-cli -- search-console export .seogeo-reports/check-latest.json --site-url https://example.com --format csv
+cargo run -p seogeo-cli -- publish-hook run . --changed-url https://example.com/ --indexnow-key abc123
 cargo run -p seogeo-cli -- rules
 cargo run -p seogeo-cli -- adapters
 ```
@@ -86,6 +91,7 @@ cargo run -p seogeo-cli -- adapters
 - [docs/local-quality.md](docs/local-quality.md): local hook model and repo-quality enforcement
 - [docs/release.md](docs/release.md): internal release checklist and packaging flow
 - [docs/astro-ci.md](docs/astro-ci.md): Astro CI and deployment-gate workflow
+- [docs/integrations.md](docs/integrations.md): snippet, Bing AI, Search Console, and IndexNow workflows
 - [docs/cli.md](docs/cli.md): generated CLI reference
 - [docs/config.md](docs/config.md): generated config reference
 - [docs/config.schema.json](docs/config.schema.json): generated JSON Schema for config validation

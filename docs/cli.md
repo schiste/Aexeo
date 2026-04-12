@@ -180,6 +180,97 @@ Options:
           Print help
 ```
 
+## `snippet`
+
+Inspect snippet-control eligibility on a built site or live URL
+
+```text
+Inspect snippet-control eligibility on a built site or live URL
+
+Usage: snippet [COMMAND]
+
+Commands:
+  inspect  Inspect snippet controls for one route or URL
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help
+```
+
+## `indexnow`
+
+Validate or submit IndexNow notifications
+
+```text
+Validate or submit IndexNow notifications
+
+Usage: indexnow [COMMAND]
+
+Commands:
+  validate  Validate IndexNow key format and key-file placement
+  submit    Submit changed URLs to an IndexNow endpoint
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help
+```
+
+## `bing-ai`
+
+Import Bing AI Performance exports and align them with audit findings
+
+```text
+Import Bing AI Performance exports and align them with audit findings
+
+Usage: bing-ai [COMMAND]
+
+Commands:
+  import  Import a Bing AI export from CSV or JSON
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help
+```
+
+## `search-console`
+
+Export audit findings into Search Console-oriented URL summaries
+
+```text
+Export audit findings into Search Console-oriented URL summaries
+
+Usage: search-console [COMMAND]
+
+Commands:
+  export  Export one audit artifact as route-level rows
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help
+```
+
+## `publish-hook`
+
+Run post-publish checks and optional freshness notifications
+
+```text
+Run post-publish checks and optional freshness notifications
+
+Usage: publish-hook [COMMAND]
+
+Commands:
+  run   Audit changed URLs, export Search Console rows, and optionally notify IndexNow
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help
+```
+
 ## `docs`
 
 Generate or verify code-derived repository docs
