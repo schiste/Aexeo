@@ -83,6 +83,12 @@ The minimum repo-quality gate is:
 sh scripts/check-repo.sh
 ```
 
+That command writes per-step timing telemetry to:
+
+```bash
+.seogeo-reports/quality-timings-latest.json
+```
+
 The local CI superset is:
 
 ```bash

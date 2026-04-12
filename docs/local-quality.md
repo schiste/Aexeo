@@ -31,6 +31,20 @@ What it enforces:
 - canonical config rendering through `seogeo config print`
 - example config validation through `docs/examples/seogeo.v1.toml`
 
+This run also writes per-step timing telemetry to:
+
+```bash
+.seogeo-reports/quality-timings-latest.json
+```
+
+Each step records:
+
+- command name
+- started and finished timestamps
+- duration in milliseconds
+- exit code
+- cache hint describing whether the gate is likely cache-light, cache-sensitive, or network-sensitive
+
 This layer is intentionally heavy because it is the main quality firewall for this repository.
 
 ### `pre-push`
@@ -71,6 +85,12 @@ sh scripts/check-performance.sh
 ```
 
 This compares the static and runtime benchmark fixtures against `performance-budget.json` and writes `.seogeo-reports/benchmarks-latest.json`.
+
+`ci-local.sh` also refreshes `.seogeo-reports/quality-timings-latest.json` with top-level timing data for:
+
+- `check-repo`
+- `pre-push`
+- `check-performance`
 
 ## Why The Gate Is Strict
 
