@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, VecDeque};
 
 use super::graph::route_is_allowed;
-use super::http::{host_for_url, normalize_base_url};
+use super::http::{host_for_url, normalize_base_url, origin_for_url, same_site_host};
 use crate::config::RuntimeConfig;
 use crate::site::{normalize_internal_href, route_from_urlish};
 
@@ -87,6 +87,15 @@ impl CrawlPlanner {
         self.enqueue_route(target.to_string(), runtime);
     }
 
+    pub(crate) fn align_with_effective_url(&mut self, effective_url: &str) {
+        let effective_host = host_for_url(effective_url);
+        if effective_host.is_empty() || !same_site_host(&self.base_host, &effective_host) {
+            return;
+        }
+        self.base_host = effective_host;
+        self.normalized_base = origin_for_url(effective_url);
+    }
+
     fn enqueue_route(&mut self, route: String, runtime: &RuntimeConfig<'_>) {
         if !route_is_allowed(&route, runtime) {
             return;
@@ -123,5 +132,25 @@ mod tests {
         assert!(planner.next_url(&runtime).is_none());
         assert!(planner.truncated());
         assert_eq!(planner.discovered_route_count(), 2);
+    }
+
+    #[test]
+    fn planner_adopts_canonical_same_site_host() {
+        let config = Config::default();
+        let runtime = config.runtime();
+        let mut planner = CrawlPlanner::new("https://example.com", 10);
+        planner.align_with_effective_url("https://www.example.com/features/test");
+        planner.discover_link_target("docs", &runtime);
+
+        assert_eq!(planner.base_host(), "www.example.com");
+        assert_eq!(planner.normalized_base(), "https://www.example.com/");
+        assert_eq!(
+            planner.next_url(&runtime).as_deref(),
+            Some("https://example.com/")
+        );
+        assert_eq!(
+            planner.next_url(&runtime).as_deref(),
+            Some("https://www.example.com/docs")
+        );
     }
 }

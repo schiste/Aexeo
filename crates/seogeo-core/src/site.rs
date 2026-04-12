@@ -1,3 +1,8 @@
+#[path = "site/parser.rs"]
+mod parser;
+#[path = "site/sitemap.rs"]
+mod sitemap;
+
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -156,7 +161,7 @@ fn iter_html_files(root: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-fn html_route_for(relative: &str) -> String {
+pub(crate) fn capture_route_for_relative_path(relative: &str) -> String {
     if relative == "index.html" {
         return String::new();
     }
@@ -347,348 +352,6 @@ fn prefer_page(current: Option<&Page>, candidate: &Page) -> bool {
         && candidate.relative_path.len() < current.relative_path.len()
 }
 
-fn parse_page(path: &Path, root: &Path) -> Result<Page> {
-    let relative = path
-        .strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/");
-    let raw = fs::read_to_string(path)?;
-    let (meta_by_name, meta_by_property) = capture_meta_maps(&raw);
-    let links = capture_links(&raw);
-    let internal_links = links
-        .iter()
-        .filter_map(|link| link.target.clone())
-        .collect();
-    let h1_texts = capture_paired_tag_texts(&raw, "h1");
-    let route = html_route_for(&relative);
-    Ok(Page {
-        path: path.to_path_buf(),
-        relative_path: relative.clone(),
-        route: route.clone(),
-        page_kind: classify_page_kind(&relative, &route),
-        raw_text: raw.clone(),
-        title: capture_tag_text(&raw, "title"),
-        meta_by_name,
-        meta_by_property,
-        canonical: capture_canonical_href(&raw),
-        html_lang: capture_html_lang(&raw),
-        h1_count: h1_texts.len(),
-        h1_texts,
-        has_breadcrumb_nav: capture_breadcrumb_nav(&raw),
-        response_headers: BTreeMap::new(),
-        links,
-        internal_links,
-        alternate_links: capture_alternate_links(&raw),
-        images: capture_images(&raw),
-        blocks: capture_semantic_blocks(&raw),
-        details_blocks: capture_details_blocks(&raw),
-        pre_blocks: capture_pre_blocks(&raw),
-        json_ld_blocks: capture_json_ld_blocks(&raw),
-    })
-}
-
-fn capture_tag_text(raw: &str, tag: &str) -> Option<String> {
-    capture_paired_tag_texts(raw, tag).into_iter().next()
-}
-
-fn capture_paired_tag_texts(raw: &str, tag: &str) -> Vec<String> {
-    let mut texts = Vec::new();
-    let start_marker = format!("<{}", tag);
-    let end_marker = format!("</{}>", tag);
-    let mut offset = 0;
-    while let Some(index) = raw[offset..].find(&start_marker) {
-        let start = offset + index;
-        let Some(open_end_rel) = raw[start..].find('>') else {
-            break;
-        };
-        let open_end = start + open_end_rel;
-        let Some(close_start_rel) = raw[open_end + 1..].find(&end_marker) else {
-            break;
-        };
-        let close_start = open_end + 1 + close_start_rel;
-        let text = strip_tags(&raw[open_end + 1..close_start]);
-        if !text.is_empty() {
-            texts.push(text);
-        }
-        offset = close_start + end_marker.len();
-    }
-    texts
-}
-
-fn capture_meta_maps(raw: &str) -> (BTreeMap<String, String>, BTreeMap<String, String>) {
-    let mut by_name = BTreeMap::new();
-    let mut by_property = BTreeMap::new();
-    for snippet in tag_snippets(raw, "meta") {
-        let content = attr_value(&snippet, "content").unwrap_or_default();
-        if content.is_empty() {
-            continue;
-        }
-        if let Some(name) = attr_value(&snippet, "name") {
-            by_name.insert(name.to_ascii_lowercase(), content.clone());
-        }
-        if let Some(property) = attr_value(&snippet, "property") {
-            by_property.insert(property.to_ascii_lowercase(), content.clone());
-        }
-    }
-    (by_name, by_property)
-}
-
-fn capture_canonical_href(raw: &str) -> Option<String> {
-    for snippet in tag_snippets(raw, "link") {
-        let rel = attr_value(&snippet, "rel")
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if rel.split_whitespace().any(|part| part == "canonical") {
-            return attr_value(&snippet, "href");
-        }
-    }
-    None
-}
-
-fn capture_alternate_links(raw: &str) -> Vec<AlternateLink> {
-    let mut links = Vec::new();
-    for snippet in tag_snippets(raw, "link") {
-        let rel = attr_value(&snippet, "rel")
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if !rel.split_whitespace().any(|part| part == "alternate") {
-            continue;
-        }
-        let Some(href) = attr_value(&snippet, "href") else {
-            continue;
-        };
-        let hreflang = attr_value(&snippet, "hreflang").filter(|value| !value.is_empty());
-        links.push(AlternateLink { href, hreflang });
-    }
-    links
-}
-
-fn capture_links(raw: &str) -> Vec<Link> {
-    let mut links = Vec::new();
-    let mut offset = 0;
-    while let Some(index) = raw[offset..].find("<a") {
-        let start = offset + index;
-        let Some(open_end_rel) = raw[start..].find('>') else {
-            break;
-        };
-        let open_end = start + open_end_rel;
-        let snippet = &raw[start..=open_end];
-        let Some(href) = attr_value(snippet, "href") else {
-            offset = open_end + 1;
-            continue;
-        };
-        let Some(close_start_rel) = raw[open_end + 1..].find("</a>") else {
-            offset = open_end + 1;
-            continue;
-        };
-        let close_start = open_end + 1 + close_start_rel;
-        let text = strip_tags(&raw[open_end + 1..close_start]);
-        let (line, column) = line_column_for(raw, start);
-        links.push(Link {
-            href: href.clone(),
-            target: normalize_internal_href(&href),
-            text,
-            line,
-            column,
-        });
-        offset = close_start + 4;
-    }
-    links
-}
-
-fn capture_html_lang(raw: &str) -> Option<String> {
-    let start = raw.find("<html")?;
-    let end = raw[start..].find('>')? + start;
-    attr_value(&raw[start..=end], "lang").filter(|value| !value.is_empty())
-}
-
-fn capture_breadcrumb_nav(raw: &str) -> bool {
-    raw.to_ascii_lowercase().contains("breadcrumb")
-}
-
-fn capture_images(raw: &str) -> Vec<ImageReference> {
-    let mut images = Vec::new();
-    let mut offset = 0;
-    while let Some(index) = raw[offset..].find("<img") {
-        let start = offset + index;
-        let Some(end_rel) = raw[start..].find('>') else {
-            break;
-        };
-        let end = start + end_rel;
-        let snippet = &raw[start..=end];
-        let Some(src) = attr_value(snippet, "src") else {
-            offset = end + 1;
-            continue;
-        };
-        let alt = attr_value(snippet, "alt");
-        let (line, column) = line_column_for(raw, start);
-        images.push(ImageReference {
-            src,
-            alt,
-            line,
-            column,
-        });
-        offset = end + 1;
-    }
-    images
-}
-
-fn capture_semantic_blocks(raw: &str) -> Vec<Block> {
-    let mut blocks = Vec::new();
-    blocks.extend(capture_named_blocks(raw, "section"));
-    blocks.extend(capture_named_blocks(raw, "article"));
-    blocks.sort_by_key(|block| (block.line, block.column));
-    blocks
-}
-
-fn capture_named_blocks(raw: &str, tag: &str) -> Vec<Block> {
-    let mut blocks = Vec::new();
-    let start_marker = format!("<{}", tag);
-    let end_marker = format!("</{}>", tag);
-    let mut offset = 0;
-    while let Some(index) = raw[offset..].find(&start_marker) {
-        let start = offset + index;
-        let Some(open_end_rel) = raw[start..].find('>') else {
-            break;
-        };
-        let open_end = start + open_end_rel;
-        let snippet = &raw[start..=open_end];
-        let Some(close_start_rel) = raw[open_end + 1..].find(&end_marker) else {
-            offset = open_end + 1;
-            continue;
-        };
-        let close_start = open_end + 1 + close_start_rel;
-        let inner = &raw[open_end + 1..close_start];
-        let (line, column) = line_column_for(raw, start);
-        blocks.push(Block {
-            tag: tag.to_string(),
-            data_ui: attr_value(snippet, "data-ui"),
-            line,
-            column,
-            has_heading: has_heading_tag(inner),
-            text: strip_tags(inner),
-        });
-        offset = close_start + end_marker.len();
-    }
-    blocks
-}
-
-fn has_heading_tag(raw: &str) -> bool {
-    (1..=6).any(|level| raw.contains(&format!("<h{}", level)))
-}
-
-fn capture_details_blocks(raw: &str) -> Vec<DetailsBlock> {
-    let mut blocks = Vec::new();
-    let mut offset = 0;
-    while let Some(index) = raw[offset..].find("<details") {
-        let start = offset + index;
-        let Some(open_end_rel) = raw[start..].find('>') else {
-            break;
-        };
-        let open_end = start + open_end_rel;
-        let Some(close_start_rel) = raw[open_end + 1..].find("</details>") else {
-            offset = open_end + 1;
-            continue;
-        };
-        let close_start = open_end + 1 + close_start_rel;
-        let inner = &raw[open_end + 1..close_start];
-        let (line, column) = line_column_for(raw, start);
-        blocks.push(DetailsBlock {
-            line,
-            column,
-            has_summary: inner.contains("<summary"),
-        });
-        offset = close_start + 10;
-    }
-    blocks
-}
-
-fn capture_pre_blocks(raw: &str) -> Vec<PreBlock> {
-    let mut blocks = Vec::new();
-    let mut offset = 0;
-    while let Some(index) = raw[offset..].find("<pre") {
-        let start = offset + index;
-        let Some(open_end_rel) = raw[start..].find('>') else {
-            break;
-        };
-        let open_end = start + open_end_rel;
-        let Some(close_start_rel) = raw[open_end + 1..].find("</pre>") else {
-            offset = open_end + 1;
-            continue;
-        };
-        let close_start = open_end + 1 + close_start_rel;
-        let inner = &raw[open_end + 1..close_start];
-        let (line, column) = line_column_for(raw, start);
-        blocks.push(PreBlock {
-            line,
-            column,
-            has_code: inner.contains("<code"),
-        });
-        offset = close_start + 6;
-    }
-    blocks
-}
-
-fn capture_json_ld_blocks(raw: &str) -> Vec<JsonLdBlock> {
-    let mut blocks = Vec::new();
-    let mut offset = 0;
-    while let Some(index) = raw[offset..].find("<script") {
-        let start = offset + index;
-        let Some(open_end_rel) = raw[start..].find('>') else {
-            break;
-        };
-        let open_end = start + open_end_rel;
-        let snippet = &raw[start..=open_end];
-        let script_type = attr_value(snippet, "type")
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        let Some(close_start_rel) = raw[open_end + 1..].find("</script>") else {
-            offset = open_end + 1;
-            continue;
-        };
-        let close_start = open_end + 1 + close_start_rel;
-        if script_type == "application/ld+json" {
-            let (line, column) = line_column_for(raw, start);
-            blocks.push(JsonLdBlock {
-                raw: raw[open_end + 1..close_start].trim().to_string(),
-                line,
-                column,
-            });
-        }
-        offset = close_start + 9;
-    }
-    blocks
-}
-
-fn tag_snippets(raw: &str, tag: &str) -> Vec<String> {
-    let mut snippets = Vec::new();
-    let needle = format!("<{}", tag);
-    let mut offset = 0;
-    while let Some(index) = raw[offset..].find(&needle) {
-        let start = offset + index;
-        let Some(end_rel) = raw[start..].find('>') else {
-            break;
-        };
-        let end = start + end_rel;
-        snippets.push(raw[start..=end].to_string());
-        offset = end + 1;
-    }
-    snippets
-}
-
-fn attr_value(snippet: &str, attr: &str) -> Option<String> {
-    for quote in ['"', '\''] {
-        let needle = format!("{}={}", attr, quote);
-        if let Some(start) = snippet.find(&needle) {
-            let value_start = start + needle.len();
-            let end = snippet[value_start..].find(quote)? + value_start;
-            return Some(snippet[value_start..end].trim().to_string());
-        }
-    }
-    None
-}
-
 fn build_inbound_link_map(pages: &[Page]) -> BTreeMap<String, BTreeSet<String>> {
     let mut inbound = BTreeMap::new();
     for page in pages {
@@ -738,68 +401,90 @@ fn detect_deployment_model(root: &Path) -> (DeploymentModel, Vec<String>) {
     }
 }
 
-fn read_loc_values(text: &str) -> Vec<String> {
-    let mut values = Vec::new();
-    let mut offset = 0;
-    while let Some(start_rel) = text[offset..].find("<loc>") {
-        let start = offset + start_rel + 5;
-        let Some(end_rel) = text[start..].find("</loc>") else {
-            break;
-        };
-        let end = start + end_rel;
-        values.push(text[start..end].trim().to_string());
-        offset = end + 6;
-    }
-    values
-}
-
-fn read_sitemap_routes_recursive(
-    path: &Path,
-    root: &Path,
-    seen: &mut BTreeSet<PathBuf>,
-) -> Result<BTreeSet<String>> {
-    if !seen.insert(path.to_path_buf()) {
-        return Ok(BTreeSet::new());
-    }
-    let text = fs::read_to_string(path)?;
-    if text.contains("<sitemapindex") {
-        let mut routes = BTreeSet::new();
-        for value in read_loc_values(&text) {
-            let nested_name = value
-                .split('?')
-                .next()
-                .unwrap_or(&value)
-                .split('#')
-                .next()
-                .unwrap_or(&value)
-                .rsplit('/')
-                .next()
-                .unwrap_or(&value);
-            let nested = root.join(nested_name);
-            if nested.exists() {
-                routes.extend(read_sitemap_routes_recursive(&nested, root, seen)?);
-            }
+fn build_indexed_paths(
+    pages: &[Page],
+    artifacts: impl IntoIterator<Item = &'static str>,
+) -> BTreeSet<String> {
+    let mut indexed = BTreeSet::new();
+    for page in pages {
+        indexed.insert(page.relative_path.clone());
+        if page.relative_path == "index.html" {
+            indexed.insert(String::new());
         }
-        return Ok(routes);
+        if let Some(prefix) = page.relative_path.strip_suffix("/index.html") {
+            indexed.insert(prefix.to_string());
+            indexed.insert(format!("{}/", prefix));
+        } else if let Some(prefix) = page.relative_path.strip_suffix(".html") {
+            indexed.insert(prefix.to_string());
+        }
     }
-    if !text.contains("<urlset") {
-        anyhow::bail!("invalid sitemap XML")
+    for artifact in artifacts {
+        indexed.insert(artifact.to_string());
     }
-    Ok(read_loc_values(&text)
-        .into_iter()
-        .filter_map(|value| route_from_urlish(&value))
-        .collect())
+    indexed
 }
 
-fn read_sitemap_routes(path: &Path, root: &Path) -> (BTreeSet<String>, Option<String>) {
-    if !path.exists() {
-        return (BTreeSet::new(), None);
+pub fn build_page_from_source(
+    path: PathBuf,
+    relative_path: String,
+    raw: String,
+    response_headers: BTreeMap<String, String>,
+) -> Page {
+    parser::build_page_from_source(path, relative_path, raw, response_headers)
+}
+
+pub struct SiteArtifacts {
+    pub llms_text: Option<String>,
+    pub robots_text: Option<String>,
+    pub sitemap_text: Option<String>,
+}
+
+pub struct SiteBuildInput {
+    pub root: PathBuf,
+    pub pages: Vec<Page>,
+    pub artifacts: SiteArtifacts,
+    pub deployment_model: DeploymentModel,
+    pub deployment_markers: Vec<String>,
+    pub crawl_meta: Option<CrawlMeta>,
+}
+
+pub fn build_site_from_parts(input: SiteBuildInput) -> Result<Site> {
+    let SiteBuildInput {
+        root,
+        pages,
+        artifacts,
+        deployment_model,
+        deployment_markers,
+        crawl_meta,
+    } = input;
+    let mut route_pages = BTreeMap::new();
+    for page in &pages {
+        if prefer_page(route_pages.get(&page.route), page) {
+            route_pages.insert(page.route.clone(), page.clone());
+        }
     }
-    let mut seen = BTreeSet::new();
-    match read_sitemap_routes_recursive(path, root, &mut seen) {
-        Ok(routes) => (routes, None),
-        Err(error) => (BTreeSet::new(), Some(error.to_string())),
-    }
+    let (sitemap_routes, sitemap_error) = match artifacts.sitemap_text {
+        Some(text) => match sitemap::read_sitemap_routes_from_text(&text) {
+            Ok(routes) => (routes, None),
+            Err(error) => (BTreeSet::new(), Some(error.to_string())),
+        },
+        None => (BTreeSet::new(), None),
+    };
+    let indexed_paths = build_indexed_paths(&pages, ["robots.txt", "llms.txt", "sitemap.xml"]);
+    Ok(Site {
+        root,
+        inbound_links: build_inbound_link_map(&pages),
+        llms_text: artifacts.llms_text,
+        robots_text: artifacts.robots_text,
+        sitemap_routes,
+        sitemap_error,
+        deployment_model,
+        deployment_markers,
+        crawl_meta,
+        pages,
+        route_pages,
+        indexed_paths,
+    })
 }
 
 pub fn load_site(root: &Path) -> Result<Site> {
@@ -808,32 +493,27 @@ pub fn load_site(root: &Path) -> Result<Site> {
     html_files.sort();
     let pages: Vec<Page> = html_files
         .iter()
-        .map(|path| parse_page(path, root))
+        .map(|path| parser::parse_page_from_file(path, root))
         .collect::<Result<Vec<_>>>()?;
-
-    let mut route_pages = BTreeMap::new();
-    for page in &pages {
-        if prefer_page(route_pages.get(&page.route), page) {
-            route_pages.insert(page.route.clone(), page.clone());
-        }
-    }
-
-    let (sitemap_routes, sitemap_error) = read_sitemap_routes(&root.join("sitemap.xml"), root);
     let (deployment_model, deployment_markers) = detect_deployment_model(root);
-    Ok(Site {
+    let mut site = build_site_from_parts(SiteBuildInput {
         root: root.to_path_buf(),
-        inbound_links: build_inbound_link_map(&pages),
-        llms_text: read_optional_text(&root.join("llms.txt")),
-        robots_text: read_optional_text(&root.join("robots.txt")),
-        sitemap_routes,
-        sitemap_error,
+        pages,
+        artifacts: SiteArtifacts {
+            llms_text: read_optional_text(&root.join("llms.txt")),
+            robots_text: read_optional_text(&root.join("robots.txt")),
+            sitemap_text: read_optional_text(&root.join("sitemap.xml")),
+        },
         deployment_model,
         deployment_markers,
         crawl_meta: None,
-        pages,
-        route_pages,
-        indexed_paths: build_site_index(root)?,
-    })
+    })?;
+    site.indexed_paths = build_site_index(root)?;
+    let (sitemap_routes, sitemap_error) =
+        sitemap::read_sitemap_routes(&root.join("sitemap.xml"), root);
+    site.sitemap_routes = sitemap_routes;
+    site.sitemap_error = sitemap_error;
+    Ok(site)
 }
 
 #[cfg(test)]

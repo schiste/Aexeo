@@ -1,24 +1,36 @@
 use anyhow::Result;
 use seogeo_contracts::Finding;
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::PathBuf;
 
-use super::graph::{response_report_path, snapshot_path_for_route};
-use super::http::write_optional_artifact;
+use super::graph::response_report_path;
+use super::http::fetch_with_http;
 use crate::config::RuntimeConfig;
-use crate::site::{CrawlMeta, DeploymentModel, Site, load_site};
+use crate::site::{
+    CrawlMeta, DeploymentModel, Site, SiteArtifacts, SiteBuildInput, build_page_from_source,
+    build_site_from_parts,
+};
+
+#[derive(Debug, Clone)]
+struct CapturedPage {
+    body: String,
+    headers: BTreeMap<String, String>,
+}
 
 pub(crate) struct RuntimeSnapshotBuilder {
-    root: PathBuf,
-    response_headers: BTreeMap<String, BTreeMap<String, String>>,
+    pages: BTreeMap<String, CapturedPage>,
+    robots_text: Option<String>,
+    llms_text: Option<String>,
+    sitemap_text: Option<String>,
 }
 
 impl RuntimeSnapshotBuilder {
-    pub(crate) fn new(root: PathBuf) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            root,
-            response_headers: BTreeMap::new(),
+            pages: BTreeMap::new(),
+            robots_text: None,
+            llms_text: None,
+            sitemap_text: None,
         }
     }
 
@@ -28,29 +40,41 @@ impl RuntimeSnapshotBuilder {
         body: &str,
         headers: &BTreeMap<String, String>,
     ) -> Result<()> {
-        let page_path = snapshot_path_for_route(&self.root, route);
-        if let Some(parent) = page_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(&page_path, body)?;
-        self.response_headers
-            .insert(route.to_string(), headers.clone());
+        self.pages.insert(
+            route.to_string(),
+            CapturedPage {
+                body: body.to_string(),
+                headers: headers.clone(),
+            },
+        );
         Ok(())
     }
 
-    pub(crate) fn write_optional_artifacts(
-        &self,
+    pub(crate) fn capture_optional_artifacts(
+        &mut self,
         base_url: &str,
         runtime: &RuntimeConfig<'_>,
     ) -> Result<()> {
         for artifact in ["robots.txt", "llms.txt", "sitemap.xml"] {
-            write_optional_artifact(
-                &self.root,
-                base_url,
-                artifact,
+            let artifact_url = format!("{}{}", base_url, artifact);
+            let fetched = fetch_with_http(
+                &artifact_url,
                 runtime.crawl_headers,
+                runtime.crawl_cookies,
                 runtime.crawl_basic_auth,
             )?;
+            if fetched.status_code.unwrap_or(500) >= 400 {
+                continue;
+            }
+            let Some(body) = fetched.body else {
+                continue;
+            };
+            match artifact {
+                "robots.txt" => self.robots_text = Some(body),
+                "llms.txt" => self.llms_text = Some(body),
+                "sitemap.xml" => self.sitemap_text = Some(body),
+                _ => {}
+            }
         }
         Ok(())
     }
@@ -63,28 +87,36 @@ impl RuntimeSnapshotBuilder {
         truncated: bool,
     ) -> Result<(Site, Vec<Finding>)> {
         let mut crawl_findings = Vec::new();
-        let mut site = load_site(&self.root)?;
-        site.root = PathBuf::from("crawl");
-        site.deployment_model = DeploymentModel::RuntimeSnapshot;
-        site.deployment_markers = vec!["runtime crawl snapshot".to_string()];
-        site.crawl_meta = Some(CrawlMeta {
-            visited_pages,
-            max_pages,
-            discovered_internal_routes,
-            truncated,
-        });
-        for page in &mut site.pages {
-            page.path = PathBuf::from(response_report_path(&page.route));
-            if let Some(headers) = self.response_headers.get(&page.route) {
-                page.response_headers = headers.clone();
-            }
-        }
-        site.route_pages = site
+        let pages = self
             .pages
             .iter()
-            .cloned()
-            .map(|page| (page.route.clone(), page))
+            .map(|(route, captured)| {
+                let relative_path = relative_html_path(route);
+                build_page_from_source(
+                    PathBuf::from(response_report_path(route)),
+                    relative_path,
+                    captured.body.clone(),
+                    captured.headers.clone(),
+                )
+            })
             .collect();
+        let site = build_site_from_parts(SiteBuildInput {
+            root: PathBuf::from("crawl"),
+            pages,
+            artifacts: SiteArtifacts {
+                llms_text: self.llms_text,
+                robots_text: self.robots_text,
+                sitemap_text: self.sitemap_text,
+            },
+            deployment_model: DeploymentModel::RuntimeSnapshot,
+            deployment_markers: vec!["runtime crawl snapshot".to_string()],
+            crawl_meta: Some(CrawlMeta {
+                visited_pages,
+                max_pages,
+                discovered_internal_routes,
+                truncated,
+            }),
+        })?;
         if truncated {
             crawl_findings.push(Finding {
                 rule_id: "CRW003".to_string(),
@@ -99,8 +131,15 @@ impl RuntimeSnapshotBuilder {
                 suggestion: Some("increase --max-pages for a more complete runtime audit".to_string()),
             });
         }
-        let _ = fs::remove_dir_all(&self.root);
         Ok((site, crawl_findings))
+    }
+}
+
+fn relative_html_path(route: &str) -> String {
+    if route.is_empty() {
+        "index.html".to_string()
+    } else {
+        format!("{route}/index.html")
     }
 }
 
@@ -108,12 +147,10 @@ impl RuntimeSnapshotBuilder {
 mod tests {
     use super::RuntimeSnapshotBuilder;
     use crate::site::DeploymentModel;
-    use std::path::PathBuf;
 
     #[test]
     fn snapshot_builder_rewrites_runtime_paths() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let mut builder = RuntimeSnapshotBuilder::new(temp_dir.path().to_path_buf());
+        let mut builder = RuntimeSnapshotBuilder::new();
         builder
             .write_page(
                 "about",
@@ -127,7 +164,7 @@ mod tests {
         assert_eq!(site.deployment_model, DeploymentModel::RuntimeSnapshot);
         assert_eq!(
             site.route_pages.get("about").unwrap().path,
-            PathBuf::from("crawl/about/index.html")
+            std::path::PathBuf::from("crawl/about/index.html")
         );
     }
 }

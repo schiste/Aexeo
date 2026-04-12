@@ -1,0 +1,8 @@
+{
+  "name": "aexeo-runtime-tools",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "playwright": "^1.52.0"
+  }
+}

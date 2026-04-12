@@ -1,7 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use super::http::{host_for_url, same_site_host};
 use crate::config::RuntimeConfig;
-use crate::site::normalize_internal_href;
+use crate::site::{normalize_internal_href, route_from_urlish};
 
 const ASSET_EXTENSIONS: &[&str] = &[
     ".css", ".gif", ".html", ".ico", ".jpeg", ".jpg", ".js", ".json", ".mjs", ".png", ".svg",
@@ -13,14 +14,6 @@ pub(crate) fn response_report_path(route: &str) -> String {
         "crawl/index.html".to_string()
     } else {
         format!("crawl/{}/index.html", route)
-    }
-}
-
-pub(crate) fn snapshot_path_for_route(root: &Path, route: &str) -> PathBuf {
-    if route.is_empty() {
-        root.join("index.html")
-    } else {
-        root.join(route).join("index.html")
     }
 }
 
@@ -39,7 +32,7 @@ fn attr_value(snippet: &str, attr: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
-pub(crate) fn extract_internal_links(raw: &str) -> Vec<String> {
+pub(crate) fn extract_internal_links(raw: &str, site_host: &str) -> Vec<String> {
     let mut links = Vec::new();
     let mut offset = 0;
     while let Some(index) = raw[offset..].find("<a") {
@@ -49,10 +42,17 @@ pub(crate) fn extract_internal_links(raw: &str) -> Vec<String> {
         };
         let open_end = start + open_end_rel;
         let snippet = &raw[start..=open_end];
-        if let Some(href) = attr_value(snippet, "href")
-            && let Some(target) = normalize_internal_href(&href)
-        {
-            links.push(target);
+        if let Some(href) = attr_value(snippet, "href") {
+            let target = normalize_internal_href(&href).or_else(|| {
+                let target_host = host_for_url(&href);
+                if target_host.is_empty() || !same_site_host(site_host, &target_host) {
+                    return None;
+                }
+                route_from_urlish(&href)
+            });
+            if let Some(target) = target {
+                links.push(target);
+            }
         }
         offset = open_end + 1;
     }
@@ -99,4 +99,27 @@ fn route_is_excluded(route: &str, patterns: &[String]) -> bool {
 pub(crate) fn route_is_allowed(route: &str, runtime: &RuntimeConfig<'_>) -> bool {
     !route_is_excluded(route, runtime.crawl_exclude_patterns)
         && route_matches_patterns(route, runtime.crawl_include_patterns)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_internal_links;
+
+    #[test]
+    fn extracts_relative_and_absolute_same_site_links() {
+        let html = r#"
+            <a href="/about">About</a>
+            <a href="https://www.example.com/contact">Contact</a>
+            <a href="https://example.com/legal/">Legal</a>
+            <a href="https://docs.example.com/guide">Guide</a>
+        "#;
+        assert_eq!(
+            extract_internal_links(html, "www.example.com"),
+            vec![
+                String::from("about"),
+                String::from("contact"),
+                String::from("legal"),
+            ]
+        );
+    }
 }
