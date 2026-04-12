@@ -292,6 +292,62 @@ fn crawl_checkpoint_and_resume_complete_a_partial_runtime_audit() {
 }
 
 #[test]
+fn crawl_writes_progress_artifact_and_performance_metadata() {
+    let (base_url, handle) = spawn_server(8);
+    let temp_dir = tempfile::tempdir().unwrap();
+    let output = Command::new(bin())
+        .current_dir(temp_dir.path())
+        .arg("crawl")
+        .arg(&base_url)
+        .arg("--engine")
+        .arg("http")
+        .arg("--max-pages")
+        .arg("5")
+        .arg("--artifact-every")
+        .arg("1")
+        .arg("--partial-audit-every")
+        .arg("10")
+        .arg("--progress")
+        .arg("off")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.code().is_some());
+    let payload = parse_json(&output.stdout);
+    assert!(payload["artifact"]["performance"]["phases"].is_array());
+    let progress_artifact = temp_dir
+        .path()
+        .join(".seogeo-reports")
+        .join("crawl-progress-latest.json");
+    assert!(progress_artifact.exists());
+    handle.join().unwrap();
+}
+
+#[test]
+fn profile_runtime_reports_performance_data() {
+    let (base_url, handle) = spawn_server(8);
+    let output = Command::new(bin())
+        .arg("profile")
+        .arg("runtime")
+        .arg(&base_url)
+        .arg("--engine")
+        .arg("http")
+        .arg("--max-pages")
+        .arg("5")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "profile");
+    assert!(payload["performance"]["phases"].is_array());
+    assert!(payload["crawl"]["elapsed_ms"].as_u64().is_some());
+    handle.join().unwrap();
+}
+
+#[test]
 fn report_render_supports_markdown_output() {
     let temp_dir = tempfile::tempdir().unwrap();
     let quality_output = Command::new(bin())

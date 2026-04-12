@@ -79,6 +79,12 @@ Options:
       --artifact-min-interval-ms <artifact-min-interval-ms>
           [default: 15000]
 
+      --partial-audit-every <partial-audit-every>
+          [default: 100]
+
+      --partial-audit-min-interval-ms <partial-audit-min-interval-ms>
+          [default: 60000]
+
       --retry-budget <retry-budget>
           [default: 2]
 
@@ -280,6 +286,12 @@ Options:
       --artifact-min-interval-ms <artifact-min-interval-ms>
           [default: 15000]
 
+      --partial-audit-every <partial-audit-every>
+          [default: 100]
+
+      --partial-audit-min-interval-ms <partial-audit-min-interval-ms>
+          [default: 60000]
+
       --retry-budget <retry-budget>
           [default: 2]
 
@@ -294,6 +306,24 @@ Options:
           [default: text]
           [possible values: text, json]
 
+  -h, --help
+          Print help
+```
+
+## `profile`
+
+Profile runtime crawl performance for a live site
+
+```text
+Profile runtime crawl performance for a live site
+
+Usage: profile [COMMAND]
+
+Commands:
+  runtime  Profile runtime crawl phases and rule-group costs
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
   -h, --help
           Print help
 ```
