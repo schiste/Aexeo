@@ -28,6 +28,30 @@ The command writes `.seogeo-reports/grounding-map-latest.json` and reports:
 - intent distribution
 - route-level gaps such as weak comparison structure or missing direct answers
 
+### Evidence Assessment
+
+Evidence assessment focuses on:
+
+- factual and numeric claim detection
+- visible evidence and attribution cues
+- unsupported claim counts
+- citation readiness
+- section-level fidelity risk
+
+Example:
+
+```bash
+cargo run -p seogeo-cli -- intelligence evidence assess .
+```
+
+The command writes `.seogeo-reports/evidence-latest.json` and reports:
+
+- claim count and claim-kind mix
+- unsupported claim volume
+- evidence density score
+- citation readiness score
+- highest-risk routes for AI citation distortion
+
 ### Truth Assessment
 
 Truth assessment compares:

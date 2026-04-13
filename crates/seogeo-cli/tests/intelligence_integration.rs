@@ -30,6 +30,28 @@ fn grounding_map_json_contract_reports_topics_and_intents() {
 }
 
 #[test]
+fn evidence_assess_json_contract_reports_scores() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    write(
+        &temp_dir.path().join("index.html"),
+        r#"<html><head><title>Aexeo benchmarks</title></head><body><section data-ui="hero"><p>Aexeo reduced audit time by 42% in 2026 according to our benchmark report.</p><a href="https://example.com/report">report</a></section></body></html>"#,
+    );
+    let output = Command::new(bin())
+        .arg("intelligence")
+        .arg("evidence")
+        .arg("assess")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "intelligence evidence assess");
+    assert_eq!(payload["result"]["assessment"]["claim_count"], 1);
+}
+
+#[test]
 fn truth_validate_json_contract_reports_manifest_validation() {
     let temp_dir = tempfile::tempdir().unwrap();
     write(

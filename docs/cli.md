@@ -209,6 +209,7 @@ Usage: intelligence [COMMAND]
 
 Commands:
   grounding-map  Infer page topics, grounding intents, and answer-coverage gaps
+  evidence       Assess evidence coverage and citation fidelity risk
   truth          Assess structured truth readiness and cross-surface consistency
   trust-surface  Import and reconcile trusted external surfaces against site truth
   help           Print this message or the help of the given subcommand(s)
