@@ -30,6 +30,36 @@ fn grounding_map_json_contract_reports_topics_and_intents() {
 }
 
 #[test]
+fn intelligence_score_json_contract_reports_overall_score() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    write(
+        &temp_dir.path().join("index.html"),
+        r#"<html><head><title>Aexeo pricing</title><script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Aexeo","url":"https://aexeo.com"}</script></head><body><h1>Aexeo pricing</h1><section data-ui="pricing"><h2>Pricing</h2><p>Aexeo improves audit speed by 42% according to our 2026 benchmark report.</p><a href="https://example.com/report">report</a></section></body></html>"#,
+    );
+    write(
+        &temp_dir.path().join("aexeo-truth.json"),
+        r#"{"version":1,"organization":{"name":"Aexeo","website":"https://aexeo.com","category":"seo_and_geo_platform","descriptors":["seo","geo"]}}"#,
+    );
+    let output = Command::new(bin())
+        .arg("intelligence")
+        .arg("score")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "intelligence score");
+    assert!(
+        payload["result"]["score"]["overall_score"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+}
+
+#[test]
 fn evidence_assess_json_contract_reports_scores() {
     let temp_dir = tempfile::tempdir().unwrap();
     write(
