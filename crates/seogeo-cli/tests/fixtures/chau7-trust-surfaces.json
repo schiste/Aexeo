@@ -1,0 +1,38 @@
+[
+  {
+    "source_type": "github",
+    "url": "https://github.com/schiste/chau7",
+    "title": "schiste/chau7",
+    "snippet": "Chau7 is a native macOS terminal for coding agents and approval workflows.",
+    "entity": "Chau7",
+    "observed_at": "2026-04-13",
+    "stars": 812
+  },
+  {
+    "source_type": "bing_ai",
+    "url": "https://chau7.sh/compare/vs-iterm2",
+    "title": "Chau7 vs iTerm2",
+    "snippet": "Comparison page for coding-agent workflows, approvals, and terminal visibility.",
+    "entity": "Chau7",
+    "observed_at": "2026-04-13",
+    "citations": 7
+  },
+  {
+    "source_type": "directory",
+    "url": "https://chau7.sh/features/hyperlinks",
+    "title": "Hyperlinks",
+    "snippet": "Clickable links and navigation for terminal output.",
+    "entity": "",
+    "observed_at": "2026-04-13",
+    "citations": 3
+  },
+  {
+    "source_type": "reddit",
+    "url": "https://www.reddit.com/r/macapps/comments/example/chau7_terminal_for_agents/",
+    "title": "Chau7 terminal for coding agents",
+    "snippet": "Chau7 gives teams a native macOS terminal tuned for coding agents.",
+    "entity": "Chau7",
+    "observed_at": "2026-04-13",
+    "upvotes": 19
+  }
+]

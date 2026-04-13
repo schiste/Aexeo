@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "organization": {
+    "name": "Chau7",
+    "website": "https://chau7.sh",
+    "category": "native_macos_terminal",
+    "descriptors": [
+      "native macos terminal",
+      "coding agents",
+      "approval workflows"
+    ]
+  },
+  "products": [
+    {
+      "name": "Chau7",
+      "category": "software",
+      "descriptors": [
+        "agent visibility",
+        "terminal productivity"
+      ]
+    }
+  ],
+  "terminology": {
+    "forbidden": {
+      "ai shell": "coding agent terminal"
+    }
+  }
+}
