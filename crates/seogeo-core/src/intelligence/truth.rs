@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+use url::Url;
 
 use crate::schema_rules::{iter_schema_field_values, iter_schema_types};
 use crate::site::Site;
@@ -33,12 +34,28 @@ pub struct TruthTerminology {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct TruthManifest {
+    #[serde(default = "default_truth_manifest_version")]
+    pub version: u32,
     #[serde(default)]
     pub organization: Option<TruthEntity>,
     #[serde(default)]
     pub products: Vec<TruthEntity>,
     #[serde(default)]
     pub terminology: TruthTerminology,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TruthManifestValidation {
+    pub valid: bool,
+    pub version: u32,
+    pub manifest_present: bool,
+    pub organization_present: bool,
+    pub product_count: usize,
+    pub preferred_term_count: usize,
+    pub forbidden_term_count: usize,
+    pub warnings: Vec<String>,
+    pub errors: Vec<String>,
+    pub elapsed_us: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,6 +109,83 @@ pub fn load_truth_manifest(path: &Path) -> Result<TruthManifest> {
     Ok(manifest)
 }
 
+pub fn validate_truth_manifest(manifest: &TruthManifest) -> TruthManifestValidation {
+    let started = Instant::now();
+    let mut warnings = Vec::new();
+    let mut errors = Vec::new();
+
+    if manifest.version != default_truth_manifest_version() {
+        errors.push(format!(
+            "unsupported truth manifest version {}; expected {}",
+            manifest.version,
+            default_truth_manifest_version()
+        ));
+    }
+
+    if manifest.organization.is_none() && manifest.products.is_empty() {
+        errors.push(
+            "truth manifest must define at least one organization or product entity".to_string(),
+        );
+    }
+
+    if let Some(organization) = &manifest.organization {
+        validate_entity(organization, "organization", &mut warnings, &mut errors);
+    } else {
+        warnings.push("truth manifest does not define an organization entity".to_string());
+    }
+
+    for (index, product) in manifest.products.iter().enumerate() {
+        validate_entity(
+            product,
+            &format!("products[{index}]"),
+            &mut warnings,
+            &mut errors,
+        );
+    }
+
+    for (preferred_key, preferred_value) in &manifest.terminology.preferred {
+        if preferred_key.trim().is_empty() || preferred_value.trim().is_empty() {
+            errors.push(format!(
+                "preferred terminology entry '{}' must have a non-empty key and value",
+                preferred_key
+            ));
+        }
+    }
+
+    for (forbidden_key, preferred_value) in &manifest.terminology.forbidden {
+        if forbidden_key.trim().is_empty() || preferred_value.trim().is_empty() {
+            errors.push(format!(
+                "forbidden terminology entry '{}' must have a non-empty key and preferred replacement",
+                forbidden_key
+            ));
+        }
+        if manifest
+            .terminology
+            .preferred
+            .keys()
+            .any(|preferred| preferred.eq_ignore_ascii_case(forbidden_key))
+        {
+            errors.push(format!(
+                "term '{}' cannot be both preferred and forbidden",
+                forbidden_key
+            ));
+        }
+    }
+
+    TruthManifestValidation {
+        valid: errors.is_empty(),
+        version: manifest.version,
+        manifest_present: true,
+        organization_present: manifest.organization.is_some(),
+        product_count: manifest.products.len(),
+        preferred_term_count: manifest.terminology.preferred.len(),
+        forbidden_term_count: manifest.terminology.forbidden.len(),
+        warnings,
+        errors,
+        elapsed_us: started.elapsed().as_micros() as u64,
+    }
+}
+
 pub fn discover_truth_manifest(
     root: &Path,
     explicit: Option<&Path>,
@@ -109,6 +203,10 @@ pub fn discover_truth_manifest(
         }
     }
     Ok(None)
+}
+
+pub fn default_truth_manifest_version() -> u32 {
+    1
 }
 
 pub fn assess_truth_layer(site: &Site, manifest: Option<&TruthManifest>) -> TruthAssessment {
@@ -316,10 +414,50 @@ fn entity_aliases(entity: &TruthEntity) -> Vec<String> {
     aliases
 }
 
+fn validate_entity(
+    entity: &TruthEntity,
+    scope: &str,
+    warnings: &mut Vec<String>,
+    errors: &mut Vec<String>,
+) {
+    if entity.name.trim().is_empty() {
+        errors.push(format!("{scope} must define a non-empty name"));
+    }
+    if let Some(website) = &entity.website
+        && Url::parse(website).is_err()
+    {
+        errors.push(format!("{scope}.website must be a valid absolute URL"));
+    }
+    if entity.aliases.iter().any(|value| value.trim().is_empty()) {
+        errors.push(format!("{scope}.aliases cannot contain empty values"));
+    }
+    if entity.features.iter().any(|value| value.trim().is_empty()) {
+        errors.push(format!("{scope}.features cannot contain empty values"));
+    }
+    if entity
+        .descriptors
+        .iter()
+        .any(|value| value.trim().is_empty())
+    {
+        errors.push(format!("{scope}.descriptors cannot contain empty values"));
+    }
+    if entity
+        .category
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        warnings.push(format!("{scope} does not define a category"));
+    }
+    if entity.descriptors.is_empty() {
+        warnings.push(format!("{scope} does not define descriptors"));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::site::load_site;
+    use std::collections::BTreeMap;
     use tempfile::tempdir;
 
     #[test]
@@ -355,5 +493,69 @@ mod tests {
         let report = assess_truth_layer(&site, None);
         assert!(!report.structured_truth_prerequisite_met);
         assert_eq!(report.score_ceiling, 59);
+    }
+
+    #[test]
+    fn truth_manifest_validation_accepts_supported_contract() {
+        let manifest = TruthManifest {
+            version: default_truth_manifest_version(),
+            organization: Some(TruthEntity {
+                name: "Aexeo".to_string(),
+                aliases: vec!["Aexeo platform".to_string()],
+                website: Some("https://aexeo.com".to_string()),
+                category: Some("seo_and_geo_platform".to_string()),
+                descriptors: vec!["seo".to_string(), "geo".to_string()],
+                features: vec!["truth layer".to_string()],
+            }),
+            products: vec![TruthEntity {
+                name: "Aexeo".to_string(),
+                aliases: Vec::new(),
+                website: Some("https://aexeo.com".to_string()),
+                category: Some("software".to_string()),
+                descriptors: vec!["auditing".to_string()],
+                features: vec!["site audit".to_string()],
+            }],
+            terminology: TruthTerminology {
+                preferred: BTreeMap::from([(
+                    "geo".to_string(),
+                    "Generative Engine Optimization".to_string(),
+                )]),
+                forbidden: BTreeMap::from([(
+                    "aeo suite".to_string(),
+                    "seo and geo auditing platform".to_string(),
+                )]),
+            },
+        };
+
+        let validation = validate_truth_manifest(&manifest);
+        assert!(validation.valid);
+        assert!(validation.errors.is_empty());
+    }
+
+    #[test]
+    fn truth_manifest_validation_rejects_bad_contract() {
+        let manifest = TruthManifest {
+            version: 9,
+            organization: Some(TruthEntity {
+                name: String::new(),
+                aliases: vec![String::new()],
+                website: Some("not-a-url".to_string()),
+                category: None,
+                descriptors: vec![],
+                features: vec![String::new()],
+            }),
+            products: Vec::new(),
+            terminology: TruthTerminology {
+                preferred: BTreeMap::from([("geo".to_string(), String::new())]),
+                forbidden: BTreeMap::from([(
+                    "geo".to_string(),
+                    "Generative Engine Optimization".to_string(),
+                )]),
+            },
+        };
+
+        let validation = validate_truth_manifest(&manifest);
+        assert!(!validation.valid);
+        assert!(!validation.errors.is_empty());
     }
 }

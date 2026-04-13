@@ -50,6 +50,14 @@ Manifest discovery order:
 - `./aexeo-truth.json`
 - `./.well-known/aexeo-truth.json`
 
+Validate the manifest contract explicitly before relying on it for scoring:
+
+```bash
+cargo run -p seogeo-cli -- intelligence truth validate .
+```
+
+The manifest contract is documented in [docs/schemas/aexeo-truth.schema.json](schemas/aexeo-truth.schema.json).
+
 The score is intentionally capped when no structured truth source is present:
 
 - no schema and no manifest: low ceiling

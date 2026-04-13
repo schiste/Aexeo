@@ -11,7 +11,8 @@ pub use trust::{
     TrustSurfaceSourceSummary, import_trust_surface_records, reconcile_trust_surfaces,
 };
 pub use truth::{
-    TruthAssessment, TruthEntity, TruthManifest, TruthMismatch, TruthMismatchSeverity,
-    TruthStructuredSource, TruthTerminology, assess_truth_layer, discover_truth_manifest,
-    load_truth_manifest,
+    TruthAssessment, TruthEntity, TruthManifest, TruthManifestValidation, TruthMismatch,
+    TruthMismatchSeverity, TruthStructuredSource, TruthTerminology, assess_truth_layer,
+    default_truth_manifest_version, discover_truth_manifest, load_truth_manifest,
+    validate_truth_manifest,
 };
