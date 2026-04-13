@@ -1,7 +1,12 @@
+mod evidence;
 mod grounding;
 mod trust;
 mod truth;
 
+pub use evidence::{
+    EvidenceClaim, EvidenceClaimKind, EvidenceRouteAssessment, EvidenceSectionAssessment,
+    EvidenceSiteAssessment, assess_evidence_coverage,
+};
 pub use grounding::{
     GroundingCoverageGap, GroundingIntentFamily, GroundingRouteAnalysis, GroundingSiteAnalysis,
     map_grounding_queries,

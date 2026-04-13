@@ -197,6 +197,21 @@ pub fn build_cli() -> Command {
                         ),
                 )
                 .subcommand(
+                    Command::new("evidence")
+                        .about("Assess evidence coverage and citation fidelity risk")
+                        .subcommand(
+                            Command::new("assess")
+                                .about("Assess claim support, evidence density, and fidelity risk")
+                                .arg(Arg::new("path").default_value("."))
+                                .arg(
+                                    Arg::new("format")
+                                        .long("format")
+                                        .value_parser(["text", "json"])
+                                        .default_value("text"),
+                                ),
+                        ),
+                )
+                .subcommand(
                     Command::new("truth")
                         .about("Assess structured truth readiness and cross-surface consistency")
                         .subcommand(

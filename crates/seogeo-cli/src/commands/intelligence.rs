@@ -1,8 +1,9 @@
 use anyhow::{Result, bail};
 use clap::ArgMatches;
 use seogeo_core::{
-    GroundingCoverageGap, GroundingSiteAnalysis, TrustSurfaceReconciliation, TruthAssessment,
-    TruthManifestValidation, TruthStructuredSource, assess_truth_layer, discover_truth_manifest,
+    EvidenceSiteAssessment, GroundingCoverageGap, GroundingSiteAnalysis,
+    TrustSurfaceReconciliation, TruthAssessment, TruthManifestValidation, TruthStructuredSource,
+    assess_evidence_coverage, assess_truth_layer, discover_truth_manifest,
     import_trust_surface_records, load_site, map_grounding_queries, reconcile_trust_surfaces,
     validate_truth_manifest,
 };
@@ -16,6 +17,11 @@ use crate::output::{render_data_command_json, render_failed_command_json};
 pub fn command_intelligence(submatches: &ArgMatches) -> Result<i32> {
     match submatches.subcommand() {
         Some(("grounding-map", map_matches)) => command_grounding_map(map_matches),
+        Some(("evidence", evidence_matches)) => match evidence_matches.subcommand() {
+            Some(("assess", assess_matches)) => command_evidence_assess(assess_matches),
+            Some((other, _)) => bail!("unsupported evidence command: {}", other),
+            None => bail!("missing evidence subcommand"),
+        },
         Some(("truth", truth_matches)) => match truth_matches.subcommand() {
             Some(("validate", validate_matches)) => command_truth_validate(validate_matches),
             Some(("assess", assess_matches)) => command_truth_assess(assess_matches),
@@ -32,6 +38,33 @@ pub fn command_intelligence(submatches: &ArgMatches) -> Result<i32> {
         },
         Some((other, _)) => bail!("unsupported intelligence command: {}", other),
         None => bail!("missing intelligence subcommand"),
+    }
+}
+
+fn command_evidence_assess(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let root = PathBuf::from(required_arg(submatches, "path")?);
+    match load_site(&root).map(|site| assess_evidence_coverage(&site)) {
+        Ok(report) => {
+            let report_path = write_report(&root, "evidence-latest.json", &report)?;
+            match format {
+                "json" => println!(
+                    "{}",
+                    render_data_command_json(
+                        "intelligence evidence assess",
+                        true,
+                        serde_json::json!({
+                            "report_path": report_path.to_string_lossy(),
+                            "assessment": report,
+                        }),
+                        Vec::new()
+                    )?
+                ),
+                _ => println!("{}", evidence_text(&report, &report_path)),
+            }
+            Ok(0)
+        }
+        Err(error) => emit_failure("intelligence evidence assess", format, error),
     }
 }
 
@@ -284,6 +317,45 @@ fn grounding_text(report: &GroundingSiteAnalysis, report_path: &Path) -> String 
                 .map(gap_label)
                 .collect::<Vec<_>>()
                 .join(",")
+        ));
+    }
+    lines.join("\n")
+}
+
+fn evidence_text(report: &EvidenceSiteAssessment, report_path: &Path) -> String {
+    let mut lines = vec![
+        "Evidence Assessment".to_string(),
+        String::new(),
+        format!("Pages analyzed: {}", report.pages_analyzed),
+        format!("Routes with claims: {}", report.routes_with_claims),
+        format!("Claims detected: {}", report.claim_count),
+        format!("Unsupported claims: {}", report.unsupported_claims),
+        format!("Evidence density: {}", report.evidence_density_score),
+        format!("Citation readiness: {}", report.citation_readiness_score),
+        format!(
+            "Average fidelity risk: {}",
+            report.average_fidelity_risk_score
+        ),
+        format!("Elapsed: {}ms", report.elapsed_us / 1000),
+        format!("Report: {}", report_path.display()),
+    ];
+    if !report.claim_kind_distribution.is_empty() {
+        lines.push(String::new());
+        lines.push("Claim kinds:".to_string());
+        for (kind, count) in &report.claim_kind_distribution {
+            lines.push(format!("- {} {}", kind, count));
+        }
+    }
+    lines.push(String::new());
+    lines.push("Top risky routes:".to_string());
+    for route in report.routes.iter().take(10) {
+        lines.push(format!(
+            "- /{} claims={} unsupported={} fidelity_risk={} citation_readiness={}",
+            route.route,
+            route.claim_count,
+            route.unsupported_claims,
+            route.fidelity_risk_score,
+            route.citation_readiness_score
         ));
     }
     lines.join("\n")
