@@ -30,6 +30,28 @@ fn grounding_map_json_contract_reports_topics_and_intents() {
 }
 
 #[test]
+fn truth_validate_json_contract_reports_manifest_validation() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    write(
+        &temp_dir.path().join("aexeo-truth.json"),
+        r#"{"version":1,"organization":{"name":"Aexeo","website":"https://aexeo.com","category":"seo_and_geo_platform","descriptors":["seo","geo"]},"products":[{"name":"Aexeo","category":"software","descriptors":["auditing"]}]}"#,
+    );
+    let output = Command::new(bin())
+        .arg("intelligence")
+        .arg("truth")
+        .arg("validate")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "intelligence truth validate");
+    assert_eq!(payload["result"]["validation"]["valid"], true);
+}
+
+#[test]
 fn truth_assess_json_contract_reports_scores() {
     let temp_dir = tempfile::tempdir().unwrap();
     write(

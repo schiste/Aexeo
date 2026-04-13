@@ -366,7 +366,7 @@ fn canonical_labels(manifest: Option<&TruthManifest>) -> BTreeSet<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::intelligence::truth::TruthEntity;
+    use crate::intelligence::truth::{TruthEntity, default_truth_manifest_version};
     use crate::site::load_site;
     use tempfile::tempdir;
 
@@ -394,6 +394,7 @@ mod tests {
         .unwrap();
         let site = load_site(temp.path()).unwrap();
         let manifest = TruthManifest {
+            version: default_truth_manifest_version(),
             organization: Some(TruthEntity {
                 name: "Aexeo".to_string(),
                 aliases: vec![],

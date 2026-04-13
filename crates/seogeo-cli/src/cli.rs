@@ -200,6 +200,18 @@ pub fn build_cli() -> Command {
                     Command::new("truth")
                         .about("Assess structured truth readiness and cross-surface consistency")
                         .subcommand(
+                            Command::new("validate")
+                                .about("Validate the Aexeo truth manifest contract")
+                                .arg(Arg::new("path").default_value("."))
+                                .arg(Arg::new("manifest").long("manifest").num_args(1))
+                                .arg(
+                                    Arg::new("format")
+                                        .long("format")
+                                        .value_parser(["text", "json"])
+                                        .default_value("text"),
+                                ),
+                        )
+                        .subcommand(
                             Command::new("assess")
                                 .about("Assess schema and optional truth manifest consistency")
                                 .arg(Arg::new("path").default_value("."))

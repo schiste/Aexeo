@@ -2,8 +2,9 @@ use anyhow::{Result, bail};
 use clap::ArgMatches;
 use seogeo_core::{
     GroundingCoverageGap, GroundingSiteAnalysis, TrustSurfaceReconciliation, TruthAssessment,
-    TruthStructuredSource, assess_truth_layer, discover_truth_manifest,
+    TruthManifestValidation, TruthStructuredSource, assess_truth_layer, discover_truth_manifest,
     import_trust_surface_records, load_site, map_grounding_queries, reconcile_trust_surfaces,
+    validate_truth_manifest,
 };
 use serde::Serialize;
 use std::fs;
@@ -16,6 +17,7 @@ pub fn command_intelligence(submatches: &ArgMatches) -> Result<i32> {
     match submatches.subcommand() {
         Some(("grounding-map", map_matches)) => command_grounding_map(map_matches),
         Some(("truth", truth_matches)) => match truth_matches.subcommand() {
+            Some(("validate", validate_matches)) => command_truth_validate(validate_matches),
             Some(("assess", assess_matches)) => command_truth_assess(assess_matches),
             Some((other, _)) => bail!("unsupported truth command: {}", other),
             None => bail!("missing truth subcommand"),
@@ -60,6 +62,44 @@ fn command_grounding_map(submatches: &ArgMatches) -> Result<i32> {
     }
 }
 
+fn command_truth_validate(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let root = PathBuf::from(required_arg(submatches, "path")?);
+    let manifest_path = submatches.get_one::<String>("manifest").map(PathBuf::from);
+    match discover_truth_manifest(&root, manifest_path.as_deref())? {
+        Some((path, manifest)) => {
+            let validation = validate_truth_manifest(&manifest);
+            match format {
+                "json" => println!(
+                    "{}",
+                    render_data_command_json(
+                        "intelligence truth validate",
+                        validation.valid,
+                        serde_json::json!({
+                            "manifest_path": canonicalize_or_keep(&path.to_string_lossy()).display().to_string(),
+                            "validation": validation,
+                        }),
+                        Vec::new()
+                    )?
+                ),
+                _ => println!(
+                    "{}",
+                    truth_manifest_text(
+                        &validation,
+                        &canonicalize_or_keep(&path.to_string_lossy()),
+                    )
+                ),
+            }
+            Ok(if validation.valid { 0 } else { 1 })
+        }
+        None => emit_failure(
+            "intelligence truth validate",
+            format,
+            anyhow::anyhow!("no truth manifest found"),
+        ),
+    }
+}
+
 fn command_truth_assess(submatches: &ArgMatches) -> Result<i32> {
     let format = required_arg(submatches, "format")?;
     let root = PathBuf::from(required_arg(submatches, "path")?);
@@ -75,6 +115,9 @@ fn command_truth_assess(submatches: &ArgMatches) -> Result<i32> {
                     .display()
                     .to_string()
             });
+            let manifest_validation = manifest
+                .as_ref()
+                .map(|(_, item)| validate_truth_manifest(item));
             match format {
                 "json" => println!(
                     "{}",
@@ -83,6 +126,7 @@ fn command_truth_assess(submatches: &ArgMatches) -> Result<i32> {
                         true,
                         serde_json::json!({
                             "manifest_path": manifest_path,
+                            "manifest_validation": manifest_validation,
                             "report_path": report_path.to_string_lossy(),
                             "assessment": report,
                         }),
@@ -91,7 +135,12 @@ fn command_truth_assess(submatches: &ArgMatches) -> Result<i32> {
                 ),
                 _ => println!(
                     "{}",
-                    truth_text(&report, manifest_path.as_deref(), &report_path)
+                    truth_text(
+                        &report,
+                        manifest_validation.as_ref(),
+                        manifest_path.as_deref(),
+                        &report_path,
+                    )
                 ),
             }
             Ok(0)
@@ -250,7 +299,12 @@ fn gap_label(gap: &GroundingCoverageGap) -> &'static str {
     }
 }
 
-fn truth_text(report: &TruthAssessment, manifest_path: Option<&str>, report_path: &Path) -> String {
+fn truth_text(
+    report: &TruthAssessment,
+    manifest_validation: Option<&TruthManifestValidation>,
+    manifest_path: Option<&str>,
+    report_path: &Path,
+) -> String {
     let mut lines = vec![
         "Truth Assessment".to_string(),
         String::new(),
@@ -274,6 +328,15 @@ fn truth_text(report: &TruthAssessment, manifest_path: Option<&str>, report_path
     if let Some(path) = manifest_path {
         lines.push(format!("Manifest: {}", path));
     }
+    if let Some(validation) = manifest_validation {
+        lines.push(format!("Manifest valid: {}", validation.valid));
+        if !validation.errors.is_empty() {
+            lines.push(format!(
+                "Manifest errors: {}",
+                validation.errors.join(" | ")
+            ));
+        }
+    }
     if !report.mismatches.is_empty() {
         lines.push(String::new());
         lines.push("Mismatches:".to_string());
@@ -286,6 +349,36 @@ fn truth_text(report: &TruthAssessment, manifest_path: Option<&str>, report_path
                 mismatch.observed,
                 mismatch.route
             ));
+        }
+    }
+    lines.join("\n")
+}
+
+fn truth_manifest_text(report: &TruthManifestValidation, manifest_path: &Path) -> String {
+    let mut lines = vec![
+        "Truth Manifest Validation".to_string(),
+        String::new(),
+        format!("Manifest: {}", manifest_path.display()),
+        format!("Valid: {}", report.valid),
+        format!("Version: {}", report.version),
+        format!("Organization present: {}", report.organization_present),
+        format!("Products: {}", report.product_count),
+        format!("Preferred terms: {}", report.preferred_term_count),
+        format!("Forbidden terms: {}", report.forbidden_term_count),
+        format!("Elapsed: {}ms", report.elapsed_us / 1000),
+    ];
+    if !report.warnings.is_empty() {
+        lines.push(String::new());
+        lines.push("Warnings:".to_string());
+        for warning in &report.warnings {
+            lines.push(format!("- {}", warning));
+        }
+    }
+    if !report.errors.is_empty() {
+        lines.push(String::new());
+        lines.push("Errors:".to_string());
+        for error in &report.errors {
+            lines.push(format!("- {}", error));
         }
     }
     lines.join("\n")
