@@ -1,6 +1,6 @@
 use serde_json::Value;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_seogeo-cli")
@@ -15,4 +15,12 @@ pub fn write(path: &Path, text: &str) {
 
 pub fn parse_json(output: &[u8]) -> Value {
     serde_json::from_slice(output).unwrap()
+}
+
+#[allow(dead_code)]
+pub fn fixture(path: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join(path)
 }

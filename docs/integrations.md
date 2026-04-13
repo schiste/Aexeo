@@ -105,6 +105,11 @@ Example import:
 cargo run -p seogeo-cli -- intelligence trust-surface import trust-surfaces.csv --root .
 ```
 
+For a realistic fixture-driven workflow, see:
+
+- [crates/seogeo-cli/tests/fixtures/chau7-trust-surfaces.json](/Users/christophehenner/Downloads/Repositories/Aexeo/crates/seogeo-cli/tests/fixtures/chau7-trust-surfaces.json)
+- [crates/seogeo-cli/tests/fixtures/chau7-mini-site](/Users/christophehenner/Downloads/Repositories/Aexeo/crates/seogeo-cli/tests/fixtures/chau7-mini-site)
+
 Supported columns:
 
 - `source_type`
