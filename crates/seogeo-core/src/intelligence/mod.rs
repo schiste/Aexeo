@@ -1,5 +1,6 @@
 mod evidence;
 mod grounding;
+mod score;
 mod trust;
 mod truth;
 
@@ -10,6 +11,9 @@ pub use evidence::{
 pub use grounding::{
     GroundingCoverageGap, GroundingIntentFamily, GroundingRouteAnalysis, GroundingSiteAnalysis,
     map_grounding_queries,
+};
+pub use score::{
+    IntelligenceBlocker, RouteIntelligenceScore, SiteIntelligenceScore, score_intelligence,
 };
 pub use trust::{
     TrustSurfaceIssue, TrustSurfaceIssueKind, TrustSurfaceReconciliation, TrustSurfaceRecord,

@@ -134,6 +134,30 @@ The reconciliation report highlights:
 - forbidden terminology usage
 - descriptor gaps where external text does not reflect the canonical product framing
 
+### Intelligence Score
+
+Use the score workflow when you want a product-level summary instead of separate analysis reports.
+
+Example:
+
+```bash
+cargo run -p seogeo-cli -- intelligence score . --site-url https://example.com --trust-surfaces trust-surfaces.json
+```
+
+The score report combines:
+
+- citation readiness from evidence coverage
+- truth consistency from schema and manifest alignment
+- answer-pack quality from grounding gaps
+- optional external trust alignment from reconciled trust surfaces
+
+It writes `.seogeo-reports/intelligence-score-latest.json` and includes:
+
+- site-level score breakdown
+- route-level scores
+- top blockers
+- lowest scoring routes
+
 ## Snippet Inspection
 
 Use snippet inspection when you need to understand whether a route or live URL is suppressing reuse in search or AI summaries.

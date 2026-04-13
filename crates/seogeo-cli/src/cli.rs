@@ -268,6 +268,20 @@ pub fn build_cli() -> Command {
                                         .default_value("text"),
                                 ),
                         ),
+                )
+                .subcommand(
+                    Command::new("score")
+                        .about("Compute site and route intelligence scores")
+                        .arg(Arg::new("path").default_value("."))
+                        .arg(Arg::new("manifest").long("manifest").num_args(1))
+                        .arg(Arg::new("trust-surfaces").long("trust-surfaces").num_args(1))
+                        .arg(Arg::new("site-url").long("site-url").num_args(1))
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "json"])
+                                .default_value("text"),
+                        ),
                 ),
         )
         .subcommand(

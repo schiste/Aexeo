@@ -55,12 +55,13 @@ pub use integrations::{
 pub use intelligence::{
     EvidenceClaim, EvidenceClaimKind, EvidenceRouteAssessment, EvidenceSectionAssessment,
     EvidenceSiteAssessment, GroundingCoverageGap, GroundingIntentFamily, GroundingRouteAnalysis,
-    GroundingSiteAnalysis, TrustSurfaceIssue, TrustSurfaceIssueKind, TrustSurfaceReconciliation,
-    TrustSurfaceRecord, TrustSurfaceSourceSummary, TruthAssessment, TruthEntity, TruthManifest,
+    GroundingSiteAnalysis, IntelligenceBlocker, RouteIntelligenceScore, SiteIntelligenceScore,
+    TrustSurfaceIssue, TrustSurfaceIssueKind, TrustSurfaceReconciliation, TrustSurfaceRecord,
+    TrustSurfaceSourceSummary, TruthAssessment, TruthEntity, TruthManifest,
     TruthManifestValidation, TruthMismatch, TruthMismatchSeverity, TruthStructuredSource,
     assess_evidence_coverage, assess_truth_layer, default_truth_manifest_version,
     discover_truth_manifest, import_trust_surface_records, load_truth_manifest,
-    map_grounding_queries, reconcile_trust_surfaces, validate_truth_manifest,
+    map_grounding_queries, reconcile_trust_surfaces, score_intelligence, validate_truth_manifest,
 };
 pub use link_rules::run_link_rules;
 pub use llm_rules::run_llm_rules;

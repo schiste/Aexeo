@@ -1,11 +1,11 @@
 use anyhow::{Result, bail};
 use clap::ArgMatches;
 use seogeo_core::{
-    EvidenceSiteAssessment, GroundingCoverageGap, GroundingSiteAnalysis,
+    EvidenceSiteAssessment, GroundingCoverageGap, GroundingSiteAnalysis, SiteIntelligenceScore,
     TrustSurfaceReconciliation, TruthAssessment, TruthManifestValidation, TruthStructuredSource,
     assess_evidence_coverage, assess_truth_layer, discover_truth_manifest,
     import_trust_surface_records, load_site, map_grounding_queries, reconcile_trust_surfaces,
-    validate_truth_manifest,
+    score_intelligence, validate_truth_manifest,
 };
 use serde::Serialize;
 use std::fs;
@@ -36,6 +36,7 @@ pub fn command_intelligence(submatches: &ArgMatches) -> Result<i32> {
             Some((other, _)) => bail!("unsupported trust-surface command: {}", other),
             None => bail!("missing trust-surface subcommand"),
         },
+        Some(("score", score_matches)) => command_intelligence_score(score_matches),
         Some((other, _)) => bail!("unsupported intelligence command: {}", other),
         None => bail!("missing intelligence subcommand"),
     }
@@ -263,6 +264,53 @@ fn command_trust_surface_reconcile(submatches: &ArgMatches) -> Result<i32> {
     }
 }
 
+fn command_intelligence_score(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let root = PathBuf::from(required_arg(submatches, "path")?);
+    let manifest_path = submatches.get_one::<String>("manifest").map(PathBuf::from);
+    let trust_surface_path = submatches
+        .get_one::<String>("trust-surfaces")
+        .map(PathBuf::from);
+    let site_url = submatches.get_one::<String>("site-url").map(String::as_str);
+
+    let site = match load_site(&root) {
+        Ok(site) => site,
+        Err(error) => return emit_failure("intelligence score", format, error),
+    };
+    let manifest = discover_truth_manifest(&root, manifest_path.as_deref())?;
+    let grounding = map_grounding_queries(&site);
+    let evidence = assess_evidence_coverage(&site);
+    let truth = assess_truth_layer(&site, manifest.as_ref().map(|(_, item)| item));
+    let trust = match trust_surface_path.as_ref() {
+        Some(path) => Some(reconcile_trust_surfaces(
+            &import_trust_surface_records(path)?,
+            &site,
+            site_url,
+            manifest.as_ref().map(|(_, item)| item),
+        )),
+        None => None,
+    };
+    let score = score_intelligence(&grounding, &truth, &evidence, trust.as_ref());
+    let report_path = write_report(&root, "intelligence-score-latest.json", &score)?;
+
+    match format {
+        "json" => println!(
+            "{}",
+            render_data_command_json(
+                "intelligence score",
+                true,
+                serde_json::json!({
+                    "report_path": report_path.to_string_lossy(),
+                    "score": score,
+                }),
+                Vec::new()
+            )?
+        ),
+        _ => println!("{}", score_text(&score, &report_path)),
+    }
+    Ok(0)
+}
+
 fn emit_failure(command: &str, format: &str, error: anyhow::Error) -> Result<i32> {
     match format {
         "json" => println!(
@@ -356,6 +404,55 @@ fn evidence_text(report: &EvidenceSiteAssessment, report_path: &Path) -> String 
             route.unsupported_claims,
             route.fidelity_risk_score,
             route.citation_readiness_score
+        ));
+    }
+    lines.join("\n")
+}
+
+fn score_text(report: &SiteIntelligenceScore, report_path: &Path) -> String {
+    let mut lines = vec![
+        "Intelligence Score".to_string(),
+        String::new(),
+        format!("Overall score: {}", report.overall_score),
+        format!("Citation readiness: {}", report.citation_readiness_score),
+        format!("Truth consistency: {}", report.truth_consistency_score),
+        format!("Answer pack: {}", report.answer_pack_score),
+        format!(
+            "External trust alignment: {}",
+            report
+                .external_trust_alignment_score
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "n/a".to_string())
+        ),
+        format!("Elapsed: {}ms", report.elapsed_us / 1000),
+        format!("Report: {}", report_path.display()),
+    ];
+    if !report.blockers.is_empty() {
+        lines.push(String::new());
+        lines.push("Top blockers:".to_string());
+        for blocker in report.blockers.iter().take(10) {
+            lines.push(format!(
+                "- [{}] {} route={}",
+                blocker.category,
+                blocker.message,
+                blocker.route.as_deref().unwrap_or("(sitewide)")
+            ));
+        }
+    }
+    lines.push(String::new());
+    lines.push("Lowest scoring routes:".to_string());
+    for route in report.route_scores.iter().take(10) {
+        lines.push(format!(
+            "- /{} overall={} citation={} truth={} answer_pack={} trust={}",
+            route.route,
+            route.overall_score,
+            route.citation_readiness_score,
+            route.truth_consistency_score,
+            route.answer_pack_score,
+            route
+                .external_trust_alignment_score
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "n/a".to_string())
         ));
     }
     lines.join("\n")
