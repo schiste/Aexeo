@@ -745,6 +745,18 @@ fn detect_descriptors(site: &Site, organization_name: Option<&str>) -> Vec<Strin
         }
         let weighted_sources = [
             (page.meta_description(), 4usize),
+            (
+                page.meta_by_property
+                    .get("og:description")
+                    .map(String::as_str),
+                3usize,
+            ),
+            (
+                page.meta_by_name
+                    .get("twitter:description")
+                    .map(String::as_str),
+                2usize,
+            ),
             (page.h1_texts.first().map(String::as_str), 2usize),
             (page.title.as_deref(), 1usize),
         ];
@@ -759,19 +771,49 @@ fn detect_descriptors(site: &Site, organization_name: Option<&str>) -> Vec<Strin
     }
     let mut descriptors = counts
         .into_iter()
-        .filter(|(_, count)| *count >= 3)
-        .map(|(phrase, _)| phrase)
+        .filter_map(|(phrase, count)| {
+            if count < 3 {
+                return None;
+            }
+            let score = descriptor_score(&phrase);
+            (score > 0).then_some((phrase, count, score))
+        })
         .collect::<Vec<_>>();
-    descriptors.sort_by(|left, right| {
-        right
-            .split_whitespace()
-            .count()
-            .cmp(&left.split_whitespace().count())
-            .then_with(|| left.cmp(right))
-    });
-    descriptors.dedup();
-    descriptors.truncate(6);
-    descriptors
+    descriptors.sort_by(
+        |(left_phrase, left_count, left_score), (right_phrase, right_count, right_score)| {
+            right_score
+                .cmp(left_score)
+                .then_with(|| right_count.cmp(left_count))
+                .then_with(|| {
+                    left_phrase
+                        .split_whitespace()
+                        .count()
+                        .cmp(&right_phrase.split_whitespace().count())
+                })
+                .then_with(|| left_phrase.cmp(right_phrase))
+        },
+    );
+    let mut out = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut seen_tokens = Vec::<BTreeSet<String>>::new();
+    for (phrase, _, _) in descriptors {
+        let token_set = normalized_words(&phrase);
+        if token_set.is_empty()
+            || seen_tokens
+                .iter()
+                .any(|existing| token_overlap_ratio(existing, &token_set) >= 0.67)
+        {
+            continue;
+        }
+        if seen.insert(phrase.clone()) {
+            seen_tokens.push(token_set);
+            out.push(phrase);
+        }
+        if out.len() == 6 {
+            break;
+        }
+    }
+    out
 }
 
 fn organization_aliases(site: &Site) -> Vec<String> {
@@ -964,6 +1006,45 @@ fn score_name_quality(value: &str) -> usize {
     score
 }
 
+fn descriptor_score(phrase: &str) -> i32 {
+    let words = normalized_words(phrase);
+    let mut score = 0i32;
+    for word in &words {
+        if DESCRIPTOR_ANCHORS.contains(&word.as_str()) {
+            score += 3;
+        }
+        if DESCRIPTOR_NOISE.contains(&word.as_str()) {
+            score -= 4;
+        }
+        if MODEL_ENUMERATION_TOKENS.contains(&word.as_str()) {
+            score -= 6;
+        }
+        if VERBISH_TOKENS.contains(&word.as_str()) {
+            score -= 2;
+        }
+    }
+    if words.len() == 2 {
+        score += 1;
+    }
+    if words
+        .iter()
+        .any(|word| CORE_DESCRIPTOR_WORDS.contains(&word.as_str()))
+    {
+        score += 2;
+    }
+    score
+}
+
+fn token_overlap_ratio(left: &BTreeSet<String>, right: &BTreeSet<String>) -> f32 {
+    let overlap = left.intersection(right).count() as f32;
+    let max_len = left.len().max(right.len()) as f32;
+    if max_len == 0.0 {
+        0.0
+    } else {
+        overlap / max_len
+    }
+}
+
 fn normalize_phrase(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for ch in value.chars() {
@@ -979,6 +1060,76 @@ fn normalize_phrase(value: &str) -> String {
 const STOP_WORDS: &[&str] = &[
     "a", "an", "and", "app", "as", "at", "by", "for", "from", "in", "into", "is", "it", "of", "on",
     "or", "the", "to", "with", "your",
+];
+
+const DESCRIPTOR_ANCHORS: &[&str] = &[
+    "agent",
+    "agents",
+    "analytics",
+    "app",
+    "approval",
+    "automation",
+    "coding",
+    "compare",
+    "control",
+    "dashboard",
+    "developer",
+    "developers",
+    "engineering",
+    "local",
+    "mac",
+    "macos",
+    "open",
+    "privacy",
+    "source",
+    "terminal",
+    "tool",
+    "tools",
+    "visibility",
+    "workflow",
+    "workflows",
+];
+
+const CORE_DESCRIPTOR_WORDS: &[&str] = &[
+    "agents",
+    "approval",
+    "coding",
+    "local",
+    "macos",
+    "open",
+    "source",
+    "terminal",
+    "visibility",
+    "workflow",
+    "workflows",
+];
+
+const DESCRIPTOR_NOISE: &[&str] = &[
+    "all",
+    "everything",
+    "free",
+    "more",
+    "named",
+    "one",
+    "shiny",
+    "sock",
+    "world",
+];
+
+const MODEL_ENUMERATION_TOKENS: &[&str] = &[
+    "aider", "chatgpt", "claude", "codex", "copilot", "cursor", "gemini", "gpt",
+];
+
+const VERBISH_TOKENS: &[&str] = &[
+    "built",
+    "intervene",
+    "keep",
+    "lets",
+    "observe",
+    "run",
+    "see",
+    "step",
+    "welcome",
 ];
 
 #[cfg(test)]
