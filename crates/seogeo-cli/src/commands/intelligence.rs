@@ -22,13 +22,15 @@ pub fn command_intelligence(submatches: &ArgMatches) -> Result<i32> {
             Some((other, _)) => bail!("unsupported evidence command: {}", other),
             None => bail!("missing evidence subcommand"),
         },
-        Some(("truth", truth_matches)) => match truth_matches.subcommand() {
-            Some(("validate", validate_matches)) => command_truth_validate(validate_matches),
-            Some(("generate", generate_matches)) => command_truth_generate(generate_matches),
-            Some(("assess", assess_matches)) => command_truth_assess(assess_matches),
-            Some((other, _)) => bail!("unsupported truth command: {}", other),
-            None => bail!("missing truth subcommand"),
-        },
+        Some(("facts", truth_matches)) | Some(("truth", truth_matches)) => {
+            match truth_matches.subcommand() {
+                Some(("validate", validate_matches)) => command_truth_validate(validate_matches),
+                Some(("generate", generate_matches)) => command_truth_generate(generate_matches),
+                Some(("assess", assess_matches)) => command_truth_assess(assess_matches),
+                Some((other, _)) => bail!("unsupported facts command: {}", other),
+                None => bail!("missing facts subcommand"),
+            }
+        }
         Some(("trust-surface", trust_matches)) => match trust_matches.subcommand() {
             Some(("import", import_matches)) => command_trust_surface_import(import_matches),
             Some(("reconcile", reconcile_matches)) => {
@@ -108,7 +110,7 @@ fn command_truth_validate(submatches: &ArgMatches) -> Result<i32> {
                 "json" => println!(
                     "{}",
                     render_data_command_json(
-                        "intelligence truth validate",
+                        "intelligence facts validate",
                         validation.valid,
                         serde_json::json!({
                             "manifest_path": canonicalize_or_keep(&path.to_string_lossy()).display().to_string(),
@@ -128,9 +130,9 @@ fn command_truth_validate(submatches: &ArgMatches) -> Result<i32> {
             Ok(if validation.valid { 0 } else { 1 })
         }
         None => emit_failure(
-            "intelligence truth validate",
+            "intelligence facts validate",
             format,
-            anyhow::anyhow!("no truth manifest found"),
+            anyhow::anyhow!("no facts manifest found"),
         ),
     }
 }
@@ -145,13 +147,13 @@ fn command_truth_generate(submatches: &ArgMatches) -> Result<i32> {
 
     match load_site(&root).map(|site| generate_truth_manifest(&site)) {
         Ok(report) => {
-            let report_path = write_report(&root, "truth-manifest-generated.json", &report)?;
+            let report_path = write_report(&root, "facts-manifest-generated.json", &report)?;
             let write_path = if let Some(path) = explicit_write {
                 Some(path)
             } else {
                 deploy_location.map(|location| match location {
-                    "well-known" => root.join(".well-known/aexeo-truth.json"),
-                    _ => root.join("aexeo-truth.json"),
+                    "well-known" => root.join(".well-known/facts.json"),
+                    _ => root.join("facts.json"),
                 })
             };
             if let Some(path) = write_path.as_ref() {
@@ -164,7 +166,7 @@ fn command_truth_generate(submatches: &ArgMatches) -> Result<i32> {
                 "json" => println!(
                     "{}",
                     render_data_command_json(
-                        "intelligence truth generate",
+                        "intelligence facts generate",
                         report.validation.valid,
                         serde_json::json!({
                             "report_path": report_path.to_string_lossy(),
@@ -181,7 +183,7 @@ fn command_truth_generate(submatches: &ArgMatches) -> Result<i32> {
             }
             Ok(if report.validation.valid { 0 } else { 1 })
         }
-        Err(error) => emit_failure("intelligence truth generate", format, error),
+        Err(error) => emit_failure("intelligence facts generate", format, error),
     }
 }
 
@@ -194,7 +196,7 @@ fn command_truth_assess(submatches: &ArgMatches) -> Result<i32> {
         .map(|site| assess_truth_layer(&site, manifest.as_ref().map(|(_, item)| item)))
     {
         Ok(report) => {
-            let report_path = write_report(&root, "truth-layer-latest.json", &report)?;
+            let report_path = write_report(&root, "facts-layer-latest.json", &report)?;
             let manifest_path = manifest.as_ref().map(|(path, _)| {
                 canonicalize_or_keep(&path.to_string_lossy())
                     .display()
@@ -207,7 +209,7 @@ fn command_truth_assess(submatches: &ArgMatches) -> Result<i32> {
                 "json" => println!(
                     "{}",
                     render_data_command_json(
-                        "intelligence truth assess",
+                        "intelligence facts assess",
                         true,
                         serde_json::json!({
                             "manifest_path": manifest_path,
@@ -230,7 +232,7 @@ fn command_truth_assess(submatches: &ArgMatches) -> Result<i32> {
             }
             Ok(0)
         }
-        Err(error) => emit_failure("intelligence truth assess", format, error),
+        Err(error) => emit_failure("intelligence facts assess", format, error),
     }
 }
 
@@ -466,7 +468,7 @@ fn score_text(report: &SiteIntelligenceScore, report_path: &Path) -> String {
         String::new(),
         format!("Overall score: {}", report.overall_score),
         format!("Citation readiness: {}", report.citation_readiness_score),
-        format!("Truth consistency: {}", report.truth_consistency_score),
+        format!("Facts consistency: {}", report.truth_consistency_score),
         format!("Answer pack: {}", report.answer_pack_score),
         format!(
             "External trust alignment: {}",
@@ -494,7 +496,7 @@ fn score_text(report: &SiteIntelligenceScore, report_path: &Path) -> String {
     lines.push("Lowest scoring routes:".to_string());
     for route in report.route_scores.iter().take(10) {
         lines.push(format!(
-            "- /{} overall={} citation={} truth={} answer_pack={} trust={}",
+            "- /{} overall={} citation={} facts={} answer_pack={} trust={}",
             route.route,
             route.overall_score,
             route.citation_readiness_score,
@@ -526,7 +528,7 @@ fn truth_text(
     report_path: &Path,
 ) -> String {
     let mut lines = vec![
-        "Truth Assessment".to_string(),
+        "Facts Assessment".to_string(),
         String::new(),
         format!(
             "Structured source: {}",
@@ -576,7 +578,7 @@ fn truth_text(
 
 fn truth_manifest_text(report: &TruthManifestValidation, manifest_path: &Path) -> String {
     let mut lines = vec![
-        "Truth Manifest Validation".to_string(),
+        "Facts Manifest Validation".to_string(),
         String::new(),
         format!("Manifest: {}", manifest_path.display()),
         format!("Valid: {}", report.valid),
@@ -610,7 +612,7 @@ fn truth_generate_text(
     report_path: &Path,
 ) -> String {
     let mut lines = vec![
-        "Truth Manifest Generation".to_string(),
+        "Facts Manifest Generation".to_string(),
         String::new(),
         format!("Generated manifest valid: {}", report.validation.valid),
         format!(

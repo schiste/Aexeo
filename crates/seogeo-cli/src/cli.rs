@@ -212,11 +212,12 @@ pub fn build_cli() -> Command {
                         ),
                 )
                 .subcommand(
-                    Command::new("truth")
-                        .about("Assess structured truth readiness and cross-surface consistency")
+                    Command::new("facts")
+                        .visible_alias("truth")
+                        .about("Assess structured facts readiness and cross-surface consistency")
                         .subcommand(
                             Command::new("validate")
-                                .about("Validate the Aexeo truth manifest contract")
+                                .about("Validate the Aexeo facts manifest contract")
                                 .arg(Arg::new("path").default_value("."))
                                 .arg(Arg::new("manifest").long("manifest").num_args(1))
                                 .arg(
@@ -228,7 +229,7 @@ pub fn build_cli() -> Command {
                         )
                         .subcommand(
                             Command::new("generate")
-                                .about("Generate a review-first truth manifest draft from site data")
+                                .about("Generate a review-first facts manifest draft from site data")
                                 .arg(Arg::new("path").default_value("."))
                                 .arg(Arg::new("write").long("write").num_args(1))
                                 .arg(
@@ -245,7 +246,7 @@ pub fn build_cli() -> Command {
                         )
                         .subcommand(
                             Command::new("assess")
-                                .about("Assess schema and optional truth manifest consistency")
+                                .about("Assess schema and optional facts manifest consistency")
                                 .arg(Arg::new("path").default_value("."))
                                 .arg(Arg::new("manifest").long("manifest").num_args(1))
                                 .arg(

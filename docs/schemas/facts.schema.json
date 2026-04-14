@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aexeo.dev/schemas/facts.schema.json",
+  "title": "Aexeo Facts Manifest",
+  "type": "object",
+  "required": ["version"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "organization": {
+      "$ref": "#/$defs/entity"
+    },
+    "products": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entity"
+      }
+    },
+    "terminology": {
+      "type": "object",
+      "properties": {
+        "preferred": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "forbidden": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "anyOf": [
+    { "required": ["organization"] },
+    { "required": ["products"] }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "entity": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "aliases": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "website": { "type": "string", "format": "uri" },
+        "category": { "type": "string", "minLength": 1 },
+        "descriptors": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "features": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

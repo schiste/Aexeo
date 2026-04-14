@@ -30,7 +30,7 @@ fn grounding_map_json_contract_reports_topics_and_intents() {
 }
 
 #[test]
-fn truth_generate_json_contract_reports_generated_manifest_and_write_path() {
+fn facts_generate_json_contract_reports_generated_manifest_and_write_path() {
     let temp_dir = tempfile::tempdir().unwrap();
     write(
         &temp_dir.path().join("index.html"),
@@ -42,7 +42,7 @@ fn truth_generate_json_contract_reports_generated_manifest_and_write_path() {
     );
     let output = Command::new(bin())
         .arg("intelligence")
-        .arg("truth")
+        .arg("facts")
         .arg("generate")
         .arg(temp_dir.path())
         .arg("--deploy-location")
@@ -53,12 +53,12 @@ fn truth_generate_json_contract_reports_generated_manifest_and_write_path() {
         .unwrap();
     assert!(output.status.success());
     let payload = parse_json(&output.stdout);
-    assert_eq!(payload["command"], "intelligence truth generate");
+    assert_eq!(payload["command"], "intelligence facts generate");
     assert_eq!(
         payload["result"]["generation"]["manifest"]["organization"]["name"],
         "Chau7"
     );
-    assert!(temp_dir.path().join("aexeo-truth.json").exists());
+    assert!(temp_dir.path().join("facts.json").exists());
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn intelligence_score_json_contract_reports_overall_score() {
         r#"<html><head><title>Aexeo pricing</title><script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Aexeo","url":"https://aexeo.com"}</script></head><body><h1>Aexeo pricing</h1><section data-ui="pricing"><h2>Pricing</h2><p>Aexeo improves audit speed by 42% according to our 2026 benchmark report.</p><a href="https://example.com/report">report</a></section></body></html>"#,
     );
     write(
-        &temp_dir.path().join("aexeo-truth.json"),
+        &temp_dir.path().join("facts.json"),
         r#"{"version":1,"organization":{"name":"Aexeo","website":"https://aexeo.com","category":"seo_and_geo_platform","descriptors":["seo","geo"]}}"#,
     );
     let output = Command::new(bin())
@@ -114,15 +114,15 @@ fn evidence_assess_json_contract_reports_scores() {
 }
 
 #[test]
-fn truth_validate_json_contract_reports_manifest_validation() {
+fn facts_validate_json_contract_reports_manifest_validation() {
     let temp_dir = tempfile::tempdir().unwrap();
     write(
-        &temp_dir.path().join("aexeo-truth.json"),
+        &temp_dir.path().join("facts.json"),
         r#"{"version":1,"organization":{"name":"Aexeo","website":"https://aexeo.com","category":"seo_and_geo_platform","descriptors":["seo","geo"]},"products":[{"name":"Aexeo","category":"software","descriptors":["auditing"]}]}"#,
     );
     let output = Command::new(bin())
         .arg("intelligence")
-        .arg("truth")
+        .arg("facts")
         .arg("validate")
         .arg(temp_dir.path())
         .arg("--format")
@@ -131,24 +131,24 @@ fn truth_validate_json_contract_reports_manifest_validation() {
         .unwrap();
     assert!(output.status.success());
     let payload = parse_json(&output.stdout);
-    assert_eq!(payload["command"], "intelligence truth validate");
+    assert_eq!(payload["command"], "intelligence facts validate");
     assert_eq!(payload["result"]["validation"]["valid"], true);
 }
 
 #[test]
-fn truth_assess_json_contract_reports_scores() {
+fn facts_assess_json_contract_reports_scores() {
     let temp_dir = tempfile::tempdir().unwrap();
     write(
         &temp_dir.path().join("index.html"),
         r#"<html><head><title>Aexeo</title><script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Aexeo","url":"https://aexeo.com"}</script></head><body><h1>Aexeo</h1></body></html>"#,
     );
     write(
-        &temp_dir.path().join("aexeo-truth.json"),
+        &temp_dir.path().join("facts.json"),
         r#"{"organization":{"name":"Aexeo","website":"https://aexeo.com"},"products":[{"name":"Aexeo","descriptors":["seo","geo","auditing"]}]}"#,
     );
     let output = Command::new(bin())
         .arg("intelligence")
-        .arg("truth")
+        .arg("facts")
         .arg("assess")
         .arg(temp_dir.path())
         .arg("--format")
@@ -157,7 +157,7 @@ fn truth_assess_json_contract_reports_scores() {
         .unwrap();
     assert!(output.status.success());
     let payload = parse_json(&output.stdout);
-    assert_eq!(payload["command"], "intelligence truth assess");
+    assert_eq!(payload["command"], "intelligence facts assess");
     assert_eq!(
         payload["result"]["assessment"]["structured_truth_prerequisite_met"],
         true

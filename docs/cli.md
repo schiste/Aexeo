@@ -210,7 +210,7 @@ Usage: intelligence [COMMAND]
 Commands:
   grounding-map  Infer page topics, grounding intents, and answer-coverage gaps
   evidence       Assess evidence coverage and citation fidelity risk
-  truth          Assess structured truth readiness and cross-surface consistency
+  facts          Assess structured facts readiness and cross-surface consistency [aliases: truth]
   trust-surface  Import and reconcile trusted external surfaces against site truth
   score          Compute site and route intelligence scores
   help           Print this message or the help of the given subcommand(s)
