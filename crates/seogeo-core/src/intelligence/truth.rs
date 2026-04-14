@@ -108,6 +108,7 @@ pub struct TruthManifestGeneration {
     pub provenance: BTreeMap<String, Vec<String>>,
     pub warnings: Vec<String>,
     pub suggested_deploy_paths: Vec<String>,
+    pub curated: bool,
     pub elapsed_us: u64,
 }
 
@@ -222,6 +223,10 @@ pub fn default_truth_manifest_version() -> u32 {
 }
 
 pub fn generate_truth_manifest(site: &Site) -> TruthManifestGeneration {
+    generate_truth_manifest_with_options(site, false)
+}
+
+pub fn generate_truth_manifest_with_options(site: &Site, curate: bool) -> TruthManifestGeneration {
     let started = Instant::now();
     let mut provenance = BTreeMap::<String, Vec<String>>::new();
     let mut warnings = vec![
@@ -302,7 +307,7 @@ pub fn generate_truth_manifest(site: &Site) -> TruthManifestGeneration {
         products.push(product);
     }
 
-    let manifest = TruthManifest {
+    let mut manifest = TruthManifest {
         version: default_truth_manifest_version(),
         organization: organization_name.map(|name| TruthEntity {
             name,
@@ -315,6 +320,9 @@ pub fn generate_truth_manifest(site: &Site) -> TruthManifestGeneration {
         products,
         terminology: TruthTerminology::default(),
     };
+    if curate {
+        curate_generated_manifest(&mut manifest, &mut provenance, &mut warnings);
+    }
     let validation = validate_truth_manifest(&manifest);
     let suggested_deploy_paths = vec![
         "facts.json".to_string(),
@@ -327,6 +335,7 @@ pub fn generate_truth_manifest(site: &Site) -> TruthManifestGeneration {
         provenance,
         warnings,
         suggested_deploy_paths,
+        curated: curate,
         elapsed_us: started.elapsed().as_micros() as u64,
     }
 }
@@ -411,9 +420,29 @@ pub fn assess_truth_layer(site: &Site, manifest: Option<&TruthManifest>) -> Trut
         {
             let allowed = entity_aliases(entity);
             let normalized = title.to_ascii_lowercase();
+            let identity_present_elsewhere = page.h1_texts.iter().any(|heading| {
+                let heading = heading.to_ascii_lowercase();
+                allowed.iter().any(|candidate| heading.contains(candidate))
+            }) || page
+                .meta_by_property
+                .get("og:title")
+                .map(|value| {
+                    let value = value.to_ascii_lowercase();
+                    allowed.iter().any(|candidate| value.contains(candidate))
+                })
+                .unwrap_or(false)
+                || page
+                    .meta_description()
+                    .map(|value| {
+                        let value = value.to_ascii_lowercase();
+                        allowed.iter().any(|candidate| value.contains(candidate))
+                    })
+                    .unwrap_or(false)
+                || page.route.is_empty();
             if !allowed
                 .iter()
                 .any(|candidate| normalized.contains(candidate))
+                && !identity_present_elsewhere
             {
                 mismatches.push(TruthMismatch {
                     route: page.route.clone(),
@@ -1035,6 +1064,99 @@ fn descriptor_score(phrase: &str) -> i32 {
     score
 }
 
+fn curate_generated_manifest(
+    manifest: &mut TruthManifest,
+    provenance: &mut BTreeMap<String, Vec<String>>,
+    warnings: &mut Vec<String>,
+) {
+    if let Some(organization) = manifest.organization.as_mut() {
+        organization.aliases = curate_aliases(&organization.name, &organization.aliases);
+        organization.descriptors = curate_descriptors(&organization.descriptors);
+    }
+    for (index, product) in manifest.products.iter_mut().enumerate() {
+        product.aliases = curate_aliases(&product.name, &product.aliases);
+        product.descriptors = curate_descriptors(&product.descriptors);
+        product.features = curate_features(&product.features);
+        provenance
+            .entry(format!("products[{index}].curation"))
+            .or_default()
+            .push("deterministic_post_processing".to_string());
+    }
+    if let Some(organization) = manifest.organization.as_ref() {
+        provenance
+            .entry("organization.curation".to_string())
+            .or_default()
+            .push("deterministic_post_processing".to_string());
+        if organization.descriptors.is_empty() {
+            warnings.push(
+                "curation removed all organization descriptors; review and add durable positioning terms manually"
+                    .to_string(),
+            );
+        }
+    }
+    warnings.push(
+        "curated mode applied deterministic post-processing for aliases, descriptors, and features"
+            .to_string(),
+    );
+}
+
+fn curate_aliases(name: &str, aliases: &[String]) -> Vec<String> {
+    let canonical = name.trim().to_ascii_lowercase();
+    let mut kept = BTreeSet::new();
+    for alias in aliases {
+        let normalized = alias.trim().to_ascii_lowercase();
+        if normalized.is_empty() || normalized == canonical || is_generic_site_label(alias) {
+            continue;
+        }
+        kept.insert(alias.trim().to_string());
+    }
+    kept.into_iter().collect()
+}
+
+fn curate_descriptors(descriptors: &[String]) -> Vec<String> {
+    let mut kept = Vec::<String>::new();
+    let mut seen = Vec::<BTreeSet<String>>::new();
+    for descriptor in descriptors {
+        let cleaned = descriptor.trim().to_string();
+        if cleaned.is_empty() {
+            continue;
+        }
+        let score = descriptor_score(&cleaned);
+        if score < 3 {
+            continue;
+        }
+        let token_set = normalized_words(&cleaned);
+        if token_set.is_empty()
+            || seen
+                .iter()
+                .any(|existing| token_overlap_ratio(existing, &token_set) >= 0.67)
+        {
+            continue;
+        }
+        seen.push(token_set);
+        kept.push(cleaned);
+        if kept.len() == 4 {
+            break;
+        }
+    }
+    kept
+}
+
+fn curate_features(features: &[String]) -> Vec<String> {
+    let mut kept = BTreeSet::new();
+    for feature in features {
+        let cleaned = feature.trim();
+        if cleaned.is_empty() {
+            continue;
+        }
+        kept.insert(cleaned.to_string());
+        if kept.len() == 16 {
+            break;
+        }
+    }
+    kept.into_iter().collect()
+}
+
 fn token_overlap_ratio(left: &BTreeSet<String>, right: &BTreeSet<String>) -> f32 {
     let overlap = left.intersection(right).count() as f32;
     let max_len = left.len().max(right.len()) as f32;
@@ -1333,5 +1455,65 @@ mod tests {
         assert!(descriptors.iter().any(|value| value == "coding agents"));
         assert!(descriptors.iter().all(|value| value != "24 bit true"));
         assert!(descriptors.iter().all(|value| value != "26 mcp tools"));
+    }
+
+    #[test]
+    fn facts_assessment_does_not_flag_title_when_identity_is_elsewhere() {
+        let temp = tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("remote.html"),
+            r#"<html><head><title>Remote | Control Your Agents from Your iPhone</title><meta name="description" content="Control Chau7 remotely from your iPhone."><meta property="og:title" content="Chau7 Remote Control"><script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Chau7","url":"https://chau7.sh"}</script></head><body><h1>Remote control for Chau7</h1></body></html>"#,
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("facts.json"),
+            r#"{"version":1,"organization":{"name":"Chau7","website":"https://chau7.sh","category":"software_application","descriptors":["coding agents"]},"products":[{"name":"Chau7","website":"https://chau7.sh","category":"software_application","descriptors":["coding agents"]}]}"#,
+        )
+        .unwrap();
+        let site = load_site(temp.path()).unwrap();
+        let manifest = load_truth_manifest(&temp.path().join("facts.json")).unwrap();
+
+        let assessment = assess_truth_layer(&site, Some(&manifest));
+
+        assert!(
+            !assessment
+                .mismatches
+                .iter()
+                .any(|mismatch| { mismatch.route == "remote" && mismatch.field == "title" })
+        );
+    }
+
+    #[test]
+    fn curated_generation_reduces_descriptor_noise() {
+        let temp = tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("index.html"),
+            r#"<html><head><title>Chau7 — One UI for All Your Coding Agents</title><meta name="description" content="Run Claude, Codex, Gemini, and more in one place. See what they cost, step in when they go wrong, keep everything local. Free, open source, named after a sock."><meta property="og:description" content="Run, compare, and steer coding agents across models. Full visibility, intervention tools, and zero data leaving your Mac. Free and open source."><script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Chau7","url":"https://chau7.sh"}</script></head><body><h1>Chau7</h1></body></html>"#,
+        )
+        .unwrap();
+
+        let site = load_site(temp.path()).unwrap();
+        let raw = generate_truth_manifest_with_options(&site, false);
+        let curated = generate_truth_manifest_with_options(&site, true);
+
+        assert!(!raw.curated);
+        assert!(curated.curated);
+        assert!(curated.manifest.organization.is_some());
+        let curated_descriptors = &curated.manifest.organization.as_ref().unwrap().descriptors;
+        assert!(
+            curated_descriptors.len()
+                <= raw
+                    .manifest
+                    .organization
+                    .as_ref()
+                    .unwrap()
+                    .descriptors
+                    .len()
+        );
+        assert!(
+            curated_descriptors
+                .iter()
+                .all(|value| value != "named after a sock")
+        );
     }
 }
