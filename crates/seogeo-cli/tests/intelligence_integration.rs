@@ -30,6 +30,38 @@ fn grounding_map_json_contract_reports_topics_and_intents() {
 }
 
 #[test]
+fn truth_generate_json_contract_reports_generated_manifest_and_write_path() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    write(
+        &temp_dir.path().join("index.html"),
+        r#"<html><head><title>Chau7 | Terminal for coding agents</title><meta name="description" content="Chau7 is a native macOS terminal for coding agents and approval workflows."><script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Chau7","url":"https://chau7.sh"}</script><script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Chau7","url":"https://chau7.sh"}</script></head><body><h1>One UI for all your coding agents</h1></body></html>"#,
+    );
+    write(
+        &temp_dir.path().join("features/hyperlinks.html"),
+        r#"<html><head><title>Hyperlinks | Chau7 terminal feature</title></head><body><h1>Hyperlinks</h1></body></html>"#,
+    );
+    let output = Command::new(bin())
+        .arg("intelligence")
+        .arg("truth")
+        .arg("generate")
+        .arg(temp_dir.path())
+        .arg("--deploy-location")
+        .arg("root")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "intelligence truth generate");
+    assert_eq!(
+        payload["result"]["generation"]["manifest"]["organization"]["name"],
+        "Chau7"
+    );
+    assert!(temp_dir.path().join("aexeo-truth.json").exists());
+}
+
+#[test]
 fn intelligence_score_json_contract_reports_overall_score() {
     let temp_dir = tempfile::tempdir().unwrap();
     write(

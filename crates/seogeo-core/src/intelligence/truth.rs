@@ -101,6 +101,16 @@ pub struct TruthAssessment {
     pub elapsed_us: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TruthManifestGeneration {
+    pub manifest: TruthManifest,
+    pub validation: TruthManifestValidation,
+    pub provenance: BTreeMap<String, Vec<String>>,
+    pub warnings: Vec<String>,
+    pub suggested_deploy_paths: Vec<String>,
+    pub elapsed_us: u64,
+}
+
 pub fn load_truth_manifest(path: &Path) -> Result<TruthManifest> {
     let raw = fs::read_to_string(path)
         .with_context(|| format!("failed to read truth manifest {}", path.display()))?;
@@ -207,6 +217,117 @@ pub fn discover_truth_manifest(
 
 pub fn default_truth_manifest_version() -> u32 {
     1
+}
+
+pub fn generate_truth_manifest(site: &Site) -> TruthManifestGeneration {
+    let started = Instant::now();
+    let mut provenance = BTreeMap::<String, Vec<String>>::new();
+    let mut warnings = vec![
+        "generated manifest is a review-first draft; confirm categories, descriptors, aliases, and terminology before deployment".to_string(),
+        "preferred and forbidden terminology are not inferred automatically".to_string(),
+    ];
+
+    let organization_name = detect_organization_name(site);
+    let organization_website = detect_site_url(site);
+    let organization_category = detect_category(site);
+    let organization_descriptors = detect_descriptors(site, organization_name.as_deref());
+    let product_features = detect_feature_names(site);
+    let product_name = detect_product_name(site, organization_name.as_deref());
+
+    if let Some(name) = &organization_name {
+        provenance.insert(
+            "organization.name".to_string(),
+            organization_name_sources(site),
+        );
+        if organization_descriptors.is_empty() {
+            warnings.push(format!(
+                "organization '{}' was inferred but no strong descriptors were found",
+                name
+            ));
+        }
+    } else {
+        warnings.push(
+            "could not infer a canonical organization name confidently; review the generated draft manually".to_string(),
+        );
+    }
+    if let Some(url) = &organization_website {
+        provenance.insert(
+            "organization.website".to_string(),
+            vec![format!("site_url:{url}")],
+        );
+    }
+    if let Some(category) = &organization_category {
+        provenance.insert(
+            "organization.category".to_string(),
+            vec![format!("schema_type:{category}")],
+        );
+    }
+    for (index, descriptor) in organization_descriptors.iter().enumerate() {
+        provenance.insert(
+            format!("organization.descriptors[{index}]"),
+            vec![format!("phrase_frequency:{descriptor}")],
+        );
+    }
+
+    let mut products = Vec::new();
+    if let Some(name) = product_name.clone() {
+        provenance.insert(
+            "products[0].name".to_string(),
+            if name == organization_name.clone().unwrap_or_default() {
+                vec!["organization_name_fallback".to_string()]
+            } else {
+                product_name_sources(site)
+            },
+        );
+        let mut product = TruthEntity {
+            name,
+            aliases: Vec::new(),
+            website: organization_website.clone(),
+            category: organization_category.clone(),
+            descriptors: organization_descriptors.iter().take(4).cloned().collect(),
+            features: product_features.clone(),
+        };
+        product.features.truncate(24);
+        for (index, feature) in product.features.iter().enumerate() {
+            provenance.insert(
+                format!("products[0].features[{index}]"),
+                vec![format!("route_feature:{feature}")],
+            );
+        }
+        if product.descriptors.is_empty() {
+            warnings.push("generated product draft has no descriptors; add durable positioning terms manually".to_string());
+        }
+        products.push(product);
+    }
+
+    let manifest = TruthManifest {
+        version: default_truth_manifest_version(),
+        organization: organization_name.map(|name| TruthEntity {
+            name,
+            aliases: organization_aliases(site),
+            website: organization_website.clone(),
+            category: organization_category.clone(),
+            descriptors: organization_descriptors,
+            features: Vec::new(),
+        }),
+        products,
+        terminology: TruthTerminology::default(),
+    };
+    let validation = validate_truth_manifest(&manifest);
+    let mut suggested_deploy_paths = vec![
+        "aexeo-truth.json".to_string(),
+        ".well-known/aexeo-truth.json".to_string(),
+    ];
+    suggested_deploy_paths.sort();
+
+    TruthManifestGeneration {
+        manifest,
+        validation,
+        provenance,
+        warnings,
+        suggested_deploy_paths,
+        elapsed_us: started.elapsed().as_micros() as u64,
+    }
 }
 
 pub fn assess_truth_layer(site: &Site, manifest: Option<&TruthManifest>) -> TruthAssessment {
@@ -453,6 +574,306 @@ fn validate_entity(
     }
 }
 
+fn detect_organization_name(site: &Site) -> Option<String> {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for page in site.route_pages() {
+        if page.route.is_empty()
+            && let Some(title) = &page.title
+            && let Some(candidate) = leading_title_segment(title)
+        {
+            *counts.entry(candidate).or_default() += 5;
+        }
+        for block in &page.json_ld_blocks {
+            let Ok(payload) = serde_json::from_str::<serde_json::Value>(&block.raw) else {
+                continue;
+            };
+            for value in iter_schema_field_values(&payload, "name") {
+                if is_viable_name(&value) {
+                    *counts.entry(value).or_default() += 3;
+                }
+            }
+        }
+    }
+    counts
+        .into_iter()
+        .max_by(|(left_name, left_count), (right_name, right_count)| {
+            left_count
+                .cmp(right_count)
+                .then_with(|| right_name.len().cmp(&left_name.len()))
+        })
+        .map(|(name, _)| name)
+}
+
+fn detect_site_url(site: &Site) -> Option<String> {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for page in site.route_pages() {
+        if page.route.is_empty()
+            && let Some(canonical) = &page.canonical
+            && Url::parse(canonical).is_ok()
+        {
+            *counts.entry(trimmed_root_url(canonical)).or_default() += 5;
+        }
+        for block in &page.json_ld_blocks {
+            let Ok(payload) = serde_json::from_str::<serde_json::Value>(&block.raw) else {
+                continue;
+            };
+            for value in iter_schema_field_values(&payload, "url") {
+                if Url::parse(&value).is_ok() {
+                    *counts.entry(trimmed_root_url(&value)).or_default() += 3;
+                }
+            }
+        }
+    }
+    counts
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(value, _)| value)
+}
+
+fn detect_category(site: &Site) -> Option<String> {
+    let mut software_application = 0;
+    let mut product = 0;
+    let mut website = 0;
+    for page in site.route_pages() {
+        for block in &page.json_ld_blocks {
+            let Ok(payload) = serde_json::from_str::<serde_json::Value>(&block.raw) else {
+                continue;
+            };
+            for schema_type in iter_schema_types(&payload) {
+                match schema_type.as_str() {
+                    "SoftwareApplication" => software_application += 1,
+                    "Product" => product += 1,
+                    "WebSite" | "Organization" => website += 1,
+                    _ => {}
+                }
+            }
+        }
+    }
+    if software_application > 0 {
+        Some("software_application".to_string())
+    } else if product > 0 {
+        Some("product".to_string())
+    } else if website > 0 {
+        Some("website".to_string())
+    } else {
+        None
+    }
+}
+
+fn detect_product_name(site: &Site, organization_name: Option<&str>) -> Option<String> {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for page in site.route_pages() {
+        for block in &page.json_ld_blocks {
+            let Ok(payload) = serde_json::from_str::<serde_json::Value>(&block.raw) else {
+                continue;
+            };
+            let types = iter_schema_types(&payload);
+            if !types
+                .iter()
+                .any(|value| matches!(value.as_str(), "SoftwareApplication" | "Product"))
+            {
+                continue;
+            }
+            for value in iter_schema_field_values(&payload, "name") {
+                if is_viable_name(&value) {
+                    *counts.entry(value).or_default() += 4;
+                }
+            }
+        }
+    }
+    if counts.is_empty() {
+        organization_name.map(ToString::to_string)
+    } else {
+        counts
+            .into_iter()
+            .max_by_key(|(_, count)| *count)
+            .map(|(value, _)| value)
+    }
+}
+
+fn detect_feature_names(site: &Site) -> Vec<String> {
+    let mut features = site
+        .route_pages()
+        .filter(|page| page.route.starts_with("features/"))
+        .filter_map(|page| {
+            page.h1_texts.first().cloned().or_else(|| {
+                page.title
+                    .as_ref()
+                    .and_then(|title| leading_title_segment(title))
+            })
+        })
+        .collect::<Vec<_>>();
+    features.sort();
+    features.dedup();
+    features
+}
+
+fn detect_descriptors(site: &Site, organization_name: Option<&str>) -> Vec<String> {
+    let brand_words = organization_name.map(normalized_words).unwrap_or_default();
+    let mut counts = BTreeMap::<String, usize>::new();
+    for page in site.route_pages() {
+        if !page.route.is_empty() && !page.route.starts_with("features/") {
+            continue;
+        }
+        for source in [
+            page.title.as_deref(),
+            page.h1_texts.first().map(String::as_str),
+            page.meta_description(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            for phrase in candidate_phrases(source, &brand_words) {
+                *counts.entry(phrase).or_default() += 1;
+            }
+        }
+    }
+    let mut descriptors = counts
+        .into_iter()
+        .filter(|(_, count)| *count >= 2)
+        .map(|(phrase, _)| phrase)
+        .collect::<Vec<_>>();
+    descriptors.sort_by(|left, right| {
+        right
+            .split_whitespace()
+            .count()
+            .cmp(&left.split_whitespace().count())
+            .then_with(|| left.cmp(right))
+    });
+    descriptors.dedup();
+    descriptors.truncate(6);
+    descriptors
+}
+
+fn organization_aliases(site: &Site) -> Vec<String> {
+    let mut aliases = BTreeSet::new();
+    for page in site.route_pages().filter(|page| page.route.is_empty()) {
+        if let Some(title) = &page.title
+            && let Some(segment) = leading_title_segment(title)
+        {
+            aliases.insert(segment);
+        }
+        for h1 in &page.h1_texts {
+            if is_viable_name(h1) {
+                aliases.insert(h1.clone());
+            }
+        }
+    }
+    aliases.into_iter().collect()
+}
+
+fn organization_name_sources(site: &Site) -> Vec<String> {
+    let mut sources = Vec::new();
+    for page in site.route_pages() {
+        if page.route.is_empty() && page.title.is_some() {
+            sources.push("homepage:title".to_string());
+        }
+        for block in &page.json_ld_blocks {
+            let Ok(payload) = serde_json::from_str::<serde_json::Value>(&block.raw) else {
+                continue;
+            };
+            if !iter_schema_field_values(&payload, "name").is_empty() {
+                sources.push("schema:name".to_string());
+                break;
+            }
+        }
+    }
+    sources.sort();
+    sources.dedup();
+    sources
+}
+
+fn product_name_sources(site: &Site) -> Vec<String> {
+    let mut sources = Vec::new();
+    for page in site.route_pages() {
+        for block in &page.json_ld_blocks {
+            let Ok(payload) = serde_json::from_str::<serde_json::Value>(&block.raw) else {
+                continue;
+            };
+            let types = iter_schema_types(&payload);
+            if types
+                .iter()
+                .any(|value| matches!(value.as_str(), "SoftwareApplication" | "Product"))
+            {
+                sources.push("schema:software_or_product".to_string());
+                break;
+            }
+        }
+    }
+    if sources.is_empty() {
+        sources.push("organization_name_fallback".to_string());
+    }
+    sources
+}
+
+fn leading_title_segment(title: &str) -> Option<String> {
+    title
+        .split(['|', '—', '-', '·'])
+        .map(str::trim)
+        .find(|segment| is_viable_name(segment))
+        .map(ToString::to_string)
+}
+
+fn is_viable_name(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && trimmed.split_whitespace().count() <= 6
+        && trimmed.chars().any(|ch| ch.is_alphabetic())
+}
+
+fn trimmed_root_url(value: &str) -> String {
+    if let Ok(url) = Url::parse(value)
+        && let Some(host) = url.host_str()
+    {
+        let scheme = url.scheme();
+        return format!("{scheme}://{host}");
+    }
+    value.to_string()
+}
+
+fn normalized_words(value: &str) -> BTreeSet<String> {
+    normalize_phrase(value)
+        .split_whitespace()
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn candidate_phrases(text: &str, brand_words: &BTreeSet<String>) -> Vec<String> {
+    let words = normalize_phrase(text)
+        .split_whitespace()
+        .filter(|word| !STOP_WORDS.contains(word))
+        .filter(|word| !brand_words.contains(*word))
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    let mut phrases = Vec::new();
+    for size in 2..=3 {
+        for window in words.windows(size) {
+            let phrase = window.join(" ");
+            if phrase.len() >= 8 {
+                phrases.push(phrase);
+            }
+        }
+    }
+    phrases
+}
+
+fn normalize_phrase(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push(' ');
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+const STOP_WORDS: &[&str] = &[
+    "a", "an", "and", "app", "as", "at", "by", "for", "from", "in", "into", "is", "it", "of", "on",
+    "or", "the", "to", "with", "your",
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -557,5 +978,43 @@ mod tests {
         let validation = validate_truth_manifest(&manifest);
         assert!(!validation.valid);
         assert!(!validation.errors.is_empty());
+    }
+
+    #[test]
+    fn generates_review_first_truth_manifest_from_site_data() {
+        let temp = tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("index.html"),
+            r#"<html><head><title>Chau7 | Terminal for coding agents</title><meta name="description" content="Chau7 is a native macOS terminal for coding agents and approval workflows."><script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Chau7","url":"https://chau7.sh"}</script><script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Chau7","url":"https://chau7.sh"}</script></head><body><h1>One UI for all your coding agents</h1></body></html>"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(temp.path().join("features")).unwrap();
+        std::fs::write(
+            temp.path().join("features/hyperlinks.html"),
+            r#"<html><head><title>Hyperlinks | Chau7 terminal feature</title></head><body><h1>Hyperlinks</h1></body></html>"#,
+        )
+        .unwrap();
+        let site = load_site(temp.path()).unwrap();
+        let generation = generate_truth_manifest(&site);
+        assert_eq!(
+            generation.manifest.organization.as_ref().unwrap().name,
+            "Chau7"
+        );
+        assert_eq!(
+            generation
+                .manifest
+                .organization
+                .as_ref()
+                .unwrap()
+                .website
+                .as_deref(),
+            Some("https://chau7.sh")
+        );
+        assert!(generation.validation.valid);
+        assert!(
+            generation.manifest.products[0]
+                .features
+                .contains(&"Hyperlinks".to_string())
+        );
     }
 }

@@ -227,6 +227,23 @@ pub fn build_cli() -> Command {
                                 ),
                         )
                         .subcommand(
+                            Command::new("generate")
+                                .about("Generate a review-first truth manifest draft from site data")
+                                .arg(Arg::new("path").default_value("."))
+                                .arg(Arg::new("write").long("write").num_args(1))
+                                .arg(
+                                    Arg::new("deploy-location")
+                                        .long("deploy-location")
+                                        .value_parser(["root", "well-known"]),
+                                )
+                                .arg(
+                                    Arg::new("format")
+                                        .long("format")
+                                        .value_parser(["text", "json"])
+                                        .default_value("text"),
+                                ),
+                        )
+                        .subcommand(
                             Command::new("assess")
                                 .about("Assess schema and optional truth manifest consistency")
                                 .arg(Arg::new("path").default_value("."))
