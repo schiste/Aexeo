@@ -106,8 +106,7 @@ fn build_route_scores(
             let citation_readiness_score = evidence_route
                 .map(|route| route.citation_readiness_score)
                 .unwrap_or(75);
-            let answer_pack_score =
-                route_answer_pack_score(grounding_route.coverage_gaps.as_slice());
+            let answer_pack_score = route_answer_pack_score(grounding_route);
             let truth_consistency_score = route_truth_score(&grounding_route.route, truth);
             let external_trust_alignment_score =
                 trust.map(|_| *trust_penalties.get(&grounding_route.route).unwrap_or(&100));
@@ -254,14 +253,39 @@ fn answer_pack_score(grounding: &GroundingSiteAnalysis) -> u8 {
     let total = grounding
         .routes
         .iter()
-        .map(|route| u64::from(route_answer_pack_score(route.coverage_gaps.as_slice())))
+        .map(|route| u64::from(route_answer_pack_score(route)))
         .sum::<u64>();
     (total / grounding.routes.len().max(1) as u64) as u8
 }
 
-fn route_answer_pack_score(gaps: &[GroundingCoverageGap]) -> u8 {
-    let mut score = 100_u8;
-    for gap in gaps {
+fn route_answer_pack_score(route: &super::GroundingRouteAnalysis) -> u8 {
+    let mut score = route_answer_pack_baseline(route.primary_intent.clone());
+
+    score = score.saturating_add(match route.answer_blocks {
+        0 => 0,
+        1 => 4,
+        2..=3 => 9,
+        _ => 12,
+    });
+
+    score = score.saturating_add(match route.heading_count {
+        0..=1 => 0,
+        2 => 3,
+        3..=4 => 6,
+        _ => 8,
+    });
+
+    score = score.saturating_add(match route.secondary_intents.len() {
+        0 => 0,
+        1 => 2,
+        _ => 4,
+    });
+
+    if route.page_kind == "detail" && route.answer_blocks >= 2 {
+        score = score.saturating_add(4);
+    }
+
+    for gap in &route.coverage_gaps {
         score = score.saturating_sub(match gap {
             GroundingCoverageGap::MissingDirectAnswer => 20,
             GroundingCoverageGap::ThinAnswerCoverage => 15,
@@ -270,7 +294,22 @@ fn route_answer_pack_score(gaps: &[GroundingCoverageGap]) -> u8 {
             GroundingCoverageGap::MissingProceduralSignals => 10,
         });
     }
-    score
+
+    score.min(100)
+}
+
+fn route_answer_pack_baseline(intent: super::GroundingIntentFamily) -> u8 {
+    match intent {
+        super::GroundingIntentFamily::Feature => 78,
+        super::GroundingIntentFamily::Comparison => 76,
+        super::GroundingIntentFamily::Definition => 74,
+        super::GroundingIntentFamily::Procedural => 74,
+        super::GroundingIntentFamily::Pricing => 74,
+        super::GroundingIntentFamily::Troubleshooting => 72,
+        super::GroundingIntentFamily::Asset => 72,
+        super::GroundingIntentFamily::Reference => 68,
+        super::GroundingIntentFamily::Generic => 64,
+    }
 }
 
 fn route_truth_score(route: &str, truth: &TruthAssessment) -> u8 {
@@ -433,5 +472,45 @@ mod tests {
         assert_eq!(report.route_scores.len(), 1);
         assert!(report.overall_score < 80);
         assert!(!report.blockers.is_empty());
+    }
+
+    #[test]
+    fn answer_pack_scoring_requires_real_structure_for_perfect_scores() {
+        let generic_route = GroundingRouteAnalysis {
+            route: String::new(),
+            page_kind: "landing".to_string(),
+            primary_topic: "home".to_string(),
+            secondary_topics: Vec::new(),
+            primary_intent: GroundingIntentFamily::Generic,
+            secondary_intents: Vec::new(),
+            intents: vec![GroundingIntentFamily::Generic],
+            intent_matches: Vec::new(),
+            schema_types: Vec::new(),
+            signals: Vec::new(),
+            coverage_gaps: Vec::new(),
+            answer_blocks: 1,
+            heading_count: 1,
+        };
+        let rich_feature_route = GroundingRouteAnalysis {
+            route: "features/hyperlinks".to_string(),
+            page_kind: "detail".to_string(),
+            primary_topic: "hyperlinks".to_string(),
+            secondary_topics: vec!["terminal hyperlinks".to_string()],
+            primary_intent: GroundingIntentFamily::Feature,
+            secondary_intents: vec![GroundingIntentFamily::Definition],
+            intents: vec![
+                GroundingIntentFamily::Feature,
+                GroundingIntentFamily::Definition,
+            ],
+            intent_matches: Vec::new(),
+            schema_types: Vec::new(),
+            signals: Vec::new(),
+            coverage_gaps: Vec::new(),
+            answer_blocks: 4,
+            heading_count: 5,
+        };
+
+        assert_eq!(route_answer_pack_score(&generic_route), 68);
+        assert_eq!(route_answer_pack_score(&rich_feature_route), 100);
     }
 }
