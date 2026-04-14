@@ -2,10 +2,10 @@ use anyhow::{Result, bail};
 use clap::ArgMatches;
 use seogeo_core::{
     EvidenceSiteAssessment, GroundingCoverageGap, GroundingSiteAnalysis, SiteIntelligenceScore,
-    TrustSurfaceReconciliation, TruthAssessment, TruthManifestValidation, TruthStructuredSource,
-    assess_evidence_coverage, assess_truth_layer, discover_truth_manifest,
-    import_trust_surface_records, load_site, map_grounding_queries, reconcile_trust_surfaces,
-    score_intelligence, validate_truth_manifest,
+    TrustSurfaceReconciliation, TruthAssessment, TruthManifestGeneration, TruthManifestValidation,
+    TruthStructuredSource, assess_evidence_coverage, assess_truth_layer, discover_truth_manifest,
+    generate_truth_manifest, import_trust_surface_records, load_site, map_grounding_queries,
+    reconcile_trust_surfaces, score_intelligence, validate_truth_manifest,
 };
 use serde::Serialize;
 use std::fs;
@@ -24,6 +24,7 @@ pub fn command_intelligence(submatches: &ArgMatches) -> Result<i32> {
         },
         Some(("truth", truth_matches)) => match truth_matches.subcommand() {
             Some(("validate", validate_matches)) => command_truth_validate(validate_matches),
+            Some(("generate", generate_matches)) => command_truth_generate(generate_matches),
             Some(("assess", assess_matches)) => command_truth_assess(assess_matches),
             Some((other, _)) => bail!("unsupported truth command: {}", other),
             None => bail!("missing truth subcommand"),
@@ -131,6 +132,56 @@ fn command_truth_validate(submatches: &ArgMatches) -> Result<i32> {
             format,
             anyhow::anyhow!("no truth manifest found"),
         ),
+    }
+}
+
+fn command_truth_generate(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let root = PathBuf::from(required_arg(submatches, "path")?);
+    let deploy_location = submatches
+        .get_one::<String>("deploy-location")
+        .map(String::as_str);
+    let explicit_write = submatches.get_one::<String>("write").map(PathBuf::from);
+
+    match load_site(&root).map(|site| generate_truth_manifest(&site)) {
+        Ok(report) => {
+            let report_path = write_report(&root, "truth-manifest-generated.json", &report)?;
+            let write_path = if let Some(path) = explicit_write {
+                Some(path)
+            } else {
+                deploy_location.map(|location| match location {
+                    "well-known" => root.join(".well-known/aexeo-truth.json"),
+                    _ => root.join("aexeo-truth.json"),
+                })
+            };
+            if let Some(path) = write_path.as_ref() {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::write(path, serde_json::to_string_pretty(&report.manifest)?)?;
+            }
+            match format {
+                "json" => println!(
+                    "{}",
+                    render_data_command_json(
+                        "intelligence truth generate",
+                        report.validation.valid,
+                        serde_json::json!({
+                            "report_path": report_path.to_string_lossy(),
+                            "write_path": write_path.as_ref().map(|path| canonicalize_or_keep(&path.to_string_lossy()).display().to_string()),
+                            "generation": report,
+                        }),
+                        Vec::new()
+                    )?
+                ),
+                _ => println!(
+                    "{}",
+                    truth_generate_text(&report, write_path.as_deref(), &report_path,)
+                ),
+            }
+            Ok(if report.validation.valid { 0 } else { 1 })
+        }
+        Err(error) => emit_failure("intelligence truth generate", format, error),
     }
 }
 
@@ -548,6 +599,53 @@ fn truth_manifest_text(report: &TruthManifestValidation, manifest_path: &Path) -
         lines.push("Errors:".to_string());
         for error in &report.errors {
             lines.push(format!("- {}", error));
+        }
+    }
+    lines.join("\n")
+}
+
+fn truth_generate_text(
+    report: &TruthManifestGeneration,
+    write_path: Option<&Path>,
+    report_path: &Path,
+) -> String {
+    let mut lines = vec![
+        "Truth Manifest Generation".to_string(),
+        String::new(),
+        format!("Generated manifest valid: {}", report.validation.valid),
+        format!(
+            "Organization: {}",
+            report
+                .manifest
+                .organization
+                .as_ref()
+                .map(|entity| entity.name.as_str())
+                .unwrap_or("(missing)")
+        ),
+        format!("Products: {}", report.manifest.products.len()),
+        format!("Elapsed: {}ms", report.elapsed_us / 1000),
+        format!("Report: {}", report_path.display()),
+    ];
+    if let Some(path) = write_path {
+        lines.push(format!("Manifest written to: {}", path.display()));
+    } else {
+        lines.push(format!(
+            "Suggested deploy paths: {}",
+            report.suggested_deploy_paths.join(", ")
+        ));
+    }
+    if !report.warnings.is_empty() {
+        lines.push(String::new());
+        lines.push("Warnings:".to_string());
+        for warning in &report.warnings {
+            lines.push(format!("- {}", warning));
+        }
+    }
+    if !report.provenance.is_empty() {
+        lines.push(String::new());
+        lines.push("Provenance:".to_string());
+        for (field, sources) in report.provenance.iter().take(10) {
+            lines.push(format!("- {} <- {}", field, sources.join(", ")));
         }
     }
     lines.join("\n")

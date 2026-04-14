@@ -88,6 +88,35 @@ The score is intentionally capped when no structured truth source is present:
 - schema only or manifest only: medium ceiling
 - schema plus manifest: full ceiling
 
+### Truth Manifest Generation
+
+Use truth generation to bootstrap a first deployable `aexeo-truth.json` from existing site schema, titles, headings, and feature routes.
+
+Examples:
+
+```bash
+cargo run -p seogeo-cli -- intelligence truth generate .
+cargo run -p seogeo-cli -- intelligence truth generate . --deploy-location root
+cargo run -p seogeo-cli -- intelligence truth generate . --write .well-known/aexeo-truth.json --format json
+```
+
+What it does:
+
+- generates a review-first truth manifest draft
+- includes provenance per generated field
+- validates the generated manifest immediately
+- optionally writes the draft to a deployable location
+
+Default report artifact:
+
+- `.seogeo-reports/truth-manifest-generated.json`
+
+Deploy options:
+
+- `--deploy-location root` writes `aexeo-truth.json`
+- `--deploy-location well-known` writes `.well-known/aexeo-truth.json`
+- `--write <path>` writes to an explicit file path
+
 ### Trust Surface Import and Reconciliation
 
 Trust surfaces are imported records from sanctioned external sources such as:
