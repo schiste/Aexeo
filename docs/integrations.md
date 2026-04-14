@@ -52,35 +52,37 @@ The command writes `.seogeo-reports/evidence-latest.json` and reports:
 - citation readiness score
 - highest-risk routes for AI citation distortion
 
-### Truth Assessment
+### Facts Assessment
 
-Truth assessment compares:
+Facts assessment compares:
 
 - visible titles and headings
 - schema.org JSON-LD
-- optional Aexeo truth manifest
+- optional Aexeo facts manifest
 - preferred and forbidden terminology
 
 Examples:
 
 ```bash
-cargo run -p seogeo-cli -- intelligence truth assess .
-cargo run -p seogeo-cli -- intelligence truth assess . --manifest ./aexeo-truth.json --format json
+cargo run -p seogeo-cli -- intelligence facts assess .
+cargo run -p seogeo-cli -- intelligence facts assess . --manifest ./facts.json --format json
 ```
 
 Manifest discovery order:
 
 - explicit `--manifest`
-- `./aexeo-truth.json`
-- `./.well-known/aexeo-truth.json`
+- `./facts.json`
+- `./.well-known/facts.json`
+- legacy `./aexeo-truth.json`
+- legacy `./.well-known/aexeo-truth.json`
 
 Validate the manifest contract explicitly before relying on it for scoring:
 
 ```bash
-cargo run -p seogeo-cli -- intelligence truth validate .
+cargo run -p seogeo-cli -- intelligence facts validate .
 ```
 
-The manifest contract is documented in [docs/schemas/aexeo-truth.schema.json](schemas/aexeo-truth.schema.json).
+The manifest contract is documented in [docs/schemas/facts.schema.json](schemas/facts.schema.json).
 
 The score is intentionally capped when no structured truth source is present:
 
@@ -88,33 +90,33 @@ The score is intentionally capped when no structured truth source is present:
 - schema only or manifest only: medium ceiling
 - schema plus manifest: full ceiling
 
-### Truth Manifest Generation
+### Facts Manifest Generation
 
-Use truth generation to bootstrap a first deployable `aexeo-truth.json` from existing site schema, titles, headings, and feature routes.
+Use facts generation to bootstrap a first deployable `facts.json` from existing site schema, titles, headings, and feature routes.
 
 Examples:
 
 ```bash
-cargo run -p seogeo-cli -- intelligence truth generate .
-cargo run -p seogeo-cli -- intelligence truth generate . --deploy-location root
-cargo run -p seogeo-cli -- intelligence truth generate . --write .well-known/aexeo-truth.json --format json
+cargo run -p seogeo-cli -- intelligence facts generate .
+cargo run -p seogeo-cli -- intelligence facts generate . --deploy-location root
+cargo run -p seogeo-cli -- intelligence facts generate . --write .well-known/facts.json --format json
 ```
 
 What it does:
 
-- generates a review-first truth manifest draft
+- generates a review-first facts manifest draft
 - includes provenance per generated field
 - validates the generated manifest immediately
 - optionally writes the draft to a deployable location
 
 Default report artifact:
 
-- `.seogeo-reports/truth-manifest-generated.json`
+- `.seogeo-reports/facts-manifest-generated.json`
 
 Deploy options:
 
-- `--deploy-location root` writes `aexeo-truth.json`
-- `--deploy-location well-known` writes `.well-known/aexeo-truth.json`
+- `--deploy-location root` writes `facts.json`
+- `--deploy-location well-known` writes `.well-known/facts.json`
 - `--write <path>` writes to an explicit file path
 
 ### Trust Surface Import and Reconciliation
@@ -153,7 +155,7 @@ Reconciliation compares those imported surfaces against:
 
 - the audited site graph
 - optional canonical site URL
-- optional truth manifest terminology and descriptors
+- optional facts manifest terminology and descriptors
 
 Example:
 
