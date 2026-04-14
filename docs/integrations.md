@@ -98,6 +98,7 @@ Examples:
 
 ```bash
 cargo run -p seogeo-cli -- intelligence facts generate .
+cargo run -p seogeo-cli -- intelligence facts generate . --curate
 cargo run -p seogeo-cli -- intelligence facts generate . --deploy-location root
 cargo run -p seogeo-cli -- intelligence facts generate . --write .well-known/facts.json --format json
 ```
@@ -105,6 +106,7 @@ cargo run -p seogeo-cli -- intelligence facts generate . --write .well-known/fac
 What it does:
 
 - generates a review-first facts manifest draft
+- supports deterministic `--curate` post-processing for aliases, descriptors, and features
 - includes provenance per generated field
 - validates the generated manifest immediately
 - optionally writes the draft to a deployable location

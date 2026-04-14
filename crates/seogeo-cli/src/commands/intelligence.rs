@@ -4,8 +4,8 @@ use seogeo_core::{
     EvidenceSiteAssessment, GroundingCoverageGap, GroundingSiteAnalysis, SiteIntelligenceScore,
     TrustSurfaceReconciliation, TruthAssessment, TruthManifestGeneration, TruthManifestValidation,
     TruthStructuredSource, assess_evidence_coverage, assess_truth_layer, discover_truth_manifest,
-    generate_truth_manifest, import_trust_surface_records, load_site, map_grounding_queries,
-    reconcile_trust_surfaces, score_intelligence, validate_truth_manifest,
+    generate_truth_manifest_with_options, import_trust_surface_records, load_site,
+    map_grounding_queries, reconcile_trust_surfaces, score_intelligence, validate_truth_manifest,
 };
 use serde::Serialize;
 use std::fs;
@@ -140,12 +140,13 @@ fn command_truth_validate(submatches: &ArgMatches) -> Result<i32> {
 fn command_truth_generate(submatches: &ArgMatches) -> Result<i32> {
     let format = required_arg(submatches, "format")?;
     let root = PathBuf::from(required_arg(submatches, "path")?);
+    let curate = submatches.get_flag("curate");
     let deploy_location = submatches
         .get_one::<String>("deploy-location")
         .map(String::as_str);
     let explicit_write = submatches.get_one::<String>("write").map(PathBuf::from);
 
-    match load_site(&root).map(|site| generate_truth_manifest(&site)) {
+    match load_site(&root).map(|site| generate_truth_manifest_with_options(&site, curate)) {
         Ok(report) => {
             let report_path = write_report(&root, "facts-manifest-generated.json", &report)?;
             let write_path = if let Some(path) = explicit_write {
@@ -614,6 +615,7 @@ fn truth_generate_text(
     let mut lines = vec![
         "Facts Manifest Generation".to_string(),
         String::new(),
+        format!("Curated: {}", report.curated),
         format!("Generated manifest valid: {}", report.validation.valid),
         format!(
             "Organization: {}",

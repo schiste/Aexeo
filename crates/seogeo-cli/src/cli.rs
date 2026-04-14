@@ -233,6 +233,11 @@ pub fn build_cli() -> Command {
                                 .arg(Arg::new("path").default_value("."))
                                 .arg(Arg::new("write").long("write").num_args(1))
                                 .arg(
+                                    Arg::new("curate")
+                                        .long("curate")
+                                        .action(clap::ArgAction::SetTrue),
+                                )
+                                .arg(
                                     Arg::new("deploy-location")
                                         .long("deploy-location")
                                         .value_parser(["root", "well-known"]),

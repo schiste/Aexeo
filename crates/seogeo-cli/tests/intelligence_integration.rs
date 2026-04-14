@@ -62,6 +62,29 @@ fn facts_generate_json_contract_reports_generated_manifest_and_write_path() {
 }
 
 #[test]
+fn facts_generate_json_contract_reports_curated_mode() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    write(
+        &temp_dir.path().join("index.html"),
+        r#"<html><head><title>Chau7 — One UI for All Your Coding Agents</title><meta name="description" content="Run Claude, Codex, Gemini, and more in one place. Keep everything local. Free and open source."><script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Chau7","url":"https://chau7.sh"}</script></head><body><h1>Chau7</h1></body></html>"#,
+    );
+    let output = Command::new(bin())
+        .arg("intelligence")
+        .arg("facts")
+        .arg("generate")
+        .arg(temp_dir.path())
+        .arg("--curate")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "intelligence facts generate");
+    assert_eq!(payload["result"]["generation"]["curated"], true);
+}
+
+#[test]
 fn intelligence_score_json_contract_reports_overall_score() {
     let temp_dir = tempfile::tempdir().unwrap();
     write(
