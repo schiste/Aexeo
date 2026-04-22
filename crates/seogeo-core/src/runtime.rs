@@ -948,6 +948,31 @@ fn performance_value(
     artifact.performance.as_ref().map(extract)
 }
 
+fn performance_wall_clock_ms(artifact: &AuditArtifact) -> Option<u64> {
+    performance_value(artifact, |performance| {
+        if performance.wall_clock_us > 0 {
+            performance.wall_clock_us / 1_000
+        } else {
+            performance.elapsed_us / 1_000
+        }
+    })
+}
+
+fn performance_cumulative_tracked_ms(artifact: &AuditArtifact) -> Option<u64> {
+    performance_value(artifact, |performance| {
+        if performance.cumulative_tracked_us > 0 {
+            return performance.cumulative_tracked_us / 1_000;
+        }
+        performance
+            .phases
+            .iter()
+            .filter(|phase| phase.basis == "cumulative" || phase.basis.is_empty())
+            .map(|phase| phase.elapsed_us)
+            .sum::<u64>()
+            / 1_000
+    })
+}
+
 fn phase_value(
     artifact: &AuditArtifact,
     phase_name: &str,
@@ -1177,8 +1202,8 @@ pub fn diff_performance_artifacts(
             label: "Performance wall clock",
             unit: "ms",
             direction: PerformanceMetricDirection::LowerIsBetter,
-            baseline: performance_value(baseline, |performance| performance.wall_clock_us / 1_000),
-            current: performance_value(current, |performance| performance.wall_clock_us / 1_000),
+            baseline: performance_wall_clock_ms(baseline),
+            current: performance_wall_clock_ms(current),
         },
     );
     add_performance_metric(
@@ -1189,12 +1214,8 @@ pub fn diff_performance_artifacts(
             label: "Cumulative tracked time",
             unit: "ms",
             direction: PerformanceMetricDirection::LowerIsBetter,
-            baseline: performance_value(baseline, |performance| {
-                performance.cumulative_tracked_us / 1_000
-            }),
-            current: performance_value(current, |performance| {
-                performance.cumulative_tracked_us / 1_000
-            }),
+            baseline: performance_cumulative_tracked_ms(baseline),
+            current: performance_cumulative_tracked_ms(current),
         },
     );
     add_performance_metric(
@@ -2365,6 +2386,44 @@ mod tests {
         let text = render_performance_diff_text(&report);
         assert!(text.contains("Performance Diff"));
         assert!(text.contains("phase.fetch.p95_ms"));
+    }
+
+    #[test]
+    fn performance_diff_falls_back_for_legacy_timing_fields() {
+        let artifact = AuditArtifact {
+            command: "crawl".to_string(),
+            performance: Some(seogeo_contracts::AuditPerformance {
+                elapsed_us: 123_000,
+                phases: vec![PhaseTiming {
+                    name: "fetch".to_string(),
+                    elapsed_us: 50_000,
+                    ..PhaseTiming::default()
+                }],
+                ..seogeo_contracts::AuditPerformance::default()
+            }),
+            ..AuditArtifact::default()
+        };
+
+        let report = diff_performance_artifacts(
+            &artifact,
+            &artifact,
+            None,
+            None,
+            PerformanceDiffThresholds::default(),
+        );
+
+        let wall_clock = report
+            .metrics
+            .iter()
+            .find(|metric| metric.metric == "performance.wall_clock_ms")
+            .unwrap();
+        assert_eq!(wall_clock.baseline, Some(123));
+        let cumulative = report
+            .metrics
+            .iter()
+            .find(|metric| metric.metric == "performance.cumulative_tracked_ms")
+            .unwrap();
+        assert_eq!(cumulative.baseline, Some(50));
     }
 
     #[test]
