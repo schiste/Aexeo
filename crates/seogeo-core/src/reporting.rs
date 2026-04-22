@@ -151,6 +151,7 @@ pub fn build_audit_artifact(
         crawl,
         findings,
         performance: None,
+        site: None,
     }
 }
 

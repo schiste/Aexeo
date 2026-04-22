@@ -7,6 +7,7 @@ use std::path::Path;
 use seogeo_contracts::{AuditArtifact, AuditStatus, Finding, FindingFingerprint};
 
 use crate::reporting::{build_audit_artifact, summarize_findings};
+use crate::site::{Site, build_site_from_audit_snapshot};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiffResult {
@@ -25,6 +26,23 @@ pub fn load_audit_artifact(path: &Path) -> Result<AuditArtifact> {
     artifact.generated_at = 0;
     artifact.summary = summarize_findings(&artifact.findings);
     Ok(artifact)
+}
+
+pub fn site_from_audit_artifact(artifact: &AuditArtifact) -> Result<Site> {
+    let snapshot = artifact
+        .site
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("audit artifact does not include a site snapshot"))?;
+    if snapshot.pages.is_empty() {
+        anyhow::bail!("audit artifact site snapshot contains no pages");
+    }
+    build_site_from_audit_snapshot(snapshot)
+}
+
+pub fn load_site_from_audit_artifact(path: &Path) -> Result<(AuditArtifact, Site)> {
+    let artifact = load_audit_artifact(path)?;
+    let site = site_from_audit_artifact(&artifact)?;
+    Ok((artifact, site))
 }
 
 pub fn load_findings_from_audit(path: &Path) -> Result<Vec<Finding>> {
@@ -99,8 +117,13 @@ pub fn render_diff_text(diff: &DiffResult) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{diff_finding_sets, load_audit_artifact, render_diff_text, write_baseline_file};
-    use seogeo_contracts::{AuditStatus, Finding, FindingScope};
+    use super::{
+        diff_finding_sets, load_audit_artifact, load_site_from_audit_artifact, render_diff_text,
+        write_baseline_file,
+    };
+    use seogeo_contracts::{
+        AuditArtifact, AuditPageSnapshot, AuditSiteSnapshot, AuditStatus, Finding, FindingScope,
+    };
 
     fn finding(rule_id: &str, path: &str) -> Finding {
         Finding {
@@ -147,5 +170,33 @@ mod tests {
         let artifact = load_audit_artifact(&path).unwrap();
         assert_eq!(artifact.command, "baseline");
         assert_eq!(artifact.findings.len(), 1);
+    }
+
+    #[test]
+    fn loads_site_snapshot_from_audit_artifact() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("crawl.json");
+        let artifact = AuditArtifact {
+            command: "crawl".into(),
+            site: Some(AuditSiteSnapshot {
+                root: "crawl".into(),
+                deployment_model: "runtime_snapshot".into(),
+                pages: vec![AuditPageSnapshot {
+                    path: "crawl/index.html".into(),
+                    relative_path: "index.html".into(),
+                    route: String::new(),
+                    raw_html:
+                        "<html><head><title>Home</title></head><body><h1>Home</h1></body></html>"
+                            .into(),
+                    ..AuditPageSnapshot::default()
+                }],
+                ..AuditSiteSnapshot::default()
+            }),
+            ..AuditArtifact::default()
+        };
+        std::fs::write(&path, serde_json::to_string_pretty(&artifact).unwrap()).unwrap();
+        let (_artifact, site) = load_site_from_audit_artifact(&path).unwrap();
+        assert_eq!(site.pages.len(), 1);
+        assert_eq!(site.route_pages().count(), 1);
     }
 }

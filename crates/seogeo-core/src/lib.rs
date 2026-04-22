@@ -90,8 +90,8 @@ pub use runtime::{
 };
 pub use schema_rules::run_schema_rules;
 pub use site::{
-    AlternateLink, Link, Page, PageKind, Site, load_site, normalize_internal_href,
-    route_from_urlish,
+    AlternateLink, Link, Page, PageKind, Site, audit_site_snapshot, build_site_from_audit_snapshot,
+    load_site, normalize_internal_href, route_from_urlish,
 };
 pub use sitemap_rules::run_sitemap_rules;
 pub use social_rules::run_social_rules;
@@ -106,6 +106,6 @@ pub use surfaces::{
     discover_machine_surface_graph,
 };
 pub use verification::{
-    DiffResult, diff_finding_sets, load_audit_artifact, load_findings_from_audit, render_diff_text,
-    write_baseline_file,
+    DiffResult, diff_finding_sets, load_audit_artifact, load_findings_from_audit,
+    load_site_from_audit_artifact, render_diff_text, site_from_audit_artifact, write_baseline_file,
 };
