@@ -10,8 +10,15 @@ Stable finding and audit contracts live in [`crates/seogeo-contracts`](../crates
 
 Responsibilities:
 - own stable finding serialization
+- carry optional crawl site snapshots for artifact-first intelligence workflows
 - provide deterministic finding fingerprints for diff and baseline workflows
 - remain independent from CLI parsing, CMS integration, and runtime crawl details
+
+Runtime crawl artifacts are the canonical handoff between collection and
+intelligence. Downstream commands should prefer `--from-crawl-artifact` when
+operating on live sites so they analyze the exact crawled HTML, crawl status,
+machine artifacts, and route inventory rather than whatever files happen to
+exist in the current working directory.
 
 ## Core
 
