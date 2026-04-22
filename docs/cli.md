@@ -212,6 +212,7 @@ Commands:
   evidence       Assess evidence coverage and citation fidelity risk
   facts          Assess structured facts readiness and cross-surface consistency [aliases: truth]
   trust-surface  Import and reconcile trusted external surfaces against site truth
+  surfaces       Discover machine-readable website surfaces and retrieval paths
   score          Compute site and route intelligence scores
   help           Print this message or the help of the given subcommand(s)
 

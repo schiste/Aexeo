@@ -24,6 +24,7 @@ pub mod sitemap_rules;
 pub mod social_rules;
 pub mod static_check;
 pub mod structure_rules;
+pub mod surfaces;
 pub mod verification;
 
 pub use config::{
@@ -95,6 +96,11 @@ pub use static_check::{
     can_run_native_static_audit, run_native_static_audit, run_native_static_audit_with_config,
 };
 pub use structure_rules::run_structure_rules;
+pub use surfaces::{
+    MachineSurface, MachineSurfaceCoverage, MachineSurfaceDiscoverySource, MachineSurfaceGraph,
+    MachineSurfaceKind, MachineSurfaceOptions, MachineSurfaceRouteSummary, MachineSurfaceStatus,
+    discover_machine_surface_graph,
+};
 pub use verification::{
     DiffResult, diff_finding_sets, load_audit_artifact, load_findings_from_audit, render_diff_text,
     write_baseline_file,

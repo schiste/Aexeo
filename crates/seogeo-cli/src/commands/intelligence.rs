@@ -1,11 +1,13 @@
 use anyhow::{Result, bail};
 use clap::ArgMatches;
 use seogeo_core::{
-    EvidenceSiteAssessment, GroundingCoverageGap, GroundingSiteAnalysis, SiteIntelligenceScore,
-    TrustSurfaceReconciliation, TruthAssessment, TruthManifestGeneration, TruthManifestValidation,
-    TruthStructuredSource, assess_evidence_coverage, assess_truth_layer, discover_truth_manifest,
-    generate_truth_manifest_with_options, import_trust_surface_records, load_site,
-    map_grounding_queries, reconcile_trust_surfaces, score_intelligence, validate_truth_manifest,
+    EvidenceSiteAssessment, GroundingCoverageGap, GroundingSiteAnalysis, MachineSurfaceGraph,
+    MachineSurfaceOptions, SiteIntelligenceScore, TrustSurfaceReconciliation, TruthAssessment,
+    TruthManifestGeneration, TruthManifestValidation, TruthStructuredSource,
+    assess_evidence_coverage, assess_truth_layer, discover_machine_surface_graph,
+    discover_truth_manifest, generate_truth_manifest_with_options, import_trust_surface_records,
+    load_site, map_grounding_queries, reconcile_trust_surfaces, score_intelligence,
+    validate_truth_manifest,
 };
 use serde::Serialize;
 use std::fs;
@@ -38,6 +40,11 @@ pub fn command_intelligence(submatches: &ArgMatches) -> Result<i32> {
             }
             Some((other, _)) => bail!("unsupported trust-surface command: {}", other),
             None => bail!("missing trust-surface subcommand"),
+        },
+        Some(("surfaces", surfaces_matches)) => match surfaces_matches.subcommand() {
+            Some(("discover", discover_matches)) => command_surfaces_discover(discover_matches),
+            Some((other, _)) => bail!("unsupported surfaces command: {}", other),
+            None => bail!("missing surfaces subcommand"),
         },
         Some(("score", score_matches)) => command_intelligence_score(score_matches),
         Some((other, _)) => bail!("unsupported intelligence command: {}", other),
@@ -96,6 +103,36 @@ fn command_grounding_map(submatches: &ArgMatches) -> Result<i32> {
             Ok(0)
         }
         Err(error) => emit_failure("intelligence grounding-map", format, error),
+    }
+}
+
+fn command_surfaces_discover(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let root = PathBuf::from(required_arg(submatches, "path")?);
+    let site_url = submatches.get_one::<String>("site-url").map(String::as_str);
+    match load_site(&root)
+        .map(|site| discover_machine_surface_graph(&site, MachineSurfaceOptions::new(site_url)))
+    {
+        Ok(report) => {
+            let report_path = write_report(&root, "machine-surfaces-latest.json", &report)?;
+            match format {
+                "json" => println!(
+                    "{}",
+                    render_data_command_json(
+                        "intelligence surfaces discover",
+                        true,
+                        serde_json::json!({
+                            "report_path": report_path.to_string_lossy(),
+                            "graph": report,
+                        }),
+                        Vec::new()
+                    )?
+                ),
+                _ => println!("{}", surfaces_text(&report, &report_path)),
+            }
+            Ok(0)
+        }
+        Err(error) => emit_failure("intelligence surfaces discover", format, error),
     }
 }
 
@@ -382,6 +419,62 @@ fn write_report<T: Serialize>(root: &Path, file_name: &str, payload: &T) -> Resu
     let path = reports_dir.join(file_name);
     fs::write(&path, serde_json::to_string_pretty(payload)?)?;
     Ok(path)
+}
+
+fn surfaces_text(report: &MachineSurfaceGraph, report_path: &Path) -> String {
+    let coverage = &report.coverage;
+    let mut lines = vec![
+        "Machine Surface Graph".to_string(),
+        String::new(),
+        format!("Site root: {}", report.site_root),
+        format!("Site URL: {}", report.site_url.as_deref().unwrap_or("-")),
+        format!("Surfaces discovered: {}", report.surfaces.len()),
+        format!("Routes analyzed: {}", coverage.total_routes),
+        format!(
+            "Markdown mirror coverage: {}/{}",
+            coverage.routes_with_markdown_mirror, coverage.total_routes
+        ),
+        format!(
+            "Schema coverage: {}/{}",
+            coverage.routes_with_schema, coverage.total_routes
+        ),
+        format!("Static machine links: {}", coverage.static_machine_links),
+        format!("llms.txt links: {}", coverage.llms_index_links),
+        format!("Convention mirror hits: {}", coverage.convention_probe_hits),
+        format!("Facts present: {}", coverage.facts_present),
+        format!("llms.txt present: {}", coverage.llms_present),
+        format!("sitemap.xml present: {}", coverage.sitemap_present),
+        format!("robots.txt present: {}", coverage.robots_present),
+        format!("Report: {}", report_path.display()),
+    ];
+    if !report.recommendations.is_empty() {
+        lines.push(String::new());
+        lines.push("Recommendations:".to_string());
+        for recommendation in &report.recommendations {
+            lines.push(format!("- {}", recommendation));
+        }
+    }
+    let routes_with_issues = report
+        .routes
+        .iter()
+        .filter(|route| !route.issues.is_empty())
+        .take(10)
+        .collect::<Vec<_>>();
+    if !routes_with_issues.is_empty() {
+        lines.push(String::new());
+        lines.push("Routes needing attention:".to_string());
+        for route in routes_with_issues {
+            lines.push(format!(
+                "- /{} schema={} markdown={} static_links={} issues={}",
+                route.route,
+                route.schema_types.len(),
+                route.markdown_mirrors.len(),
+                route.static_machine_links.len(),
+                route.issues.join("; ")
+            ));
+        }
+    }
+    lines.join("\n")
 }
 
 fn grounding_text(report: &GroundingSiteAnalysis, report_path: &Path) -> String {
