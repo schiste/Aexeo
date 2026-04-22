@@ -8,8 +8,8 @@ use seogeo_core::{
     SnippetInspection, build_bing_ai_opportunity_report, build_bing_ai_trend_report,
     build_publish_hook_report_with_config, export_search_console_rows, import_bing_ai_export,
     inspect_snippet_controls_path, inspect_snippet_controls_url, load_indexnow_ledger,
-    record_bing_ai_trend, retry_indexnow_submissions, submit_indexnow, submit_indexnow_with_ledger,
-    validate_indexnow,
+    plan_indexnow_submission, record_bing_ai_trend, retry_indexnow_submissions, submit_indexnow,
+    submit_indexnow_with_ledger, validate_indexnow,
 };
 use std::path::{Path, PathBuf};
 
@@ -27,6 +27,7 @@ pub fn command_snippet(submatches: &ArgMatches) -> Result<i32> {
 pub fn command_indexnow(submatches: &ArgMatches) -> Result<i32> {
     match submatches.subcommand() {
         Some(("validate", validate_matches)) => command_indexnow_validate(validate_matches),
+        Some(("plan", plan_matches)) => command_indexnow_plan(plan_matches),
         Some(("submit", submit_matches)) => command_indexnow_submit(submit_matches),
         Some(("ledger", ledger_matches)) => command_indexnow_ledger(ledger_matches),
         Some(("retry", retry_matches)) => command_indexnow_retry(retry_matches),
@@ -171,6 +172,41 @@ fn indexnow_submission_text(submission: &seogeo_core::IndexNowSubmission) -> Str
     ];
     if let Some(body) = &submission.response_body {
         lines.push(format!("Response body: {}", body));
+    }
+    lines.join("\n")
+}
+
+fn indexnow_plan_text(plan: &seogeo_core::IndexNowPlan) -> String {
+    let mut lines = vec![
+        "IndexNow Plan".to_string(),
+        String::new(),
+        format!("Endpoint: {}", plan.endpoint),
+        format!("Site: {}", plan.site_url),
+        format!("Host: {}", plan.host),
+        format!("Key location: {}", plan.key_location),
+        format!("URLs: {}", plan.submitted_urls),
+        format!("Can submit: {}", plan.can_submit),
+    ];
+    if !plan.warnings.is_empty() {
+        lines.push(String::new());
+        lines.push("Warnings:".to_string());
+        for warning in &plan.warnings {
+            lines.push(format!("- {}", warning));
+        }
+    }
+    if !plan.errors.is_empty() {
+        lines.push(String::new());
+        lines.push("Errors:".to_string());
+        for error in &plan.errors {
+            lines.push(format!("- {}", error));
+        }
+    }
+    if !plan.notes.is_empty() {
+        lines.push(String::new());
+        lines.push("Notes:".to_string());
+        for note in &plan.notes {
+            lines.push(format!("- {}", note));
+        }
     }
     lines.join("\n")
 }
@@ -522,6 +558,37 @@ fn command_indexnow_validate(submatches: &ArgMatches) -> Result<i32> {
             render_data_command_json("indexnow validate", success, validation.clone(), Vec::new())?
         ),
         _ => println!("{}", indexnow_validation_text(&validation)),
+    }
+    Ok(if success { 0 } else { 1 })
+}
+
+fn command_indexnow_plan(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let urls = submatches
+        .get_many::<String>("url")
+        .ok_or_else(|| anyhow!("missing required CLI argument 'url'"))?
+        .cloned()
+        .collect::<Vec<_>>();
+    let root = submatches
+        .get_one::<String>("path")
+        .map(|path| canonicalize_or_keep(path));
+    let plan = match plan_indexnow_submission(
+        required_arg(submatches, "endpoint")?,
+        required_arg(submatches, "site_url")?,
+        required_arg(submatches, "key")?,
+        root.as_deref(),
+        &urls,
+    ) {
+        Ok(plan) => plan,
+        Err(error) => return emit_integration_failure("indexnow plan", format, error),
+    };
+    let success = plan.can_submit;
+    match format {
+        "json" => println!(
+            "{}",
+            render_data_command_json("indexnow plan", success, plan.clone(), Vec::new())?
+        ),
+        _ => println!("{}", indexnow_plan_text(&plan)),
     }
     Ok(if success { 0 } else { 1 })
 }

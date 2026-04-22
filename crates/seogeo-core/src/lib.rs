@@ -46,14 +46,14 @@ pub use html_rules::{run_html_rules, run_static_html_audit};
 pub use integrations::{
     BingAiImportReport, BingAiOpportunity, BingAiOpportunityReport, BingAiRecord, BingAiTrendDelta,
     BingAiTrendReport, BingAiTrendRoute, BingAiTrendSnapshot, BingAiUrlSummary, IndexNowLedger,
-    IndexNowLedgerEntry, IndexNowRetryReport, IndexNowSubmission, IndexNowValidation,
+    IndexNowLedgerEntry, IndexNowPlan, IndexNowRetryReport, IndexNowSubmission, IndexNowValidation,
     PublishHookReport, SearchConsoleExportRow, SnippetInspection, build_bing_ai_opportunity_report,
     build_bing_ai_trend_report, build_publish_hook_report, build_publish_hook_report_with_config,
     export_search_console_rows, import_bing_ai_export, inspect_snippet_controls_path,
     inspect_snippet_controls_site, inspect_snippet_controls_url,
     inspect_snippet_controls_with_config, load_bing_ai_trends, load_indexnow_ledger,
-    record_bing_ai_trend, retry_indexnow_submissions, submit_indexnow, submit_indexnow_with_ledger,
-    validate_indexnow,
+    plan_indexnow_submission, record_bing_ai_trend, retry_indexnow_submissions, submit_indexnow,
+    submit_indexnow_with_ledger, validate_indexnow,
 };
 pub use intelligence::{
     EvidenceClaim, EvidenceClaimKind, EvidenceRouteAssessment, EvidenceSectionAssessment,
