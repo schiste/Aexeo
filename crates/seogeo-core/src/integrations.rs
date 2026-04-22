@@ -56,6 +56,21 @@ pub struct IndexNowSubmission {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IndexNowPlan {
+    pub endpoint: String,
+    pub site_url: String,
+    pub host: String,
+    pub key_location: String,
+    pub validation: IndexNowValidation,
+    pub urls: Vec<String>,
+    pub submitted_urls: usize,
+    pub can_submit: bool,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BingAiRecord {
     pub url: String,
     pub route: String,
@@ -512,6 +527,96 @@ pub fn submit_indexnow(
         status_code,
         success: (200..300).contains(&status_code),
         response_body,
+    })
+}
+
+fn normalize_indexnow_urls(urls: &[String]) -> Vec<String> {
+    let mut normalized = BTreeSet::new();
+    for url in urls {
+        let trimmed = url.trim();
+        if !trimmed.is_empty() {
+            normalized.insert(trimmed.to_string());
+        }
+    }
+    normalized.into_iter().collect()
+}
+
+fn validate_indexnow_url_ownership(host: &str, urls: &[String]) -> Vec<String> {
+    let mut errors = Vec::new();
+    for url in urls {
+        let parsed = match Url::parse(url) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                errors.push(format!("invalid URL '{}': {}", url, error));
+                continue;
+            }
+        };
+        if !matches!(parsed.scheme(), "http" | "https") {
+            errors.push(format!("URL '{}' must use http or https", url));
+        }
+        if parsed.host_str() != Some(host) {
+            errors.push(format!(
+                "URL '{}' is not owned by IndexNow host '{}'",
+                url, host
+            ));
+        }
+    }
+    errors
+}
+
+pub fn plan_indexnow_submission(
+    endpoint: &str,
+    site_url: &str,
+    key: &str,
+    root: Option<&Path>,
+    urls: &[String],
+) -> Result<IndexNowPlan> {
+    let validation = validate_indexnow(site_url, key, root)?;
+    let normalized_urls = normalize_indexnow_urls(urls);
+    let mut errors = validation.errors.clone();
+    let mut warnings = validation.warnings.clone();
+    if !validation.key_file_present {
+        errors.push(format!(
+            "IndexNow key file must be present before submission: {}",
+            validation.key_location
+        ));
+    }
+    if normalized_urls.is_empty() {
+        errors.push("at least one URL is required for IndexNow submission".to_string());
+    }
+    if normalized_urls.len() > 10_000 {
+        errors.push(format!(
+            "IndexNow payload contains {} URLs; split submissions into batches of at most 10,000 URLs",
+            normalized_urls.len()
+        ));
+    }
+    errors.extend(validate_indexnow_url_ownership(
+        &validation.host,
+        &normalized_urls,
+    ));
+    if validation.validation_mode == "remote" {
+        warnings.push(
+            "remote validation checks the live key file; use --path for local pre-publish validation"
+                .to_string(),
+        );
+    }
+    let can_submit = errors.is_empty();
+    Ok(IndexNowPlan {
+        endpoint: endpoint.to_string(),
+        site_url: site_url.to_string(),
+        host: validation.host.clone(),
+        key_location: validation.key_location.clone(),
+        validation,
+        submitted_urls: normalized_urls.len(),
+        urls: normalized_urls,
+        can_submit,
+        errors,
+        warnings,
+        notes: vec![
+            "This is a dry-run plan; no search engine was notified.".to_string(),
+            "IndexNow notifies participating engines about URL changes but does not guarantee indexing or ranking.".to_string(),
+            "Persist real submissions through the ledger by using `indexnow submit --path <root>` or the publish hook.".to_string(),
+        ],
     })
 }
 
@@ -1256,8 +1361,9 @@ mod tests {
     use super::{
         build_bing_ai_opportunity_report, build_bing_ai_trend_report, build_publish_hook_report,
         export_search_console_rows, import_bing_ai_export, inspect_snippet_controls_path,
-        load_indexnow_ledger, record_bing_ai_trend, retry_indexnow_submissions, submit_indexnow,
-        submit_indexnow_with_ledger, validate_indexnow,
+        load_indexnow_ledger, plan_indexnow_submission, record_bing_ai_trend,
+        retry_indexnow_submissions, submit_indexnow, submit_indexnow_with_ledger,
+        validate_indexnow,
     };
     use std::fs;
     use std::io::{Read, Write};
@@ -1283,6 +1389,51 @@ mod tests {
         assert!(result.key_file_present);
         assert!(result.key_file_matches);
         assert_eq!(result.remote_status_code, None);
+    }
+
+    #[test]
+    fn plans_indexnow_submission_without_network_submit() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(&root.join("abc123.txt"), "abc123");
+        let urls = vec![
+            "https://example.com/a".to_string(),
+            "https://example.com/a".to_string(),
+            "https://example.com/b".to_string(),
+        ];
+        let plan = plan_indexnow_submission(
+            "https://api.indexnow.org/indexnow",
+            "https://example.com",
+            "abc123",
+            Some(root),
+            &urls,
+        )
+        .unwrap();
+        assert!(plan.can_submit);
+        assert_eq!(plan.submitted_urls, 2);
+        assert!(plan.errors.is_empty());
+        assert_eq!(plan.validation.validation_mode, "local");
+    }
+
+    #[test]
+    fn blocks_indexnow_urls_for_other_hosts() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(&root.join("abc123.txt"), "abc123");
+        let plan = plan_indexnow_submission(
+            "https://api.indexnow.org/indexnow",
+            "https://example.com",
+            "abc123",
+            Some(root),
+            &["https://other.example/page".to_string()],
+        )
+        .unwrap();
+        assert!(!plan.can_submit);
+        assert!(
+            plan.errors
+                .iter()
+                .any(|error| error.contains("not owned by IndexNow host"))
+        );
     }
 
     #[test]

@@ -343,6 +343,26 @@ pub fn build_cli() -> Command {
                         ),
                 )
                 .subcommand(
+                    Command::new("plan")
+                        .about("Dry-run an IndexNow payload and validate submit readiness")
+                        .arg(Arg::new("endpoint").required(true))
+                        .arg(Arg::new("site_url").required(true))
+                        .arg(Arg::new("key").required(true))
+                        .arg(Arg::new("path").long("path").num_args(1))
+                        .arg(
+                            Arg::new("url")
+                                .required(true)
+                                .num_args(1..)
+                                .action(ArgAction::Append),
+                        )
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "json"])
+                                .default_value("text"),
+                        ),
+                )
+                .subcommand(
                     Command::new("submit")
                         .about("Submit changed URLs to an IndexNow endpoint")
                         .arg(Arg::new("endpoint").required(true))

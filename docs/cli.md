@@ -235,6 +235,7 @@ Usage: indexnow [COMMAND]
 
 Commands:
   validate  Validate IndexNow key format and key-file placement
+  plan      Dry-run an IndexNow payload and validate submit readiness
   submit    Submit changed URLs to an IndexNow endpoint
   ledger    Inspect the local IndexNow submission ledger
   retry     Retry failed retryable IndexNow submissions from the ledger
