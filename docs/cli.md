@@ -95,6 +95,9 @@ Options:
       --config <config>
 
 
+      --perf-budget <perf-budget>
+          Fail the runtime command when a JSON performance budget is exceeded
+
       --baseline <baseline>
 
 

@@ -86,7 +86,8 @@ pub use reporting::{
 pub use robots_rules::run_robots_rules;
 pub use runtime::{
     PlaywrightDoctor, RuntimeAudit, RuntimeAuditOptions, RuntimeProgressEvent, RuntimeProgressMode,
-    run_runtime_audit, run_runtime_audit_with_options, runtime_doctor, verify_runtime_audit,
+    evaluate_performance_budget, run_runtime_audit, run_runtime_audit_with_options, runtime_doctor,
+    verify_runtime_audit,
 };
 pub use schema_rules::run_schema_rules;
 pub use site::{

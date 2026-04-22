@@ -100,6 +100,12 @@ pub fn build_cli() -> Command {
                         .default_value("plain"),
                 )
                 .arg(Arg::new("config").long("config").num_args(1))
+                .arg(
+                    Arg::new("perf-budget")
+                        .long("perf-budget")
+                        .num_args(1)
+                        .help("Fail the runtime command when a JSON performance budget is exceeded"),
+                )
                 .arg(Arg::new("baseline").long("baseline").num_args(1))
                 .arg(
                     Arg::new("regressions-only")
@@ -701,6 +707,12 @@ pub fn build_cli() -> Command {
                                 .action(ArgAction::SetTrue),
                         )
                         .arg(Arg::new("config").long("config").num_args(1))
+                        .arg(
+                            Arg::new("perf-budget")
+                                .long("perf-budget")
+                                .num_args(1)
+                                .help("Fail the profile command when a JSON performance budget is exceeded"),
+                        )
                         .arg(
                             Arg::new("max-pages")
                                 .long("max-pages")

@@ -1,14 +1,16 @@
 use anyhow::{Result, bail};
 use clap::ArgMatches;
 use seogeo_contracts::AuditStatus;
+use seogeo_contracts::PerformanceBudget;
 use seogeo_core::config::load_config_with_diagnostics;
 use seogeo_core::{
     RuntimeAudit, RuntimeAuditOptions, RuntimeProgressEvent, RuntimeProgressMode,
-    audit_site_snapshot, build_audit_artifact, diff_finding_sets, load_audit_artifact,
-    load_findings_from_audit, render_diff_text, render_sarif, render_text_artifact,
-    run_runtime_audit_with_options, runtime_doctor, verify_runtime_audit, write_audit_artifact,
-    write_partial_audit_artifact, write_progress_audit_artifact,
+    audit_site_snapshot, build_audit_artifact, diff_finding_sets, evaluate_performance_budget,
+    load_audit_artifact, load_findings_from_audit, render_diff_text, render_sarif,
+    render_text_artifact, run_runtime_audit_with_options, runtime_doctor, verify_runtime_audit,
+    write_audit_artifact, write_partial_audit_artifact, write_progress_audit_artifact,
 };
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::commands::common::required_arg;
@@ -58,6 +60,50 @@ fn runtime_output_artifact(
     artifact.performance = audit.performance.clone();
     artifact.site = Some(audit_site_snapshot(&audit.site, site_url));
     artifact
+}
+
+fn load_performance_budget(
+    submatches: &ArgMatches,
+) -> Result<Option<(PathBuf, PerformanceBudget)>> {
+    let Some(path) = submatches.get_one::<String>("perf-budget") else {
+        return Ok(None);
+    };
+    let path = PathBuf::from(path);
+    let text = fs::read_to_string(&path)?;
+    let budget = serde_json::from_str::<PerformanceBudget>(&text)?;
+    Ok(Some((path, budget)))
+}
+
+fn apply_performance_budget(
+    artifact: &mut seogeo_contracts::AuditArtifact,
+    budget: Option<&(PathBuf, PerformanceBudget)>,
+) -> bool {
+    let Some((path, budget)) = budget else {
+        return true;
+    };
+    let report =
+        evaluate_performance_budget(artifact, budget.clone(), Some(path.display().to_string()));
+    let passed = report.passed;
+    if let Some(performance) = artifact.performance.as_mut() {
+        performance.budget = Some(report);
+    }
+    passed
+}
+
+fn copy_performance_budget(
+    target: &mut seogeo_contracts::AuditArtifact,
+    source: &seogeo_contracts::AuditArtifact,
+) {
+    let Some(source_budget) = source
+        .performance
+        .as_ref()
+        .and_then(|performance| performance.budget.clone())
+    else {
+        return;
+    };
+    if let Some(target_performance) = target.performance.as_mut() {
+        target_performance.budget = Some(source_budget);
+    }
 }
 
 fn print_progress(mode: &str, event: RuntimeProgressEvent) {
@@ -195,6 +241,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     if regressions_only && baseline_path.is_none() {
         bail!("--regressions-only requires --baseline");
     }
+    let performance_budget = load_performance_budget(submatches)?;
     let format = submatches
         .get_one::<String>("format")
         .map(String::as_str)
@@ -234,8 +281,10 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
         Ok(audit) => audit,
         Err(error) => return emit_runtime_failure("crawl", format, &error, warnings),
     };
-    let full_audit_artifact =
+    let mut full_audit_artifact =
         runtime_output_artifact("crawl", &audit, &audit.findings, Some(target_url));
+    let performance_budget_passed =
+        apply_performance_budget(&mut full_audit_artifact, performance_budget.as_ref());
     let audit_path = write_audit_artifact(
         &full_audit_artifact,
         &cwd,
@@ -253,14 +302,16 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     } else {
         audit.findings.clone()
     };
-    let render_artifact =
+    let mut render_artifact =
         runtime_output_artifact("crawl", &audit, &findings_to_render, Some(target_url));
-    let success = if regressions_only {
+    copy_performance_budget(&mut render_artifact, &full_audit_artifact);
+    let findings_success = if regressions_only {
         findings_to_render.is_empty() && audit.status != AuditStatus::Failed
     } else {
         !findings_to_render.iter().any(|finding| finding.is_error())
             && audit.status != AuditStatus::Failed
     };
+    let success = findings_success && performance_budget_passed;
 
     match format {
         "json" => println!(
@@ -376,6 +427,7 @@ pub fn command_profile_runtime(submatches: &ArgMatches) -> Result<i32> {
         .get_one::<String>("format")
         .map(String::as_str)
         .unwrap_or("text");
+    let performance_budget = load_performance_budget(submatches)?;
     let mut options = runtime_options_from_cli(
         submatches,
         RuntimeProgressMode::Off,
@@ -391,10 +443,12 @@ pub fn command_profile_runtime(submatches: &ArgMatches) -> Result<i32> {
         &config,
         &mut options,
     )?;
+    let mut artifact =
+        runtime_output_artifact("profile", &audit, &audit.findings, Some(target_url));
+    let performance_budget_passed =
+        apply_performance_budget(&mut artifact, performance_budget.as_ref());
     match format {
         "json" => {
-            let artifact =
-                runtime_output_artifact("profile", &audit, &audit.findings, Some(target_url));
             println!("{}", serde_json::to_string_pretty(&artifact)?);
         }
         _ => {
@@ -495,6 +549,24 @@ pub fn command_profile_runtime(submatches: &ArgMatches) -> Result<i32> {
                     }
                     println!();
                 }
+                if let Some(budget) = artifact
+                    .performance
+                    .as_ref()
+                    .and_then(|performance| performance.budget.as_ref())
+                {
+                    println!("Performance Budget");
+                    println!("- Passed: {}", budget.passed);
+                    if let Some(path) = budget.budget_path.as_deref() {
+                        println!("- Path: {}", path);
+                    }
+                    for violation in &budget.violations {
+                        println!("- {}", violation.message);
+                    }
+                    for warning in &budget.warnings {
+                        println!("- Warning: {}", warning);
+                    }
+                    println!();
+                }
             }
             if !crawl.slowest_paths.is_empty() {
                 println!("Slowest Paths");
@@ -507,11 +579,13 @@ pub fn command_profile_runtime(submatches: &ArgMatches) -> Result<i32> {
             }
         }
     }
-    Ok(if audit.status == AuditStatus::Failed {
-        1
-    } else {
-        0
-    })
+    Ok(
+        if audit.status == AuditStatus::Failed || !performance_budget_passed {
+            1
+        } else {
+            0
+        },
+    )
 }
 
 pub fn command_doctor(submatches: &ArgMatches) -> Result<i32> {
