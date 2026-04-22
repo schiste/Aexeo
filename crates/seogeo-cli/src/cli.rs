@@ -151,12 +151,15 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("kind").required(true).value_parser([
                     "llms",
                     "llms-full",
+                    "machine-bundle",
                     "markdown-mirror",
+                    "markdown-pages",
                     "robots",
                     "links",
                 ]))
                 .arg(Arg::new("path").default_value("."))
                 .arg(Arg::new("config").long("config").num_args(1))
+                .arg(Arg::new("write-dir").long("write-dir").num_args(1))
                 .arg(
                     Arg::new("format")
                         .long("format")

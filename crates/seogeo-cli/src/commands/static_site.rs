@@ -4,17 +4,19 @@ use seogeo_contracts::AuditStatus;
 use seogeo_core::adapter::resolve_static_site_root;
 use seogeo_core::config::load_config_with_diagnostics;
 use seogeo_core::{
-    apply_safe_fixes, build_audit_artifact, diff_finding_sets, load_findings_from_audit, load_site,
-    render_llms_full_txt, render_llms_txt, render_markdown_mirror, render_robots_txt, render_sarif,
+    MachineArtifactBundle, apply_safe_fixes, build_audit_artifact, build_machine_artifact_bundle,
+    diff_finding_sets, load_findings_from_audit, load_site, render_llms_full_txt, render_llms_txt,
+    render_markdown_mirror, render_markdown_mirror_pages, render_robots_txt, render_sarif,
     render_text_artifact, run_native_static_audit_with_config, suggest_internal_links,
     write_audit_artifact, write_baseline_file,
 };
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::commands::common::{canonicalize_or_keep, required_arg};
 use crate::output::{
-    emit_config_warnings, render_audit_command_json, render_path_command_json,
-    render_paths_command_json, render_text_command_json,
+    emit_config_warnings, render_audit_command_json, render_data_command_json,
+    render_path_command_json, render_paths_command_json, render_text_command_json,
 };
 
 pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
@@ -123,6 +125,15 @@ pub fn command_generate(submatches: &ArgMatches) -> Result<i32> {
         .get_one::<String>("kind")
         .map(String::as_str)
         .ok_or_else(|| anyhow::anyhow!("missing required CLI argument 'kind'"))?;
+    if matches!(kind, "machine-bundle" | "markdown-pages") {
+        return command_generate_machine_artifacts(
+            submatches,
+            kind,
+            &site,
+            site_config.site_url,
+            loaded.warnings,
+        );
+    }
     let output = match kind {
         "llms" => render_llms_txt(&site, site_config.site_url),
         "llms-full" => render_llms_full_txt(&site, site_config.site_url),
@@ -152,6 +163,110 @@ pub fn command_generate(submatches: &ArgMatches) -> Result<i32> {
         }
     }
     Ok(0)
+}
+
+fn command_generate_machine_artifacts(
+    submatches: &ArgMatches,
+    kind: &str,
+    site: &seogeo_core::Site,
+    site_url: Option<&str>,
+    warnings: Vec<seogeo_core::config::ConfigWarning>,
+) -> Result<i32> {
+    let bundle = if kind == "machine-bundle" {
+        build_machine_artifact_bundle(site, site_url)
+    } else {
+        let artifacts = render_markdown_mirror_pages(site);
+        MachineArtifactBundle {
+            route_count: site.route_page_pairs().count(),
+            markdown_pages: artifacts.len(),
+            artifacts,
+            deploy_notes: vec![
+                "Deploy generated Markdown files at the same relative paths from the public site root.".to_string(),
+                "Reference generated Markdown mirrors from /llms.txt or static page links for stronger discovery.".to_string(),
+            ],
+        }
+    };
+    let written = if let Some(write_dir) = submatches.get_one::<String>("write-dir") {
+        write_machine_artifact_bundle(Path::new(write_dir), &bundle)?
+    } else {
+        Vec::new()
+    };
+    match submatches
+        .get_one::<String>("format")
+        .map(String::as_str)
+        .unwrap_or("text")
+    {
+        "json" => println!(
+            "{}",
+            render_data_command_json(
+                "generate",
+                true,
+                serde_json::json!({
+                    "kind": kind,
+                    "written": written,
+                    "bundle": bundle,
+                }),
+                warnings
+            )?
+        ),
+        _ => {
+            emit_config_warnings(&warnings);
+            println!("{}", machine_bundle_text(kind, &bundle, &written));
+        }
+    }
+    Ok(0)
+}
+
+fn write_machine_artifact_bundle(
+    root: &Path,
+    bundle: &MachineArtifactBundle,
+) -> Result<Vec<String>> {
+    let mut written = Vec::new();
+    for artifact in &bundle.artifacts {
+        let path = root.join(&artifact.path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&path, &artifact.content)?;
+        written.push(path.display().to_string());
+    }
+    Ok(written)
+}
+
+fn machine_bundle_text(kind: &str, bundle: &MachineArtifactBundle, written: &[String]) -> String {
+    let mut lines = vec![
+        format!("Generated {}", kind),
+        String::new(),
+        format!("Routes: {}", bundle.route_count),
+        format!("Artifacts: {}", bundle.artifacts.len()),
+        format!("Markdown pages: {}", bundle.markdown_pages),
+    ];
+    if !written.is_empty() {
+        lines.push(format!("Written files: {}", written.len()));
+    }
+    lines.push(String::new());
+    lines.push("Artifacts:".to_string());
+    for artifact in &bundle.artifacts {
+        lines.push(format!(
+            "- {} kind={} bytes={}",
+            artifact.path, artifact.kind, artifact.bytes
+        ));
+    }
+    if !bundle.deploy_notes.is_empty() {
+        lines.push(String::new());
+        lines.push("Deploy notes:".to_string());
+        for note in &bundle.deploy_notes {
+            lines.push(format!("- {}", note));
+        }
+    }
+    if !written.is_empty() {
+        lines.push(String::new());
+        lines.push("Written paths:".to_string());
+        for path in written {
+            lines.push(format!("- {}", path));
+        }
+    }
+    lines.join("\n")
 }
 
 pub fn command_fix(submatches: &ArgMatches) -> Result<i32> {
