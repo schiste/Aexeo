@@ -54,6 +54,69 @@ The command writes `.seogeo-reports/evidence-latest.json` and reports:
 - citation readiness score
 - highest-risk routes for AI citation distortion
 
+### Answer Fan-out Assessment
+
+Answer fan-out simulates the way answer engines decompose a broad question into
+related subqueries. It is deterministic and does not require an LLM.
+
+Example:
+
+```bash
+cargo run -p seogeo-cli -- intelligence fanout assess .
+```
+
+The command writes `.seogeo-reports/answer-fanout-latest.json` and generates
+coverage checks for:
+
+- definition queries
+- setup and workflow queries
+- comparison and alternatives queries
+- pricing and cost queries
+- trust and security queries
+- support and troubleshooting queries
+
+Each query records:
+
+- generated query text
+- topic and family
+- expected supporting surface
+- matched routes and match reasons
+- coverage score
+- gaps that explain why the query is weak
+
+Use this to identify missing pages before an answer engine or AI Mode-style
+query fan-out discovers the gap externally.
+
+### Machine Surface Graph
+
+The surface graph is the canonical inventory for machine-readable web presence.
+It ties together first-party HTML, schema, facts manifests, `llms.txt`,
+Markdown mirrors, sitemap, robots, feeds, and static discovery links.
+
+Example:
+
+```bash
+cargo run -p seogeo-cli -- intelligence surfaces discover . --site-url https://example.com
+```
+
+The command writes `.seogeo-reports/machine-surfaces-latest.json` and records:
+
+- discovered surfaces
+- discovery source such as `static_link`, `llms_index`, `sitemap`,
+  `local_artifact`, or `convention_probe`
+- route-level Markdown mirror coverage
+- schema coverage
+- static machine-readable links
+- recommendations for missing deployable artifacts
+
+This distinction matters for `.md.txt` deployments. A convention-probed
+Markdown URL is useful, but a static link or `llms.txt` reference is stronger
+evidence that agents can discover it without guessing.
+
+Surface readiness is also available as the `surfaces` audit rule group. The
+rules are warning-level by default except broken `llms.txt` machine references,
+which are errors because they point agents to missing artifacts.
+
 ### Facts Assessment
 
 Facts assessment compares:
@@ -122,6 +185,30 @@ Deploy options:
 - `--deploy-location root` writes `facts.json`
 - `--deploy-location well-known` writes `.well-known/facts.json`
 - `--write <path>` writes to an explicit file path
+
+### Machine Artifact Bundle
+
+Use the machine bundle generator when you want a deployable first pass for all
+core AI-readable artifacts.
+
+Examples:
+
+```bash
+cargo run -p seogeo-cli -- generate machine-bundle .
+cargo run -p seogeo-cli -- generate machine-bundle . --write-dir ./public
+cargo run -p seogeo-cli -- generate markdown-pages . --write-dir ./public
+```
+
+The full bundle includes:
+
+- `facts.json`
+- `llms.txt`
+- `llms-full.txt`
+- per-route `.md.txt` Markdown mirrors
+
+The generated `facts.json` is intentionally review-first. It should be treated
+as a deployable draft derived from schema, titles, headings, and site inventory,
+not as a legal or commercial source of truth until reviewed by the site owner.
 
 ### Trust Surface Import and Reconciliation
 
@@ -226,6 +313,7 @@ Examples:
 
 ```bash
 cargo run -p seogeo-cli -- indexnow validate https://example.com abc123 --path .
+cargo run -p seogeo-cli -- indexnow plan https://api.indexnow.org/indexnow https://example.com abc123 --path . https://example.com/a
 cargo run -p seogeo-cli -- indexnow submit https://api.indexnow.org/indexnow https://example.com abc123 https://example.com/a https://example.com/b
 cargo run -p seogeo-cli -- indexnow ledger .
 cargo run -p seogeo-cli -- indexnow retry --path . abc123
@@ -235,6 +323,14 @@ cargo run -p seogeo-cli -- indexnow retry --path . abc123
 
 - with `--path`, it validates the local key file in the build root
 - without `--path`, it performs a live HTTP check against the deployed `keyLocation`
+
+`indexnow plan` is a dry run. It does not notify any engine. It validates:
+
+- key file readiness
+- URL de-duplication
+- URL ownership against the submitted host
+- batch size
+- submit readiness
 
 `indexnow submit` sends a standards-shaped payload with:
 
@@ -253,6 +349,10 @@ When `--path` is provided on submit, Aexeo records the attempt into `.seogeo-rep
 - success/retryable status
 
 Use `indexnow retry` to replay the latest retryable failed batch per unique endpoint/site/url set.
+
+IndexNow is a freshness notification layer. It can help participating engines
+prioritize changed URLs, but it does not guarantee indexing, ranking, or AI
+citation inclusion.
 
 ## Bing AI Import
 

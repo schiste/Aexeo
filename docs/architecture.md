@@ -26,6 +26,27 @@ Responsibilities:
 
 This layer should stay independent from CLI argument parsing and website-specific runtime glue.
 
+## Machine-Readable Presence
+
+Aexeo treats AI discoverability as a graph of machine-readable surfaces rather
+than as one-off files.
+
+Core owns:
+
+- `MachineSurfaceGraph` discovery
+- deterministic `facts.json`, `llms.txt`, `llms-full.txt`, and `.md.txt`
+  artifact generation
+- surface-readiness audit rules
+- answer fan-out coverage analysis
+- runtime performance bottleneck summaries
+- IndexNow validation, dry-run planning, submission ledgering, and retries
+
+The graph records discovery source explicitly. A Markdown mirror found through a
+static link is different from one found through `llms.txt`, sitemap, local
+artifact loading, rendered UI, or convention probing. This distinction keeps
+scores portable across websites while still allowing emerging conventions such
+as Google-style `.md.txt` mirrors.
+
 ## CLI
 
 The canonical command surface lives in [`crates/seogeo-cli`](../crates/seogeo-cli).
