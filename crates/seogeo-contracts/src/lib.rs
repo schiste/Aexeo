@@ -91,6 +91,19 @@ pub struct RuleTiming {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct PerformanceBottleneck {
+    pub kind: String,
+    pub name: String,
+    pub elapsed_us: u64,
+    #[serde(default)]
+    pub share_basis_points: u32,
+    #[serde(default)]
+    pub findings: Option<usize>,
+    #[serde(default)]
+    pub recommendation: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct AuditPerformance {
     #[serde(default)]
     pub elapsed_us: u64,
@@ -98,6 +111,10 @@ pub struct AuditPerformance {
     pub phases: Vec<PhaseTiming>,
     #[serde(default)]
     pub rule_groups: Vec<RuleTiming>,
+    #[serde(default)]
+    pub bottlenecks: Vec<PerformanceBottleneck>,
+    #[serde(default)]
+    pub observations: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
