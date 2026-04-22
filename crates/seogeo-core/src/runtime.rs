@@ -11,7 +11,7 @@ use seogeo_contracts::{
     PerformanceBottleneck, PhaseTiming, RuleTiming, SlowCrawlPath,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 use std::time::Instant;
@@ -158,6 +158,7 @@ struct RuntimePerformance {
     last_partial_emit_at: Option<Instant>,
     last_partial_emit_page: usize,
     slowest_paths: Vec<SlowCrawlPath>,
+    samples: BTreeMap<String, Vec<u64>>,
 }
 
 impl RuntimePerformance {
@@ -179,10 +180,12 @@ impl RuntimePerformance {
 
     fn record_fetch(&mut self, duration_us: u64) {
         self.total_fetch_us = self.total_fetch_us.saturating_add(duration_us);
+        self.record_sample("fetch", duration_us);
     }
 
     fn record_page_process(&mut self, url: &str, fetch_us: u64, process_us: u64) {
         self.total_page_process_us = self.total_page_process_us.saturating_add(process_us);
+        self.record_sample("page_process_total", process_us);
         self.slowest_paths.push(SlowCrawlPath {
             url: url.to_string(),
             fetch_us,
@@ -202,59 +205,72 @@ impl RuntimePerformance {
 
     fn record_queue_selection(&mut self, duration_us: u64) {
         self.total_queue_selection_us = self.total_queue_selection_us.saturating_add(duration_us);
+        self.record_sample("queue_selection", duration_us);
     }
 
     fn record_snapshot_write(&mut self, duration_us: u64) {
         self.total_snapshot_write_us = self.total_snapshot_write_us.saturating_add(duration_us);
+        self.record_sample("snapshot_write", duration_us);
     }
 
     fn record_planner_update(&mut self, duration_us: u64) {
         self.total_planner_update_us = self.total_planner_update_us.saturating_add(duration_us);
+        self.record_sample("planner_update", duration_us);
     }
 
     fn record_link_extraction(&mut self, duration_us: u64) {
         self.total_link_extraction_us = self.total_link_extraction_us.saturating_add(duration_us);
+        self.record_sample("link_extraction", duration_us);
     }
 
     fn record_progress_callback(&mut self, duration_us: u64) {
         self.total_progress_callback_us =
             self.total_progress_callback_us.saturating_add(duration_us);
+        self.record_sample("progress_callback", duration_us);
     }
 
     fn record_checkpoint_write(&mut self, duration_us: u64) {
         self.total_checkpoint_write_us = self.total_checkpoint_write_us.saturating_add(duration_us);
+        self.record_sample("checkpoint_write", duration_us);
     }
 
     fn record_progress_artifact_write(&mut self, duration_us: u64) {
         self.total_progress_artifact_write_us = self
             .total_progress_artifact_write_us
             .saturating_add(duration_us);
+        self.record_sample("progress_artifact_write", duration_us);
     }
 
     fn record_optional_artifact_fetch(&mut self, duration_us: u64) {
         self.total_optional_artifact_fetch_us = self
             .total_optional_artifact_fetch_us
             .saturating_add(duration_us);
+        self.record_sample("optional_artifact_fetch", duration_us);
     }
 
     fn record_sitemap_seed(&mut self, duration_us: u64) {
         self.total_sitemap_seed_us = self.total_sitemap_seed_us.saturating_add(duration_us);
+        self.record_sample("sitemap_seed", duration_us);
     }
 
     fn record_snapshot_build(&mut self, duration_us: u64) {
         self.total_snapshot_build_us = self.total_snapshot_build_us.saturating_add(duration_us);
+        self.record_sample("snapshot_build", duration_us);
     }
 
     fn record_final_audit(&mut self, duration_us: u64) {
         self.total_final_audit_us = self.total_final_audit_us.saturating_add(duration_us);
+        self.record_sample("final_audit", duration_us);
     }
 
     fn record_rule_evaluation(&mut self, duration_us: u64) {
         self.total_rule_evaluation_us = self.total_rule_evaluation_us.saturating_add(duration_us);
+        self.record_sample("rule_evaluation", duration_us);
     }
 
     fn record_policy_apply(&mut self, duration_us: u64) {
         self.total_policy_apply_us = self.total_policy_apply_us.saturating_add(duration_us);
+        self.record_sample("policy_apply", duration_us);
     }
 
     fn record_checkpoint(&mut self) {
@@ -313,6 +329,7 @@ impl RuntimePerformance {
 
     fn record_partial_audit(&mut self, visited_pages: usize, duration_us: u64) {
         self.total_partial_audit_us = self.total_partial_audit_us.saturating_add(duration_us);
+        self.record_sample("partial_audit_total", duration_us);
         self.partial_audits_built += 1;
         self.partial_artifacts_written += 1;
         self.last_partial_emit_page = visited_pages;
@@ -323,12 +340,21 @@ impl RuntimePerformance {
         self.total_partial_audit_build_us = self
             .total_partial_audit_build_us
             .saturating_add(duration_us);
+        self.record_sample("partial_audit_build", duration_us);
     }
 
     fn record_partial_artifact_write(&mut self, duration_us: u64) {
         self.total_partial_artifact_write_us = self
             .total_partial_artifact_write_us
             .saturating_add(duration_us);
+        self.record_sample("partial_artifact_write", duration_us);
+    }
+
+    fn record_sample(&mut self, name: &str, duration_us: u64) {
+        self.samples
+            .entry(name.to_string())
+            .or_default()
+            .push(duration_us);
     }
 
     fn apply_to(&self, crawl_stats: &mut CrawlStats) {
@@ -420,94 +446,116 @@ impl RuntimePerformance {
 
     fn phase_timings(&self, crawl_stats: &CrawlStats) -> Vec<PhaseTiming> {
         let mut phases = vec![
-            PhaseTiming {
-                name: "fetch".to_string(),
-                elapsed_us: self.total_fetch_us,
-            },
-            PhaseTiming {
-                name: "queue_selection".to_string(),
-                elapsed_us: self.total_queue_selection_us,
-            },
-            PhaseTiming {
-                name: "snapshot_write".to_string(),
-                elapsed_us: self.total_snapshot_write_us,
-            },
-            PhaseTiming {
-                name: "planner_update".to_string(),
-                elapsed_us: self.total_planner_update_us,
-            },
-            PhaseTiming {
-                name: "link_extraction".to_string(),
-                elapsed_us: self.total_link_extraction_us,
-            },
-            PhaseTiming {
-                name: "progress_callback".to_string(),
-                elapsed_us: self.total_progress_callback_us,
-            },
-            PhaseTiming {
-                name: "checkpoint_write".to_string(),
-                elapsed_us: self.total_checkpoint_write_us,
-            },
-            PhaseTiming {
-                name: "progress_artifact_write".to_string(),
-                elapsed_us: self.total_progress_artifact_write_us,
-            },
-            PhaseTiming {
-                name: "sitemap_seed".to_string(),
-                elapsed_us: self.total_sitemap_seed_us,
-            },
-            PhaseTiming {
-                name: "optional_artifact_fetch".to_string(),
-                elapsed_us: self.total_optional_artifact_fetch_us,
-            },
-            PhaseTiming {
-                name: "snapshot_build".to_string(),
-                elapsed_us: self.total_snapshot_build_us,
-            },
-            PhaseTiming {
-                name: "partial_audit_build".to_string(),
-                elapsed_us: self.total_partial_audit_build_us,
-            },
-            PhaseTiming {
-                name: "partial_artifact_write".to_string(),
-                elapsed_us: self.total_partial_artifact_write_us,
-            },
-            PhaseTiming {
-                name: "final_audit".to_string(),
-                elapsed_us: self.total_final_audit_us,
-            },
-            PhaseTiming {
-                name: "rule_evaluation".to_string(),
-                elapsed_us: self.total_rule_evaluation_us,
-            },
-            PhaseTiming {
-                name: "policy_apply".to_string(),
-                elapsed_us: self.total_policy_apply_us,
-            },
-            PhaseTiming {
-                name: "overhead".to_string(),
-                elapsed_us: crawl_stats.total_overhead_us,
-            },
-            PhaseTiming {
-                name: "page_process_total".to_string(),
-                elapsed_us: self.total_page_process_us,
-            },
-            PhaseTiming {
-                name: "partial_audit_total".to_string(),
-                elapsed_us: self.total_partial_audit_us,
-            },
+            self.phase("fetch", self.total_fetch_us, "cumulative"),
+            self.phase(
+                "queue_selection",
+                self.total_queue_selection_us,
+                "cumulative",
+            ),
+            self.phase("snapshot_write", self.total_snapshot_write_us, "cumulative"),
+            self.phase("planner_update", self.total_planner_update_us, "cumulative"),
+            self.phase(
+                "link_extraction",
+                self.total_link_extraction_us,
+                "cumulative",
+            ),
+            self.phase(
+                "progress_callback",
+                self.total_progress_callback_us,
+                "cumulative",
+            ),
+            self.phase(
+                "checkpoint_write",
+                self.total_checkpoint_write_us,
+                "cumulative",
+            ),
+            self.phase(
+                "progress_artifact_write",
+                self.total_progress_artifact_write_us,
+                "cumulative",
+            ),
+            self.phase("sitemap_seed", self.total_sitemap_seed_us, "cumulative"),
+            self.phase(
+                "optional_artifact_fetch",
+                self.total_optional_artifact_fetch_us,
+                "cumulative",
+            ),
+            self.phase("snapshot_build", self.total_snapshot_build_us, "cumulative"),
+            self.phase(
+                "partial_audit_build",
+                self.total_partial_audit_build_us,
+                "cumulative",
+            ),
+            self.phase(
+                "partial_artifact_write",
+                self.total_partial_artifact_write_us,
+                "cumulative",
+            ),
+            self.phase("final_audit", self.total_final_audit_us, "cumulative"),
+            self.phase("rule_evaluation", self.total_rule_evaluation_us, "nested"),
+            self.phase("policy_apply", self.total_policy_apply_us, "nested"),
+            self.phase("overhead", crawl_stats.total_overhead_us, "cumulative"),
+            self.phase("page_process_total", self.total_page_process_us, "derived"),
+            self.phase(
+                "partial_audit_total",
+                self.total_partial_audit_us,
+                "derived",
+            ),
         ];
         phases.retain(|phase| phase.elapsed_us > 0);
         phases.sort_by(|left, right| right.elapsed_us.cmp(&left.elapsed_us));
         phases
     }
+
+    fn phase(&self, name: &str, elapsed_us: u64, basis: &str) -> PhaseTiming {
+        let samples = self.samples.get(name).map(Vec::as_slice).unwrap_or(&[]);
+        let mut phase = PhaseTiming {
+            name: name.to_string(),
+            elapsed_us,
+            basis: basis.to_string(),
+            ..PhaseTiming::default()
+        };
+        apply_sample_distribution(&mut phase, samples);
+        phase
+    }
 }
 
-fn share_basis_points(elapsed_us: u64, total_us: u64) -> u32 {
+fn percentile(sorted: &[u64], percentile_basis_points: u64) -> u64 {
+    if sorted.is_empty() {
+        return 0;
+    }
+    let max_index = sorted.len() - 1;
+    let index = ((max_index as u64) * percentile_basis_points).div_ceil(10_000) as usize;
+    sorted[index.min(max_index)]
+}
+
+fn apply_sample_distribution(phase: &mut PhaseTiming, samples: &[u64]) {
+    if samples.is_empty() {
+        return;
+    }
+    let mut sorted = samples.to_vec();
+    sorted.sort_unstable();
+    phase.sample_count = sorted.len();
+    phase.min_us = *sorted.first().unwrap_or(&0);
+    phase.max_us = *sorted.last().unwrap_or(&0);
+    phase.p50_us = percentile(&sorted, 5_000);
+    phase.p75_us = percentile(&sorted, 7_500);
+    phase.p95_us = percentile(&sorted, 9_500);
+    phase.p99_us = percentile(&sorted, 9_900);
+}
+
+fn capped_share_basis_points(elapsed_us: u64, total_us: u64) -> u32 {
     if total_us == 0 {
         return 0;
     }
     ((elapsed_us.saturating_mul(10_000)) / total_us).min(10_000) as u32
+}
+
+fn uncapped_share_basis_points(elapsed_us: u64, total_us: u64) -> u32 {
+    if total_us == 0 {
+        return 0;
+    }
+    ((elapsed_us as u128).saturating_mul(10_000) / total_us as u128).min(u32::MAX as u128) as u32
 }
 
 fn format_share(share_basis_points: u32) -> String {
@@ -553,27 +601,48 @@ fn rule_group_recommendation(group: &str) -> String {
 
 fn build_audit_performance(
     elapsed_us: u64,
-    phases: Vec<PhaseTiming>,
+    mut phases: Vec<PhaseTiming>,
     rule_groups: Vec<RuleTiming>,
 ) -> AuditPerformance {
-    let total_us = elapsed_us.max(1);
+    let wall_clock_us = elapsed_us;
+    let cumulative_tracked_us: u64 = phases
+        .iter()
+        .filter(|phase| phase.basis == "cumulative")
+        .map(|phase| phase.elapsed_us)
+        .sum();
+    let cumulative_basis_us = cumulative_tracked_us.max(1);
+    let wall_basis_us = wall_clock_us.max(1);
+    for phase in &mut phases {
+        phase.wall_share_basis_points =
+            uncapped_share_basis_points(phase.elapsed_us, wall_basis_us);
+        phase.cumulative_share_basis_points =
+            capped_share_basis_points(phase.elapsed_us, cumulative_basis_us);
+    }
     let mut bottlenecks = Vec::new();
     for phase in phases.iter().take(5) {
+        let cumulative_share = capped_share_basis_points(phase.elapsed_us, cumulative_basis_us);
         bottlenecks.push(PerformanceBottleneck {
             kind: "phase".to_string(),
             name: phase.name.clone(),
             elapsed_us: phase.elapsed_us,
-            share_basis_points: share_basis_points(phase.elapsed_us, total_us),
+            share_basis_points: cumulative_share,
+            wall_share_basis_points: uncapped_share_basis_points(phase.elapsed_us, wall_basis_us),
+            cumulative_share_basis_points: cumulative_share,
             findings: None,
             recommendation: phase_recommendation(&phase.name),
         });
     }
+    let total_rule_group_us: u64 = rule_groups.iter().map(|timing| timing.elapsed_us).sum();
+    let rule_group_basis_us = total_rule_group_us.max(1);
     for timing in rule_groups.iter().take(5) {
+        let cumulative_share = capped_share_basis_points(timing.elapsed_us, cumulative_basis_us);
         bottlenecks.push(PerformanceBottleneck {
             kind: "rule_group".to_string(),
             name: timing.group.clone(),
             elapsed_us: timing.elapsed_us,
-            share_basis_points: share_basis_points(timing.elapsed_us, total_us),
+            share_basis_points: capped_share_basis_points(timing.elapsed_us, rule_group_basis_us),
+            wall_share_basis_points: uncapped_share_basis_points(timing.elapsed_us, wall_basis_us),
+            cumulative_share_basis_points: cumulative_share,
             findings: Some(timing.findings),
             recommendation: Some(rule_group_recommendation(&timing.group)),
         });
@@ -592,29 +661,41 @@ fn build_audit_performance(
         && top.share_basis_points >= 2_500
     {
         observations.push(format!(
-            "{} `{}` accounts for {} of runtime",
+            "{} `{}` accounts for {} of its cost basis",
             top.kind,
             top.name,
             format_share(top.share_basis_points)
         ));
     }
     if let Some(fetch) = phases.iter().find(|phase| phase.name == "fetch")
-        && share_basis_points(fetch.elapsed_us, total_us) >= 5_000
+        && capped_share_basis_points(fetch.elapsed_us, cumulative_basis_us) >= 5_000
     {
         observations.push(
-            "fetch dominates runtime; crawler throughput is likely network-bound".to_string(),
+            "fetch dominates cumulative crawler cost; throughput is likely network-bound"
+                .to_string(),
         );
     }
     if let Some(rule_eval) = phases.iter().find(|phase| phase.name == "rule_evaluation")
-        && share_basis_points(rule_eval.elapsed_us, total_us) >= 2_000
+        && uncapped_share_basis_points(rule_eval.elapsed_us, wall_basis_us) >= 2_000
     {
         observations.push(
             "rule evaluation is a material runtime cost; inspect slowest rule groups".to_string(),
         );
     }
+    if phases
+        .iter()
+        .any(|phase| phase.wall_share_basis_points > 10_000 && phase.basis == "cumulative")
+    {
+        observations.push(
+            "one or more cumulative phases exceed wall-clock time; use cumulative shares for cost attribution and wall shares for latency impact"
+                .to_string(),
+        );
+    }
 
     AuditPerformance {
         elapsed_us,
+        wall_clock_us,
+        cumulative_tracked_us,
         phases,
         rule_groups,
         bottlenecks,
@@ -758,6 +839,15 @@ fn build_partial_runtime_artifact(
     phases.push(PhaseTiming {
         name: "partial_snapshot_build".to_string(),
         elapsed_us: snapshot_build_us,
+        basis: "cumulative".to_string(),
+        sample_count: 1,
+        min_us: snapshot_build_us,
+        max_us: snapshot_build_us,
+        p50_us: snapshot_build_us,
+        p75_us: snapshot_build_us,
+        p95_us: snapshot_build_us,
+        p99_us: snapshot_build_us,
+        ..PhaseTiming::default()
     });
     phases.sort_by(|left, right| right.elapsed_us.cmp(&left.elapsed_us));
     artifact.performance = Some(build_audit_performance(
@@ -1439,10 +1529,14 @@ mod tests {
                 PhaseTiming {
                     name: "fetch".to_string(),
                     elapsed_us: 7_000,
+                    basis: "cumulative".to_string(),
+                    ..PhaseTiming::default()
                 },
                 PhaseTiming {
                     name: "rule_evaluation".to_string(),
                     elapsed_us: 2_000,
+                    basis: "nested".to_string(),
+                    ..PhaseTiming::default()
                 },
             ],
             vec![RuleTiming {
@@ -1452,7 +1546,9 @@ mod tests {
             }],
         );
         assert_eq!(performance.bottlenecks[0].name, "fetch");
-        assert_eq!(performance.bottlenecks[0].share_basis_points, 7_000);
+        assert_eq!(performance.bottlenecks[0].share_basis_points, 10_000);
+        assert_eq!(performance.bottlenecks[0].wall_share_basis_points, 7_000);
+        assert_eq!(performance.phases[0].cumulative_share_basis_points, 10_000);
         assert!(
             performance
                 .observations
