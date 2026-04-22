@@ -425,6 +425,24 @@ fn artifact_status_lines(artifact: &AuditArtifact) -> Vec<String> {
                 .join(", ");
             lines.push(format!("- Slowest rule groups: {}", groups));
         }
+        if !performance.bottlenecks.is_empty() {
+            let bottlenecks = performance
+                .bottlenecks
+                .iter()
+                .take(5)
+                .map(|item| {
+                    format!(
+                        "{}:{}={}ms/{}",
+                        item.kind,
+                        item.name,
+                        item.elapsed_us / 1_000,
+                        format_basis_points(item.share_basis_points)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!("- Performance bottlenecks: {}", bottlenecks));
+        }
     }
     lines
 }
@@ -435,6 +453,10 @@ fn artifact_status_label(status: AuditStatus) -> &'static str {
         AuditStatus::Partial => "partial",
         AuditStatus::Failed => "failed",
     }
+}
+
+fn format_basis_points(value: u32) -> String {
+    format!("{}.{:02}%", value / 100, value % 100)
 }
 
 pub fn render_text_artifact(
@@ -585,6 +607,31 @@ pub fn render_markdown_artifact(artifact: &AuditArtifact, audit_path: Option<&Pa
                     timing.elapsed_us / 1_000,
                     timing.findings
                 ));
+            }
+        }
+        if !performance.bottlenecks.is_empty() {
+            lines.push("- Runtime bottlenecks:".to_string());
+            for bottleneck in performance.bottlenecks.iter().take(8) {
+                let mut line = format!(
+                    "  - `{}` `{}` elapsed=`{}ms` share=`{}`",
+                    bottleneck.kind,
+                    bottleneck.name,
+                    bottleneck.elapsed_us / 1_000,
+                    format_basis_points(bottleneck.share_basis_points)
+                );
+                if let Some(findings) = bottleneck.findings {
+                    line.push_str(&format!(" findings=`{}`", findings));
+                }
+                if let Some(recommendation) = &bottleneck.recommendation {
+                    line.push_str(&format!(" recommendation=`{}`", recommendation));
+                }
+                lines.push(line);
+            }
+        }
+        if !performance.observations.is_empty() {
+            lines.push("- Performance observations:".to_string());
+            for observation in &performance.observations {
+                lines.push(format!("  - {}", observation));
             }
         }
     }

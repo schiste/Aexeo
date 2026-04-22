@@ -7,8 +7,8 @@ mod snapshot;
 
 use anyhow::Result;
 use seogeo_contracts::{
-    AuditArtifact, AuditPerformance, AuditStatus, CrawlStats, Finding, FindingScope, PhaseTiming,
-    SlowCrawlPath,
+    AuditArtifact, AuditPerformance, AuditStatus, CrawlStats, Finding, FindingScope,
+    PerformanceBottleneck, PhaseTiming, RuleTiming, SlowCrawlPath,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -503,6 +503,125 @@ impl RuntimePerformance {
     }
 }
 
+fn share_basis_points(elapsed_us: u64, total_us: u64) -> u32 {
+    if total_us == 0 {
+        return 0;
+    }
+    ((elapsed_us.saturating_mul(10_000)) / total_us).min(10_000) as u32
+}
+
+fn format_share(share_basis_points: u32) -> String {
+    format!(
+        "{}.{:02}%",
+        share_basis_points / 100,
+        share_basis_points % 100
+    )
+}
+
+fn phase_recommendation(name: &str) -> Option<String> {
+    match name {
+        "fetch" => Some(
+            "optimize network concurrency, caching, robots/sitemap seeds, and avoid Playwright unless rendered DOM is required"
+                .to_string(),
+        ),
+        "page_process_total" | "link_extraction" | "planner_update" => Some(
+            "profile extraction and graph-update work; large HTML or dense internal-link graphs may need batching"
+                .to_string(),
+        ),
+        "rule_evaluation" | "final_audit" => Some(
+            "inspect slowest rule groups and disable or policy-gate expensive checks for exploratory crawls"
+                .to_string(),
+        ),
+        "partial_audit_total" | "partial_audit_build" => Some(
+            "increase partial-audit intervals for large crawls when progress artifacts are not required"
+                .to_string(),
+        ),
+        "snapshot_write" | "checkpoint_write" | "progress_artifact_write" => Some(
+            "write artifacts less frequently or move report output to faster local storage"
+                .to_string(),
+        ),
+        _ => None,
+    }
+}
+
+fn rule_group_recommendation(group: &str) -> String {
+    format!(
+        "review `{}` findings and timing; tune rule config or temporarily disable this group during exploratory performance runs",
+        group
+    )
+}
+
+fn build_audit_performance(
+    elapsed_us: u64,
+    phases: Vec<PhaseTiming>,
+    rule_groups: Vec<RuleTiming>,
+) -> AuditPerformance {
+    let total_us = elapsed_us.max(1);
+    let mut bottlenecks = Vec::new();
+    for phase in phases.iter().take(5) {
+        bottlenecks.push(PerformanceBottleneck {
+            kind: "phase".to_string(),
+            name: phase.name.clone(),
+            elapsed_us: phase.elapsed_us,
+            share_basis_points: share_basis_points(phase.elapsed_us, total_us),
+            findings: None,
+            recommendation: phase_recommendation(&phase.name),
+        });
+    }
+    for timing in rule_groups.iter().take(5) {
+        bottlenecks.push(PerformanceBottleneck {
+            kind: "rule_group".to_string(),
+            name: timing.group.clone(),
+            elapsed_us: timing.elapsed_us,
+            share_basis_points: share_basis_points(timing.elapsed_us, total_us),
+            findings: Some(timing.findings),
+            recommendation: Some(rule_group_recommendation(&timing.group)),
+        });
+    }
+    bottlenecks.sort_by(|left, right| {
+        right
+            .elapsed_us
+            .cmp(&left.elapsed_us)
+            .then_with(|| left.kind.cmp(&right.kind))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    bottlenecks.truncate(8);
+
+    let mut observations = Vec::new();
+    if let Some(top) = bottlenecks.first()
+        && top.share_basis_points >= 2_500
+    {
+        observations.push(format!(
+            "{} `{}` accounts for {} of runtime",
+            top.kind,
+            top.name,
+            format_share(top.share_basis_points)
+        ));
+    }
+    if let Some(fetch) = phases.iter().find(|phase| phase.name == "fetch")
+        && share_basis_points(fetch.elapsed_us, total_us) >= 5_000
+    {
+        observations.push(
+            "fetch dominates runtime; crawler throughput is likely network-bound".to_string(),
+        );
+    }
+    if let Some(rule_eval) = phases.iter().find(|phase| phase.name == "rule_evaluation")
+        && share_basis_points(rule_eval.elapsed_us, total_us) >= 2_000
+    {
+        observations.push(
+            "rule evaluation is a material runtime cost; inspect slowest rule groups".to_string(),
+        );
+    }
+
+    AuditPerformance {
+        elapsed_us,
+        phases,
+        rule_groups,
+        bottlenecks,
+        observations,
+    }
+}
+
 type RuntimeMaterialization = (
     Site,
     Vec<Finding>,
@@ -595,11 +714,11 @@ fn build_progress_runtime_artifact(
         Some(crawl_stats.clone()),
         truncation_reason,
     );
-    artifact.performance = Some(AuditPerformance {
-        elapsed_us: crawl_stats.elapsed_us,
-        phases: performance.phase_timings(crawl_stats),
-        rule_groups: Vec::new(),
-    });
+    artifact.performance = Some(build_audit_performance(
+        crawl_stats.elapsed_us,
+        performance.phase_timings(crawl_stats),
+        Vec::new(),
+    ));
     artifact
 }
 
@@ -635,19 +754,17 @@ fn build_partial_runtime_artifact(
             planner.queued_count()
         )),
     );
-    artifact.performance = Some(AuditPerformance {
-        elapsed_us: crawl_stats.elapsed_us,
-        phases: {
-            let mut phases = performance.phase_timings(crawl_stats);
-            phases.push(PhaseTiming {
-                name: "partial_snapshot_build".to_string(),
-                elapsed_us: snapshot_build_us,
-            });
-            phases.sort_by(|left, right| right.elapsed_us.cmp(&left.elapsed_us));
-            phases
-        },
-        rule_groups: profiled.rule_timings,
+    let mut phases = performance.phase_timings(crawl_stats);
+    phases.push(PhaseTiming {
+        name: "partial_snapshot_build".to_string(),
+        elapsed_us: snapshot_build_us,
     });
+    phases.sort_by(|left, right| right.elapsed_us.cmp(&left.elapsed_us));
+    artifact.performance = Some(build_audit_performance(
+        crawl_stats.elapsed_us,
+        phases,
+        profiled.rule_timings,
+    ));
     Ok(artifact)
 }
 
@@ -1079,11 +1196,11 @@ pub fn run_runtime_audit_with_options(
     );
     performance.record_progress_callback(progress_started_at.elapsed().as_micros() as u64);
     performance.apply_to(&mut crawl_stats);
-    let performance_summary = AuditPerformance {
-        elapsed_us: crawl_stats.elapsed_us,
-        phases: performance.phase_timings(&crawl_stats),
-        rule_groups: profiled.rule_timings,
-    };
+    let performance_summary = build_audit_performance(
+        crawl_stats.elapsed_us,
+        performance.phase_timings(&crawl_stats),
+        profiled.rule_timings,
+    );
     Ok(RuntimeAudit {
         site,
         crawl_findings,
@@ -1110,7 +1227,9 @@ mod tests {
         run_runtime_audit_with_options, verify_runtime_audit,
     };
     use crate::config::{Config, default_rule_switches};
-    use seogeo_contracts::{AuditStatus, CrawlStats, Finding, FindingScope};
+    use seogeo_contracts::{
+        AuditStatus, CrawlStats, Finding, FindingScope, PhaseTiming, RuleTiming,
+    };
     use std::collections::{BTreeMap, BTreeSet};
     use std::io::ErrorKind;
     use std::io::{Read, Write};
@@ -1303,12 +1422,49 @@ mod tests {
             "social",
             "schema",
             "llm",
+            "surfaces",
             "content",
             "structure",
         ] {
             config.checks.insert(key.to_string(), false);
         }
         config
+    }
+
+    #[test]
+    fn performance_summary_identifies_bottlenecks() {
+        let performance = super::build_audit_performance(
+            10_000,
+            vec![
+                PhaseTiming {
+                    name: "fetch".to_string(),
+                    elapsed_us: 7_000,
+                },
+                PhaseTiming {
+                    name: "rule_evaluation".to_string(),
+                    elapsed_us: 2_000,
+                },
+            ],
+            vec![RuleTiming {
+                group: "surfaces".to_string(),
+                elapsed_us: 1_500,
+                findings: 3,
+            }],
+        );
+        assert_eq!(performance.bottlenecks[0].name, "fetch");
+        assert_eq!(performance.bottlenecks[0].share_basis_points, 7_000);
+        assert!(
+            performance
+                .observations
+                .iter()
+                .any(|observation| observation.contains("fetch dominates"))
+        );
+        assert!(
+            performance
+                .bottlenecks
+                .iter()
+                .any(|bottleneck| bottleneck.kind == "rule_group" && bottleneck.name == "surfaces")
+        );
     }
 
     #[test]

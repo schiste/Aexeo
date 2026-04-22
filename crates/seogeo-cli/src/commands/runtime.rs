@@ -431,6 +431,34 @@ pub fn command_profile_runtime(submatches: &ArgMatches) -> Result<i32> {
                     }
                     println!();
                 }
+                if !performance.bottlenecks.is_empty() {
+                    println!("Runtime Bottlenecks");
+                    for bottleneck in performance.bottlenecks.iter().take(8) {
+                        println!(
+                            "- {} {}: {}ms share={}.{:02}%{}",
+                            bottleneck.kind,
+                            bottleneck.name,
+                            bottleneck.elapsed_us / 1_000,
+                            bottleneck.share_basis_points / 100,
+                            bottleneck.share_basis_points % 100,
+                            bottleneck
+                                .findings
+                                .map(|value| format!(" findings={}", value))
+                                .unwrap_or_default()
+                        );
+                        if let Some(recommendation) = &bottleneck.recommendation {
+                            println!("  recommendation: {}", recommendation);
+                        }
+                    }
+                    println!();
+                }
+                if !performance.observations.is_empty() {
+                    println!("Performance Observations");
+                    for observation in &performance.observations {
+                        println!("- {}", observation);
+                    }
+                    println!();
+                }
             }
             if !crawl.slowest_paths.is_empty() {
                 println!("Slowest Paths");
