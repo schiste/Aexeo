@@ -215,6 +215,21 @@ pub fn build_cli() -> Command {
                         ),
                 )
                 .subcommand(
+                    Command::new("fanout")
+                        .about("Assess deterministic answer-engine query fan-out coverage")
+                        .subcommand(
+                            Command::new("assess")
+                                .about("Generate and score definition, setup, comparison, pricing, trust, and support fan-out queries")
+                                .arg(Arg::new("path").default_value("."))
+                                .arg(
+                                    Arg::new("format")
+                                        .long("format")
+                                        .value_parser(["text", "json"])
+                                        .default_value("text"),
+                                ),
+                        ),
+                )
+                .subcommand(
                     Command::new("facts")
                         .visible_alias("truth")
                         .about("Assess structured facts readiness and cross-surface consistency")

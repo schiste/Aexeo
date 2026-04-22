@@ -1,4 +1,5 @@
 mod evidence;
+mod fanout;
 mod grounding;
 mod score;
 mod trust;
@@ -7,6 +8,9 @@ mod truth;
 pub use evidence::{
     EvidenceClaim, EvidenceClaimKind, EvidenceRouteAssessment, EvidenceSectionAssessment,
     EvidenceSiteAssessment, assess_evidence_coverage,
+};
+pub use fanout::{
+    AnswerFanoutQuery, AnswerFanoutReport, AnswerFanoutRouteMatch, assess_answer_fanout,
 };
 pub use grounding::{
     GroundingCoverageGap, GroundingIntentFamily, GroundingRouteAnalysis, GroundingSiteAnalysis,

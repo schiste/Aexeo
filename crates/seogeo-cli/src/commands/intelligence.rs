@@ -1,13 +1,13 @@
 use anyhow::{Result, bail};
 use clap::ArgMatches;
 use seogeo_core::{
-    EvidenceSiteAssessment, GroundingCoverageGap, GroundingSiteAnalysis, MachineSurfaceGraph,
-    MachineSurfaceOptions, SiteIntelligenceScore, TrustSurfaceReconciliation, TruthAssessment,
-    TruthManifestGeneration, TruthManifestValidation, TruthStructuredSource,
-    assess_evidence_coverage, assess_truth_layer, discover_machine_surface_graph,
-    discover_truth_manifest, generate_truth_manifest_with_options, import_trust_surface_records,
-    load_site, map_grounding_queries, reconcile_trust_surfaces, score_intelligence,
-    validate_truth_manifest,
+    AnswerFanoutReport, EvidenceSiteAssessment, GroundingCoverageGap, GroundingSiteAnalysis,
+    MachineSurfaceGraph, MachineSurfaceOptions, SiteIntelligenceScore, TrustSurfaceReconciliation,
+    TruthAssessment, TruthManifestGeneration, TruthManifestValidation, TruthStructuredSource,
+    assess_answer_fanout, assess_evidence_coverage, assess_truth_layer,
+    discover_machine_surface_graph, discover_truth_manifest, generate_truth_manifest_with_options,
+    import_trust_surface_records, load_site, map_grounding_queries, reconcile_trust_surfaces,
+    score_intelligence, validate_truth_manifest,
 };
 use serde::Serialize;
 use std::fs;
@@ -23,6 +23,11 @@ pub fn command_intelligence(submatches: &ArgMatches) -> Result<i32> {
             Some(("assess", assess_matches)) => command_evidence_assess(assess_matches),
             Some((other, _)) => bail!("unsupported evidence command: {}", other),
             None => bail!("missing evidence subcommand"),
+        },
+        Some(("fanout", fanout_matches)) => match fanout_matches.subcommand() {
+            Some(("assess", assess_matches)) => command_fanout_assess(assess_matches),
+            Some((other, _)) => bail!("unsupported fanout command: {}", other),
+            None => bail!("missing fanout subcommand"),
         },
         Some(("facts", truth_matches)) | Some(("truth", truth_matches)) => {
             match truth_matches.subcommand() {
@@ -103,6 +108,33 @@ fn command_grounding_map(submatches: &ArgMatches) -> Result<i32> {
             Ok(0)
         }
         Err(error) => emit_failure("intelligence grounding-map", format, error),
+    }
+}
+
+fn command_fanout_assess(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let root = PathBuf::from(required_arg(submatches, "path")?);
+    match load_site(&root).map(|site| assess_answer_fanout(&site)) {
+        Ok(report) => {
+            let report_path = write_report(&root, "answer-fanout-latest.json", &report)?;
+            match format {
+                "json" => println!(
+                    "{}",
+                    render_data_command_json(
+                        "intelligence fanout assess",
+                        true,
+                        serde_json::json!({
+                            "report_path": report_path.to_string_lossy(),
+                            "assessment": report,
+                        }),
+                        Vec::new()
+                    )?
+                ),
+                _ => println!("{}", fanout_text(&report, &report_path)),
+            }
+            Ok(0)
+        }
+        Err(error) => emit_failure("intelligence fanout assess", format, error),
     }
 }
 
@@ -513,6 +545,44 @@ fn grounding_text(report: &GroundingSiteAnalysis, report_path: &Path) -> String 
                 .collect::<Vec<_>>()
                 .join(",")
         ));
+    }
+    lines.join("\n")
+}
+
+fn fanout_text(report: &AnswerFanoutReport, report_path: &Path) -> String {
+    let mut lines = vec![
+        "Answer Fan-out Assessment".to_string(),
+        String::new(),
+        format!("Routes analyzed: {}", report.routes_analyzed),
+        format!("Queries generated: {}", report.query_count),
+        format!("Covered queries: {}", report.covered_queries),
+        format!("Coverage score: {}", report.coverage_score),
+        format!("Elapsed: {}ms", report.elapsed_us / 1000),
+        format!("Report: {}", report_path.display()),
+    ];
+    let weak_queries = report
+        .queries
+        .iter()
+        .filter(|query| query.coverage_score < 60 || !query.gaps.is_empty())
+        .take(10)
+        .collect::<Vec<_>>();
+    if !weak_queries.is_empty() {
+        lines.push(String::new());
+        lines.push("Weak fan-out queries:".to_string());
+        for query in weak_queries {
+            let best = query
+                .matched_routes
+                .first()
+                .map(|item| format!("/{} ({})", item.route, item.score))
+                .unwrap_or_else(|| "none".to_string());
+            lines.push(format!(
+                "- [{}] '{}' score={} best={} expected={}",
+                query.family, query.query, query.coverage_score, best, query.expected_surface
+            ));
+            if !query.gaps.is_empty() {
+                lines.push(format!("  gaps: {}", query.gaps.join("; ")));
+            }
+        }
     }
     lines.join("\n")
 }
