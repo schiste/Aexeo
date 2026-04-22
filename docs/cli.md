@@ -454,6 +454,24 @@ Options:
           Print help
 ```
 
+## `perf`
+
+Compare and inspect runtime performance artifacts
+
+```text
+Compare and inspect runtime performance artifacts
+
+Usage: perf [COMMAND]
+
+Commands:
+  diff  Compare runtime performance between two audit artifacts
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help
+```
+
 ## `report`
 
 Render an audit artifact into a human or machine readable report

@@ -166,6 +166,63 @@ pub struct PerformanceBudgetReport {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PerformanceDiffThresholds {
+    pub relative_threshold_basis_points: u32,
+    pub absolute_threshold: u64,
+}
+
+impl Default for PerformanceDiffThresholds {
+    fn default() -> Self {
+        Self {
+            relative_threshold_basis_points: 1_000,
+            absolute_threshold: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PerformanceMetricDelta {
+    pub metric: String,
+    pub label: String,
+    pub unit: String,
+    pub direction: String,
+    #[serde(default)]
+    pub baseline: Option<u64>,
+    #[serde(default)]
+    pub current: Option<u64>,
+    #[serde(default)]
+    pub delta: Option<i64>,
+    #[serde(default)]
+    pub relative_delta_basis_points: Option<i64>,
+    pub status: String,
+    pub regressed: bool,
+    pub improved: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct PerformanceDiffSummary {
+    pub metrics_compared: usize,
+    pub regressions: usize,
+    pub improvements: usize,
+    pub unchanged: usize,
+    pub missing: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct PerformanceDiffReport {
+    #[serde(default)]
+    pub baseline_path: Option<String>,
+    #[serde(default)]
+    pub current_path: Option<String>,
+    pub thresholds: PerformanceDiffThresholds,
+    pub summary: PerformanceDiffSummary,
+    #[serde(default)]
+    pub metrics: Vec<PerformanceMetricDelta>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct AuditPerformance {
     #[serde(default)]

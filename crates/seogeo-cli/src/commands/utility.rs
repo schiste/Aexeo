@@ -10,7 +10,9 @@ use crate::commands::{
     },
     intelligence::command_intelligence,
     listings::{command_adapters, command_plugin_check, command_rules},
-    runtime::{command_crawl, command_doctor, command_profile_runtime, command_verify},
+    runtime::{
+        command_crawl, command_doctor, command_perf_diff, command_profile_runtime, command_verify,
+    },
     static_site::{command_baseline, command_check, command_fix, command_generate},
 };
 
@@ -47,6 +49,11 @@ pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
             Some(("runtime", runtime_matches)) => command_profile_runtime(runtime_matches),
             Some((other, _)) => bail!("unsupported profile subcommand: {}", other),
             None => bail!("missing profile subcommand"),
+        },
+        Some(("perf", submatches)) => match submatches.subcommand() {
+            Some(("diff", diff_matches)) => command_perf_diff(diff_matches),
+            Some((other, _)) => bail!("unsupported perf subcommand: {}", other),
+            None => bail!("missing perf subcommand"),
         },
         Some(("trend", submatches)) => command_trend(
             required_arg(submatches, "command_name")?,

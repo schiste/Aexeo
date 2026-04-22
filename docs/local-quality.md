@@ -86,6 +86,14 @@ sh scripts/check-performance.sh
 
 This compares the static and runtime benchmark fixtures against `performance-budget.json` and writes `.seogeo-reports/benchmarks-latest.json`.
 
+Runtime audit artifacts can also be compared directly:
+
+```bash
+seogeo perf diff .seogeo-reports/crawl-baseline.json .seogeo-reports/crawl-latest.json
+```
+
+The command exits non-zero when one or more metrics regress beyond the configured relative threshold. Timing metrics can also use an absolute millisecond threshold to ignore small jitter, and the command emits warnings when the two runs are not directly comparable, such as different engines or page counts.
+
 `ci-local.sh` also refreshes `.seogeo-reports/quality-timings-latest.json` with top-level timing data for:
 
 - `check-repo`
