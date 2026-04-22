@@ -163,13 +163,16 @@ Usage: generate [OPTIONS] <kind> [path]
 
 Arguments:
   <kind>
-          [possible values: llms, llms-full, markdown-mirror, robots, links]
+          [possible values: llms, llms-full, machine-bundle, markdown-mirror, markdown-pages, robots, links]
 
   [path]
           [default: .]
 
 Options:
       --config <config>
+
+
+      --write-dir <write-dir>
 
 
       --format <format>

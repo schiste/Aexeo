@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -313,6 +314,22 @@ fn render_page_metadata(page: &Page, route: &str) -> Vec<String> {
     lines
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GeneratedMachineArtifact {
+    pub path: String,
+    pub kind: String,
+    pub bytes: usize,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineArtifactBundle {
+    pub artifacts: Vec<GeneratedMachineArtifact>,
+    pub route_count: usize,
+    pub markdown_pages: usize,
+    pub deploy_notes: Vec<String>,
+}
+
 pub fn render_llms_txt(site: &Site, _site_url: Option<&str>) -> String {
     let (pages, feature_routes) = categorize_routes(site);
     let (feature_count, category_count) = derive_feature_counts(&site.root, &feature_routes);
@@ -390,6 +407,146 @@ pub fn render_llms_txt(site: &Site, _site_url: Option<&str>) -> String {
 
 fn visible_text(raw_text: &str) -> String {
     collapse_whitespace(&strip_tags(raw_text))
+}
+
+fn markdown_escape_heading(text: &str) -> String {
+    text.replace('\n', " ").trim().to_string()
+}
+
+fn markdown_path_for_route(route: &str) -> String {
+    if route.is_empty() {
+        "index.md.txt".to_string()
+    } else {
+        format!("{route}.md.txt")
+    }
+}
+
+fn render_page_markdown_mirror(route: &str, page: &Page) -> String {
+    let title = page.title.clone().unwrap_or_else(|| {
+        if route.is_empty() {
+            "Home".to_string()
+        } else {
+            route.replace('/', " / ")
+        }
+    });
+    let mut lines = vec![
+        format!("# {}", markdown_escape_heading(&title)),
+        String::new(),
+    ];
+    lines.extend(render_page_metadata(page, route));
+    lines.push(String::new());
+
+    if page.blocks.is_empty() {
+        let text = visible_text(&page.raw_text);
+        lines.push(if text.is_empty() {
+            "_No visible text._".to_string()
+        } else {
+            text
+        });
+        return lines.join("\n").trim_end().to_string() + "\n";
+    }
+
+    for block in &page.blocks {
+        let heading = block
+            .data_ui
+            .clone()
+            .unwrap_or_else(|| page_kind_heading(classify_page_kind(route)).to_string());
+        lines.push(format!("## {}", markdown_escape_heading(&heading)));
+        lines.push(String::new());
+        let text = collapse_whitespace(&block.text);
+        lines.push(if text.is_empty() {
+            "_No visible text._".to_string()
+        } else {
+            text
+        });
+        lines.push(String::new());
+    }
+    lines.join("\n").trim_end().to_string() + "\n"
+}
+
+pub fn render_markdown_mirror_pages(site: &Site) -> Vec<GeneratedMachineArtifact> {
+    site.route_page_pairs()
+        .filter(|(route, _)| route.as_str() != "404")
+        .map(|(route, page)| {
+            let content = render_page_markdown_mirror(route, page);
+            GeneratedMachineArtifact {
+                path: markdown_path_for_route(route),
+                kind: "markdown_mirror".to_string(),
+                bytes: content.len(),
+                content,
+            }
+        })
+        .collect()
+}
+
+fn render_bundle_llms_txt(site: &Site, site_url: Option<&str>) -> String {
+    let mut text = render_llms_txt(site, site_url);
+    let mirrors = render_markdown_mirror_pages(site);
+    if !mirrors.is_empty() {
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str("\n## Markdown Mirrors\n");
+        for artifact in mirrors {
+            let label = artifact
+                .path
+                .strip_suffix(".md.txt")
+                .unwrap_or(&artifact.path)
+                .replace('-', " ")
+                .replace('/', " / ");
+            text.push_str(&format!(
+                "- [{}](/{}): LLM-readable Markdown mirror\n",
+                label, artifact.path
+            ));
+        }
+    }
+    text
+}
+
+fn machine_artifact(path: &str, kind: &str, content: String) -> GeneratedMachineArtifact {
+    GeneratedMachineArtifact {
+        path: path.to_string(),
+        kind: kind.to_string(),
+        bytes: content.len(),
+        content,
+    }
+}
+
+pub fn build_machine_artifact_bundle(site: &Site, site_url: Option<&str>) -> MachineArtifactBundle {
+    let mut artifacts = vec![
+        machine_artifact(
+            "llms.txt",
+            "llms_index",
+            render_bundle_llms_txt(site, site_url),
+        ),
+        machine_artifact(
+            "llms-full.txt",
+            "llms_full_context",
+            render_llms_full_txt(site, site_url),
+        ),
+    ];
+    let facts = crate::intelligence::generate_truth_manifest_with_options(site, false);
+    let facts_content =
+        serde_json::to_string_pretty(&facts.manifest).unwrap_or_else(|_| "{}".to_string());
+    artifacts.push(machine_artifact(
+        "facts.json",
+        "facts_manifest",
+        facts_content,
+    ));
+    let markdown_pages = render_markdown_mirror_pages(site);
+    let markdown_count = markdown_pages.len();
+    artifacts.extend(markdown_pages);
+    artifacts.sort_by(|left, right| left.path.cmp(&right.path));
+    MachineArtifactBundle {
+        artifacts,
+        route_count: site.route_page_pairs().count(),
+        markdown_pages: markdown_count,
+        deploy_notes: vec![
+            "Deploy generated files at the same relative paths from the public site root.".to_string(),
+            "Review facts.json before publishing; generated facts are a deterministic first draft, not a legal source of truth.".to_string(),
+            "Expose Markdown mirrors through /llms.txt and, where appropriate, static page links so agents do not rely only on URL convention probing.".to_string(),
+        ],
+    }
 }
 
 pub fn render_llms_full_txt(site: &Site, _site_url: Option<&str>) -> String {
@@ -589,7 +746,8 @@ pub fn suggest_internal_links(site: &Site, top_n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_link_suggestions, render_llms_full_txt, render_llms_txt, render_markdown_mirror,
+        build_link_suggestions, build_machine_artifact_bundle, render_llms_full_txt,
+        render_llms_txt, render_markdown_mirror, render_markdown_mirror_pages,
         suggest_internal_links,
     };
     use crate::site::load_site;
@@ -652,6 +810,57 @@ mod tests {
         assert!(suggest_internal_links(&site, 3).contains("/features/alpha"));
         let suggestion_map = build_link_suggestions(&site, 3);
         assert!(!suggestion_map.get("").unwrap_or(&Vec::new()).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn generates_machine_artifact_bundle_with_page_markdown_and_facts() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            &make_html_page(
+                "",
+                "<section data-ui=\"hero\"><h2>Hero</h2><p>Official product overview.</p></section>",
+            ),
+        );
+        write(
+            &root.join("features/search/index.html"),
+            &make_html_page(
+                "features/search",
+                "<section data-ui=\"feature\"><h2>Feature</h2><p>Search feature details.</p></section>",
+            ),
+        );
+
+        let site = load_site(root)?;
+        let markdown_pages = render_markdown_mirror_pages(&site);
+        assert_eq!(markdown_pages.len(), 2);
+        assert!(
+            markdown_pages
+                .iter()
+                .any(|artifact| artifact.path == "features/search.md.txt")
+        );
+        assert!(
+            markdown_pages
+                .iter()
+                .any(|artifact| artifact.content.contains("Official product overview"))
+        );
+
+        let bundle = build_machine_artifact_bundle(&site, Some("https://example.com"));
+        assert!(
+            bundle
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.path == "facts.json")
+        );
+        assert!(
+            bundle
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.path == "llms.txt"
+                    && artifact.content.contains("## Markdown Mirrors"))
+        );
+        assert_eq!(bundle.markdown_pages, 2);
         Ok(())
     }
 }
