@@ -163,7 +163,7 @@ impl HttpFetcher {
                 let result = loop {
                     match fetcher.fetch(&url) {
                         Ok(fetched) => break Ok(fetched),
-                        Err(error) if retries < fetch_retry_budget => {
+                        Err(_) if retries < fetch_retry_budget => {
                             retries += 1;
                         }
                         Err(error) => break Err(error),

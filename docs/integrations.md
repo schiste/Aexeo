@@ -34,6 +34,7 @@ Evidence assessment focuses on:
 
 - factual and numeric claim detection
 - visible evidence and attribution cues
+- evidence quality weighting so generic outbound links do not support every claim
 - unsupported claim counts
 - citation readiness
 - section-level fidelity risk
@@ -49,6 +50,7 @@ The command writes `.seogeo-reports/evidence-latest.json` and reports:
 - claim count and claim-kind mix
 - unsupported claim volume
 - evidence density score
+- evidence quality score
 - citation readiness score
 - highest-risk routes for AI citation distortion
 

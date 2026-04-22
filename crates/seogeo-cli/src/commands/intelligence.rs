@@ -433,6 +433,7 @@ fn evidence_text(report: &EvidenceSiteAssessment, report_path: &Path) -> String 
         format!("Claims detected: {}", report.claim_count),
         format!("Unsupported claims: {}", report.unsupported_claims),
         format!("Evidence density: {}", report.evidence_density_score),
+        format!("Evidence quality: {}", report.evidence_quality_score),
         format!("Citation readiness: {}", report.citation_readiness_score),
         format!(
             "Average fidelity risk: {}",
