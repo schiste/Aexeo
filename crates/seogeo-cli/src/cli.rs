@@ -763,6 +763,36 @@ pub fn build_cli() -> Command {
                 ),
         )
         .subcommand(
+            Command::new("perf")
+                .about("Compare and inspect runtime performance artifacts")
+                .subcommand(
+                    Command::new("diff")
+                        .about("Compare runtime performance between two audit artifacts")
+                        .arg(Arg::new("baseline").required(true))
+                        .arg(Arg::new("current").required(true))
+                        .arg(
+                            Arg::new("regression-threshold-pct")
+                                .long("regression-threshold-pct")
+                                .value_parser(value_parser!(u32))
+                                .default_value("10")
+                                .help("Minimum relative delta percentage before a metric is marked regressed"),
+                        )
+                        .arg(
+                            Arg::new("absolute-threshold-ms")
+                                .long("absolute-threshold-ms")
+                                .value_parser(value_parser!(u64))
+                                .default_value("0")
+                                .help("Minimum absolute millisecond delta before timing metrics are marked regressed"),
+                        )
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "json"])
+                                .default_value("text"),
+                        ),
+                ),
+        )
+        .subcommand(
             Command::new("report")
                 .about("Render an audit artifact into a human or machine readable report")
                 .subcommand(

@@ -2,6 +2,7 @@ mod runtime_support;
 mod support;
 
 use runtime_support::spawn_server;
+use seogeo_contracts::{AuditArtifact, AuditPerformance, CrawlStats, PhaseTiming, RuleTiming};
 use std::process::Command;
 use support::{bin, parse_json, write};
 
@@ -451,6 +452,102 @@ fn profile_runtime_fails_when_performance_budget_is_exceeded() {
         "elapsed"
     );
     handle.join().unwrap();
+}
+
+#[test]
+fn perf_diff_reports_runtime_regressions() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let baseline_path = temp_dir.path().join("baseline.json");
+    let current_path = temp_dir.path().join("current.json");
+    let baseline = AuditArtifact {
+        command: "crawl".to_string(),
+        crawl: Some(CrawlStats {
+            engine: "http".to_string(),
+            visited_pages: 10,
+            max_pages: 10,
+            elapsed_ms: 100,
+            pages_per_minute: 600,
+            average_fetch_ms: 20,
+            ..CrawlStats::default()
+        }),
+        performance: Some(AuditPerformance {
+            elapsed_us: 100_000,
+            wall_clock_us: 100_000,
+            cumulative_tracked_us: 50_000,
+            phases: vec![PhaseTiming {
+                name: "fetch".to_string(),
+                elapsed_us: 50_000,
+                p95_us: 30_000,
+                ..PhaseTiming::default()
+            }],
+            rule_groups: vec![RuleTiming {
+                group: "schema".to_string(),
+                elapsed_us: 10_000,
+                findings: 1,
+            }],
+            ..AuditPerformance::default()
+        }),
+        ..AuditArtifact::default()
+    };
+    let current = AuditArtifact {
+        command: "crawl".to_string(),
+        crawl: Some(CrawlStats {
+            engine: "http".to_string(),
+            visited_pages: 10,
+            max_pages: 10,
+            elapsed_ms: 140,
+            pages_per_minute: 420,
+            average_fetch_ms: 40,
+            ..CrawlStats::default()
+        }),
+        performance: Some(AuditPerformance {
+            elapsed_us: 140_000,
+            wall_clock_us: 140_000,
+            cumulative_tracked_us: 80_000,
+            phases: vec![PhaseTiming {
+                name: "fetch".to_string(),
+                elapsed_us: 80_000,
+                p95_us: 60_000,
+                ..PhaseTiming::default()
+            }],
+            rule_groups: vec![RuleTiming {
+                group: "schema".to_string(),
+                elapsed_us: 20_000,
+                findings: 1,
+            }],
+            ..AuditPerformance::default()
+        }),
+        ..AuditArtifact::default()
+    };
+    write(&baseline_path, &serde_json::to_string(&baseline).unwrap());
+    write(&current_path, &serde_json::to_string(&current).unwrap());
+
+    let output = Command::new(bin())
+        .arg("perf")
+        .arg("diff")
+        .arg(&baseline_path)
+        .arg(&current_path)
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "perf diff");
+    assert_eq!(payload["success"], false);
+    assert!(
+        payload["report"]["summary"]["regressions"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(
+        payload["report"]["metrics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|metric| metric["metric"] == "phase.fetch.p95_ms" && metric["regressed"] == true)
+    );
 }
 
 #[test]

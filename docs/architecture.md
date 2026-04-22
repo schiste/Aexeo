@@ -30,8 +30,21 @@ Responsibilities:
 - report rendering and audit artifact persistence
 - generated documentation metadata
 - baseline and regression diff primitives
+- runtime performance budgets and performance diff primitives
 
 This layer should stay independent from CLI argument parsing and website-specific runtime glue.
+
+## Runtime Performance Observability
+
+Runtime crawl artifacts carry both wall-clock and cumulative timing data. Wall
+clock is used to understand end-user latency for a run; cumulative timings are
+used to attribute crawler cost across repeated phases such as fetches, queue
+planning, rule evaluation, snapshotting, checkpointing, and artifact writes.
+
+`crawl` and `profile runtime` can evaluate a JSON performance budget with
+`--perf-budget`. `perf diff` compares two runtime audit artifacts with a
+configurable relative and absolute threshold, making it suitable for CI gates
+where small network jitter should not be treated as a regression.
 
 ## Machine-Readable Presence
 

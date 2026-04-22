@@ -2,13 +2,15 @@ use anyhow::{Result, bail};
 use clap::ArgMatches;
 use seogeo_contracts::AuditStatus;
 use seogeo_contracts::PerformanceBudget;
+use seogeo_contracts::PerformanceDiffThresholds;
 use seogeo_core::config::load_config_with_diagnostics;
 use seogeo_core::{
     RuntimeAudit, RuntimeAuditOptions, RuntimeProgressEvent, RuntimeProgressMode,
-    audit_site_snapshot, build_audit_artifact, diff_finding_sets, evaluate_performance_budget,
-    load_audit_artifact, load_findings_from_audit, render_diff_text, render_sarif,
-    render_text_artifact, run_runtime_audit_with_options, runtime_doctor, verify_runtime_audit,
-    write_audit_artifact, write_partial_audit_artifact, write_progress_audit_artifact,
+    audit_site_snapshot, build_audit_artifact, diff_finding_sets, diff_performance_artifacts,
+    evaluate_performance_budget, load_audit_artifact, load_findings_from_audit, render_diff_text,
+    render_performance_diff_text, render_sarif, render_text_artifact,
+    run_runtime_audit_with_options, runtime_doctor, verify_runtime_audit, write_audit_artifact,
+    write_partial_audit_artifact, write_progress_audit_artifact,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -586,6 +588,46 @@ pub fn command_profile_runtime(submatches: &ArgMatches) -> Result<i32> {
             0
         },
     )
+}
+
+pub fn command_perf_diff(submatches: &ArgMatches) -> Result<i32> {
+    let baseline_path = required_arg(submatches, "baseline")?;
+    let current_path = required_arg(submatches, "current")?;
+    let format = submatches
+        .get_one::<String>("format")
+        .map(String::as_str)
+        .unwrap_or("text");
+    let relative_threshold_pct = *submatches
+        .get_one::<u32>("regression-threshold-pct")
+        .unwrap_or(&10);
+    let thresholds = PerformanceDiffThresholds {
+        relative_threshold_basis_points: relative_threshold_pct.saturating_mul(100),
+        absolute_threshold: *submatches
+            .get_one::<u64>("absolute-threshold-ms")
+            .unwrap_or(&0),
+    };
+    let baseline = load_audit_artifact(Path::new(baseline_path))?;
+    let current = load_audit_artifact(Path::new(current_path))?;
+    let report = diff_performance_artifacts(
+        &baseline,
+        &current,
+        Some(baseline_path.to_string()),
+        Some(current_path.to_string()),
+        thresholds,
+    );
+    let success = report.summary.regressions == 0;
+    match format {
+        "json" => println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "command": "perf diff",
+                "success": success,
+                "report": report,
+            }))?
+        ),
+        _ => println!("{}", render_performance_diff_text(&report)),
+    }
+    Ok(if success { 0 } else { 1 })
 }
 
 pub fn command_doctor(submatches: &ArgMatches) -> Result<i32> {

@@ -9,7 +9,8 @@ use anyhow::Result;
 use seogeo_contracts::{
     AuditArtifact, AuditPerformance, AuditStatus, CrawlStats, Finding, FindingScope,
     PerformanceBottleneck, PerformanceBudget, PerformanceBudgetReport, PerformanceBudgetViolation,
-    PhaseTiming, RuleTiming, SlowCrawlPath,
+    PerformanceDiffReport, PerformanceDiffSummary, PerformanceDiffThresholds,
+    PerformanceMetricDelta, PhaseTiming, RuleTiming, SlowCrawlPath,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -820,6 +821,553 @@ pub fn evaluate_performance_budget(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PerformanceMetricDirection {
+    LowerIsBetter,
+    HigherIsBetter,
+}
+
+impl PerformanceMetricDirection {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::LowerIsBetter => "lower_is_better",
+            Self::HigherIsBetter => "higher_is_better",
+        }
+    }
+}
+
+fn relative_delta_basis_points(baseline: u64, current: u64) -> Option<i64> {
+    if baseline == 0 {
+        return None;
+    }
+    let delta = current as i128 - baseline as i128;
+    Some(((delta * 10_000) / baseline as i128) as i64)
+}
+
+fn significant_delta(
+    absolute_delta: u64,
+    relative_delta_basis_points: Option<i64>,
+    relative_threshold_basis_points: u32,
+    absolute_threshold: u64,
+) -> bool {
+    if absolute_delta <= absolute_threshold {
+        return false;
+    }
+    relative_delta_basis_points
+        .map(|basis_points| basis_points.unsigned_abs() >= relative_threshold_basis_points as u64)
+        .unwrap_or(true)
+}
+
+struct PerformanceMetricInput<'a> {
+    metric: &'a str,
+    label: &'a str,
+    unit: &'a str,
+    direction: PerformanceMetricDirection,
+    baseline: Option<u64>,
+    current: Option<u64>,
+}
+
+fn build_performance_metric_delta(
+    input: PerformanceMetricInput<'_>,
+    thresholds: &PerformanceDiffThresholds,
+) -> PerformanceMetricDelta {
+    let mut delta = None;
+    let mut relative_delta = None;
+    let mut regressed = false;
+    let mut improved = false;
+
+    if let (Some(baseline), Some(current)) = (input.baseline, input.current) {
+        let raw_delta = current as i64 - baseline as i64;
+        delta = Some(raw_delta);
+        relative_delta = relative_delta_basis_points(baseline, current);
+        let absolute_delta = raw_delta.unsigned_abs();
+        let absolute_threshold = if input.unit == "ms" {
+            thresholds.absolute_threshold
+        } else {
+            0
+        };
+        let is_significant = significant_delta(
+            absolute_delta,
+            relative_delta,
+            thresholds.relative_threshold_basis_points,
+            absolute_threshold,
+        );
+        match input.direction {
+            PerformanceMetricDirection::LowerIsBetter => {
+                regressed = raw_delta > 0 && is_significant;
+                improved = raw_delta < 0 && is_significant;
+            }
+            PerformanceMetricDirection::HigherIsBetter => {
+                regressed = raw_delta < 0 && is_significant;
+                improved = raw_delta > 0 && is_significant;
+            }
+        }
+    }
+
+    let status = if input.baseline.is_none() || input.current.is_none() {
+        "missing"
+    } else if regressed {
+        "regressed"
+    } else if improved {
+        "improved"
+    } else {
+        "unchanged"
+    };
+
+    PerformanceMetricDelta {
+        metric: input.metric.to_string(),
+        label: input.label.to_string(),
+        unit: input.unit.to_string(),
+        direction: input.direction.as_str().to_string(),
+        baseline: input.baseline,
+        current: input.current,
+        delta,
+        relative_delta_basis_points: relative_delta,
+        status: status.to_string(),
+        regressed,
+        improved,
+    }
+}
+
+fn add_performance_metric(
+    metrics: &mut Vec<PerformanceMetricDelta>,
+    thresholds: &PerformanceDiffThresholds,
+    input: PerformanceMetricInput<'_>,
+) {
+    metrics.push(build_performance_metric_delta(input, thresholds));
+}
+
+fn crawl_value(artifact: &AuditArtifact, extract: impl FnOnce(&CrawlStats) -> u64) -> Option<u64> {
+    artifact.crawl.as_ref().map(extract)
+}
+
+fn performance_value(
+    artifact: &AuditArtifact,
+    extract: impl FnOnce(&AuditPerformance) -> u64,
+) -> Option<u64> {
+    artifact.performance.as_ref().map(extract)
+}
+
+fn phase_value(
+    artifact: &AuditArtifact,
+    phase_name: &str,
+    extract: impl FnOnce(&PhaseTiming) -> Option<u64>,
+) -> Option<u64> {
+    artifact
+        .performance
+        .as_ref()
+        .and_then(|performance| {
+            performance
+                .phases
+                .iter()
+                .find(|phase| phase.name == phase_name)
+        })
+        .and_then(extract)
+}
+
+fn rule_group_value(
+    artifact: &AuditArtifact,
+    group_name: &str,
+    extract: impl FnOnce(&RuleTiming) -> u64,
+) -> Option<u64> {
+    artifact
+        .performance
+        .as_ref()
+        .and_then(|performance| {
+            performance
+                .rule_groups
+                .iter()
+                .find(|group| group.group == group_name)
+        })
+        .map(extract)
+}
+
+fn collect_phase_names(baseline: &AuditArtifact, current: &AuditArtifact) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for artifact in [baseline, current] {
+        if let Some(performance) = artifact.performance.as_ref() {
+            for phase in &performance.phases {
+                names.insert(phase.name.clone());
+            }
+        }
+    }
+    names
+}
+
+fn collect_rule_group_names(baseline: &AuditArtifact, current: &AuditArtifact) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for artifact in [baseline, current] {
+        if let Some(performance) = artifact.performance.as_ref() {
+            for group in &performance.rule_groups {
+                names.insert(group.group.clone());
+            }
+        }
+    }
+    names
+}
+
+fn performance_diff_warnings(baseline: &AuditArtifact, current: &AuditArtifact) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if baseline.crawl.is_none() || current.crawl.is_none() {
+        warnings.push(
+            "one or both artifacts do not include crawl stats; crawl-level metrics may be missing"
+                .to_string(),
+        );
+    }
+    if baseline.performance.is_none() || current.performance.is_none() {
+        warnings.push(
+            "one or both artifacts do not include performance metadata; phase-level metrics may be missing"
+                .to_string(),
+        );
+    }
+    if baseline.status != current.status {
+        warnings.push(format!(
+            "audit statuses differ: baseline={:?} current={:?}",
+            baseline.status, current.status
+        ));
+    }
+    if let (Some(baseline_crawl), Some(current_crawl)) = (&baseline.crawl, &current.crawl) {
+        if baseline_crawl.engine != current_crawl.engine {
+            warnings.push(format!(
+                "runtime engines differ: baseline={} current={}",
+                baseline_crawl.engine, current_crawl.engine
+            ));
+        }
+        if baseline_crawl.visited_pages != current_crawl.visited_pages {
+            warnings.push(format!(
+                "visited page counts differ: baseline={} current={}; normalize seeds and max-pages before interpreting absolute timing deltas",
+                baseline_crawl.visited_pages, current_crawl.visited_pages
+            ));
+        }
+        if baseline_crawl.max_pages != current_crawl.max_pages {
+            warnings.push(format!(
+                "max-pages differ: baseline={} current={}",
+                baseline_crawl.max_pages, current_crawl.max_pages
+            ));
+        }
+        if baseline_crawl.truncated || current_crawl.truncated {
+            warnings.push(
+                "one or both crawls were truncated; compare a complete run before setting hard budgets"
+                    .to_string(),
+            );
+        }
+    }
+    warnings
+}
+
+fn summarize_performance_metrics(metrics: &[PerformanceMetricDelta]) -> PerformanceDiffSummary {
+    let mut summary = PerformanceDiffSummary::default();
+    for metric in metrics {
+        match metric.status.as_str() {
+            "regressed" => {
+                summary.metrics_compared += 1;
+                summary.regressions += 1;
+            }
+            "improved" => {
+                summary.metrics_compared += 1;
+                summary.improvements += 1;
+            }
+            "unchanged" => {
+                summary.metrics_compared += 1;
+                summary.unchanged += 1;
+            }
+            _ => summary.missing += 1,
+        }
+    }
+    summary
+}
+
+pub fn diff_performance_artifacts(
+    baseline: &AuditArtifact,
+    current: &AuditArtifact,
+    baseline_path: Option<String>,
+    current_path: Option<String>,
+    thresholds: PerformanceDiffThresholds,
+) -> PerformanceDiffReport {
+    let mut metrics = Vec::new();
+    add_performance_metric(
+        &mut metrics,
+        &thresholds,
+        PerformanceMetricInput {
+            metric: "crawl.elapsed_ms",
+            label: "Crawl elapsed",
+            unit: "ms",
+            direction: PerformanceMetricDirection::LowerIsBetter,
+            baseline: crawl_value(baseline, |crawl| crawl.elapsed_ms),
+            current: crawl_value(current, |crawl| crawl.elapsed_ms),
+        },
+    );
+    add_performance_metric(
+        &mut metrics,
+        &thresholds,
+        PerformanceMetricInput {
+            metric: "crawl.pages_per_minute",
+            label: "Crawl throughput",
+            unit: "pages/min",
+            direction: PerformanceMetricDirection::HigherIsBetter,
+            baseline: crawl_value(baseline, |crawl| crawl.pages_per_minute as u64),
+            current: crawl_value(current, |crawl| crawl.pages_per_minute as u64),
+        },
+    );
+    add_performance_metric(
+        &mut metrics,
+        &thresholds,
+        PerformanceMetricInput {
+            metric: "crawl.average_fetch_ms",
+            label: "Average fetch",
+            unit: "ms",
+            direction: PerformanceMetricDirection::LowerIsBetter,
+            baseline: crawl_value(baseline, |crawl| crawl.average_fetch_ms),
+            current: crawl_value(current, |crawl| crawl.average_fetch_ms),
+        },
+    );
+    add_performance_metric(
+        &mut metrics,
+        &thresholds,
+        PerformanceMetricInput {
+            metric: "crawl.average_page_process_ms",
+            label: "Average page processing",
+            unit: "ms",
+            direction: PerformanceMetricDirection::LowerIsBetter,
+            baseline: crawl_value(baseline, |crawl| crawl.average_page_process_ms),
+            current: crawl_value(current, |crawl| crawl.average_page_process_ms),
+        },
+    );
+    add_performance_metric(
+        &mut metrics,
+        &thresholds,
+        PerformanceMetricInput {
+            metric: "crawl.average_partial_audit_ms",
+            label: "Average partial audit",
+            unit: "ms",
+            direction: PerformanceMetricDirection::LowerIsBetter,
+            baseline: crawl_value(baseline, |crawl| crawl.average_partial_audit_ms),
+            current: crawl_value(current, |crawl| crawl.average_partial_audit_ms),
+        },
+    );
+    add_performance_metric(
+        &mut metrics,
+        &thresholds,
+        PerformanceMetricInput {
+            metric: "crawl.fetch_failures",
+            label: "Fetch failures",
+            unit: "count",
+            direction: PerformanceMetricDirection::LowerIsBetter,
+            baseline: crawl_value(baseline, |crawl| crawl.fetch_failures as u64),
+            current: crawl_value(current, |crawl| crawl.fetch_failures as u64),
+        },
+    );
+    add_performance_metric(
+        &mut metrics,
+        &thresholds,
+        PerformanceMetricInput {
+            metric: "crawl.fetch_retries",
+            label: "Fetch retries",
+            unit: "count",
+            direction: PerformanceMetricDirection::LowerIsBetter,
+            baseline: crawl_value(baseline, |crawl| crawl.fetch_retries as u64),
+            current: crawl_value(current, |crawl| crawl.fetch_retries as u64),
+        },
+    );
+    add_performance_metric(
+        &mut metrics,
+        &thresholds,
+        PerformanceMetricInput {
+            metric: "performance.wall_clock_ms",
+            label: "Performance wall clock",
+            unit: "ms",
+            direction: PerformanceMetricDirection::LowerIsBetter,
+            baseline: performance_value(baseline, |performance| performance.wall_clock_us / 1_000),
+            current: performance_value(current, |performance| performance.wall_clock_us / 1_000),
+        },
+    );
+    add_performance_metric(
+        &mut metrics,
+        &thresholds,
+        PerformanceMetricInput {
+            metric: "performance.cumulative_tracked_ms",
+            label: "Cumulative tracked time",
+            unit: "ms",
+            direction: PerformanceMetricDirection::LowerIsBetter,
+            baseline: performance_value(baseline, |performance| {
+                performance.cumulative_tracked_us / 1_000
+            }),
+            current: performance_value(current, |performance| {
+                performance.cumulative_tracked_us / 1_000
+            }),
+        },
+    );
+    add_performance_metric(
+        &mut metrics,
+        &thresholds,
+        PerformanceMetricInput {
+            metric: "summary.total_findings",
+            label: "Total findings",
+            unit: "count",
+            direction: PerformanceMetricDirection::LowerIsBetter,
+            baseline: Some(baseline.summary.total as u64),
+            current: Some(current.summary.total as u64),
+        },
+    );
+    add_performance_metric(
+        &mut metrics,
+        &thresholds,
+        PerformanceMetricInput {
+            metric: "summary.errors",
+            label: "Error findings",
+            unit: "count",
+            direction: PerformanceMetricDirection::LowerIsBetter,
+            baseline: Some(baseline.summary.errors as u64),
+            current: Some(current.summary.errors as u64),
+        },
+    );
+
+    for phase_name in collect_phase_names(baseline, current) {
+        let metric_name = format!("phase.{}.elapsed_ms", phase_name);
+        let label = format!("Phase `{}` elapsed", phase_name);
+        add_performance_metric(
+            &mut metrics,
+            &thresholds,
+            PerformanceMetricInput {
+                metric: &metric_name,
+                label: &label,
+                unit: "ms",
+                direction: PerformanceMetricDirection::LowerIsBetter,
+                baseline: phase_value(baseline, &phase_name, |phase| {
+                    Some(phase.elapsed_us / 1_000)
+                }),
+                current: phase_value(current, &phase_name, |phase| Some(phase.elapsed_us / 1_000)),
+            },
+        );
+        let baseline_p95 = phase_value(baseline, &phase_name, |phase| {
+            (phase.p95_us > 0).then_some(phase.p95_us / 1_000)
+        });
+        let current_p95 = phase_value(current, &phase_name, |phase| {
+            (phase.p95_us > 0).then_some(phase.p95_us / 1_000)
+        });
+        if baseline_p95.is_some() || current_p95.is_some() {
+            let p95_metric_name = format!("phase.{}.p95_ms", phase_name);
+            let p95_label = format!("Phase `{}` p95", phase_name);
+            add_performance_metric(
+                &mut metrics,
+                &thresholds,
+                PerformanceMetricInput {
+                    metric: &p95_metric_name,
+                    label: &p95_label,
+                    unit: "ms",
+                    direction: PerformanceMetricDirection::LowerIsBetter,
+                    baseline: baseline_p95,
+                    current: current_p95,
+                },
+            );
+        }
+    }
+
+    for group_name in collect_rule_group_names(baseline, current) {
+        let metric_name = format!("rule_group.{}.elapsed_ms", group_name);
+        let label = format!("Rule group `{}` elapsed", group_name);
+        add_performance_metric(
+            &mut metrics,
+            &thresholds,
+            PerformanceMetricInput {
+                metric: &metric_name,
+                label: &label,
+                unit: "ms",
+                direction: PerformanceMetricDirection::LowerIsBetter,
+                baseline: rule_group_value(baseline, &group_name, |group| group.elapsed_us / 1_000),
+                current: rule_group_value(current, &group_name, |group| group.elapsed_us / 1_000),
+            },
+        );
+    }
+
+    let summary = summarize_performance_metrics(&metrics);
+    let warnings = performance_diff_warnings(baseline, current);
+    PerformanceDiffReport {
+        baseline_path,
+        current_path,
+        thresholds,
+        summary,
+        metrics,
+        warnings,
+    }
+}
+
+fn format_performance_metric_value(value: Option<u64>, unit: &str) -> String {
+    match value {
+        Some(value) if unit == "ms" => format!("{value}ms"),
+        Some(value) if unit == "pages/min" => format!("{value} pages/min"),
+        Some(value) => format!("{value} {unit}"),
+        None => "n/a".to_string(),
+    }
+}
+
+fn format_signed_delta(value: Option<i64>, unit: &str) -> String {
+    match value {
+        Some(value) if unit == "ms" => format!("{value:+}ms"),
+        Some(value) if unit == "pages/min" => format!("{value:+} pages/min"),
+        Some(value) => format!("{value:+} {unit}"),
+        None => "n/a".to_string(),
+    }
+}
+
+fn format_signed_basis_points(value: Option<i64>) -> String {
+    match value {
+        Some(value) => {
+            let sign = if value >= 0 { "+" } else { "-" };
+            let abs = value.unsigned_abs();
+            format!("{sign}{}.{:02}%", abs / 100, abs % 100)
+        }
+        None => "n/a".to_string(),
+    }
+}
+
+fn format_unsigned_basis_points(value: u32) -> String {
+    format!("{}.{:02}%", value / 100, value % 100)
+}
+
+pub fn render_performance_diff_text(report: &PerformanceDiffReport) -> String {
+    let mut lines = vec!["Performance Diff".to_string(), String::new()];
+    if let Some(path) = report.baseline_path.as_deref() {
+        lines.push(format!("Baseline: {path}"));
+    }
+    if let Some(path) = report.current_path.as_deref() {
+        lines.push(format!("Current: {path}"));
+    }
+    lines.push(format!(
+        "Thresholds: relative={} absolute={}ms",
+        format_unsigned_basis_points(report.thresholds.relative_threshold_basis_points),
+        report.thresholds.absolute_threshold
+    ));
+    lines.push(format!(
+        "Summary: regressions={} improvements={} unchanged={} missing={}",
+        report.summary.regressions,
+        report.summary.improvements,
+        report.summary.unchanged,
+        report.summary.missing
+    ));
+    lines.push(String::new());
+    lines.push("Metrics".to_string());
+    for metric in &report.metrics {
+        lines.push(format!(
+            "- {}: {} -> {} ({}, {}) {}",
+            metric.metric,
+            format_performance_metric_value(metric.baseline, &metric.unit),
+            format_performance_metric_value(metric.current, &metric.unit),
+            format_signed_delta(metric.delta, &metric.unit),
+            format_signed_basis_points(metric.relative_delta_basis_points),
+            metric.status
+        ));
+    }
+    if !report.warnings.is_empty() {
+        lines.push(String::new());
+        lines.push("Warnings".to_string());
+        for warning in &report.warnings {
+            lines.push(format!("- {warning}"));
+        }
+    }
+    lines.join("\n")
+}
+
 type RuntimeMaterialization = (
     Site,
     Vec<Finding>,
@@ -1430,13 +1978,14 @@ pub fn runtime_doctor() -> PlaywrightDoctor {
 #[cfg(test)]
 mod tests {
     use super::{
-        RuntimeArtifactMode, RuntimeAuditOptions, RuntimeProgressMode, evaluate_performance_budget,
-        run_runtime_audit, run_runtime_audit_with_options, verify_runtime_audit,
+        RuntimeArtifactMode, RuntimeAuditOptions, RuntimeProgressMode, diff_performance_artifacts,
+        evaluate_performance_budget, render_performance_diff_text, run_runtime_audit,
+        run_runtime_audit_with_options, verify_runtime_audit,
     };
     use crate::config::{Config, default_rule_switches};
     use seogeo_contracts::{
         AuditArtifact, AuditStatus, CrawlStats, Finding, FindingScope, PerformanceBudget,
-        PhaseTiming, RuleTiming,
+        PerformanceDiffThresholds, PhaseTiming, RuleTiming,
     };
     use std::collections::{BTreeMap, BTreeSet};
     use std::io::ErrorKind;
@@ -1724,6 +2273,98 @@ mod tests {
                 .iter()
                 .any(|item| item.metric == "fetch_p95")
         );
+    }
+
+    #[test]
+    fn performance_diff_marks_significant_regressions() {
+        let baseline = AuditArtifact {
+            command: "crawl".to_string(),
+            crawl: Some(CrawlStats {
+                engine: "http".to_string(),
+                visited_pages: 10,
+                max_pages: 10,
+                elapsed_ms: 100,
+                pages_per_minute: 600,
+                average_fetch_ms: 20,
+                average_page_process_ms: 4,
+                ..CrawlStats::default()
+            }),
+            performance: Some(super::build_audit_performance(
+                100_000,
+                vec![PhaseTiming {
+                    name: "fetch".to_string(),
+                    elapsed_us: 50_000,
+                    basis: "cumulative".to_string(),
+                    sample_count: 2,
+                    p95_us: 30_000,
+                    ..PhaseTiming::default()
+                }],
+                vec![RuleTiming {
+                    group: "schema".to_string(),
+                    elapsed_us: 10_000,
+                    findings: 1,
+                }],
+            )),
+            ..AuditArtifact::default()
+        };
+        let current = AuditArtifact {
+            command: "crawl".to_string(),
+            crawl: Some(CrawlStats {
+                engine: "http".to_string(),
+                visited_pages: 11,
+                max_pages: 10,
+                elapsed_ms: 140,
+                pages_per_minute: 420,
+                average_fetch_ms: 40,
+                average_page_process_ms: 4,
+                ..CrawlStats::default()
+            }),
+            performance: Some(super::build_audit_performance(
+                140_000,
+                vec![PhaseTiming {
+                    name: "fetch".to_string(),
+                    elapsed_us: 80_000,
+                    basis: "cumulative".to_string(),
+                    sample_count: 2,
+                    p95_us: 60_000,
+                    ..PhaseTiming::default()
+                }],
+                vec![RuleTiming {
+                    group: "schema".to_string(),
+                    elapsed_us: 20_000,
+                    findings: 1,
+                }],
+            )),
+            ..AuditArtifact::default()
+        };
+
+        let report = diff_performance_artifacts(
+            &baseline,
+            &current,
+            Some("baseline.json".to_string()),
+            Some("current.json".to_string()),
+            PerformanceDiffThresholds {
+                relative_threshold_basis_points: 1_000,
+                absolute_threshold: 0,
+            },
+        );
+
+        assert!(report.summary.regressions >= 4);
+        assert!(
+            report
+                .metrics
+                .iter()
+                .any(|metric| metric.metric == "phase.fetch.p95_ms" && metric.regressed)
+        );
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("visited page counts differ"))
+        );
+        let text = render_performance_diff_text(&report);
+        assert!(text.contains("Performance Diff"));
+        assert!(text.contains("phase.fetch.p95_ms"));
     }
 
     #[test]
