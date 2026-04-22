@@ -455,6 +455,7 @@ mod tests {
             unsupported_claims: 1,
             claim_kind_distribution: BTreeMap::new(),
             evidence_density_score: 40,
+            evidence_quality_score: 40,
             citation_readiness_score: 55,
             average_fidelity_risk_score: 60,
             routes: vec![super::super::EvidenceRouteAssessment {
@@ -463,6 +464,7 @@ mod tests {
                 claim_count: 1,
                 unsupported_claims: 1,
                 evidence_density_score: 40,
+                evidence_quality_score: 40,
                 citation_readiness_score: 55,
                 fidelity_risk_score: 60,
             }],

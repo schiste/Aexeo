@@ -18,6 +18,7 @@ pub struct EvidenceClaim {
     pub excerpt: String,
     pub kinds: Vec<EvidenceClaimKind>,
     pub supported: bool,
+    pub support_score: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,6 +28,7 @@ pub struct EvidenceSectionAssessment {
     pub supported_claims: usize,
     pub unsupported_claims: usize,
     pub evidence_signals: Vec<String>,
+    pub evidence_quality_score: u8,
     pub fidelity_risk_score: u8,
     pub claims: Vec<EvidenceClaim>,
 }
@@ -38,6 +40,7 @@ pub struct EvidenceRouteAssessment {
     pub claim_count: usize,
     pub unsupported_claims: usize,
     pub evidence_density_score: u8,
+    pub evidence_quality_score: u8,
     pub citation_readiness_score: u8,
     pub fidelity_risk_score: u8,
 }
@@ -50,6 +53,7 @@ pub struct EvidenceSiteAssessment {
     pub unsupported_claims: usize,
     pub claim_kind_distribution: BTreeMap<String, usize>,
     pub evidence_density_score: u8,
+    pub evidence_quality_score: u8,
     pub citation_readiness_score: u8,
     pub average_fidelity_risk_score: u8,
     pub routes: Vec<EvidenceRouteAssessment>,
@@ -74,6 +78,7 @@ pub fn assess_evidence_coverage(site: &Site) -> EvidenceSiteAssessment {
     let mut claim_count = 0;
     let mut unsupported_claims = 0;
     let mut evidence_density_total = 0_u64;
+    let mut evidence_quality_total = 0_u64;
     let mut citation_readiness_total = 0_u64;
     let mut fidelity_total = 0_u64;
     let mut routes_with_claims = 0;
@@ -85,6 +90,7 @@ pub fn assess_evidence_coverage(site: &Site) -> EvidenceSiteAssessment {
         claim_count += route.claim_count;
         unsupported_claims += route.unsupported_claims;
         evidence_density_total += u64::from(route.evidence_density_score);
+        evidence_quality_total += u64::from(route.evidence_quality_score);
         citation_readiness_total += u64::from(route.citation_readiness_score);
         fidelity_total += u64::from(route.fidelity_risk_score);
         for section in &route.sections {
@@ -106,6 +112,7 @@ pub fn assess_evidence_coverage(site: &Site) -> EvidenceSiteAssessment {
         unsupported_claims,
         claim_kind_distribution: kind_distribution,
         evidence_density_score: (evidence_density_total / count) as u8,
+        evidence_quality_score: (evidence_quality_total / count) as u8,
         citation_readiness_score: (citation_readiness_total / count) as u8,
         average_fidelity_risk_score: (fidelity_total / count) as u8,
         routes,
@@ -114,18 +121,19 @@ pub fn assess_evidence_coverage(site: &Site) -> EvidenceSiteAssessment {
 }
 
 fn assess_route(page: &crate::site::Page) -> EvidenceRouteAssessment {
-    let external_link_count = page
+    let external_links = page
         .links
         .iter()
         .filter(|link| link.href.starts_with("http://") || link.href.starts_with("https://"))
         .filter(|link| link.target.is_none())
-        .count();
+        .map(|link| link.href.as_str())
+        .collect::<Vec<_>>();
 
     let sections = if page.blocks.is_empty() {
         vec![assess_section(
             "page".to_string(),
             &plain_text(&page.raw_text),
-            external_link_count,
+            &external_links,
         )]
     } else {
         page.blocks
@@ -137,7 +145,7 @@ fn assess_route(page: &crate::site::Page) -> EvidenceRouteAssessment {
                     .clone()
                     .filter(|value| !value.is_empty())
                     .unwrap_or_else(|| format!("{}:{}", block.tag, index + 1));
-                assess_section(key, &block.text, external_link_count)
+                assess_section(key, &block.text, &external_links)
             })
             .collect::<Vec<_>>()
     };
@@ -155,9 +163,20 @@ fn assess_route(page: &crate::site::Page) -> EvidenceRouteAssessment {
     } else {
         (((claim_count.saturating_sub(unsupported_claims)) * 100) / claim_count) as u8
     };
-    let citation_readiness_score = evidence_density_score
+    let evidence_quality_score = if sections.is_empty() {
+        0
+    } else {
+        (sections
+            .iter()
+            .map(|section| u64::from(section.evidence_quality_score))
+            .sum::<u64>()
+            / sections.len() as u64) as u8
+    };
+    let citation_readiness_score = ((u16::from(evidence_density_score) * 65
+        + u16::from(evidence_quality_score) * 35)
+        / 100) as u8;
+    let citation_readiness_score = citation_readiness_score
         .saturating_sub((page.blocks.len() < 2) as u8 * 10)
-        .saturating_add((external_link_count > 0) as u8 * 5)
         .min(100);
     let fidelity_risk_score = sections
         .iter()
@@ -171,6 +190,7 @@ fn assess_route(page: &crate::site::Page) -> EvidenceRouteAssessment {
         claim_count,
         unsupported_claims,
         evidence_density_score,
+        evidence_quality_score,
         citation_readiness_score,
         fidelity_risk_score,
     }
@@ -179,9 +199,10 @@ fn assess_route(page: &crate::site::Page) -> EvidenceRouteAssessment {
 fn assess_section(
     section_key: String,
     text: &str,
-    external_link_count: usize,
+    external_links: &[&str],
 ) -> EvidenceSectionAssessment {
-    let evidence_signals = evidence_signals(text, external_link_count);
+    let evidence_signals = evidence_signals(text, external_links);
+    let evidence_quality_score = evidence_quality_score(&evidence_signals);
     let sentences = split_sentences(text);
     let mut claims = Vec::new();
     for sentence in sentences {
@@ -189,11 +210,13 @@ fn assess_section(
         if kinds.is_empty() {
             continue;
         }
-        let supported = !evidence_signals.is_empty();
+        let support_score = claim_support_score(&kinds, evidence_quality_score);
+        let supported = support_score >= 55;
         claims.push(EvidenceClaim {
             excerpt: truncate_excerpt(&sentence),
             kinds,
             supported,
+            support_score,
         });
     }
     let claim_count = claims.len();
@@ -207,17 +230,21 @@ fn assess_section(
         supported_claims,
         unsupported_claims,
         evidence_signals,
+        evidence_quality_score,
         fidelity_risk_score,
         claims,
     }
 }
 
-fn evidence_signals(text: &str, external_link_count: usize) -> Vec<String> {
+fn evidence_signals(text: &str, external_links: &[&str]) -> Vec<String> {
     let normalized = text.to_ascii_lowercase();
     let mut signals = Vec::new();
     for (needle, label) in [
         ("according to", "attribution_phrase"),
         ("source:", "explicit_source_label"),
+        ("sources:", "explicit_source_label"),
+        ("citation:", "explicit_source_label"),
+        ("cites:", "explicit_source_label"),
         ("study", "study_reference"),
         ("survey", "survey_reference"),
         ("benchmark", "benchmark_reference"),
@@ -225,17 +252,105 @@ fn evidence_signals(text: &str, external_link_count: usize) -> Vec<String> {
         ("research", "research_reference"),
         ("data from", "data_source_phrase"),
         ("as of ", "dated_qualifier"),
+        ("last updated", "dated_qualifier"),
+        ("methodology", "methodology_reference"),
     ] {
         if normalized.contains(needle) {
             signals.push(label.to_string());
         }
     }
+    if normalized.contains("http://") || normalized.contains("https://") {
+        signals.push("inline_url_reference".to_string());
+    }
+    let external_link_count = external_links.len();
     if external_link_count > 0 {
-        signals.push("external_reference_links".to_string());
+        signals.push("page_external_links".to_string());
+    }
+    let authoritative_count = external_links
+        .iter()
+        .filter(|href| is_authoritative_evidence_url(href))
+        .count();
+    if authoritative_count > 0 {
+        signals.push("authoritative_external_links".to_string());
+    }
+    if external_link_count >= 3 {
+        signals.push("multiple_external_links".to_string());
     }
     signals.sort();
     signals.dedup();
     signals
+}
+
+fn evidence_quality_score(signals: &[String]) -> u8 {
+    let mut score = 0_u8;
+    for signal in signals {
+        score = score.saturating_add(match signal.as_str() {
+            "explicit_source_label" => 45,
+            "attribution_phrase" => 35,
+            "data_source_phrase" => 35,
+            "methodology_reference" => 30,
+            "benchmark_reference" | "study_reference" | "survey_reference" => 28,
+            "research_reference" | "report_reference" => 22,
+            "authoritative_external_links" => 22,
+            "inline_url_reference" => 18,
+            "dated_qualifier" => 14,
+            "multiple_external_links" => 8,
+            "page_external_links" => 6,
+            _ => 0,
+        });
+    }
+    score.min(100)
+}
+
+fn claim_support_score(kinds: &[EvidenceClaimKind], evidence_quality_score: u8) -> u8 {
+    let required = if kinds.iter().any(|kind| {
+        matches!(
+            kind,
+            EvidenceClaimKind::Comparative | EvidenceClaimKind::Superlative
+        )
+    }) {
+        65
+    } else if kinds.iter().any(|kind| {
+        matches!(
+            kind,
+            EvidenceClaimKind::Numeric | EvidenceClaimKind::Temporal
+        )
+    }) {
+        55
+    } else {
+        45
+    };
+    if evidence_quality_score >= required {
+        evidence_quality_score
+    } else {
+        evidence_quality_score.saturating_sub(required - evidence_quality_score)
+    }
+}
+
+fn is_authoritative_evidence_url(href: &str) -> bool {
+    let Ok(url) = url::Url::parse(href) else {
+        return false;
+    };
+    let Some(host) = url.host_str().map(|host| host.to_ascii_lowercase()) else {
+        return false;
+    };
+    host.ends_with(".gov")
+        || host.ends_with(".edu")
+        || host == "doi.org"
+        || host.ends_with(".doi.org")
+        || host == "arxiv.org"
+        || host.ends_with(".arxiv.org")
+        || host == "pubmed.ncbi.nlm.nih.gov"
+        || host.ends_with(".nih.gov")
+        || host == "ietf.org"
+        || host.ends_with(".ietf.org")
+        || host == "w3.org"
+        || host.ends_with(".w3.org")
+        || host == "schema.org"
+        || host.ends_with(".schema.org")
+        || host == "github.com"
+        || host.ends_with(".github.com")
+        || host == "developers.google.com"
 }
 
 fn detect_claim_kinds(sentence: &str) -> Vec<EvidenceClaimKind> {
@@ -362,7 +477,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn evidence_assessment_detects_supported_and_unsupported_claims() {
+    fn evidence_assessment_requires_strong_evidence_for_claim_support() {
         let temp = tempdir().unwrap();
         std::fs::write(
             temp.path().join("index.html"),
@@ -373,8 +488,10 @@ mod tests {
         let report = assess_evidence_coverage(&site);
         assert_eq!(report.pages_analyzed, 1);
         assert_eq!(report.claim_count, 2);
-        assert_eq!(report.unsupported_claims, 0);
-        assert!(report.citation_readiness_score > 50);
+        assert_eq!(report.unsupported_claims, 1);
+        assert!(report.evidence_quality_score > 20);
+        assert!(report.citation_readiness_score >= 40);
+        assert!(report.citation_readiness_score < 60);
     }
 
     #[test]
@@ -389,5 +506,35 @@ mod tests {
         let report = assess_evidence_coverage(&site);
         assert_eq!(report.unsupported_claims, 1);
         assert!(report.routes[0].fidelity_risk_score >= 40);
+    }
+
+    #[test]
+    fn page_level_external_links_are_weak_support_only() {
+        let temp = tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("index.html"),
+            r#"<html><head><title>Claims</title></head><body><section><p>Aexeo improves results by 80%.</p></section><a href="https://example.com">Example</a></body></html>"#,
+        )
+        .unwrap();
+        let site = load_site(temp.path()).unwrap();
+        let report = assess_evidence_coverage(&site);
+        assert_eq!(report.claim_count, 1);
+        assert_eq!(report.unsupported_claims, 1);
+        assert!(report.routes[0].evidence_quality_score < 20);
+    }
+
+    #[test]
+    fn authoritative_links_and_attribution_raise_evidence_quality() {
+        let temp = tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("index.html"),
+            r#"<html><head><title>Claims</title></head><body><section><p>According to the benchmark methodology, Aexeo reduced crawl time by 42% in 2026.</p></section><a href="https://developers.google.com/search/docs">Google docs</a></body></html>"#,
+        )
+        .unwrap();
+        let site = load_site(temp.path()).unwrap();
+        let report = assess_evidence_coverage(&site);
+        assert_eq!(report.claim_count, 1);
+        assert_eq!(report.unsupported_claims, 0);
+        assert!(report.routes[0].evidence_quality_score >= 70);
     }
 }
