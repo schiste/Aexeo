@@ -16,6 +16,7 @@ use crate::site::{DeploymentModel, load_site};
 use crate::sitemap_rules::run_sitemap_rules;
 use crate::social_rules::run_social_rules;
 use crate::structure_rules::run_structure_rules;
+use crate::surface_rules::run_surface_rules;
 
 #[derive(Debug, Clone, Default)]
 pub struct SiteCheckProfile {
@@ -112,6 +113,13 @@ pub fn run_checks_for_site_profiled(site: &crate::site::Site, config: &Config) -
         || run_llm_rules(site, config),
     );
     time_rule_group(
+        rules.checks.get("surfaces").copied().unwrap_or(true),
+        "surfaces",
+        &mut rule_timings,
+        &mut findings,
+        || run_surface_rules(site, config),
+    );
+    time_rule_group(
         rules.checks.get("schema").copied().unwrap_or(true),
         "schema",
         &mut rule_timings,
@@ -167,6 +175,7 @@ pub fn can_run_native_static_audit(config: &Config) -> bool {
                     | "links"
                     | "sitemap"
                     | "llm"
+                    | "surfaces"
                     | "schema"
                     | "content"
                     | "structure"

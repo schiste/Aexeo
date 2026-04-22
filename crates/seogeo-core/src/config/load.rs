@@ -273,6 +273,7 @@ fn merge_bool_rule_toggles(
         "social",
         "schema",
         "llm",
+        "surfaces",
         "content",
         "structure",
     ] {
@@ -318,6 +319,7 @@ fn validate_rules_table(table: &toml::map::Map<String, Value>) -> Result<()> {
             "social",
             "schema",
             "llm",
+            "surfaces",
             "content",
             "structure",
         ],
@@ -391,7 +393,7 @@ fn validate_rules_table(table: &toml::map::Map<String, Value>) -> Result<()> {
                 ],
                 "[rules.structure]",
             )?,
-            "sitemap" | "llm" => validate_allowed_keys(
+            "sitemap" | "llm" | "surfaces" => validate_allowed_keys(
                 expect_table(value, key, "[rules]")?,
                 &["enabled"],
                 &format!("[rules.{}]", key),
@@ -768,7 +770,7 @@ fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
                 "require_fact_consistency",
             );
         }
-        for key in ["sitemap", "llm"] {
+        for key in ["sitemap", "llm", "surfaces"] {
             if let Some(Value::Table(mut table)) = rules_table.remove(key) {
                 move_table_field_if_absent_checks(root, &mut table, key);
             }
