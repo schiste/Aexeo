@@ -140,6 +140,7 @@ pub fn default_rule_switches() -> BTreeMap<&'static str, bool> {
         ("social", true),
         ("schema", true),
         ("llm", true),
+        ("surfaces", true),
         ("content", true),
         ("structure", true),
     ])

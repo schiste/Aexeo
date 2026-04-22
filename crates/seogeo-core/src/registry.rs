@@ -57,6 +57,10 @@ fn metadata_for_prefix(prefix: &str) -> RuleMetadata {
             class: RuleClass::Policy,
             confidence: ConfidenceLevel::Medium,
         },
+        "SRF" => RuleMetadata {
+            class: RuleClass::Policy,
+            confidence: ConfidenceLevel::High,
+        },
         "CNT" => RuleMetadata {
             class: RuleClass::Policy,
             confidence: ConfidenceLevel::Medium,
@@ -453,6 +457,37 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             ],
         },
         RuleGroupDefinition {
+            name: "surfaces",
+            title: "Machine Surfaces",
+            description: "Machine-readable discovery, citation, and agent-retrieval surfaces.",
+            rules: &[
+                RuleDescriptor {
+                    rule_id: "SRF001",
+                    summary: "missing facts.json machine-readable facts manifest",
+                },
+                RuleDescriptor {
+                    rule_id: "SRF002",
+                    summary: "no per-page Markdown mirrors discovered",
+                },
+                RuleDescriptor {
+                    rule_id: "SRF003",
+                    summary: "larger site is missing llms-full.txt compiled context",
+                },
+                RuleDescriptor {
+                    rule_id: "SRF004",
+                    summary: "route has no discovered Markdown mirror",
+                },
+                RuleDescriptor {
+                    rule_id: "SRF005",
+                    summary: "route has Markdown mirror but no static discovery link",
+                },
+                RuleDescriptor {
+                    rule_id: "SRF006",
+                    summary: "llms.txt references missing machine-readable artifact",
+                },
+            ],
+        },
+        RuleGroupDefinition {
             name: "content",
             title: "Content Policy",
             description: "",
@@ -615,6 +650,7 @@ mod tests {
                 "social",
                 "schema",
                 "llm",
+                "surfaces",
                 "content",
                 "structure",
                 "runtime",

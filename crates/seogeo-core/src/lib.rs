@@ -24,6 +24,7 @@ pub mod sitemap_rules;
 pub mod social_rules;
 pub mod static_check;
 pub mod structure_rules;
+pub mod surface_rules;
 pub mod surfaces;
 pub mod verification;
 
@@ -97,6 +98,7 @@ pub use static_check::{
     can_run_native_static_audit, run_native_static_audit, run_native_static_audit_with_config,
 };
 pub use structure_rules::run_structure_rules;
+pub use surface_rules::run_surface_rules;
 pub use surfaces::{
     MachineSurface, MachineSurfaceCoverage, MachineSurfaceDiscoverySource, MachineSurfaceGraph,
     MachineSurfaceKind, MachineSurfaceOptions, MachineSurfaceRouteSummary, MachineSurfaceStatus,

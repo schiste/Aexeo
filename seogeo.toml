@@ -43,6 +43,9 @@ required_types = []
 [rules.llm]
 enabled = true
 
+[rules.surfaces]
+enabled = true
+
 [rules.content]
 enabled = true
 min_page_size = 500

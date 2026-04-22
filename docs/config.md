@@ -382,3 +382,4 @@ Built-in rule-group toggles. Unknown plugin rule groups default to enabled unles
 - `sitemap`: default `true`
 - `social`: default `true`
 - `structure`: default `true`
+- `surfaces`: default `true`
