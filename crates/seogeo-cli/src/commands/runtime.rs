@@ -420,10 +420,34 @@ pub fn command_profile_runtime(submatches: &ArgMatches) -> Result<i32> {
             );
             println!();
             if let Some(performance) = audit.performance.as_ref() {
+                if performance.wall_clock_us > 0 || performance.cumulative_tracked_us > 0 {
+                    println!(
+                        "Performance Basis: wall_clock={}ms cumulative_tracked={}ms",
+                        performance.wall_clock_us / 1_000,
+                        performance.cumulative_tracked_us / 1_000
+                    );
+                    println!();
+                }
                 if !performance.phases.is_empty() {
                     println!("Phase Timings");
                     for phase in &performance.phases {
-                        println!("- {}: {}ms", phase.name, phase.elapsed_us / 1_000);
+                        let basis = if phase.basis.is_empty() {
+                            "unknown"
+                        } else {
+                            &phase.basis
+                        };
+                        println!(
+                            "- {}: {}ms basis={} cumulative_share={}.{:02}% wall_share={}.{:02}% p95={}ms samples={}",
+                            phase.name,
+                            phase.elapsed_us / 1_000,
+                            basis,
+                            phase.cumulative_share_basis_points / 100,
+                            phase.cumulative_share_basis_points % 100,
+                            phase.wall_share_basis_points / 100,
+                            phase.wall_share_basis_points % 100,
+                            phase.p95_us / 1_000,
+                            phase.sample_count
+                        );
                     }
                     println!();
                 }
@@ -443,12 +467,16 @@ pub fn command_profile_runtime(submatches: &ArgMatches) -> Result<i32> {
                     println!("Runtime Bottlenecks");
                     for bottleneck in performance.bottlenecks.iter().take(8) {
                         println!(
-                            "- {} {}: {}ms share={}.{:02}%{}",
+                            "- {} {}: {}ms share={}.{:02}% wall={}.{:02}% cumulative={}.{:02}%{}",
                             bottleneck.kind,
                             bottleneck.name,
                             bottleneck.elapsed_us / 1_000,
                             bottleneck.share_basis_points / 100,
                             bottleneck.share_basis_points % 100,
+                            bottleneck.wall_share_basis_points / 100,
+                            bottleneck.wall_share_basis_points % 100,
+                            bottleneck.cumulative_share_basis_points / 100,
+                            bottleneck.cumulative_share_basis_points % 100,
                             bottleneck
                                 .findings
                                 .map(|value| format!(" findings={}", value))

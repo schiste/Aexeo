@@ -400,11 +400,37 @@ fn artifact_status_lines(artifact: &AuditArtifact) -> Vec<String> {
         }
     }
     if let Some(performance) = artifact.performance.as_ref() {
+        if performance.wall_clock_us > 0 || performance.cumulative_tracked_us > 0 {
+            lines.push(format!(
+                "- Performance basis: wall_clock={}ms cumulative_tracked={}ms",
+                performance.wall_clock_us / 1_000,
+                performance.cumulative_tracked_us / 1_000
+            ));
+        }
         if !performance.phases.is_empty() {
             let phases = performance
                 .phases
                 .iter()
-                .map(|phase| format!("{}={}ms", phase.name, phase.elapsed_us / 1_000))
+                .map(|phase| {
+                    let p95 = if phase.p95_us > 0 {
+                        format!(" p95={}ms", phase.p95_us / 1_000)
+                    } else {
+                        String::new()
+                    };
+                    format!(
+                        "{}={}ms basis={} cum={} wall={}{}",
+                        phase.name,
+                        phase.elapsed_us / 1_000,
+                        if phase.basis.is_empty() {
+                            "unknown"
+                        } else {
+                            &phase.basis
+                        },
+                        format_basis_points(phase.cumulative_share_basis_points),
+                        format_basis_points(phase.wall_share_basis_points),
+                        p95
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(", ");
             lines.push(format!("- Phase timings: {}", phases));
@@ -433,11 +459,12 @@ fn artifact_status_lines(artifact: &AuditArtifact) -> Vec<String> {
                 .take(5)
                 .map(|item| {
                     format!(
-                        "{}:{}={}ms/{}",
+                        "{}:{}={}ms/share={} wall={}",
                         item.kind,
                         item.name,
                         item.elapsed_us / 1_000,
-                        format_basis_points(item.share_basis_points)
+                        format_basis_points(item.share_basis_points),
+                        format_basis_points(item.wall_share_basis_points)
                     )
                 })
                 .collect::<Vec<_>>()
@@ -589,13 +616,30 @@ pub fn render_markdown_artifact(artifact: &AuditArtifact, audit_path: Option<&Pa
         }
     }
     if let Some(performance) = artifact.performance.as_ref() {
+        if performance.wall_clock_us > 0 || performance.cumulative_tracked_us > 0 {
+            lines.push(format!(
+                "- Performance basis: wall_clock=`{}ms` cumulative_tracked=`{}ms`",
+                performance.wall_clock_us / 1_000,
+                performance.cumulative_tracked_us / 1_000
+            ));
+        }
         if !performance.phases.is_empty() {
             lines.push("- Phase timings:".to_string());
             for phase in &performance.phases {
+                let basis = if phase.basis.is_empty() {
+                    "unknown"
+                } else {
+                    &phase.basis
+                };
                 lines.push(format!(
-                    "  - `{}` elapsed=`{}ms`",
+                    "  - `{}` elapsed=`{}ms` basis=`{}` cumulative_share=`{}` wall_share=`{}` p95=`{}ms` samples=`{}`",
                     phase.name,
-                    phase.elapsed_us / 1_000
+                    phase.elapsed_us / 1_000,
+                    basis,
+                    format_basis_points(phase.cumulative_share_basis_points),
+                    format_basis_points(phase.wall_share_basis_points),
+                    phase.p95_us / 1_000,
+                    phase.sample_count
                 ));
             }
         }
@@ -614,11 +658,13 @@ pub fn render_markdown_artifact(artifact: &AuditArtifact, audit_path: Option<&Pa
             lines.push("- Runtime bottlenecks:".to_string());
             for bottleneck in performance.bottlenecks.iter().take(8) {
                 let mut line = format!(
-                    "  - `{}` `{}` elapsed=`{}ms` share=`{}`",
+                    "  - `{}` `{}` elapsed=`{}ms` share=`{}` wall_share=`{}` cumulative_share=`{}`",
                     bottleneck.kind,
                     bottleneck.name,
                     bottleneck.elapsed_us / 1_000,
-                    format_basis_points(bottleneck.share_basis_points)
+                    format_basis_points(bottleneck.share_basis_points),
+                    format_basis_points(bottleneck.wall_share_basis_points),
+                    format_basis_points(bottleneck.cumulative_share_basis_points)
                 );
                 if let Some(findings) = bottleneck.findings {
                     line.push_str(&format!(" findings=`{}`", findings));

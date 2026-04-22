@@ -81,6 +81,26 @@ pub struct SlowCrawlPath {
 pub struct PhaseTiming {
     pub name: String,
     pub elapsed_us: u64,
+    #[serde(default)]
+    pub basis: String,
+    #[serde(default)]
+    pub sample_count: usize,
+    #[serde(default)]
+    pub min_us: u64,
+    #[serde(default)]
+    pub max_us: u64,
+    #[serde(default)]
+    pub p50_us: u64,
+    #[serde(default)]
+    pub p75_us: u64,
+    #[serde(default)]
+    pub p95_us: u64,
+    #[serde(default)]
+    pub p99_us: u64,
+    #[serde(default)]
+    pub wall_share_basis_points: u32,
+    #[serde(default)]
+    pub cumulative_share_basis_points: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -98,6 +118,10 @@ pub struct PerformanceBottleneck {
     #[serde(default)]
     pub share_basis_points: u32,
     #[serde(default)]
+    pub wall_share_basis_points: u32,
+    #[serde(default)]
+    pub cumulative_share_basis_points: u32,
+    #[serde(default)]
     pub findings: Option<usize>,
     #[serde(default)]
     pub recommendation: Option<String>,
@@ -107,6 +131,10 @@ pub struct PerformanceBottleneck {
 pub struct AuditPerformance {
     #[serde(default)]
     pub elapsed_us: u64,
+    #[serde(default)]
+    pub wall_clock_us: u64,
+    #[serde(default)]
+    pub cumulative_tracked_us: u64,
     #[serde(default)]
     pub phases: Vec<PhaseTiming>,
     #[serde(default)]
