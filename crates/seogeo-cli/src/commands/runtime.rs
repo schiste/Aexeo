@@ -4,10 +4,10 @@ use seogeo_contracts::AuditStatus;
 use seogeo_core::config::load_config_with_diagnostics;
 use seogeo_core::{
     RuntimeAudit, RuntimeAuditOptions, RuntimeProgressEvent, RuntimeProgressMode,
-    build_audit_artifact, diff_finding_sets, load_audit_artifact, load_findings_from_audit,
-    render_diff_text, render_sarif, render_text_artifact, run_runtime_audit_with_options,
-    runtime_doctor, verify_runtime_audit, write_audit_artifact, write_partial_audit_artifact,
-    write_progress_audit_artifact,
+    audit_site_snapshot, build_audit_artifact, diff_finding_sets, load_audit_artifact,
+    load_findings_from_audit, render_diff_text, render_sarif, render_text_artifact,
+    run_runtime_audit_with_options, runtime_doctor, verify_runtime_audit, write_audit_artifact,
+    write_partial_audit_artifact, write_progress_audit_artifact,
 };
 use std::path::{Path, PathBuf};
 
@@ -46,6 +46,7 @@ fn runtime_output_artifact(
     command: &str,
     audit: &RuntimeAudit,
     findings: &[seogeo_contracts::Finding],
+    site_url: Option<&str>,
 ) -> seogeo_contracts::AuditArtifact {
     let mut artifact = build_audit_artifact(
         command,
@@ -55,6 +56,7 @@ fn runtime_output_artifact(
         audit.truncation_reason.clone(),
     );
     artifact.performance = audit.performance.clone();
+    artifact.site = Some(audit_site_snapshot(&audit.site, site_url));
     artifact
 }
 
@@ -220,9 +222,10 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
         seogeo_core::runtime::RuntimeArtifactMode::Callback(&mut progress_writer),
         seogeo_core::runtime::RuntimeArtifactMode::Callback(&mut partial_writer),
     );
+    let target_url = required_arg(submatches, "url")?;
 
     let audit = match run_runtime_audit_with_options(
-        required_arg(submatches, "url")?,
+        target_url,
         *submatches.get_one::<usize>("max-pages").unwrap_or(&200),
         selected_runtime_engine(&config, submatches),
         &config,
@@ -231,7 +234,8 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
         Ok(audit) => audit,
         Err(error) => return emit_runtime_failure("crawl", format, &error, warnings),
     };
-    let full_audit_artifact = runtime_output_artifact("crawl", &audit, &audit.findings);
+    let full_audit_artifact =
+        runtime_output_artifact("crawl", &audit, &audit.findings, Some(target_url));
     let audit_path = write_audit_artifact(
         &full_audit_artifact,
         &cwd,
@@ -249,7 +253,8 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     } else {
         audit.findings.clone()
     };
-    let render_artifact = runtime_output_artifact("crawl", &audit, &findings_to_render);
+    let render_artifact =
+        runtime_output_artifact("crawl", &audit, &findings_to_render, Some(target_url));
     let success = if regressions_only {
         findings_to_render.is_empty() && audit.status != AuditStatus::Failed
     } else {
@@ -321,8 +326,9 @@ pub fn command_verify(submatches: &ArgMatches) -> Result<i32> {
         seogeo_core::runtime::RuntimeArtifactMode::Callback(&mut progress_writer),
         seogeo_core::runtime::RuntimeArtifactMode::Callback(&mut partial_writer),
     );
+    let target_url = required_arg(submatches, "url")?;
     let audit = match run_runtime_audit_with_options(
-        required_arg(submatches, "url")?,
+        target_url,
         *submatches.get_one::<usize>("max-pages").unwrap_or(&200),
         selected_runtime_engine(&config, submatches),
         &config,
@@ -377,8 +383,9 @@ pub fn command_profile_runtime(submatches: &ArgMatches) -> Result<i32> {
         seogeo_core::runtime::RuntimeArtifactMode::Off,
         seogeo_core::runtime::RuntimeArtifactMode::Off,
     );
+    let target_url = required_arg(submatches, "url")?;
     let audit = run_runtime_audit_with_options(
-        required_arg(submatches, "url")?,
+        target_url,
         *submatches.get_one::<usize>("max-pages").unwrap_or(&20),
         selected_runtime_engine(&config, submatches),
         &config,
@@ -386,7 +393,8 @@ pub fn command_profile_runtime(submatches: &ArgMatches) -> Result<i32> {
     )?;
     match format {
         "json" => {
-            let artifact = runtime_output_artifact("profile", &audit, &audit.findings);
+            let artifact =
+                runtime_output_artifact("profile", &audit, &audit.findings, Some(target_url));
             println!("{}", serde_json::to_string_pretty(&artifact)?);
         }
         _ => {

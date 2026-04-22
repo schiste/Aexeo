@@ -118,6 +118,46 @@ pub struct AuditPerformance {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AuditCrawlMeta {
+    pub visited_pages: usize,
+    pub max_pages: usize,
+    pub discovered_internal_routes: usize,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AuditPageSnapshot {
+    pub path: String,
+    pub relative_path: String,
+    pub route: String,
+    pub raw_html: String,
+    #[serde(default)]
+    pub response_headers: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AuditSiteSnapshot {
+    #[serde(default = "default_audit_site_snapshot_version")]
+    pub version: u32,
+    #[serde(default)]
+    pub site_url: Option<String>,
+    pub root: String,
+    pub deployment_model: String,
+    #[serde(default)]
+    pub deployment_markers: Vec<String>,
+    #[serde(default)]
+    pub crawl_meta: Option<AuditCrawlMeta>,
+    #[serde(default)]
+    pub llms_text: Option<String>,
+    #[serde(default)]
+    pub robots_text: Option<String>,
+    #[serde(default)]
+    pub sitemap_text: Option<String>,
+    #[serde(default)]
+    pub pages: Vec<AuditPageSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct CrawlStats {
     pub engine: String,
     pub visited_pages: usize,
@@ -209,6 +249,8 @@ pub struct AuditArtifact {
     #[serde(default)]
     pub performance: Option<AuditPerformance>,
     #[serde(default)]
+    pub site: Option<AuditSiteSnapshot>,
+    #[serde(default)]
     pub findings: Vec<Finding>,
 }
 
@@ -235,6 +277,10 @@ fn default_severity() -> String {
 
 fn default_audit_artifact_version() -> u32 {
     2
+}
+
+fn default_audit_site_snapshot_version() -> u32 {
+    1
 }
 
 impl Finding {
@@ -282,6 +328,7 @@ impl Default for AuditArtifact {
             truncation_reason: None,
             crawl: None,
             performance: None,
+            site: None,
             findings: Vec::new(),
         }
     }
@@ -315,7 +362,9 @@ impl RuleMetadata {
 
 #[cfg(test)]
 mod tests {
-    use super::{AuditArtifact, AuditStatus, Finding, FindingScope};
+    use super::{
+        AuditArtifact, AuditPageSnapshot, AuditSiteSnapshot, AuditStatus, Finding, FindingScope,
+    };
 
     #[test]
     fn finding_renders_with_suggestion() {
@@ -344,5 +393,27 @@ mod tests {
         };
         assert_eq!(artifact.status, AuditStatus::Complete);
         assert_eq!(artifact.version, 2);
+    }
+
+    #[test]
+    fn audit_artifact_can_embed_a_site_snapshot() {
+        let artifact = AuditArtifact {
+            command: "crawl".into(),
+            site: Some(AuditSiteSnapshot {
+                root: "crawl".into(),
+                deployment_model: "runtime_snapshot".into(),
+                pages: vec![AuditPageSnapshot {
+                    relative_path: "index.html".into(),
+                    route: String::new(),
+                    raw_html: "<html><body><h1>Home</h1></body></html>".into(),
+                    ..AuditPageSnapshot::default()
+                }],
+                ..AuditSiteSnapshot::default()
+            }),
+            ..AuditArtifact::default()
+        };
+        let snapshot = artifact.site.as_ref().unwrap();
+        assert_eq!(snapshot.pages.len(), 1);
+        assert_eq!(snapshot.pages[0].relative_path, "index.html");
     }
 }

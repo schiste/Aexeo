@@ -4,6 +4,7 @@ mod parser;
 mod sitemap;
 
 use anyhow::Result;
+use seogeo_contracts::{AuditCrawlMeta, AuditPageSnapshot, AuditSiteSnapshot};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -517,6 +518,84 @@ pub fn build_site_from_parts(input: SiteBuildInput) -> Result<Site> {
         pages,
         route_page_indices,
         indexed_paths,
+    })
+}
+
+fn deployment_model_label(model: &DeploymentModel) -> &'static str {
+    match model {
+        DeploymentModel::StaticExport => "static_export",
+        DeploymentModel::SsrWorker => "ssr_worker",
+        DeploymentModel::RuntimeSnapshot => "runtime_snapshot",
+    }
+}
+
+fn deployment_model_from_label(label: &str) -> DeploymentModel {
+    match label {
+        "ssr_worker" => DeploymentModel::SsrWorker,
+        "runtime_snapshot" => DeploymentModel::RuntimeSnapshot,
+        _ => DeploymentModel::StaticExport,
+    }
+}
+
+pub fn audit_site_snapshot(site: &Site, site_url: Option<&str>) -> AuditSiteSnapshot {
+    AuditSiteSnapshot {
+        version: 1,
+        site_url: site_url.map(str::to_string),
+        root: site.root.to_string_lossy().to_string(),
+        deployment_model: deployment_model_label(&site.deployment_model).to_string(),
+        deployment_markers: site.deployment_markers.clone(),
+        crawl_meta: site.crawl_meta.as_ref().map(|meta| AuditCrawlMeta {
+            visited_pages: meta.visited_pages,
+            max_pages: meta.max_pages,
+            discovered_internal_routes: meta.discovered_internal_routes,
+            truncated: meta.truncated,
+        }),
+        llms_text: site.llms_text.clone(),
+        robots_text: site.robots_text.clone(),
+        sitemap_text: site.sitemap_text.clone(),
+        pages: site
+            .pages
+            .iter()
+            .map(|page| AuditPageSnapshot {
+                path: page.path.to_string_lossy().to_string(),
+                relative_path: page.relative_path.clone(),
+                route: page.route.clone(),
+                raw_html: page.raw_text.clone(),
+                response_headers: page.response_headers.clone(),
+            })
+            .collect(),
+    }
+}
+
+pub fn build_site_from_audit_snapshot(snapshot: &AuditSiteSnapshot) -> Result<Site> {
+    let pages = snapshot
+        .pages
+        .iter()
+        .map(|page| {
+            build_page_from_source(
+                PathBuf::from(&page.path),
+                page.relative_path.clone(),
+                page.raw_html.clone(),
+                page.response_headers.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    build_site_from_parts(SiteBuildInput {
+        root: PathBuf::from(&snapshot.root),
+        pages,
+        artifacts: SiteArtifacts {
+            llms_text: snapshot.llms_text.clone(),
+            robots_text: snapshot.robots_text.clone(),
+            sitemap_text: snapshot.sitemap_text.clone(),
+        },
+        deployment_model: deployment_model_from_label(&snapshot.deployment_model),
+        deployment_markers: snapshot.deployment_markers.clone(),
+        crawl_meta: snapshot.crawl_meta.as_ref().map(|meta| CrawlMeta {
+            visited_pages: meta.visited_pages,
+            max_pages: meta.max_pages,
+            discovered_internal_routes: meta.discovered_internal_routes,
+            truncated: meta.truncated,
+        }),
     })
 }
 
