@@ -222,6 +222,12 @@ pub fn build_cli() -> Command {
                                 .about("Generate and score definition, setup, comparison, pricing, trust, and support fan-out queries")
                                 .arg(Arg::new("path").default_value("."))
                                 .arg(
+                                    Arg::new("from-crawl-artifact")
+                                        .long("from-crawl-artifact")
+                                        .num_args(1)
+                                        .help("Read site input from a crawl audit artifact instead of scanning a directory"),
+                                )
+                                .arg(
                                     Arg::new("format")
                                         .long("format")
                                         .value_parser(["text", "json"])
@@ -317,6 +323,12 @@ pub fn build_cli() -> Command {
                             Command::new("discover")
                                 .about("Build a machine-surface graph for HTML, schema, facts, llms, markdown, sitemap, and robots")
                                 .arg(Arg::new("path").default_value("."))
+                                .arg(
+                                    Arg::new("from-crawl-artifact")
+                                        .long("from-crawl-artifact")
+                                        .num_args(1)
+                                        .help("Read site input from a crawl audit artifact instead of scanning a directory"),
+                                )
                                 .arg(Arg::new("site-url").long("site-url").num_args(1))
                                 .arg(
                                     Arg::new("format")

@@ -1,13 +1,14 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
+use seogeo_contracts::AuditStatus;
 use seogeo_core::{
     AnswerFanoutReport, EvidenceSiteAssessment, GroundingCoverageGap, GroundingSiteAnalysis,
     MachineSurfaceGraph, MachineSurfaceOptions, SiteIntelligenceScore, TrustSurfaceReconciliation,
     TruthAssessment, TruthManifestGeneration, TruthManifestValidation, TruthStructuredSource,
     assess_answer_fanout, assess_evidence_coverage, assess_truth_layer,
     discover_machine_surface_graph, discover_truth_manifest, generate_truth_manifest_with_options,
-    import_trust_surface_records, load_site, map_grounding_queries, reconcile_trust_surfaces,
-    score_intelligence, validate_truth_manifest,
+    import_trust_surface_records, load_site, load_site_from_audit_artifact, map_grounding_queries,
+    reconcile_trust_surfaces, score_intelligence, validate_truth_manifest,
 };
 use serde::Serialize;
 use std::fs;
@@ -15,6 +16,24 @@ use std::path::{Path, PathBuf};
 
 use crate::commands::common::{canonicalize_or_keep, required_arg};
 use crate::output::{render_data_command_json, render_failed_command_json};
+
+#[derive(Debug, Clone, Serialize)]
+struct IntelligenceInputMetadata {
+    source: String,
+    path: String,
+    report_root: String,
+    site_url: Option<String>,
+    status: Option<String>,
+    partial: bool,
+    pages: usize,
+    warning: Option<String>,
+}
+
+struct IntelligenceInput {
+    site: seogeo_core::Site,
+    report_root: PathBuf,
+    metadata: IntelligenceInputMetadata,
+}
 
 pub fn command_intelligence(submatches: &ArgMatches) -> Result<i32> {
     match submatches.subcommand() {
@@ -113,59 +132,65 @@ fn command_grounding_map(submatches: &ArgMatches) -> Result<i32> {
 
 fn command_fanout_assess(submatches: &ArgMatches) -> Result<i32> {
     let format = required_arg(submatches, "format")?;
-    let root = PathBuf::from(required_arg(submatches, "path")?);
-    match load_site(&root).map(|site| assess_answer_fanout(&site)) {
-        Ok(report) => {
-            let report_path = write_report(&root, "answer-fanout-latest.json", &report)?;
-            match format {
-                "json" => println!(
-                    "{}",
-                    render_data_command_json(
-                        "intelligence fanout assess",
-                        true,
-                        serde_json::json!({
-                            "report_path": report_path.to_string_lossy(),
-                            "assessment": report,
-                        }),
-                        Vec::new()
-                    )?
-                ),
-                _ => println!("{}", fanout_text(&report, &report_path)),
-            }
-            Ok(0)
-        }
-        Err(error) => emit_failure("intelligence fanout assess", format, error),
+    let input = match load_intelligence_input(submatches) {
+        Ok(input) => input,
+        Err(error) => return emit_failure("intelligence fanout assess", format, error),
+    };
+    let report = assess_answer_fanout(&input.site);
+    let report_path = write_report(&input.report_root, "answer-fanout-latest.json", &report)?;
+    match format {
+        "json" => println!(
+            "{}",
+            render_data_command_json(
+                "intelligence fanout assess",
+                true,
+                serde_json::json!({
+                    "input": input.metadata,
+                    "report_path": report_path.to_string_lossy(),
+                    "assessment": report,
+                }),
+                Vec::new()
+            )?
+        ),
+        _ => println!(
+            "{}",
+            with_input_text(fanout_text(&report, &report_path), &input.metadata)
+        ),
     }
+    Ok(0)
 }
 
 fn command_surfaces_discover(submatches: &ArgMatches) -> Result<i32> {
     let format = required_arg(submatches, "format")?;
-    let root = PathBuf::from(required_arg(submatches, "path")?);
-    let site_url = submatches.get_one::<String>("site-url").map(String::as_str);
-    match load_site(&root)
-        .map(|site| discover_machine_surface_graph(&site, MachineSurfaceOptions::new(site_url)))
-    {
-        Ok(report) => {
-            let report_path = write_report(&root, "machine-surfaces-latest.json", &report)?;
-            match format {
-                "json" => println!(
-                    "{}",
-                    render_data_command_json(
-                        "intelligence surfaces discover",
-                        true,
-                        serde_json::json!({
-                            "report_path": report_path.to_string_lossy(),
-                            "graph": report,
-                        }),
-                        Vec::new()
-                    )?
-                ),
-                _ => println!("{}", surfaces_text(&report, &report_path)),
-            }
-            Ok(0)
-        }
-        Err(error) => emit_failure("intelligence surfaces discover", format, error),
+    let input = match load_intelligence_input(submatches) {
+        Ok(input) => input,
+        Err(error) => return emit_failure("intelligence surfaces discover", format, error),
+    };
+    let explicit_site_url = submatches.get_one::<String>("site-url").map(String::as_str);
+    let snapshot_site_url = input.metadata.site_url.as_deref();
+    let site_url = explicit_site_url.or(snapshot_site_url);
+    let report = discover_machine_surface_graph(&input.site, MachineSurfaceOptions::new(site_url));
+    let report_path = write_report(&input.report_root, "machine-surfaces-latest.json", &report)?;
+    match format {
+        "json" => println!(
+            "{}",
+            render_data_command_json(
+                "intelligence surfaces discover",
+                true,
+                serde_json::json!({
+                    "input": input.metadata,
+                    "report_path": report_path.to_string_lossy(),
+                    "graph": report,
+                }),
+                Vec::new()
+            )?
+        ),
+        _ => println!(
+            "{}",
+            with_input_text(surfaces_text(&report, &report_path), &input.metadata)
+        ),
     }
+    Ok(0)
 }
 
 fn command_truth_validate(submatches: &ArgMatches) -> Result<i32> {
@@ -432,6 +457,103 @@ fn command_intelligence_score(submatches: &ArgMatches) -> Result<i32> {
         _ => println!("{}", score_text(&score, &report_path)),
     }
     Ok(0)
+}
+
+fn status_label(status: AuditStatus) -> &'static str {
+    match status {
+        AuditStatus::Complete => "complete",
+        AuditStatus::Partial => "partial",
+        AuditStatus::Failed => "failed",
+    }
+}
+
+fn report_root_for_artifact(path: &Path) -> PathBuf {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    if parent.file_name().and_then(|item| item.to_str()) == Some(".seogeo-reports") {
+        return parent
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+    }
+    parent.to_path_buf()
+}
+
+fn load_intelligence_input(submatches: &ArgMatches) -> Result<IntelligenceInput> {
+    if let Some(path) = submatches.get_one::<String>("from-crawl-artifact") {
+        let artifact_path = PathBuf::from(path);
+        let (artifact, site) =
+            load_site_from_audit_artifact(&artifact_path).with_context(|| {
+                format!(
+                    "failed to load crawl artifact input from {}",
+                    artifact_path.display()
+                )
+            })?;
+        let snapshot = artifact
+            .site
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("audit artifact does not include a site snapshot"))?;
+        let report_root = report_root_for_artifact(&artifact_path);
+        let partial = artifact.is_partial();
+        let warning = if partial {
+            Some(
+                "input crawl artifact is partial; downstream intelligence may miss routes"
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+        return Ok(IntelligenceInput {
+            site,
+            metadata: IntelligenceInputMetadata {
+                source: "crawl_artifact".to_string(),
+                path: artifact_path.to_string_lossy().to_string(),
+                report_root: report_root.to_string_lossy().to_string(),
+                site_url: snapshot.site_url.clone(),
+                status: Some(status_label(artifact.status).to_string()),
+                partial,
+                pages: snapshot.pages.len(),
+                warning,
+            },
+            report_root,
+        });
+    }
+
+    let root = PathBuf::from(required_arg(submatches, "path")?);
+    if root.is_file() {
+        bail!(
+            "{} is a file; pass --from-crawl-artifact for crawl audit artifacts or provide a site directory",
+            root.display()
+        );
+    }
+    let site = load_site(&root)?;
+    Ok(IntelligenceInput {
+        metadata: IntelligenceInputMetadata {
+            source: "directory".to_string(),
+            path: root.to_string_lossy().to_string(),
+            report_root: root.to_string_lossy().to_string(),
+            site_url: None,
+            status: None,
+            partial: false,
+            pages: site.pages.len(),
+            warning: None,
+        },
+        report_root: root,
+        site,
+    })
+}
+
+fn with_input_text(mut text: String, metadata: &IntelligenceInputMetadata) -> String {
+    text.push_str("\n\nInput\n");
+    text.push_str(&format!("- Source: {}\n", metadata.source));
+    text.push_str(&format!("- Path: {}\n", metadata.path));
+    text.push_str(&format!("- Pages: {}\n", metadata.pages));
+    if let Some(status) = metadata.status.as_deref() {
+        text.push_str(&format!("- Crawl status: {status}\n"));
+    }
+    if let Some(warning) = metadata.warning.as_deref() {
+        text.push_str(&format!("- Warning: {warning}\n"));
+    }
+    text
 }
 
 fn emit_failure(command: &str, format: &str, error: anyhow::Error) -> Result<i32> {

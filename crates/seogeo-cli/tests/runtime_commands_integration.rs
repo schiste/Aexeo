@@ -195,6 +195,81 @@ fn crawl_json_contract_reports_summary_and_exit_code() {
 }
 
 #[test]
+fn crawl_artifact_can_drive_intelligence_commands_without_scanning_cwd() {
+    let (base_url, handle) = spawn_server(8);
+    let crawl_dir = tempfile::tempdir().unwrap();
+    let crawl_output = Command::new(bin())
+        .current_dir(crawl_dir.path())
+        .arg("crawl")
+        .arg(&base_url)
+        .arg("--engine")
+        .arg("http")
+        .arg("--max-pages")
+        .arg("10")
+        .arg("--progress")
+        .arg("off")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(!crawl_output.status.success());
+    let crawl_payload = parse_json(&crawl_output.stdout);
+    assert_eq!(
+        crawl_payload["artifact"]["site"]["pages"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let unrelated_dir = tempfile::tempdir().unwrap();
+    let artifact_path = crawl_dir.path().join(".seogeo-reports/crawl-latest.json");
+    let surfaces_output = Command::new(bin())
+        .current_dir(unrelated_dir.path())
+        .arg("intelligence")
+        .arg("surfaces")
+        .arg("discover")
+        .arg("--from-crawl-artifact")
+        .arg(&artifact_path)
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(surfaces_output.status.success());
+    let surfaces_payload = parse_json(&surfaces_output.stdout);
+    assert_eq!(
+        surfaces_payload["result"]["input"]["source"],
+        "crawl_artifact"
+    );
+    assert_eq!(surfaces_payload["result"]["input"]["pages"], 2);
+    assert_eq!(
+        surfaces_payload["result"]["graph"]["coverage"]["total_routes"],
+        2
+    );
+
+    let fanout_output = Command::new(bin())
+        .current_dir(unrelated_dir.path())
+        .arg("intelligence")
+        .arg("fanout")
+        .arg("assess")
+        .arg("--from-crawl-artifact")
+        .arg(&artifact_path)
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(fanout_output.status.success());
+    let fanout_payload = parse_json(&fanout_output.stdout);
+    assert_eq!(
+        fanout_payload["result"]["input"]["source"],
+        "crawl_artifact"
+    );
+    assert_eq!(fanout_payload["result"]["assessment"]["routes_analyzed"], 2);
+
+    handle.join().unwrap();
+}
+
+#[test]
 fn verify_json_contract_reports_diff_summary() {
     let (base_url, handle) = spawn_server(16);
     let temp_dir = tempfile::tempdir().unwrap();
