@@ -65,6 +65,13 @@ Example:
 cargo run -p seogeo-cli -- intelligence fanout assess .
 ```
 
+Runtime crawl artifacts are the preferred input for live-site analysis:
+
+```bash
+cargo run -p seogeo-cli -- intelligence fanout assess \
+  --from-crawl-artifact .seogeo-reports/crawl-latest.json
+```
+
 The command writes `.seogeo-reports/answer-fanout-latest.json` and generates
 coverage checks for:
 
@@ -97,6 +104,14 @@ Example:
 
 ```bash
 cargo run -p seogeo-cli -- intelligence surfaces discover . --site-url https://example.com
+```
+
+Runtime crawl artifacts preserve the actual crawled HTML and optional machine
+artifacts, so they avoid accidentally scanning a repository checkout:
+
+```bash
+cargo run -p seogeo-cli -- intelligence surfaces discover \
+  --from-crawl-artifact .seogeo-reports/crawl-latest.json
 ```
 
 The command writes `.seogeo-reports/machine-surfaces-latest.json` and records:
