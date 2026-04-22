@@ -470,12 +470,17 @@ fn status_label(status: AuditStatus) -> &'static str {
 fn report_root_for_artifact(path: &Path) -> PathBuf {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     if parent.file_name().and_then(|item| item.to_str()) == Some(".seogeo-reports") {
-        return parent
+        let root = parent
             .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf();
+            .filter(|candidate| !candidate.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        return root.to_path_buf();
     }
-    parent.to_path_buf()
+    if parent.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        parent.to_path_buf()
+    }
 }
 
 fn load_intelligence_input(submatches: &ArgMatches) -> Result<IntelligenceInput> {
