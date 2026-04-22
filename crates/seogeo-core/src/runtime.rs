@@ -8,7 +8,8 @@ mod snapshot;
 use anyhow::Result;
 use seogeo_contracts::{
     AuditArtifact, AuditPerformance, AuditStatus, CrawlStats, Finding, FindingScope,
-    PerformanceBottleneck, PhaseTiming, RuleTiming, SlowCrawlPath,
+    PerformanceBottleneck, PerformanceBudget, PerformanceBudgetReport, PerformanceBudgetViolation,
+    PhaseTiming, RuleTiming, SlowCrawlPath,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -700,6 +701,122 @@ fn build_audit_performance(
         rule_groups,
         bottlenecks,
         observations,
+        budget: None,
+    }
+}
+
+fn budget_violation(
+    metric: &str,
+    actual: u64,
+    budget: u64,
+    unit: &str,
+) -> PerformanceBudgetViolation {
+    PerformanceBudgetViolation {
+        metric: metric.to_string(),
+        actual,
+        budget,
+        unit: unit.to_string(),
+        message: format!("{metric} actual {actual}{unit} exceeds budget {budget}{unit}"),
+    }
+}
+
+fn phase_ms(performance: &AuditPerformance, name: &str) -> Option<u64> {
+    performance
+        .phases
+        .iter()
+        .find(|phase| phase.name == name)
+        .map(|phase| phase.elapsed_us / 1_000)
+}
+
+fn phase_p95_ms(performance: &AuditPerformance, name: &str) -> Option<u64> {
+    performance
+        .phases
+        .iter()
+        .find(|phase| phase.name == name)
+        .and_then(|phase| (phase.p95_us > 0).then_some(phase.p95_us / 1_000))
+}
+
+pub fn evaluate_performance_budget(
+    artifact: &AuditArtifact,
+    budget: PerformanceBudget,
+    budget_path: Option<String>,
+) -> PerformanceBudgetReport {
+    let mut violations = Vec::new();
+    let mut warnings = Vec::new();
+    let performance = artifact.performance.as_ref();
+
+    if let Some(limit) = budget.max_elapsed_ms {
+        let actual = artifact
+            .crawl
+            .as_ref()
+            .map(|crawl| crawl.elapsed_ms)
+            .or_else(|| performance.map(|item| item.wall_clock_us / 1_000))
+            .unwrap_or_default();
+        if actual > limit {
+            violations.push(budget_violation("elapsed", actual, limit, "ms"));
+        }
+    }
+    if let Some(limit) = budget.max_fetch_average_ms {
+        let actual = artifact
+            .crawl
+            .as_ref()
+            .map(|crawl| crawl.average_fetch_ms)
+            .unwrap_or_default();
+        if actual > limit {
+            violations.push(budget_violation("fetch_average", actual, limit, "ms"));
+        }
+    }
+    if let Some(limit) = budget.max_fetch_p95_ms {
+        match performance.and_then(|item| phase_p95_ms(item, "fetch")) {
+            Some(actual) if actual > limit => {
+                violations.push(budget_violation("fetch_p95", actual, limit, "ms"));
+            }
+            Some(_) => {}
+            None => warnings.push("fetch p95 budget could not be evaluated".to_string()),
+        }
+    }
+    if let Some(limit) = budget.max_rule_evaluation_ms {
+        match performance.and_then(|item| phase_ms(item, "rule_evaluation")) {
+            Some(actual) if actual > limit => {
+                violations.push(budget_violation("rule_evaluation", actual, limit, "ms"));
+            }
+            Some(_) => {}
+            None => warnings.push("rule evaluation budget could not be evaluated".to_string()),
+        }
+    }
+    if let Some(limit) = budget.max_final_audit_ms {
+        match performance.and_then(|item| phase_ms(item, "final_audit")) {
+            Some(actual) if actual > limit => {
+                violations.push(budget_violation("final_audit", actual, limit, "ms"));
+            }
+            Some(_) => {}
+            None => warnings.push("final audit budget could not be evaluated".to_string()),
+        }
+    }
+    if let Some(limit) = budget.max_total_findings {
+        let actual = artifact.summary.total as u64;
+        if actual > limit as u64 {
+            violations.push(budget_violation(
+                "total_findings",
+                actual,
+                limit as u64,
+                " findings",
+            ));
+        }
+    }
+    if let Some(limit) = budget.max_errors {
+        let actual = artifact.summary.errors as u64;
+        if actual > limit as u64 {
+            violations.push(budget_violation("errors", actual, limit as u64, " errors"));
+        }
+    }
+
+    PerformanceBudgetReport {
+        passed: violations.is_empty(),
+        budget_path,
+        budget,
+        violations,
+        warnings,
     }
 }
 
@@ -1313,12 +1430,13 @@ pub fn runtime_doctor() -> PlaywrightDoctor {
 #[cfg(test)]
 mod tests {
     use super::{
-        RuntimeArtifactMode, RuntimeAuditOptions, RuntimeProgressMode, run_runtime_audit,
-        run_runtime_audit_with_options, verify_runtime_audit,
+        RuntimeArtifactMode, RuntimeAuditOptions, RuntimeProgressMode, evaluate_performance_budget,
+        run_runtime_audit, run_runtime_audit_with_options, verify_runtime_audit,
     };
     use crate::config::{Config, default_rule_switches};
     use seogeo_contracts::{
-        AuditStatus, CrawlStats, Finding, FindingScope, PhaseTiming, RuleTiming,
+        AuditArtifact, AuditStatus, CrawlStats, Finding, FindingScope, PerformanceBudget,
+        PhaseTiming, RuleTiming,
     };
     use std::collections::{BTreeMap, BTreeSet};
     use std::io::ErrorKind;
@@ -1560,6 +1678,51 @@ mod tests {
                 .bottlenecks
                 .iter()
                 .any(|bottleneck| bottleneck.kind == "rule_group" && bottleneck.name == "surfaces")
+        );
+    }
+
+    #[test]
+    fn performance_budget_reports_violations() {
+        let mut artifact = AuditArtifact {
+            command: "crawl".to_string(),
+            crawl: Some(CrawlStats {
+                elapsed_ms: 250,
+                average_fetch_ms: 80,
+                ..CrawlStats::default()
+            }),
+            ..AuditArtifact::default()
+        };
+        artifact.summary.total = 3;
+        artifact.performance = Some(super::build_audit_performance(
+            250_000,
+            vec![PhaseTiming {
+                name: "fetch".to_string(),
+                elapsed_us: 160_000,
+                basis: "cumulative".to_string(),
+                sample_count: 2,
+                p95_us: 120_000,
+                ..PhaseTiming::default()
+            }],
+            Vec::new(),
+        ));
+        let report = evaluate_performance_budget(
+            &artifact,
+            PerformanceBudget {
+                max_elapsed_ms: Some(200),
+                max_fetch_average_ms: Some(70),
+                max_fetch_p95_ms: Some(100),
+                max_total_findings: Some(2),
+                ..PerformanceBudget::default()
+            },
+            Some("budget.json".to_string()),
+        );
+        assert!(!report.passed);
+        assert_eq!(report.violations.len(), 4);
+        assert!(
+            report
+                .violations
+                .iter()
+                .any(|item| item.metric == "fetch_p95")
         );
     }
 

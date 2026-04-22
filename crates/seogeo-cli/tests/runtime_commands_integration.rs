@@ -423,6 +423,37 @@ fn profile_runtime_reports_performance_data() {
 }
 
 #[test]
+fn profile_runtime_fails_when_performance_budget_is_exceeded() {
+    let (base_url, handle) = spawn_server(8);
+    let temp_dir = tempfile::tempdir().unwrap();
+    let budget_path = temp_dir.path().join("runtime-budget.json");
+    write(&budget_path, r#"{"max_elapsed_ms":0}"#);
+    let output = Command::new(bin())
+        .arg("profile")
+        .arg("runtime")
+        .arg(&base_url)
+        .arg("--engine")
+        .arg("http")
+        .arg("--max-pages")
+        .arg("5")
+        .arg("--perf-budget")
+        .arg(&budget_path)
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "profile");
+    assert_eq!(payload["performance"]["budget"]["passed"], false);
+    assert_eq!(
+        payload["performance"]["budget"]["violations"][0]["metric"],
+        "elapsed"
+    );
+    handle.join().unwrap();
+}
+
+#[test]
 fn report_render_supports_markdown_output() {
     let temp_dir = tempfile::tempdir().unwrap();
     let quality_output = Command::new(bin())

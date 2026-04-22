@@ -471,6 +471,18 @@ fn artifact_status_lines(artifact: &AuditArtifact) -> Vec<String> {
                 .join(", ");
             lines.push(format!("- Performance bottlenecks: {}", bottlenecks));
         }
+        if let Some(budget) = performance.budget.as_ref() {
+            lines.push(format!("- Performance budget passed: {}", budget.passed));
+            if !budget.violations.is_empty() {
+                let violations = budget
+                    .violations
+                    .iter()
+                    .map(|violation| violation.message.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                lines.push(format!("- Performance budget violations: {}", violations));
+            }
+        }
     }
     lines
 }
@@ -679,6 +691,19 @@ pub fn render_markdown_artifact(artifact: &AuditArtifact, audit_path: Option<&Pa
             lines.push("- Performance observations:".to_string());
             for observation in &performance.observations {
                 lines.push(format!("  - {}", observation));
+            }
+        }
+        if let Some(budget) = performance.budget.as_ref() {
+            lines.push("- Performance budget:".to_string());
+            lines.push(format!("  - passed=`{}`", budget.passed));
+            if let Some(path) = budget.budget_path.as_deref() {
+                lines.push(format!("  - path=`{}`", path));
+            }
+            for violation in &budget.violations {
+                lines.push(format!("  - violation=`{}`", violation.message));
+            }
+            for warning in &budget.warnings {
+                lines.push(format!("  - warning=`{}`", warning));
             }
         }
     }

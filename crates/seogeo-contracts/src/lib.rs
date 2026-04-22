@@ -128,6 +128,45 @@ pub struct PerformanceBottleneck {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct PerformanceBudget {
+    #[serde(default)]
+    pub max_elapsed_ms: Option<u64>,
+    #[serde(default)]
+    pub max_fetch_average_ms: Option<u64>,
+    #[serde(default)]
+    pub max_fetch_p95_ms: Option<u64>,
+    #[serde(default)]
+    pub max_rule_evaluation_ms: Option<u64>,
+    #[serde(default)]
+    pub max_final_audit_ms: Option<u64>,
+    #[serde(default)]
+    pub max_total_findings: Option<usize>,
+    #[serde(default)]
+    pub max_errors: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct PerformanceBudgetViolation {
+    pub metric: String,
+    pub actual: u64,
+    pub budget: u64,
+    pub unit: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct PerformanceBudgetReport {
+    pub passed: bool,
+    #[serde(default)]
+    pub budget_path: Option<String>,
+    pub budget: PerformanceBudget,
+    #[serde(default)]
+    pub violations: Vec<PerformanceBudgetViolation>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct AuditPerformance {
     #[serde(default)]
     pub elapsed_us: u64,
@@ -143,6 +182,8 @@ pub struct AuditPerformance {
     pub bottlenecks: Vec<PerformanceBottleneck>,
     #[serde(default)]
     pub observations: Vec<String>,
+    #[serde(default)]
+    pub budget: Option<PerformanceBudgetReport>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
