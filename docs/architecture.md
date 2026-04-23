@@ -86,7 +86,7 @@ Target package map:
 - `aexeo-contracts`
 - `aexeo-core`
 - `aexeo-cli`
-- `aexeo-payload-astro-bridge`
+- `aexeo-emdash-bridge`
 
 The detailed ownership rules are documented in
 [package-boundaries.md](package-boundaries.md).

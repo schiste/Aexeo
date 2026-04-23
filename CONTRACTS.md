@@ -9,7 +9,7 @@ integrate now from what remains intentionally tunable.
 
 ## Stable Now
 
-The following surfaces are stable and can be safely consumed by a Payload CMS,
+The following surfaces are stable and can be safely consumed by emdash,
 an Astro build pipeline, or a repo-level CLI integration.
 
 ### Product identity
@@ -146,7 +146,7 @@ Aexeo may move into the future `website` monorepo only as a bounded package set.
 
 What must remain true after the move:
 
-- `aexeo-core` stays independent from Payload and Astro schema details
+- `aexeo-core` stays independent from emdash and Astro schema details
 - `aexeo-cli` stays first-class and testable outside the CMS
 - integration code depends on Aexeo contracts instead of importing internal
   engine details

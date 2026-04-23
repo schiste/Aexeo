@@ -24,7 +24,7 @@ packages/
   aexeo-contracts/
   aexeo-core/
   aexeo-cli/
-  aexeo-payload-astro-bridge/
+  aexeo-emdash-bridge/
 ```
 
 Additional website-specific modules may depend on these packages, but they must
@@ -45,7 +45,7 @@ Must not own:
 
 - CLI parsing
 - site-specific heuristics
-- Payload imports
+- emdash imports
 - Astro imports
 
 ### `aexeo-core`
@@ -61,7 +61,7 @@ Owns:
 
 Must not own:
 
-- Payload collection knowledge
+- emdash schema knowledge
 - Astro component knowledge
 - editor UI behavior
 - queue or job transport specifics
@@ -80,14 +80,15 @@ Must not own:
 - website-specific business rules
 - CMS hook logic
 
-### `aexeo-payload-astro-bridge`
+### `aexeo-emdash-bridge`
 
 Owns:
 
 - document-to-route resolution
 - document-to-preview resolution
-- Payload-facing recommendation services
+- emdash-facing recommendation services
 - Astro build and preview adapters
+- Portable Text to virtual site input conversion
 - findings storage and retrieval helpers
 
 Must not own:
@@ -101,7 +102,7 @@ Must not own:
 These rules must stay true before and after the move.
 
 - `aexeo-core` must not import website app code.
-- `aexeo-core` must not depend on Payload schemas.
+- `aexeo-core` must not depend on emdash schemas.
 - `aexeo-core` must not require Astro-specific route models.
 - `aexeo-cli` must remain runnable without the CMS.
 - website-specific integrations must consume the stable contract, not internal
@@ -124,5 +125,5 @@ The move is not an excuse to:
 
 - merge Aexeo into generic website utilities
 - drop the standalone CLI
-- hardwire Aexeo to one Payload schema
+- hardwire Aexeo to one emdash schema
 - make the website repo the only place where audits can run
