@@ -766,6 +766,97 @@ pub fn build_cli() -> Command {
             Command::new("perf")
                 .about("Compare and inspect runtime performance artifacts")
                 .subcommand(
+                    Command::new("baseline")
+                        .about("Run a runtime crawl and save a named performance baseline")
+                        .arg(Arg::new("url").required(true))
+                        .arg(
+                            Arg::new("name")
+                                .long("name")
+                                .num_args(1)
+                                .default_value("runtime")
+                                .help("Stable baseline name used for .seogeo-reports artifacts"),
+                        )
+                        .arg(
+                            Arg::new("seed")
+                                .long("seed")
+                                .num_args(1)
+                                .action(ArgAction::Append),
+                        )
+                        .arg(
+                            Arg::new("include-pattern")
+                                .long("include-pattern")
+                                .num_args(1)
+                                .action(ArgAction::Append),
+                        )
+                        .arg(
+                            Arg::new("exclude-pattern")
+                                .long("exclude-pattern")
+                                .num_args(1)
+                                .action(ArgAction::Append),
+                        )
+                        .arg(
+                            Arg::new("no-sitemap-seed")
+                                .long("no-sitemap-seed")
+                                .action(ArgAction::SetTrue),
+                        )
+                        .arg(Arg::new("config").long("config").num_args(1))
+                        .arg(
+                            Arg::new("perf-budget")
+                                .long("perf-budget")
+                                .num_args(1)
+                                .help("JSON performance budget; defaults to configured performance_budget_file when present"),
+                        )
+                        .arg(
+                            Arg::new("compare-to")
+                                .long("compare-to")
+                                .num_args(1)
+                                .help("Baseline artifact to compare before updating the named latest baseline"),
+                        )
+                        .arg(
+                            Arg::new("promote-on-regression")
+                                .long("promote-on-regression")
+                                .action(ArgAction::SetTrue)
+                                .help("Update the named latest baseline even when budget or diff gates fail"),
+                        )
+                        .arg(
+                            Arg::new("max-pages")
+                                .long("max-pages")
+                                .value_parser(value_parser!(usize))
+                                .default_value("200"),
+                        )
+                        .arg(
+                            Arg::new("retry-budget")
+                                .long("retry-budget")
+                                .value_parser(value_parser!(usize))
+                                .default_value("2"),
+                        )
+                        .arg(Arg::new("engine").long("engine").value_parser([
+                            "auto",
+                            "http",
+                            "playwright",
+                        ]))
+                        .arg(
+                            Arg::new("regression-threshold-pct")
+                                .long("regression-threshold-pct")
+                                .value_parser(value_parser!(u32))
+                                .default_value("10")
+                                .help("Minimum relative delta percentage before a metric is marked regressed"),
+                        )
+                        .arg(
+                            Arg::new("absolute-threshold-ms")
+                                .long("absolute-threshold-ms")
+                                .value_parser(value_parser!(u64))
+                                .default_value("25")
+                                .help("Minimum absolute millisecond delta before timing metrics are marked regressed"),
+                        )
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "json"])
+                                .default_value("text"),
+                        ),
+                )
+                .subcommand(
                     Command::new("diff")
                         .about("Compare runtime performance between two audit artifacts")
                         .arg(Arg::new("baseline").required(true))

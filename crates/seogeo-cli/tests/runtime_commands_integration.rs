@@ -3,6 +3,8 @@ mod support;
 
 use runtime_support::spawn_server;
 use seogeo_contracts::{AuditArtifact, AuditPerformance, CrawlStats, PhaseTiming, RuleTiming};
+use std::fs;
+use std::path::Path;
 use std::process::Command;
 use support::{bin, parse_json, write};
 
@@ -415,7 +417,12 @@ fn profile_runtime_reports_performance_data() {
         .arg("json")
         .output()
         .unwrap();
-    assert!(output.status.success());
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     let payload = parse_json(&output.stdout);
     assert_eq!(payload["command"], "profile");
     assert!(payload["performance"]["phases"].is_array());
@@ -548,6 +555,124 @@ fn perf_diff_reports_runtime_regressions() {
             .iter()
             .any(|metric| metric["metric"] == "phase.fetch.p95_ms" && metric["regressed"] == true)
     );
+}
+
+#[test]
+fn perf_baseline_writes_named_baseline_and_compares_previous_run() {
+    let (base_url, handle) = spawn_server(8);
+    let temp_dir = tempfile::tempdir().unwrap();
+    let previous_path = temp_dir
+        .path()
+        .join(".seogeo-reports")
+        .join("test-site-runtime-baseline-latest.json");
+    let mut previous = AuditArtifact {
+        command: "perf-baseline".to_string(),
+        crawl: Some(CrawlStats {
+            engine: "http".to_string(),
+            visited_pages: 2,
+            max_pages: 5,
+            elapsed_ms: 10_000,
+            pages_per_minute: 10,
+            average_fetch_ms: 500,
+            ..CrawlStats::default()
+        }),
+        performance: Some(AuditPerformance {
+            elapsed_us: 10_000_000,
+            wall_clock_us: 10_000_000,
+            cumulative_tracked_us: 10_000_000,
+            phases: vec![PhaseTiming {
+                name: "fetch".to_string(),
+                elapsed_us: 5_000_000,
+                p95_us: 500_000,
+                ..PhaseTiming::default()
+            }],
+            ..AuditPerformance::default()
+        }),
+        ..AuditArtifact::default()
+    };
+    previous.summary.total = 1_000;
+    previous.summary.errors = 10;
+    write(&previous_path, &serde_json::to_string(&previous).unwrap());
+
+    let output = Command::new(bin())
+        .current_dir(temp_dir.path())
+        .arg("perf")
+        .arg("baseline")
+        .arg(&base_url)
+        .arg("--engine")
+        .arg("http")
+        .arg("--max-pages")
+        .arg("5")
+        .arg("--name")
+        .arg("Test Site!")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let second_payload = parse_json(&output.stdout);
+    assert_eq!(second_payload["command"], "perf baseline");
+    assert_eq!(second_payload["name"], "test-site");
+    assert_eq!(second_payload["latest_updated"], true);
+    let expected_previous_path = previous_path.canonicalize().unwrap();
+    assert_eq!(
+        second_payload["diff"]["baseline_path"],
+        expected_previous_path.display().to_string()
+    );
+    let latest = second_payload["latest_path"].as_str().unwrap();
+    let baseline = second_payload["baseline_path"].as_str().unwrap();
+    assert!(Path::new(latest).exists());
+    assert!(Path::new(baseline).exists());
+    assert_eq!(second_payload["artifact"]["crawl"]["visited_pages"], 2);
+    handle.join().unwrap();
+}
+
+#[test]
+fn perf_baseline_does_not_promote_failed_gate_by_default() {
+    let (base_url, handle) = spawn_server(8);
+    let temp_dir = tempfile::tempdir().unwrap();
+    let previous_path = temp_dir
+        .path()
+        .join(".seogeo-reports")
+        .join("blocked-runtime-baseline-latest.json");
+    let previous = AuditArtifact {
+        command: "previous-baseline".to_string(),
+        generated_at: 1,
+        ..AuditArtifact::default()
+    };
+    write(&previous_path, &serde_json::to_string(&previous).unwrap());
+    let budget_path = temp_dir.path().join("runtime-budget.json");
+    write(&budget_path, r#"{"max_elapsed_ms":0}"#);
+
+    let output = Command::new(bin())
+        .current_dir(temp_dir.path())
+        .arg("perf")
+        .arg("baseline")
+        .arg(&base_url)
+        .arg("--engine")
+        .arg("http")
+        .arg("--max-pages")
+        .arg("5")
+        .arg("--name")
+        .arg("Blocked")
+        .arg("--perf-budget")
+        .arg(&budget_path)
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["latest_updated"], false);
+    assert!(Path::new(payload["baseline_path"].as_str().unwrap()).exists());
+    let latest_payload = parse_json(&fs::read(&previous_path).unwrap());
+    assert_eq!(latest_payload["command"], "previous-baseline");
+    handle.join().unwrap();
 }
 
 #[test]
