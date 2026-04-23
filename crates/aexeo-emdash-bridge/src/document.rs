@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::portable_text::PortableTextBlock;
@@ -10,6 +12,8 @@ pub struct EmdashDocument {
     pub description: Option<String>,
     #[serde(default)]
     pub canonical: Option<String>,
+    #[serde(default)]
+    pub meta: BTreeMap<String, String>,
     #[serde(default)]
     pub body: Vec<PortableTextBlock>,
 }
@@ -45,6 +49,32 @@ mod tests {
         let document: EmdashDocument = serde_json::from_str(raw).unwrap();
         assert!(document.description.is_none());
         assert!(document.canonical.is_none());
+        assert!(document.meta.is_empty());
         assert!(document.body.is_empty());
+    }
+
+    #[test]
+    fn captures_open_graph_and_twitter_meta_in_a_flat_map() {
+        let raw = r#"{
+            "route": "/",
+            "title": "Home",
+            "meta": {
+                "og:title": "Home | Example",
+                "og:description": "Welcome",
+                "og:image": "https://example.com/cover.png",
+                "twitter:card": "summary_large_image",
+                "twitter:image": "https://example.com/cover.png"
+            }
+        }"#;
+        let document: EmdashDocument = serde_json::from_str(raw).unwrap();
+        assert_eq!(document.meta.len(), 5);
+        assert_eq!(
+            document.meta.get("og:title").map(String::as_str),
+            Some("Home | Example")
+        );
+        assert_eq!(
+            document.meta.get("twitter:card").map(String::as_str),
+            Some("summary_large_image")
+        );
     }
 }
