@@ -2,10 +2,42 @@ use crate::portable_text::{BlockStyle, MarkDef, PortableTextBlock, PortableTextC
 
 pub fn render_html(blocks: &[PortableTextBlock]) -> String {
     let mut out = String::new();
+    let mut open_heading_levels: Vec<u8> = Vec::new();
     for block in blocks {
+        if let Some(level) = heading_level(&block.style) {
+            close_heading_sections_at_or_above(&mut out, &mut open_heading_levels, level);
+            out.push_str("<section>");
+            open_heading_levels.push(level);
+        }
         append_block(&mut out, block);
     }
+    close_all_heading_sections(&mut out, &mut open_heading_levels);
     out
+}
+
+fn close_heading_sections_at_or_above(out: &mut String, open_levels: &mut Vec<u8>, incoming: u8) {
+    while open_levels.last().is_some_and(|level| *level >= incoming) {
+        out.push_str("</section>");
+        open_levels.pop();
+    }
+}
+
+fn close_all_heading_sections(out: &mut String, open_levels: &mut Vec<u8>) {
+    while open_levels.pop().is_some() {
+        out.push_str("</section>");
+    }
+}
+
+fn heading_level(style: &BlockStyle) -> Option<u8> {
+    match style {
+        BlockStyle::H1 => Some(1),
+        BlockStyle::H2 => Some(2),
+        BlockStyle::H3 => Some(3),
+        BlockStyle::H4 => Some(4),
+        BlockStyle::H5 => Some(5),
+        BlockStyle::H6 => Some(6),
+        _ => None,
+    }
 }
 
 fn append_block(out: &mut String, block: &PortableTextBlock) {
@@ -226,8 +258,95 @@ mod tests {
         assert_eq!(
             render_html(&blocks),
             concat!(
+                "<section>",
                 "<h2 id=\"h\" data-pt-key=\"h\">Section title</h2>",
                 "<blockquote id=\"q\" data-pt-key=\"q\">Notable quote</blockquote>",
+                "</section>",
+            )
+        );
+    }
+
+    fn heading(style: BlockStyle, key: &str, text: &str) -> PortableTextBlock {
+        PortableTextBlock {
+            key: Some(key.to_string()),
+            style,
+            list_item: None,
+            level: None,
+            children: vec![span(text)],
+            mark_defs: Vec::new(),
+        }
+    }
+
+    fn paragraph(text: &str) -> PortableTextBlock {
+        PortableTextBlock {
+            key: None,
+            style: BlockStyle::Normal,
+            list_item: None,
+            level: None,
+            children: vec![span(text)],
+            mark_defs: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn wraps_heading_hierarchy_into_nested_sections() {
+        let blocks = vec![
+            heading(BlockStyle::H1, "a", "Top"),
+            heading(BlockStyle::H2, "b", "Sub"),
+            paragraph("body"),
+        ];
+        assert_eq!(
+            render_html(&blocks),
+            concat!(
+                "<section>",
+                "<h1 id=\"a\" data-pt-key=\"a\">Top</h1>",
+                "<section>",
+                "<h2 id=\"b\" data-pt-key=\"b\">Sub</h2>",
+                "<p>body</p>",
+                "</section>",
+                "</section>",
+            )
+        );
+    }
+
+    #[test]
+    fn closes_sibling_sections_when_a_same_level_heading_arrives() {
+        let blocks = vec![
+            heading(BlockStyle::H1, "a", "First"),
+            heading(BlockStyle::H2, "b", "Sub of first"),
+            heading(BlockStyle::H1, "c", "Second"),
+        ];
+        assert_eq!(
+            render_html(&blocks),
+            concat!(
+                "<section>",
+                "<h1 id=\"a\" data-pt-key=\"a\">First</h1>",
+                "<section>",
+                "<h2 id=\"b\" data-pt-key=\"b\">Sub of first</h2>",
+                "</section>",
+                "</section>",
+                "<section>",
+                "<h1 id=\"c\" data-pt-key=\"c\">Second</h1>",
+                "</section>",
+            )
+        );
+    }
+
+    #[test]
+    fn leaves_paragraphs_before_the_first_heading_at_root() {
+        let blocks = vec![
+            paragraph("lede"),
+            heading(BlockStyle::H1, "a", "Intro"),
+            paragraph("body"),
+        ];
+        assert_eq!(
+            render_html(&blocks),
+            concat!(
+                "<p>lede</p>",
+                "<section>",
+                "<h1 id=\"a\" data-pt-key=\"a\">Intro</h1>",
+                "<p>body</p>",
+                "</section>",
             )
         );
     }
