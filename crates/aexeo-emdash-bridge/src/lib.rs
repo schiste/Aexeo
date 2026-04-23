@@ -6,6 +6,8 @@ pub mod page;
 pub mod portable_text;
 pub mod render;
 pub mod site;
+#[cfg(feature = "wasm")]
+pub mod wasm;
 
 pub use document::{EmdashDocument, HreflangAlternate};
 pub use evaluate::evaluate_documents;
