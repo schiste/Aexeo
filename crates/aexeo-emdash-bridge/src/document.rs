@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::portable_text::PortableTextBlock;
 
@@ -24,6 +25,8 @@ pub struct EmdashDocument {
     pub alternates: Vec<HreflangAlternate>,
     #[serde(default)]
     pub meta: BTreeMap<String, String>,
+    #[serde(default)]
+    pub schema: Vec<Value>,
     #[serde(default)]
     pub body: Vec<PortableTextBlock>,
 }
@@ -60,7 +63,38 @@ mod tests {
         assert!(document.description.is_none());
         assert!(document.canonical.is_none());
         assert!(document.meta.is_empty());
+        assert!(document.schema.is_empty());
+        assert!(document.alternates.is_empty());
         assert!(document.body.is_empty());
+    }
+
+    #[test]
+    fn retains_arbitrary_json_ld_entries_by_type() {
+        let raw = r#"{
+            "route": "/product/x",
+            "title": "Product X",
+            "schema": [
+                {"@context": "https://schema.org", "@type": "Product", "name": "X"},
+                {
+                    "@context": "https://schema.org",
+                    "@type": "BreadcrumbList",
+                    "itemListElement": [
+                        {"@type": "ListItem", "position": 1, "name": "Home"},
+                        {"@type": "ListItem", "position": 2, "name": "Product X"}
+                    ]
+                }
+            ]
+        }"#;
+        let document: EmdashDocument = serde_json::from_str(raw).unwrap();
+        assert_eq!(document.schema.len(), 2);
+        assert_eq!(
+            document.schema[0].get("@type").and_then(|v| v.as_str()),
+            Some("Product")
+        );
+        assert_eq!(
+            document.schema[1].get("@type").and_then(|v| v.as_str()),
+            Some("BreadcrumbList")
+        );
     }
 
     #[test]
