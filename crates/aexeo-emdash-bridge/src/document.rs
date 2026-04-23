@@ -4,6 +4,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::portable_text::PortableTextBlock;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HreflangAlternate {
+    pub lang: String,
+    pub href: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EmdashDocument {
     pub route: String,
@@ -12,6 +18,10 @@ pub struct EmdashDocument {
     pub description: Option<String>,
     #[serde(default)]
     pub canonical: Option<String>,
+    #[serde(default)]
+    pub lang: Option<String>,
+    #[serde(default)]
+    pub alternates: Vec<HreflangAlternate>,
     #[serde(default)]
     pub meta: BTreeMap<String, String>,
     #[serde(default)]
@@ -51,6 +61,25 @@ mod tests {
         assert!(document.canonical.is_none());
         assert!(document.meta.is_empty());
         assert!(document.body.is_empty());
+    }
+
+    #[test]
+    fn captures_lang_and_hreflang_alternates_including_x_default() {
+        let raw = r#"{
+            "route": "/",
+            "title": "Home",
+            "lang": "en",
+            "alternates": [
+                {"lang": "en", "href": "https://example.com/"},
+                {"lang": "fr-FR", "href": "https://example.com/fr/"},
+                {"lang": "x-default", "href": "https://example.com/"}
+            ]
+        }"#;
+        let document: EmdashDocument = serde_json::from_str(raw).unwrap();
+        assert_eq!(document.lang.as_deref(), Some("en"));
+        assert_eq!(document.alternates.len(), 3);
+        assert_eq!(document.alternates[1].lang, "fr-FR");
+        assert_eq!(document.alternates[2].lang, "x-default");
     }
 
     #[test]
