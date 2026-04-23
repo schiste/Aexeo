@@ -9,9 +9,20 @@ pub fn render_html(blocks: &[PortableTextBlock]) -> String {
 }
 
 fn append_block(out: &mut String, block: &PortableTextBlock) {
-    match block.style {
-        BlockStyle::Normal => append_simple_block(out, "p", block),
-        _ => append_simple_block(out, "p", block),
+    let tag = tag_for_style(&block.style);
+    append_simple_block(out, tag, block);
+}
+
+fn tag_for_style(style: &BlockStyle) -> &'static str {
+    match style {
+        BlockStyle::Normal => "p",
+        BlockStyle::H1 => "h1",
+        BlockStyle::H2 => "h2",
+        BlockStyle::H3 => "h3",
+        BlockStyle::H4 => "h4",
+        BlockStyle::H5 => "h5",
+        BlockStyle::H6 => "h6",
+        BlockStyle::Blockquote => "blockquote",
     }
 }
 
@@ -189,6 +200,35 @@ mod tests {
         assert_eq!(
             render_html(&blocks),
             "<p><a href=\"https://example.com/?q=&quot;cats&quot;&amp;n=1\">docs</a></p>"
+        );
+    }
+
+    #[test]
+    fn renders_heading_and_blockquote_styles_with_matching_tags() {
+        let blocks = vec![
+            PortableTextBlock {
+                key: Some("h".to_string()),
+                style: BlockStyle::H2,
+                list_item: None,
+                level: None,
+                children: vec![span("Section title")],
+                mark_defs: Vec::new(),
+            },
+            PortableTextBlock {
+                key: Some("q".to_string()),
+                style: BlockStyle::Blockquote,
+                list_item: None,
+                level: None,
+                children: vec![span("Notable quote")],
+                mark_defs: Vec::new(),
+            },
+        ];
+        assert_eq!(
+            render_html(&blocks),
+            concat!(
+                "<h2 id=\"h\" data-pt-key=\"h\">Section title</h2>",
+                "<blockquote id=\"q\" data-pt-key=\"q\">Notable quote</blockquote>",
+            )
         );
     }
 
