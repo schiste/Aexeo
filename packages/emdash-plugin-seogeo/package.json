@@ -1,0 +1,31 @@
+{
+  "name": "@aexeo/emdash-plugin-seogeo",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Aexeo seogeo rules as an emdash plugin",
+  "type": "module",
+  "main": "./dist/plugin.js",
+  "types": "./dist/plugin.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/plugin.d.ts",
+      "import": "./dist/plugin.js"
+    }
+  },
+  "files": [
+    "dist",
+    "wasm"
+  ],
+  "scripts": {
+    "build:wasm": "wasm-pack build ../../crates/aexeo-emdash-bridge --target bundler --features wasm --out-dir ../../packages/emdash-plugin-seogeo/wasm",
+    "build:ts": "tsc",
+    "build": "npm run build:wasm && npm run build:ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@emdash-cms/core": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}
