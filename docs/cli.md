@@ -464,8 +464,9 @@ Compare and inspect runtime performance artifacts
 Usage: perf [COMMAND]
 
 Commands:
-  diff  Compare runtime performance between two audit artifacts
-  help  Print this message or the help of the given subcommand(s)
+  baseline  Run a runtime crawl and save a named performance baseline
+  diff      Compare runtime performance between two audit artifacts
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help

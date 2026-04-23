@@ -70,10 +70,28 @@ fn load_performance_budget(
     let Some(path) = submatches.get_one::<String>("perf-budget") else {
         return Ok(None);
     };
-    let path = PathBuf::from(path);
+    load_performance_budget_path(PathBuf::from(path)).map(Some)
+}
+
+fn load_performance_budget_path(path: PathBuf) -> Result<(PathBuf, PerformanceBudget)> {
     let text = fs::read_to_string(&path)?;
     let budget = serde_json::from_str::<PerformanceBudget>(&text)?;
-    Ok(Some((path, budget)))
+    Ok((path, budget))
+}
+
+fn load_performance_budget_or_default(
+    submatches: &ArgMatches,
+    cwd: &Path,
+    config: &seogeo_core::Config,
+) -> Result<Option<(PathBuf, PerformanceBudget)>> {
+    if let Some(explicit) = load_performance_budget(submatches)? {
+        return Ok(Some(explicit));
+    }
+    let configured = cwd.join(config.performance_budget_file.clone());
+    if configured.exists() {
+        return load_performance_budget_path(configured).map(Some);
+    }
+    Ok(None)
 }
 
 fn apply_performance_budget(
@@ -106,6 +124,66 @@ fn copy_performance_budget(
     if let Some(target_performance) = target.performance.as_mut() {
         target_performance.budget = Some(source_budget);
     }
+}
+
+fn sanitize_baseline_name(name: &str) -> String {
+    let mut sanitized = String::new();
+    let mut last_was_separator = false;
+    for character in name.chars() {
+        let next = if character.is_ascii_alphanumeric() {
+            last_was_separator = false;
+            Some(character.to_ascii_lowercase())
+        } else if matches!(character, '.' | '_' | '-') {
+            if last_was_separator {
+                None
+            } else {
+                last_was_separator = true;
+                Some(character)
+            }
+        } else if last_was_separator {
+            None
+        } else {
+            last_was_separator = true;
+            Some('-')
+        };
+        if let Some(next) = next {
+            sanitized.push(next);
+        }
+    }
+    let sanitized = sanitized.trim_matches(['.', '_', '-']).to_string();
+    if sanitized.is_empty() {
+        "runtime".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn runtime_baseline_latest_path(cwd: &Path, name: &str) -> PathBuf {
+    cwd.join(".seogeo-reports")
+        .join(format!("{name}-runtime-baseline-latest.json"))
+}
+
+fn runtime_baseline_timestamped_path(cwd: &Path, name: &str, generated_at: u64) -> PathBuf {
+    cwd.join(".seogeo-reports")
+        .join(format!("{name}-runtime-baseline-{generated_at}.json"))
+}
+
+fn write_runtime_baseline_artifact(
+    artifact: &seogeo_contracts::AuditArtifact,
+    cwd: &Path,
+    name: &str,
+    update_latest: bool,
+) -> Result<(PathBuf, PathBuf)> {
+    let reports_dir = cwd.join(".seogeo-reports");
+    fs::create_dir_all(&reports_dir)?;
+    let latest_path = runtime_baseline_latest_path(cwd, name);
+    let timestamped_path = runtime_baseline_timestamped_path(cwd, name, artifact.generated_at);
+    let payload = serde_json::to_string_pretty(artifact)?;
+    fs::write(&timestamped_path, &payload)?;
+    if update_latest {
+        fs::write(&latest_path, payload)?;
+    }
+    Ok((latest_path, timestamped_path))
 }
 
 fn print_progress(mode: &str, event: RuntimeProgressEvent) {
@@ -590,6 +668,160 @@ pub fn command_profile_runtime(submatches: &ArgMatches) -> Result<i32> {
     )
 }
 
+fn performance_diff_thresholds_from_cli(submatches: &ArgMatches) -> PerformanceDiffThresholds {
+    let relative_threshold_pct = *submatches
+        .get_one::<u32>("regression-threshold-pct")
+        .unwrap_or(&10);
+    PerformanceDiffThresholds {
+        relative_threshold_basis_points: relative_threshold_pct.saturating_mul(100),
+        absolute_threshold: *submatches
+            .get_one::<u64>("absolute-threshold-ms")
+            .unwrap_or(&0),
+    }
+}
+
+pub fn command_perf_baseline(submatches: &ArgMatches) -> Result<i32> {
+    let cwd = std::env::current_dir()?;
+    let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
+    let loaded = load_config_with_diagnostics(&cwd, explicit_config.as_deref())?;
+    let mut config = loaded.config;
+    let warnings = loaded.warnings;
+    apply_runtime_cli_overrides(&mut config, submatches);
+    let target_url = required_arg(submatches, "url")?;
+    let format = submatches
+        .get_one::<String>("format")
+        .map(String::as_str)
+        .unwrap_or("text");
+    let baseline_name = sanitize_baseline_name(
+        submatches
+            .get_one::<String>("name")
+            .map(String::as_str)
+            .unwrap_or("runtime"),
+    );
+    let performance_budget = load_performance_budget_or_default(submatches, &cwd, &config)?;
+    let latest_path = runtime_baseline_latest_path(&cwd, &baseline_name);
+    let compare_path = submatches
+        .get_one::<String>("compare-to")
+        .map(PathBuf::from)
+        .or_else(|| latest_path.exists().then_some(latest_path.clone()));
+    let compare_artifact = compare_path
+        .as_ref()
+        .map(|path| load_audit_artifact(path))
+        .transpose()?;
+    let mut options = runtime_options_from_cli(
+        submatches,
+        RuntimeProgressMode::Off,
+        "perf-baseline",
+        seogeo_core::runtime::RuntimeArtifactMode::Off,
+        seogeo_core::runtime::RuntimeArtifactMode::Off,
+    );
+    let audit = run_runtime_audit_with_options(
+        target_url,
+        *submatches.get_one::<usize>("max-pages").unwrap_or(&200),
+        selected_runtime_engine(&config, submatches),
+        &config,
+        &mut options,
+    )?;
+    let mut artifact =
+        runtime_output_artifact("perf-baseline", &audit, &audit.findings, Some(target_url));
+    let performance_budget_passed =
+        apply_performance_budget(&mut artifact, performance_budget.as_ref());
+    let audit_path = write_audit_artifact(
+        &artifact,
+        &cwd,
+        "perf-baseline",
+        config.output().audit_log_limit,
+    )?;
+    let timestamped_path =
+        runtime_baseline_timestamped_path(&cwd, &baseline_name, artifact.generated_at);
+    let diff_report = compare_artifact.as_ref().map(|baseline| {
+        diff_performance_artifacts(
+            baseline,
+            &artifact,
+            compare_path.as_ref().map(|path| path.display().to_string()),
+            Some(timestamped_path.display().to_string()),
+            performance_diff_thresholds_from_cli(submatches),
+        )
+    });
+    let diff_passed = diff_report
+        .as_ref()
+        .map(|report| report.summary.regressions == 0)
+        .unwrap_or(true);
+    let success = audit.status != AuditStatus::Failed && performance_budget_passed && diff_passed;
+    let latest_updated = success || submatches.get_flag("promote-on-regression");
+    let (latest_path, timestamped_path) =
+        write_runtime_baseline_artifact(&artifact, &cwd, &baseline_name, latest_updated)?;
+
+    match format {
+        "json" => println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "command": "perf baseline",
+                "success": success,
+                "name": baseline_name,
+                "url": target_url,
+                "audit_path": audit_path.display().to_string(),
+                "baseline_path": timestamped_path.display().to_string(),
+                "latest_path": latest_path.display().to_string(),
+                "latest_updated": latest_updated,
+                "budget": artifact.performance.as_ref().and_then(|performance| performance.budget.as_ref()),
+                "diff": diff_report,
+                "warnings": warnings,
+                "artifact": artifact,
+            }))?
+        ),
+        _ => {
+            emit_config_warnings(&warnings);
+            println!("Performance Baseline");
+            println!();
+            println!("- Name: {}", baseline_name);
+            println!("- URL: {}", target_url);
+            println!("- Status: {:?}", audit.status);
+            println!("- Pages: {}", audit.crawl_stats.visited_pages);
+            println!("- Elapsed: {}ms", audit.crawl_stats.elapsed_ms);
+            println!(
+                "- Throughput: {} pages/min",
+                audit.crawl_stats.pages_per_minute
+            );
+            println!("- Average fetch: {}ms", audit.crawl_stats.average_fetch_ms);
+            println!("- Audit results: {}", audit_path.display());
+            println!("- Baseline: {}", timestamped_path.display());
+            println!("- Latest: {}", latest_path.display());
+            println!("- Latest updated: {}", latest_updated);
+            if let Some(budget) = artifact
+                .performance
+                .as_ref()
+                .and_then(|performance| performance.budget.as_ref())
+            {
+                println!("- Budget passed: {}", budget.passed);
+                if let Some(path) = budget.budget_path.as_deref() {
+                    println!("- Budget path: {}", path);
+                }
+                for violation in &budget.violations {
+                    println!("- Budget violation: {}", violation.message);
+                }
+            } else {
+                println!("- Budget: not configured");
+            }
+            if let Some(report) = diff_report.as_ref() {
+                println!(
+                    "- Diff: regressions={} improvements={} unchanged={} missing={}",
+                    report.summary.regressions,
+                    report.summary.improvements,
+                    report.summary.unchanged,
+                    report.summary.missing
+                );
+                for warning in &report.warnings {
+                    println!("- Diff warning: {}", warning);
+                }
+            } else {
+                println!("- Diff: no previous baseline");
+            }
+        }
+    }
+    Ok(if success { 0 } else { 1 })
+}
+
 pub fn command_perf_diff(submatches: &ArgMatches) -> Result<i32> {
     let baseline_path = required_arg(submatches, "baseline")?;
     let current_path = required_arg(submatches, "current")?;
@@ -597,15 +829,7 @@ pub fn command_perf_diff(submatches: &ArgMatches) -> Result<i32> {
         .get_one::<String>("format")
         .map(String::as_str)
         .unwrap_or("text");
-    let relative_threshold_pct = *submatches
-        .get_one::<u32>("regression-threshold-pct")
-        .unwrap_or(&10);
-    let thresholds = PerformanceDiffThresholds {
-        relative_threshold_basis_points: relative_threshold_pct.saturating_mul(100),
-        absolute_threshold: *submatches
-            .get_one::<u64>("absolute-threshold-ms")
-            .unwrap_or(&0),
-    };
+    let thresholds = performance_diff_thresholds_from_cli(submatches);
     let baseline = load_audit_artifact(Path::new(baseline_path))?;
     let current = load_audit_artifact(Path::new(current_path))?;
     let report = diff_performance_artifacts(

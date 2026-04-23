@@ -11,7 +11,8 @@ use crate::commands::{
     intelligence::command_intelligence,
     listings::{command_adapters, command_plugin_check, command_rules},
     runtime::{
-        command_crawl, command_doctor, command_perf_diff, command_profile_runtime, command_verify,
+        command_crawl, command_doctor, command_perf_baseline, command_perf_diff,
+        command_profile_runtime, command_verify,
     },
     static_site::{command_baseline, command_check, command_fix, command_generate},
 };
@@ -51,6 +52,7 @@ pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
             None => bail!("missing profile subcommand"),
         },
         Some(("perf", submatches)) => match submatches.subcommand() {
+            Some(("baseline", baseline_matches)) => command_perf_baseline(baseline_matches),
             Some(("diff", diff_matches)) => command_perf_diff(diff_matches),
             Some((other, _)) => bail!("unsupported perf subcommand: {}", other),
             None => bail!("missing perf subcommand"),
