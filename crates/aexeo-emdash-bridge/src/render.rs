@@ -1,9 +1,32 @@
-use crate::portable_text::{BlockStyle, MarkDef, PortableTextBlock, PortableTextChild};
+use crate::portable_text::{BlockStyle, ListItem, MarkDef, PortableTextBlock, PortableTextChild};
 
 pub fn render_html(blocks: &[PortableTextBlock]) -> String {
     let mut out = String::new();
     let mut open_heading_levels: Vec<u8> = Vec::new();
+    let mut open_list: Option<(ListItem, u32)> = None;
+
     for block in blocks {
+        let list_context = block
+            .list_item
+            .clone()
+            .map(|li| (li, block.level.unwrap_or(1)));
+
+        if open_list != list_context {
+            if let Some((list_type, _)) = &open_list {
+                out.push_str(close_tag_for_list(list_type));
+            }
+            open_list = None;
+        }
+
+        if let Some((list_type, _)) = &list_context {
+            if open_list.is_none() {
+                out.push_str(open_tag_for_list(list_type));
+                open_list = list_context.clone();
+            }
+            append_simple_block(&mut out, "li", block);
+            continue;
+        }
+
         if let Some(level) = heading_level(&block.style) {
             close_heading_sections_at_or_above(&mut out, &mut open_heading_levels, level);
             out.push_str("<section>");
@@ -11,8 +34,26 @@ pub fn render_html(blocks: &[PortableTextBlock]) -> String {
         }
         append_block(&mut out, block);
     }
+
+    if let Some((list_type, _)) = &open_list {
+        out.push_str(close_tag_for_list(list_type));
+    }
     close_all_heading_sections(&mut out, &mut open_heading_levels);
     out
+}
+
+fn open_tag_for_list(list_type: &ListItem) -> &'static str {
+    match list_type {
+        ListItem::Bullet => "<ul>",
+        ListItem::Number => "<ol>",
+    }
+}
+
+fn close_tag_for_list(list_type: &ListItem) -> &'static str {
+    match list_type {
+        ListItem::Bullet => "</ul>",
+        ListItem::Number => "</ol>",
+    }
 }
 
 fn close_heading_sections_at_or_above(out: &mut String, open_levels: &mut Vec<u8>, incoming: u8) {
@@ -327,6 +368,93 @@ mod tests {
                 "</section>",
                 "<section>",
                 "<h1 id=\"c\" data-pt-key=\"c\">Second</h1>",
+                "</section>",
+            )
+        );
+    }
+
+    fn list_item(kind: ListItem, key: &str, text: &str) -> PortableTextBlock {
+        PortableTextBlock {
+            key: Some(key.to_string()),
+            style: BlockStyle::Normal,
+            list_item: Some(kind),
+            level: Some(1),
+            children: vec![span(text)],
+            mark_defs: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn groups_adjacent_bullet_items_under_a_single_ul() {
+        let blocks = vec![
+            list_item(ListItem::Bullet, "a", "one"),
+            list_item(ListItem::Bullet, "b", "two"),
+        ];
+        assert_eq!(
+            render_html(&blocks),
+            concat!(
+                "<ul>",
+                "<li id=\"a\" data-pt-key=\"a\">one</li>",
+                "<li id=\"b\" data-pt-key=\"b\">two</li>",
+                "</ul>",
+            )
+        );
+    }
+
+    #[test]
+    fn starts_a_new_list_when_marker_kind_changes() {
+        let blocks = vec![
+            list_item(ListItem::Bullet, "a", "one"),
+            list_item(ListItem::Number, "b", "two"),
+        ];
+        assert_eq!(
+            render_html(&blocks),
+            concat!(
+                "<ul>",
+                "<li id=\"a\" data-pt-key=\"a\">one</li>",
+                "</ul>",
+                "<ol>",
+                "<li id=\"b\" data-pt-key=\"b\">two</li>",
+                "</ol>",
+            )
+        );
+    }
+
+    #[test]
+    fn closes_open_list_before_a_non_list_block() {
+        let blocks = vec![
+            list_item(ListItem::Bullet, "a", "one"),
+            paragraph("gap"),
+            list_item(ListItem::Bullet, "b", "two"),
+        ];
+        assert_eq!(
+            render_html(&blocks),
+            concat!(
+                "<ul>",
+                "<li id=\"a\" data-pt-key=\"a\">one</li>",
+                "</ul>",
+                "<p>gap</p>",
+                "<ul>",
+                "<li id=\"b\" data-pt-key=\"b\">two</li>",
+                "</ul>",
+            )
+        );
+    }
+
+    #[test]
+    fn renders_list_inside_a_heading_section() {
+        let blocks = vec![
+            heading(BlockStyle::H1, "t", "Title"),
+            list_item(ListItem::Number, "a", "one"),
+        ];
+        assert_eq!(
+            render_html(&blocks),
+            concat!(
+                "<section>",
+                "<h1 id=\"t\" data-pt-key=\"t\">Title</h1>",
+                "<ol>",
+                "<li id=\"a\" data-pt-key=\"a\">one</li>",
+                "</ol>",
                 "</section>",
             )
         );
