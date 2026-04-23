@@ -169,7 +169,7 @@ fn wrap_with_mark_def(inner: String, def: &MarkDef) -> String {
     inner
 }
 
-fn append_escaped_text(out: &mut String, text: &str) {
+pub(crate) fn append_escaped_text(out: &mut String, text: &str) {
     for ch in text.chars() {
         match ch {
             '&' => out.push_str("&amp;"),
@@ -180,7 +180,7 @@ fn append_escaped_text(out: &mut String, text: &str) {
     }
 }
 
-fn append_attribute_value(out: &mut String, value: &str) {
+pub(crate) fn append_attribute_value(out: &mut String, value: &str) {
     for ch in value.chars() {
         match ch {
             '&' => out.push_str("&amp;"),
