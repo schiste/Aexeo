@@ -1,5 +1,6 @@
 import type { EmdashDocument, Finding } from "./types.js";
 import { evaluate } from "./evaluator.js";
+import { tools } from "./mcp.js";
 
 // Capability manifest. This is the single most important security surface
 // in the plugin. Each entry is a specific permission the host must grant;
@@ -45,6 +46,7 @@ export interface Plugin {
   hooks: {
     "content:afterSave": (context: ContentAfterSaveContext) => Promise<void>;
   };
+  mcpTools: typeof tools;
 }
 
 async function handleAfterSave({
@@ -81,6 +83,7 @@ const plugin: Plugin = {
   hooks: {
     "content:afterSave": handleAfterSave,
   },
+  mcpTools: tools,
 };
 
 export default plugin;
