@@ -1,4 +1,4 @@
-use crate::portable_text::{BlockStyle, PortableTextBlock, PortableTextChild};
+use crate::portable_text::{BlockStyle, MarkDef, PortableTextBlock, PortableTextChild};
 
 pub fn render_html(blocks: &[PortableTextBlock]) -> String {
     let mut out = String::new();
@@ -20,7 +20,7 @@ fn append_simple_block(out: &mut String, tag: &str, block: &PortableTextBlock) {
     out.push_str(tag);
     append_identity_attributes(out, block.key.as_deref());
     out.push('>');
-    append_children_text(out, &block.children);
+    append_children_html(out, &block.children, &block.mark_defs);
     out.push_str("</");
     out.push_str(tag);
     out.push('>');
@@ -37,12 +37,52 @@ fn append_identity_attributes(out: &mut String, key: Option<&str>) {
     out.push('"');
 }
 
-fn append_children_text(out: &mut String, children: &[PortableTextChild]) {
+fn append_children_html(out: &mut String, children: &[PortableTextChild], mark_defs: &[MarkDef]) {
     for child in children {
         match child {
-            PortableTextChild::Span(span) => append_escaped_text(out, &span.text),
+            PortableTextChild::Span(span) => {
+                let mut rendered = String::new();
+                append_escaped_text(&mut rendered, &span.text);
+                for mark in &span.marks {
+                    rendered = wrap_with_mark(rendered, mark, mark_defs);
+                }
+                out.push_str(&rendered);
+            }
         }
     }
+}
+
+fn wrap_with_mark(inner: String, mark: &str, mark_defs: &[MarkDef]) -> String {
+    if let Some(tag) = decoration_tag_for(mark) {
+        return format!("<{tag}>{inner}</{tag}>");
+    }
+    if let Some(def) = mark_defs.iter().find(|def| def.key == mark) {
+        return wrap_with_mark_def(inner, def);
+    }
+    inner
+}
+
+fn decoration_tag_for(mark: &str) -> Option<&'static str> {
+    match mark {
+        "strong" => Some("strong"),
+        "em" => Some("em"),
+        "code" => Some("code"),
+        "underline" => Some("u"),
+        "strike-through" => Some("s"),
+        _ => None,
+    }
+}
+
+fn wrap_with_mark_def(inner: String, def: &MarkDef) -> String {
+    if def.mark_type == "link" {
+        let href = def.data.get("href").and_then(|value| value.as_str());
+        if let Some(href) = href {
+            let mut escaped = String::new();
+            append_attribute_value(&mut escaped, href);
+            return format!("<a href=\"{escaped}\">{inner}</a>");
+        }
+    }
+    inner
 }
 
 fn append_escaped_text(out: &mut String, text: &str) {
@@ -72,12 +112,17 @@ fn append_attribute_value(out: &mut String, value: &str) {
 mod tests {
     use super::*;
     use crate::portable_text::{PortableTextChild, PortableTextSpan};
+    use serde_json::json;
 
     fn span(text: &str) -> PortableTextChild {
+        span_with_marks(text, Vec::new())
+    }
+
+    fn span_with_marks(text: &str, marks: Vec<&str>) -> PortableTextChild {
         PortableTextChild::Span(PortableTextSpan {
             key: None,
             text: text.to_string(),
-            marks: Vec::new(),
+            marks: marks.into_iter().map(|m| m.to_string()).collect(),
         })
     }
 
@@ -109,5 +154,54 @@ mod tests {
             mark_defs: Vec::new(),
         }];
         assert_eq!(render_html(&blocks), "<p>hello</p>");
+    }
+
+    #[test]
+    fn wraps_known_decoration_marks_inside_out() {
+        let blocks = vec![PortableTextBlock {
+            key: None,
+            style: BlockStyle::Normal,
+            list_item: None,
+            level: None,
+            children: vec![span_with_marks("loud", vec!["strong", "em"])],
+            mark_defs: Vec::new(),
+        }];
+        assert_eq!(
+            render_html(&blocks),
+            "<p><em><strong>loud</strong></em></p>"
+        );
+    }
+
+    #[test]
+    fn resolves_link_mark_def_with_escaped_href() {
+        let blocks = vec![PortableTextBlock {
+            key: None,
+            style: BlockStyle::Normal,
+            list_item: None,
+            level: None,
+            children: vec![span_with_marks("docs", vec!["m1"])],
+            mark_defs: vec![MarkDef {
+                key: "m1".to_string(),
+                mark_type: "link".to_string(),
+                data: json!({"href": "https://example.com/?q=\"cats\"&n=1"}),
+            }],
+        }];
+        assert_eq!(
+            render_html(&blocks),
+            "<p><a href=\"https://example.com/?q=&quot;cats&quot;&amp;n=1\">docs</a></p>"
+        );
+    }
+
+    #[test]
+    fn ignores_unknown_marks_and_missing_mark_defs() {
+        let blocks = vec![PortableTextBlock {
+            key: None,
+            style: BlockStyle::Normal,
+            list_item: None,
+            level: None,
+            children: vec![span_with_marks("plain", vec!["wavy", "missing-def"])],
+            mark_defs: Vec::new(),
+        }];
+        assert_eq!(render_html(&blocks), "<p>plain</p>");
     }
 }
