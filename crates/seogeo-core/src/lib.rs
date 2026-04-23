@@ -91,13 +91,15 @@ pub use runtime::{
 };
 pub use schema_rules::run_schema_rules;
 pub use site::{
-    AlternateLink, Link, Page, PageKind, Site, audit_site_snapshot, build_site_from_audit_snapshot,
-    load_site, normalize_internal_href, route_from_urlish,
+    AlternateLink, Link, Page, PageKind, Site, SiteArtifacts, SiteBuildInput, audit_site_snapshot,
+    build_page_from_source, build_site_from_audit_snapshot, build_site_from_parts, load_site,
+    normalize_internal_href, route_from_urlish,
 };
 pub use sitemap_rules::run_sitemap_rules;
 pub use social_rules::run_social_rules;
 pub use static_check::{
-    can_run_native_static_audit, run_native_static_audit, run_native_static_audit_with_config,
+    SiteCheckProfile, can_run_native_static_audit, run_checks_for_site,
+    run_checks_for_site_profiled, run_native_static_audit, run_native_static_audit_with_config,
 };
 pub use structure_rules::run_structure_rules;
 pub use surface_rules::run_surface_rules;
