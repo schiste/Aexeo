@@ -9,12 +9,16 @@ publish.workspace = true
 anyhow.workspace = true
 base64.workspace = true
 csv.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 url.workspace = true
 seogeo-contracts = { version = "0.2.0", path = "../seogeo-contracts" }
+
+[features]
+default = ["net"]
+net = ["dep:reqwest"]
 
 [dev-dependencies]
 tempfile = { version = "0.2.0", path = "../tempfile" }
