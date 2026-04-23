@@ -4,6 +4,7 @@ members = [
   "crates/seogeo-contracts",
   "crates/seogeo-core",
   "crates/seogeo-cli",
+  "crates/aexeo-emdash-bridge",
 ]
 resolver = "2"
 
