@@ -5,6 +5,14 @@ version = 4
 [[package]]
 name = "aexeo-emdash-bridge"
 version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "seogeo-contracts",
+ "seogeo-core",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "anstream"
