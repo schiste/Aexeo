@@ -3,9 +3,9 @@ use serde_json::json;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::registry::rule_metadata_for_id;
+use crate::timing::unix_seconds;
 use seogeo_contracts::{
     AuditArtifact, AuditStatus, AuditSummary, CrawlStats, Finding, FindingScope, RuleClass,
 };
@@ -13,10 +13,7 @@ use seogeo_contracts::{
 pub const DEFAULT_AUDIT_LOG_LIMIT: usize = 5;
 
 fn now_epoch_seconds() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+    unix_seconds()
 }
 
 fn confidence_buckets() -> BTreeMap<&'static str, usize> {

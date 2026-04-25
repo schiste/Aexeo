@@ -5,8 +5,9 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
-use std::time::Instant;
 use url::Url;
+
+use crate::timing::Started;
 
 use crate::intelligence::truth::TruthManifest;
 use crate::site::{Site, route_from_urlish};
@@ -76,7 +77,7 @@ pub fn reconcile_trust_surfaces(
     site_url: Option<&str>,
     manifest: Option<&TruthManifest>,
 ) -> TrustSurfaceReconciliation {
-    let started = Instant::now();
+    let started = Started::now();
     let canonical_host = site_url
         .and_then(|value| Url::parse(value).ok())
         .and_then(|url| url.host_str().map(|host| host.to_ascii_lowercase()))
@@ -217,7 +218,7 @@ pub fn reconcile_trust_surfaces(
         offsite_mentions,
         source_summaries,
         issues,
-        elapsed_us: started.elapsed().as_micros() as u64,
+        elapsed_us: started.elapsed_us(),
     }
 }
 

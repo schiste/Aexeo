@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::time::Instant;
 
 use crate::site::Site;
+use crate::timing::Started;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -61,7 +61,7 @@ pub struct EvidenceSiteAssessment {
 }
 
 pub fn assess_evidence_coverage(site: &Site) -> EvidenceSiteAssessment {
-    let started = Instant::now();
+    let started = Started::now();
     let mut routes = site
         .route_pages()
         .map(assess_route)
@@ -116,7 +116,7 @@ pub fn assess_evidence_coverage(site: &Site) -> EvidenceSiteAssessment {
         citation_readiness_score: (citation_readiness_total / count) as u8,
         average_fidelity_risk_score: (fidelity_total / count) as u8,
         routes,
-        elapsed_us: started.elapsed().as_micros() as u64,
+        elapsed_us: started.elapsed_us(),
     }
 }
 

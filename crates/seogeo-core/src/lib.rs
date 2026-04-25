@@ -28,6 +28,7 @@ pub mod static_check;
 pub mod structure_rules;
 pub mod surface_rules;
 pub mod surfaces;
+pub(crate) mod timing;
 pub mod verification;
 
 pub use config::{

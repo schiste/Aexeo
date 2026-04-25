@@ -1,7 +1,6 @@
 use anyhow::Result;
 use seogeo_contracts::{Finding, FindingScope, RuleTiming};
 use std::path::Path;
-use std::time::Instant;
 
 use crate::adapter::resolve_static_site_root;
 use crate::config::{Config, default_rule_switches, load_config};
@@ -17,6 +16,7 @@ use crate::sitemap_rules::run_sitemap_rules;
 use crate::social_rules::run_social_rules;
 use crate::structure_rules::run_structure_rules;
 use crate::surface_rules::run_surface_rules;
+use crate::timing::Started;
 
 #[derive(Debug, Clone, Default)]
 pub struct SiteCheckProfile {
@@ -37,9 +37,9 @@ fn time_rule_group<F>(
     if !enabled {
         return;
     }
-    let started_at = Instant::now();
+    let started_at = Started::now();
     let produced = run();
-    let elapsed_us = started_at.elapsed().as_micros() as u64;
+    let elapsed_us = started_at.elapsed_us();
     let finding_count = produced.len();
     findings.extend(produced);
     timings.push(RuleTiming {
@@ -141,9 +141,9 @@ pub fn run_checks_for_site_profiled(site: &crate::site::Site, config: &Config) -
         || run_structure_rules(site, config),
     );
 
-    let policy_started_at = Instant::now();
+    let policy_started_at = Started::now();
     let findings = apply_policy(findings, config);
-    let policy_apply_us = policy_started_at.elapsed().as_micros() as u64;
+    let policy_apply_us = policy_started_at.elapsed_us();
     rule_timings.sort_by(|left, right| {
         right
             .elapsed_us

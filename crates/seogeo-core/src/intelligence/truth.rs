@@ -3,11 +3,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 use url::Url;
 
 use crate::schema_rules::{iter_schema_field_values, iter_schema_types};
 use crate::site::Site;
+use crate::timing::Started;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct TruthEntity {
@@ -121,7 +121,7 @@ pub fn load_truth_manifest(path: &Path) -> Result<TruthManifest> {
 }
 
 pub fn validate_truth_manifest(manifest: &TruthManifest) -> TruthManifestValidation {
-    let started = Instant::now();
+    let started = Started::now();
     let mut warnings = Vec::new();
     let mut errors = Vec::new();
 
@@ -193,7 +193,7 @@ pub fn validate_truth_manifest(manifest: &TruthManifest) -> TruthManifestValidat
         forbidden_term_count: manifest.terminology.forbidden.len(),
         warnings,
         errors,
-        elapsed_us: started.elapsed().as_micros() as u64,
+        elapsed_us: started.elapsed_us(),
     }
 }
 
@@ -227,7 +227,7 @@ pub fn generate_truth_manifest(site: &Site) -> TruthManifestGeneration {
 }
 
 pub fn generate_truth_manifest_with_options(site: &Site, curate: bool) -> TruthManifestGeneration {
-    let started = Instant::now();
+    let started = Started::now();
     let mut provenance = BTreeMap::<String, Vec<String>>::new();
     let mut warnings = vec![
         "generated manifest is a review-first draft; confirm categories, descriptors, aliases, and terminology before deployment".to_string(),
@@ -336,12 +336,12 @@ pub fn generate_truth_manifest_with_options(site: &Site, curate: bool) -> TruthM
         warnings,
         suggested_deploy_paths,
         curated: curate,
-        elapsed_us: started.elapsed().as_micros() as u64,
+        elapsed_us: started.elapsed_us(),
     }
 }
 
 pub fn assess_truth_layer(site: &Site, manifest: Option<&TruthManifest>) -> TruthAssessment {
-    let started = Instant::now();
+    let started = Started::now();
     let mut pages_with_schema = 0;
     let mut organization_schema_pages = 0;
     let mut website_schema_pages = 0;
@@ -540,7 +540,7 @@ pub fn assess_truth_layer(site: &Site, manifest: Option<&TruthManifest>) -> Trut
         preferred_term_hits,
         forbidden_term_hits,
         mismatches,
-        elapsed_us: started.elapsed().as_micros() as u64,
+        elapsed_us: started.elapsed_us(),
     }
 }
 

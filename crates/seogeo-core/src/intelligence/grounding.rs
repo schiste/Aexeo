@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::Instant;
 
 use crate::schema_rules::iter_schema_types;
 use crate::site::{Page, PageKind, Site};
+use crate::timing::Started;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -74,7 +74,7 @@ pub struct GroundingSiteAnalysis {
 }
 
 pub fn map_grounding_queries(site: &Site) -> GroundingSiteAnalysis {
-    let started = Instant::now();
+    let started = Started::now();
     let mut routes = site
         .route_pages()
         .map(analyze_page_grounding)
@@ -112,7 +112,7 @@ pub fn map_grounding_queries(site: &Site) -> GroundingSiteAnalysis {
         primary_intent_distribution,
         topic_clusters,
         routes,
-        elapsed_us: started.elapsed().as_micros() as u64,
+        elapsed_us: started.elapsed_us(),
     }
 }
 

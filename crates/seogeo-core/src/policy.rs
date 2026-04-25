@@ -11,12 +11,7 @@ fn looks_expired(expires: Option<&str>) -> bool {
 }
 
 fn chrono_like_today() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
+    let seconds = crate::timing::unix_seconds() as i64;
     const SECONDS_PER_DAY: i64 = 86_400;
     let days = seconds / SECONDS_PER_DAY;
     civil_from_days(days)

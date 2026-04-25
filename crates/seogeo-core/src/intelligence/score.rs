@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::time::Instant;
+
+use crate::timing::Started;
 
 use super::{
     EvidenceSiteAssessment, GroundingCoverageGap, GroundingSiteAnalysis, TrustSurfaceIssueKind,
@@ -44,7 +45,7 @@ pub fn score_intelligence(
     evidence: &EvidenceSiteAssessment,
     trust: Option<&TrustSurfaceReconciliation>,
 ) -> SiteIntelligenceScore {
-    let started = Instant::now();
+    let started = Started::now();
     let citation_readiness_score = evidence.citation_readiness_score;
     let truth_consistency_score = truth.score;
     let answer_pack_score = answer_pack_score(grounding);
@@ -67,7 +68,7 @@ pub fn score_intelligence(
         overall_score,
         route_scores,
         blockers,
-        elapsed_us: started.elapsed().as_micros() as u64,
+        elapsed_us: started.elapsed_us(),
     }
 }
 

@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use std::time::Instant;
 
 use super::grounding::{GroundingIntentFamily, GroundingRouteAnalysis, map_grounding_queries};
 use crate::site::Site;
+use crate::timing::Started;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnswerFanoutRouteMatch {
@@ -243,7 +243,7 @@ fn query_gaps(seed: &FanoutSeed, matched_routes: &[AnswerFanoutRouteMatch]) -> V
 }
 
 pub fn assess_answer_fanout(site: &Site) -> AnswerFanoutReport {
-    let started = Instant::now();
+    let started = Started::now();
     let grounding = map_grounding_queries(site);
     let seeds = build_fanout_seeds(&grounding.routes);
     let mut queries = Vec::new();
@@ -293,7 +293,7 @@ pub fn assess_answer_fanout(site: &Site) -> AnswerFanoutReport {
         covered_queries,
         coverage_score,
         queries,
-        elapsed_us: started.elapsed().as_micros() as u64,
+        elapsed_us: started.elapsed_us(),
     }
 }
 
