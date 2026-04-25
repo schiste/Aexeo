@@ -60,7 +60,7 @@ function runCommand(command: string, args: readonly string[]): Promise<number> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, [...args], { stdio: "inherit" });
     child.once("error", reject);
-    child.once("close", (code) => {
+    child.once("close", (code: number | null) => {
       resolve(code ?? 1);
     });
   });
