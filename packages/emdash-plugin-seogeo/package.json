@@ -14,10 +14,11 @@
   },
   "files": [
     "dist",
-    "wasm"
+    "wasm",
+    "scripts/build-wasm.sh"
   ],
   "scripts": {
-    "build:wasm": "wasm-pack build ../../crates/aexeo-emdash-bridge --target bundler --features wasm --out-dir ../../packages/emdash-plugin-seogeo/wasm",
+    "build:wasm": "bash scripts/build-wasm.sh",
     "build:ts": "tsc",
     "build": "npm run build:wasm && npm run build:ts",
     "typecheck": "tsc --noEmit"
