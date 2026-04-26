@@ -1,29 +1,66 @@
 import { capabilities } from "./plugin.js";
 
-// Plugin descriptor read by emdash at install time. Metadata only;
-// the sandbox entry referenced via `entrypoint` is what executes
-// inside the Worker isolate.
+// Local mirror of emdash's PluginDescriptor / SandboxedPluginDescriptor
+// (the latter is a type alias for the former in the host source). The
+// real types come from @emdash-cms/core once that peer dependency is
+// installed; this stand-in keeps the plugin typecheckable in isolation
+// and pinned to the field set we verified against the host source.
+export interface PluginAdminPage {
+  path: string;
+  label: string;
+  icon?: string;
+}
 
-const descriptor = {
-  id: "aexeo-seogeo",
-  version: "0.0.1",
-  // Subpath export of this same package; must match package.json
-  // `exports["./sandbox"]`.
-  entrypoint: "@aexeo/emdash-plugin-seogeo/sandbox",
-  capabilities,
-  // Pages mount at /admin/plugins/aexeo-seogeo/<path>. The page name
-  // (without leading slash) is what the sandbox entry receives in
-  // `body.page` when emdash POSTs the page_load interaction.
-  adminPages: [
-    { path: "/findings", label: "SEO findings" },
-    { path: "/document", label: "Document SEO" },
-  ],
-  dashboardWidgets: [{ id: "seogeo-score", size: "third", title: "SEO score" }],
-  // Storage scopes the host must provision before the plugin runs.
-  // Mirrors the kv: capability declared in capabilities.
-  storage: {
-    kv: ["seogeo-baselines"],
-  },
-} as const;
+export interface PluginAdminWidget {
+  id: string;
+  size?: "full" | "half" | "third";
+  title?: string;
+}
 
-export default descriptor;
+export interface SandboxedPluginDescriptor {
+  id: string;
+  version: string;
+  entrypoint: string;
+  // Required for sandboxed plugins; the host's integration validator
+  // rejects the default "native" format from the sandboxed: [] array.
+  format: "standard";
+  capabilities?: readonly string[];
+  adminPages?: readonly PluginAdminPage[];
+  // emdash names the field adminWidgets, not dashboardWidgets — easy
+  // mistake from the dashboard-side rendering vocabulary.
+  adminWidgets?: readonly PluginAdminWidget[];
+  allowedHosts?: readonly string[];
+}
+
+// Factory function the consumer calls in their astro.config.mjs:
+//
+//   import { seogeoPlugin } from "@aexeo/emdash-plugin-seogeo";
+//   emdash({
+//     database: sqlite({ url: "file:./data.db" }),
+//     sandboxed: [seogeoPlugin()],
+//     sandboxRunner: "@emdash-cms/sandbox-cloudflare",
+//   });
+//
+// Mirrors the calling convention used by every first-party emdash
+// plugin (embedsPlugin, auditLogPlugin, webhookNotifierPlugin, ...).
+export function seogeoPlugin(): SandboxedPluginDescriptor {
+  return {
+    id: "aexeo-seogeo",
+    version: "0.0.1",
+    // Subpath export of this same package; must match package.json
+    // `exports["./sandbox"]`.
+    entrypoint: "@aexeo/emdash-plugin-seogeo/sandbox",
+    format: "standard",
+    capabilities,
+    // Pages mount at /admin/plugins/aexeo-seogeo/<path>. The page name
+    // (without leading slash) is what the sandbox entry receives in
+    // `body.page` when emdash POSTs the page_load interaction.
+    adminPages: [
+      { path: "/findings", label: "SEO findings" },
+      { path: "/document", label: "Document SEO" },
+    ],
+    adminWidgets: [
+      { id: "seogeo-score", size: "third", title: "SEO score" },
+    ],
+  };
+}
