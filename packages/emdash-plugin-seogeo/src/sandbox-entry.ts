@@ -49,9 +49,9 @@ async function handleAdminRoute(ctx: RouteContext): Promise<BlockResponse> {
   if (ctx.body.type === "page_load") {
     return handlePageLoad(ctx, ctx.body.page);
   }
-  // Action / form_submit are handled by re-running the page render
-  // after the side effect; the action_id encodes which page to
-  // refresh once stages 6.3-6.5 wire real interactions.
+  if (ctx.body.type === "block_action") {
+    return handleBlockAction(ctx, ctx.body.action_id, ctx.body.value);
+  }
   return handlePageLoad(ctx, "findings");
 }
 
@@ -65,10 +65,27 @@ async function handlePageLoad(
   if (page === "widget:seogeo-score") {
     return renderScoreWidget(ctx);
   }
-  if (page.startsWith("document")) {
-    return renderDocumentPanel(ctx, page);
+  if (page === "document") {
+    return renderDocumentPanel(ctx);
   }
   return notFound(page);
+}
+
+async function handleBlockAction(
+  ctx: RouteContext,
+  actionId: string,
+  value: unknown,
+): Promise<BlockResponse> {
+  if (actionId === "view_document" && typeof value === "string") {
+    return renderDocumentPanel(ctx, value);
+  }
+  // Filters on the findings page are stubbed: re-render the unfiltered
+  // table for now. Per-filter state is a small follow-up once we thread
+  // the active filter through the response.
+  if (actionId.startsWith("filter:")) {
+    return renderFindingsPage(ctx);
+  }
+  return notFound(actionId);
 }
 
 async function renderFindingsPage(ctx: RouteContext): Promise<BlockResponse> {
@@ -154,12 +171,19 @@ function findingsTable(rows: FindingRow[]): unknown {
       { id: "rule", label: "Rule" },
       { id: "severity", label: "Severity" },
       { id: "message", label: "Message" },
+      { id: "view", label: "" },
     ],
     rows: rows.map((row) => ({
       route: row.document_route,
       rule: row.rule_id,
       severity: row.severity,
       message: row.message,
+      view: {
+        type: "button",
+        text: "View",
+        action_id: "view_document",
+        value: row.document_route,
+      },
     })),
   };
 }
@@ -226,14 +250,59 @@ function topBlockersLine(score: SiteIntelligenceScore): string {
 }
 
 async function renderDocumentPanel(
-  _ctx: RouteContext,
-  _page: string,
+  ctx: RouteContext,
+  route?: string,
 ): Promise<BlockResponse> {
+  if (route === undefined) {
+    return {
+      blocks: [
+        { type: "header", text: "Document SEO" },
+        {
+          type: "context",
+          text: "Pick a document from the SEO findings list to see its rule findings here.",
+        },
+      ],
+    };
+  }
+  const findings = await readFindings(ctx.kv, route);
+  const errors = findings.filter((finding) => finding.severity === "error");
+  const warnings = findings.filter((finding) => finding.severity === "warning");
+  const sorted = [...findings].sort(severityFirst);
   return {
     blocks: [
-      { type: "header", text: "Document SEO" },
-      { type: "context", text: "stub (filled in 6.5)" },
+      { type: "header", text: `Document SEO — ${route}` },
+      {
+        type: "context",
+        text:
+          findings.length === 0
+            ? `No findings for ${route} — the document is currently clean.`
+            : `${findings.length} findings — ${errors.length} errors, ${warnings.length} warnings.`,
+      },
+      ...(findings.length === 0
+        ? []
+        : [{ type: "divider" }, documentFindingsTable(sorted)]),
     ],
+  };
+}
+
+function documentFindingsTable(findings: Finding[]): unknown {
+  return {
+    type: "table",
+    columns: [
+      { id: "rule", label: "Rule" },
+      { id: "severity", label: "Severity" },
+      { id: "message", label: "Message" },
+      { id: "block", label: "Block" },
+    ],
+    rows: findings.map((finding) => ({
+      rule: finding.rule_id,
+      severity: finding.severity,
+      message: finding.message,
+      // The bridge stamps every Portable Text block with id + data-pt-key
+      // when rendering; surfacing the path:line locator here lets authors
+      // locate the failing block via the editor's ⌘-F.
+      block: `${finding.path}:${finding.line}`,
+    })),
   };
 }
 
