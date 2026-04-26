@@ -52,6 +52,23 @@ async function handleAdminRoute(ctx: RouteContext): Promise<BlockResponse> {
   if (ctx.body.type === "block_action") {
     return handleBlockAction(ctx, ctx.body.action_id, ctx.body.value);
   }
+  if (ctx.body.type === "form_submit") {
+    return handleFormSubmit(ctx, ctx.body.action_id, ctx.body.values);
+  }
+  return handlePageLoad(ctx, "findings");
+}
+
+async function handleFormSubmit(
+  ctx: RouteContext,
+  actionId: string,
+  values: Record<string, unknown>,
+): Promise<BlockResponse> {
+  if (actionId === "view_document") {
+    const picked = values["route_picker"];
+    if (typeof picked === "string" && picked.length > 0) {
+      return renderDocumentPanel(ctx, picked);
+    }
+  }
   return handlePageLoad(ctx, "findings");
 }
 
@@ -93,38 +110,60 @@ async function renderFindingsPage(ctx: RouteContext): Promise<BlockResponse> {
   const errors = findings.filter((finding) => finding.severity === "error");
   const warnings = findings.filter((finding) => finding.severity === "warning");
   const sorted = [...findings].sort(severityFirst);
-  return {
-    blocks: [
-      { type: "header", text: "SEO findings" },
-      {
-        type: "context",
-        text:
-          findings.length === 0
-            ? "No documents have been saved yet — findings appear after the next emdash save."
-            : `${findings.length} findings across ${countRoutes(findings)} routes — ${errors.length} errors, ${warnings.length} warnings.`,
-      },
-      { type: "divider" },
-      {
-        type: "actions",
-        elements: [
-          {
-            type: "button",
-            text: "All",
-            action_id: "filter:all",
-            style: "primary",
-          },
-          { type: "button", text: "Errors only", action_id: "filter:errors" },
-          { type: "button", text: "Warnings only", action_id: "filter:warnings" },
-        ],
-      },
-      sorted.length === 0
-        ? {
-            type: "context",
-            text: "Once a document publishes, its rule findings list here.",
-          }
-        : findingsTable(sorted),
-    ],
-  };
+  const routes = uniqueRoutes(findings);
+  const blocks: unknown[] = [
+    { type: "header", text: "SEO findings" },
+    {
+      type: "context",
+      text:
+        findings.length === 0
+          ? "No documents have been saved yet — findings appear after the next emdash save."
+          : `${findings.length} findings across ${routes.length} routes — ${errors.length} errors, ${warnings.length} warnings.`,
+    },
+    { type: "divider" },
+    {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          label: "All",
+          action_id: "filter:all",
+          style: "primary",
+        },
+        { type: "button", label: "Errors only", action_id: "filter:errors" },
+        {
+          type: "button",
+          label: "Warnings only",
+          action_id: "filter:warnings",
+        },
+      ],
+    },
+    sorted.length === 0
+      ? {
+          type: "context",
+          text: "Once a document publishes, its rule findings list here.",
+        }
+      : findingsTable(sorted),
+  ];
+  // emdash table cells JSON-stringify objects rather than render
+  // interactive elements, so per-row View buttons would be dead. The
+  // route-selection flow lives below the table as a select + submit
+  // form whose form_submit dispatch routes to the document panel.
+  if (routes.length > 0) {
+    blocks.push({
+      type: "form",
+      fields: [
+        {
+          type: "select",
+          action_id: "route_picker",
+          label: "Document to inspect",
+          options: routes.map((route) => ({ label: route, value: route })),
+        },
+      ],
+      submit: { label: "View document SEO", action_id: "view_document" },
+    });
+  }
+  return { blocks };
 }
 
 interface FindingRow extends Finding {
@@ -146,12 +185,12 @@ async function readAllFindings(kv: KvNamespace): Promise<FindingRow[]> {
   return out;
 }
 
-function countRoutes(rows: FindingRow[]): number {
+function uniqueRoutes(rows: FindingRow[]): string[] {
   const routes = new Set<string>();
   for (const row of rows) {
     routes.add(row.document_route);
   }
-  return routes.size;
+  return [...routes].sort();
 }
 
 function severityFirst(a: Finding, b: Finding): number {
@@ -167,23 +206,16 @@ function findingsTable(rows: FindingRow[]): unknown {
   return {
     type: "table",
     columns: [
-      { id: "route", label: "Route" },
-      { id: "rule", label: "Rule" },
-      { id: "severity", label: "Severity" },
-      { id: "message", label: "Message" },
-      { id: "view", label: "" },
+      { key: "route", label: "Route" },
+      { key: "rule", label: "Rule", format: "code" },
+      { key: "severity", label: "Severity", format: "badge" },
+      { key: "message", label: "Message" },
     ],
     rows: rows.map((row) => ({
       route: row.document_route,
       rule: row.rule_id,
       severity: row.severity,
       message: row.message,
-      view: {
-        type: "button",
-        text: "View",
-        action_id: "view_document",
-        value: row.document_route,
-      },
     })),
   };
 }
@@ -289,10 +321,10 @@ function documentFindingsTable(findings: Finding[]): unknown {
   return {
     type: "table",
     columns: [
-      { id: "rule", label: "Rule" },
-      { id: "severity", label: "Severity" },
-      { id: "message", label: "Message" },
-      { id: "block", label: "Block" },
+      { key: "rule", label: "Rule", format: "code" },
+      { key: "severity", label: "Severity", format: "badge" },
+      { key: "message", label: "Message" },
+      { key: "block", label: "Block", format: "code" },
     ],
     rows: findings.map((finding) => ({
       rule: finding.rule_id,
