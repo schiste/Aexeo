@@ -34,12 +34,20 @@ export interface SandboxedPluginDescriptor {
 
 // Factory function the consumer calls in their astro.config.mjs:
 //
+//   import { d1, r2, sandbox } from "@emdash-cms/cloudflare";
 //   import { seogeoPlugin } from "@aexeo/emdash-plugin-seogeo";
 //   emdash({
-//     database: sqlite({ url: "file:./data.db" }),
+//     database: d1({ binding: "DB" }),
+//     storage: r2({ binding: "MEDIA" }),
 //     sandboxed: [seogeoPlugin()],
-//     sandboxRunner: "@emdash-cms/sandbox-cloudflare",
+//     sandboxRunner: sandbox(),
 //   });
+//
+// Sandboxed plugins on emdash 0.7.0 require Cloudflare Workers — the
+// only sandbox runner ships in @emdash-cms/cloudflare and uses Worker
+// Loader for V8 isolation. Node-platform emdash apps fall back to a
+// noop runner that registers the descriptor but never invokes the
+// sandbox entry, so plugin routes return 404 even after auth.
 //
 // Mirrors the calling convention used by every first-party emdash
 // plugin (embedsPlugin, auditLogPlugin, webhookNotifierPlugin, ...).
