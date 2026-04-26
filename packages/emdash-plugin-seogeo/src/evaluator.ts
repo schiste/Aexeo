@@ -1,4 +1,8 @@
-import type { EmdashDocument, Finding } from "./types.js";
+import type {
+  EmdashDocument,
+  Finding,
+  SiteIntelligenceScore,
+} from "./types.js";
 
 // The WASM module is produced by scripts/build-wasm.sh, which drives
 // cargo + wasm-bindgen --target bundler against aexeo-emdash-bridge.
@@ -6,7 +10,10 @@ import type { EmdashDocument, Finding } from "./types.js";
 // the generated glue module and instantiate the WebAssembly on first
 // access; no explicit init() call is needed. Run `npm run build:wasm`
 // before TypeScript compilation so the .d.ts at this path exists.
-import { evaluateDocuments } from "../wasm/aexeo_emdash_bridge.js";
+import {
+  evaluateDocuments,
+  scoreIntelligence,
+} from "../wasm/aexeo_emdash_bridge.js";
 
 export interface EvaluateOptions {
   // Serialized seogeo Config. When omitted, the bridge evaluates with
@@ -40,4 +47,14 @@ export function findingsByRoute(
     }
   }
   return grouped;
+}
+
+// Backed by the bridge's wasm-bindgen scoreIntelligence export. Passes
+// the full document set in one call; the bridge builds the Site,
+// computes grounding/truth/evidence, and runs score_intelligence.
+export async function scoreSite(
+  documents: readonly EmdashDocument[],
+): Promise<SiteIntelligenceScore> {
+  const raw = scoreIntelligence(JSON.stringify(documents));
+  return JSON.parse(raw) as SiteIntelligenceScore;
 }

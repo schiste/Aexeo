@@ -1,7 +1,8 @@
 import type { KvNamespace } from "./plugin.js";
-import { handleAfterSave, readFindings } from "./plugin.js";
+import { handleAfterSave, readAllDocuments, readFindings } from "./plugin.js";
 import { tools as mcpTools } from "./mcp.js";
-import type { Finding } from "./types.js";
+import { scoreSite } from "./evaluator.js";
+import type { Finding, SiteIntelligenceScore } from "./types.js";
 
 // Stand-in for @emdash-cms/core's definePlugin. The real implementation
 // is identity-returning for the sandboxed shape (hooks + routes); this
@@ -163,13 +164,65 @@ function findingsTable(rows: FindingRow[]): unknown {
   };
 }
 
-async function renderScoreWidget(_ctx: RouteContext): Promise<BlockResponse> {
-  return {
-    blocks: [
-      { type: "header", text: "SEO score" },
-      { type: "context", text: "stub (filled in 6.4)" },
-    ],
-  };
+async function renderScoreWidget(ctx: RouteContext): Promise<BlockResponse> {
+  const documents = await readAllDocuments(ctx.kv);
+  if (documents.length === 0) {
+    return {
+      blocks: [
+        { type: "header", text: "SEO score" },
+        {
+          type: "context",
+          text: "No documents saved yet — score appears after the first emdash save.",
+        },
+      ],
+    };
+  }
+  const score = await scoreSite(documents);
+  const blocks: unknown[] = [
+    {
+      type: "stats",
+      items: [
+        {
+          label: "Overall",
+          value: `${score.overall_score}`,
+        },
+        {
+          label: "Citation",
+          value: `${score.citation_readiness_score}`,
+        },
+        {
+          label: "Truth",
+          value: `${score.truth_consistency_score}`,
+        },
+        {
+          label: "Answers",
+          value: `${score.answer_pack_score}`,
+        },
+      ],
+    },
+  ];
+  if (score.overall_score < 60) {
+    blocks.unshift({
+      type: "banner",
+      title: `Site score is ${score.overall_score} — below the 60 quality threshold`,
+      variant: "alert",
+    });
+  }
+  if (score.blockers.length > 0) {
+    blocks.push({
+      type: "context",
+      text: topBlockersLine(score),
+    });
+  }
+  return { blocks };
+}
+
+function topBlockersLine(score: SiteIntelligenceScore): string {
+  const top = score.blockers.slice(0, 3).map((blocker) => blocker.message);
+  if (top.length === 0) {
+    return "No blockers identified.";
+  }
+  return `Top blockers: ${top.join(" • ")}`;
 }
 
 async function renderDocumentPanel(

@@ -86,9 +86,11 @@ export async function handleAfterSave({
   const findings = await evaluate([document]);
   const previous = await readFindings(kv, document.route);
   const diff = diffFindings(previous, findings);
-  // Order matters: write the new baseline first so a fast retry sees
-  // the latest evaluator output even if the IndexNow submission below
-  // throws or the Worker is killed.
+  // Order matters: write the document and findings baselines first so
+  // a fast retry sees the latest state even if the IndexNow submission
+  // below throws or the Worker is killed. document:* feeds the score
+  // widget; findings:* feeds the findings page and document panel.
+  await kv.put(documentKey(document.route), JSON.stringify(document));
   await kv.put(
     findingsKey(document.route),
     JSON.stringify({ route: document.route, findings }),
@@ -102,6 +104,26 @@ export async function handleAfterSave({
 export function findingsKey(route: string): string {
   const normalized = route === "" || route === "/" ? "/" : route;
   return `findings:${normalized}`;
+}
+
+export function documentKey(route: string): string {
+  const normalized = route === "" || route === "/" ? "/" : route;
+  return `document:${normalized}`;
+}
+
+export async function readAllDocuments(
+  kv: KvNamespace,
+): Promise<EmdashDocument[]> {
+  const listed = await kv.list({ prefix: "document:" });
+  const out: EmdashDocument[] = [];
+  for (const entry of listed.keys) {
+    const raw = await kv.get(entry.name);
+    if (raw === null) {
+      continue;
+    }
+    out.push(JSON.parse(raw) as EmdashDocument);
+  }
+  return out;
 }
 
 export async function readFindings(

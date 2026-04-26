@@ -72,3 +72,23 @@ export interface Finding {
   suggestion: string | null;
   scope: FindingScope;
 }
+
+// Mirror of seogeo-core's SiteIntelligenceScore. Exact subset the
+// dashboard widget consumes; less-used fields like elapsed_us live in
+// the JSON the bridge emits but are not typed here.
+export interface SiteIntelligenceScore {
+  citation_readiness_score: number;
+  truth_consistency_score: number;
+  answer_pack_score: number;
+  external_trust_alignment_score: number | null;
+  overall_score: number;
+  route_scores: unknown[];
+  blockers: IntelligenceBlocker[];
+}
+
+export interface IntelligenceBlocker {
+  rule_id?: string;
+  message: string;
+  route?: string;
+  severity?: string;
+}
