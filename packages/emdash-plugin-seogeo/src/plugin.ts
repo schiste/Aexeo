@@ -2,7 +2,11 @@ import type { EmdashDocument, Finding } from "./types.js";
 import { type FindingsDiff, diffFindings } from "./diff.js";
 import { evaluate } from "./evaluator.js";
 import { type IndexNowConfig, submitIndexNow } from "./indexnow.js";
-import { tools } from "./mcp.js";
+
+// This module owns the publish-time hook plus the shared types the
+// sandbox entry composes into definePlugin. It used to also export the
+// final Plugin object directly; that role moved to ./sandbox-entry.ts
+// so emdash can isolate the plugin via its standard sandbox loader.
 
 // Capability manifest. This is the single most important security surface
 // in the plugin. Each entry is a specific permission the host must grant;
@@ -49,15 +53,6 @@ export interface ContentAfterSaveContext {
   settings?: PluginSettings;
 }
 
-export interface Plugin {
-  name: string;
-  capabilities: readonly string[];
-  hooks: {
-    "content:afterSave": (context: ContentAfterSaveContext) => Promise<void>;
-  };
-  mcpTools: typeof tools;
-}
-
 // Policy hook: should this save trigger an IndexNow submission?
 //
 // IndexNow is rate-limited and noisy; submitting on every keystroke is
@@ -76,7 +71,7 @@ export function defaultShouldSubmit(diff: FindingsDiff): boolean {
   return !diff.added.some((finding) => finding.severity === "error");
 }
 
-async function handleAfterSave({
+export async function handleAfterSave({
   document,
   kv,
   settings,
@@ -122,14 +117,3 @@ function absoluteUrl(siteUrl: string, route: string): string {
   const path = route.startsWith("/") ? route : `/${route}`;
   return base + path;
 }
-
-const plugin: Plugin = {
-  name: "aexeo-seogeo",
-  capabilities,
-  hooks: {
-    "content:afterSave": handleAfterSave,
-  },
-  mcpTools: tools,
-};
-
-export default plugin;

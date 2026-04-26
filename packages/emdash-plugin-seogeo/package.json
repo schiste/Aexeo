@@ -4,12 +4,16 @@
   "private": true,
   "description": "Aexeo seogeo rules as an emdash plugin",
   "type": "module",
-  "main": "./dist/plugin.js",
-  "types": "./dist/plugin.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/plugin.d.ts",
-      "import": "./dist/plugin.js"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./sandbox": {
+      "types": "./dist/sandbox-entry.d.ts",
+      "import": "./dist/sandbox-entry.js"
     }
   },
   "files": [
