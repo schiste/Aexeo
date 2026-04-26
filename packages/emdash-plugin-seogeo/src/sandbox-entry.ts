@@ -1,6 +1,7 @@
 import type { KvNamespace } from "./plugin.js";
-import { handleAfterSave } from "./plugin.js";
+import { handleAfterSave, readFindings } from "./plugin.js";
 import { tools as mcpTools } from "./mcp.js";
+import type { Finding } from "./types.js";
 
 // Stand-in for @emdash-cms/core's definePlugin. The real implementation
 // is identity-returning for the sandboxed shape (hooks + routes); this
@@ -69,12 +70,96 @@ async function handlePageLoad(
   return notFound(page);
 }
 
-async function renderFindingsPage(_ctx: RouteContext): Promise<BlockResponse> {
+async function renderFindingsPage(ctx: RouteContext): Promise<BlockResponse> {
+  const findings = await readAllFindings(ctx.kv);
+  const errors = findings.filter((finding) => finding.severity === "error");
+  const warnings = findings.filter((finding) => finding.severity === "warning");
+  const sorted = [...findings].sort(severityFirst);
   return {
     blocks: [
       { type: "header", text: "SEO findings" },
-      { type: "context", text: "stub (filled in 6.3)" },
+      {
+        type: "context",
+        text:
+          findings.length === 0
+            ? "No documents have been saved yet — findings appear after the next emdash save."
+            : `${findings.length} findings across ${countRoutes(findings)} routes — ${errors.length} errors, ${warnings.length} warnings.`,
+      },
+      { type: "divider" },
+      {
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            text: "All",
+            action_id: "filter:all",
+            style: "primary",
+          },
+          { type: "button", text: "Errors only", action_id: "filter:errors" },
+          { type: "button", text: "Warnings only", action_id: "filter:warnings" },
+        ],
+      },
+      sorted.length === 0
+        ? {
+            type: "context",
+            text: "Once a document publishes, its rule findings list here.",
+          }
+        : findingsTable(sorted),
     ],
+  };
+}
+
+interface FindingRow extends Finding {
+  // Route is stored alongside the finding in plugin.ts but not on the
+  // Finding itself; we re-attach when materializing rows.
+  document_route: string;
+}
+
+async function readAllFindings(kv: KvNamespace): Promise<FindingRow[]> {
+  const listed = await kv.list({ prefix: "findings:" });
+  const out: FindingRow[] = [];
+  for (const entry of listed.keys) {
+    const route = entry.name.replace(/^findings:/, "");
+    const findings = await readFindings(kv, route);
+    for (const finding of findings) {
+      out.push({ ...finding, document_route: route });
+    }
+  }
+  return out;
+}
+
+function countRoutes(rows: FindingRow[]): number {
+  const routes = new Set<string>();
+  for (const row of rows) {
+    routes.add(row.document_route);
+  }
+  return routes.size;
+}
+
+function severityFirst(a: Finding, b: Finding): number {
+  const rank = (severity: string) => (severity === "error" ? 0 : 1);
+  const diff = rank(a.severity) - rank(b.severity);
+  if (diff !== 0) {
+    return diff;
+  }
+  return a.rule_id.localeCompare(b.rule_id);
+}
+
+function findingsTable(rows: FindingRow[]): unknown {
+  return {
+    type: "table",
+    columns: [
+      { id: "route", label: "Route" },
+      { id: "rule", label: "Rule" },
+      { id: "severity", label: "Severity" },
+      { id: "message", label: "Message" },
+    ],
+    rows: rows.map((row) => ({
+      route: row.document_route,
+      rule: row.rule_id,
+      severity: row.severity,
+      message: row.message,
+    })),
   };
 }
 
