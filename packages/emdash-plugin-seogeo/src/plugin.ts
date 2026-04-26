@@ -36,9 +36,16 @@ export const capabilities = [
 // touches. They exist so the plugin typechecks against a stable contract
 // even when @emdash-cms/core has not been installed yet; the real emdash
 // types from the host take over once the peer dependency is present.
+export interface KvListed {
+  keys: { name: string }[];
+  list_complete: boolean;
+  cursor?: string;
+}
+
 export interface KvNamespace {
   get(key: string): Promise<string | null>;
   put(key: string, value: string): Promise<void>;
+  list(options?: { prefix?: string; cursor?: string }): Promise<KvListed>;
 }
 
 export interface PluginSettings {

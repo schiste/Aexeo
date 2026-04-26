@@ -1,3 +1,4 @@
+import type { KvNamespace } from "./plugin.js";
 import { handleAfterSave } from "./plugin.js";
 import { tools as mcpTools } from "./mcp.js";
 
@@ -30,6 +31,7 @@ export type BlockInteraction =
 export interface RouteContext {
   request: Request;
   body: BlockInteraction;
+  kv: KvNamespace;
 }
 
 export interface BlockResponse {
@@ -37,19 +39,71 @@ export interface BlockResponse {
   toast?: { message: string; type: "success" | "error" | "info" };
 }
 
-// Placeholder until 6.3 (findings page), 6.4 (score widget), and
-// 6.5 (document panel) replace each branch with real Block Kit output.
-async function handleAdminRoute({
-  body,
-}: RouteContext): Promise<BlockResponse> {
-  const page = "page" in body ? body.page : "(non-page interaction)";
+// Top-level dispatch for the admin route. emdash hands every page load
+// and every block interaction (button click, form submit) through the
+// same handler; we route on body.type first, then on body.page or
+// body.action_id.
+async function handleAdminRoute(ctx: RouteContext): Promise<BlockResponse> {
+  if (ctx.body.type === "page_load") {
+    return handlePageLoad(ctx, ctx.body.page);
+  }
+  // Action / form_submit are handled by re-running the page render
+  // after the side effect; the action_id encodes which page to
+  // refresh once stages 6.3-6.5 wire real interactions.
+  return handlePageLoad(ctx, "findings");
+}
+
+async function handlePageLoad(
+  ctx: RouteContext,
+  page: string,
+): Promise<BlockResponse> {
+  if (page === "findings") {
+    return renderFindingsPage(ctx);
+  }
+  if (page === "widget:seogeo-score") {
+    return renderScoreWidget(ctx);
+  }
+  if (page.startsWith("document")) {
+    return renderDocumentPanel(ctx, page);
+  }
+  return notFound(page);
+}
+
+async function renderFindingsPage(_ctx: RouteContext): Promise<BlockResponse> {
   return {
     blocks: [
-      { type: "header", text: "seogeo" },
-      {
-        type: "context",
-        text: `placeholder: received type=${body.type} page=${page}`,
-      },
+      { type: "header", text: "SEO findings" },
+      { type: "context", text: "stub (filled in 6.3)" },
+    ],
+  };
+}
+
+async function renderScoreWidget(_ctx: RouteContext): Promise<BlockResponse> {
+  return {
+    blocks: [
+      { type: "header", text: "SEO score" },
+      { type: "context", text: "stub (filled in 6.4)" },
+    ],
+  };
+}
+
+async function renderDocumentPanel(
+  _ctx: RouteContext,
+  _page: string,
+): Promise<BlockResponse> {
+  return {
+    blocks: [
+      { type: "header", text: "Document SEO" },
+      { type: "context", text: "stub (filled in 6.5)" },
+    ],
+  };
+}
+
+function notFound(page: string): BlockResponse {
+  return {
+    blocks: [
+      { type: "header", text: "Not found" },
+      { type: "context", text: `unknown page: ${page}` },
     ],
   };
 }
