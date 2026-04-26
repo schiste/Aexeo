@@ -1,5 +1,7 @@
 import type { EmdashDocument, Finding } from "./types.js";
+import { type FindingsDiff, diffFindings } from "./diff.js";
 import { evaluate } from "./evaluator.js";
+import { type IndexNowConfig, submitIndexNow } from "./indexnow.js";
 import { tools } from "./mcp.js";
 
 // Capability manifest. This is the single most important security surface
@@ -35,9 +37,16 @@ export interface KvNamespace {
   put(key: string, value: string): Promise<void>;
 }
 
+export interface PluginSettings {
+  // Optional IndexNow config. When present, the publish hook will
+  // submit the changed document URL according to shouldSubmit below.
+  indexNow?: IndexNowConfig;
+}
+
 export interface ContentAfterSaveContext {
   document: EmdashDocument;
   kv: KvNamespace;
+  settings?: PluginSettings;
 }
 
 export interface Plugin {
@@ -49,15 +58,43 @@ export interface Plugin {
   mcpTools: typeof tools;
 }
 
+// Policy hook: should this save trigger an IndexNow submission?
+//
+// IndexNow is rate-limited and noisy; submitting on every keystroke is
+// hostile to the protocol. Default policy: submit only when the diff
+// actually changes (added or resolved findings) AND no new error-severity
+// finding was introduced. Resolution alone counts because it means the
+// document moved from "broken" to "fixed", which is exactly the freshness
+// signal IndexNow exists for.
+//
+// You can pass a stricter or looser policy via PluginSettings.shouldSubmit
+// in a later iteration if the default doesn't match your editorial flow.
+export function defaultShouldSubmit(diff: FindingsDiff): boolean {
+  if (diff.added.length === 0 && diff.resolved.length === 0) {
+    return false;
+  }
+  return !diff.added.some((finding) => finding.severity === "error");
+}
+
 async function handleAfterSave({
   document,
   kv,
+  settings,
 }: ContentAfterSaveContext): Promise<void> {
   const findings = await evaluate([document]);
+  const previous = await readFindings(kv, document.route);
+  const diff = diffFindings(previous, findings);
+  // Order matters: write the new baseline first so a fast retry sees
+  // the latest evaluator output even if the IndexNow submission below
+  // throws or the Worker is killed.
   await kv.put(
     findingsKey(document.route),
     JSON.stringify({ route: document.route, findings }),
   );
+  if (settings?.indexNow && defaultShouldSubmit(diff)) {
+    const documentUrl = absoluteUrl(settings.indexNow.siteUrl, document.route);
+    await submitIndexNow(settings.indexNow, [documentUrl]);
+  }
 }
 
 export function findingsKey(route: string): string {
@@ -75,6 +112,15 @@ export async function readFindings(
   }
   const parsed = JSON.parse(raw) as { findings: Finding[] };
   return parsed.findings;
+}
+
+function absoluteUrl(siteUrl: string, route: string): string {
+  const base = siteUrl.endsWith("/") ? siteUrl.slice(0, -1) : siteUrl;
+  if (route === "" || route === "/") {
+    return base + "/";
+  }
+  const path = route.startsWith("/") ? route : `/${route}`;
+  return base + path;
 }
 
 const plugin: Plugin = {
