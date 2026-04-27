@@ -68,16 +68,21 @@ export const capabilities: readonly string[] = baseCapabilities;
 // touches. They exist so the plugin typechecks against a stable contract
 // even when @emdash-cms/core has not been installed yet; the real emdash
 // types from the host take over once the peer dependency is present.
-export interface KvListed {
-  keys: { name: string }[];
-  list_complete: boolean;
-  cursor?: string;
+// emdash's bridge JSON-serializes on the way in and JSON-parses on the
+// way out — values cross the wire as already-deserialized objects, not
+// raw strings. The list() method takes a bare prefix string and
+// returns a flat {key, value}[] array; both fields are populated, so
+// callers don't need a second round-trip to fetch values.
+export interface KvEntry<T = unknown> {
+  key: string;
+  value: T;
 }
 
 export interface KvNamespace {
-  get(key: string): Promise<string | null>;
-  put(key: string, value: string): Promise<void>;
-  list(options?: { prefix?: string; cursor?: string }): Promise<KvListed>;
+  get<T = unknown>(key: string): Promise<T | null>;
+  set(key: string, value: unknown): Promise<void>;
+  delete(key: string): Promise<boolean>;
+  list<T = unknown>(prefix?: string): Promise<KvEntry<T>[]>;
 }
 
 export interface PluginSettings {
@@ -190,7 +195,7 @@ export async function handleAfterSave(
   // Always persist the document — the score widget reads from
   // document:* keys and we want a fresh document set even when
   // evaluation fails. KV writes are idempotent on key.
-  await kv.put(documentKey(document.route), JSON.stringify(document));
+  await kv.set(documentKey(document.route), document);
 
   if (__SEOGEO_EVALUATOR_URL__ === null || __SEOGEO_EVAL_TOKEN__ === null) {
     // No evaluator configured at build time. The sandbox UI still
@@ -230,10 +235,10 @@ export async function handleAfterSave(
   }
 
   const diff = diffFindings(previous, findings);
-  await kv.put(
-    findingsKey(document.route),
-    JSON.stringify({ route: document.route, findings }),
-  );
+  await kv.set(findingsKey(document.route), {
+    route: document.route,
+    findings,
+  });
   if (settings?.indexNow && defaultShouldSubmit(diff)) {
     const documentUrl = absoluteUrl(settings.indexNow.siteUrl, document.route);
     await submitIndexNow(settings.indexNow, [documentUrl]);
@@ -253,28 +258,25 @@ export function documentKey(route: string): string {
 export async function readAllDocuments(
   kv: KvNamespace,
 ): Promise<EmdashDocument[]> {
-  const listed = await kv.list({ prefix: "document:" });
-  const out: EmdashDocument[] = [];
-  for (const entry of listed.keys) {
-    const raw = await kv.get(entry.name);
-    if (raw === null) {
-      continue;
-    }
-    out.push(JSON.parse(raw) as EmdashDocument);
-  }
-  return out;
+  // kv.list returns the parsed values inline — one round-trip, no
+  // get-per-key follow-up. Entries with malformed payloads are
+  // skipped rather than throwing, so a single corrupted KV row
+  // doesn't break the score widget.
+  const entries = await kv.list<EmdashDocument>("document:");
+  return entries
+    .map((entry) => entry.value)
+    .filter((value): value is EmdashDocument => value !== null);
 }
 
 export async function readFindings(
   kv: KvNamespace,
   route: string,
 ): Promise<Finding[]> {
-  const raw = await kv.get(findingsKey(route));
-  if (raw === null) {
+  const stored = await kv.get<{ findings: Finding[] }>(findingsKey(route));
+  if (stored === null) {
     return [];
   }
-  const parsed = JSON.parse(raw) as { findings: Finding[] };
-  return parsed.findings;
+  return stored.findings;
 }
 
 function absoluteUrl(siteUrl: string, route: string): string {

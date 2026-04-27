@@ -101,13 +101,17 @@ async function handlePageLoad(
   ctx: DispatchCtx,
   page: string,
 ): Promise<BlockResponse> {
-  if (page === "findings") {
+  // emdash sends body.page exactly as we registered it in adminPages
+  // (with the leading slash, e.g. "/findings"). Normalize once so
+  // dispatch matches whether the host evolves to send a bare name.
+  const normalized = page.startsWith("/") ? page.slice(1) : page;
+  if (normalized === "findings") {
     return renderFindingsPage(ctx);
   }
-  if (page === "widget:seogeo-score") {
+  if (normalized === "widget:seogeo-score") {
     return renderScoreWidget(ctx);
   }
-  if (page === "document") {
+  if (normalized === "document") {
     return renderDocumentPanel(ctx);
   }
   return notFound(page);
@@ -198,12 +202,19 @@ interface FindingRow extends Finding {
 }
 
 async function readAllFindings(kv: KvNamespace): Promise<FindingRow[]> {
-  const listed = await kv.list({ prefix: "findings:" });
+  // emdash's kv.list returns parsed values inline, so we don't need a
+  // second get-per-key pass — both the route key and the stored
+  // {route, findings} payload come back in one call.
+  const entries = await kv.list<{ route: string; findings: Finding[] }>(
+    "findings:",
+  );
   const out: FindingRow[] = [];
-  for (const entry of listed.keys) {
-    const route = entry.name.replace(/^findings:/, "");
-    const findings = await readFindings(kv, route);
-    for (const finding of findings) {
+  for (const entry of entries) {
+    if (entry.value === null) {
+      continue;
+    }
+    const route = entry.key.replace(/^findings:/, "");
+    for (const finding of entry.value.findings) {
       out.push({ ...finding, document_route: route });
     }
   }
