@@ -1,4 +1,8 @@
 import type { EmdashDocument, Finding } from "./types.js";
+import {
+  type EmdashContentItem,
+  contentItemToEmdashDocument,
+} from "./adapter.js";
 import { type FindingsDiff, diffFindings } from "./diff.js";
 import { type IndexNowConfig, submitIndexNow } from "./indexnow.js";
 import {
@@ -117,11 +121,15 @@ export interface SandboxCtx {
   };
 }
 
+// Shape emdash's runtime hands to content:afterSave handlers. The
+// host invokes hooks with `{content, collection, isNew}` (see
+// emdash/dist/astro/middleware.mjs `runAfterSaveHooks`). content is
+// the raw ContentItem row from the storage table — we adapt it to
+// the WASM bridge's EmdashDocument shape via contentItemToEmdashDocument.
 export interface ContentAfterSaveEvent {
-  document: EmdashDocument;
-  // Plugin-level settings supplied by the host (currently unused by
-  // emdash 0.7.0; kept for forward compatibility).
-  settings?: PluginSettings;
+  content: EmdashContentItem;
+  collection: string;
+  isNew: boolean;
 }
 
 // Policy hook: should this save trigger an IndexNow submission?
@@ -188,7 +196,7 @@ export async function handleAfterSave(
   event: ContentAfterSaveEvent,
   ctx: SandboxCtx,
 ): Promise<void> {
-  const { document, settings } = event;
+  const document = contentItemToEmdashDocument(event.content);
   const { kv, http, log } = ctx;
   const previous = await readFindings(kv, document.route);
 
@@ -239,10 +247,12 @@ export async function handleAfterSave(
     route: document.route,
     findings,
   });
-  if (settings?.indexNow && defaultShouldSubmit(diff)) {
-    const documentUrl = absoluteUrl(settings.indexNow.siteUrl, document.route);
-    await submitIndexNow(settings.indexNow, [documentUrl]);
-  }
+  // IndexNow integration is currently unwired — emdash 0.7.0 does not
+  // forward plugin settings into the sandbox, so there is no per-site
+  // way to enable IndexNow from astro.config without going through the
+  // same build-time define dance the evaluator URL uses. Track via the
+  // diff helper for the day we wire it.
+  void diff;
 }
 
 export function findingsKey(route: string): string {
