@@ -109,11 +109,27 @@ declare const __SEOGEO_EVALUATOR_URL__: string | null;
 declare const __SEOGEO_EVAL_TOKEN__: string | null;
 
 // emdash sandbox ctx shape we depend on. The full shape is broader,
-// but we only thread kv and http through afterSave; declaring this
-// locally keeps the plugin typecheckable without @emdash-cms/core.
+// but we only thread kv, http, and content through this plugin;
+// declaring this locally keeps the plugin typecheckable without
+// @emdash-cms/core. content.list goes through bridge.contentList
+// which requires the read:content capability (which we declare).
+export interface ContentList {
+  items: EmdashContentItem[];
+  cursor?: string;
+  hasMore: boolean;
+}
+
+export interface SandboxContentApi {
+  list(
+    collection: string,
+    opts?: { limit?: number; cursor?: string },
+  ): Promise<ContentList>;
+}
+
 export interface SandboxCtx {
   kv: KvNamespace;
   http: SidecarHttp;
+  content: SandboxContentApi;
   log?: {
     info(msg: string, data?: unknown): void;
     warn(msg: string, data?: unknown): void;
@@ -192,67 +208,145 @@ export function defaultEvaluationFailurePolicy(
   return { action: "keep_previous" };
 }
 
+// emdash 0.7.0's sandbox runner invokes content:afterSave fire-and-
+// forget after the request response is sent. The bridge bindings the
+// sandbox uses for KV, HTTP, and content access are tied to the
+// originating request's context — and by the time our hook runs they
+// are stale: `await ctx.kv.get(...)` and `await ctx.http.fetch(...)`
+// hang forever with no error surfacing (the host's wallTimeMs catch
+// also doesn't fire, even after minutes). We verified this with a
+// stepwise throwing probe: synchronous code before the first await
+// runs fine; anything past the first bridge call never returns.
+//
+// Because we can't perform I/O here, the hook can't actually trigger
+// evaluation. Eval runs from the admin route handler instead — see
+// the "Refresh" button on the findings page in sandbox-entry.ts. The
+// hook is kept as a no-op so we still appear in the loaded plugin
+// log line and can flip back to active mode the day emdash fixes
+// the post-response bridge contract (likely 0.8.x).
 export async function handleAfterSave(
-  event: ContentAfterSaveEvent,
-  ctx: SandboxCtx,
+  _event: ContentAfterSaveEvent,
+  _ctx: SandboxCtx,
 ): Promise<void> {
-  const document = contentItemToEmdashDocument(event.content);
+  // No-op. See block above.
+}
+
+// Default set of content collections the plugin sweeps when an admin
+// clicks Refresh. We can't introspect the host's schema from the
+// sandbox bridge in 0.7.0; the user can override this set via the
+// seogeoPlugin({ collections }) factory option once we plumb it.
+export const DEFAULT_COLLECTIONS = ["posts", "pages"] as const;
+
+export interface RefreshSummary {
+  documentsScanned: number;
+  routesUpdated: number;
+  totalFindings: number;
+  errors: string[];
+}
+
+// Walks the content collections, evaluates the full set via the
+// sidecar, and writes findings per-route into KV. This runs from the
+// admin route handler — which has a live request context where
+// kv/http bridges work, unlike the post-response afterSave context.
+export async function evaluateAndPersistAll(
+  ctx: SandboxCtx,
+  options: { collections?: readonly string[] } = {},
+): Promise<RefreshSummary> {
+  const collections = options.collections ?? DEFAULT_COLLECTIONS;
   const { kv, http, log } = ctx;
-  const previous = await readFindings(kv, document.route);
+  const summary: RefreshSummary = {
+    documentsScanned: 0,
+    routesUpdated: 0,
+    totalFindings: 0,
+    errors: [],
+  };
 
-  // Always persist the document — the score widget reads from
-  // document:* keys and we want a fresh document set even when
-  // evaluation fails. KV writes are idempotent on key.
-  await kv.set(documentKey(document.route), document);
+  // 1. Pull every published document from each collection. The bridge
+  //    enforces a per-call limit of 100; iterate by cursor so the full
+  //    set is collected even on larger sites. Empty collections (or
+  //    permissions errors) are tolerated — they accrue to summary.errors.
+  const documents: EmdashDocument[] = [];
+  const documentRoutes = new Set<string>();
+  for (const collection of collections) {
+    let cursor: string | undefined;
+    do {
+      try {
+        const page: ContentList = await ctx.content.list(collection, {
+          limit: 100,
+          ...(cursor === undefined ? {} : { cursor }),
+        });
+        for (const item of page.items) {
+          const document = contentItemToEmdashDocument(item);
+          documents.push(document);
+          documentRoutes.add(document.route);
+        }
+        cursor = page.hasMore ? page.cursor : undefined;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        summary.errors.push(`${collection}: ${message}`);
+        cursor = undefined;
+      }
+    } while (cursor !== undefined);
+  }
+  summary.documentsScanned = documents.length;
 
-  if (__SEOGEO_EVALUATOR_URL__ === null || __SEOGEO_EVAL_TOKEN__ === null) {
-    // No evaluator configured at build time. The sandbox UI still
-    // works against pre-existing KV state but new saves don't update
-    // findings. Surface this in the host log so an unconfigured
-    // install is debuggable.
-    log?.warn?.(
-      "seogeo evaluator not configured at build time; skipping evaluation",
-    );
-    return;
+  // 2. Persist the documents in KV — the score widget reads them on
+  //    page load, so even if the sidecar fetch below fails we want
+  //    fresh data backing the widget.
+  for (const document of documents) {
+    await kv.set(documentKey(document.route), document);
   }
 
+  if (
+    __SEOGEO_EVALUATOR_URL__ === null ||
+    __SEOGEO_EVAL_TOKEN__ === null
+  ) {
+    summary.errors.push(
+      "evaluator not configured at build time (SEOGEO_EVALUATOR_URL/SEOGEO_EVAL_TOKEN)",
+    );
+    return summary;
+  }
+
+  // 3. Evaluate via the sidecar and group findings by route. The
+  //    sidecar runs WASM in a Worker that doesn't have post-response
+  //    context issues; admin route handlers always run in-request.
   const sidecarConfig: SidecarConfig = {
     url: __SEOGEO_EVALUATOR_URL__,
     authToken: __SEOGEO_EVAL_TOKEN__,
   };
-  const result = await evaluateViaSidecar(http, sidecarConfig, [document]);
-
-  let findings: Finding[];
-  if (result.ok) {
-    findings = result.findings;
-  } else {
+  const result = await evaluateViaSidecar(http, sidecarConfig, documents);
+  if (!result.ok) {
     log?.error?.(`seogeo sidecar failure (${result.reason})`, {
       detail: result.detail,
     });
-    const policy = defaultEvaluationFailurePolicy(result, previous);
-    if (policy.action === "rethrow") {
-      throw policy.error;
-    }
-    if (policy.action === "clear") {
-      findings = [];
-    } else {
-      // keep_previous: nothing more to do for findings; bail before
-      // overwriting KV so the previous baseline is preserved exactly.
-      return;
-    }
+    summary.errors.push(`sidecar ${result.reason}: ${result.detail}`);
+    return summary;
   }
 
-  const diff = diffFindings(previous, findings);
-  await kv.set(findingsKey(document.route), {
-    route: document.route,
-    findings,
-  });
-  // IndexNow integration is currently unwired — emdash 0.7.0 does not
-  // forward plugin settings into the sandbox, so there is no per-site
-  // way to enable IndexNow from astro.config without going through the
-  // same build-time define dance the evaluator URL uses. Track via the
-  // diff helper for the day we wire it.
-  void diff;
+  const findingsByRoute = new Map<string, Finding[]>();
+  for (const route of documentRoutes) {
+    findingsByRoute.set(route, []);
+  }
+  for (const finding of result.findings) {
+    // The bridge tags page-scope findings with a path that maps to
+    // our document route; sitewide and template-scope findings get
+    // bucketed under "*" so the findings page can list them under a
+    // dedicated row.
+    const bucket = finding.scope === "page" ? finding.path : "*";
+    const list = findingsByRoute.get(bucket) ?? [];
+    list.push(finding);
+    findingsByRoute.set(bucket, list);
+  }
+
+  // 4. Write findings per route. This both creates new entries and
+  //    overwrites cleared routes (a route with zero findings stores
+  //    an empty array — the findings page treats that as "clean").
+  for (const [route, findings] of findingsByRoute) {
+    await kv.set(findingsKey(route), { route, findings });
+    summary.routesUpdated += 1;
+  }
+  summary.totalFindings = result.findings.length;
+  return summary;
 }
 
 export function findingsKey(route: string): string {

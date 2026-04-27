@@ -1,5 +1,10 @@
-import type { KvNamespace, SandboxCtx } from "./plugin.js";
-import { handleAfterSave, readAllDocuments, readFindings } from "./plugin.js";
+import type { KvNamespace, RefreshSummary, SandboxCtx } from "./plugin.js";
+import {
+  evaluateAndPersistAll,
+  handleAfterSave,
+  readAllDocuments,
+  readFindings,
+} from "./plugin.js";
 import { tools as mcpTools } from "./mcp.js";
 import { scoreSite } from "./evaluator.js";
 import type { Finding, SiteIntelligenceScore } from "./types.js";
@@ -62,6 +67,9 @@ async function handleAdminRoute(
   input: RouteInput,
   ctx: SandboxCtx,
 ): Promise<BlockResponse> {
+  ctx.log?.info?.(
+    `seogeo route: type=${input.input?.type} page=${(input.input as { page?: string })?.page ?? ""}`,
+  );
   const dispatch: DispatchCtx = { body: input.input, kv: ctx.kv, ctx };
   if (dispatch.body.type === "page_load") {
     return handlePageLoad(dispatch, dispatch.body.page);
@@ -125,6 +133,9 @@ async function handleBlockAction(
   if (actionId === "view_document" && typeof value === "string") {
     return renderDocumentPanel(ctx, value);
   }
+  if (actionId === "refresh_findings") {
+    return handleRefresh(ctx);
+  }
   // Filters on the findings page are stubbed: re-render the unfiltered
   // table for now. Per-filter state is a small follow-up once we thread
   // the active filter through the response.
@@ -132,6 +143,49 @@ async function handleBlockAction(
     return renderFindingsPage(ctx);
   }
   return notFound(actionId);
+}
+
+async function handleRefresh(ctx: DispatchCtx): Promise<BlockResponse> {
+  // The route handler runs in a live request context, so the bridge
+  // bindings (kv, http, content) are valid here — unlike afterSave
+  // which fires post-response when bindings are stale. This is where
+  // the actual eval flow lives in emdash 0.7.0.
+  let summary: RefreshSummary;
+  try {
+    summary = await evaluateAndPersistAll(ctx.ctx);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return {
+      blocks: [
+        { type: "header", text: "SEO findings" },
+        {
+          type: "banner",
+          title: `Refresh failed: ${detail}`,
+          variant: "alert",
+        },
+      ],
+      toast: { message: `Refresh failed: ${detail}`, type: "error" },
+    };
+  }
+  const refreshed = await renderFindingsPage(ctx);
+  const toastMessage =
+    summary.errors.length === 0
+      ? `Refreshed ${summary.routesUpdated} routes (${summary.totalFindings} findings across ${summary.documentsScanned} documents)`
+      : `Refresh completed with ${summary.errors.length} errors — see banner`;
+  if (summary.errors.length > 0) {
+    refreshed.blocks.unshift({
+      type: "banner",
+      title: `Refresh issues: ${summary.errors.join(" • ")}`,
+      variant: "warning",
+    });
+  }
+  return {
+    ...refreshed,
+    toast: {
+      message: toastMessage,
+      type: summary.errors.length === 0 ? "success" : "info",
+    },
+  };
 }
 
 async function renderFindingsPage(ctx: DispatchCtx): Promise<BlockResponse> {
@@ -146,19 +200,25 @@ async function renderFindingsPage(ctx: DispatchCtx): Promise<BlockResponse> {
       type: "context",
       text:
         findings.length === 0
-          ? "No documents have been saved yet — findings appear after the next emdash save."
+          ? "No findings yet — click Refresh to evaluate the site."
           : `${findings.length} findings across ${routes.length} routes — ${errors.length} errors, ${warnings.length} warnings.`,
     },
     { type: "divider" },
     {
       type: "actions",
       elements: [
+        // Refresh is the primary action: emdash 0.7.0's afterSave hook
+        // can't reliably do I/O (post-response bridge invalidation), so
+        // re-evaluation is admin-triggered rather than save-triggered.
+        // Pressing this lists all content via the live in-request bridge,
+        // calls the sidecar /evaluate, and writes findings back to KV.
         {
           type: "button",
-          label: "All",
-          action_id: "filter:all",
+          label: "Refresh",
+          action_id: "refresh_findings",
           style: "primary",
         },
+        { type: "button", label: "All", action_id: "filter:all" },
         { type: "button", label: "Errors only", action_id: "filter:errors" },
         {
           type: "button",
