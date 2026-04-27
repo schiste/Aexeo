@@ -102,6 +102,11 @@ export function createPlugin(_options: ConfiguredPluginOptions = {}): unknown {
     } as never,
     admin: {
       pages: [
+        // emdash's /admin/plugins/<id> root navigates to the plugin's
+        // "/" page — without it, clicking the plugin in the meta list
+        // produces a "Not Found". Alias "/" to the findings page so
+        // the entry-point lands somewhere useful.
+        { path: "/", label: "SEO findings" },
         { path: "/findings", label: "SEO findings" },
         { path: "/document", label: "Document SEO" },
       ],
@@ -133,22 +138,23 @@ type BlockInteraction =
       values: Record<string, unknown>;
     };
 
-interface RouteInput {
-  input: BlockInteraction;
-  request?: unknown;
-  requestMeta?: unknown;
-}
-
 interface BlockResponse {
   blocks: unknown[];
   toast?: { message: string; type: "success" | "error" | "info" };
 }
 
-async function handleAdminRoute(
-  input: RouteInput,
-  ctx: SandboxCtx,
-): Promise<BlockResponse> {
-  const body = input.input;
+// Configured-plugin route handlers receive a single RouteContext
+// argument (vs. the sandboxed wrapper's (input, ctx) two-arg form).
+// The interaction body lives at ctx.input; bridges (kv, http,
+// content) hang off ctx directly. We use a permissive type because
+// emdash's full RouteContext type pulls in @emdash-cms/core that
+// the package doesn't take as a hard peer dep.
+interface RouteContext extends SandboxCtx {
+  input: BlockInteraction;
+}
+
+async function handleAdminRoute(ctx: RouteContext): Promise<BlockResponse> {
+  const body = ctx.input;
   if (body.type === "page_load") {
     return handlePageLoad(ctx, body.page);
   }
@@ -184,7 +190,9 @@ async function handlePageLoad(
   page: string,
 ): Promise<BlockResponse> {
   const normalized = page.startsWith("/") ? page.slice(1) : page;
-  if (normalized === "findings") {
+  // "/" and "/findings" both render the findings page — "/" is the
+  // alias emdash's /admin/plugins/<id> root navigates to.
+  if (normalized === "" || normalized === "findings") {
     return renderFindingsPage(ctx);
   }
   if (normalized === "widget:seogeo-score") {

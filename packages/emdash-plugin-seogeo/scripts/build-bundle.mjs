@@ -190,19 +190,22 @@ if (sandboxResult.errors.length > 0) {
   process.exit(1);
 }
 
-// 2. Configured-plugin entry. Runs in the host Worker process where
-//    the cold-start CPU budget can actually fit the 1.2MB WASM.
-//    esbuild's `binary` loader inlines the .wasm file as a Uint8Array
-//    literal in the output JS — same trick as the sandbox bundle's
-//    custom plugin, but using esbuild's built-in loader instead of a
-//    handwritten one. The configured bundle has no sidecar fetch;
-//    evaluation runs in-process via wasm-init.ts.
+// 2. Configured-plugin entry. Runs in the host Worker process. We
+//    do NOT inline the .wasm bytes — Cloudflare Workers / workerd
+//    disallow runtime WebAssembly.instantiate from raw bytes ("Wasm
+//    code generation disallowed by embedder"). The only allowed
+//    path is for the consumer's bundler to resolve the .wasm import
+//    to a precompiled WebAssembly.Module at build time, then we
+//    instantiate synchronously via `new WebAssembly.Instance()`.
 //
-// `emdash` is a peer dependency of the consumer (their host Worker
-// has its own copy at runtime), so we must NOT bundle it — keeping
-// the import statement intact lets the consumer's bundler resolve
-// to its installed copy. Same reasoning for any `node:*` import
-// emdash itself transitively pulls in.
+//    Mark `*.wasm` as external so esbuild keeps the import
+//    statement intact in the output. Ship the .wasm file alongside
+//    dist/configured.js (copied below); the consumer's Vite +
+//    @astrojs/cloudflare or Wrangler chain handles the resolution.
+//
+//    `emdash` is a peer dependency of the consumer, so we mark it
+//    external too. Same for any `node:*` import emdash transitively
+//    pulls in.
 const configuredResult = await build({
   entryPoints: [resolve(root, "src/configured.ts")],
   outfile: resolve(root, "dist/configured.js"),
@@ -210,11 +213,10 @@ const configuredResult = await build({
   format: "esm",
   platform: "neutral",
   target: "es2022",
-  external: ["emdash", "node:*"],
+  external: ["emdash", "node:*", "*.wasm"],
   minify: false,
   sourcemap: false,
   legalComments: "none",
-  loader: { ".wasm": "binary" },
   logLevel: "info",
 });
 
@@ -230,5 +232,5 @@ console.log(
 const configuredPath = resolve(root, "dist/configured.js");
 const configuredStat = await readFile(configuredPath);
 console.log(
-  `bundled: dist/configured.js (${configuredStat.length.toLocaleString()} bytes — includes inlined WASM)`,
+  `bundled: dist/configured.js (${configuredStat.length.toLocaleString()} bytes; .wasm import kept external)`,
 );

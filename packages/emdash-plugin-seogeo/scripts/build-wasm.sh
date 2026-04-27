@@ -45,12 +45,17 @@ wasm-bindgen "$WASM_PATH" --out-dir "$OUT_DIR" --target bundler
 #     call (__wbg_set_wasm, evaluateDocuments, scoreIntelligence).
 # Without these overrides, `npm run typecheck` fails.
 cat > "$OUT_DIR/aexeo_emdash_bridge_bg.wasm.d.ts" <<'EOF'
-// Overrides the wasm-bindgen-generated default to match the
-// binary-loader / inline-plugin shape we actually consume. See
-// scripts/build-wasm.sh for why this file is rewritten after
-// every wasm-bindgen run.
-declare const bytes: Uint8Array;
-export default bytes;
+// Overrides the wasm-bindgen-generated default to match what
+// emdash hosts consuming this package actually receive at the
+// import site: a precompiled WebAssembly.Module. Cloudflare
+// Workers / workerd disallow runtime WebAssembly.instantiate
+// from raw bytes ("Wasm code generation disallowed by embedder"),
+// so we depend on the consumer's bundler resolving the import
+// to a Module at build time. esbuild's "wasm" loader does this;
+// Wrangler does this natively. See scripts/build-wasm.sh for why
+// this file is rewritten after every wasm-bindgen run.
+declare const wasmModule: WebAssembly.Module;
+export default wasmModule;
 EOF
 
 cat > "$OUT_DIR/aexeo_emdash_bridge_bg.d.ts" <<'EOF'

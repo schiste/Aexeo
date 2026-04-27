@@ -71,6 +71,10 @@ export function seogeoPlugin(
       "kv:seogeo-baselines",
     ],
     adminPages: [
+      // "/" alias is required so emdash's /admin/plugins/<id> root
+      // doesn't 404 — that page is where the meta /admin/plugins
+      // list links to when an operator clicks the plugin entry.
+      { path: "/", label: "SEO findings" },
       { path: "/findings", label: "SEO findings" },
       { path: "/document", label: "Document SEO" },
     ],
