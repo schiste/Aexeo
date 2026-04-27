@@ -1,97 +1,78 @@
-import { buildAllowedHosts, buildCapabilities } from "./plugin.js";
+// Public surface for @aexeo/emdash-plugin-seogeo.
+//
+// The package ships TWO plugin factories. Both return descriptors
+// emdash's astro integration consumes at build time; both have a
+// matching runtime entrypoint that emdash imports at boot.
+//
+//   1. seogeoPlugin() — CONFIGURED MODE (recommended). Returns a
+//      descriptor pointing at "@aexeo/emdash-plugin-seogeo/configured"
+//      whose createPlugin() runs in-process inside the host emdash
+//      Worker. No sidecar Worker, no runtime token, no Setup page.
+//      Use this for first-party deploys where you trust the plugin
+//      with full host access. Place in `plugins: [...]`.
+//
+//   2. seogeoPluginSandboxed({ evaluatorHost }) — SANDBOXED MODE.
+//      Returns a descriptor pointing at
+//      "@aexeo/emdash-plugin-seogeo/sandbox" loaded by emdash's
+//      Worker Loader, with a separate sidecar Worker doing the WASM
+//      evaluation. Required when the plugin runs on third-party
+//      emdash sites that don't trust it with host access. Place in
+//      `sandboxed: [...]` with `sandboxRunner: sandbox()`.
 
-// Local mirror of emdash's PluginDescriptor / SandboxedPluginDescriptor
-// (the latter is a type alias for the former in the host source). The
-// real types come from @emdash-cms/core once that peer dependency is
-// installed; this stand-in keeps the plugin typecheckable in isolation
-// and pinned to the field set we verified against the host source.
-export interface PluginAdminPage {
-  path: string;
-  label: string;
-  icon?: string;
-}
+import type { SeogeoSandboxedOptions } from "./sandbox.js";
 
-export interface PluginAdminWidget {
-  id: string;
-  size?: "full" | "half" | "third";
-  title?: string;
-}
+export { seogeoPluginSandboxed } from "./sandbox.js";
+export type {
+  PluginAdminPage,
+  PluginAdminWidget,
+  SandboxedPluginDescriptor,
+  SeogeoSandboxedOptions,
+} from "./sandbox.js";
 
-export interface SandboxedPluginDescriptor {
+// Configured-mode descriptor. Mirrors emdash's PluginDescriptor; the
+// host's astro integration auto-generates an importer that does:
+//
+//   import { createPlugin } from "@aexeo/emdash-plugin-seogeo/configured";
+//   plugins.push(createPlugin(<options>));
+//
+// adminEntry is omitted because the plugin's admin pages are rendered
+// server-side via Block Kit (returned from the route handler), not
+// client-side React components.
+export interface ConfiguredPluginDescriptor {
   id: string;
   version: string;
   entrypoint: string;
-  // Required for sandboxed plugins; the host's integration validator
-  // rejects the default "native" format from the sandboxed: [] array.
-  format: "standard";
-  capabilities?: readonly string[];
-  adminPages?: readonly PluginAdminPage[];
-  // emdash names the field adminWidgets, not dashboardWidgets — easy
-  // mistake from the dashboard-side rendering vocabulary.
-  adminWidgets?: readonly PluginAdminWidget[];
+  options: Record<string, unknown>;
+  capabilities: readonly string[];
   allowedHosts?: readonly string[];
+  adminPages: readonly { path: string; label: string }[];
+  adminWidgets: readonly { id: string; size?: string; title?: string }[];
 }
 
-// Factory function the consumer calls in their astro.config.mjs:
-//
-//   import { d1, r2, sandbox } from "@emdash-cms/cloudflare";
-//   import { seogeoPlugin } from "@aexeo/emdash-plugin-seogeo";
-//   emdash({
-//     database: d1({ binding: "DB" }),
-//     storage: r2({ binding: "MEDIA" }),
-//     sandboxed: [seogeoPlugin({
-//       evaluatorHost: "seogeo-crawl-worker.<your-subdomain>.workers.dev",
-//     })],
-//     sandboxRunner: sandbox(),
-//   });
-//
-// Sandboxed plugins on emdash 0.7.0 require Cloudflare Workers — the
-// only sandbox runner ships in @emdash-cms/cloudflare and uses Worker
-// Loader for V8 isolation. Node-platform emdash apps fall back to a
-// noop runner that registers the descriptor but never invokes the
-// sandbox entry, so plugin routes return 404 even after auth.
 export interface SeogeoPluginOptions {
-  // Public host of the deployed seogeo-crawl-worker. We need this at
-  // descriptor-creation time because emdash's sandbox bridge enforces
-  // outbound HTTP via an `allowedHosts` list that's read once at
-  // integration setup and never changed at runtime. The host you pass
-  // here is what the bridge will permit for outbound fetch — anything
-  // else (including a typo) is rejected with "Host not allowed".
-  //
-  // The full sidecar URL and the auth token are NOT supplied here;
-  // they're managed at runtime via the Setup admin page (which writes
-  // to KV). Rotation only requires updating those values, not a
-  // rebuild. The host part stays constant for the life of the
-  // sidecar deploy.
-  //
-  // Falls back to process.env.SEOGEO_EVALUATOR_HOST so CI / Cloudflare
-  // Pages builds can configure it without editing astro.config.
-  evaluatorHost?: string;
+  // No knobs yet. Reserved so future configured-mode toggles land
+  // without breaking the seogeoPlugin() call sites.
 }
 
-// Mirrors the calling convention used by every first-party emdash
-// plugin (embedsPlugin, auditLogPlugin, webhookNotifierPlugin, ...).
 export function seogeoPlugin(
   options: SeogeoPluginOptions = {},
-): SandboxedPluginDescriptor {
-  const evaluatorHost =
-    options.evaluatorHost ?? process.env.SEOGEO_EVALUATOR_HOST ?? null;
+): ConfiguredPluginDescriptor {
   return {
     id: "aexeo-seogeo",
     version: "0.0.1",
-    // Subpath export of this same package; must match package.json
-    // `exports["./sandbox"]`.
-    entrypoint: "@aexeo/emdash-plugin-seogeo/sandbox",
-    format: "standard",
-    capabilities: buildCapabilities(evaluatorHost),
-    allowedHosts: buildAllowedHosts(evaluatorHost),
-    // Pages mount at /admin/plugins/aexeo-seogeo/<path>. The page name
-    // (without leading slash) is what the sandbox entry receives in
-    // `body.page` when emdash POSTs the page_load interaction.
+    // Subpath import resolved by the consumer's bundler at build
+    // time — must match the package.json `exports["./configured"]`
+    // entry.
+    entrypoint: "@aexeo/emdash-plugin-seogeo/configured",
+    options: { ...options },
+    capabilities: [
+      "read:content",
+      "read:schema",
+      "kv:seogeo-baselines",
+    ],
     adminPages: [
       { path: "/findings", label: "SEO findings" },
       { path: "/document", label: "Document SEO" },
-      { path: "/setup", label: "Setup" },
     ],
     adminWidgets: [
       { id: "seogeo-score", size: "third", title: "SEO score" },

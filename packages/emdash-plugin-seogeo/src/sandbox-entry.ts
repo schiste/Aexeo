@@ -1,4 +1,5 @@
 import type {
+  EvaluatorFn,
   KvNamespace,
   RefreshSummary,
   SandboxCtx,
@@ -12,6 +13,7 @@ import {
   readSidecarConfig,
   writeSidecarConfig,
 } from "./plugin.js";
+import { evaluateViaSidecar } from "./sidecar.js";
 import { tools as mcpTools } from "./mcp.js";
 import { scoreSite } from "./evaluator.js";
 import type { Finding, SiteIntelligenceScore } from "./types.js";
@@ -162,10 +164,28 @@ async function handleRefresh(ctx: DispatchCtx): Promise<BlockResponse> {
   // The route handler runs in a live request context, so the bridge
   // bindings (kv, http, content) are valid here — unlike afterSave
   // which fires post-response when bindings are stale. This is where
-  // the actual eval flow lives in emdash 0.7.0.
+  // the actual eval flow lives for the sandboxed plugin path.
+  const sandboxEvaluator: EvaluatorFn = async (documents) => {
+    const runtime = await readSidecarConfig(ctx.kv);
+    if (runtime === null) {
+      return {
+        ok: false,
+        reason: "config_missing",
+        detail:
+          "sidecar not configured — open the seogeo Setup page and enter your evaluator URL and token",
+      };
+    }
+    return evaluateViaSidecar(
+      ctx.ctx.http,
+      { url: runtime.url, authToken: runtime.token },
+      documents,
+    );
+  };
   let summary: RefreshSummary;
   try {
-    summary = await evaluateAndPersistAll(ctx.ctx);
+    summary = await evaluateAndPersistAll(ctx.ctx, {
+      evaluator: sandboxEvaluator,
+    });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     return {

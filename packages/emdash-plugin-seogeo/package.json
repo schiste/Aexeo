@@ -12,6 +12,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./configured": {
+      "types": "./dist/configured.d.ts",
+      "import": "./dist/configured.js",
+      "default": "./dist/configured.js"
+    },
     "./sandbox": {
       "types": "./dist/sandbox-entry.d.ts",
       "import": "./dist/sandbox-entry.js",
@@ -32,15 +37,20 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@emdash-cms/core": "*"
+    "@emdash-cms/core": "*",
+    "emdash": ">=0.7.0"
   },
   "peerDependenciesMeta": {
     "@emdash-cms/core": {
+      "optional": true
+    },
+    "emdash": {
       "optional": true
     }
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "emdash": "^0.7.0",
     "esbuild": "^0.28.0",
     "typescript": "^5.6.0"
   }

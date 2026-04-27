@@ -5,12 +5,7 @@ import {
 } from "./adapter.js";
 import { type FindingsDiff, diffFindings } from "./diff.js";
 import { type IndexNowConfig, submitIndexNow } from "./indexnow.js";
-import {
-  type SidecarConfig,
-  type SidecarHttp,
-  type SidecarResult,
-  evaluateViaSidecar,
-} from "./sidecar.js";
+import type { SidecarHttp } from "./sidecar.js";
 
 // This module owns the publish-time hook plus the shared types the
 // sandbox entry composes into definePlugin. It used to also export the
@@ -211,47 +206,13 @@ export function defaultShouldSubmit(diff: FindingsDiff): boolean {
   return !diff.added.some((finding) => finding.severity === "error");
 }
 
-// Policy hook: what should the plugin do when the sidecar evaluator
-// fails? This runs inside emdash's content:afterSave hook, so the
-// editor is waiting on us. There is no single right answer — the
-// trade-off is between editorial UX and signal accuracy.
-//
-// `previous` is the last successful set of findings stored in KV for
-// this route (may be empty on first-ever save). `failure` describes
-// why the sidecar call failed (network_error, auth_error,
-// server_error, invalid_response).
-//
-// Implementations must return one of:
-//   - { action: "keep_previous" } — preserve last-known-good findings.
-//     The findings page and document panel keep showing the previous
-//     state; users may not notice the eval is broken.
-//   - { action: "clear" } — overwrite KV with []. Findings page goes
-//     empty for this route; loud-but-misleading.
-//   - { action: "rethrow", error } — propagate as exception. emdash
-//     surfaces a 500 to the editor, the save itself may roll back
-//     depending on host behavior. Users see the breakage immediately.
-//
-// FIXME(daisy): pick a default that matches your editorial workflow,
-// keep it 5–10 lines, and lean on the `failure.reason` discriminator
-// to handle different failure modes differently if you want to.
-export type EvaluationFailurePolicy =
-  | { action: "keep_previous" }
-  | { action: "clear" }
-  | { action: "rethrow"; error: Error };
-
-export function defaultEvaluationFailurePolicy(
-  failure: Extract<SidecarResult, { ok: false }>,
-  previous: readonly Finding[],
-): EvaluationFailurePolicy {
-  // TODO(user): replace this conservative default. The current policy
-  // keeps previous findings on every failure mode, which is silent
-  // when the sidecar is misconfigured. Consider rethrowing on
-  // auth_error (loud feedback for setup mistakes) and keep_previous
-  // on transient network_error/server_error.
-  void failure;
-  void previous;
-  return { action: "keep_previous" };
-}
+// (Note: a previous version of this module exposed an
+// EvaluationFailurePolicy hook for sandboxed afterSave. With the
+// configured plugin path, afterSave runs in the host's request
+// context and exceptions propagate naturally — there's nothing for a
+// policy hook to decide. The hook will be reintroduced if/when the
+// sandboxed afterSave bug is fixed upstream and we re-enable that
+// path. See git log for the previous design.)
 
 // emdash 0.7.0's sandbox runner invokes content:afterSave fire-and-
 // forget after the request response is sent. The bridge bindings the
@@ -273,7 +234,45 @@ export async function handleAfterSave(
   _event: ContentAfterSaveEvent,
   _ctx: SandboxCtx,
 ): Promise<void> {
-  // No-op. See block above.
+  // No-op. Sandboxed mode only. See block above.
+}
+
+// Parameterized afterSave for the configured plugin path. Runs in
+// the host's request context so all bridge calls are valid; replaces
+// just this document's findings (sitewide/template findings stay
+// untouched until the next Refresh, which sweeps the whole site).
+export async function handleAfterSaveConfigured(
+  event: ContentAfterSaveEvent,
+  ctx: SandboxCtx,
+  evaluator: EvaluatorFn,
+): Promise<void> {
+  const document = contentItemToEmdashDocument(event.content);
+  const { kv, log } = ctx;
+
+  // Persist the document so the score widget has fresh data even if
+  // evaluation fails below.
+  await kv.set(documentKey(document.route), document);
+
+  const result = await evaluator([document]);
+  if (!result.ok) {
+    log?.error?.(`afterSave evaluator failure (${result.reason})`, {
+      detail: result.detail,
+    });
+    // Leave previous findings in place — silent-on-failure is the
+    // safer default for an editor's save flow. Any hard problem
+    // surfaces on the next manual Refresh.
+    return;
+  }
+
+  // Page-scoped findings replace this route's stored set; sitewide
+  // and template-scoped findings are left for the next full Refresh.
+  const pageFindings = result.findings.filter(
+    (finding) => finding.scope === "page",
+  );
+  await kv.set(findingsKey(document.route), {
+    route: document.route,
+    findings: pageFindings,
+  });
 }
 
 // Default set of content collections the plugin sweeps when an admin
@@ -289,16 +288,40 @@ export interface RefreshSummary {
   errors: string[];
 }
 
+// Result of an evaluation pass — either findings or a structured
+// failure. The `reason` discriminator is opaque to evaluateAndPersistAll;
+// it just gets surfaced in the RefreshSummary.errors list.
+export type EvaluationOutcome =
+  | { ok: true; findings: Finding[] }
+  | { ok: false; reason: string; detail: string };
+
+// Pluggable evaluator. Two implementations live in this package:
+//
+//   - Configured plugin (in-process, default): calls the WASM bridge
+//     directly via src/wasm-init.ts. No sidecar, no fetch, no token.
+//     Works because configured plugins run in the host Worker with
+//     full access to compiled WASM bound by the bundler.
+//   - Sandboxed plugin (legacy/future-public): calls a deployed
+//     sidecar Worker via the bridge's http.fetch. Required when the
+//     plugin runs inside emdash's Worker Loader sandbox where the
+//     1.2MB WASM blows the 50ms cpuMs budget at module init.
+//
+// evaluateAndPersistAll is symmetric across the two — only this
+// function differs.
+export type EvaluatorFn = (
+  documents: readonly EmdashDocument[],
+) => Promise<EvaluationOutcome>;
+
 // Walks the content collections, evaluates the full set via the
-// sidecar, and writes findings per-route into KV. This runs from the
-// admin route handler — which has a live request context where
-// kv/http bridges work, unlike the post-response afterSave context.
+// supplied evaluator, and writes findings per-route into KV. This
+// runs from the admin route handler — which has a live request
+// context where kv/http/content bridges work in either plugin mode.
 export async function evaluateAndPersistAll(
   ctx: SandboxCtx,
-  options: { collections?: readonly string[] } = {},
+  options: { collections?: readonly string[]; evaluator: EvaluatorFn },
 ): Promise<RefreshSummary> {
   const collections = options.collections ?? DEFAULT_COLLECTIONS;
-  const { kv, http, log } = ctx;
+  const { kv, log } = ctx;
   const summary: RefreshSummary = {
     documentsScanned: 0,
     routesUpdated: 0,
@@ -342,29 +365,15 @@ export async function evaluateAndPersistAll(
     await kv.set(documentKey(document.route), document);
   }
 
-  // 3. Evaluate via the sidecar and group findings by route. The
-  //    sidecar runs WASM in a Worker that doesn't have post-response
-  //    context issues; admin route handlers always run in-request.
-  //    The URL and token are read from KV (set via the Setup admin
-  //    page); a missing or partial config yields a single, clear
-  //    error pointing the user back to that page.
-  const runtime = await readSidecarConfig(kv);
-  if (runtime === null) {
-    summary.errors.push(
-      "sidecar not configured — open the seogeo Setup page and enter your evaluator URL and token",
-    );
-    return summary;
-  }
-  const sidecarConfig: SidecarConfig = {
-    url: runtime.url,
-    authToken: runtime.token,
-  };
-  const result = await evaluateViaSidecar(http, sidecarConfig, documents);
+  // 3. Evaluate via the supplied evaluator and group findings by
+  //    route. The evaluator strategy (in-process WASM vs sidecar
+  //    fetch) is the only configured-vs-sandboxed difference.
+  const result = await options.evaluator(documents);
   if (!result.ok) {
-    log?.error?.(`seogeo sidecar failure (${result.reason})`, {
+    log?.error?.(`seogeo evaluator failure (${result.reason})`, {
       detail: result.detail,
     });
-    summary.errors.push(`sidecar ${result.reason}: ${result.detail}`);
+    summary.errors.push(`${result.reason}: ${result.detail}`);
     return summary;
   }
 

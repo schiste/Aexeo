@@ -131,24 +131,54 @@ export { evaluateDocuments, scoreIntelligence } from "./aexeo_emdash_bridge_bg.j
 
 await mkdir(resolve(root, "dist"), { recursive: true });
 
-// As of v0.0.2, sidecar URL and token are read from KV at runtime
-// (see CONFIG_URL_KEY / CONFIG_TOKEN_KEY in src/plugin.ts), populated
-// by the Setup admin page. The previous build-time `define`
-// substitution forced every site operator to add a prebuild hook to
-// their package.json so SEOGEO_EVALUATOR_URL/SEOGEO_EVAL_TOKEN got
-// inlined into the bundle. The KV approach drops that requirement
-// entirely — the same published bundle works for every site.
+// esbuild produces ALL .js outputs in dist/ — tsc only emits .d.ts
+// (see tsconfig.build.json's emitDeclarationOnly). This avoids the
+// race where tsc and esbuild both try to write the same .js file.
+//
+// Three bundle targets:
+//
+//   1. dist/index.js — the public factory entry. Re-exports
+//      seogeoPlugin (configured) and seogeoPluginSandboxed.
+//   2. dist/sandbox-entry.js — the sandboxed runtime entry. Loaded
+//      as a string by emdash's Worker Loader; cannot include WASM
+//      (1.2MB exceeds the 50ms cpuMs at module init). Routes
+//      evaluation through a sidecar Worker instead.
+//   3. dist/configured.js — the configured runtime entry. Runs
+//      in-process in the host Worker where the cold-start CPU budget
+//      fits the WASM compile. esbuild's `binary` loader inlines the
+//      .wasm bytes as a Uint8Array literal; wasm-init.ts lazy-
+//      instantiates on first eval call.
 
-const result = await build({
+// 1. Public factory entry (index). Tiny — just the descriptor
+//    factories. The configured-mode runtime is in a separate file
+//    (dist/configured.js) so it doesn't get inlined into every
+//    consumer's bundle when only the descriptor is needed.
+const indexResult = await build({
+  entryPoints: [resolve(root, "src/index.ts")],
+  outfile: resolve(root, "dist/index.js"),
+  bundle: true,
+  format: "esm",
+  platform: "neutral",
+  target: "es2022",
+  minify: false,
+  sourcemap: false,
+  legalComments: "none",
+  logLevel: "info",
+});
+if (indexResult.errors.length > 0) process.exit(1);
+
+// 2. Sandboxed-plugin runtime entry. Goes through Worker Loader,
+//    can't fit the WASM (50ms cpuMs), so the sandbox-entry build
+//    replaces the WASM evaluator with a stub and routes evaluation
+//    through the sidecar fetch instead.
+const sandboxResult = await build({
   entryPoints: [resolve(root, "src/sandbox-entry.ts")],
   outfile: resolve(root, "dist/sandbox-entry.js"),
   bundle: true,
   format: "esm",
   platform: "neutral",
   target: "es2022",
-  // Workers / Worker Loader support TLA in module scripts.
   supported: { "top-level-await": true },
-  // Don't mangle — we want readable output for stack traces.
   minify: false,
   sourcemap: false,
   legalComments: "none",
@@ -156,10 +186,49 @@ const result = await build({
   logLevel: "info",
 });
 
-if (result.errors.length > 0) {
+if (sandboxResult.errors.length > 0) {
   process.exit(1);
 }
 
-const outPath = resolve(root, "dist/sandbox-entry.js");
-const stat = await readFile(outPath);
-console.log(`bundled: dist/sandbox-entry.js (${stat.length.toLocaleString()} bytes)`);
+// 2. Configured-plugin entry. Runs in the host Worker process where
+//    the cold-start CPU budget can actually fit the 1.2MB WASM.
+//    esbuild's `binary` loader inlines the .wasm file as a Uint8Array
+//    literal in the output JS — same trick as the sandbox bundle's
+//    custom plugin, but using esbuild's built-in loader instead of a
+//    handwritten one. The configured bundle has no sidecar fetch;
+//    evaluation runs in-process via wasm-init.ts.
+//
+// `emdash` is a peer dependency of the consumer (their host Worker
+// has its own copy at runtime), so we must NOT bundle it — keeping
+// the import statement intact lets the consumer's bundler resolve
+// to its installed copy. Same reasoning for any `node:*` import
+// emdash itself transitively pulls in.
+const configuredResult = await build({
+  entryPoints: [resolve(root, "src/configured.ts")],
+  outfile: resolve(root, "dist/configured.js"),
+  bundle: true,
+  format: "esm",
+  platform: "neutral",
+  target: "es2022",
+  external: ["emdash", "node:*"],
+  minify: false,
+  sourcemap: false,
+  legalComments: "none",
+  loader: { ".wasm": "binary" },
+  logLevel: "info",
+});
+
+if (configuredResult.errors.length > 0) {
+  process.exit(1);
+}
+
+const sandboxPath = resolve(root, "dist/sandbox-entry.js");
+const sandboxStat = await readFile(sandboxPath);
+console.log(
+  `bundled: dist/sandbox-entry.js (${sandboxStat.length.toLocaleString()} bytes)`,
+);
+const configuredPath = resolve(root, "dist/configured.js");
+const configuredStat = await readFile(configuredPath);
+console.log(
+  `bundled: dist/configured.js (${configuredStat.length.toLocaleString()} bytes — includes inlined WASM)`,
+);

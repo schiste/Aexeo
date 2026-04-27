@@ -1,14 +1,16 @@
 {
-  // Build-only tsconfig. tsc emits .js + .d.ts for everything under src/
-  // EXCEPT sandbox-entry.ts — that file is bundled by esbuild
-  // (scripts/build-bundle.mjs) into a single self-contained module
-  // because emdash's Worker Loader can't resolve relative imports
-  // between plugin files at runtime. Without this exclusion, tsc
-  // emits an unbundled dist/sandbox-entry.js whose `./mcp.js` etc.
-  // imports would crash the isolate at startup.
-  //
-  // The default tsconfig.json (used by `npm run typecheck`) includes
-  // sandbox-entry.ts so type errors there are still caught.
+  // Build-only tsconfig. tsc emits ONLY .d.ts files for everything
+  // under src/ — esbuild (scripts/build-bundle.mjs) is responsible
+  // for producing all .js. This split prevents tsc and esbuild from
+  // racing on the same .js outputs (sandbox-entry.js, configured.js
+  // both have to be esbuild-bundled because emdash's Worker Loader
+  // can't resolve relative imports between plugin files at runtime,
+  // and the configured bundle inlines WASM via esbuild's binary
+  // loader). The default tsconfig.json (used by `npm run typecheck`)
+  // is unchanged; it includes everything for type-checking purposes.
   "extends": "./tsconfig.json",
-  "exclude": ["node_modules", "dist", "wasm", "src/sandbox-entry.ts"]
+  "compilerOptions": {
+    "emitDeclarationOnly": true
+  },
+  "exclude": ["node_modules", "dist", "wasm"]
 }
