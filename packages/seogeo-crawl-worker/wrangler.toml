@@ -1,4 +1,5 @@
-# Per-user Cloudflare Worker that serves seogeo crawl artifacts.
+# Per-user Cloudflare Worker that serves both seogeo crawl artifacts
+# AND runtime document evaluation for the emdash plugin.
 # Copy this file into your own repo and fill in the placeholders before
 # running `wrangler deploy`. Each plugin user owns their own Worker,
 # their own R2 bucket, and their own auth token; nothing here is shared
@@ -15,8 +16,24 @@ workers_dev = true
 binding = "CRAWLS"
 bucket_name = "REPLACE_ME_BUCKET_NAME"
 
+# WASM module that powers POST /evaluate. The binding name `BRIDGE_WASM`
+# is what src/worker.ts imports. Wrangler reads the .wasm file at
+# deploy time and ships it as a Worker module — far more efficient
+# than inlining base64 inside the JS, since the V8 isolate caches the
+# compiled module across requests for the same Worker version.
+#
+# Copy aexeo_emdash_bridge_bg.wasm from the @aexeo/emdash-plugin-seogeo
+# package's wasm/ directory next to this wrangler.toml before deploy.
+[wasm_modules]
+BRIDGE_WASM = "wasm/aexeo_emdash_bridge_bg.wasm"
+
 # Public site URL the crawler ran against. The Worker uses this to
 # label the dashboard and to validate that incoming requests reference
 # this property.
 [vars]
 SITE_URL = "https://example.com"
+
+# EVAL_TOKEN is set as a secret, not a var, so it does not appear in
+# the wrangler.toml committed to your repo. Set it once with:
+#   wrangler secret put EVAL_TOKEN
+# Use the SAME value in the emdash plugin config's evaluatorAuthToken.
