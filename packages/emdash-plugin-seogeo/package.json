@@ -26,7 +26,7 @@
   ],
   "scripts": {
     "build:wasm": "bash scripts/build-wasm.sh",
-    "build:ts": "tsc",
+    "build:ts": "tsc -p tsconfig.build.json",
     "build:bundle": "node scripts/build-bundle.mjs",
     "build": "npm run build:wasm && npm run build:ts && npm run build:bundle",
     "typecheck": "tsc --noEmit"

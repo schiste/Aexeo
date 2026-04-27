@@ -1,4 +1,4 @@
-import { buildCapabilities } from "./plugin.js";
+import { buildAllowedHosts, buildCapabilities } from "./plugin.js";
 
 // Local mirror of emdash's PluginDescriptor / SandboxedPluginDescriptor
 // (the latter is a type alias for the former in the host source). The
@@ -78,6 +78,7 @@ export function seogeoPlugin(
     entrypoint: "@aexeo/emdash-plugin-seogeo/sandbox",
     format: "standard",
     capabilities: buildCapabilities(evaluatorUrl),
+    allowedHosts: buildAllowedHosts(evaluatorUrl),
     // Pages mount at /admin/plugins/aexeo-seogeo/<path>. The page name
     // (without leading slash) is what the sandbox entry receives in
     // `body.page` when emdash POSTs the page_load interaction.

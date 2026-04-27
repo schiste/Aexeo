@@ -22,45 +22,55 @@ import {
 // anything not listed here the WASM sandbox cannot do. Review and tighten
 // before deploying: overly broad capabilities re-create the WordPress
 // failure mode the emdash sandbox was designed to prevent.
+//
+// emdash 0.7.0's bridge only recognizes a small set of literal
+// capabilities (read:content, read:schema, write:content, write:artifacts,
+// kv:<namespace>, network:fetch, network:fetch:any, email:send, ...).
+// Hypothetical host-pinned forms like `network:fetch:<host>` are silently
+// ignored — host enforcement is split into a literal capability AND a
+// separate `allowedHosts` field on the descriptor. Sidecar reachability
+// is therefore a two-part declaration: include "network:fetch" here and
+// list the sidecar host plus IndexNow's host in allowedHosts (computed
+// in src/index.ts seogeoPlugin()).
 const baseCapabilities = [
-  // Rule groups HTML/SOC/SCH/CNT/GEO/LLM all read author-provided content.
   "read:content",
-  // Needed so the bridge can reconcile which collection a document belongs
-  // to when emdash schemas contain more than a single content type.
   "read:schema",
-  // Explicit allow-list of artifact paths the bridge writes during publish.
-  // Never broaden to "write:artifacts" or "write:artifacts:public/*".
   "write:artifacts:public/llms.txt",
   "write:artifacts:public/llms-full.txt",
   "write:artifacts:public/facts.json",
   "write:artifacts:public/*.md.txt",
-  // Baseline findings are stashed between publishes so diff detection works.
   "kv:seogeo-baselines",
-  // IndexNow is a freshness-notification endpoint. Pinned to the public
-  // host; extending to "network" would also grant arbitrary outbound HTTP.
-  "network:indexnow:api.indexnow.org",
 ] as const;
 
 // Compute the capability list. When a sidecar evaluator URL is
-// supplied, we add a single pinned-host network:fetch:<host>
-// capability — never network:fetch alone, which would grant arbitrary
-// outbound HTTP from the sandbox.
+// configured, we declare network:fetch (the literal capability the
+// bridge recognizes); the actual allow-list is enforced by the
+// descriptor's allowedHosts field, which is built in parallel.
 export function buildCapabilities(
   evaluatorUrl: string | null,
 ): readonly string[] {
   if (evaluatorUrl === null) {
     return baseCapabilities;
   }
-  let host: string;
-  try {
-    host = new URL(evaluatorUrl).host;
-  } catch {
-    // Invalid URL — fall through with no extra capability so the
-    // descriptor still loads. afterSave will surface the misconfig
-    // as a network failure at runtime.
-    return baseCapabilities;
+  return [...baseCapabilities, "network:fetch"];
+}
+
+// Hosts the plugin is permitted to fetch from. Pairs with the
+// network:fetch capability — both are required for outbound HTTP.
+export function buildAllowedHosts(
+  evaluatorUrl: string | null,
+): readonly string[] {
+  const hosts: string[] = ["api.indexnow.org"];
+  if (evaluatorUrl !== null) {
+    try {
+      hosts.push(new URL(evaluatorUrl).host);
+    } catch {
+      // Malformed URL — drop silently; the capability will still
+      // exist but no host will match, so fetches fail at runtime
+      // with a "Host not allowed" error which is debuggable.
+    }
   }
-  return [...baseCapabilities, `network:fetch:${host}`];
+  return hosts;
 }
 
 // Backwards-compat re-export for existing imports. New callers should

@@ -173,10 +173,16 @@ async function handleRefresh(ctx: DispatchCtx): Promise<BlockResponse> {
       ? `Refreshed ${summary.routesUpdated} routes (${summary.totalFindings} findings across ${summary.documentsScanned} documents)`
       : `Refresh completed with ${summary.errors.length} errors — see banner`;
   if (summary.errors.length > 0) {
+    // Block Kit's banner variant is "default" | "alert" | "error".
+    // "warning" silently lands as undefined in the renderer's
+    // variant->classes lookup, surfacing as
+    // "Cannot read properties of undefined (reading 'classes')" in
+    // the browser. Use "alert" for soft warnings, "error" for hard
+    // failures.
     refreshed.blocks.unshift({
       type: "banner",
       title: `Refresh issues: ${summary.errors.join(" • ")}`,
-      variant: "warning",
+      variant: "alert",
     });
   }
   return {
