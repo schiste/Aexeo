@@ -1,9 +1,16 @@
-import type { KvNamespace, RefreshSummary, SandboxCtx } from "./plugin.js";
+import type {
+  KvNamespace,
+  RefreshSummary,
+  SandboxCtx,
+  SidecarRuntimeConfig,
+} from "./plugin.js";
 import {
   evaluateAndPersistAll,
   handleAfterSave,
   readAllDocuments,
   readFindings,
+  readSidecarConfig,
+  writeSidecarConfig,
 } from "./plugin.js";
 import { tools as mcpTools } from "./mcp.js";
 import { scoreSite } from "./evaluator.js";
@@ -96,6 +103,9 @@ async function handleFormSubmit(
   actionId: string,
   values: Record<string, unknown>,
 ): Promise<BlockResponse> {
+  if (actionId === "save_setup") {
+    return handleSetupSubmit(ctx, values);
+  }
   if (actionId === "view_document") {
     const picked = values["route_picker"];
     if (typeof picked === "string" && picked.length > 0) {
@@ -121,6 +131,9 @@ async function handlePageLoad(
   }
   if (normalized === "document") {
     return renderDocumentPanel(ctx);
+  }
+  if (normalized === "setup") {
+    return renderSetupPage(ctx);
   }
   return notFound(page);
 }
@@ -438,6 +451,152 @@ function documentFindingsTable(findings: Finding[]): unknown {
       block: `${finding.path}:${finding.line}`,
     })),
   };
+}
+
+async function renderSetupPage(
+  ctx: DispatchCtx,
+  options: {
+    bannerError?: string;
+    bannerSuccess?: string;
+    initialUrl?: string;
+  } = {},
+): Promise<BlockResponse> {
+  // Read the existing config so the operator can see what's currently
+  // wired up. The token is never re-displayed (secret_input.has_value
+  // tells the renderer to show "••• stored" without leaking the value);
+  // the URL is shown in plain text since it's not sensitive on its own.
+  const existing = await readSidecarConfig(ctx.kv);
+  const blocks: unknown[] = [
+    { type: "header", text: "seogeo setup" },
+    {
+      type: "context",
+      text:
+        "Paste the URL and auth token of your deployed seogeo-crawl-worker. " +
+        "These are stored in plugin KV and read at runtime — no rebuild required " +
+        "after a change. Rotate the token here whenever you redeploy the sidecar with a new secret.",
+    },
+  ];
+  if (options.bannerError !== undefined) {
+    blocks.push({
+      type: "banner",
+      title: options.bannerError,
+      variant: "error",
+    });
+  } else if (options.bannerSuccess !== undefined) {
+    blocks.push({
+      type: "banner",
+      title: options.bannerSuccess,
+      variant: "default",
+    });
+  }
+  blocks.push(
+    {
+      type: "form",
+      fields: [
+        {
+          type: "text_input",
+          action_id: "evaluator_url",
+          label: "Sidecar URL",
+          placeholder: "https://seogeo-crawl-worker.<subdomain>.workers.dev",
+          initial_value:
+            options.initialUrl ?? existing?.url ?? "",
+        },
+        {
+          type: "secret_input",
+          action_id: "eval_token",
+          label: "EVAL_TOKEN",
+          placeholder: existing === null
+            ? "Generate with: openssl rand -hex 32"
+            : "Leave blank to keep the existing token",
+          has_value: existing !== null,
+        },
+      ],
+      submit: {
+        label: "Save",
+        action_id: "save_setup",
+      },
+    },
+    { type: "divider" },
+    {
+      type: "context",
+      text:
+        existing === null
+          ? "Status: not configured. Refresh on the findings page will fail until both fields are saved."
+          : `Status: configured. Sidecar at ${existing.url}. Token stored — paste a new one above to rotate.`,
+    },
+  );
+  return { blocks };
+}
+
+async function handleSetupSubmit(
+  ctx: DispatchCtx,
+  values: Record<string, unknown>,
+): Promise<BlockResponse> {
+  const rawUrl = values["evaluator_url"];
+  const rawToken = values["eval_token"];
+  const url = typeof rawUrl === "string" ? rawUrl.trim() : "";
+  const token = typeof rawToken === "string" ? rawToken.trim() : "";
+
+  // The URL must parse and use HTTPS (or HTTP only for *.workers.dev
+  // dev-mode quirks — Cloudflare's deployed Workers always serve HTTPS).
+  // We also reject localhost/127.x explicitly because emdash's bridge
+  // hardcodes localhost in its SSRF blocklist; saving such a URL would
+  // pass the form check but fail every Refresh, which is hostile UX.
+  if (url.length === 0) {
+    return renderSetupPage(ctx, {
+      bannerError: "Sidecar URL is required.",
+      initialUrl: url,
+    });
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return renderSetupPage(ctx, {
+      bannerError: `Sidecar URL is not a valid URL: ${url}`,
+      initialUrl: url,
+    });
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return renderSetupPage(ctx, {
+      bannerError: `Sidecar URL must be http(s): got ${parsed.protocol}`,
+      initialUrl: url,
+    });
+  }
+  if (
+    parsed.hostname === "localhost" ||
+    parsed.hostname.endsWith(".localhost") ||
+    /^127\./.test(parsed.hostname)
+  ) {
+    return renderSetupPage(ctx, {
+      bannerError:
+        "emdash's sandbox blocks fetches to localhost (anti-SSRF). Use the deployed *.workers.dev URL.",
+      initialUrl: url,
+    });
+  }
+
+  // Resolve the token. Empty token + existing config = keep the
+  // current token (rotation-friendly UX: paste only the URL when the
+  // token hasn't changed). Empty token + no existing config = error.
+  const existing = await readSidecarConfig(ctx.kv);
+  let resolvedToken: string;
+  if (token.length > 0) {
+    resolvedToken = token;
+  } else if (existing !== null) {
+    resolvedToken = existing.token;
+  } else {
+    return renderSetupPage(ctx, {
+      bannerError: "EVAL_TOKEN is required on first setup.",
+      initialUrl: url,
+    });
+  }
+
+  const next: SidecarRuntimeConfig = { url, token: resolvedToken };
+  await writeSidecarConfig(ctx.kv, next);
+  return renderSetupPage(ctx, {
+    bannerSuccess:
+      "Configuration saved. Click Refresh on the findings page to evaluate.",
+  });
 }
 
 function notFound(page: string): BlockResponse {

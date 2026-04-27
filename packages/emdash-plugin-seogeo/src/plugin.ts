@@ -42,14 +42,15 @@ const baseCapabilities = [
   "kv:seogeo-baselines",
 ] as const;
 
-// Compute the capability list. When a sidecar evaluator URL is
-// configured, we declare network:fetch (the literal capability the
-// bridge recognizes); the actual allow-list is enforced by the
-// descriptor's allowedHosts field, which is built in parallel.
+// Compute the capability list. When the consumer declares an
+// evaluatorHost (the public host of their deployed sidecar Worker),
+// we add the literal network:fetch capability that emdash's bridge
+// recognizes; the host-level allow-list is enforced separately via
+// the descriptor's allowedHosts field.
 export function buildCapabilities(
-  evaluatorUrl: string | null,
+  evaluatorHost: string | null,
 ): readonly string[] {
-  if (evaluatorUrl === null) {
+  if (evaluatorHost === null) {
     return baseCapabilities;
   }
   return [...baseCapabilities, "network:fetch"];
@@ -57,18 +58,17 @@ export function buildCapabilities(
 
 // Hosts the plugin is permitted to fetch from. Pairs with the
 // network:fetch capability — both are required for outbound HTTP.
+// emdash 0.7.x reads the descriptor once at integration setup, so the
+// allow-list cannot change after dev-server / build start; the URL the
+// plugin actually fetches is read from KV at runtime, but the host part
+// must already be on this list. Site operators declare it once via
+// seogeoPlugin({ evaluatorHost }) in astro.config.mjs.
 export function buildAllowedHosts(
-  evaluatorUrl: string | null,
+  evaluatorHost: string | null,
 ): readonly string[] {
   const hosts: string[] = ["api.indexnow.org"];
-  if (evaluatorUrl !== null) {
-    try {
-      hosts.push(new URL(evaluatorUrl).host);
-    } catch {
-      // Malformed URL — drop silently; the capability will still
-      // exist but no host will match, so fetches fail at runtime
-      // with a "Host not allowed" error which is debuggable.
-    }
+  if (evaluatorHost !== null && evaluatorHost.length > 0) {
+    hosts.push(evaluatorHost);
   }
   return hosts;
 }
@@ -111,12 +111,47 @@ export interface ContentAfterSaveContext {
   settings?: PluginSettings;
 }
 
-// Build-time defines provided by scripts/build-bundle.mjs. esbuild
-// substitutes the literal expressions before parsing, so a missing env
-// var at build time becomes a runtime `null` — afterSave then skips
-// evaluation rather than throwing. Rotation requires a plugin rebuild.
-declare const __SEOGEO_EVALUATOR_URL__: string | null;
-declare const __SEOGEO_EVAL_TOKEN__: string | null;
+// KV keys for runtime-managed sidecar configuration. Operators paste
+// their values once via the Setup admin page — see renderSetupPage in
+// sandbox-entry.ts. The plugin reads them on every Refresh; rotation
+// is a single Setup-page edit, no rebuild or redeploy.
+//
+// Whyever-not env vars / build-time inlining: emdash 0.7.x doesn't
+// surface plugin descriptor options to the sandbox at runtime, and
+// the alternative (esbuild defines fed by env vars at the consumer's
+// `npm run build:bundle`) forces every site operator to add a
+// prebuild hook to their package.json. KV is the cleanest path that
+// (a) the sandbox actually reads at runtime, and (b) doesn't leak the
+// token into the bundled JS at rest.
+export const CONFIG_URL_KEY = "config:evaluator_url";
+export const CONFIG_TOKEN_KEY = "config:eval_token";
+
+export interface SidecarRuntimeConfig {
+  url: string;
+  token: string;
+}
+
+export async function readSidecarConfig(
+  kv: KvNamespace,
+): Promise<SidecarRuntimeConfig | null> {
+  const url = await kv.get<string>(CONFIG_URL_KEY);
+  const token = await kv.get<string>(CONFIG_TOKEN_KEY);
+  if (typeof url !== "string" || typeof token !== "string") {
+    return null;
+  }
+  if (url.length === 0 || token.length === 0) {
+    return null;
+  }
+  return { url, token };
+}
+
+export async function writeSidecarConfig(
+  kv: KvNamespace,
+  config: SidecarRuntimeConfig,
+): Promise<void> {
+  await kv.set(CONFIG_URL_KEY, config.url);
+  await kv.set(CONFIG_TOKEN_KEY, config.token);
+}
 
 // emdash sandbox ctx shape we depend on. The full shape is broader,
 // but we only thread kv, http, and content through this plugin;
@@ -307,22 +342,22 @@ export async function evaluateAndPersistAll(
     await kv.set(documentKey(document.route), document);
   }
 
-  if (
-    __SEOGEO_EVALUATOR_URL__ === null ||
-    __SEOGEO_EVAL_TOKEN__ === null
-  ) {
-    summary.errors.push(
-      "evaluator not configured at build time (SEOGEO_EVALUATOR_URL/SEOGEO_EVAL_TOKEN)",
-    );
-    return summary;
-  }
-
   // 3. Evaluate via the sidecar and group findings by route. The
   //    sidecar runs WASM in a Worker that doesn't have post-response
   //    context issues; admin route handlers always run in-request.
+  //    The URL and token are read from KV (set via the Setup admin
+  //    page); a missing or partial config yields a single, clear
+  //    error pointing the user back to that page.
+  const runtime = await readSidecarConfig(kv);
+  if (runtime === null) {
+    summary.errors.push(
+      "sidecar not configured — open the seogeo Setup page and enter your evaluator URL and token",
+    );
+    return summary;
+  }
   const sidecarConfig: SidecarConfig = {
-    url: __SEOGEO_EVALUATOR_URL__,
-    authToken: __SEOGEO_EVAL_TOKEN__,
+    url: runtime.url,
+    authToken: runtime.token,
   };
   const result = await evaluateViaSidecar(http, sidecarConfig, documents);
   if (!result.ok) {

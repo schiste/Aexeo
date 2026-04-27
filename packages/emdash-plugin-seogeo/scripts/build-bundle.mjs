@@ -131,21 +131,13 @@ export { evaluateDocuments, scoreIntelligence } from "./aexeo_emdash_bridge_bg.j
 
 await mkdir(resolve(root, "dist"), { recursive: true });
 
-// Build-time configuration of the sidecar evaluator. Read from process
-// env so the user can configure per-deployment without editing source.
-// Missing values resolve to literal `null` at runtime, and the plugin's
-// afterSave hook treats that as "evaluator not configured" — it logs a
-// warning and skips evaluation. Rotation requires a rebuild.
-const evaluatorUrl = process.env.SEOGEO_EVALUATOR_URL ?? null;
-const evalToken = process.env.SEOGEO_EVAL_TOKEN ?? null;
-const define = {
-  __SEOGEO_EVALUATOR_URL__: JSON.stringify(evaluatorUrl),
-  __SEOGEO_EVAL_TOKEN__: JSON.stringify(evalToken),
-};
-console.log(
-  `evaluator URL: ${evaluatorUrl ?? "(unset; afterSave will skip evaluation)"}`,
-);
-console.log(`eval token: ${evalToken === null ? "(unset)" : "(set)"}`);
+// As of v0.0.2, sidecar URL and token are read from KV at runtime
+// (see CONFIG_URL_KEY / CONFIG_TOKEN_KEY in src/plugin.ts), populated
+// by the Setup admin page. The previous build-time `define`
+// substitution forced every site operator to add a prebuild hook to
+// their package.json so SEOGEO_EVALUATOR_URL/SEOGEO_EVAL_TOKEN got
+// inlined into the bundle. The KV approach drops that requirement
+// entirely — the same published bundle works for every site.
 
 const result = await build({
   entryPoints: [resolve(root, "src/sandbox-entry.ts")],
@@ -156,7 +148,6 @@ const result = await build({
   target: "es2022",
   // Workers / Worker Loader support TLA in module scripts.
   supported: { "top-level-await": true },
-  define,
   // Don't mangle — we want readable output for stack traces.
   minify: false,
   sourcemap: false,

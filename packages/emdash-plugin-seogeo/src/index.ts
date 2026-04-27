@@ -39,7 +39,9 @@ export interface SandboxedPluginDescriptor {
 //   emdash({
 //     database: d1({ binding: "DB" }),
 //     storage: r2({ binding: "MEDIA" }),
-//     sandboxed: [seogeoPlugin()],
+//     sandboxed: [seogeoPlugin({
+//       evaluatorHost: "seogeo-crawl-worker.<your-subdomain>.workers.dev",
+//     })],
 //     sandboxRunner: sandbox(),
 //   });
 //
@@ -48,19 +50,23 @@ export interface SandboxedPluginDescriptor {
 // Loader for V8 isolation. Node-platform emdash apps fall back to a
 // noop runner that registers the descriptor but never invokes the
 // sandbox entry, so plugin routes return 404 even after auth.
-//
 export interface SeogeoPluginOptions {
-  // URL of the deployed seogeo-crawl-worker (the sidecar that runs
-  // POST /evaluate). When omitted, the descriptor's capability list
-  // is unchanged and afterSave skips evaluation. The sidecar's
-  // EVAL_TOKEN secret must be configured separately and inlined into
-  // the sandbox bundle at build time via SEOGEO_EVAL_TOKEN — the
-  // descriptor cannot pass secrets into the sandbox at runtime.
+  // Public host of the deployed seogeo-crawl-worker. We need this at
+  // descriptor-creation time because emdash's sandbox bridge enforces
+  // outbound HTTP via an `allowedHosts` list that's read once at
+  // integration setup and never changed at runtime. The host you pass
+  // here is what the bridge will permit for outbound fetch — anything
+  // else (including a typo) is rejected with "Host not allowed".
   //
-  // Set BOTH this option AND process.env.SEOGEO_EVALUATOR_URL to the
-  // same value: this option drives the descriptor capability,
-  // SEOGEO_EVALUATOR_URL drives the bundle's afterSave fetch target.
-  evaluatorUrl?: string;
+  // The full sidecar URL and the auth token are NOT supplied here;
+  // they're managed at runtime via the Setup admin page (which writes
+  // to KV). Rotation only requires updating those values, not a
+  // rebuild. The host part stays constant for the life of the
+  // sidecar deploy.
+  //
+  // Falls back to process.env.SEOGEO_EVALUATOR_HOST so CI / Cloudflare
+  // Pages builds can configure it without editing astro.config.
+  evaluatorHost?: string;
 }
 
 // Mirrors the calling convention used by every first-party emdash
@@ -68,8 +74,8 @@ export interface SeogeoPluginOptions {
 export function seogeoPlugin(
   options: SeogeoPluginOptions = {},
 ): SandboxedPluginDescriptor {
-  const evaluatorUrl =
-    options.evaluatorUrl ?? process.env.SEOGEO_EVALUATOR_URL ?? null;
+  const evaluatorHost =
+    options.evaluatorHost ?? process.env.SEOGEO_EVALUATOR_HOST ?? null;
   return {
     id: "aexeo-seogeo",
     version: "0.0.1",
@@ -77,14 +83,15 @@ export function seogeoPlugin(
     // `exports["./sandbox"]`.
     entrypoint: "@aexeo/emdash-plugin-seogeo/sandbox",
     format: "standard",
-    capabilities: buildCapabilities(evaluatorUrl),
-    allowedHosts: buildAllowedHosts(evaluatorUrl),
+    capabilities: buildCapabilities(evaluatorHost),
+    allowedHosts: buildAllowedHosts(evaluatorHost),
     // Pages mount at /admin/plugins/aexeo-seogeo/<path>. The page name
     // (without leading slash) is what the sandbox entry receives in
     // `body.page` when emdash POSTs the page_load interaction.
     adminPages: [
       { path: "/findings", label: "SEO findings" },
       { path: "/document", label: "Document SEO" },
+      { path: "/setup", label: "Setup" },
     ],
     adminWidgets: [
       { id: "seogeo-score", size: "third", title: "SEO score" },
