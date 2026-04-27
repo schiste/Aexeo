@@ -21,12 +21,14 @@
   "files": [
     "dist",
     "wasm",
-    "scripts/build-wasm.sh"
+    "scripts/build-wasm.sh",
+    "scripts/build-bundle.mjs"
   ],
   "scripts": {
     "build:wasm": "bash scripts/build-wasm.sh",
     "build:ts": "tsc",
-    "build": "npm run build:wasm && npm run build:ts",
+    "build:bundle": "node scripts/build-bundle.mjs",
+    "build": "npm run build:wasm && npm run build:ts && npm run build:bundle",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
@@ -39,6 +41,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "esbuild": "^0.28.0",
     "typescript": "^5.6.0"
   }
 }
