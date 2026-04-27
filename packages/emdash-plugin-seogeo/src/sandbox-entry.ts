@@ -1,4 +1,4 @@
-import type { KvNamespace } from "./plugin.js";
+import type { KvNamespace, SandboxCtx } from "./plugin.js";
 import { handleAfterSave, readAllDocuments, readFindings } from "./plugin.js";
 import { tools as mcpTools } from "./mcp.js";
 import { scoreSite } from "./evaluator.js";
@@ -30,10 +30,23 @@ export type BlockInteraction =
       values: Record<string, unknown>;
     };
 
-export interface RouteContext {
-  request: Request;
+// Shape of the first argument emdash passes to a sandbox route
+// handler. Mirrors what the Cloudflare sandbox wrapper builds in
+// invokeRoute(): { input, request: serializedRequest, requestMeta }.
+// We only consume `input` (the BlockInteraction body); the others
+// are surfaced for forward compat.
+export interface RouteInput {
+  input: BlockInteraction;
+  request?: unknown;
+  requestMeta?: unknown;
+}
+
+// What we actually thread through the dispatch helpers — the
+// interaction body plus the host-supplied ctx (kv, http, log, ...).
+export interface DispatchCtx {
   body: BlockInteraction;
   kv: KvNamespace;
+  ctx: SandboxCtx;
 }
 
 export interface BlockResponse {
@@ -45,21 +58,33 @@ export interface BlockResponse {
 // and every block interaction (button click, form submit) through the
 // same handler; we route on body.type first, then on body.page or
 // body.action_id.
-async function handleAdminRoute(ctx: RouteContext): Promise<BlockResponse> {
-  if (ctx.body.type === "page_load") {
-    return handlePageLoad(ctx, ctx.body.page);
+async function handleAdminRoute(
+  input: RouteInput,
+  ctx: SandboxCtx,
+): Promise<BlockResponse> {
+  const dispatch: DispatchCtx = { body: input.input, kv: ctx.kv, ctx };
+  if (dispatch.body.type === "page_load") {
+    return handlePageLoad(dispatch, dispatch.body.page);
   }
-  if (ctx.body.type === "block_action") {
-    return handleBlockAction(ctx, ctx.body.action_id, ctx.body.value);
+  if (dispatch.body.type === "block_action") {
+    return handleBlockAction(
+      dispatch,
+      dispatch.body.action_id,
+      dispatch.body.value,
+    );
   }
-  if (ctx.body.type === "form_submit") {
-    return handleFormSubmit(ctx, ctx.body.action_id, ctx.body.values);
+  if (dispatch.body.type === "form_submit") {
+    return handleFormSubmit(
+      dispatch,
+      dispatch.body.action_id,
+      dispatch.body.values,
+    );
   }
-  return handlePageLoad(ctx, "findings");
+  return handlePageLoad(dispatch, "findings");
 }
 
 async function handleFormSubmit(
-  ctx: RouteContext,
+  ctx: DispatchCtx,
   actionId: string,
   values: Record<string, unknown>,
 ): Promise<BlockResponse> {
@@ -73,7 +98,7 @@ async function handleFormSubmit(
 }
 
 async function handlePageLoad(
-  ctx: RouteContext,
+  ctx: DispatchCtx,
   page: string,
 ): Promise<BlockResponse> {
   if (page === "findings") {
@@ -89,7 +114,7 @@ async function handlePageLoad(
 }
 
 async function handleBlockAction(
-  ctx: RouteContext,
+  ctx: DispatchCtx,
   actionId: string,
   value: unknown,
 ): Promise<BlockResponse> {
@@ -105,7 +130,7 @@ async function handleBlockAction(
   return notFound(actionId);
 }
 
-async function renderFindingsPage(ctx: RouteContext): Promise<BlockResponse> {
+async function renderFindingsPage(ctx: DispatchCtx): Promise<BlockResponse> {
   const findings = await readAllFindings(ctx.kv);
   const errors = findings.filter((finding) => finding.severity === "error");
   const warnings = findings.filter((finding) => finding.severity === "warning");
@@ -220,7 +245,7 @@ function findingsTable(rows: FindingRow[]): unknown {
   };
 }
 
-async function renderScoreWidget(ctx: RouteContext): Promise<BlockResponse> {
+async function renderScoreWidget(ctx: DispatchCtx): Promise<BlockResponse> {
   const documents = await readAllDocuments(ctx.kv);
   if (documents.length === 0) {
     return {
@@ -282,7 +307,7 @@ function topBlockersLine(score: SiteIntelligenceScore): string {
 }
 
 async function renderDocumentPanel(
-  ctx: RouteContext,
+  ctx: DispatchCtx,
   route?: string,
 ): Promise<BlockResponse> {
   if (route === undefined) {

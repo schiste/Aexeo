@@ -34,6 +34,8 @@ export async function scoreSite(
     citation_readiness_score: 0,
     truth_consistency_score: 0,
     answer_pack_score: 0,
+    external_trust_alignment_score: null,
+    route_scores: [],
     blockers: [],
   };
 }

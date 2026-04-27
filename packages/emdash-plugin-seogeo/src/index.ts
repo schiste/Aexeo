@@ -1,4 +1,4 @@
-import { capabilities } from "./plugin.js";
+import { buildCapabilities } from "./plugin.js";
 
 // Local mirror of emdash's PluginDescriptor / SandboxedPluginDescriptor
 // (the latter is a type alias for the former in the host source). The
@@ -49,9 +49,27 @@ export interface SandboxedPluginDescriptor {
 // noop runner that registers the descriptor but never invokes the
 // sandbox entry, so plugin routes return 404 even after auth.
 //
+export interface SeogeoPluginOptions {
+  // URL of the deployed seogeo-crawl-worker (the sidecar that runs
+  // POST /evaluate). When omitted, the descriptor's capability list
+  // is unchanged and afterSave skips evaluation. The sidecar's
+  // EVAL_TOKEN secret must be configured separately and inlined into
+  // the sandbox bundle at build time via SEOGEO_EVAL_TOKEN — the
+  // descriptor cannot pass secrets into the sandbox at runtime.
+  //
+  // Set BOTH this option AND process.env.SEOGEO_EVALUATOR_URL to the
+  // same value: this option drives the descriptor capability,
+  // SEOGEO_EVALUATOR_URL drives the bundle's afterSave fetch target.
+  evaluatorUrl?: string;
+}
+
 // Mirrors the calling convention used by every first-party emdash
 // plugin (embedsPlugin, auditLogPlugin, webhookNotifierPlugin, ...).
-export function seogeoPlugin(): SandboxedPluginDescriptor {
+export function seogeoPlugin(
+  options: SeogeoPluginOptions = {},
+): SandboxedPluginDescriptor {
+  const evaluatorUrl =
+    options.evaluatorUrl ?? process.env.SEOGEO_EVALUATOR_URL ?? null;
   return {
     id: "aexeo-seogeo",
     version: "0.0.1",
@@ -59,7 +77,7 @@ export function seogeoPlugin(): SandboxedPluginDescriptor {
     // `exports["./sandbox"]`.
     entrypoint: "@aexeo/emdash-plugin-seogeo/sandbox",
     format: "standard",
-    capabilities,
+    capabilities: buildCapabilities(evaluatorUrl),
     // Pages mount at /admin/plugins/aexeo-seogeo/<path>. The page name
     // (without leading slash) is what the sandbox entry receives in
     // `body.page` when emdash POSTs the page_load interaction.
