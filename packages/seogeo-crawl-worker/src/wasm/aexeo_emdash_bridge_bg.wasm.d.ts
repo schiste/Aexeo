@@ -1,11 +1,8 @@
-/* tslint:disable */
-/* eslint-disable */
-export const memory: WebAssembly.Memory;
-export const evaluateDocuments: (a: number, b: number, c: number, d: number) => [number, number, number, number];
-export const scoreIntelligence: (a: number, b: number) => [number, number, number, number];
-export const __wbindgen_externrefs: WebAssembly.Table;
-export const __wbindgen_malloc: (a: number, b: number) => number;
-export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
-export const __externref_table_dealloc: (a: number) => void;
-export const __wbindgen_free: (a: number, b: number, c: number) => void;
-export const __wbindgen_start: () => void;
+// In a modules-based Cloudflare Worker, Wrangler resolves
+// `import x from "./foo.wasm"` to a precompiled WebAssembly.Module at
+// bundle time. The wasm-bindgen-generated .d.ts that originally lived
+// here described the wasm's export shape as if it were an ESM with
+// named exports — that's the bundler/Vite contract, not the Workers
+// one. Replace it with the modules-Worker-correct declaration.
+declare const bridgeModule: WebAssembly.Module;
+export default bridgeModule;

@@ -1,20 +1,22 @@
-// Initialize the wasm-bindgen glue against the WASM module Cloudflare
-// hands us via the BRIDGE_WASM env binding. Wrangler ships the .wasm
-// file as a precompiled WebAssembly.Module, so we can do a synchronous
-// `new WebAssembly.Instance(...)` instead of the async instantiate
-// call the sandbox bundle has to use. This avoids the cpuMs/TLA issues
-// the sandbox runs into; the Worker isolate compiles the module once
-// at deploy time and reuses the compiled artifact across requests.
+// Initialize the wasm-bindgen glue against the WASM module Wrangler
+// bundles in via the direct .wasm import below. Modules-based Workers
+// (ESM) resolve `import x from "./foo.wasm"` to a precompiled
+// WebAssembly.Module at build time, so we get synchronous
+// `new WebAssembly.Instance(...)` and no runtime compile cost. This
+// avoids the cpuMs/TLA issues the emdash sandbox runs into and is
+// also why the older [wasm_modules] wrangler.toml binding is not
+// used: that syntax is for service-worker (non-modules) scripts.
 
+import bridgeModule from "./aexeo_emdash_bridge_bg.wasm";
 import * as glue from "./aexeo_emdash_bridge_bg.js";
 
 let initialized = false;
 
-export function ensureInitialized(module: WebAssembly.Module): void {
+export function ensureInitialized(): void {
   if (initialized) {
     return;
   }
-  const instance = new WebAssembly.Instance(module, {
+  const instance = new WebAssembly.Instance(bridgeModule, {
     "./aexeo_emdash_bridge_bg.js": glue,
   });
   glue.__wbg_set_wasm(instance.exports);

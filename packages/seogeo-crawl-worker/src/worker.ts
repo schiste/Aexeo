@@ -24,7 +24,6 @@ import { ensureInitialized, evaluateDocuments } from "./wasm/init.js";
 
 export interface Env {
   CRAWLS: R2Bucket;
-  BRIDGE_WASM: WebAssembly.Module;
   SITE_URL: string;
   EVAL_TOKEN: string;
 }
@@ -91,7 +90,7 @@ async function evaluateRoute(request: Request, env: Env): Promise<Response> {
   if (!Array.isArray(body.documents)) {
     return jsonResponse(env, { error: "documents must be an array" }, 400);
   }
-  ensureInitialized(env.BRIDGE_WASM);
+  ensureInitialized();
   let raw: string;
   try {
     raw = evaluateDocuments(JSON.stringify(body.documents), body.configJson);
