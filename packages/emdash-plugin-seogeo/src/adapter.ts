@@ -64,7 +64,11 @@ function deriveRoute(content: EmdashContentItem): string {
   // Most emdash blog templates serve at /<slug>; collections without a
   // slug fall back to the row id so we still produce a unique key for
   // KV storage. The WASM bridge treats the route as opaque.
-  if (content.slug !== null && content.slug.length > 0) {
+  // Note: the typed shape is `string | null`, but newly-created
+  // ContentItems may have slug undefined when the schema's slug field
+  // hasn't been populated yet. Truthy check covers both null and
+  // undefined; an empty string falls through to the id fallback too.
+  if (typeof content.slug === "string" && content.slug.length > 0) {
     return content.slug.startsWith("/") ? content.slug : `/${content.slug}`;
   }
   return `/${content.type}/${content.id}`;
