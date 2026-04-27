@@ -21,6 +21,29 @@ import { build } from "esbuild";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
 
+// Substitute the WASM-backed evaluator with a sandbox-safe stub when
+// building the sandbox bundle. The WASM evaluator's module-level
+// WebAssembly.instantiate exceeds Worker Loader's default 50ms cpuMs
+// limit, leaving top-level await unsettled at load. Heavy evaluation
+// runs out-of-sandbox; the sandbox reads pre-computed findings from KV.
+// The astro integration's CI-gate path keeps using ./evaluator.ts.
+const sandboxEvaluatorPlugin = {
+  name: "sandbox-evaluator",
+  setup(buildApi) {
+    buildApi.onResolve({ filter: /(^|\/)evaluator(\.js)?$/ }, (args) => {
+      // Only redirect imports from inside our own src/ tree, not
+      // anything that happens to end in "evaluator". Belt and braces
+      // — there's only one such importer today (plugin.ts).
+      if (!args.importer.includes("/emdash-plugin-seogeo/src/")) {
+        return null;
+      }
+      return {
+        path: resolve(root, "src/evaluator-sandbox.ts"),
+      };
+    });
+  },
+};
+
 // Custom esbuild plugin that resolves the .wasm import emitted by
 // wasm-bindgen's bundler-target glue (`import * as wasm from
 // "./aexeo_emdash_bridge_bg.wasm"`). We base64-encode the bytes and
@@ -28,6 +51,11 @@ const root = resolve(here, "..");
 // load time and re-exports the instance's exports. The synthetic
 // module uses top-level await; the resulting ESM bundle is async,
 // which the sandbox runner handles transparently.
+//
+// NOTE: This plugin is no longer reached when the sandbox-evaluator
+// substitution above is in effect, since the stub doesn't import the
+// WASM glue. We keep it in the build for symmetry — if a future
+// non-sandbox bundle target is added, the same machinery will work.
 const wasmInlinePlugin = {
   name: "wasm-inline",
   setup(buildApi) {
@@ -116,7 +144,7 @@ const result = await build({
   minify: false,
   sourcemap: false,
   legalComments: "none",
-  plugins: [wasmGlueShimPlugin, wasmInlinePlugin],
+  plugins: [sandboxEvaluatorPlugin, wasmGlueShimPlugin, wasmInlinePlugin],
   logLevel: "info",
 });
 
