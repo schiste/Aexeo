@@ -1,315 +1,296 @@
-# Deploying `@aexeo/emdash-plugin-seogeo` to another emdash site
+# Installing `@aexeo/emdash-plugin-seogeo`
 
-This is the runbook for installing the seogeo plugin on a second (third, Nth)
-emdash project, and for keeping that install up to date as the plugin evolves.
+This package adds Aexeo's seogeo SEO/GEO content evaluator to an emdash
+site. Findings show up as a Block Kit admin page; a sidebar widget
+shows the site's current intelligence score; saves auto-evaluate the
+changed document.
 
-## Architecture, in one paragraph
+## Two install paths
 
-The plugin has **two pieces** that travel together:
+The package exports two factories:
 
-1. **The plugin package** (`@aexeo/emdash-plugin-seogeo`) — JavaScript that runs
-   inside emdash's Cloudflare Worker Loader sandbox. Provides the admin UI
-   surfaces (findings page, document panel, dashboard widget) and the Refresh
-   button that triggers an evaluation.
-2. **The sidecar Worker** (`@aexeo/seogeo-crawl-worker`) — a separate Cloudflare
-   Worker the *site operator* deploys to their own Cloudflare account. Receives
-   `POST /evaluate`, runs the seogeo Rust→WASM bridge, returns findings JSON.
+- **`seogeoPlugin()`** — **configured mode** (recommended). Plugin
+  runs in-process inside the host emdash Worker. No separate
+  deployment, no auth token, no admin Setup page. Use this for
+  first-party emdash sites.
+- **`seogeoPluginSandboxed({ evaluatorHost })`** — **sandboxed
+  mode**. Plugin runs inside emdash's Worker Loader isolate; WASM
+  evaluation runs in a separate sidecar Worker the operator
+  deploys. Use this only when a third party hosts emdash and
+  doesn't trust the plugin code with full host access.
 
-The plugin sandbox **cannot** run the WASM evaluator directly (Worker Loader
-isolates have a 50ms cpuMs budget and the bridge is ~1.2MB; we measured the
-limit at startup). The sidecar lives outside the sandbox and has no such cap.
-The plugin sandbox calls it over HTTPS with a Bearer token. Both pieces ship
-the **same WASM binary** and must be version-locked — see the upgrade rule
-below.
+Configured mode is what most installs should pick. The instructions
+below cover that path. Sandboxed mode is documented at the bottom for
+when it's actually needed.
 
-## One-time setup on a new emdash site
+## Configured mode (recommended)
 
-This walkthrough assumes the new site is a Cloudflare-platform emdash project
-(either built from `@emdash-cms/template-blog-cloudflare` or another template
-that uses `@astrojs/cloudflare` + `@emdash-cms/cloudflare`).
+### Prerequisites
 
-### 0. Prerequisites
+- An emdash site running on the **Cloudflare** adapter
+  (`@astrojs/cloudflare` + `@emdash-cms/cloudflare`'s `sandbox()`
+  runner is fine — sandboxed plugins use Worker Loader, configured
+  plugins don't, but both adapters import cleanly).
+- emdash 0.7.0 or later as a peer dependency.
 
-- A Cloudflare account with API access (paid is fine; free tier works for
-  testing — Worker Loader and R2 are both free-tier eligible).
-- `wrangler` available in the project (`npx wrangler` is sufficient).
-- The site's `astro.config.mjs` already wires `@emdash-cms/cloudflare`'s
-  `sandbox()` runner. If it doesn't, the plugin will load silently as a
-  noop — emdash's non-Cloudflare sandbox runner does not invoke routes or
-  hooks. Confirm by looking for `sandboxRunner: sandbox()` in the emdash
-  integration call.
-
-### 1. Add the plugin to the new project
-
-The package is currently `private: true` in this repo (no public npm publish).
-You have three reasonable options:
-
-**Option A — Publish to npm** (recommended for >1 site):
-1. Flip `private: true` → `private: false` in
-   `packages/emdash-plugin-seogeo/package.json`.
-2. From that directory: `npm run build && npm publish --access restricted`
-   (or `--access public` if the npm scope is public).
-3. In the new emdash project:
-   `npm install @aexeo/emdash-plugin-seogeo --save`.
-
-**Option B — Install from a git URL** (works without npm publish):
-In the new emdash project's `package.json`:
-```jsonc
-"dependencies": {
-  "@aexeo/emdash-plugin-seogeo": "git+ssh://git@github.com/<org>/<repo>.git#<commit-sha>"
-}
-```
-Then `npm install`. Pin to a commit SHA, not a branch — branches drift.
-
-**Option C — Vendor the dist directory** (simplest, hardest to update):
-Copy `packages/emdash-plugin-seogeo/dist/` and `packages/emdash-plugin-seogeo/wasm/`
-into the new project at e.g. `vendor/emdash-plugin-seogeo/`, then add a
-`file:` dep:
-```jsonc
-"@aexeo/emdash-plugin-seogeo": "file:./vendor/emdash-plugin-seogeo"
-```
-Use this when you cannot publish and don't want a git submodule.
-
-### 2. Deploy the per-site sidecar Worker
-
-Each emdash site **must own its own sidecar deploy** — the Worker holds the
-site's auth token and (if you wire it up) writes findings to a per-site R2
-bucket. Sharing one sidecar across sites would let any one site's plugin
-install arbitrarily query findings for any other site.
+### Install
 
 ```bash
-# Clone the worker template into the new project (or a sibling directory).
-# The template lives at packages/seogeo-crawl-worker/ in this repo.
-cp -r packages/seogeo-crawl-worker /path/to/new-project/
-
-cd /path/to/new-project/seogeo-crawl-worker
-
-# Edit wrangler.toml:
-#   - line 8:   name = "seogeo-crawl-worker-<site-slug>"   (must be unique
-#               across your Cloudflare account)
-#   - line 17:  bucket_name = "<your-bucket-name>"          (R2 bucket name —
-#               only used for crawl artifacts; the eval endpoint doesn't
-#               touch R2 yet)
-#   - line 34:  SITE_URL = "https://yoursite.example"
-
-# Auth, create bucket, deploy
-npx wrangler login
-npx wrangler r2 bucket create <your-bucket-name>
-npx wrangler deploy
-# Output prints the deployed URL like:
-#   https://seogeo-crawl-worker-<site-slug>.<your-subdomain>.workers.dev
-# Save that URL — you'll need it.
-
-# Generate a strong token (32+ random bytes) and set it as the Worker secret
-TOKEN="$(openssl rand -hex 32)"
-echo "$TOKEN" | npx wrangler secret put EVAL_TOKEN
-echo "Token (keep this safe): $TOKEN"
-
-# Sanity-check before wiring up the plugin
-curl -i -X POST https://seogeo-crawl-worker-<site-slug>.<your-subdomain>.workers.dev/evaluate \
-  -H "authorization: Bearer $TOKEN" \
-  -H "content-type: application/json" \
-  -d '{"documents":[]}'
-# Expect HTTP 200 with a JSON array of sitewide findings.
+npm install @aexeo/emdash-plugin-seogeo vite-plugin-wasm
 ```
 
-### 3. Wire the plugin into the new site's astro.config
+`vite-plugin-wasm` is required because Vite's defaults treat `.wasm`
+imports as static-asset URLs, but Cloudflare Workers can only run
+WASM as precompiled `WebAssembly.Module` instances. The plugin
+bridges the two; without it, the seogeo plugin's first call throws
+"WASM module did not resolve to a WebAssembly.Module."
 
-In the new project's `astro.config.mjs`:
+> **If installing from a private git remote or as a vendored
+> directory** — see the "Alternative install sources" section at the
+> end. The result is the same, just the dependency line differs.
+
+### Wire into `astro.config.mjs`
 
 ```js
-import { d1, r2, sandbox } from "@emdash-cms/cloudflare";
+import cloudflare from "@astrojs/cloudflare";
+import { d1, r2 } from "@emdash-cms/cloudflare";
 import { seogeoPlugin } from "@aexeo/emdash-plugin-seogeo";
 import { defineConfig } from "astro/config";
 import emdash from "emdash/astro";
+import wasm from "vite-plugin-wasm";
 
 export default defineConfig({
-  // ... existing config ...
+  output: "server",
+  adapter: cloudflare(),
+  vite: {
+    // Required: makes `import x from "./foo.wasm"` resolve to a
+    // precompiled WebAssembly.Module. Cloudflare Workers /
+    // workerd disallow runtime WebAssembly.instantiate from raw
+    // bytes, so the bundler has to do the compilation.
+    plugins: [wasm()],
+    // The seogeo plugin's WASM import confuses Vite's dep
+    // optimizer when it tries to pre-bundle the package.
+    optimizeDeps: { exclude: ["@aexeo/emdash-plugin-seogeo"] },
+  },
   integrations: [
-    // ... existing integrations ...
     emdash({
       database: d1({ binding: "DB" }),
       storage: r2({ binding: "MEDIA" }),
-      sandboxed: [
-        seogeoPlugin({
-          // The factory reads this option AND process.env.SEOGEO_EVALUATOR_URL.
-          // The capability list and allowedHosts are derived from this URL.
-          evaluatorUrl: process.env.SEOGEO_EVALUATOR_URL,
-        }),
-      ],
-      sandboxRunner: sandbox(),
+      plugins: [seogeoPlugin()],
     }),
   ],
 });
 ```
 
-### 4. Build the plugin bundle with the sidecar URL + token inlined
+That's it for code. No environment variables, no secrets to manage,
+no sidecar to deploy.
 
-`@aexeo/emdash-plugin-seogeo`'s sandbox bundle bakes the evaluator URL and
-auth token in at build time — emdash 0.7.x does not surface plugin descriptor
-options to the sandbox at runtime, so build-time `define` substitution is the
-only working path.
-
-If you used **Option A or B** above (npm or git): the published `dist/` was
-built without a sidecar URL. You need to rebuild it inside the new project.
-The simplest path is a `prebuild` hook that re-runs the bundle script with
-your project's env vars set:
-
-```jsonc
-// new-project/package.json
-"scripts": {
-  "prebuild": "cd node_modules/@aexeo/emdash-plugin-seogeo && npm run build:bundle",
-  "predev":   "cd node_modules/@aexeo/emdash-plugin-seogeo && npm run build:bundle",
-  "dev":      "astro dev",
-  "build":    "astro build"
-},
-```
-
-Then run any build/dev command with the env vars in scope:
-
-```bash
-export SEOGEO_EVALUATOR_URL="https://seogeo-crawl-worker-<site-slug>.<your-subdomain>.workers.dev"
-export SEOGEO_EVAL_TOKEN="<the token you saved from step 2>"
-npm run dev      # for local development
-npm run build    # for a Cloudflare Pages / Workers deploy
-```
-
-(For production deploys, set the same two env vars in your CI / Cloudflare
-Pages build settings.)
-
-If you used **Option C** (vendor): you've copied a `dist/` that was built
-against *some* sidecar URL. Either rebuild it in place with the new env vars,
-or accept that vendor copies need a manual rebuild step on every change.
-
-### 5. Verify the install
+### Verify
 
 1. Start the dev server: `npm run dev`.
-2. The startup log should print:
+2. The emdash startup log doesn't print a special line for configured
+   plugins (only sandboxed ones get a "Loaded sandboxed plugin..."
+   line). Instead, navigate to:
+
    ```
-   EmDash: Loaded sandboxed plugin aexeo-seogeo:0.0.1 with capabilities:
-     [..., network:fetch]
+   http://localhost:4321/_emdash/admin/plugins
    ```
-   The literal `network:fetch` (not `network:fetch:any`) plus the
-   `allowedHosts` field on the descriptor is what authorizes the sandbox to
-   reach your sidecar host specifically. If you see `network:fetch:<something>`
-   instead, the plugin version pre-dates the bridge-shape fix — upgrade.
-3. Open the admin, navigate to `/admin/plugins/aexeo-seogeo/findings`, click
-   **Refresh**. Toast should read
-   `Refreshed N routes (M findings across K documents)`. The dashboard widget
-   reflects the score after refresh.
 
-If Refresh produces `Blocked fetch to internal host: localhost`, you're
-pointing at a localhost sidecar. The bridge hardcodes `localhost` in its
-SSRF blocklist (anti-prompt-injection security default). Use the deployed
-`workers.dev` URL, not `http://localhost:8787`.
+   The seogeo plugin will appear in the list. Click it.
 
-If you see `Missing capability: network:fetch`, you have a version mismatch —
-the plugin descriptor is from a release that emitted host-pinned
-`network:fetch:<host>` capabilities, which emdash 0.7.x's bridge does not
-recognize. Upgrade the plugin to ≥ the version that introduced
-`buildAllowedHosts`.
+3. The findings page renders with a Refresh button. Click **Refresh**
+   — toast says "Refreshed N routes (M findings across K documents)"
+   and the table populates.
 
-## Updating the plugin
+4. Save a document: the `content:afterSave` hook auto-evaluates that
+   one document; refresh the findings page and that route's findings
+   are updated. (The dashboard widget also picks up the new score.)
 
-Plugin updates have **two parts that must move together** because the bundled
-WASM is identical on both sides:
+### Production deploy
 
-### Update path (npm or git source)
+Run your usual Astro/Cloudflare deploy: `npm run build && wrangler
+deploy` (or whatever your CI does). The same `vite-plugin-wasm` and
+`optimizeDeps.exclude` lines work for production builds — the plugin
+ships its WASM as a separate `.wasm` file under
+`node_modules/@aexeo/emdash-plugin-seogeo/wasm/` which Wrangler
+compiles into the deployed Worker artifact.
+
+## Updating
 
 ```bash
-# 1. Bump the plugin dep in the new emdash project
-cd /path/to/new-project
 npm update @aexeo/emdash-plugin-seogeo
-# (or for git URL deps: change the #commit-sha pin in package.json, then npm install)
-
-# 2. Rebuild the plugin bundle WITH your env vars (prebuild hook does this if
-#    set up; otherwise rerun manually)
-SEOGEO_EVALUATOR_URL=https://... \
-SEOGEO_EVAL_TOKEN=... \
-npm --prefix node_modules/@aexeo/emdash-plugin-seogeo run build:bundle
-
-# 3. Copy the updated WASM into the sidecar repo and redeploy. THIS IS THE
-#    STEP YOU CAN'T SKIP: the plugin and sidecar must run identical WASM
-#    bytes, otherwise the bridge's serde wire format can drift between them
-#    and findings deserialize wrong (silent or loud, depending on which
-#    field changed).
-cp node_modules/@aexeo/emdash-plugin-seogeo/wasm/aexeo_emdash_bridge_bg.wasm \
-   /path/to/seogeo-crawl-worker/src/wasm/aexeo_emdash_bridge_bg.wasm
-cd /path/to/seogeo-crawl-worker
-npx wrangler deploy
-
-# 4. Restart the emdash dev server (or trigger a redeploy)
-cd /path/to/new-project
-npm run dev
+npm run build && <your deploy command>
 ```
 
-### Update path (vendor source)
+The plugin's WASM is bundled with each version of the package, so
+`npm update` brings new rules along automatically. There's no
+separate sidecar to keep in sync (configured mode), no token to
+rotate, no Setup page to revisit.
 
-Same as above, but step 1 is "copy the new `dist/` and `wasm/` over the old
-vendored copy" instead of `npm update`.
+## Removing
 
-### Version coupling rule
+Delete the dependency, the import, and the `seogeoPlugin()` line in
+`integrations:[emdash({plugins:[...]})]`. The KV keys the plugin
+wrote remain in your KV namespace — purge with
+`wrangler kv:key delete --prefix=findings:` and
+`wrangler kv:key delete --prefix=document:` if you want a clean
+removal.
 
-> **Plugin and sidecar must always run identical WASM.**
+## Sandboxed mode (future external deploys)
 
-The plugin's `package.json` `version` field is the source of truth. The
-sidecar's `wrangler.toml` doesn't track it explicitly, but the WASM file
-under `seogeo-crawl-worker/src/wasm/` should always be the byte-for-byte
-copy of `node_modules/@aexeo/emdash-plugin-seogeo/wasm/aexeo_emdash_bridge_bg.wasm`
-at the same plugin version.
+If you're shipping this plugin to a third-party emdash site whose
+operator should NOT have the plugin code running in their host
+Worker process, switch to sandboxed mode. This requires deploying a
+separate sidecar Worker that runs the WASM evaluator.
 
-A safe convention: write the plugin version into the sidecar's `wrangler.toml`
-`vars` section as `PLUGIN_VERSION = "0.0.1"`, and have the sidecar's
-`POST /evaluate` echo it back in a response header. The plugin can then
-warn in the admin UI when the deployed sidecar's version drifts from the
-sandbox bundle's compiled-in version. This is a small follow-up that's
-worth doing once you have >1 site deployed.
+Trade-offs vs. configured mode:
 
-## Cost and security notes
+- **Pro**: V8 isolate boundary; capability + allowedHosts enforcement
+  prevents the plugin from ever reading host state directly.
+- **Con**: separate sidecar Worker to deploy and maintain; an
+  EVAL_TOKEN to rotate; a Setup admin page to configure. The
+  `content:afterSave` hook is also non-functional in emdash 0.7.x's
+  sandbox (post-response bridge invalidation — known upstream issue);
+  evaluation is manual-Refresh-only.
 
-- **R2 bucket**: only used for crawl artifacts (`/findings/latest`,
-  `/findings/list`). The runtime evaluation path doesn't touch R2 — it's
-  pure compute against the request payload. So bucket size grows only with
-  scheduled crawls (which we haven't wired up yet); zero size today.
-- **Worker requests**: one `POST /evaluate` per Refresh click per site.
-  Cloudflare Workers' free tier (100k requests/day) covers tens of
-  thousands of refresh clicks before you'd pay anything. Paid is
-  $5/month for 10M requests.
-- **`EVAL_TOKEN` rotation**: regenerate with `openssl rand -hex 32`,
-  set on the Worker via `wrangler secret put EVAL_TOKEN`, AND rebuild the
-  plugin bundle with the new token in `SEOGEO_EVAL_TOKEN`, AND redeploy
-  the emdash site. The token has to match on both sides; rotation is
-  not zero-downtime in this version.
-- **No data leaves your Cloudflare account except via your own sidecar.**
-  The plugin sandbox cannot call any host outside `allowedHosts`
-  (your sidecar URL plus `api.indexnow.org` for IndexNow notifications).
-  emdash's bridge enforces this list at every fetch.
+```js
+// astro.config.mjs (sandboxed mode)
+import { sandbox } from "@emdash-cms/cloudflare";
+import { seogeoPluginSandboxed } from "@aexeo/emdash-plugin-seogeo";
+
+emdash({
+  database: d1({ binding: "DB" }),
+  storage: r2({ binding: "MEDIA" }),
+  sandboxed: [
+    seogeoPluginSandboxed({
+      // Public host of the deployed sidecar Worker.
+      evaluatorHost: "seogeo-crawl-worker.<subdomain>.workers.dev",
+    }),
+  ],
+  sandboxRunner: sandbox(),
+});
+```
+
+The sidecar Worker template lives at `packages/seogeo-crawl-worker/`
+in this repo. Per-site deploy:
+
+```bash
+cd seogeo-crawl-worker
+# Edit wrangler.toml: name, R2 bucket name, SITE_URL
+npx wrangler login
+npx wrangler r2 bucket create <bucket-name>
+npx wrangler deploy
+echo "$(openssl rand -hex 32)" | npx wrangler secret put EVAL_TOKEN
+```
+
+Then in the admin UI, visit
+`/admin/plugins/aexeo-seogeo/setup` and paste the deployed URL +
+the same token.
+
+## Alternative install sources
+
+The package isn't on public npm at the moment. Three install methods:
+
+**Git URL (works without npm publish):**
+
+```jsonc
+"dependencies": {
+  "@aexeo/emdash-plugin-seogeo":
+    "git+ssh://git@github.com/<aexeo-org>/<repo>.git#<commit-sha>:packages/emdash-plugin-seogeo"
+}
+```
+
+Pin to a commit SHA, not a branch. Update by changing the SHA.
+
+**Vendored copy** (no git access required):
+
+Copy `dist/`, `wasm/`, and `package.json` from this repo into your
+project at e.g. `vendor/emdash-plugin-seogeo/`, then:
+
+```jsonc
+"dependencies": {
+  "@aexeo/emdash-plugin-seogeo": "file:./vendor/emdash-plugin-seogeo"
+}
+```
+
+Update by re-copying the directory.
+
+**npm publish** (when ready):
+
+```bash
+# In packages/emdash-plugin-seogeo/, after flipping `private: false`
+npm run build
+npm publish --access public
+```
+
+After this, all three install methods reduce to
+`npm install @aexeo/emdash-plugin-seogeo`.
 
 ## Troubleshooting
 
-**`No such module "mcp.js"` at startup.** The plugin bundle is the
-unbundled `tsc` output, not the esbuild bundle. Rebuild via
-`npm run build` (which runs `build:ts && build:bundle` in that order).
-Avoid running `npm run build:ts` standalone — `tsconfig.build.json`
-excludes `sandbox-entry.ts`, but the default `tsconfig.json` doesn't.
+**`Wasm code generation disallowed by embedder` at first Refresh.**
+The bundle is trying to instantiate WASM from raw bytes at runtime,
+which Cloudflare Workers reject. Confirm `vite-plugin-wasm` is
+installed and in the `vite.plugins` array of `astro.config.mjs`. If
+present, double-check the package version is recent (≥ the version
+that switched to direct .wasm imports — see git log for `Switch
+configured-mode WASM from inlined bytes to direct .wasm import`).
 
-**`Top-level await in module is unsettled` at startup.** The bundle is
-inlining the WASM via base64 + `await WebAssembly.instantiate(...)`. That
-pattern blew Worker Loader's 50ms cpuMs budget at compile time. Make sure
-the bundle's evaluator goes through the sidecar fetch instead — see
-`src/sidecar.ts`. The bundle should be ≈20KB, not ≈1.6MB.
+**`seogeo: WASM module did not resolve to a WebAssembly.Module`**
+The bundler resolved the .wasm import but produced something other
+than a Module (URL string, Uint8Array). Same fix as above: ensure
+`vite-plugin-wasm` is loaded.
 
-**Refresh button does nothing visible.** Open the network tab, find the
-POST to `/_emdash/api/plugins/aexeo-seogeo/admin`. Inspect the response
-body. If it's a 400 with `ROUTE_ERROR`, the sandbox failed to start
-(usually a bundle issue). If it's a 200 with toast `"Refresh failed: ..."`,
-the failure detail is in the message. If it's a 200 with `"Refreshed 0
-routes ..."`, your `DEFAULT_COLLECTIONS` (currently `["posts", "pages"]`)
-don't match the actual collection slugs in your emdash schema — adjust
-`packages/emdash-plugin-seogeo/src/plugin.ts` and republish.
+**`Cannot read properties of undefined (reading 'kv')` on Refresh.**
+Older plugin version where the configured-mode handler used the
+sandboxed two-arg ctx shape. Update; it's fixed in the version with
+`Switch configured-mode WASM from inlined bytes to direct .wasm
+import` in the commit log.
 
-**`Cannot read properties of undefined (reading 'classes')` in the browser.**
-A Block Kit response is using a `BannerBlock` variant the renderer doesn't
-recognize. Valid variants are `"default" | "alert" | "error"` only. This
-is a host validation gap (the server-side Zod schema accepts unknown
-variants) — the fix is on the plugin side: stick to the three valid values.
+**`/admin/plugins` doesn't list seogeo, but `/findings` works.** The
+emdash version's plugins meta page may filter out plugins without a
+`/` adminPage entry. The package declares one explicitly; if you see
+this on a recent version, it's an emdash regression — file upstream.
+
+**`Refresh issues: posts: TypeError: ...`** during a sweep. The
+adapter hit a content item shape it didn't expect (a custom
+collection field, an unusual schema). Open an issue with the
+collection's slug + the failing field; we'll add defensive handling.
+
+**Plugin doesn't appear in admin sidebar at all.** Confirm the
+emdash adapter is `@astrojs/cloudflare`'s `cloudflare()`. The plugin
+relies on Cloudflare-specific APIs and won't load (silently) on the
+Node adapter.
+
+## What the plugin actually does
+
+- **Findings page** (`/_emdash/admin/plugins/aexeo-seogeo/findings`):
+  Block Kit table of every rule violation across the site. Filter by
+  severity. Click a route in the picker to drill into per-document
+  findings.
+- **Document panel** (`/document`): the same findings, scoped to one
+  document.
+- **Score widget** (dashboard): top-line intelligence score across
+  citation, truth, answer-pack, external-trust dimensions. Banner
+  appears below 60.
+- **Refresh button** on the findings page: re-evaluate every
+  document in the configured collections (`posts`, `pages` by
+  default). Writes findings to KV under `findings:<route>` and the
+  evaluated document under `document:<route>`.
+- **Auto-evaluate on save**: emdash's `content:afterSave` hook fires
+  for each save, re-evaluates that one document, and updates its
+  KV findings entry. The dashboard widget reflects the new score on
+  the next page load.
+
+## Architecture in one paragraph
+
+The plugin runs in-process inside the host emdash Worker. Saves
+trigger emdash's `content:afterSave` hook, which adapts the saved
+content to the bridge's wire format and runs the WASM evaluator
+inline. Findings are stored in the host's plugin KV (the
+`PluginContext.kv` accessor). The Refresh button does the same thing
+but for every document in every configured collection. The WASM
+itself is the same `aexeo-emdash-bridge` Rust crate that powers the
+seogeo CLI; it's compiled to WebAssembly via wasm-pack and imported
+by the host's bundler (Vite + `vite-plugin-wasm`). No separate
+service, no sidecar, no auth token.
