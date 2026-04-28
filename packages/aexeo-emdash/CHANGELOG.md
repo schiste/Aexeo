@@ -6,6 +6,38 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-04-28
+
+Functional patch. Three bugs flagged by the aeptus web team after
+testing 0.1.1 against emdash 0.8.0; same `wasm/` as `0.1.0` (no
+rule-engine change).
+
+**Compatibility:** verified against emdash `0.7.0` and `0.8.0`.
+
+### Fixed
+
+- **Duplicate "SEO findings" sidebar entry.** The descriptor and
+  the runtime admin both declared `/` AND `/findings` as adminPages
+  with the same label, so emdash rendered two duplicate links.
+  Drop the `/` entry — root-URL navigation
+  (`/admin/plugins/<id>/`) still works because the dispatcher in
+  `src/configured.ts` aliases the empty page name to the findings
+  page.
+
+### Added
+
+- **`seogeoPlugin({ collections })` option** for configured mode.
+  Lets sites with non-default collection slugs override which
+  collections the Refresh button sweeps. Defaults to
+  `["posts", "pages"]` when omitted (the slugs from
+  `@emdash-cms/template-blog-cloudflare`). Pointing at a missing
+  slug is non-fatal — the bridge returns empty and the sweep
+  records the missing collection in the Refresh summary's `errors`.
+- The Refresh sweep now threads the resolved collection list
+  through `handleAdminRoute` → `handleRefresh` →
+  `evaluateAndPersistAll` so the runtime honors what the descriptor
+  passed.
+
 ## [0.1.1] - 2026-04-28
 
 Documentation-only patch. No runtime changes — same `dist/` and
@@ -68,6 +100,7 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.1.1...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.1.2...HEAD
+[0.1.2]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.1.1...aexeo-emdash-v0.1.2
 [0.1.1]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.1.0...aexeo-emdash-v0.1.1
 [0.1.0]: https://github.com/schiste/Aexeo/releases/tag/aexeo-emdash-v0.1.0

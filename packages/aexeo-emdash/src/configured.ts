@@ -19,6 +19,7 @@ import type {
   SandboxCtx,
 } from "./plugin.js";
 import {
+  DEFAULT_COLLECTIONS,
   evaluateAndPersistAll,
   handleAfterSaveConfigured,
   readAllDocuments,
@@ -75,12 +76,26 @@ const inProcessEvaluator: EvaluatorFn = async (documents) => {
 // runtime module the host imports separately.
 
 export interface ConfiguredPluginOptions {
-  // No runtime config knobs for now. The interface is here so future
-  // flags (custom collection set, IndexNow toggle, etc.) can land
-  // without breaking the createPlugin signature.
+  /**
+   * emdash collections the Refresh button sweeps. Comes through from
+   * the descriptor's `options` field — see `seogeoPlugin({ collections })`
+   * in src/index.ts. When undefined, falls back to DEFAULT_COLLECTIONS
+   * (`["posts", "pages"]`).
+   */
+  collections?: readonly string[];
 }
 
-export function createPlugin(_options: ConfiguredPluginOptions = {}): unknown {
+export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
+  // Resolve runtime config once at boot and capture it in the closures
+  // attached to the route handler and hooks. The descriptor's
+  // `options` field is JSON-cloned by emdash's astro integration
+  // before reaching us, so this is the actual values, not references
+  // back to the consumer's astro.config.
+  const collections =
+    options.collections === undefined
+      ? DEFAULT_COLLECTIONS
+      : [...options.collections];
+
   // Capability enforcement for configured plugins is informational;
   // emdash's host plugins (formsPlugin, etc.) declare what they need
   // so the admin/audit surface can display it. Note: emdash's
@@ -92,19 +107,27 @@ export function createPlugin(_options: ConfiguredPluginOptions = {}): unknown {
     version: "0.0.1",
     capabilities: ["read:content"],
     hooks: {
+      // afterSave processes one saved document at a time — collections
+      // list isn't needed here. The hook always runs regardless of
+      // which collection the document came from.
       "content:afterSave": (event: ContentAfterSaveEvent, ctx: SandboxCtx) =>
         handleAfterSaveConfigured(event, ctx, inProcessEvaluator),
     } as never,
     routes: {
-      admin: { handler: handleAdminRoute },
+      // The Refresh sweep (handleAdminRoute → handleRefresh) is the
+      // one consumer of `collections`. Bind the resolved list here so
+      // every request handles the same set without re-reading options.
+      admin: {
+        handler: (ctx: RouteContext) => handleAdminRoute(ctx, collections),
+      },
     } as never,
     admin: {
       pages: [
-        // emdash's /admin/plugins/<id> root navigates to the plugin's
-        // "/" page — without it, clicking the plugin in the meta list
-        // produces a "Not Found". Alias "/" to the findings page so
-        // the entry-point lands somewhere useful.
-        { path: "/", label: "SEO findings" },
+        // The root URL `/admin/plugins/<id>/` routes through the same
+        // dispatcher (handlePageLoad treats "" and "findings" as
+        // aliases). Listing "/" alongside "/findings" here would create
+        // duplicate "SEO findings" sidebar entries — that was the
+        // visible 0.1.0 / 0.1.1 bug fixed in 0.1.2.
         { path: "/findings", label: "SEO findings" },
         { path: "/document", label: "Document SEO" },
       ],
@@ -151,7 +174,10 @@ interface RouteContext extends SandboxCtx {
   input: BlockInteraction;
 }
 
-async function handleAdminRoute(ctx: RouteContext): Promise<BlockResponse> {
+async function handleAdminRoute(
+  ctx: RouteContext,
+  collections: readonly string[],
+): Promise<BlockResponse> {
   const body = ctx.input;
   if (body.type === "page_load") {
     return handlePageLoad(ctx, body.page);
@@ -164,7 +190,7 @@ async function handleAdminRoute(ctx: RouteContext): Promise<BlockResponse> {
       return renderDocumentPanel(ctx, body.value);
     }
     if (body.action_id === "refresh_findings") {
-      return handleRefresh(ctx);
+      return handleRefresh(ctx, collections);
     }
     if (body.action_id.startsWith("filter:")) {
       return renderFindingsPage(ctx);
@@ -202,11 +228,15 @@ async function handlePageLoad(
   return notFound(page);
 }
 
-async function handleRefresh(ctx: SandboxCtx): Promise<BlockResponse> {
+async function handleRefresh(
+  ctx: SandboxCtx,
+  collections: readonly string[],
+): Promise<BlockResponse> {
   let summary: RefreshSummary;
   try {
     summary = await evaluateAndPersistAll(ctx, {
       evaluator: inProcessEvaluator,
+      collections,
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
