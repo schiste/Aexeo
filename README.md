@@ -4,17 +4,34 @@
 
 It is being built as developer infrastructure for private use: think Ruff for search quality, retrieval structure, AI-facing artifacts, deterministic cleanup, and runtime website audits.
 
-## Internal Use
+## Repository Stance
 
-This repository is private and intended for internal use only.
+This repository is **private**. The CLI, the rule engine
+(`crates/seogeo-core`, `crates/seogeo-cli`, `crates/seogeo-contracts`,
+`crates/aexeo-emdash-bridge`), the runtime, and the docs all stay
+internal — no public source mirror, no public release channel for
+the engine, no `cargo install --git` path for external users.
 
-- no public package publishing
-- no public release channel
-- install from the private repository or from internal build artifacts
-- use `sh scripts/install-seogeo.sh --from-binary target/release/seogeo-cli` for deterministic local installs
-- run `npm install` in the repository root if you want the optional Playwright-backed runtime engine
+**One artifact crosses the public boundary**: the
+[`@aeptus/aexeo-emdash`](https://www.npmjs.com/package/@aeptus/aexeo-emdash)
+emdash plugin on npm. It ships compiled JS + a precompiled WASM
+build of `aexeo-emdash-bridge`, deliberately exposed so emdash
+users can install Aexeo's content evaluator as a normal plugin
+dependency. The source for that plugin lives at
+`packages/aexeo-emdash/` and the WASM source at
+`crates/aexeo-emdash-bridge/`. The rest of the engine that produces
+the WASM binary stays in this private repo.
 
-See [docs/install.md](docs/install.md) for supported installation and release paths.
+Internal install paths:
+
+- `sh scripts/install-seogeo.sh --from-binary target/release/seogeo-cli`
+  for deterministic local CLI installs
+- `cargo run -p seogeo-cli -- <subcommand>` for live development
+- `npm install` in the repository root for the optional
+  Playwright-backed runtime engine
+
+See [docs/install.md](docs/install.md) for the canonical install +
+upgrade flow.
 
 ## Local Quality
 
