@@ -6,6 +6,26 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-04-28
+
+Documentation-only patch. No runtime changes — same `dist/` and
+`wasm/` as `0.1.0`. Bumping the patch so npm consumers can resolve
+to the documented version of INSTALL.md / CHANGELOG.md without
+having to read this repo directly.
+
+### Changed
+
+- INSTALL.md now has a structured "Updating" section covering
+  routine plugin updates, emdash updates, joint updates, and the
+  verification steps for each. Establishes the rule "update one
+  thing at a time, never both in the same deploy" so failure
+  bisects stay clean.
+- CHANGELOG.md compatibility section calls out the verified emdash
+  range explicitly (`0.7.0` and `0.8.0`), names the upstream PR
+  (#734) that fixes the sandboxed-mode `content:afterSave` bridge
+  bug on `0.8.0`, and sets the convention for future releases to
+  record their tested range the same way.
+
 ## [0.1.0] - 2026-04-28
 
 First public release.
@@ -48,5 +68,6 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.1.0...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.1.1...HEAD
+[0.1.1]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.1.0...aexeo-emdash-v0.1.1
 [0.1.0]: https://github.com/schiste/Aexeo/releases/tag/aexeo-emdash-v0.1.0
