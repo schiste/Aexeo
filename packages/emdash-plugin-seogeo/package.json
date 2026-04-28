@@ -1,8 +1,27 @@
 {
   "name": "@aexeo/emdash-plugin-seogeo",
-  "version": "0.0.1",
-  "private": true,
-  "description": "Aexeo seogeo rules as an emdash plugin",
+  "version": "0.1.0",
+  "description": "Aexeo seogeo SEO/GEO content evaluator as an emdash plugin",
+  "license": "MIT",
+  "author": "Aexeo",
+  "homepage": "https://github.com/aexeo/Aexeo/tree/main/packages/emdash-plugin-seogeo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aexeo/Aexeo.git",
+    "directory": "packages/emdash-plugin-seogeo"
+  },
+  "bugs": {
+    "url": "https://github.com/aexeo/Aexeo/issues"
+  },
+  "keywords": [
+    "emdash",
+    "emdash-plugin",
+    "seo",
+    "geo",
+    "cms",
+    "wasm",
+    "cloudflare"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -26,15 +45,17 @@
   "files": [
     "dist",
     "wasm",
-    "scripts/build-wasm.sh",
-    "scripts/build-bundle.mjs"
+    "INSTALL.md",
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "scripts": {
     "build:wasm": "bash scripts/build-wasm.sh",
     "build:ts": "tsc -p tsconfig.build.json",
     "build:bundle": "node scripts/build-bundle.mjs",
     "build": "npm run build:wasm && npm run build:ts && npm run build:bundle",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
     "@emdash-cms/core": "*",
