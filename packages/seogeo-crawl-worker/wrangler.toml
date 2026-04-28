@@ -1,0 +1,39 @@
+# Per-user Cloudflare Worker that serves both seogeo crawl artifacts
+# AND runtime document evaluation for the emdash plugin.
+# Copy this file into your own repo and fill in the placeholders before
+# running `wrangler deploy`. Each plugin user owns their own Worker,
+# their own R2 bucket, and their own auth token; nothing here is shared
+# across sites.
+
+name = "seogeo-crawl-worker"
+main = "src/worker.ts"
+compatibility_date = "2024-09-23"
+workers_dev = true
+
+# R2 bucket holding crawl artifacts written by your scheduled CI job.
+# Create it once before deploying with:
+#   wrangler r2 bucket create seogeo-crawls
+# For `wrangler dev --local` the binding is mocked by Miniflare, so the
+# name only needs to be syntactically valid — no real bucket required.
+[[r2_buckets]]
+binding = "CRAWLS"
+bucket_name = "seogeo-crawls"
+
+# Note on WASM: modules-based Workers (this script is ESM) consume
+# WASM via a direct `import bridgeWasm from "./bridge.wasm"` statement
+# in src/wasm/init.ts. Wrangler bundles the .wasm file at deploy time
+# and the import resolves to a precompiled WebAssembly.Module — no
+# [wasm_modules] declaration needed and no runtime compile cost.
+
+# Public site URL the crawler ran against. The Worker uses this to
+# label the dashboard and to validate that incoming requests reference
+# this property.
+[vars]
+SITE_URL = "https://example.com"
+
+# EVAL_TOKEN is set as a secret in production (so it never lands in
+# the repo); use `wrangler secret put EVAL_TOKEN` after `wrangler deploy`.
+# For LOCAL development with `wrangler dev`, secrets aren't fetched —
+# put the value in .dev.vars (gitignored) instead:
+#   echo "EVAL_TOKEN=<your-token>" > .dev.vars
+# Use the SAME value in the emdash plugin config (SEOGEO_EVAL_TOKEN env).

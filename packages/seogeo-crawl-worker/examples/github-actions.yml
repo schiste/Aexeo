@@ -1,0 +1,53 @@
+# Reference workflow for a per-user seogeo crawl pipeline. Copy this
+# file into your own repository at .github/workflows/seogeo-crawl.yml
+# and edit the SITE_URL, R2 bucket, and credentials secrets to match
+# your deployment. The Worker that serves the resulting artifacts to
+# the emdash admin UI lives in packages/seogeo-crawl-worker/.
+#
+# Required repository secrets:
+#   R2_ACCOUNT_ID         Cloudflare account id with the R2 bucket
+#   R2_ACCESS_KEY_ID      R2 token with write access to the bucket
+#   R2_SECRET_ACCESS_KEY  matching R2 token secret
+#   R2_BUCKET             bucket name configured in wrangler.toml
+
+name: seogeo crawl
+
+on:
+  schedule:
+    - cron: "17 6 * * *"   # daily at 06:17 UTC (avoid common :00 spikes)
+  workflow_dispatch:
+
+env:
+  SITE_URL: https://example.com
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build seogeo-cli
+        run: cargo build --release -p seogeo-cli
+
+      - name: Run seogeo crawl
+        run: |
+          ./target/release/seogeo-cli crawl "$SITE_URL" \
+            --engine http --format json > crawl.json
+
+      - name: Upload to R2 (latest + timestamped)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+          ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws --endpoint-url "$ENDPOINT" s3 cp crawl.json \
+            "s3://${R2_BUCKET}/crawls/${STAMP}.json"
+          aws --endpoint-url "$ENDPOINT" s3 cp crawl.json \
+            "s3://${R2_BUCKET}/crawls/latest.json"
