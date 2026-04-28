@@ -34,12 +34,19 @@ First public release.
 
 ### Compatibility
 
-- emdash `>= 0.7.0`
-- `@astrojs/cloudflare` adapter (Cloudflare Workers target). The
-  plugin will silently noop on the Node adapter.
-- `vite-plugin-wasm` required in the consumer's `astro.config.mjs`
-  vite plugins for the WASM import to resolve as a precompiled
-  `WebAssembly.Module`.
+- **emdash:** verified against `0.7.0` and `0.8.0`. Both modes work
+  on `0.7.0`; configured mode is recommended. On `0.8.0` the
+  sandboxed mode's `content:afterSave` hook also works (upstream
+  PR #734 wraps deferred plugin hooks in `after()` so bridge
+  bindings stay valid past the response — fixes the
+  silent-eval-skip behavior we worked around with the manual
+  Refresh button on `0.7.x`).
+- **Adapter:** `@astrojs/cloudflare`. The plugin uses
+  Cloudflare-specific APIs and will silently no-op on the Node
+  adapter.
+- **Vite plugin:** `vite-plugin-wasm` is required in the consumer's
+  `astro.config.mjs` for the WASM import to resolve to a
+  precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/seogeo-plugin-v0.1.0...HEAD
-[0.1.0]: https://github.com/schiste/Aexeo/releases/tag/seogeo-plugin-v0.1.0
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.1.0...HEAD
+[0.1.0]: https://github.com/schiste/Aexeo/releases/tag/aexeo-emdash-v0.1.0

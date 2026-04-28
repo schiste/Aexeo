@@ -117,15 +117,102 @@ compiles into the deployed Worker artifact.
 
 ## Updating
 
+There are two things that can be updated independently — the plugin
+package and emdash itself. **Update one at a time, never both in the
+same deploy.** That way if something breaks, you know which side
+introduced the regression.
+
+### Updating the plugin
+
+For a routine patch / minor update within your existing semver range:
+
 ```bash
 npm update @aeptus/aexeo-emdash
-npm run build && <your deploy command>
+npm run build
+# Your usual deploy command
 ```
 
+For a major version bump (e.g. from `^0.x` to `^1.x`):
+
+1. Read the [CHANGELOG](./CHANGELOG.md) entry for the new major.
+   Look for the `Compatibility` line that names the verified
+   emdash version range — confirm it covers your installed emdash.
+2. Bump the dependency range in `package.json`:
+   ```diff
+   -  "@aeptus/aexeo-emdash": "^0.1.0",
+   +  "@aeptus/aexeo-emdash": "^0.2.0",
+   ```
+3. `npm install`, build, deploy.
+
 The plugin's WASM is bundled with each version of the package, so
-`npm update` brings new rules along automatically. There's no
-separate sidecar to keep in sync (configured mode), no token to
-rotate, no Setup page to revisit.
+`npm update` / `npm install` brings new rules along automatically.
+There's no separate sidecar to keep in sync (configured mode), no
+token to rotate, no Setup page to revisit.
+
+**Verify after a plugin update:**
+
+1. Visit `/admin/plugins/aexeo-seogeo/findings` and click **Refresh**.
+   Toast should show non-zero rules sweeping. (A zero count *can*
+   be valid for a clean site, but if you previously had findings
+   and now have none, suspect the upgrade.)
+2. Save any document — `/findings` should auto-update for that
+   route's findings (the `content:afterSave` hook firing).
+
+### Updating emdash
+
+Updating emdash is the more dangerous direction because emdash
+controls the contracts the plugin depends on (PluginContext shape,
+hook signatures, Block Kit schemas, capability strings, etc.).
+Pre-flight before bumping:
+
+1. Look up the plugin version's tested emdash range in our
+   [CHANGELOG](./CHANGELOG.md). The latest plugin version's
+   `Compatibility` line says e.g. "tested against emdash 0.7.0
+   through 0.8.0." If the emdash version you want is **inside that
+   range**, the bump is safe. If it's **above the range**, treat it
+   as untested.
+2. If untested, scan the emdash release notes for breaking changes
+   in any of these areas (these are what the plugin touches):
+   - `PluginContext` shape (kv, http, content, log)
+   - Hook signatures (`content:afterSave`, etc.)
+   - Block Kit element schemas (banner variants, button styles,
+     table column formats)
+   - Capability validation strings (`read:content`, `network:fetch`)
+   - The `definePlugin` API
+   - The `createPlugin` / configured-plugin descriptor contract
+   If any of those changed, expect to bump the plugin too.
+3. Bump emdash:
+   ```bash
+   npm install emdash@<new-version>
+   ```
+4. Build and run locally first — never deploy directly to
+   production.
+5. Verify the plugin: same two checks as above (Refresh + save).
+
+If verification fails: roll emdash back
+(`npm install emdash@<previous-version>`), file an issue against
+this plugin describing the failure, and stay on the prior emdash
+version until a compatible plugin release ships.
+
+### When both need updating together
+
+Sometimes a plugin release will require an emdash bump (because we
+adopted a new emdash API). The plugin's CHANGELOG will say so:
+"Requires emdash >= X.Y.0." When that's the case:
+
+1. Update emdash first.
+2. Verify the existing plugin still works on the new emdash.
+3. Update the plugin.
+4. Verify again.
+
+Two separate deploys, two separate verification passes. This
+keeps the bisect clean if anything breaks.
+
+### Compatibility quick-reference
+
+The current verified pairing is recorded in
+[CHANGELOG.md](./CHANGELOG.md) at the top of each release entry.
+Treat anything outside that range as best-effort.
 
 ## Removing
 
