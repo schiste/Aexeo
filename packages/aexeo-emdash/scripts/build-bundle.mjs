@@ -34,7 +34,7 @@ const sandboxEvaluatorPlugin = {
       // Only redirect imports from inside our own src/ tree, not
       // anything that happens to end in "evaluator". Belt and braces
       // — there's only one such importer today (plugin.ts).
-      if (!args.importer.includes("/emdash-plugin-seogeo/src/")) {
+      if (!args.importer.includes("/aexeo-emdash/src/")) {
         return null;
       }
       return {

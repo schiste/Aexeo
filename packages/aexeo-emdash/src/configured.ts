@@ -14,13 +14,11 @@
 
 import type {
   ContentAfterSaveEvent,
-  ContentList,
   EvaluatorFn,
   RefreshSummary,
   SandboxCtx,
 } from "./plugin.js";
 import {
-  DEFAULT_COLLECTIONS,
   evaluateAndPersistAll,
   handleAfterSaveConfigured,
   readAllDocuments,
@@ -69,7 +67,7 @@ const inProcessEvaluator: EvaluatorFn = async (documents) => {
 //      which returns the *resolved plugin* with hooks/routes/admin
 //      defined inline. emdash's astro integration generates a
 //      virtual module that does:
-//          import { createPlugin } from "@aeptus/emdash-plugin-seogeo/configured";
+//          import { createPlugin } from "@aeptus/aexeo-emdash/configured";
 //          export const plugins = [createPlugin({...}), ...];
 //
 // The split lets the descriptor be JSON-serialized into a generated

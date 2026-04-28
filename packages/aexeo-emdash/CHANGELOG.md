@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `@aeptus/emdash-plugin-seogeo` are listed here.
+All notable changes to `@aeptus/aexeo-emdash` are listed here.
 The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 

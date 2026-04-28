@@ -54,7 +54,7 @@ export interface SandboxedPluginDescriptor {
 // sandboxed path:
 //
 //   import { d1, r2, sandbox } from "@emdash-cms/cloudflare";
-//   import { seogeoPluginSandboxed } from "@aeptus/emdash-plugin-seogeo";
+//   import { seogeoPluginSandboxed } from "@aeptus/aexeo-emdash";
 //   emdash({
 //     database: d1({ binding: "DB" }),
 //     storage: r2({ binding: "MEDIA" }),
@@ -92,7 +92,7 @@ export function seogeoPluginSandboxed(
     version: "0.0.1",
     // Subpath export of this same package; must match package.json
     // `exports["./sandbox"]`.
-    entrypoint: "@aeptus/emdash-plugin-seogeo/sandbox",
+    entrypoint: "@aeptus/aexeo-emdash/sandbox",
     format: "standard",
     capabilities: buildCapabilities(evaluatorHost),
     allowedHosts: buildAllowedHosts(evaluatorHost),

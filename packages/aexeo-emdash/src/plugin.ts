@@ -3,8 +3,6 @@ import {
   type EmdashContentItem,
   contentItemToEmdashDocument,
 } from "./adapter.js";
-import { type FindingsDiff, diffFindings } from "./diff.js";
-import { type IndexNowConfig, submitIndexNow } from "./indexnow.js";
 import type { SidecarHttp } from "./sidecar.js";
 
 // This module owns the publish-time hook plus the shared types the
@@ -94,18 +92,6 @@ export interface KvNamespace {
   list<T = unknown>(prefix?: string): Promise<KvEntry<T>[]>;
 }
 
-export interface PluginSettings {
-  // Optional IndexNow config. When present, the publish hook will
-  // submit the changed document URL according to shouldSubmit below.
-  indexNow?: IndexNowConfig;
-}
-
-export interface ContentAfterSaveContext {
-  document: EmdashDocument;
-  kv: KvNamespace;
-  settings?: PluginSettings;
-}
-
 // KV keys for runtime-managed sidecar configuration. Operators paste
 // their values once via the Setup admin page — see renderSetupPage in
 // sandbox-entry.ts. The plugin reads them on every Refresh; rotation
@@ -186,24 +172,6 @@ export interface ContentAfterSaveEvent {
   content: EmdashContentItem;
   collection: string;
   isNew: boolean;
-}
-
-// Policy hook: should this save trigger an IndexNow submission?
-//
-// IndexNow is rate-limited and noisy; submitting on every keystroke is
-// hostile to the protocol. Default policy: submit only when the diff
-// actually changes (added or resolved findings) AND no new error-severity
-// finding was introduced. Resolution alone counts because it means the
-// document moved from "broken" to "fixed", which is exactly the freshness
-// signal IndexNow exists for.
-//
-// You can pass a stricter or looser policy via PluginSettings.shouldSubmit
-// in a later iteration if the default doesn't match your editorial flow.
-export function defaultShouldSubmit(diff: FindingsDiff): boolean {
-  if (diff.added.length === 0 && diff.resolved.length === 0) {
-    return false;
-  }
-  return !diff.added.some((finding) => finding.severity === "error");
 }
 
 // (Note: a previous version of this module exposed an
@@ -435,13 +403,4 @@ export async function readFindings(
     return [];
   }
   return stored.findings;
-}
-
-function absoluteUrl(siteUrl: string, route: string): string {
-  const base = siteUrl.endsWith("/") ? siteUrl.slice(0, -1) : siteUrl;
-  if (route === "" || route === "/") {
-    return base + "/";
-  }
-  const path = route.startsWith("/") ? route : `/${route}`;
-  return base + path;
 }

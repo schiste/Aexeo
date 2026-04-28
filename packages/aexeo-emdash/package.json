@@ -1,14 +1,14 @@
 {
-  "name": "@aeptus/emdash-plugin-seogeo",
+  "name": "@aeptus/aexeo-emdash",
   "version": "0.1.0",
   "description": "Aexeo seogeo SEO/GEO content evaluator as an emdash plugin",
   "license": "MIT",
   "author": "Aexeo",
-  "homepage": "https://github.com/schiste/Aexeo/tree/main/packages/emdash-plugin-seogeo",
+  "homepage": "https://github.com/schiste/Aexeo/tree/main/packages/aexeo-emdash",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/schiste/Aexeo.git",
-    "directory": "packages/emdash-plugin-seogeo"
+    "directory": "packages/aexeo-emdash"
   },
   "bugs": {
     "url": "https://github.com/schiste/Aexeo/issues"

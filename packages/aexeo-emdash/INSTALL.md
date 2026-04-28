@@ -1,4 +1,4 @@
-# Installing `@aeptus/emdash-plugin-seogeo`
+# Installing `@aeptus/aexeo-emdash`
 
 This package adds Aexeo's seogeo SEO/GEO content evaluator to an emdash
 site. Findings show up as a Block Kit admin page; a sidebar widget
@@ -36,7 +36,7 @@ when it's actually needed.
 ### Install
 
 ```bash
-npm install @aeptus/emdash-plugin-seogeo vite-plugin-wasm
+npm install @aeptus/aexeo-emdash vite-plugin-wasm
 ```
 
 `vite-plugin-wasm` is required because Vite's defaults treat `.wasm`
@@ -54,7 +54,7 @@ bridges the two; without it, the seogeo plugin's first call throws
 ```js
 import cloudflare from "@astrojs/cloudflare";
 import { d1, r2 } from "@emdash-cms/cloudflare";
-import { seogeoPlugin } from "@aeptus/emdash-plugin-seogeo";
+import { seogeoPlugin } from "@aeptus/aexeo-emdash";
 import { defineConfig } from "astro/config";
 import emdash from "emdash/astro";
 import wasm from "vite-plugin-wasm";
@@ -70,7 +70,7 @@ export default defineConfig({
     plugins: [wasm()],
     // The seogeo plugin's WASM import confuses Vite's dep
     // optimizer when it tries to pre-bundle the package.
-    optimizeDeps: { exclude: ["@aeptus/emdash-plugin-seogeo"] },
+    optimizeDeps: { exclude: ["@aeptus/aexeo-emdash"] },
   },
   integrations: [
     emdash({
@@ -112,13 +112,13 @@ Run your usual Astro/Cloudflare deploy: `npm run build && wrangler
 deploy` (or whatever your CI does). The same `vite-plugin-wasm` and
 `optimizeDeps.exclude` lines work for production builds — the plugin
 ships its WASM as a separate `.wasm` file under
-`node_modules/@aeptus/emdash-plugin-seogeo/wasm/` which Wrangler
+`node_modules/@aeptus/aexeo-emdash/wasm/` which Wrangler
 compiles into the deployed Worker artifact.
 
 ## Updating
 
 ```bash
-npm update @aeptus/emdash-plugin-seogeo
+npm update @aeptus/aexeo-emdash
 npm run build && <your deploy command>
 ```
 
@@ -156,7 +156,7 @@ Trade-offs vs. configured mode:
 ```js
 // astro.config.mjs (sandboxed mode)
 import { sandbox } from "@emdash-cms/cloudflare";
-import { seogeoPluginSandboxed } from "@aeptus/emdash-plugin-seogeo";
+import { seogeoPluginSandboxed } from "@aeptus/aexeo-emdash";
 
 emdash({
   database: d1({ binding: "DB" }),
@@ -197,8 +197,8 @@ SSH access to the source repo):
 
 ```jsonc
 "dependencies": {
-  "@aeptus/emdash-plugin-seogeo":
-    "git+ssh://git@github.com/schiste/Aexeo.git#<commit-sha>:packages/emdash-plugin-seogeo"
+  "@aeptus/aexeo-emdash":
+    "git+ssh://git@github.com/schiste/Aexeo.git#<commit-sha>:packages/aexeo-emdash"
 }
 ```
 
@@ -207,11 +207,11 @@ Pin to a commit SHA, not a branch. Update by changing the SHA.
 **Vendored copy** (no git access required):
 
 Copy `dist/`, `wasm/`, and `package.json` from this repo into your
-project at e.g. `vendor/emdash-plugin-seogeo/`, then:
+project at e.g. `vendor/aexeo-emdash/`, then:
 
 ```jsonc
 "dependencies": {
-  "@aeptus/emdash-plugin-seogeo": "file:./vendor/emdash-plugin-seogeo"
+  "@aeptus/aexeo-emdash": "file:./vendor/aexeo-emdash"
 }
 ```
 
