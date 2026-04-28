@@ -40,6 +40,13 @@ export interface ConfiguredPluginDescriptor {
   id: string;
   version: string;
   entrypoint: string;
+  // adminEntry: module spec for the plugin's React admin
+  // components. emdash's astro integration imports it as a
+  // namespace at build time and exposes `pages[<pluginPath>]` to
+  // the admin's React tree. Pages registered here override the
+  // default Block-Kit-driven SandboxedPluginPage. Optional —
+  // plugins that only need Block Kit can omit it.
+  adminEntry?: string;
   options: Record<string, unknown>;
   capabilities: readonly string[];
   allowedHosts?: readonly string[];
@@ -81,6 +88,15 @@ export function seogeoPlugin(
     // time — must match the package.json `exports["./configured"]`
     // entry.
     entrypoint: "@aeptus/aexeo-emdash/configured",
+    // React admin module — registers a custom <Findings/> component
+    // for /findings so the route column can render proper <a href>
+    // links. Block Kit can't express clickable links in any element
+    // type as of emdash 0.8.0. The React module's `pages` object is
+    // imported by emdash's admin registry codegen at build time; if
+    // the consumer's bundler doesn't pick up tsx (rare — every
+    // emdash adapter does), the rest of the plugin still works
+    // because /document and the dashboard widget stay on Block Kit.
+    adminEntry: "@aeptus/aexeo-emdash/admin",
     // emdash's astro integration JSON-serializes `options` and emits
     // an importer that does `createPlugin(<options>)` at boot.
     // Anything we put here is what the runtime entry's createPlugin

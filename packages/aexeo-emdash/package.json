@@ -1,6 +1,6 @@
 {
   "name": "@aeptus/aexeo-emdash",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Aexeo seogeo SEO/GEO content evaluator as an emdash plugin",
   "license": "MIT",
   "author": "Aexeo",
@@ -36,6 +36,11 @@
       "import": "./dist/configured.js",
       "default": "./dist/configured.js"
     },
+    "./admin": {
+      "types": "./dist/admin.d.ts",
+      "import": "./dist/admin.js",
+      "default": "./dist/admin.js"
+    },
     "./sandbox": {
       "types": "./dist/sandbox-entry.d.ts",
       "import": "./dist/sandbox-entry.js",
@@ -59,7 +64,8 @@
   },
   "peerDependencies": {
     "@emdash-cms/core": "*",
-    "emdash": ">=0.7.0"
+    "emdash": ">=0.7.0",
+    "react": "^18.0.0 || ^19.0.0"
   },
   "peerDependenciesMeta": {
     "@emdash-cms/core": {
@@ -67,12 +73,17 @@
     },
     "emdash": {
       "optional": true
+    },
+    "react": {
+      "optional": true
     }
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/react": "^19.2.14",
     "emdash": "^0.7.0",
     "esbuild": "^0.28.0",
+    "react": "^19.2.5",
     "typescript": "^5.6.0"
   }
 }

@@ -25,6 +25,7 @@ import {
   readAllDocuments,
   readFindings,
 } from "./plugin.js";
+import { handleDataRoute } from "./data-route.js";
 import { evaluateDocuments, scoreIntelligence } from "./wasm-init.js";
 import type { EmdashContentItem } from "./adapter.js";
 import type { Finding, SiteIntelligenceScore } from "./types.js";
@@ -119,6 +120,29 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
       // every request handles the same set without re-reading options.
       admin: {
         handler: (ctx: RouteContext) => handleAdminRoute(ctx, collections),
+      },
+      // JSON data endpoint for the React adminEntry. Two routes:
+      //   POST /_emdash/api/plugins/aexeo-seogeo/data    — read current findings
+      //   POST /_emdash/api/plugins/aexeo-seogeo/refresh — sweep + read
+      // Returning JSON (not Block Kit blocks) lets the React
+      // <Findings/> component render proper <a href> links to the
+      // emdash edit page and the public site, which Block Kit can't
+      // express in any element type as of emdash 0.8.0.
+      data: {
+        handler: async (ctx: SandboxCtx) =>
+          (await handleDataRoute(ctx, {
+            collections,
+            evaluator: inProcessEvaluator,
+            refresh: false,
+          })).payload,
+      },
+      refresh: {
+        handler: (ctx: SandboxCtx) =>
+          handleDataRoute(ctx, {
+            collections,
+            evaluator: inProcessEvaluator,
+            refresh: true,
+          }),
       },
     } as never,
     admin: {

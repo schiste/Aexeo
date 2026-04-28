@@ -224,6 +224,42 @@ if (configuredResult.errors.length > 0) {
   process.exit(1);
 }
 
+// 3. React adminEntry bundle. Imported by emdash's admin-registry
+//    codegen at build time and rendered by the consumer's admin SPA.
+//    React, react-dom, and @cloudflare/kumo are peer-installed by
+//    every emdash admin host, so mark them external — the bundle
+//    just brings our component code, leaving the consumer's existing
+//    React tree to render it. JSX uses the automatic runtime
+//    (jsx-runtime / jsx-dev-runtime), so esbuild needs `react/jsx-runtime`
+//    to stay external too.
+const adminResult = await build({
+  entryPoints: [resolve(root, "src/admin.tsx")],
+  outfile: resolve(root, "dist/admin.js"),
+  bundle: true,
+  format: "esm",
+  platform: "neutral",
+  target: "es2022",
+  external: [
+    "react",
+    "react-dom",
+    "react/jsx-runtime",
+    "react/jsx-dev-runtime",
+    "@cloudflare/kumo",
+    "@phosphor-icons/react",
+    "emdash",
+    "node:*",
+  ],
+  jsx: "automatic",
+  minify: false,
+  sourcemap: false,
+  legalComments: "none",
+  logLevel: "info",
+});
+
+if (adminResult.errors.length > 0) {
+  process.exit(1);
+}
+
 const sandboxPath = resolve(root, "dist/sandbox-entry.js");
 const sandboxStat = await readFile(sandboxPath);
 console.log(
@@ -233,4 +269,9 @@ const configuredPath = resolve(root, "dist/configured.js");
 const configuredStat = await readFile(configuredPath);
 console.log(
   `bundled: dist/configured.js (${configuredStat.length.toLocaleString()} bytes; .wasm import kept external)`,
+);
+const adminPath = resolve(root, "dist/admin.js");
+const adminStat = await readFile(adminPath);
+console.log(
+  `bundled: dist/admin.js (${adminStat.length.toLocaleString()} bytes; React/peer deps external)`,
 );

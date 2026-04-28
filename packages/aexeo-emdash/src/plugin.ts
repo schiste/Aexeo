@@ -1,9 +1,21 @@
 import type { EmdashDocument, Finding } from "./types.js";
 import {
   type EmdashContentItem,
+  type EmdashContentMeta,
+  adaptContentItem,
   contentItemToEmdashDocument,
 } from "./adapter.js";
 import type { SidecarHttp } from "./sidecar.js";
+
+// What we actually store at documentKey(route): the WASM-shaped doc
+// plus the metadata (id, collection, slug, status, title) the admin
+// UI needs to construct edit/public URLs and human labels. The
+// score widget reads documents from these entries; the new admin
+// /findings React page reads meta to build links.
+export interface StoredDocument {
+  document: EmdashDocument;
+  meta: EmdashContentMeta;
+}
 
 // This module owns the publish-time hook plus the shared types the
 // sandbox entry composes into definePlugin. It used to also export the
@@ -156,6 +168,11 @@ export interface SandboxCtx {
   kv: KvNamespace;
   http: SidecarHttp;
   content: SandboxContentApi;
+  // emdash's wrapper injects site info at wrapper-generation time
+  // (see @emdash-cms/cloudflare/dist/sandbox/index.mjs:800). The
+  // `url` field comes from the `emdash:site_url` option, empty when
+  // unset. Used by the React findings page to construct public URLs.
+  site?: { url: string; name?: string; locale?: string };
   log?: {
     info(msg: string, data?: unknown): void;
     warn(msg: string, data?: unknown): void;
@@ -214,12 +231,16 @@ export async function handleAfterSaveConfigured(
   ctx: SandboxCtx,
   evaluator: EvaluatorFn,
 ): Promise<void> {
-  const document = contentItemToEmdashDocument(event.content);
+  const adapted = adaptContentItem(event.content);
+  const document = adapted.document;
   const { kv, log } = ctx;
 
-  // Persist the document so the score widget has fresh data even if
-  // evaluation fails below.
-  await kv.set(documentKey(document.route), document);
+  // Persist both the WASM-shaped document and the admin metadata.
+  // The metadata (id, collection, status) lets the React findings
+  // page build edit URLs into emdash and public URLs to the live
+  // site without an extra DB lookup at render time.
+  const stored: StoredDocument = { document, meta: adapted.meta };
+  await kv.set(documentKey(document.route), stored);
 
   const result = await evaluator([document]);
   if (!result.ok) {
@@ -302,6 +323,7 @@ export async function evaluateAndPersistAll(
   //    set is collected even on larger sites. Empty collections (or
   //    permissions errors) are tolerated — they accrue to summary.errors.
   const documents: EmdashDocument[] = [];
+  const adaptedByRoute = new Map<string, StoredDocument>();
   const documentRoutes = new Set<string>();
   for (const collection of collections) {
     let cursor: string | undefined;
@@ -312,9 +334,13 @@ export async function evaluateAndPersistAll(
           ...(cursor === undefined ? {} : { cursor }),
         });
         for (const item of page.items) {
-          const document = contentItemToEmdashDocument(item);
-          documents.push(document);
-          documentRoutes.add(document.route);
+          const adapted = adaptContentItem(item);
+          documents.push(adapted.document);
+          documentRoutes.add(adapted.document.route);
+          adaptedByRoute.set(adapted.document.route, {
+            document: adapted.document,
+            meta: adapted.meta,
+          });
         }
         cursor = page.hasMore ? page.cursor : undefined;
       } catch (err) {
@@ -326,11 +352,12 @@ export async function evaluateAndPersistAll(
   }
   summary.documentsScanned = documents.length;
 
-  // 2. Persist the documents in KV — the score widget reads them on
-  //    page load, so even if the sidecar fetch below fails we want
-  //    fresh data backing the widget.
-  for (const document of documents) {
-    await kv.set(documentKey(document.route), document);
+  // 2. Persist documents (with metadata) in KV — the score widget
+  //    and the admin findings page both read these. The meta blob
+  //    is what powers per-route edit URLs and live links in the
+  //    React admin.
+  for (const stored of adaptedByRoute.values()) {
+    await kv.set(documentKey(stored.document.route), stored);
   }
 
   // 3. Evaluate via the supplied evaluator and group findings by
@@ -384,14 +411,42 @@ export function documentKey(route: string): string {
 export async function readAllDocuments(
   kv: KvNamespace,
 ): Promise<EmdashDocument[]> {
+  return (await readAllStoredDocuments(kv)).map((s) => s.document);
+}
+
+export async function readAllStoredDocuments(
+  kv: KvNamespace,
+): Promise<StoredDocument[]> {
   // kv.list returns the parsed values inline — one round-trip, no
-  // get-per-key follow-up. Entries with malformed payloads are
-  // skipped rather than throwing, so a single corrupted KV row
-  // doesn't break the score widget.
-  const entries = await kv.list<EmdashDocument>("document:");
-  return entries
-    .map((entry) => entry.value)
-    .filter((value): value is EmdashDocument => value !== null);
+  // get-per-key follow-up. We tolerate two storage shapes for
+  // backwards-compat: pre-0.2.0 entries stored a bare EmdashDocument
+  // (no meta); 0.2.0+ entries store {document, meta}. The narrower
+  // legacy shape gets a synthesized minimal meta so callers don't
+  // have to special-case it.
+  const entries = await kv.list<unknown>("document:");
+  const out: StoredDocument[] = [];
+  for (const entry of entries) {
+    const value = entry.value;
+    if (value === null || typeof value !== "object") continue;
+    if ("document" in value && "meta" in value) {
+      out.push(value as StoredDocument);
+      continue;
+    }
+    if ("route" in value) {
+      const document = value as EmdashDocument;
+      out.push({
+        document,
+        meta: {
+          id: document.route,
+          collection: "",
+          slug: null,
+          status: "",
+          title: document.title ?? "",
+        },
+      });
+    }
+  }
+  return out;
 }
 
 export async function readFindings(

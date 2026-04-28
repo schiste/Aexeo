@@ -6,6 +6,59 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-28
+
+Adds the long-asked clickable routes on the findings page. Block
+Kit can't render external links in any element type, so /findings
+now ships as a React component registered via the plugin's
+`adminEntry`. /document and the dashboard widget continue to use
+Block Kit (no link needs there).
+
+**Compatibility:** verified against emdash `0.7.0` and `0.8.0`.
+
+### Added
+
+- **Clickable routes on /findings.** Each row's route links to the
+  emdash edit URL for that document
+  (`/_emdash/admin/content/<collection>/<id>`). Published documents
+  also get a "live ↗" link to the public URL
+  (`<emdash:site_url><route>`). Drafts surface their status
+  (`draft`, `scheduled`, etc.) inline so editorial state is visible
+  at a glance.
+- **`adminEntry` field** on the configured-mode plugin descriptor.
+  Points at `@aeptus/aexeo-emdash/admin`, which exports `pages`
+  registering the `<Findings/>` React component for `/findings`.
+  emdash's `usePluginPage` hook picks this up and renders the
+  React component in place of the Block Kit fallback.
+- **Two new HTTP routes** the React component consumes:
+  - `POST /_emdash/api/plugins/aexeo-seogeo/data` — read current
+    findings + per-route metadata + computed URLs (no
+    re-evaluation).
+  - `POST /_emdash/api/plugins/aexeo-seogeo/refresh` — sweep the
+    configured collections, write findings to KV, return the same
+    payload as `/data` plus a refresh summary.
+  Both routes return JSON in the shape exported as `FindingsPayload`
+  from `dist/data-route.d.ts`. The shape is the wire contract
+  between plugin and admin component and is intentionally
+  additive — fields will be appended in future versions, never
+  renamed or removed.
+- `react` declared as an optional peer dependency
+  (`^18.0.0 || ^19.0.0`). Optional because plugins that don't use
+  the React findings page (e.g. ones that override `adminEntry`)
+  don't need it; emdash hosts that DO render adminEntry components
+  always have React installed already.
+
+### Changed
+
+- `documentKey(route)` KV entries now store
+  `{ document, meta: { id, collection, status, slug, title } }`
+  instead of the bare `EmdashDocument`. The new metadata is what
+  the React component reads to construct edit / public URLs without
+  an extra DB round-trip per row. Pre-0.2.0 entries are
+  backwards-compatible — `readAllStoredDocuments` synthesizes a
+  minimal meta blob for legacy entries so a single corrupted-shape
+  row doesn't break the page.
+
 ## [0.1.2] - 2026-04-28
 
 Functional patch. Three bugs flagged by the aeptus web team after
@@ -100,7 +153,8 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.1.2...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.2.0...HEAD
+[0.2.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.1.2...aexeo-emdash-v0.2.0
 [0.1.2]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.1.1...aexeo-emdash-v0.1.2
 [0.1.1]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.1.0...aexeo-emdash-v0.1.1
 [0.1.0]: https://github.com/schiste/Aexeo/releases/tag/aexeo-emdash-v0.1.0

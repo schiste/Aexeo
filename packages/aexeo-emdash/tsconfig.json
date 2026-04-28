@@ -4,6 +4,7 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["ES2022", "DOM"],
+    "jsx": "react-jsx",
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
@@ -19,6 +20,6 @@
     "outDir": "./dist",
     "rootDir": "./src"
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["node_modules", "dist", "wasm"]
 }

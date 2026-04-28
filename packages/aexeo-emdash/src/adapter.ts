@@ -31,9 +31,34 @@ export interface EmdashContentItem {
   };
 }
 
+// Metadata about the source ContentItem that the WASM bridge doesn't
+// need but the admin UI does — enough to construct edit URLs into
+// emdash, public URLs into the deployed site, and to distinguish
+// drafts from published content. Stored alongside the EmdashDocument
+// in KV (see StoredDocument in plugin.ts).
+export interface EmdashContentMeta {
+  id: string;
+  collection: string;
+  slug: string | null;
+  status: string;
+  // Hydrated from the same content.data extraction the document uses,
+  // so the admin can render a human-readable label even when the
+  // route is a slugless fallback like "/posts/<id>".
+  title: string;
+}
+
+export interface AdaptedContent {
+  document: EmdashDocument;
+  meta: EmdashContentMeta;
+}
+
 export function contentItemToEmdashDocument(
   content: EmdashContentItem,
 ): EmdashDocument {
+  return adaptContentItem(content).document;
+}
+
+export function adaptContentItem(content: EmdashContentItem): AdaptedContent {
   const route = deriveRoute(content);
   const title = stringOrEmpty(
     content.seo?.title ?? content.data["title"] ?? content.slug ?? content.id,
@@ -57,7 +82,16 @@ export function contentItemToEmdashDocument(
   if (body !== null) {
     document.body = body;
   }
-  return document;
+  return {
+    document,
+    meta: {
+      id: content.id,
+      collection: content.type,
+      slug: content.slug,
+      status: content.status,
+      title,
+    },
+  };
 }
 
 function deriveRoute(content: EmdashContentItem): string {

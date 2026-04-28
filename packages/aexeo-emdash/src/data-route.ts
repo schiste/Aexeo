@@ -1,0 +1,207 @@
+// Data route for the React admin findings page.
+//
+// Returns JSON (not Block Kit blocks) shaped for the
+// `usePluginPage`-registered <Findings/> component to render.
+// Block-Kit-only consumers continue using the `admin` route via
+// SandboxedPluginPage; the React-component path uses this `data`
+// route for raw findings + per-route metadata + computed edit /
+// public URLs. Two routes covers both rendering paths.
+
+import type {
+  EvaluatorFn,
+  RefreshSummary,
+  SandboxCtx,
+  StoredDocument,
+} from "./plugin.js";
+import {
+  evaluateAndPersistAll,
+  readAllStoredDocuments,
+  readFindings,
+} from "./plugin.js";
+import type { Finding } from "./types.js";
+
+// What the React component receives. Stable wire format — bumping
+// this is a breaking change for any consumer who has cached the
+// shape, so we add fields rather than rename.
+export interface FindingsPayload {
+  // One entry per route the plugin has indexed. Ordered by
+  // severity-descending (errors first, then warnings).
+  routes: RouteSummary[];
+  // Raw findings, ordered the same way. The component re-groups by
+  // route on the client so it can interleave per-route metadata
+  // with the rule rows in a single table.
+  findings: FindingRow[];
+  // Top-level totals for the page header context line. Computed
+  // server-side because the React component is rendered before any
+  // findings array shape mutation could throw it off.
+  totals: {
+    routes: number;
+    findings: number;
+    errors: number;
+    warnings: number;
+    documentsIndexed: number;
+  };
+  // When the bridge tagged a finding with scope: "sitewide" or
+  // "template" rather than a specific page, it's bucketed under "*"
+  // server-side and surfaced separately in the UI.
+  sitewideFindings: Finding[];
+}
+
+export interface RouteSummary {
+  route: string;
+  // Human label — falls back to the route when the source content
+  // didn't have a title yet (drafts, slugless rows).
+  title: string;
+  status: string;
+  collection: string;
+  id: string;
+  // Pre-built URLs the React component drops into <a href>. Empty
+  // string (not null) when the URL can't be constructed — keeps the
+  // component's conditional rendering simple.
+  editUrl: string;
+  publishedUrl: string;
+  findingCount: number;
+  errorCount: number;
+  warningCount: number;
+}
+
+export interface FindingRow {
+  route: string;
+  rule_id: string;
+  severity: string;
+  message: string;
+  path: string;
+  line: number;
+  column: number;
+  scope: string;
+  suggestion: string | null;
+}
+
+interface DataRouteOptions {
+  collections: readonly string[];
+  evaluator: EvaluatorFn;
+  // Refresh: when true, the route runs evaluateAndPersistAll first
+  // and then returns the freshly-written findings. False just reads
+  // current KV state.
+  refresh: boolean;
+}
+
+export async function handleDataRoute(
+  ctx: SandboxCtx,
+  options: DataRouteOptions,
+): Promise<{
+  payload: FindingsPayload;
+  summary: RefreshSummary | null;
+}> {
+  let summary: RefreshSummary | null = null;
+  if (options.refresh) {
+    summary = await evaluateAndPersistAll(ctx, {
+      collections: options.collections,
+      evaluator: options.evaluator,
+    });
+  }
+  const payload = await buildFindingsPayload(ctx);
+  return { payload, summary };
+}
+
+async function buildFindingsPayload(
+  ctx: SandboxCtx,
+): Promise<FindingsPayload> {
+  const stored = await readAllStoredDocuments(ctx.kv);
+  const documents = new Map<string, StoredDocument>();
+  for (const entry of stored) {
+    documents.set(entry.document.route, entry);
+  }
+
+  // Walk the findings KV namespace once. Each entry is keyed by
+  // findings:<route> and the value is { route, findings: Finding[] }.
+  const entries = await ctx.kv.list<{ route: string; findings: Finding[] }>(
+    "findings:",
+  );
+  const findings: FindingRow[] = [];
+  const sitewide: Finding[] = [];
+  const perRoute = new Map<
+    string,
+    { findings: Finding[]; errors: number; warnings: number }
+  >();
+  for (const entry of entries) {
+    if (entry.value === null) continue;
+    const route = entry.key.replace(/^findings:/, "");
+    if (route === "*") {
+      sitewide.push(...entry.value.findings);
+      continue;
+    }
+    let bucket = perRoute.get(route);
+    if (bucket === undefined) {
+      bucket = { findings: [], errors: 0, warnings: 0 };
+      perRoute.set(route, bucket);
+    }
+    for (const finding of entry.value.findings) {
+      bucket.findings.push(finding);
+      if (finding.severity === "error") bucket.errors += 1;
+      else if (finding.severity === "warning") bucket.warnings += 1;
+      findings.push({ ...finding, route });
+    }
+  }
+  findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
+
+  const siteUrl = ctx.site?.url ?? "";
+  const routes: RouteSummary[] = [];
+  for (const [route, bucket] of perRoute) {
+    const stored = documents.get(route);
+    routes.push({
+      route,
+      title: stored?.meta.title ?? route,
+      status: stored?.meta.status ?? "",
+      collection: stored?.meta.collection ?? "",
+      id: stored?.meta.id ?? "",
+      editUrl: stored ? buildEditUrl(stored.meta) : "",
+      publishedUrl: stored ? buildPublishedUrl(stored.meta, route, siteUrl) : "",
+      findingCount: bucket.findings.length,
+      errorCount: bucket.errors,
+      warningCount: bucket.warnings,
+    });
+  }
+  routes.sort((a, b) => b.errorCount - a.errorCount || a.route.localeCompare(b.route));
+
+  return {
+    routes,
+    findings,
+    totals: {
+      routes: routes.length,
+      findings: findings.length,
+      errors: findings.filter((f) => f.severity === "error").length,
+      warnings: findings.filter((f) => f.severity === "warning").length,
+      documentsIndexed: documents.size,
+    },
+    sitewideFindings: sitewide,
+  };
+}
+
+function severityRank(severity: string): number {
+  if (severity === "error") return 0;
+  if (severity === "warning") return 1;
+  return 2;
+}
+
+function buildEditUrl(meta: { collection: string; id: string }): string {
+  if (meta.collection === "" || meta.id === "") return "";
+  // emdash's admin edit-content URL pattern: /_emdash/admin/content/<collection>/<id>
+  // Stable since at least 0.7.0 — confirmed against the admin source.
+  return `/_emdash/admin/content/${encodeURIComponent(meta.collection)}/${encodeURIComponent(meta.id)}`;
+}
+
+function buildPublishedUrl(
+  meta: { status: string; slug: string | null },
+  route: string,
+  siteUrl: string,
+): string {
+  // Only published documents get a public URL; drafts are not
+  // reachable. siteUrl is what emdash exposes via ctx.site.url —
+  // empty string when the host hasn't configured one, in which
+  // case we don't link at all.
+  if (meta.status !== "published") return "";
+  if (siteUrl === "") return "";
+  const trimmed = siteUrl.endsWith("/") ? siteUrl.slice(0, -1) : siteUrl;
+  return `${trimmed}${route}`;
+}
