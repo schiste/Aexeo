@@ -1,11 +1,11 @@
-// Public surface for @aexeo/emdash-plugin-seogeo.
+// Public surface for @aeptus/emdash-plugin-seogeo.
 //
 // The package ships TWO plugin factories. Both return descriptors
 // emdash's astro integration consumes at build time; both have a
 // matching runtime entrypoint that emdash imports at boot.
 //
 //   1. seogeoPlugin() — CONFIGURED MODE (recommended). Returns a
-//      descriptor pointing at "@aexeo/emdash-plugin-seogeo/configured"
+//      descriptor pointing at "@aeptus/emdash-plugin-seogeo/configured"
 //      whose createPlugin() runs in-process inside the host emdash
 //      Worker. No sidecar Worker, no runtime token, no Setup page.
 //      Use this for first-party deploys where you trust the plugin
@@ -13,7 +13,7 @@
 //
 //   2. seogeoPluginSandboxed({ evaluatorHost }) — SANDBOXED MODE.
 //      Returns a descriptor pointing at
-//      "@aexeo/emdash-plugin-seogeo/sandbox" loaded by emdash's
+//      "@aeptus/emdash-plugin-seogeo/sandbox" loaded by emdash's
 //      Worker Loader, with a separate sidecar Worker doing the WASM
 //      evaluation. Required when the plugin runs on third-party
 //      emdash sites that don't trust it with host access. Place in
@@ -32,7 +32,7 @@ export type {
 // Configured-mode descriptor. Mirrors emdash's PluginDescriptor; the
 // host's astro integration auto-generates an importer that does:
 //
-//   import { createPlugin } from "@aexeo/emdash-plugin-seogeo/configured";
+//   import { createPlugin } from "@aeptus/emdash-plugin-seogeo/configured";
 //   plugins.push(createPlugin(<options>));
 //
 // adminEntry is omitted because the plugin's admin pages are rendered
@@ -63,7 +63,7 @@ export function seogeoPlugin(
     // Subpath import resolved by the consumer's bundler at build
     // time — must match the package.json `exports["./configured"]`
     // entry.
-    entrypoint: "@aexeo/emdash-plugin-seogeo/configured",
+    entrypoint: "@aeptus/emdash-plugin-seogeo/configured",
     options: { ...options },
     capabilities: [
       "read:content",

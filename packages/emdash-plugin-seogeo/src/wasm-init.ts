@@ -37,7 +37,7 @@ function ensureInitialized(): void {
       "seogeo: WASM module did not resolve to a WebAssembly.Module — " +
         "the consumer's bundler isn't configured for .wasm imports. " +
         "Add the .wasm loader to your Vite/wrangler config; see " +
-        "@aexeo/emdash-plugin-seogeo INSTALL.md for the recipe.",
+        "@aeptus/emdash-plugin-seogeo INSTALL.md for the recipe.",
     );
   }
   const instance = new WebAssembly.Instance(bridgeModule, {

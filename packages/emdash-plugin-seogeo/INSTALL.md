@@ -1,4 +1,4 @@
-# Installing `@aexeo/emdash-plugin-seogeo`
+# Installing `@aeptus/emdash-plugin-seogeo`
 
 This package adds Aexeo's seogeo SEO/GEO content evaluator to an emdash
 site. Findings show up as a Block Kit admin page; a sidebar widget
@@ -36,7 +36,7 @@ when it's actually needed.
 ### Install
 
 ```bash
-npm install @aexeo/emdash-plugin-seogeo vite-plugin-wasm
+npm install @aeptus/emdash-plugin-seogeo vite-plugin-wasm
 ```
 
 `vite-plugin-wasm` is required because Vite's defaults treat `.wasm`
@@ -54,7 +54,7 @@ bridges the two; without it, the seogeo plugin's first call throws
 ```js
 import cloudflare from "@astrojs/cloudflare";
 import { d1, r2 } from "@emdash-cms/cloudflare";
-import { seogeoPlugin } from "@aexeo/emdash-plugin-seogeo";
+import { seogeoPlugin } from "@aeptus/emdash-plugin-seogeo";
 import { defineConfig } from "astro/config";
 import emdash from "emdash/astro";
 import wasm from "vite-plugin-wasm";
@@ -70,7 +70,7 @@ export default defineConfig({
     plugins: [wasm()],
     // The seogeo plugin's WASM import confuses Vite's dep
     // optimizer when it tries to pre-bundle the package.
-    optimizeDeps: { exclude: ["@aexeo/emdash-plugin-seogeo"] },
+    optimizeDeps: { exclude: ["@aeptus/emdash-plugin-seogeo"] },
   },
   integrations: [
     emdash({
@@ -112,13 +112,13 @@ Run your usual Astro/Cloudflare deploy: `npm run build && wrangler
 deploy` (or whatever your CI does). The same `vite-plugin-wasm` and
 `optimizeDeps.exclude` lines work for production builds — the plugin
 ships its WASM as a separate `.wasm` file under
-`node_modules/@aexeo/emdash-plugin-seogeo/wasm/` which Wrangler
+`node_modules/@aeptus/emdash-plugin-seogeo/wasm/` which Wrangler
 compiles into the deployed Worker artifact.
 
 ## Updating
 
 ```bash
-npm update @aexeo/emdash-plugin-seogeo
+npm update @aeptus/emdash-plugin-seogeo
 npm run build && <your deploy command>
 ```
 
@@ -156,7 +156,7 @@ Trade-offs vs. configured mode:
 ```js
 // astro.config.mjs (sandboxed mode)
 import { sandbox } from "@emdash-cms/cloudflare";
-import { seogeoPluginSandboxed } from "@aexeo/emdash-plugin-seogeo";
+import { seogeoPluginSandboxed } from "@aeptus/emdash-plugin-seogeo";
 
 emdash({
   database: d1({ binding: "DB" }),
@@ -189,14 +189,16 @@ the same token.
 
 ## Alternative install sources
 
-The package isn't on public npm at the moment. Three install methods:
+Public npm is the recommended path. If your install context can't
+reach the npm registry, two fallbacks:
 
-**Git URL (works without npm publish):**
+**Git URL** (works without npm registry access, requires GitHub
+SSH access to the source repo):
 
 ```jsonc
 "dependencies": {
-  "@aexeo/emdash-plugin-seogeo":
-    "git+ssh://git@github.com/<aexeo-org>/<repo>.git#<commit-sha>:packages/emdash-plugin-seogeo"
+  "@aeptus/emdash-plugin-seogeo":
+    "git+ssh://git@github.com/schiste/Aexeo.git#<commit-sha>:packages/emdash-plugin-seogeo"
 }
 ```
 
@@ -209,22 +211,13 @@ project at e.g. `vendor/emdash-plugin-seogeo/`, then:
 
 ```jsonc
 "dependencies": {
-  "@aexeo/emdash-plugin-seogeo": "file:./vendor/emdash-plugin-seogeo"
+  "@aeptus/emdash-plugin-seogeo": "file:./vendor/emdash-plugin-seogeo"
 }
 ```
 
-Update by re-copying the directory.
-
-**npm publish** (when ready):
-
-```bash
-# In packages/emdash-plugin-seogeo/, after flipping `private: false`
-npm run build
-npm publish --access public
-```
-
-After this, all three install methods reduce to
-`npm install @aexeo/emdash-plugin-seogeo`.
+Update by re-copying the directory. Vendored installs lose npm's
+update tracking, so this is the heaviest of the three options
+operationally.
 
 ## Troubleshooting
 

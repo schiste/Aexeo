@@ -1,4 +1,4 @@
-# @aexeo/emdash-plugin-seogeo
+# @aeptus/emdash-plugin-seogeo
 
 Aexeo's seogeo SEO/GEO content evaluator as an emdash plugin.
 
@@ -9,18 +9,18 @@ changed document; the Refresh button re-evaluates the whole site.
 ## Install
 
 ```bash
-npm install @aexeo/emdash-plugin-seogeo vite-plugin-wasm
+npm install @aeptus/emdash-plugin-seogeo vite-plugin-wasm
 ```
 
 ```js
 // astro.config.mjs
-import { seogeoPlugin } from "@aexeo/emdash-plugin-seogeo";
+import { seogeoPlugin } from "@aeptus/emdash-plugin-seogeo";
 import wasm from "vite-plugin-wasm";
 
 export default defineConfig({
   vite: {
     plugins: [wasm()],
-    optimizeDeps: { exclude: ["@aexeo/emdash-plugin-seogeo"] },
+    optimizeDeps: { exclude: ["@aeptus/emdash-plugin-seogeo"] },
   },
   integrations: [
     emdash({

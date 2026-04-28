@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `@aexeo/emdash-plugin-seogeo` are listed here.
+All notable changes to `@aeptus/emdash-plugin-seogeo` are listed here.
 The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
@@ -41,5 +41,5 @@ First public release.
   vite plugins for the WASM import to resolve as a precompiled
   `WebAssembly.Module`.
 
-[Unreleased]: https://github.com/aexeo/Aexeo/compare/seogeo-plugin-v0.1.0...HEAD
-[0.1.0]: https://github.com/aexeo/Aexeo/releases/tag/seogeo-plugin-v0.1.0
+[Unreleased]: https://github.com/schiste/Aexeo/compare/seogeo-plugin-v0.1.0...HEAD
+[0.1.0]: https://github.com/schiste/Aexeo/releases/tag/seogeo-plugin-v0.1.0
