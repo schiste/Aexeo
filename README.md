@@ -105,6 +105,7 @@ cargo run -p seogeo-cli -- adapters
 - [docs/decisions.md](docs/decisions.md): enforced architecture decisions
 - [docs/package-boundaries.md](docs/package-boundaries.md): target package map for the future `website` monorepo move
 - [docs/install.md](docs/install.md): internal install and upgrade instructions
+- [docs/static-site-ci.md](docs/static-site-ci.md): static-site CI recipe, monorepo layouts, placeholder-route patterns
 - [docs/local-quality.md](docs/local-quality.md): local hook model and repo-quality enforcement
 - [docs/release.md](docs/release.md): internal release checklist and packaging flow
 - [docs/astro-ci.md](docs/astro-ci.md): Astro CI and deployment-gate workflow

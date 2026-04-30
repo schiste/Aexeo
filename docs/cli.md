@@ -166,7 +166,7 @@ Usage: generate [OPTIONS] <kind> [path]
 
 Arguments:
   <kind>
-          [possible values: llms, llms-full, machine-bundle, markdown-mirror, markdown-pages, robots, links]
+          [possible values: llms, llms-full, machine-bundle, markdown-mirror, markdown-pages, robots, sitemap, links]
 
   [path]
           [default: .]
@@ -176,6 +176,9 @@ Options:
 
 
       --write-dir <write-dir>
+
+
+      --site-url <site-url>
 
 
       --format <format>

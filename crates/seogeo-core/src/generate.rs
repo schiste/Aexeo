@@ -525,6 +525,18 @@ pub fn build_machine_artifact_bundle(site: &Site, site_url: Option<&str>) -> Mac
             render_llms_full_txt(site, site_url),
         ),
     ];
+    if let Some(url) = site_url {
+        artifacts.push(machine_artifact(
+            "sitemap.xml",
+            "sitemap",
+            render_sitemap_xml(site, url),
+        ));
+        artifacts.push(machine_artifact(
+            "robots.txt",
+            "robots",
+            render_robots_txt(url),
+        ));
+    }
     let facts = crate::intelligence::generate_truth_manifest_with_options(site, false);
     let facts_content =
         serde_json::to_string_pretty(&facts.manifest).unwrap_or_else(|_| "{}".to_string());
@@ -612,6 +624,73 @@ pub fn render_robots_txt(site_url: &str) -> String {
         "User-agent: *\nAllow: /\nSitemap: {}/sitemap.xml\n",
         normalized
     )
+}
+
+fn page_is_indexable(page: &Page) -> bool {
+    let robots_meta = page.metadata("robots").unwrap_or("").to_ascii_lowercase();
+    if robots_meta.contains("noindex") {
+        return false;
+    }
+    let robots_header = page
+        .response_headers
+        .get("x-robots-tag")
+        .map(String::as_str)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if robots_header.contains("noindex") {
+        return false;
+    }
+    true
+}
+
+fn route_to_url(site_url: &str, route: &str) -> String {
+    let base = site_url.trim_end_matches('/');
+    if route.is_empty() {
+        format!("{}/", base)
+    } else {
+        format!("{}/{}", base, route)
+    }
+}
+
+fn xml_escape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '\'' => out.push_str("&apos;"),
+            '"' => out.push_str("&quot;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+pub fn render_sitemap_xml(site: &Site, site_url: &str) -> String {
+    let mut routes: Vec<&str> = site
+        .route_page_pairs()
+        .filter(|(route, page)| {
+            if route.as_str() == "404" {
+                return false;
+            }
+            page_is_indexable(page)
+        })
+        .map(|(route, _)| route.as_str())
+        .collect();
+    routes.sort();
+
+    let mut out = String::new();
+    out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    out.push_str("<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
+    for route in routes {
+        let url = route_to_url(site_url, route);
+        out.push_str("  <url>\n");
+        out.push_str(&format!("    <loc>{}</loc>\n", xml_escape(&url)));
+        out.push_str("  </url>\n");
+    }
+    out.push_str("</urlset>\n");
+    out
 }
 
 fn tokenize_route(route: &str) -> BTreeSet<String> {
@@ -747,7 +826,7 @@ pub fn suggest_internal_links(site: &Site, top_n: usize) -> String {
 mod tests {
     use super::{
         build_link_suggestions, build_machine_artifact_bundle, render_llms_full_txt,
-        render_llms_txt, render_markdown_mirror, render_markdown_mirror_pages,
+        render_llms_txt, render_markdown_mirror, render_markdown_mirror_pages, render_sitemap_xml,
         suggest_internal_links,
     };
     use crate::site::load_site;
@@ -810,6 +889,50 @@ mod tests {
         assert!(suggest_internal_links(&site, 3).contains("/features/alpha"));
         let suggestion_map = build_link_suggestions(&site, 3);
         assert!(!suggestion_map.get("").unwrap_or(&Vec::new()).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn sitemap_emits_indexable_routes_and_excludes_noindex_and_404() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(&root.join("index.html"), &make_html_page("", ""));
+        write(&root.join("about.html"), &make_html_page("about", ""));
+        // 404 is excluded by route, regardless of indexability.
+        write(&root.join("404.html"), &make_html_page("404", ""));
+        // noindex via meta robots — must be excluded.
+        write(
+            &root.join("hidden.html"),
+            "<html lang=\"en\"><head><title>x</title><meta name=\"description\" content=\"y\"><meta name=\"robots\" content=\"noindex\"><link rel=\"canonical\" href=\"https://example.com/hidden\"></head><body><h1>x</h1></body></html>",
+        );
+        let site = load_site(root)?;
+        let xml = render_sitemap_xml(&site, "https://example.com");
+        assert!(xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
+        assert!(xml.contains("<loc>https://example.com/</loc>"));
+        assert!(xml.contains("<loc>https://example.com/about</loc>"));
+        assert!(!xml.contains("/hidden"));
+        assert!(!xml.contains("/404"));
+        // Trailing slash on site_url should not produce double-slash on root URL.
+        let xml_trailing = render_sitemap_xml(&site, "https://example.com/");
+        assert!(xml_trailing.contains("<loc>https://example.com/</loc>"));
+        assert!(!xml_trailing.contains("https://example.com//"));
+        Ok(())
+    }
+
+    #[test]
+    fn machine_bundle_includes_sitemap_and_robots_when_site_url_set() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(&root.join("index.html"), &make_html_page("", ""));
+        let site = load_site(root)?;
+        let with_url = build_machine_artifact_bundle(&site, Some("https://example.com"));
+        let names: Vec<_> = with_url.artifacts.iter().map(|a| a.path.as_str()).collect();
+        assert!(names.contains(&"sitemap.xml"));
+        assert!(names.contains(&"robots.txt"));
+        let without = build_machine_artifact_bundle(&site, None);
+        let names: Vec<_> = without.artifacts.iter().map(|a| a.path.as_str()).collect();
+        assert!(!names.contains(&"sitemap.xml"));
+        assert!(!names.contains(&"robots.txt"));
         Ok(())
     }
 

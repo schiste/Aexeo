@@ -7,8 +7,8 @@ use seogeo_core::{
     MachineArtifactBundle, apply_safe_fixes, build_audit_artifact, build_machine_artifact_bundle,
     diff_finding_sets, load_findings_from_audit, load_site, render_llms_full_txt, render_llms_txt,
     render_markdown_mirror, render_markdown_mirror_pages, render_robots_txt, render_sarif,
-    render_text_artifact, run_native_static_audit_with_config, suggest_internal_links,
-    write_audit_artifact, write_baseline_file,
+    render_sitemap_xml, render_text_artifact, run_native_static_audit_with_config,
+    suggest_internal_links, write_audit_artifact, write_baseline_file,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -126,24 +126,48 @@ pub fn command_generate(submatches: &ArgMatches) -> Result<i32> {
         .map(String::as_str)
         .ok_or_else(|| anyhow::anyhow!("missing required CLI argument 'kind'"))?;
     if matches!(kind, "machine-bundle" | "markdown-pages") {
+        let site_url = submatches
+            .get_one::<String>("site-url")
+            .map(String::as_str)
+            .or(site_config.site_url);
         return command_generate_machine_artifacts(
             submatches,
             kind,
             &site,
-            site_config.site_url,
+            site_url,
             loaded.warnings,
         );
     }
+    // CLI flag overrides the seogeo.toml site.url for one-off invocations.
+    let site_url_override = submatches.get_one::<String>("site-url").map(String::as_str);
+    let resolved_site_url = site_url_override.or(site_config.site_url);
+
     let output = match kind {
-        "llms" => render_llms_txt(&site, site_config.site_url),
-        "llms-full" => render_llms_full_txt(&site, site_config.site_url),
+        "llms" => render_llms_txt(&site, resolved_site_url),
+        "llms-full" => render_llms_full_txt(&site, resolved_site_url),
         "markdown-mirror" => render_markdown_mirror(&site),
         "robots" => {
-            let Some(site_url) = site_config.site_url else {
+            let Some(site_url) = resolved_site_url else {
                 println!("site_url is required to generate robots.txt");
                 return Ok(2);
             };
             render_robots_txt(site_url)
+        }
+        "sitemap" => {
+            let Some(site_url) = resolved_site_url else {
+                println!("site_url is required to generate sitemap.xml");
+                return Ok(2);
+            };
+            let xml = render_sitemap_xml(&site, site_url);
+            // An empty <urlset/> almost always means a misconfiguration
+            // (wrong path, all pages noindex). Refuse rather than emit it.
+            if !xml.contains("<url>") {
+                println!(
+                    "no indexable routes found; sitemap.xml would be empty (check input path and noindex coverage)"
+                );
+                return Ok(2);
+            }
+            xml
         }
         "links" => suggest_internal_links(&site, 3),
         other => bail!("unsupported generate kind: {}", other),

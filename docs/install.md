@@ -163,6 +163,11 @@ This is the same pattern eslint, mypy, and stricter linters use for
 brownfield adoption. Trying to clear the entire backlog before turning
 the linter on is what kills adoption — incremental ratchet wins.
 
+> See also [docs/static-site-ci.md](static-site-ci.md) for the full
+> static-site CI recipe (build → generate machine surfaces →
+> regression-gated check), monorepo layouts, and placeholder-route
+> patterns.
+
 ### CI integration
 
 The bootstrap is idempotent and cache-aware. A typical CI step:

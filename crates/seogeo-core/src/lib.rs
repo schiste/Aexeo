@@ -40,7 +40,7 @@ pub use fix::apply_safe_fixes;
 pub use generate::{
     GeneratedMachineArtifact, MachineArtifactBundle, build_link_suggestions,
     build_machine_artifact_bundle, render_llms_full_txt, render_llms_txt, render_markdown_mirror,
-    render_markdown_mirror_pages, render_robots_txt, suggest_internal_links,
+    render_markdown_mirror_pages, render_robots_txt, render_sitemap_xml, suggest_internal_links,
 };
 pub use html_rules::{run_html_rules, run_static_html_audit};
 pub use integrations::{

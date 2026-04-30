@@ -161,11 +161,13 @@ pub fn build_cli() -> Command {
                     "markdown-mirror",
                     "markdown-pages",
                     "robots",
+                    "sitemap",
                     "links",
                 ]))
                 .arg(Arg::new("path").default_value("."))
                 .arg(Arg::new("config").long("config").num_args(1))
                 .arg(Arg::new("write-dir").long("write-dir").num_args(1))
+                .arg(Arg::new("site-url").long("site-url").num_args(1))
                 .arg(
                     Arg::new("format")
                         .long("format")
