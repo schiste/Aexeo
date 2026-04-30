@@ -62,16 +62,149 @@ sh scripts/install-seogeo.sh \
 
 ## Build Internal Artifacts
 
-Create release artifacts:
+Create release artifacts for the host triple:
 
 ```bash
 sh scripts/build_internal_release.sh
 ```
 
+Or for a specific target (must match the host; refuses cross-compilation
+unless `--allow-cross` is passed):
+
+```bash
+sh scripts/build_internal_release.sh --target darwin-arm64
+sh scripts/build_internal_release.sh --target linux-x86_64
+```
+
 This produces:
 
-- `dist/seogeo-cli`
-- `dist/SHA256SUMS.txt`
+- `dist/seogeo-cli-<os-arch>`
+- `dist/seogeo-cli-<os-arch>.sha256`
+
+The release workflow combines per-target `.sha256` files into a single
+`SHA256SUMS.txt` asset on the GitHub Release.
+
+## Distributing to Consumer Repos
+
+The seogeo CLI is consumed from internal repos (e.g. `aeptus-com-cms`)
+without re-building from source. Each tag push (`v*`) on this repo
+triggers `.github/workflows/release-internal.yml`, which builds the
+binary natively on `macos-14` (arm64) and `ubuntu-latest` (x86_64),
+then publishes a real GitHub Release with these assets:
+
+- `seogeo-cli-darwin-arm64`
+- `seogeo-cli-linux-x86_64`
+- `SHA256SUMS.txt`
+
+Consumer repos don't need Rust, the Aexeo source, or any toolchain —
+they vendor a single bootstrap script that fetches the matching
+prebuilt binary at the version they pin.
+
+### Adopting in a new consumer repo
+
+1. Copy `scripts/bootstrap-seogeo.template.sh` from this repo into the
+   consumer as `scripts/bootstrap-seogeo.sh` and `chmod +x` it.
+2. Create a `.seogeo-version` file at the consumer repo root with a
+   constraint, e.g. `^0.7` (caret pin) or `v0.7.4` (exact).
+3. Set `GITHUB_TOKEN` to a token with `contents:read` on this repo
+   (see *Auth setup* below) and run the bootstrap once locally:
+
+   ```bash
+   GITHUB_TOKEN=<token> ./scripts/bootstrap-seogeo.sh
+   ```
+
+   This resolves the constraint, writes `.seogeo-version.lock`, downloads
+   the binary into `~/.cache/seogeo/<tag>/seogeo-cli`, verifies the
+   SHA256, and prints the binary path on stdout.
+4. Commit both `.seogeo-version` and `.seogeo-version.lock`.
+
+### CI integration
+
+The bootstrap is idempotent and cache-aware. A typical CI step:
+
+```yaml
+- name: Mint a seogeo fetch token
+  id: app-token
+  uses: actions/create-github-app-token@v1
+  with:
+    app-id: ${{ vars.SEOGEO_APP_ID }}
+    private-key: ${{ secrets.SEOGEO_APP_PRIVATE_KEY }}
+    owner: schiste
+    repositories: Aexeo
+
+- name: Install seogeo
+  env:
+    GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+  run: |
+    SEOGEO_BIN=$(./scripts/bootstrap-seogeo.sh)
+    echo "$(dirname "$SEOGEO_BIN")" >> "$GITHUB_PATH"
+
+- name: Run seogeo check
+  run: seogeo-cli check .
+```
+
+In CI (`$CI=true`) the bootstrap **refuses to write the lock**. If
+`.seogeo-version.lock` is missing or no longer satisfies
+`.seogeo-version`, the build fails with a message telling the operator
+to re-run the bootstrap locally and commit the updated lock. This
+matches `npm ci` / `cargo build --locked` semantics and is the
+mechanism that keeps CI builds reproducible under floating pins.
+
+### Bumping the pinned version
+
+```bash
+# 1. Edit the constraint (e.g. ^0.7 → ^0.8).
+$EDITOR .seogeo-version
+
+# 2. Drop the lock so the next bootstrap re-resolves.
+rm .seogeo-version.lock
+
+# 3. Re-run; this writes a new lock satisfying the new constraint.
+./scripts/bootstrap-seogeo.sh
+
+# 4. Review and commit both files.
+git diff .seogeo-version .seogeo-version.lock
+git add .seogeo-version .seogeo-version.lock
+```
+
+### Constraint syntax
+
+| Constraint | Matches | Notes |
+|------------|---------|-------|
+| `v0.7.4` | exactly `v0.7.4` | leading `v` optional |
+| `^0.7` or `^0.7.0` | `0.7.*` | minor pin while major is 0 |
+| `^0.7.4` | `0.7.x` where `x >= 4` | patch-floor on 0.x |
+| `^1.2` | `>=1.2.0, <2.0.0` | minor and patch float once major hits 1 |
+
+Tilde (`~`) and explicit ranges (`>=`, `<`) are explicitly rejected with
+a "use caret instead" error. Add them later only if a real use case
+appears.
+
+### Auth setup
+
+Consumers use a GitHub App installation token (preferred over a long-
+lived PAT) to fetch private release assets. One-time setup:
+
+1. Create a GitHub App on the `schiste` account (`Settings → Developer
+   settings → GitHub Apps → New`):
+   - **Permissions** → Repository → **Contents: Read-only**
+   - **Where can this be installed:** Only this account
+   - Webhook: disabled
+2. Generate a private key on the App page; save the `.pem` securely.
+3. Note the numeric **App ID**.
+4. Install the App on `schiste/Aexeo`.
+5. For each consumer repo:
+   - Install the same App on the consumer repo.
+   - In the consumer repo settings: add variable `SEOGEO_APP_ID` and
+     secret `SEOGEO_APP_PRIVATE_KEY` (paste the `.pem` contents).
+
+The CI snippet above uses `actions/create-github-app-token@v1` to mint a
+short-lived installation token from those values on every run. No PAT
+to rotate, no per-person ownership, and revocation is per-installation.
+
+For local development outside CI, a fine-grained PAT with
+`contents:read` on `schiste/Aexeo` is acceptable — set it as
+`GITHUB_TOKEN` in your shell.
 
 ## Release Flow
 

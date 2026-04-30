@@ -7,15 +7,71 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - runner: macos-14
+            target: darwin-arm64
+          - runner: ubuntu-latest
+            target: linux-x86_64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-      - name: Build internal artifacts
-        run: sh scripts/build_internal_release.sh
-      - name: Upload release artifacts
+        with:
+          components: rustfmt, clippy
+      - name: Build native target
+        env:
+          TARGET: ${{ matrix.target }}
+        run: sh scripts/build_internal_release.sh --target "$TARGET"
+      - name: Upload target artifact
         uses: actions/upload-artifact@v4
         with:
-          name: seogeo-release
-          path: dist/*
+          name: seogeo-cli-${{ matrix.target }}
+          path: |
+            dist/seogeo-cli-${{ matrix.target }}
+            dist/seogeo-cli-${{ matrix.target }}.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all target artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Stage release directory
+        run: |
+          set -eu
+          mkdir -p release
+          # Workflow artifacts strip POSIX mode bits, so re-mark each
+          # binary executable before it becomes a release asset.
+          for f in artifacts/*/seogeo-cli-*; do
+            case "$f" in
+              *.sha256) ;;
+              *)
+                base=$(basename "$f")
+                cp "$f" "release/$base"
+                chmod +x "release/$base"
+                ;;
+            esac
+          done
+          # Re-derive the combined SHA256SUMS.txt from the staged files
+          # so each line is "<hex>  <basename>" with no path prefix.
+          cd release
+          shasum -a 256 seogeo-cli-* > SHA256SUMS.txt
+          ls -la
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
