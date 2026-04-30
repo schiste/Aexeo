@@ -189,18 +189,26 @@ lived PAT) to fetch private release assets. One-time setup:
    settings → GitHub Apps → New`):
    - **Permissions** → Repository → **Contents: Read-only**
    - **Where can this be installed:** Only this account
-   - Webhook: disabled
+   - Webhook: disabled (uncheck Active)
 2. Generate a private key on the App page; save the `.pem` securely.
 3. Note the numeric **App ID**.
-4. Install the App on `schiste/Aexeo`.
+4. Install the App on `schiste/Aexeo`. Do **not** install it on the
+   consumer repos. The consumer side only needs the App's credentials
+   (App ID + private key) — `actions/create-github-app-token` mints a
+   `schiste/Aexeo`-scoped token by passing `owner: schiste,
+   repositories: Aexeo` regardless of where the workflow runs. Keeping
+   the App installed only on `schiste` minimizes blast radius if the
+   private key ever leaks.
 5. For each consumer repo:
-   - Install the same App on the consumer repo.
    - In the consumer repo settings: add variable `SEOGEO_APP_ID` and
      secret `SEOGEO_APP_PRIVATE_KEY` (paste the `.pem` contents).
 
 The CI snippet above uses `actions/create-github-app-token@v1` to mint a
-short-lived installation token from those values on every run. No PAT
-to rotate, no per-person ownership, and revocation is per-installation.
+short-lived installation token from those values on every run. The
+`owner: schiste` line in the snippet is required when the consumer repo
+lives outside `schiste/`, because the action defaults to looking up an
+installation matching the workflow's owner. No PAT to rotate, no
+per-person ownership, and revocation is per-installation.
 
 For local development outside CI, a fine-grained PAT with
 `contents:read` on `schiste/Aexeo` is acceptable — set it as
