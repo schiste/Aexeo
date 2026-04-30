@@ -61,9 +61,21 @@ esac
 # Implements caret semantics matching cargo: for 0.x, ^0.X.Y allows
 # 0.X.>=Y (minor pins major-zero releases). For >=1.x, ^X.Y.Z allows
 # anything <(X+1).0.0 and >=X.Y.Z.
+#
+# Prerelease tags (anything with a "-" after the patch, like v0.0.1-rc.1)
+# never satisfy a caret constraint — that's the semver default. Pin to
+# them explicitly with an exact constraint if you need a release
+# candidate.
 satisfies() {
     sat_c="$1"; sat_v="$2"
     sat_v="${sat_v#v}"
+    case "$sat_c" in
+        \^*)
+            case "$sat_v" in
+                *-*) return 1 ;;
+            esac
+            ;;
+    esac
     sat_v_major=$(printf '%s' "$sat_v" | cut -d. -f1)
     sat_v_minor=$(printf '%s' "$sat_v" | cut -d. -f2)
     sat_v_patch=$(printf '%s' "$sat_v" | cut -d. -f3)
@@ -114,7 +126,7 @@ if [ -z "$TAG" ]; then
     command -v jq >/dev/null || die "jq required to resolve constraint"
     command -v curl >/dev/null || die "curl required to resolve constraint"
 
-    err "resolving $CONSTRAINT against $REPO releases…"
+    err "resolving $CONSTRAINT against $REPO releases..."
     # First page only — fine for the first 30 releases. Add pagination if
     # the release count grows past that.
     RELEASES=$(curl -fsSL \
@@ -132,6 +144,13 @@ if [ -z "$TAG" ]; then
     OLDIFS="$IFS"; IFS='
 '
     for c in $CANDIDATES; do
+        # Skip tags that are not seogeo-cli releases. The repo also
+        # publishes tags for adjacent artifacts (e.g. aexeo-emdash-v*)
+        # and only tags shaped like vX.Y.Z(...) belong here.
+        case "$c" in
+            v[0-9]*) ;;
+            *) continue ;;
+        esac
         if satisfies "$CONSTRAINT" "$c"; then
             if [ -z "$BEST" ]; then
                 BEST="$c"
@@ -175,7 +194,7 @@ mkdir -p "$INSTALL_DIR"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-err "downloading $ASSET from $REPO@$TAG…"
+err "downloading $ASSET from $REPO@${TAG}..."
 RELEASE_JSON=$(curl -fsSL \
     -H "Authorization: Bearer $GITHUB_TOKEN" \
     -H "Accept: application/vnd.github+json" \

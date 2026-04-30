@@ -118,6 +118,51 @@ prebuilt binary at the version they pin.
    SHA256, and prints the binary path on stdout.
 4. Commit both `.seogeo-version` and `.seogeo-version.lock`.
 
+### Adopting against an existing backlog
+
+Running `seogeo-cli check .` for the first time on a real repo will
+almost always surface a sizeable backlog of pre-existing findings —
+generated artifacts, vendored content, log files, longstanding HTML
+issues, etc. Failing CI on day one over inherited problems is a bad
+adoption story; the practical pattern is:
+
+1. **Configure excludes first.** Add a `seogeo.toml` (or equivalent
+   config) in the consumer repo that excludes generated paths and
+   anything outside the actual surface you intend to lint
+   (e.g. `target/`, `dist/`, `node_modules/`, `.seogeo-reports/`,
+   `*-latest.json`). Iterate locally with
+   `seogeo-cli check . --format text` until the remaining backlog is
+   real findings, not noise.
+
+2. **Snapshot the current state as a baseline:**
+
+   ```bash
+   seogeo-cli baseline .
+   ```
+
+   This writes `.seogeo-baseline.json` recording every current finding.
+   Commit it.
+
+3. **Run check with `--regressions-only` in CI:**
+
+   ```yaml
+   - name: Run seogeo (regressions only)
+     run: seogeo-cli check . --baseline .seogeo-baseline.json --regressions-only
+   ```
+
+   CI now fails only on findings introduced after the baseline was
+   captured. The pre-existing backlog stays visible for paydown but
+   doesn't block PRs.
+
+4. **Pay down at your own pace.** Whenever a finding from the baseline
+   gets fixed, refresh the baseline (`seogeo-cli baseline .`) and
+   commit. The new baseline carries fewer findings; CI's bar rises
+   accordingly.
+
+This is the same pattern eslint, mypy, and stricter linters use for
+brownfield adoption. Trying to clear the entire backlog before turning
+the linter on is what kills adoption — incremental ratchet wins.
+
 ### CI integration
 
 The bootstrap is idempotent and cache-aware. A typical CI step:
