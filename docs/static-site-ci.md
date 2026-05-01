@@ -53,7 +53,7 @@ When `--site-url` is set:
 | `llms-full.txt` | LLM-readable full-context dump |
 | `sitemap.xml` | Standard sitemap (excludes `noindex` and 404 routes) |
 | `robots.txt` | Standard robots.txt with `Sitemap:` cross-reference |
-| `facts.json` | Generated truth manifest |
+| `facts.json` | Generated truth manifest (see [facts-manifest.md](facts-manifest.md) for authoring) |
 | `*.md.txt` | Per-page Markdown mirrors |
 
 When `--site-url` is not set, `sitemap.xml` and `robots.txt` are

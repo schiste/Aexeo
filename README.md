@@ -96,6 +96,7 @@ cargo run -p seogeo-cli -- adapters
 - [docs/release.md](docs/release.md): release checklist
 - [docs/local-quality.md](docs/local-quality.md): local quality workflow
 - [docs/static-site-ci.md](docs/static-site-ci.md): static-site CI recipe
+- [docs/facts-manifest.md](docs/facts-manifest.md): truth-manifest authoring guide (LLM-assisted flow)
 - [docs/astro-ci.md](docs/astro-ci.md): Astro CI and deployment-gate workflow
 - [docs/integrations.md](docs/integrations.md): snippet, Bing AI, Search Console, and IndexNow workflows
 - [docs/cli.md](docs/cli.md): generated CLI reference
