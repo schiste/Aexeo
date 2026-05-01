@@ -14,6 +14,7 @@
 
 import type { SandboxCtx } from "./plugin.js";
 import { FACTS_KEY, readAllDocuments, readStoredFacts } from "./plugin.js";
+import { persistManifestStateFindings } from "./data-route.js";
 import {
   generateFactsPrompt,
   validateFactsManifest,
@@ -160,5 +161,11 @@ async function handleSave(
     };
   }
   await ctx.kv.set(FACTS_KEY, parsed);
+  // Re-derive the cached manifest-state findings so the Findings page
+  // reflects the new FACTS001 (cleared) / FACTS003 (cleared if no
+  // mismatches) state on its next data-path load. Without this, the
+  // editor saves, navigates back to /findings, and sees the old finding
+  // still listed until they click Refresh.
+  await persistManifestStateFindings(ctx);
   return { data: { saved: true } };
 }

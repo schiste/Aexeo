@@ -102,6 +102,12 @@ export async function handleDataRoute(
       collections: options.collections,
       evaluator: options.evaluator,
     });
+    // Manifest-state findings re-derive on refresh too, since the relevant
+    // inputs (stored manifest, document set) are exactly what just changed.
+    // Persisting under a meta KV slot means the data path can read them
+    // alongside engine findings without firing a fresh WASM round-trip on
+    // every Findings-page load.
+    await persistManifestStateFindings(ctx);
   }
   const payload = await buildFindingsPayload(ctx);
   return { payload, summary };
@@ -167,13 +173,16 @@ async function buildFindingsPayload(
   }
   routes.sort((a, b) => b.errorCount - a.errorCount || a.route.localeCompare(b.route));
 
-  // Append synthetic manifest-state findings to the sitewide bucket.
-  // These describe the truth manifest as a whole rather than any one
-  // document, so they belong with the existing sitewide findings the
-  // engine emits. They render in the same UI section without any
-  // component-side changes.
-  const manifestFindings = await deriveManifestStateFindings(ctx);
-  sitewide.push(...manifestFindings);
+  // Append cached manifest-state findings (computed and persisted during
+  // the last refresh — see persistManifestStateFindings). The data path
+  // never re-derives them, so the Findings page load cost stays at one
+  // KV read regardless of document count.
+  const cached = await ctx.kv.get<{ findings: Finding[] }>(
+    MANIFEST_FINDINGS_KEY,
+  );
+  if (cached !== undefined && cached !== null) {
+    sitewide.push(...cached.findings);
+  }
 
   return {
     routes,
@@ -187,6 +196,22 @@ async function buildFindingsPayload(
     },
     sitewideFindings: sitewide,
   };
+}
+
+// KV slot for cached manifest-state findings. Populated on refresh,
+// consumed on data-path reads. Outside the `findings:` prefix so the
+// engine's per-route persist loop never overwrites it.
+const MANIFEST_FINDINGS_KEY = "meta:facts-findings";
+
+// Recompute manifest-state findings and store them under MANIFEST_FINDINGS_KEY
+// so the data path can read without firing the WASM bridge. Called from the
+// refresh path here and from the /facts save handler so an editor sees the
+// FACTS001/003 row update without having to click Refresh.
+export async function persistManifestStateFindings(
+  ctx: SandboxCtx,
+): Promise<void> {
+  const findings = await deriveManifestStateFindings(ctx);
+  await ctx.kv.set(MANIFEST_FINDINGS_KEY, { findings });
 }
 
 // Synthesize sitewide findings about the truth manifest itself. These

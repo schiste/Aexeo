@@ -329,10 +329,26 @@ fn extract_block_signatures(value: &Value) -> Vec<(String, String)> {
     out
 }
 
+fn primary_at_type(value: &Value) -> Option<&str> {
+    // JSON-LD allows @type to be either a string or an array of strings
+    // (a node typed as both Product and Thing, for example). For the
+    // signature we use the first array element so multi-typed entities
+    // round-trip through dedup the same way string-typed ones do.
+    let t = value.get("@type")?;
+    match t {
+        Value::String(s) => Some(s.as_str()),
+        Value::Array(items) => items.iter().find_map(|item| match item {
+            Value::String(s) => Some(s.as_str()),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
 fn extract_block_signatures_into(value: &Value, out: &mut Vec<(String, String)>) {
     match value {
         Value::Object(map) => {
-            if let Some(Value::String(t)) = map.get("@type") {
+            if let Some(t) = primary_at_type(value) {
                 let name = map
                     .get("name")
                     .and_then(Value::as_str)
@@ -450,6 +466,29 @@ mod tests {
         assert!(prompt.contains("No JSON-LD structured data found on this site"));
         // The static framing must still be there.
         assert!(prompt.contains("Truth Manifest Authoring Prompt"));
+        Ok(())
+    }
+
+    #[test]
+    fn handles_at_type_array_in_json_ld() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        // JSON-LD with @type as array — valid spec, occurs in real sites.
+        write(
+            &root.join("index.html"),
+            &page_with_schema(
+                "",
+                r#"<script type="application/ld+json">{"@context":"https://schema.org","@type":["Product","Thing"],"name":"Multi"}</script>"#,
+            ),
+        );
+        let site = load_site(root)?;
+        let prompt = render_facts_prompt(&site);
+        // @types listing should show both names from the array.
+        assert!(prompt.contains("Product"));
+        assert!(prompt.contains("Thing"));
+        // Excerpts block should include the entity (signed by primary
+        // @type "Product") rather than silently skipping it.
+        assert!(prompt.contains("\"name\": \"Multi\""));
         Ok(())
     }
 

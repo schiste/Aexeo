@@ -39,6 +39,12 @@ pub fn score_intelligence_js(
     // Optional manifest: when present, the truth-layer assessment compares it
     // against schema.org and surfaces mismatches; when absent, the score is
     // computed in schema-only mode (the plugin's pre-existing default).
+    //
+    // The empty-string guard exists for defense in depth: callers who
+    // construct manifest_json by stringifying a possibly-null value can pass
+    // "" if their stringify path produces it. The literal string "null" would
+    // get past this guard and hit serde, which fails loudly — that's the
+    // intended behavior (caller bug, not silent fallback).
     let manifest: Option<TruthManifest> = match manifest_json.as_deref() {
         Some(json) if !json.is_empty() => Some(
             serde_json::from_str(json)
