@@ -14,10 +14,9 @@
 #      across re-runs at the same tag.
 #
 # REQUIREMENTS:
-#   $GITHUB_TOKEN — fine-grained PAT or GitHub App installation token with
-#                   contents:read on the seogeo source repo. In CI, get it
-#                   from actions/create-github-app-token@v1.
 #   curl, jq, shasum — standard on macOS and Ubuntu runners.
+#   $GITHUB_TOKEN is optional for public releases. Provide it when you
+#   need higher GitHub API rate limits or when releases are private.
 #
 # CONFIG:
 #   $SEOGEO_RELEASE_REPO — defaults to schiste/Aexeo.
@@ -39,6 +38,36 @@ LOCK_FILE="$HERE/.seogeo-version.lock"
 
 err() { printf '%s\n' "$*" >&2; }
 die() { err "bootstrap-seogeo: $*"; exit 1; }
+
+curl_json() {
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        curl -fsSL \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$1"
+    else
+        curl -fsSL \
+            -H "Accept: application/vnd.github+json" \
+            "$1"
+    fi
+}
+
+download_asset() {
+    output_path="$1"
+    asset_url="$2"
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        curl -fsSL \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/octet-stream" \
+            -o "$output_path" \
+            "$asset_url"
+    else
+        curl -fsSL \
+            -H "Accept: application/octet-stream" \
+            -o "$output_path" \
+            "$asset_url"
+    fi
+}
 
 [ -f "$VERSION_FILE" ] || die "missing $VERSION_FILE; create it with a constraint like ^0.7"
 
@@ -122,17 +151,13 @@ if [ -z "$TAG" ]; then
         die "lockfile $LOCK_FILE missing or stale for constraint '$CONSTRAINT'; run bootstrap-seogeo.sh locally and commit the updated lock"
     fi
 
-    : "${GITHUB_TOKEN:?GITHUB_TOKEN required to resolve $CONSTRAINT against $REPO releases}"
     command -v jq >/dev/null || die "jq required to resolve constraint"
     command -v curl >/dev/null || die "curl required to resolve constraint"
 
     err "resolving $CONSTRAINT against $REPO releases..."
     # First page only — fine for the first 30 releases. Add pagination if
     # the release count grows past that.
-    RELEASES=$(curl -fsSL \
-        -H "Authorization: Bearer $GITHUB_TOKEN" \
-        -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/repos/$REPO/releases?per_page=100")
+    RELEASES=$(curl_json "https://api.github.com/repos/$REPO/releases?per_page=100")
 
     # All tags newest-first.
     CANDIDATES=$(printf '%s' "$RELEASES" | jq -r '.[].tag_name')
@@ -186,7 +211,6 @@ if [ -x "$INSTALL_BIN" ]; then
     exit 0
 fi
 
-: "${GITHUB_TOKEN:?GITHUB_TOKEN required to download $ASSET from $REPO@$TAG}"
 command -v jq >/dev/null || die "jq required for asset id lookup"
 command -v curl >/dev/null || die "curl required for download"
 
@@ -195,20 +219,15 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 err "downloading $ASSET from $REPO@${TAG}..."
-RELEASE_JSON=$(curl -fsSL \
-    -H "Authorization: Bearer $GITHUB_TOKEN" \
-    -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/repos/$REPO/releases/tags/$TAG")
+RELEASE_JSON=$(curl_json "https://api.github.com/repos/$REPO/releases/tags/$TAG")
 
 for name in "$ASSET" "SHA256SUMS.txt"; do
     asset_id=$(printf '%s' "$RELEASE_JSON" \
         | jq -r --arg n "$name" '.assets[] | select(.name == $n) | .id')
     [ -n "$asset_id" ] && [ "$asset_id" != "null" ] \
         || die "asset $name not present in release $TAG"
-    curl -fsSL \
-        -H "Authorization: Bearer $GITHUB_TOKEN" \
-        -H "Accept: application/octet-stream" \
-        -o "$TMP/$name" \
+    download_asset \
+        "$TMP/$name" \
         "https://api.github.com/repos/$REPO/releases/assets/$asset_id"
 done
 

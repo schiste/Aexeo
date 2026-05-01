@@ -1,39 +1,39 @@
 # Aexeo / seogeo
 
-`seogeo` is an internal SEO and GEO linting runtime for websites.
+`seogeo` is a Rust-first SEO and GEO linting/runtime toolkit for websites.
 
-It is being built as developer infrastructure for private use: think Ruff for search quality, retrieval structure, AI-facing artifacts, deterministic cleanup, and runtime website audits.
+The repository currently contains:
 
-## Repository Stance
+- `crates/seogeo-contracts`: stable finding and audit contracts
+- `crates/seogeo-core`: config, rule engine, reporting, generation, and intelligence logic
+- `crates/seogeo-cli`: the canonical CLI surface
+- `crates/aexeo-emdash-bridge`: the WASM bridge used by the emdash plugin
+- `packages/aexeo-emdash`: the published `@aeptus/aexeo-emdash` npm package
+- `packages/seogeo-crawl-worker`: optional Cloudflare worker for sandboxed plugin deployments
 
-This repository is **private**. The CLI, the rule engine
-(`crates/seogeo-core`, `crates/seogeo-cli`, `crates/seogeo-contracts`,
-`crates/aexeo-emdash-bridge`), the runtime, and the docs all stay
-internal — no public source mirror, no public release channel for
-the engine, no `cargo install --git` path for external users.
+The source tree is licensed under [MIT](LICENSE). The Rust crates are not yet published on `crates.io`; build from source or consume GitHub release artifacts. The emdash plugin ships on npm and now rebuilds its bridge WASM from the current Rust source during `npm run build`.
 
-**One artifact crosses the public boundary**: the
-[`@aeptus/aexeo-emdash`](https://www.npmjs.com/package/@aeptus/aexeo-emdash)
-emdash plugin on npm. It ships compiled JS + a precompiled WASM
-build of `aexeo-emdash-bridge`, deliberately exposed so emdash
-users can install Aexeo's content evaluator as a normal plugin
-dependency. The source for that plugin lives at
-`packages/aexeo-emdash/` and the WASM source at
-`crates/aexeo-emdash-bridge/`. The rest of the engine that produces
-the WASM binary stays in this private repo.
+## Quick Start
 
-Internal install paths:
+Build and run the CLI from source:
 
-- `sh scripts/install-seogeo.sh --from-binary target/release/seogeo-cli`
-  for deterministic local CLI installs
-- `cargo run -p seogeo-cli -- <subcommand>` for live development
-- `npm install` in the repository root for the optional
-  Playwright-backed runtime engine
+```bash
+cargo run -p seogeo-cli -- check .
+```
 
-See [docs/install.md](docs/install.md) for the canonical install +
-upgrade flow.
+Run the Rust test suite:
 
-## Local Quality
+```bash
+cargo test --workspace
+```
+
+Build the npm plugin:
+
+```bash
+cd packages/aexeo-emdash
+npm install
+npm run build
+```
 
 Install the repository hooks once per clone:
 
@@ -42,23 +42,11 @@ sh scripts/install-quality-tools.sh
 sh scripts/install-hooks.sh
 ```
 
-`pre-commit` is intentionally the hardest local gate in this repository. It runs staged-file safeguards plus the full repo quality sequence from `scripts/check-repo.sh`.
-
 For a full local validation pass before opening a PR:
 
 ```bash
 sh scripts/ci-local.sh
 ```
-
-## Rust-First Architecture
-
-The Rust workspace is now the canonical entrypoint for Aexeo.
-
-- `crates/seogeo-contracts`: stable finding and audit contracts
-- `crates/seogeo-core`: config, rule inventory, reporting, docs, and diff/baseline primitives
-- `crates/seogeo-cli`: canonical CLI surface
-
-The CLI surface is fully native Rust. The legacy Python implementation has been removed from the repository; only plugin manifest validation still accepts Python-style plugin modules as an integration input.
 
 ## Commands
 
@@ -68,6 +56,7 @@ cargo run -p seogeo-cli -- crawl http://localhost:8000 --engine http
 cargo run -p seogeo-cli -- fix .
 cargo run -p seogeo-cli -- generate llms .
 cargo run -p seogeo-cli -- generate robots .
+cargo run -p seogeo-cli -- generate sitemap . --site-url https://example.com
 cargo run -p seogeo-cli -- generate links .
 cargo run -p seogeo-cli -- config print . --format toml
 cargo run -p seogeo-cli -- baseline .
@@ -85,15 +74,15 @@ cargo run -p seogeo-cli -- rules
 cargo run -p seogeo-cli -- adapters
 ```
 
-## Current Product Areas
+## Product Areas
 
-- static linting for SEO/GEO structure and artifacts
-- runtime crawl with native HTTP orchestration and optional local Playwright-backed browser execution
-- deterministic artifact generation and safe HTML/artifact autofix
-- adapter and plugin architecture for framework-specific usage
+- static linting for SEO/GEO structure and machine-readable artifacts
+- runtime crawl with native HTTP orchestration and optional Playwright-backed browser execution
+- deterministic artifact generation and safe autofix flows
+- adapter and plugin architecture for framework-specific integrations
 - baseline, diff, and post-deploy verification workflows
 - code-generated reference docs with drift enforcement
-- release-mode benchmark fixtures for static and runtime audit paths via `sh scripts/bench.sh`
+- higher-level intelligence passes for grounding, evidence, truth, and answer-surface coverage
 
 ## Repository Docs
 
@@ -102,12 +91,11 @@ cargo run -p seogeo-cli -- adapters
 - [SPEC.md](SPEC.md): stable contract and parity target
 - [docs/ENGINEERING.md](docs/ENGINEERING.md): engineering standards
 - [docs/architecture.md](docs/architecture.md): runtime, core, and integration boundaries
-- [docs/decisions.md](docs/decisions.md): enforced architecture decisions
-- [docs/package-boundaries.md](docs/package-boundaries.md): target package map for the future `website` monorepo move
-- [docs/install.md](docs/install.md): internal install and upgrade instructions
-- [docs/static-site-ci.md](docs/static-site-ci.md): static-site CI recipe, monorepo layouts, placeholder-route patterns
-- [docs/local-quality.md](docs/local-quality.md): local hook model and repo-quality enforcement
-- [docs/release.md](docs/release.md): internal release checklist and packaging flow
+- [docs/decisions.md](docs/decisions.md): architecture decisions
+- [docs/install.md](docs/install.md): install and bootstrap paths
+- [docs/release.md](docs/release.md): release checklist
+- [docs/local-quality.md](docs/local-quality.md): local quality workflow
+- [docs/static-site-ci.md](docs/static-site-ci.md): static-site CI recipe
 - [docs/astro-ci.md](docs/astro-ci.md): Astro CI and deployment-gate workflow
 - [docs/integrations.md](docs/integrations.md): snippet, Bing AI, Search Console, and IndexNow workflows
 - [docs/cli.md](docs/cli.md): generated CLI reference
@@ -118,4 +106,4 @@ cargo run -p seogeo-cli -- adapters
 
 ## Notes
 
-`cargo run -p seogeo-cli -- docs generate .` refreshes the generated reference docs from the Rust codebase. `cargo run -p seogeo-cli -- docs check .` fails when those docs are stale.
+`cargo run -p seogeo-cli -- docs generate .` refreshes generated docs from the Rust codebase. `cargo run -p seogeo-cli -- docs check .` fails when those docs are stale.

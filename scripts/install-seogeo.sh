@@ -18,8 +18,10 @@ Source modes (mutually exclusive):
                          $SEOGEO_RELEASE_REPO defaults to schiste/Aexeo.
 
 Auth for --from-release:
-  Uses gh CLI if available (gh auth must be active). Otherwise requires
-  GITHUB_TOKEN in env, plus jq on PATH for asset id lookup.
+  Uses gh CLI if available (gh auth must be active). Otherwise fetches
+  the public GitHub release API directly. Set GITHUB_TOKEN when you need
+  higher API rate limits or when releases are private. jq is required for
+  the curl-based fallback.
 EOF
 }
 
@@ -30,6 +32,39 @@ BINARY_NAME="seogeo-cli"
 RUN_SMOKE_TEST=1
 RELEASE_TAG=""
 RELEASE_REPO="${SEOGEO_RELEASE_REPO:-schiste/Aexeo}"
+
+curl_json() {
+    url="$1"
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        curl -fsSL \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$url"
+    else
+        curl -fsSL \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$url"
+    fi
+}
+
+download_asset_with_curl() {
+    output_path="$1"
+    asset_url="$2"
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        curl -fsSL \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/octet-stream" \
+            -o "$output_path" \
+            "$asset_url"
+    else
+        curl -fsSL \
+            -H "Accept: application/octet-stream" \
+            -o "$output_path" \
+            "$asset_url"
+    fi
+}
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -100,15 +135,10 @@ download_release_with_gh() {
 download_release_with_curl() {
     tag="$1"; target="$2"; out="$3"
     asset="seogeo-cli-$target"
-    : "${GITHUB_TOKEN:?GITHUB_TOKEN required when gh CLI is unavailable}"
     command -v jq >/dev/null || { echo "jq required for curl-based release fetch" >&2; return 2; }
 
     api="https://api.github.com/repos/$RELEASE_REPO/releases/tags/$tag"
-    release_json=$(curl -fsSL \
-        -H "Authorization: Bearer $GITHUB_TOKEN" \
-        -H "Accept: application/vnd.github+json" \
-        -H "X-GitHub-Api-Version: 2022-11-28" \
-        "$api")
+    release_json=$(curl_json "$api")
 
     for name in "$asset" "SHA256SUMS.txt"; do
         asset_id=$(printf '%s' "$release_json" \
@@ -117,10 +147,8 @@ download_release_with_curl() {
             echo "asset not found in $tag: $name" >&2
             return 1
         }
-        curl -fsSL \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "Accept: application/octet-stream" \
-            -o "$out/$name" \
+        download_asset_with_curl \
+            "$out/$name" \
             "https://api.github.com/repos/$RELEASE_REPO/releases/assets/$asset_id"
     done
 }

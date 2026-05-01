@@ -4,6 +4,7 @@ members = [
   "crates/seogeo-contracts",
   "crates/seogeo-core",
   "crates/seogeo-cli",
+  "crates/aexeo-emdash-bridge",
 ]
 resolver = "2"
 
@@ -11,7 +12,9 @@ resolver = "2"
 version = "0.2.0"
 edition = "2024"
 authors = ["Christophe Henner"]
+license = "MIT"
 publish = false
+repository = "https://github.com/schiste/Aexeo"
 
 [workspace.dependencies]
 anyhow = "1.0"

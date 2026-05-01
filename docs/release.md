@@ -1,17 +1,31 @@
-# Internal Release Checklist
+# Release Checklist
 
-This repository is private and released through internal Rust build artifacts.
+This repository currently has two release surfaces:
 
-## Pre-Release Gates
+- GitHub release artifacts for `seogeo-cli`
+- the `@aeptus/aexeo-emdash` npm package
 
-Run the required validation sequence from the repository root:
+## Pre-Release Validation
+
+Run the required checks from the repository root:
 
 ```bash
-sh scripts/check-repo.sh
-sh scripts/pre-push.sh
+cargo test --workspace
+cargo run -p seogeo-cli -- quality . --format json
+cargo audit
+cargo deny check
+cargo +nightly udeps --workspace --all-targets
 ```
 
-## Build And Package
+For the npm package:
+
+```bash
+cd packages/aexeo-emdash
+npm install
+npm run build
+```
+
+## CLI Release Artifacts
 
 Build the release binary:
 
@@ -19,26 +33,42 @@ Build the release binary:
 cargo build --release
 ```
 
-Package internal artifacts:
+Package release assets:
 
 ```bash
 sh scripts/build_internal_release.sh
 ```
 
-This writes `dist/seogeo-cli` and `dist/SHA256SUMS.txt`.
+This produces platform-specific `seogeo-cli-*` binaries and checksum files in `dist/`.
 
-## Install Smoke Test
-
-Validate the packaged binary through the install path:
+Smoke-test the packaged binary:
 
 ```bash
 sh scripts/install-seogeo.sh --from-binary dist/seogeo-cli --dest-dir /tmp/seogeo-smoke/bin
 /tmp/seogeo-smoke/bin/seogeo-cli --help
 ```
 
+## NPM Package Release
+
+Before publishing `@aeptus/aexeo-emdash`:
+
+```bash
+cd packages/aexeo-emdash
+npm run build
+npm pack
+```
+
+Check that the tarball includes:
+
+- `dist/`
+- `wasm/`
+- `INSTALL.md`
+- `CHANGELOG.md`
+- `LICENSE`
+
 ## Publish
 
 1. Confirm the working tree is clean.
-2. Push the release commit.
-3. Push the version tag used by the internal release workflow.
-4. Record the released commit SHA and artifact checksum in the internal changelog.
+2. Push the release commit and version tag.
+3. Publish the GitHub release assets and, when applicable, the npm package.
+4. Record the released version, commit SHA, and checksums in the release notes.

@@ -26,6 +26,7 @@ export type {
   SandboxedPluginDescriptor,
   SeogeoSandboxedOptions,
 } from "./sandbox.js";
+import { PACKAGE_VERSION } from "./version.js";
 
 // Configured-mode descriptor. Mirrors emdash's PluginDescriptor; the
 // host's astro integration auto-generates an importer that does:
@@ -83,7 +84,7 @@ export function seogeoPlugin(
 ): ConfiguredPluginDescriptor {
   return {
     id: "aexeo-seogeo",
-    version: "0.0.1",
+    version: PACKAGE_VERSION,
     // Subpath import resolved by the consumer's bundler at build
     // time — must match the package.json `exports["./configured"]`
     // entry.

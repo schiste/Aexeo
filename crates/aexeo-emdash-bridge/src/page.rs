@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use seogeo_core::{Page, build_page_from_source};
+use seogeo_core::site::{Page, build_page_from_source};
 
 use crate::document::EmdashDocument;
 use crate::render::{append_attribute_value, append_escaped_text, render_html};

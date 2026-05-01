@@ -17,6 +17,7 @@
 // isolation guarantee.
 
 import { buildAllowedHosts, buildCapabilities } from "./plugin.js";
+import { PACKAGE_VERSION } from "./version.js";
 
 // Local mirror of emdash's PluginDescriptor / SandboxedPluginDescriptor
 // (the latter is a type alias for the former in the host source). The
@@ -89,7 +90,7 @@ export function seogeoPluginSandboxed(
     options.evaluatorHost ?? process.env.SEOGEO_EVALUATOR_HOST ?? null;
   return {
     id: "aexeo-seogeo",
-    version: "0.0.1",
+    version: PACKAGE_VERSION,
     // Subpath export of this same package; must match package.json
     // `exports["./sandbox"]`.
     entrypoint: "@aeptus/aexeo-emdash/sandbox",

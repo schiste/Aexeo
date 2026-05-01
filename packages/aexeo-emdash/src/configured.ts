@@ -26,6 +26,7 @@ import {
   readFindings,
 } from "./plugin.js";
 import { handleDataRoute } from "./data-route.js";
+import { PACKAGE_VERSION } from "./version.js";
 import { evaluateDocuments, scoreIntelligence } from "./wasm-init.js";
 import type { EmdashContentItem } from "./adapter.js";
 import type { Finding, SiteIntelligenceScore } from "./types.js";
@@ -105,7 +106,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
   // like kv:seogeo-baselines aren't accepted there.
   return definePlugin({
     id: "aexeo-seogeo",
-    version: "0.0.1",
+    version: PACKAGE_VERSION,
     capabilities: ["read:content"],
     hooks: {
       // afterSave processes one saved document at a time — collections

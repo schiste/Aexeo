@@ -55,11 +55,12 @@
     "LICENSE"
   ],
   "scripts": {
+    "sync-version": "node scripts/sync-version.mjs",
     "build:wasm": "bash scripts/build-wasm.sh",
     "build:ts": "tsc -p tsconfig.build.json",
     "build:bundle": "node scripts/build-bundle.mjs",
-    "build": "npm run build:wasm && npm run build:ts && npm run build:bundle",
-    "typecheck": "tsc --noEmit",
+    "build": "npm run sync-version && npm run build:wasm && npm run build:ts && npm run build:bundle",
+    "typecheck": "npm run sync-version && tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {

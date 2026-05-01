@@ -66,7 +66,8 @@ pub use intelligence::{
     TruthStructuredSource, assess_answer_fanout, assess_evidence_coverage, assess_truth_layer,
     default_truth_manifest_version, discover_truth_manifest, generate_truth_manifest,
     generate_truth_manifest_with_options, import_trust_surface_records, load_truth_manifest,
-    map_grounding_queries, reconcile_trust_surfaces, score_intelligence, validate_truth_manifest,
+    map_grounding_queries, reconcile_trust_surfaces, render_facts_prompt, score_intelligence,
+    validate_truth_manifest,
 };
 pub use link_rules::run_link_rules;
 pub use llm_rules::run_llm_rules;
@@ -97,7 +98,8 @@ pub use site::{
 pub use sitemap_rules::run_sitemap_rules;
 pub use social_rules::run_social_rules;
 pub use static_check::{
-    can_run_native_static_audit, run_native_static_audit, run_native_static_audit_with_config,
+    can_run_native_static_audit, run_checks_for_site, run_native_static_audit,
+    run_native_static_audit_with_config,
 };
 pub use structure_rules::run_structure_rules;
 pub use surface_rules::run_surface_rules;

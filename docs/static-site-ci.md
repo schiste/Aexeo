@@ -19,18 +19,7 @@ This pattern is what the consumer team adopts after step 4 of
 ## Concrete CI step
 
 ```yaml
-- name: Mint a seogeo fetch token
-  id: app-token
-  uses: actions/create-github-app-token@v1
-  with:
-    app-id: ${{ vars.SEOGEO_APP_ID }}
-    private-key: ${{ secrets.SEOGEO_APP_PRIVATE_KEY }}
-    owner: schiste
-    repositories: Aexeo
-
 - name: Install seogeo
-  env:
-    GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
   run: |
     SEOGEO_BIN=$(./scripts/bootstrap-seogeo.sh)
     echo "$(dirname "$SEOGEO_BIN")" >> "$GITHUB_PATH"
@@ -50,6 +39,9 @@ This pattern is what the consumer team adopts after step 4 of
       --baseline .seogeo-baseline.json \
       --regressions-only
 ```
+
+If your CI frequently hits GitHub API rate limits, set `GITHUB_TOKEN`
+for the bootstrap step. Public releases work without it.
 
 ## What `generate machine-bundle` produces in `dist/`
 
@@ -258,5 +250,5 @@ delta in one place — no surprise findings appearing in unrelated PRs.
 | `site_url is required to generate sitemap.xml` | No `[site] url = ...` in `seogeo.toml` and no `--site-url` flag. Set one. |
 | `no indexable routes found; sitemap.xml would be empty` | Wrong path passed (not the built dist), all pages have `noindex`, or `[ignore]` is too aggressive. |
 | `lockfile ... missing or stale for constraint '...'` in CI | Constraint changed but lock wasn't regenerated. Run bootstrap locally and commit the new lock. |
-| `no installation found` from `actions/create-github-app-token` | Missing `owner: schiste` line — the action defaults to looking up an installation matching the workflow's owner. |
+| GitHub API rate-limit or auth error during bootstrap | Set `GITHUB_TOKEN` for the bootstrap step, or verify the release repo is public and reachable from CI. |
 | `check` reports many findings on first run | Brownfield adoption — see [docs/install.md](install.md) "Adopting against an existing backlog". |

@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
-use seogeo_core::site::DeploymentModel;
-use seogeo_core::{Site, SiteArtifacts, SiteBuildInput, build_site_from_parts};
+use seogeo_core::site::{
+    DeploymentModel, Site, SiteArtifacts, SiteBuildInput, build_site_from_parts,
+};
 
 use crate::document::EmdashDocument;
 use crate::page::build_page_from_document;
