@@ -50,7 +50,17 @@ pub fn score_intelligence_js(
     let truth = assess_truth_layer(&site, manifest.as_ref());
     let evidence = assess_evidence_coverage(&site);
     let report = score_intelligence(&grounding, &truth, &evidence, None);
-    serde_json::to_string(&report)
+    // Splice the truth-source enum onto the score JSON so the plugin can
+    // badge the truth_consistency_score as manifest-aware vs schema-only
+    // without a second WASM round-trip.
+    let mut json = serde_json::to_value(&report)
+        .map_err(|error| JsError::new(&format!("failed to serialize score: {error}")))?;
+    if let Some(obj) = json.as_object_mut() {
+        let source = serde_json::to_value(&truth.structured_truth_source)
+            .map_err(|error| JsError::new(&format!("failed to serialize source: {error}")))?;
+        obj.insert("structured_truth_source".to_string(), source);
+    }
+    serde_json::to_string(&json)
         .map_err(|error| JsError::new(&format!("failed to serialize score: {error}")))
 }
 

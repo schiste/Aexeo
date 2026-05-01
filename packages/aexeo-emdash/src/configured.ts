@@ -24,6 +24,7 @@ import {
   handleAfterSaveConfigured,
   readAllDocuments,
   readFindings,
+  readStoredFacts,
 } from "./plugin.js";
 import { handleDataRoute } from "./data-route.js";
 import { PACKAGE_VERSION } from "./version.js";
@@ -421,14 +422,20 @@ async function renderScoreWidget(ctx: SandboxCtx): Promise<BlockResponse> {
       ],
     };
   }
-  const score = await scoreLocally(documents);
+  const facts = await readStoredFacts(ctx.kv);
+  const score = await scoreLocally(documents, facts);
+  // Badge the truth score with its actual signal source so editors aren't
+  // misled into thinking a 60 from schema-only data means the same as a 60
+  // with a hand-authored manifest backing it. The bridge splices
+  // structured_truth_source onto the score JSON for exactly this purpose.
+  const truthLabel = formatTruthLabel(score);
   const blocks: unknown[] = [
     {
       type: "stats",
       items: [
         { label: "Overall", value: `${score.overall_score}` },
         { label: "Citation", value: `${score.citation_readiness_score}` },
-        { label: "Truth", value: `${score.truth_consistency_score}` },
+        { label: truthLabel, value: `${score.truth_consistency_score}` },
         { label: "Answers", value: `${score.answer_pack_score}` },
       ],
     },
@@ -448,13 +455,40 @@ async function renderScoreWidget(ctx: SandboxCtx): Promise<BlockResponse> {
 
 async function scoreLocally(
   documents: readonly EmdashContentItem[] | readonly { route: string }[],
+  manifest: unknown | null = null,
 ): Promise<SiteIntelligenceScore> {
   // documents from KV are already adapted EmdashDocuments stored
   // verbatim; pass them straight to the WASM scorer. Type assertion
   // is safe because the values shipped through evaluateAndPersistAll
   // come from contentItemToEmdashDocument().
-  const raw = await scoreIntelligence(JSON.stringify(documents));
+  //
+  // The optional manifest argument is the editor-authored truth manifest
+  // pulled from FACTS_KEY. When non-null, the bridge passes it into
+  // assess_truth_layer so the truth_consistency_score reflects the
+  // manifest+schema state rather than schema-only.
+  const manifestJson = manifest === null ? null : JSON.stringify(manifest);
+  const raw = await scoreIntelligence(JSON.stringify(documents), manifestJson);
   return JSON.parse(raw) as SiteIntelligenceScore;
+}
+
+// Translate the bridge's structured_truth_source enum into the label that
+// goes on the dashboard widget's truth-score stat. This is the UX honesty
+// fix: editors see whether the score came from manifest+schema (full
+// signal), schema-only (partial), manifest-only (rare; manifest authored
+// but no JSON-LD on pages), or none (no inputs at all).
+function formatTruthLabel(score: SiteIntelligenceScore): string {
+  switch (score.structured_truth_source) {
+    case "schema_and_manifest":
+      return "Truth (manifest+schema)";
+    case "manifest":
+      return "Truth (manifest only)";
+    case "schema":
+      return "Truth (schema only)";
+    case "none":
+      return "Truth (no signal)";
+    default:
+      return "Truth";
+  }
 }
 
 function topBlockersLine(score: SiteIntelligenceScore): string {

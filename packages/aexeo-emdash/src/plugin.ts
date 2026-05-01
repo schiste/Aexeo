@@ -408,6 +408,24 @@ export function documentKey(route: string): string {
   return `document:${normalized}`;
 }
 
+// Single canonical KV slot for the editor-authored truth manifest. The
+// plugin owns the file (read by scoreIntelligence; written by the /facts
+// admin route's "Save" button). Distinct from the host's filesystem
+// facts.json that the CLI reads — the plugin sees CMS-stored documents,
+// not the static-site root.
+export const FACTS_KEY = "facts:current";
+
+// Read the stored truth manifest from KV. Returns the parsed JSON object
+// or null when no manifest has been authored yet. The bridge accepts an
+// optional manifest_json string parameter on scoreIntelligence and
+// validateFactsManifest; null short-circuits both to the schema-only path.
+export async function readStoredFacts(
+  kv: KvNamespace,
+): Promise<unknown | null> {
+  const stored = await kv.get<unknown>(FACTS_KEY);
+  return stored === undefined ? null : stored;
+}
+
 export async function readAllDocuments(
   kv: KvNamespace,
 ): Promise<EmdashDocument[]> {

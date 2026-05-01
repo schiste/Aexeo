@@ -76,6 +76,17 @@ export interface Finding {
 // Mirror of seogeo-core's SiteIntelligenceScore. Exact subset the
 // dashboard widget consumes; less-used fields like elapsed_us live in
 // the JSON the bridge emits but are not typed here.
+// Mirror of seogeo-core's TruthStructuredSource enum (snake_case as
+// serialized by serde). The bridge splices this onto SiteIntelligenceScore
+// JSON so the dashboard widget can badge the truth score with the actual
+// signal source — telling editors "you're seeing schema-only" vs "you're
+// seeing manifest+schema" without needing a separate WASM call.
+export type StructuredTruthSource =
+  | "manifest"
+  | "schema"
+  | "schema_and_manifest"
+  | "none";
+
 export interface SiteIntelligenceScore {
   citation_readiness_score: number;
   truth_consistency_score: number;
@@ -84,6 +95,7 @@ export interface SiteIntelligenceScore {
   overall_score: number;
   route_scores: unknown[];
   blockers: IntelligenceBlocker[];
+  structured_truth_source?: StructuredTruthSource;
 }
 
 export interface IntelligenceBlocker {
