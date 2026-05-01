@@ -59,7 +59,28 @@ export async function evaluateDocuments(
 
 export async function scoreIntelligence(
   documentsJson: string,
+  manifestJson?: string | null,
 ): Promise<string> {
   ensureInitialized();
-  return glue.scoreIntelligence(documentsJson);
+  return glue.scoreIntelligence(documentsJson, manifestJson ?? undefined);
+}
+
+// Renders the LLM authoring prompt for the editor's site. Pure projection
+// over the documents — no KV, no host filesystem.
+export async function generateFactsPrompt(
+  documentsJson: string,
+): Promise<string> {
+  ensureInitialized();
+  return glue.generateFactsPrompt(documentsJson);
+}
+
+// Validates a candidate facts.json against the site documents. Returns the
+// raw JSON string of { validation, assessment } so the caller can render
+// either inline or hand it to the React component verbatim.
+export async function validateFactsManifest(
+  manifestJson: string,
+  documentsJson: string,
+): Promise<string> {
+  ensureInitialized();
+  return glue.validateFactsManifest(manifestJson, documentsJson);
 }

@@ -1,4 +1,8 @@
 node_modules/
 dist/
-wasm/
+# wasm/ is build output. The hand-maintained _bg.d.ts is the only file
+# in there that's an authoritative source (wasm-bindgen 0.2.118 doesn't
+# emit it for the bundler target), so track that one explicitly.
+wasm/*
+!wasm/aexeo_emdash_bridge_bg.d.ts
 *.tsbuildinfo

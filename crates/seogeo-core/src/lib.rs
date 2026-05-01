@@ -7,6 +7,7 @@ pub mod docs;
 pub mod fix;
 pub mod generate;
 pub mod html_rules;
+#[cfg(feature = "net")]
 pub mod integrations;
 pub mod intelligence;
 pub mod link_rules;
@@ -17,6 +18,7 @@ pub mod quality;
 pub mod registry;
 pub mod reporting;
 pub mod robots_rules;
+#[cfg(feature = "net")]
 pub mod runtime;
 pub mod schema_rules;
 pub mod site;
@@ -43,6 +45,7 @@ pub use generate::{
     render_markdown_mirror_pages, render_robots_txt, render_sitemap_xml, suggest_internal_links,
 };
 pub use html_rules::{run_html_rules, run_static_html_audit};
+#[cfg(feature = "net")]
 pub use integrations::{
     BingAiImportReport, BingAiOpportunity, BingAiOpportunityReport, BingAiRecord, BingAiTrendDelta,
     BingAiTrendReport, BingAiTrendRoute, BingAiTrendSnapshot, BingAiUrlSummary, IndexNowLedger,
@@ -85,6 +88,7 @@ pub use reporting::{
     write_progress_audit_artifact,
 };
 pub use robots_rules::run_robots_rules;
+#[cfg(feature = "net")]
 pub use runtime::{
     PlaywrightDoctor, RuntimeAudit, RuntimeAuditOptions, RuntimeProgressEvent, RuntimeProgressMode,
     diff_performance_artifacts, evaluate_performance_budget, render_performance_diff_text,

@@ -1,7 +1,8 @@
 use wasm_bindgen::prelude::*;
 
 use seogeo_core::{
-    Config, assess_evidence_coverage, assess_truth_layer, map_grounding_queries, score_intelligence,
+    Config, TruthManifest, assess_evidence_coverage, assess_truth_layer, map_grounding_queries,
+    render_facts_prompt, score_intelligence, validate_truth_manifest,
 };
 
 use crate::document::EmdashDocument;
@@ -27,15 +28,65 @@ pub fn evaluate_documents_js(
 }
 
 #[wasm_bindgen(js_name = "scoreIntelligence")]
-pub fn score_intelligence_js(documents_json: &str) -> Result<String, JsError> {
+pub fn score_intelligence_js(
+    documents_json: &str,
+    manifest_json: Option<String>,
+) -> Result<String, JsError> {
     let documents: Vec<EmdashDocument> = serde_json::from_str(documents_json)
         .map_err(|error| JsError::new(&format!("failed to parse documents: {error}")))?;
     let site = build_site_from_documents(&documents)
         .map_err(|error| JsError::new(&format!("failed to build site: {error}")))?;
+    // Optional manifest: when present, the truth-layer assessment compares it
+    // against schema.org and surfaces mismatches; when absent, the score is
+    // computed in schema-only mode (the plugin's pre-existing default).
+    let manifest: Option<TruthManifest> = match manifest_json.as_deref() {
+        Some(json) if !json.is_empty() => Some(
+            serde_json::from_str(json)
+                .map_err(|error| JsError::new(&format!("failed to parse manifest: {error}")))?,
+        ),
+        _ => None,
+    };
     let grounding = map_grounding_queries(&site);
-    let truth = assess_truth_layer(&site, None);
+    let truth = assess_truth_layer(&site, manifest.as_ref());
     let evidence = assess_evidence_coverage(&site);
     let report = score_intelligence(&grounding, &truth, &evidence, None);
     serde_json::to_string(&report)
         .map_err(|error| JsError::new(&format!("failed to serialize score: {error}")))
+}
+
+/// Generate the LLM authoring prompt for a truth manifest. The plugin calls
+/// this when the editor opens "Generate authoring prompt" — the returned
+/// string is what the editor pastes into Claude/GPT/etc.
+#[wasm_bindgen(js_name = "generateFactsPrompt")]
+pub fn generate_facts_prompt_js(documents_json: &str) -> Result<String, JsError> {
+    let documents: Vec<EmdashDocument> = serde_json::from_str(documents_json)
+        .map_err(|error| JsError::new(&format!("failed to parse documents: {error}")))?;
+    let site = build_site_from_documents(&documents)
+        .map_err(|error| JsError::new(&format!("failed to build site: {error}")))?;
+    Ok(render_facts_prompt(&site))
+}
+
+/// Validate a candidate `facts.json`. Returns a JSON object with two top-level
+/// fields: `validation` (shape / schema check) and `assessment` (truth-layer
+/// audit including mismatches against the site). The plugin renders this in
+/// the validate-paste UI.
+#[wasm_bindgen(js_name = "validateFactsManifest")]
+pub fn validate_facts_manifest_js(
+    manifest_json: &str,
+    documents_json: &str,
+) -> Result<String, JsError> {
+    let manifest: TruthManifest = serde_json::from_str(manifest_json)
+        .map_err(|error| JsError::new(&format!("failed to parse manifest: {error}")))?;
+    let validation = validate_truth_manifest(&manifest);
+    let documents: Vec<EmdashDocument> = serde_json::from_str(documents_json)
+        .map_err(|error| JsError::new(&format!("failed to parse documents: {error}")))?;
+    let site = build_site_from_documents(&documents)
+        .map_err(|error| JsError::new(&format!("failed to build site: {error}")))?;
+    let assessment = assess_truth_layer(&site, Some(&manifest));
+    let payload = serde_json::json!({
+        "validation": validation,
+        "assessment": assessment,
+    });
+    serde_json::to_string(&payload)
+        .map_err(|error| JsError::new(&format!("failed to serialize result: {error}")))
 }
