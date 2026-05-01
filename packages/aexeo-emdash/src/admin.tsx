@@ -14,8 +14,13 @@
 // clickable links matter. /document and the score widget keep using
 // the Block Kit path because they don't need link rendering.
 
+import { Facts } from "./admin/Facts.js";
 import { Findings } from "./admin/Findings.js";
 
 export const pages = {
   "/findings": Findings,
+  // /facts is the truth-manifest authoring page. Block Kit can't render
+  // a textarea or copy-to-clipboard button, so this path goes through
+  // the React adminEntry. Same mechanism as /findings.
+  "/facts": Facts,
 };

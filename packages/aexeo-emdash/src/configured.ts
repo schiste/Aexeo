@@ -27,6 +27,7 @@ import {
   readStoredFacts,
 } from "./plugin.js";
 import { handleDataRoute } from "./data-route.js";
+import { handleFactsRoute } from "./facts-route.js";
 import { PACKAGE_VERSION } from "./version.js";
 import { evaluateDocuments, scoreIntelligence } from "./wasm-init.js";
 import type { EmdashContentItem } from "./adapter.js";
@@ -146,6 +147,13 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
             refresh: true,
           }),
       },
+      // /facts route serves the truth-manifest authoring UI. It
+      // multiplexes four operations (data / prompt / validate / save)
+      // onto one POST endpoint via a "kind" body field — see
+      // facts-route.ts for the full contract.
+      facts: {
+        handler: (ctx: SandboxCtx) => handleFactsRoute(ctx as never),
+      },
     } as never,
     admin: {
       pages: [
@@ -156,6 +164,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
         // visible 0.1.0 / 0.1.1 bug fixed in 0.1.2.
         { path: "/findings", label: "SEO findings" },
         { path: "/document", label: "Document SEO" },
+        { path: "/facts", label: "Truth manifest" },
       ],
       widgets: [
         { id: "seogeo-score", size: "third", title: "SEO score" },
