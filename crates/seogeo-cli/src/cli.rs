@@ -163,6 +163,7 @@ pub fn build_cli() -> Command {
                     "robots",
                     "sitemap",
                     "links",
+                    "facts-prompt",
                 ]))
                 .arg(Arg::new("path").default_value("."))
                 .arg(Arg::new("config").long("config").num_args(1))
@@ -921,6 +922,28 @@ pub fn build_cli() -> Command {
                         .long("format")
                         .value_parser(["text", "json"])
                         .default_value("text"),
+                ),
+        )
+        .subcommand(
+            Command::new("facts")
+                .about("Author and validate truth manifests (facts.json)")
+                .subcommand(
+                    Command::new("validate")
+                        .about("Validate a candidate facts.json against shape and site")
+                        .arg(Arg::new("path").required(true))
+                        .arg(
+                            Arg::new("site-path")
+                                .long("site-path")
+                                .num_args(1)
+                                .help("Path to the static site root used for mismatch detection. Defaults to current directory."),
+                        )
+                        .arg(Arg::new("config").long("config").num_args(1))
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "json"])
+                                .default_value("text"),
+                        ),
                 ),
         )
         .subcommand(

@@ -4,6 +4,7 @@ use crate::commands::{
     common::required_arg,
     config::command_config,
     docs::{command_diff, command_docs, command_quality, command_report_render, command_trend},
+    facts::command_facts,
     integrations::{
         command_bing_ai, command_indexnow, command_publish_hook, command_search_console,
         command_snippet,
@@ -74,6 +75,7 @@ pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
         Some(("crawl", submatches)) => command_crawl(submatches),
         Some(("verify", submatches)) => command_verify(submatches),
         Some(("plugin-check", submatches)) => command_plugin_check(submatches),
+        Some(("facts", submatches)) => command_facts(submatches),
         Some((other, _)) => bail!("unsupported command: {}", other),
         None => bail!("missing command"),
     }

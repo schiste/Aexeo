@@ -5,10 +5,11 @@ use seogeo_core::adapter::resolve_static_site_root;
 use seogeo_core::config::load_config_with_diagnostics;
 use seogeo_core::{
     MachineArtifactBundle, apply_safe_fixes, build_audit_artifact, build_machine_artifact_bundle,
-    diff_finding_sets, load_findings_from_audit, load_site, render_llms_full_txt, render_llms_txt,
-    render_markdown_mirror, render_markdown_mirror_pages, render_robots_txt, render_sarif,
-    render_sitemap_xml, render_text_artifact, run_native_static_audit_with_config,
-    suggest_internal_links, write_audit_artifact, write_baseline_file,
+    diff_finding_sets, load_findings_from_audit, load_site, render_facts_prompt,
+    render_llms_full_txt, render_llms_txt, render_markdown_mirror, render_markdown_mirror_pages,
+    render_robots_txt, render_sarif, render_sitemap_xml, render_text_artifact,
+    run_native_static_audit_with_config, suggest_internal_links, write_audit_artifact,
+    write_baseline_file,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -170,6 +171,7 @@ pub fn command_generate(submatches: &ArgMatches) -> Result<i32> {
             xml
         }
         "links" => suggest_internal_links(&site, 3),
+        "facts-prompt" => render_facts_prompt(&site),
         other => bail!("unsupported generate kind: {}", other),
     };
     match submatches

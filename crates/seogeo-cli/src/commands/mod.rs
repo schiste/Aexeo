@@ -1,6 +1,7 @@
 pub mod common;
 pub mod config;
 pub mod docs;
+pub mod facts;
 pub mod integrations;
 pub mod intelligence;
 pub mod listings;

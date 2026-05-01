@@ -166,7 +166,7 @@ Usage: generate [OPTIONS] <kind> [path]
 
 Arguments:
   <kind>
-          [possible values: llms, llms-full, machine-bundle, markdown-mirror, markdown-pages, robots, sitemap, links]
+          [possible values: llms, llms-full, machine-bundle, markdown-mirror, markdown-pages, robots, sitemap, links, facts-prompt]
 
   [path]
           [default: .]
@@ -537,6 +537,24 @@ Options:
           [default: text]
           [possible values: text, json]
 
+  -h, --help
+          Print help
+```
+
+## `facts`
+
+Author and validate truth manifests (facts.json)
+
+```text
+Author and validate truth manifests (facts.json)
+
+Usage: facts [COMMAND]
+
+Commands:
+  validate  Validate a candidate facts.json against shape and site
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
   -h, --help
           Print help
 ```
