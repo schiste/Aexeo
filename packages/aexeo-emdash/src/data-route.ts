@@ -15,10 +15,13 @@ import type {
 } from "./plugin.js";
 import {
   evaluateAndPersistAll,
+  readAllDocuments,
   readAllStoredDocuments,
   readFindings,
+  readStoredFacts,
 } from "./plugin.js";
 import type { Finding } from "./types.js";
+import { validateFactsManifest } from "./wasm-init.js";
 
 // What the React component receives. Stable wire format — bumping
 // this is a breaking change for any consumer who has cached the
@@ -164,6 +167,14 @@ async function buildFindingsPayload(
   }
   routes.sort((a, b) => b.errorCount - a.errorCount || a.route.localeCompare(b.route));
 
+  // Append synthetic manifest-state findings to the sitewide bucket.
+  // These describe the truth manifest as a whole rather than any one
+  // document, so they belong with the existing sitewide findings the
+  // engine emits. They render in the same UI section without any
+  // component-side changes.
+  const manifestFindings = await deriveManifestStateFindings(ctx);
+  sitewide.push(...manifestFindings);
+
   return {
     routes,
     findings,
@@ -176,6 +187,95 @@ async function buildFindingsPayload(
     },
     sitewideFindings: sitewide,
   };
+}
+
+// Synthesize sitewide findings about the truth manifest itself. These
+// surface in the existing /findings UI alongside engine-emitted findings
+// so editors discover the manifest authoring flow naturally — without us
+// having to add a new sidebar entry that says "by the way, please go
+// configure this thing."
+//
+// Three rule IDs reserved here:
+//   FACTS001 — manifest missing entirely
+//   FACTS002 — manifest stale (deferred until last-observed schema set
+//              is tracked)
+//   FACTS003 — manifest disagrees with on-page schema.org
+async function deriveManifestStateFindings(
+  ctx: SandboxCtx,
+): Promise<Finding[]> {
+  const manifest = await readStoredFacts(ctx.kv);
+  if (manifest === null) {
+    return [
+      {
+        rule_id: "FACTS001",
+        message:
+          "No truth manifest authored yet. Open the Truth manifest page to generate an LLM authoring prompt and save your facts.json.",
+        severity: "warning",
+        path: "",
+        line: 0,
+        column: 0,
+        scope: "sitewide",
+        suggestion: null,
+      },
+    ];
+  }
+  // Manifest exists. Run the bridge's validateFactsManifest against the
+  // current document set; aggregate any mismatch findings into a single
+  // sitewide entry so the editor sees one row pointing at the validate
+  // page rather than 30 noisy mismatch rows.
+  const documents = await readAllDocuments(ctx.kv);
+  if (documents.length === 0) {
+    return [];
+  }
+  try {
+    const raw = await validateFactsManifest(
+      JSON.stringify(manifest),
+      JSON.stringify(documents),
+    );
+    const result = JSON.parse(raw) as {
+      validation: { valid: boolean; errors: string[] };
+      assessment: {
+        mismatches: Array<{
+          field: string;
+          severity: "error" | "warning";
+        }>;
+      };
+    };
+    const out: Finding[] = [];
+    if (!result.validation.valid || result.validation.errors.length > 0) {
+      out.push({
+        rule_id: "FACTS001",
+        message: `Truth manifest fails shape validation: ${result.validation.errors.slice(0, 3).join("; ")}`,
+        severity: "error",
+        path: "",
+        line: 0,
+        column: 0,
+        scope: "sitewide",
+        suggestion: null,
+      });
+    }
+    const errCount = result.assessment.mismatches.filter(
+      (m) => m.severity === "error",
+    ).length;
+    const warnCount = result.assessment.mismatches.length - errCount;
+    if (result.assessment.mismatches.length > 0) {
+      out.push({
+        rule_id: "FACTS003",
+        message: `Truth manifest disagrees with on-page schema.org: ${errCount} errors, ${warnCount} warnings. Open the Truth manifest page to review and refresh.`,
+        severity: errCount > 0 ? "error" : "warning",
+        path: "",
+        line: 0,
+        column: 0,
+        scope: "sitewide",
+        suggestion: null,
+      });
+    }
+    return out;
+  } catch {
+    // Don't let a bridge call failure break the findings page; the
+    // manifest can stay broken until the editor opens the validate UI.
+    return [];
+  }
 }
 
 function severityRank(severity: string): number {
