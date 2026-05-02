@@ -11,5 +11,6 @@ dist/
 build/
 *.egg-info/
 .seogeo-reports/
+.aexeo-reports/
 target/
 .DS_Store
