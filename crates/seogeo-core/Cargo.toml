@@ -20,7 +20,7 @@ serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 url.workspace = true
-seogeo-contracts = { version = "0.2.0", path = "../seogeo-contracts" }
+seogeo-contracts = { version = "0.0.5", path = "../seogeo-contracts" }
 
 [dev-dependencies]
-tempfile = { version = "0.2.0", path = "../tempfile" }
+tempfile = { version = "0.0.5", path = "../tempfile" }

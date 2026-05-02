@@ -6,6 +6,71 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-01
+
+Adds an LLM-assisted authoring flow for the truth manifest
+(`facts.json`) — a structured assertion of who the organization is,
+what the products are, and the terminology to use/avoid. AI
+assistants and search crawlers read it for citation grounding;
+authoring it well is a content task, not engineering, but the
+manifest's failure mode (a published manifest with hallucinated
+content) is high-impact.
+
+The plugin frames the question, validates the answer, and persists
+the result. The editor's LLM generates. The split is enforced by
+the prompt template, which mandates an interview phase before
+producing JSON: the LLM must ask up to 4 prioritized questions
+(terminology > identity > product/org split > descriptors) so the
+failure mode shifts from confident hallucination to honest gaps.
+
+**Compatibility:** verified against emdash `0.7.0` and `0.8.0`.
+
+### Added
+
+- **`/facts` admin page.** New entry in the plugin's adminPages.
+  Three-section UI: status of stored manifest, generate-prompt
+  (copy to clipboard for pasting into the editor's LLM), and
+  paste-and-validate (textarea with Validate + Save buttons; Save
+  is gated on a clean validation).
+- **Manifest-aware truth scoring.** `scoreIntelligence` now accepts
+  an optional manifest argument; the plugin reads it from KV
+  (`facts:current`) before scoring and badges the dashboard widget's
+  truth stat with the actual signal source — `Truth (manifest+schema)`,
+  `Truth (schema only)`, etc. Closes the prior UX-honesty gap where
+  the truth score was computed in schema-only mode without telling
+  the editor.
+- **`FACTS001` / `FACTS003` findings** on /findings. Surface
+  "no manifest authored yet" and "manifest disagrees with on-page
+  schema.org" so editors discover the authoring flow through their
+  existing surface. Cached under `meta:facts-findings` and
+  refreshed on Refresh + on Save, so the data path reads at zero
+  WASM cost.
+- **Bridge surface:** `generateFactsPrompt(documents)` and
+  `validateFactsManifest(manifest, documents)` WASM exports.
+  `scoreIntelligence` gained an optional `manifest_json` parameter.
+
+### Changed
+
+- `wasm/aexeo_emdash_bridge_bg.d.ts` is now tracked in git
+  (gitignored everything else in `wasm/`). wasm-bindgen 0.2.118
+  doesn't emit a `_bg.d.ts` for the bundler target, so this file
+  is hand-maintained. The build script snapshots its contents
+  before each wasm-bindgen run and restores it (saving the new
+  emit under `.wasm-bindgen` for inspection) if a future toolchain
+  version begins emitting one — loud warning rather than silent
+  regression.
+
+### Notes for hosts upgrading from 0.2.x
+
+- A new sidebar entry "Truth manifest" appears under the plugin's
+  admin pages. No action required to enable.
+- The dashboard widget's truth-score label now reads
+  `Truth (schema only)` until a manifest is authored. Same number,
+  more honest framing — no behavioral change.
+- A new sitewide finding (`FACTS001`) appears on /findings until a
+  manifest is saved. Severity: warning. Authoring via the new
+  /facts page dismisses it.
+
 ## [0.2.0] - 2026-04-28
 
 Adds the long-asked clickable routes on the findings page. Block
@@ -153,7 +218,8 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.2.0...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.3.0...HEAD
+[0.3.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.2.0...aexeo-emdash-v0.3.0
 [0.2.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.1.2...aexeo-emdash-v0.2.0
 [0.1.2]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.1.1...aexeo-emdash-v0.1.2
 [0.1.1]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.1.0...aexeo-emdash-v0.1.1
