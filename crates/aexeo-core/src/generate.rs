@@ -549,6 +549,23 @@ pub fn build_machine_artifact_bundle(site: &Site, site_url: Option<&str>) -> Mac
     let markdown_count = markdown_pages.len();
     artifacts.extend(markdown_pages);
     artifacts.sort_by(|left, right| left.path.cmp(&right.path));
+
+    // The discovery manifest lists every artifact in the bundle with its
+    // bundle-relative path, kind, byte size, and optional public URL. It
+    // exists so an LLM crawler (or a `<link rel="alternate">` injector,
+    // see `aexeo-cli fix add-discovery-links`) can find every machine
+    // surface in one fetch instead of probing per-route. Computed AFTER
+    // the other artifacts and inserted last so it self-references its
+    // own entry consistently — and we sort once more so the final
+    // artifact ordering on disk stays alphabetical.
+    let manifest_content = render_discovery_manifest(&artifacts, site_url);
+    artifacts.push(machine_artifact(
+        "manifest.json",
+        "discovery_manifest",
+        manifest_content,
+    ));
+    artifacts.sort_by(|left, right| left.path.cmp(&right.path));
+
     MachineArtifactBundle {
         artifacts,
         route_count: site.route_page_pairs().count(),
@@ -556,9 +573,61 @@ pub fn build_machine_artifact_bundle(site: &Site, site_url: Option<&str>) -> Mac
         deploy_notes: vec![
             "Deploy generated files at the same relative paths from the public site root.".to_string(),
             "Review facts.json before publishing; generated facts are a deterministic first draft, not a legal source of truth.".to_string(),
-            "Expose Markdown mirrors through /llms.txt and, where appropriate, static page links so agents do not rely only on URL convention probing.".to_string(),
+            "Reference manifest.json from your site root and let `aexeo-cli fix add-discovery-links dist` inject the matching <link rel=\"alternate\"> tags into HTML <head>.".to_string(),
         ],
     }
+}
+
+fn render_discovery_manifest(
+    artifacts: &[GeneratedMachineArtifact],
+    site_url: Option<&str>,
+) -> String {
+    let entries: Vec<serde_json::Value> = artifacts
+        .iter()
+        .map(|artifact| {
+            let url = site_url.map(|base| {
+                let normalized = base.trim_end_matches('/');
+                format!("{}/{}", normalized, artifact.path)
+            });
+            // Markdown mirrors carry their source-route name as a stem
+            // (e.g. about.md.txt → /about). Surface that explicitly so
+            // the link-injector can match mirrors back to their HTML
+            // source pages without re-deriving the convention.
+            let source_route = artifact.path.strip_suffix(".md.txt").map(|stem| {
+                if stem == "index" {
+                    "/".to_string()
+                } else {
+                    format!("/{}", stem)
+                }
+            });
+            let mut entry = serde_json::Map::new();
+            entry.insert(
+                "kind".to_string(),
+                serde_json::Value::String(artifact.kind.clone()),
+            );
+            entry.insert(
+                "path".to_string(),
+                serde_json::Value::String(artifact.path.clone()),
+            );
+            entry.insert(
+                "bytes".to_string(),
+                serde_json::Value::Number(serde_json::Number::from(artifact.bytes)),
+            );
+            if let Some(url) = url {
+                entry.insert("url".to_string(), serde_json::Value::String(url));
+            }
+            if let Some(route) = source_route {
+                entry.insert("source_route".to_string(), serde_json::Value::String(route));
+            }
+            serde_json::Value::Object(entry)
+        })
+        .collect();
+    let manifest = serde_json::json!({
+        "version": 1,
+        "site_url": site_url,
+        "artifacts": entries,
+    });
+    serde_json::to_string_pretty(&manifest).unwrap_or_else(|_| "{}".to_string())
 }
 
 pub fn render_llms_full_txt(site: &Site, _site_url: Option<&str>) -> String {
@@ -933,6 +1002,67 @@ mod tests {
         let names: Vec<_> = without.artifacts.iter().map(|a| a.path.as_str()).collect();
         assert!(!names.contains(&"sitemap.xml"));
         assert!(!names.contains(&"robots.txt"));
+        Ok(())
+    }
+
+    #[test]
+    fn public_bundle_emits_discovery_manifest_listing_every_artifact() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(&root.join("index.html"), &make_html_page("", ""));
+        write(&root.join("about.html"), &make_html_page("about", ""));
+        let site = load_site(root)?;
+        let bundle = build_machine_artifact_bundle(&site, Some("https://example.com"));
+
+        // Manifest must be present.
+        let manifest = bundle
+            .artifacts
+            .iter()
+            .find(|a| a.path == "manifest.json")
+            .expect("public-bundle should emit manifest.json");
+        assert_eq!(manifest.kind, "discovery_manifest");
+        let payload: serde_json::Value = serde_json::from_str(&manifest.content)?;
+        assert_eq!(payload["version"], serde_json::json!(1));
+        assert_eq!(
+            payload["site_url"],
+            serde_json::json!("https://example.com")
+        );
+        let entries = payload["artifacts"]
+            .as_array()
+            .expect("artifacts should be an array");
+        // Every artifact except the manifest itself is referenced. The
+        // manifest doesn't self-reference (a crawler that fetched it
+        // already knows what file it just got).
+        for artifact in &bundle.artifacts {
+            if artifact.path == "manifest.json" {
+                continue;
+            }
+            assert!(
+                entries
+                    .iter()
+                    .any(|entry| entry["path"] == serde_json::Value::String(artifact.path.clone())),
+                "manifest missing entry for {}",
+                artifact.path
+            );
+        }
+        assert!(
+            entries
+                .iter()
+                .all(|entry| entry["path"] != serde_json::json!("manifest.json")),
+            "manifest should not self-reference",
+        );
+        // Markdown mirrors carry their source-route mapping so the link
+        // injector can match mirrors back to their source pages.
+        let about_entry = entries
+            .iter()
+            .find(|e| e["path"] == serde_json::json!("about.md.txt"))
+            .expect("manifest should reference about.md.txt");
+        assert_eq!(about_entry["source_route"], serde_json::json!("/about"));
+        let index_entry = entries
+            .iter()
+            .find(|e| e["path"] == serde_json::json!("index.md.txt"))
+            .expect("manifest should reference index.md.txt");
+        assert_eq!(index_entry["source_route"], serde_json::json!("/"));
         Ok(())
     }
 

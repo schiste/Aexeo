@@ -166,7 +166,7 @@ Usage: generate [OPTIONS] <kind> [path]
 
 Arguments:
   <kind>
-          [possible values: llms, llms-full, machine-bundle, markdown-mirror, markdown-pages, robots, sitemap, links, facts-prompt]
+          [possible values: llms, llms-full, public-bundle, markdown-mirror, markdown-pages, robots, sitemap, links, facts-prompt]
 
   [path]
           [default: .]

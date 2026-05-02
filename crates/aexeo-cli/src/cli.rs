@@ -157,7 +157,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("kind").required(true).value_parser([
                     "llms",
                     "llms-full",
-                    "machine-bundle",
+                    "public-bundle",
                     "markdown-mirror",
                     "markdown-pages",
                     "robots",

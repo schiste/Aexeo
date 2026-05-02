@@ -126,7 +126,7 @@ pub fn command_generate(submatches: &ArgMatches) -> Result<i32> {
         .get_one::<String>("kind")
         .map(String::as_str)
         .ok_or_else(|| anyhow::anyhow!("missing required CLI argument 'kind'"))?;
-    if matches!(kind, "machine-bundle" | "markdown-pages") {
+    if matches!(kind, "public-bundle" | "markdown-pages") {
         let site_url = submatches
             .get_one::<String>("site-url")
             .map(String::as_str)
@@ -198,7 +198,7 @@ fn command_generate_machine_artifacts(
     site_url: Option<&str>,
     warnings: Vec<aexeo_core::config::ConfigWarning>,
 ) -> Result<i32> {
-    let bundle = if kind == "machine-bundle" {
+    let bundle = if kind == "public-bundle" {
         build_machine_artifact_bundle(site, site_url)
     } else {
         let artifacts = render_markdown_mirror_pages(site);
