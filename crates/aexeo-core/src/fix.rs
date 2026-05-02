@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -171,6 +171,87 @@ fn apply_related_link_insertions(site: &Site, config: &Config) -> Result<Vec<Pat
     Ok(changed)
 }
 
+/// Inject `<link rel="alternate" type="text/markdown" href="...">` tags into
+/// every HTML page that has a markdown mirror declared in the bundle's
+/// manifest.json. Idempotent: re-runs are no-ops once the tag is present.
+///
+/// Reads manifest.json from the same root the fix is run on. When no
+/// manifest exists (i.e. the host hasn't generated a public-bundle there),
+/// the fix is a silent no-op — the safer behavior than guessing at mirror
+/// paths from filename conventions.
+fn apply_discovery_link_fixes(root: &Path) -> Result<Vec<PathBuf>> {
+    let manifest_path = root.join("manifest.json");
+    let Ok(manifest_text) = fs::read_to_string(&manifest_path) else {
+        return Ok(Vec::new());
+    };
+    let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&manifest_text) else {
+        return Ok(Vec::new());
+    };
+    let Some(artifacts) = manifest.get("artifacts").and_then(|v| v.as_array()) else {
+        return Ok(Vec::new());
+    };
+
+    // Build a route → mirror-path map from the manifest. The manifest's
+    // source_route is the leading "/" form ("/about", "/"); the matching
+    // HTML file lives at root/about.html, root/about/index.html, or
+    // root/index.html depending on the host's flat-vs-nested layout.
+    let mut mirror_by_route: BTreeMap<String, String> = BTreeMap::new();
+    for entry in artifacts {
+        let Some(kind) = entry.get("kind").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if kind != "markdown_mirror" {
+            continue;
+        }
+        let Some(path) = entry.get("path").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(route) = entry.get("source_route").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        mirror_by_route.insert(route.to_string(), path.to_string());
+    }
+    if mirror_by_route.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut changed = Vec::new();
+    for (route, mirror_path) in &mirror_by_route {
+        // Match the route to one of the conventional HTML layouts.
+        // Order matters: index.html is the canonical home, then nested
+        // <route>/index.html (Astro/Hugo default), then flat <route>.html.
+        let candidates: Vec<PathBuf> = if route == "/" {
+            vec![root.join("index.html")]
+        } else {
+            let stripped = route.trim_start_matches('/');
+            vec![
+                root.join(stripped).join("index.html"),
+                root.join(format!("{stripped}.html")),
+            ]
+        };
+        let Some(html_path) = candidates.into_iter().find(|p| p.exists()) else {
+            continue;
+        };
+        let raw_text = fs::read_to_string(&html_path)?;
+        // Idempotency: skip if the discovery link is already present.
+        // Match on the href specifically rather than just the rel/type
+        // string so a different mirror path doesn't get silently
+        // duplicated. The mirror path is the canonical signal.
+        let href = format!("/{mirror_path}");
+        let needle = format!("href=\"{href}\"");
+        if raw_text.contains(&needle) {
+            continue;
+        }
+        let tag = format!(r#"<link rel="alternate" type="text/markdown" href="{href}">"#);
+        let updated = inject_head_tags(&raw_text, &[tag]);
+        if updated != raw_text {
+            fs::write(&html_path, updated)?;
+            changed.push(html_path);
+        }
+    }
+    Ok(changed)
+}
+
 pub fn apply_safe_fixes(root: &Path, config: &Config) -> Result<Vec<PathBuf>> {
     let mut changed = BTreeSet::new();
     let site = load_site(root)?;
@@ -210,6 +291,14 @@ pub fn apply_safe_fixes(root: &Path, config: &Config) -> Result<Vec<PathBuf>> {
     }
     let refreshed_site = load_site(root)?;
     for path in apply_related_link_insertions(&refreshed_site, config)? {
+        changed.insert(path);
+    }
+    // Discovery-link injection runs against the manifest (if present) so
+    // hosts who've generated a public-bundle into the same root get their
+    // <link rel="alternate"> tags wired up automatically. Silent no-op
+    // when no manifest is found — the safer behavior than guessing at
+    // mirror paths from filename conventions.
+    for path in apply_discovery_link_fixes(root)? {
         changed.insert(path);
     }
 
@@ -302,6 +391,56 @@ mod tests {
         apply_safe_fixes(root, &config)?;
         let updated = fs::read_to_string(root.join("index.html"))?;
         assert!(updated.contains("/alpha") || updated.contains("data-ui=\"related-links\""));
+        Ok(())
+    }
+
+    #[test]
+    fn injects_discovery_links_for_manifest_listed_mirrors() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(&root.join("index.html"), &make_html_page("", ""));
+        write(&root.join("about.html"), &make_html_page("about", ""));
+        // Hand-craft a manifest matching the public-bundle output shape.
+        write(
+            &root.join("manifest.json"),
+            r#"{
+              "version": 1,
+              "site_url": "https://example.com",
+              "artifacts": [
+                {"kind": "markdown_mirror", "path": "index.md.txt", "source_route": "/"},
+                {"kind": "markdown_mirror", "path": "about.md.txt", "source_route": "/about"},
+                {"kind": "sitemap", "path": "sitemap.xml"}
+              ]
+            }"#,
+        );
+        // Empty mirrors so the fix can find HTML and inject without
+        // depending on real mirror generation; we're testing the
+        // injection, not the bundle.
+        write(&root.join("index.md.txt"), "");
+        write(&root.join("about.md.txt"), "");
+
+        let config = Config::default();
+        apply_safe_fixes(root, &config)?;
+
+        let home = fs::read_to_string(root.join("index.html"))?;
+        assert!(
+            home.contains(r#"href="/index.md.txt""#),
+            "home should have the index mirror link"
+        );
+        let about = fs::read_to_string(root.join("about.html"))?;
+        assert!(
+            about.contains(r#"href="/about.md.txt""#),
+            "about should have the about mirror link"
+        );
+
+        // Idempotency: a second run should not duplicate the link.
+        apply_safe_fixes(root, &config)?;
+        let home2 = fs::read_to_string(root.join("index.html"))?;
+        assert_eq!(
+            home2.matches(r#"href="/index.md.txt""#).count(),
+            1,
+            "discovery link must not be duplicated on second run"
+        );
         Ok(())
     }
 }
