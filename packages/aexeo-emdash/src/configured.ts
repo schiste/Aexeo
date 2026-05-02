@@ -2,7 +2,7 @@
 // path for first-party emdash deploys: the plugin runs in the host
 // Worker, owns no separate sidecar, and reads no runtime config.
 // Compared to the sandboxed entry it has zero ops surface — install
-// from npm, add `seogeoPlugin()` to astro.config, done.
+// from npm, add `aexeoPlugin()` to astro.config, done.
 //
 // Runs in the host's request context, so:
 //   - content:afterSave fires for real (no post-response bridge bug)
@@ -43,6 +43,37 @@ import type { Finding, SiteIntelligenceScore } from "./types.js";
 // installed still get a buildable package).
 import { definePlugin } from "emdash";
 
+// Resolve the final collection list from the user's three knobs.
+// Exposed at module scope so its precedence rules can be unit-tested
+// (and reused by future entry points if we add CLI parity for the
+// configured-mode runtime).
+function resolveCollections(
+  explicit: readonly string[] | undefined,
+  include: readonly string[] | undefined,
+  exclude: readonly string[] | undefined,
+): readonly string[] {
+  if (explicit !== undefined) {
+    // Explicit list wins — include/exclude are ignored. This is the
+    // path consumers with non-template-blog schemas use.
+    return [...explicit];
+  }
+  const excludeSet = new Set<string>(exclude ?? []);
+  // Subtract first, then add — see the comment in createPlugin for why.
+  const base: string[] = DEFAULT_COLLECTIONS.filter(
+    (slug) => !excludeSet.has(slug),
+  );
+  if (include === undefined || include.length === 0) {
+    return base;
+  }
+  const result: string[] = [...base];
+  for (const slug of include) {
+    if (!result.includes(slug)) {
+      result.push(slug);
+    }
+  }
+  return result;
+}
+
 // In-process WASM evaluator. Wraps the bridge's stringly-typed
 // interface in the structured EvaluatorFn contract that
 // evaluateAndPersistAll expects.
@@ -69,7 +100,7 @@ const inProcessEvaluator: EvaluatorFn = async (documents) => {
 //   1. The factory in astro.config returns a *descriptor* with an
 //      `entrypoint` field — a module spec the host imports at boot
 //      to call `createPlugin(options)`. See src/index.ts for the
-//      seogeoPlugin() factory that emits this descriptor.
+//      aexeoPlugin() factory that emits this descriptor.
 //   2. The runtime entry (this file) exports `createPlugin(options)`
 //      which returns the *resolved plugin* with hooks/routes/admin
 //      defined inline. emdash's astro integration generates a
@@ -83,12 +114,22 @@ const inProcessEvaluator: EvaluatorFn = async (documents) => {
 
 export interface ConfiguredPluginOptions {
   /**
-   * emdash collections the Refresh button sweeps. Comes through from
-   * the descriptor's `options` field — see `seogeoPlugin({ collections })`
-   * in src/index.ts. When undefined, falls back to DEFAULT_COLLECTIONS
-   * (`["posts", "pages"]`).
+   * Full override of the swept collections. See `aexeoPlugin` in
+   * src/index.ts for the full precedence story.
    */
   collections?: readonly string[];
+
+  /**
+   * Add to the default `["posts", "pages"]`. Ignored when
+   * `collections` is set.
+   */
+  includeCollections?: readonly string[];
+
+  /**
+   * Remove from the default `["posts", "pages"]`. Applied before
+   * `includeCollections`. Ignored when `collections` is set.
+   */
+  excludeCollections?: readonly string[];
 
   /**
    * Editor-workflow suppressions. See `Suppression` in suppressions.ts
@@ -105,10 +146,20 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
   // `options` field is JSON-cloned by emdash's astro integration
   // before reaching us, so this is the actual values, not references
   // back to the consumer's astro.config.
-  const collections =
-    options.collections === undefined
-      ? DEFAULT_COLLECTIONS
-      : [...options.collections];
+  //
+  // Collection precedence:
+  //   - `collections` set → full override; include/exclude ignored.
+  //   - otherwise → DEFAULT_COLLECTIONS minus excludeCollections,
+  //     then plus includeCollections.
+  // The sequence (subtract before add) means a slug appearing in
+  // both excludeCollections and includeCollections ends up included
+  // — that matches user intuition for "I want X back even though I
+  // excluded the defaults that contained it."
+  const collections = resolveCollections(
+    options.collections,
+    options.includeCollections,
+    options.excludeCollections,
+  );
 
   // Compile suppressions at startup so a malformed rule fails the host's
   // boot rather than the editor's first Refresh click. compileSuppressions
@@ -121,9 +172,9 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
   // so the admin/audit surface can display it. Note: emdash's
   // definePlugin validates the capability strings against a closed
   // set — read:content, network:fetch, etc. Hypothetical strings
-  // like kv:seogeo-baselines aren't accepted there.
+  // like kv:aexeo-baselines aren't accepted there.
   return definePlugin({
-    id: "aexeo-seogeo",
+    id: "aexeo-emdash",
     version: PACKAGE_VERSION,
     capabilities: ["read:content"],
     hooks: {
@@ -146,8 +197,8 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
         handler: (ctx: RouteContext) => handleAdminRoute(ctx, collections),
       },
       // JSON data endpoint for the React adminEntry. Two routes:
-      //   POST /_emdash/api/plugins/aexeo-seogeo/data    — read current findings
-      //   POST /_emdash/api/plugins/aexeo-seogeo/refresh — sweep + read
+      //   POST /_emdash/api/plugins/aexeo-emdash/data    — read current findings
+      //   POST /_emdash/api/plugins/aexeo-emdash/refresh — sweep + read
       // Returning JSON (not Block Kit blocks) lets the React
       // <Findings/> component render proper <a href> links to the
       // emdash edit page and the public site, which Block Kit can't
@@ -190,7 +241,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
         { path: "/facts", label: "Truth manifest" },
       ],
       widgets: [
-        { id: "seogeo-score", size: "third", title: "SEO score" },
+        { id: "aexeo-score", size: "third", title: "SEO score" },
       ],
     },
   });
@@ -277,7 +328,7 @@ async function handlePageLoad(
   if (normalized === "" || normalized === "findings") {
     return renderFindingsPage(ctx);
   }
-  if (normalized === "widget:seogeo-score") {
+  if (normalized === "widget:aexeo-score") {
     return renderScoreWidget(ctx);
   }
   if (normalized === "document") {
@@ -449,7 +500,7 @@ async function renderScoreWidget(ctx: SandboxCtx): Promise<BlockResponse> {
         { type: "header", text: "SEO score" },
         {
           type: "context",
-          text: "No documents indexed — click Refresh on the seogeo findings page.",
+          text: "No documents indexed — click Refresh on the Aexeo findings page.",
         },
       ],
     };

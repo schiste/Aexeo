@@ -6,6 +6,57 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-01
+
+Three follow-ups from real-world adoption feedback after 0.4.0:
+
+- richer suppression selectors so editors can target by collection
+  and document status, not just route + rule
+- ergonomic collections API (`includeCollections` /
+  `excludeCollections`) for sites whose schema is close to the
+  default but needs minor tweaks
+- README now leads with the suppressions glob semantics so consumers
+  migrating from local patches don't have to dig through the
+  CHANGELOG to learn that `*` is single-segment and `**` is recursive
+
+**Compatibility:** verified against emdash `0.7.0` and `0.8.0`.
+
+### Added
+
+- **`Suppression.collections`** — silence findings for documents in
+  the named emdash collections.
+- **`Suppression.statuses`** — silence findings for documents in the
+  named statuses (`"draft"`, `"published"`, etc.). Useful for
+  preventing draft-stage findings from cluttering the dashboard.
+- **`includeCollections`** factory option — adds slugs to the
+  default `["posts", "pages"]`. For sites that have the defaults
+  PLUS extras (e.g. blog adapter + `guides` and `faqs`).
+- **`excludeCollections`** factory option — removes slugs from the
+  default. For sites that have most of the defaults but want to
+  skip one.
+
+### Changed
+
+- **`SuppressionFilter.apply` signature** — now takes a
+  `SuppressionContext` object (`{ route, collection?, status? }`)
+  instead of a bare route string. Direct callers of `apply` will
+  see a TypeScript error and need a one-line update; the public
+  factory API (`aexeoPlugin({ suppressions })`) is unchanged.
+
+### Notes for hosts upgrading from 0.4.x
+
+- No automatic behavior change. New selectors and options default
+  to undefined and are ignored unless the host opts in.
+- Selector matching is **AND across selectors, OR across rules**.
+  A suppression with both `routePattern: "/fr-fr/**"` and
+  `collections: ["pages"]` only silences findings on French pages,
+  not on French blog posts.
+- Sitewide findings (route `*`) ignore `collections` /
+  `statuses` selectors — those findings are inherently
+  cross-document and have no single collection or status to match.
+  Use `routePattern` (or omit it) and `ruleIds` for sitewide
+  suppressions.
+
 ## [0.4.0] - 2026-05-01
 
 Adds upstreamed support for editor-workflow finding suppressions.
@@ -16,13 +67,13 @@ patch over the published plugin.
 
 ### Added
 
-- **`seogeoPlugin({ suppressions })` option.** Each rule silences
+- **`aexeoPlugin({ suppressions })` option.** Each rule silences
   findings matching the route pattern (glob) AND/OR a rule-id set.
   Applied before findings are persisted to KV — suppressed findings
   never reach the dashboard, /findings, or the per-document panel.
 
   ```ts
-  seogeoPlugin({
+  aexeoPlugin({
     suppressions: [
       { routePattern: "/privacy", ruleIds: ["RULE001"] },
       { routePattern: "/fr-fr/**", ruleIds: ["RULE002"] },
@@ -50,7 +101,7 @@ patch over the published plugin.
   and the filter is a no-op until the host opts in.
 - Suppressions are plugin-only by design. The CLI `check` continues
   to surface every finding; if you want to silence findings at the
-  CLI layer, use `seogeo.toml`'s `[ignore]` block. The two surfaces
+  CLI layer, use `aexeo.toml`'s `[ignore]` block. The two surfaces
   serve different audiences: the plugin is editorial workflow, the
   CLI is build-gating.
 
@@ -144,10 +195,10 @@ Block Kit (no link needs there).
   emdash's `usePluginPage` hook picks this up and renders the
   React component in place of the Block Kit fallback.
 - **Two new HTTP routes** the React component consumes:
-  - `POST /_emdash/api/plugins/aexeo-seogeo/data` — read current
+  - `POST /_emdash/api/plugins/aexeo-emdash/data` — read current
     findings + per-route metadata + computed URLs (no
     re-evaluation).
-  - `POST /_emdash/api/plugins/aexeo-seogeo/refresh` — sweep the
+  - `POST /_emdash/api/plugins/aexeo-emdash/refresh` — sweep the
     configured collections, write findings to KV, return the same
     payload as `/data` plus a refresh summary.
   Both routes return JSON in the shape exported as `FindingsPayload`
@@ -192,7 +243,7 @@ rule-engine change).
 
 ### Added
 
-- **`seogeoPlugin({ collections })` option** for configured mode.
+- **`aexeoPlugin({ collections })` option** for configured mode.
   Lets sites with non-default collection slugs override which
   collections the Refresh button sweeps. Defaults to
   `["posts", "pages"]` when omitted (the slugs from
@@ -230,15 +281,15 @@ First public release.
 
 ### Added
 
-- `seogeoPlugin()` factory for **configured mode** — the recommended
+- `aexeoPlugin()` factory for **configured mode** — the recommended
   install path for first-party emdash sites. Plugin runs in-process
   inside the host Worker. No sidecar deploy, no auth token, no admin
   Setup page.
-- `seogeoPluginSandboxed({ evaluatorHost })` factory for **sandboxed
+- `aexeoPluginSandboxed({ evaluatorHost })` factory for **sandboxed
   mode** — preserved for future third-party-deploy scenarios where
   the plugin code shouldn't have full host access. Requires a
   separately-deployed sidecar Worker (template at
-  `seogeo-crawl-worker` in the source repo).
+  `aexeo-crawl-worker` in the source repo).
 - Block Kit admin pages: findings table, per-document panel,
   intelligence-score dashboard widget. Refresh button on the
   findings page sweeps every document in the configured collections.
@@ -246,7 +297,7 @@ First public release.
   automatic re-evaluation of the changed document and update the
   findings table without manual intervention.
 - WASM-backed evaluator powered by the `aexeo-emdash-bridge` Rust
-  crate (same engine as the seogeo CLI). Compiles via the consumer's
+  crate (same engine as the Aexeo CLI). Compiles via the consumer's
   Vite/Wrangler chain — `vite-plugin-wasm` is a peer-side runtime
   dependency for Vite-driven Cloudflare deploys.
 
@@ -266,7 +317,8 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.4.0...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.5.0...HEAD
+[0.5.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.4.0...aexeo-emdash-v0.5.0
 [0.4.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.3.0...aexeo-emdash-v0.4.0
 [0.3.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.2.0...aexeo-emdash-v0.3.0
 [0.2.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.1.2...aexeo-emdash-v0.2.0

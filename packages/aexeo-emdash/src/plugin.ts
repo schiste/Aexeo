@@ -37,7 +37,7 @@ export interface StoredDocument {
 // separate `allowedHosts` field on the descriptor. Sidecar reachability
 // is therefore a two-part declaration: include "network:fetch" here and
 // list the sidecar host plus IndexNow's host in allowedHosts (computed
-// in src/index.ts seogeoPlugin()).
+// in src/index.ts aexeoPlugin()).
 const baseCapabilities = [
   "read:content",
   "read:schema",
@@ -45,7 +45,7 @@ const baseCapabilities = [
   "write:artifacts:public/llms-full.txt",
   "write:artifacts:public/facts.json",
   "write:artifacts:public/*.md.txt",
-  "kv:seogeo-baselines",
+  "kv:aexeo-baselines",
 ] as const;
 
 // Compute the capability list. When the consumer declares an
@@ -68,7 +68,7 @@ export function buildCapabilities(
 // allow-list cannot change after dev-server / build start; the URL the
 // plugin actually fetches is read from KV at runtime, but the host part
 // must already be on this list. Site operators declare it once via
-// seogeoPlugin({ evaluatorHost }) in astro.config.mjs.
+// aexeoPlugin({ evaluatorHost }) in astro.config.mjs.
 export function buildAllowedHosts(
   evaluatorHost: string | null,
 ): readonly string[] {
@@ -231,7 +231,7 @@ export async function handleAfterSave(
 // Optional `suppressionFilter` is applied AFTER the evaluator runs
 // but BEFORE writing to KV — suppressed findings never reach the
 // dashboard, the /findings page, or the per-document panel. The
-// filter is host policy (configured via seogeoPlugin({ suppressions }));
+// filter is host policy (configured via aexeoPlugin({ suppressions }));
 // the engine itself is unchanged.
 export async function handleAfterSaveConfigured(
   event: ContentAfterSaveEvent,
@@ -269,7 +269,14 @@ export async function handleAfterSaveConfigured(
   const filtered =
     suppressionFilter === undefined
       ? pageFindings
-      : suppressionFilter.apply(document.route, pageFindings);
+      : suppressionFilter.apply(
+          {
+            route: document.route,
+            collection: adapted.meta.collection,
+            status: adapted.meta.status,
+          },
+          pageFindings,
+        );
   await kv.set(findingsKey(document.route), {
     route: document.route,
     findings: filtered,
@@ -279,7 +286,7 @@ export async function handleAfterSaveConfigured(
 // Default set of content collections the plugin sweeps when an admin
 // clicks Refresh. We can't introspect the host's schema from the
 // sandbox bridge in 0.7.0; the user can override this set via the
-// seogeoPlugin({ collections }) factory option once we plumb it.
+// aexeoPlugin({ collections }) factory option once we plumb it.
 export const DEFAULT_COLLECTIONS = ["posts", "pages"] as const;
 
 export interface RefreshSummary {
@@ -387,7 +394,7 @@ export async function evaluateAndPersistAll(
   //    fetch) is the only configured-vs-sandboxed difference.
   const result = await options.evaluator(documents);
   if (!result.ok) {
-    log?.error?.(`seogeo evaluator failure (${result.reason})`, {
+    log?.error?.(`aexeo evaluator failure (${result.reason})`, {
       detail: result.detail,
     });
     summary.errors.push(`${result.reason}: ${result.detail}`);
@@ -414,12 +421,27 @@ export async function evaluateAndPersistAll(
   //    an empty array — the findings page treats that as "clean").
   //    Suppressions are applied here, before the KV write, so
   //    suppressed findings never make it into the editor surface.
+  //    For per-document routes we look up the stored meta so
+  //    collection/status selectors have the data they need; sitewide
+  //    findings (bucket "*") get a context with route "*" only —
+  //    collection/status selectors on those rules are no-ops, by
+  //    design (sitewide findings are inherently cross-document).
   let totalAfterSuppression = 0;
   for (const [route, findings] of findingsByRoute) {
+    const stored = adaptedByRoute.get(route);
+    const context = {
+      route,
+      ...(stored?.meta.collection === undefined
+        ? {}
+        : { collection: stored.meta.collection }),
+      ...(stored?.meta.status === undefined
+        ? {}
+        : { status: stored.meta.status }),
+    };
     const filtered =
       suppressionFilter === undefined
         ? findings
-        : suppressionFilter.apply(route, findings);
+        : suppressionFilter.apply(context, findings);
     await kv.set(findingsKey(route), { route, findings: filtered });
     summary.routesUpdated += 1;
     totalAfterSuppression += filtered.length;

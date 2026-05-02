@@ -4,14 +4,14 @@
 // emdash's astro integration consumes at build time; both have a
 // matching runtime entrypoint that emdash imports at boot.
 //
-//   1. seogeoPlugin() — CONFIGURED MODE (recommended). Returns a
+//   1. aexeoPlugin() — CONFIGURED MODE (recommended). Returns a
 //      descriptor pointing at "@aeptus/aexeo-emdash/configured"
 //      whose createPlugin() runs in-process inside the host emdash
 //      Worker. No sidecar Worker, no runtime token, no Setup page.
 //      Use this for first-party deploys where you trust the plugin
 //      with full host access. Place in `plugins: [...]`.
 //
-//   2. seogeoPluginSandboxed({ evaluatorHost }) — SANDBOXED MODE.
+//   2. aexeoPluginSandboxed({ evaluatorHost }) — SANDBOXED MODE.
 //      Returns a descriptor pointing at
 //      "@aeptus/aexeo-emdash/sandbox" loaded by emdash's
 //      Worker Loader, with a separate sidecar Worker doing the WASM
@@ -19,12 +19,12 @@
 //      emdash sites that don't trust it with host access. Place in
 //      `sandboxed: [...]` with `sandboxRunner: sandbox()`.
 
-export { seogeoPluginSandboxed } from "./sandbox.js";
+export { aexeoPluginSandboxed } from "./sandbox.js";
 export type {
   PluginAdminPage,
   PluginAdminWidget,
   SandboxedPluginDescriptor,
-  SeogeoSandboxedOptions,
+  AexeoSandboxedOptions,
 } from "./sandbox.js";
 import { PACKAGE_VERSION } from "./version.js";
 
@@ -55,7 +55,7 @@ export interface ConfiguredPluginDescriptor {
   adminWidgets: readonly { id: string; size?: string; title?: string }[];
 }
 
-export interface SeogeoPluginOptions {
+export interface AexeoPluginOptions {
   /**
    * emdash collections the plugin sweeps when an admin clicks
    * Refresh on the findings page. Order doesn't matter; the sweep
@@ -66,17 +66,52 @@ export interface SeogeoPluginOptions {
    *
    * Defaults to `["posts", "pages"]` (the slugs the
    * `@emdash-cms/template-blog-cloudflare` template ships with).
-   * Override when your schema uses different collection slugs:
+   * Three knobs, in precedence order:
    *
-   *     seogeoPlugin({ collections: ["posts", "guides", "products"] })
+   *   - `collections` — full override. When set, replaces the
+   *     default entirely. Use this when your schema has none of the
+   *     default slugs (e.g. a site with `blog_posts` and `pages`).
    *
-   * Pointing this at a slug that doesn't exist in your schema is
-   * non-fatal: the bridge's `content.list` returns empty and the
-   * sweep records the missing collection in the Refresh summary's
-   * `errors` field. Safe to ship a superset for a project that may
-   * add collections later.
+   *         aexeoPlugin({ collections: ["blog_posts", "pages"] })
+   *
+   *   - `includeCollections` — extend the default. Adds slugs to
+   *     the existing default. Use this when your schema has the
+   *     default slugs PLUS extras.
+   *
+   *         aexeoPlugin({ includeCollections: ["guides", "faqs"] })
+   *
+   *   - `excludeCollections` — subtract from the default. Removes
+   *     slugs from the existing default. Use this when your schema
+   *     has the defaults but you want to skip one.
+   *
+   *         aexeoPlugin({ excludeCollections: ["posts"] })
+   *
+   * `includeCollections` and `excludeCollections` may be combined
+   * (subtract first, then add). `collections` ignores both — it's
+   * the explicit-list override.
+   *
+   * Pointing any of these at a slug that doesn't exist in your
+   * schema is non-fatal: the bridge's `content.list` returns empty
+   * and the sweep records the missing collection in the Refresh
+   * summary's `errors` field. Safe to ship a superset for a project
+   * that may add collections later.
    */
   collections?: readonly string[];
+
+  /**
+   * Slugs to add on top of the default `["posts", "pages"]`. Ignored
+   * when `collections` is set (which fully overrides the default).
+   * See `collections` for the full precedence story.
+   */
+  includeCollections?: readonly string[];
+
+  /**
+   * Slugs to remove from the default `["posts", "pages"]`. Applied
+   * before `includeCollections`, so adding a slug back via include
+   * is a no-op (it was never removed). Ignored when `collections`
+   * is set.
+   */
+  excludeCollections?: readonly string[];
 
   /**
    * Editor-workflow suppressions. Each rule silences findings that
@@ -84,7 +119,7 @@ export interface SeogeoPluginOptions {
    * Applied before findings are persisted to KV — suppressed findings
    * never reach the dashboard, /findings, or the per-document panel.
    *
-   *     seogeoPlugin({
+   *     aexeoPlugin({
    *       suppressions: [
    *         { routePattern: "/privacy", ruleIds: ["RULE001"] },
    *         { routePattern: "/fr-fr/**", ruleIds: ["RULE002"] },
@@ -101,7 +136,7 @@ export interface SeogeoPluginOptions {
    *
    * Suppressions are plugin-only by design. The CLI's `check` is the
    * canonical strict audit; if you want to silence findings at the
-   * CLI layer, use `seogeo.toml`'s `[ignore]` block instead. The two
+   * CLI layer, use `aexeo.toml`'s `[ignore]` block instead. The two
    * surfaces serve different audiences: the plugin is editorial
    * workflow, the CLI is build-gating.
    */
@@ -111,11 +146,11 @@ export interface SeogeoPluginOptions {
 export type { Suppression } from "./suppressions.js";
 import type { Suppression } from "./suppressions.js";
 
-export function seogeoPlugin(
-  options: SeogeoPluginOptions = {},
+export function aexeoPlugin(
+  options: AexeoPluginOptions = {},
 ): ConfiguredPluginDescriptor {
   return {
-    id: "aexeo-seogeo",
+    id: "aexeo-emdash",
     version: PACKAGE_VERSION,
     // Subpath import resolved by the consumer's bundler at build
     // time — must match the package.json `exports["./configured"]`
@@ -139,14 +174,33 @@ export function seogeoPlugin(
       ...(options.collections === undefined
         ? {}
         : { collections: [...options.collections] }),
+      ...(options.includeCollections === undefined
+        ? {}
+        : { includeCollections: [...options.includeCollections] }),
+      ...(options.excludeCollections === undefined
+        ? {}
+        : { excludeCollections: [...options.excludeCollections] }),
       ...(options.suppressions === undefined
         ? {}
-        : { suppressions: options.suppressions.map((rule) => ({ ...rule })) }),
+        : {
+            suppressions: options.suppressions.map((rule) => ({
+              ...rule,
+              ...(rule.ruleIds === undefined
+                ? {}
+                : { ruleIds: [...rule.ruleIds] }),
+              ...(rule.collections === undefined
+                ? {}
+                : { collections: [...rule.collections] }),
+              ...(rule.statuses === undefined
+                ? {}
+                : { statuses: [...rule.statuses] }),
+            })),
+          }),
     },
     capabilities: [
       "read:content",
       "read:schema",
-      "kv:seogeo-baselines",
+      "kv:aexeo-baselines",
     ],
     // adminPages drives the admin sidebar — one nav entry per item.
     // Don't list "/" alongside "/findings": both would render as
@@ -160,7 +214,7 @@ export function seogeoPlugin(
       { path: "/document", label: "Document SEO" },
     ],
     adminWidgets: [
-      { id: "seogeo-score", size: "third", title: "SEO score" },
+      { id: "aexeo-score", size: "third", title: "SEO score" },
     ],
   };
 }
