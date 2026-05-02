@@ -77,7 +77,39 @@ export interface SeogeoPluginOptions {
    * add collections later.
    */
   collections?: readonly string[];
+
+  /**
+   * Editor-workflow suppressions. Each rule silences findings that
+   * match the route pattern (glob) AND/OR are in the rule-id set.
+   * Applied before findings are persisted to KV — suppressed findings
+   * never reach the dashboard, /findings, or the per-document panel.
+   *
+   *     seogeoPlugin({
+   *       suppressions: [
+   *         { routePattern: "/privacy", ruleIds: ["RULE001"] },
+   *         { routePattern: "/fr-fr/**", ruleIds: ["RULE002"] },
+   *         { ruleIds: ["RULE999"] }, // applies to every route
+   *       ],
+   *     })
+   *
+   * Glob syntax: `*` matches any chars except `/`; `**` matches across
+   * `/`; `?` matches one char except `/`. Patterns are anchored.
+   *
+   * Empty rules (`{}` with neither field set) are rejected at plugin
+   * construction — that's a kill-switch for all findings everywhere
+   * and almost certainly an editor mistake.
+   *
+   * Suppressions are plugin-only by design. The CLI's `check` is the
+   * canonical strict audit; if you want to silence findings at the
+   * CLI layer, use `seogeo.toml`'s `[ignore]` block instead. The two
+   * surfaces serve different audiences: the plugin is editorial
+   * workflow, the CLI is build-gating.
+   */
+  suppressions?: readonly Suppression[];
 }
+
+export type { Suppression } from "./suppressions.js";
+import type { Suppression } from "./suppressions.js";
 
 export function seogeoPlugin(
   options: SeogeoPluginOptions = {},
@@ -107,6 +139,9 @@ export function seogeoPlugin(
       ...(options.collections === undefined
         ? {}
         : { collections: [...options.collections] }),
+      ...(options.suppressions === undefined
+        ? {}
+        : { suppressions: options.suppressions.map((rule) => ({ ...rule })) }),
     },
     capabilities: [
       "read:content",

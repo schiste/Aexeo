@@ -28,6 +28,8 @@ import {
 } from "./plugin.js";
 import { handleDataRoute } from "./data-route.js";
 import { handleFactsRoute } from "./facts-route.js";
+import { compileSuppressions } from "./suppressions.js";
+import type { Suppression } from "./suppressions.js";
 import { PACKAGE_VERSION } from "./version.js";
 import { evaluateDocuments, scoreIntelligence } from "./wasm-init.js";
 import type { EmdashContentItem } from "./adapter.js";
@@ -87,6 +89,14 @@ export interface ConfiguredPluginOptions {
    * (`["posts", "pages"]`).
    */
   collections?: readonly string[];
+
+  /**
+   * Editor-workflow suppressions. See `Suppression` in suppressions.ts
+   * for the rule shape and matching semantics. Compiled once at plugin
+   * construction; the resulting filter is captured in the closures
+   * attached to the route handlers and the afterSave hook.
+   */
+  suppressions?: readonly Suppression[];
 }
 
 export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
@@ -99,6 +109,12 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
     options.collections === undefined
       ? DEFAULT_COLLECTIONS
       : [...options.collections];
+
+  // Compile suppressions at startup so a malformed rule fails the host's
+  // boot rather than the editor's first Refresh click. compileSuppressions
+  // throws on empty rules ({} with neither routePattern nor ruleIds);
+  // that error surfaces clearly in the host's startup logs.
+  const suppressionFilter = compileSuppressions(options.suppressions);
 
   // Capability enforcement for configured plugins is informational;
   // emdash's host plugins (formsPlugin, etc.) declare what they need
@@ -115,7 +131,12 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
       // list isn't needed here. The hook always runs regardless of
       // which collection the document came from.
       "content:afterSave": (event: ContentAfterSaveEvent, ctx: SandboxCtx) =>
-        handleAfterSaveConfigured(event, ctx, inProcessEvaluator),
+        handleAfterSaveConfigured(
+          event,
+          ctx,
+          inProcessEvaluator,
+          suppressionFilter,
+        ),
     } as never,
     routes: {
       // The Refresh sweep (handleAdminRoute → handleRefresh) is the
@@ -137,6 +158,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
             collections,
             evaluator: inProcessEvaluator,
             refresh: false,
+            suppressionFilter,
           })).payload,
       },
       refresh: {
@@ -145,6 +167,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
             collections,
             evaluator: inProcessEvaluator,
             refresh: true,
+            suppressionFilter,
           }),
       },
       // /facts route serves the truth-manifest authoring UI. It

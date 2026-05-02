@@ -6,6 +6,54 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-01
+
+Adds upstreamed support for editor-workflow finding suppressions.
+Removes the last reason for consumer sites to maintain a local
+patch over the published plugin.
+
+**Compatibility:** verified against emdash `0.7.0` and `0.8.0`.
+
+### Added
+
+- **`seogeoPlugin({ suppressions })` option.** Each rule silences
+  findings matching the route pattern (glob) AND/OR a rule-id set.
+  Applied before findings are persisted to KV — suppressed findings
+  never reach the dashboard, /findings, or the per-document panel.
+
+  ```ts
+  seogeoPlugin({
+    suppressions: [
+      { routePattern: "/privacy", ruleIds: ["RULE001"] },
+      { routePattern: "/fr-fr/**", ruleIds: ["RULE002"] },
+      { ruleIds: ["RULE999"] }, // applies to every route
+    ],
+  })
+  ```
+
+  Glob: `*` matches non-`/` chars, `**` matches across `/`, `?`
+  matches one non-`/` char. Patterns are anchored. Empty rules
+  (`{}` with neither field) are rejected at plugin construction
+  with a clear error — that's a kill-switch for all findings
+  everywhere and almost certainly an editor mistake.
+
+- **`Suppression` type** re-exported from the package root for hosts
+  that want to type their config:
+
+  ```ts
+  import type { Suppression } from "@aeptus/aexeo-emdash";
+  ```
+
+### Notes for hosts upgrading from 0.3.x
+
+- No automatic behavior change. `suppressions` defaults to undefined
+  and the filter is a no-op until the host opts in.
+- Suppressions are plugin-only by design. The CLI `check` continues
+  to surface every finding; if you want to silence findings at the
+  CLI layer, use `seogeo.toml`'s `[ignore]` block. The two surfaces
+  serve different audiences: the plugin is editorial workflow, the
+  CLI is build-gating.
+
 ## [0.3.0] - 2026-05-01
 
 Adds an LLM-assisted authoring flow for the truth manifest
@@ -218,7 +266,8 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.3.0...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.4.0...HEAD
+[0.4.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.3.0...aexeo-emdash-v0.4.0
 [0.3.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.2.0...aexeo-emdash-v0.3.0
 [0.2.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.1.2...aexeo-emdash-v0.2.0
 [0.1.2]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.1.1...aexeo-emdash-v0.1.2

@@ -1,3 +1,4 @@
+import type { SuppressionFilter } from "./suppressions.js";
 import type { EmdashDocument, Finding } from "./types.js";
 import {
   type EmdashContentItem,
@@ -226,10 +227,17 @@ export async function handleAfterSave(
 // the host's request context so all bridge calls are valid; replaces
 // just this document's findings (sitewide/template findings stay
 // untouched until the next Refresh, which sweeps the whole site).
+//
+// Optional `suppressionFilter` is applied AFTER the evaluator runs
+// but BEFORE writing to KV — suppressed findings never reach the
+// dashboard, the /findings page, or the per-document panel. The
+// filter is host policy (configured via seogeoPlugin({ suppressions }));
+// the engine itself is unchanged.
 export async function handleAfterSaveConfigured(
   event: ContentAfterSaveEvent,
   ctx: SandboxCtx,
   evaluator: EvaluatorFn,
+  suppressionFilter?: SuppressionFilter,
 ): Promise<void> {
   const adapted = adaptContentItem(event.content);
   const document = adapted.document;
@@ -258,9 +266,13 @@ export async function handleAfterSaveConfigured(
   const pageFindings = result.findings.filter(
     (finding) => finding.scope === "page",
   );
+  const filtered =
+    suppressionFilter === undefined
+      ? pageFindings
+      : suppressionFilter.apply(document.route, pageFindings);
   await kv.set(findingsKey(document.route), {
     route: document.route,
-    findings: pageFindings,
+    findings: filtered,
   });
 }
 
@@ -305,11 +317,21 @@ export type EvaluatorFn = (
 // supplied evaluator, and writes findings per-route into KV. This
 // runs from the admin route handler — which has a live request
 // context where kv/http/content bridges work in either plugin mode.
+//
+// Optional `suppressionFilter` filters per-route findings (and
+// sitewide-bucketed findings under "*") before writing to KV.
+// Suppressions are host policy; the engine and the bridge are
+// unchanged.
 export async function evaluateAndPersistAll(
   ctx: SandboxCtx,
-  options: { collections?: readonly string[]; evaluator: EvaluatorFn },
+  options: {
+    collections?: readonly string[];
+    evaluator: EvaluatorFn;
+    suppressionFilter?: SuppressionFilter;
+  },
 ): Promise<RefreshSummary> {
   const collections = options.collections ?? DEFAULT_COLLECTIONS;
+  const suppressionFilter = options.suppressionFilter;
   const { kv, log } = ctx;
   const summary: RefreshSummary = {
     documentsScanned: 0,
@@ -390,11 +412,19 @@ export async function evaluateAndPersistAll(
   // 4. Write findings per route. This both creates new entries and
   //    overwrites cleared routes (a route with zero findings stores
   //    an empty array — the findings page treats that as "clean").
+  //    Suppressions are applied here, before the KV write, so
+  //    suppressed findings never make it into the editor surface.
+  let totalAfterSuppression = 0;
   for (const [route, findings] of findingsByRoute) {
-    await kv.set(findingsKey(route), { route, findings });
+    const filtered =
+      suppressionFilter === undefined
+        ? findings
+        : suppressionFilter.apply(route, findings);
+    await kv.set(findingsKey(route), { route, findings: filtered });
     summary.routesUpdated += 1;
+    totalAfterSuppression += filtered.length;
   }
-  summary.totalFindings = result.findings.length;
+  summary.totalFindings = totalAfterSuppression;
   return summary;
 }
 

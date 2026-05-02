@@ -87,6 +87,10 @@ interface DataRouteOptions {
   // and then returns the freshly-written findings. False just reads
   // current KV state.
   refresh: boolean;
+  // Optional suppression filter; passed through to evaluateAndPersistAll
+  // so suppressed findings never make it into the KV findings:* entries.
+  // Compiled once at plugin construction; passed by reference here.
+  suppressionFilter?: import("./suppressions.js").SuppressionFilter;
 }
 
 export async function handleDataRoute(
@@ -101,6 +105,9 @@ export async function handleDataRoute(
     summary = await evaluateAndPersistAll(ctx, {
       collections: options.collections,
       evaluator: options.evaluator,
+      ...(options.suppressionFilter === undefined
+        ? {}
+        : { suppressionFilter: options.suppressionFilter }),
     });
     // Manifest-state findings re-derive on refresh too, since the relevant
     // inputs (stored manifest, document set) are exactly what just changed.
