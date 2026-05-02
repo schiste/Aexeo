@@ -209,6 +209,22 @@ pub fn build_cli() -> Command {
                         ),
                 )
                 .subcommand(
+                    Command::new("identity")
+                        .about("Compute the canonical identity Aexeo derives for a route")
+                        .arg(
+                            Arg::new("route")
+                                .required(true)
+                                .help("Route to inspect; \"\" or \"/\" for the home page"),
+                        )
+                        .arg(Arg::new("path").default_value("."))
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "json"])
+                                .default_value("text"),
+                        ),
+                )
+                .subcommand(
                     Command::new("evidence")
                         .about("Assess evidence coverage and citation fidelity risk")
                         .subcommand(

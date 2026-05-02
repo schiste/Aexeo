@@ -1,12 +1,13 @@
 use aexeo_contracts::AuditStatus;
 use aexeo_core::{
     AnswerFanoutReport, EvidenceSiteAssessment, GroundingCoverageGap, GroundingSiteAnalysis,
-    MachineSurfaceGraph, MachineSurfaceOptions, SiteIntelligenceScore, TrustSurfaceReconciliation,
-    TruthAssessment, TruthManifestGeneration, TruthManifestValidation, TruthStructuredSource,
-    assess_answer_fanout, assess_evidence_coverage, assess_truth_layer,
-    discover_machine_surface_graph, discover_truth_manifest, generate_truth_manifest_with_options,
-    import_trust_surface_records, load_site, load_site_from_audit_artifact, map_grounding_queries,
-    reconcile_trust_surfaces, score_intelligence, validate_truth_manifest,
+    MachineSurfaceGraph, MachineSurfaceOptions, PageIdentity, SiteIntelligenceScore,
+    TrustSurfaceReconciliation, TruthAssessment, TruthManifestGeneration, TruthManifestValidation,
+    TruthStructuredSource, assess_answer_fanout, assess_evidence_coverage, assess_truth_layer,
+    compute_page_identity, discover_machine_surface_graph, discover_truth_manifest,
+    generate_truth_manifest_with_options, import_trust_surface_records, load_site,
+    load_site_from_audit_artifact, map_grounding_queries, reconcile_trust_surfaces,
+    score_intelligence, validate_truth_manifest,
 };
 use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
@@ -38,6 +39,7 @@ struct IntelligenceInput {
 pub fn command_intelligence(submatches: &ArgMatches) -> Result<i32> {
     match submatches.subcommand() {
         Some(("grounding-map", map_matches)) => command_grounding_map(map_matches),
+        Some(("identity", identity_matches)) => command_identity(identity_matches),
         Some(("evidence", evidence_matches)) => match evidence_matches.subcommand() {
             Some(("assess", assess_matches)) => command_evidence_assess(assess_matches),
             Some((other, _)) => bail!("unsupported evidence command: {}", other),
@@ -1016,4 +1018,157 @@ fn unique_source_types(records: &[aexeo_core::TrustSurfaceRecord]) -> Vec<String
     sources.sort();
     sources.dedup();
     sources
+}
+
+fn command_identity(submatches: &ArgMatches) -> Result<i32> {
+    let raw_route = required_arg(submatches, "route")?;
+    // Convention: an empty string and "/" both mean the home page.
+    // Internally the site keys use the empty string for home; strip a
+    // leading "/" so users can pass either form.
+    let normalized_route = if raw_route == "/" {
+        "".to_string()
+    } else {
+        raw_route.trim_start_matches('/').to_string()
+    };
+    let path = canonicalize_or_keep(
+        submatches
+            .get_one::<String>("path")
+            .map(String::as_str)
+            .unwrap_or("."),
+    );
+    let format = submatches
+        .get_one::<String>("format")
+        .map(String::as_str)
+        .unwrap_or("text");
+
+    let site = load_site(&path)?;
+    let Some(identity) = compute_page_identity(&site, &normalized_route) else {
+        match format {
+            "json" => {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "route": raw_route,
+                        "found": false,
+                    }))?
+                );
+            }
+            _ => {
+                println!(
+                    "identity: route '{}' not found in {}",
+                    raw_route,
+                    path.display()
+                );
+            }
+        }
+        return Ok(2);
+    };
+
+    match format {
+        "json" => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "route": &identity.route,
+                    "canonical_title": &identity.canonical_title,
+                    "canonical_source": &identity.canonical_source,
+                    "agrees": identity.agrees,
+                    "sources": &identity.sources,
+                    "drift": &identity.drift,
+                }))?
+            );
+        }
+        _ => print_identity_text(&identity),
+    }
+
+    Ok(if identity.agrees { 0 } else { 1 })
+}
+
+fn print_identity_text(identity: &PageIdentity) {
+    println!(
+        "identity: /{}",
+        if identity.route.is_empty() {
+            ""
+        } else {
+            &identity.route
+        }
+    );
+    match &identity.canonical_title {
+        Some(title) => println!(
+            "  canonical: \"{}\"  (source: {})",
+            title, identity.canonical_source
+        ),
+        None => println!("  canonical: <none — no title, H1, or schema name found>"),
+    }
+    println!();
+    println!("  sources:");
+    println!(
+        "    title:      {}",
+        identity
+            .sources
+            .title
+            .as_deref()
+            .map(|t| format!("\"{}\"", t))
+            .unwrap_or_else(|| "<missing>".to_string())
+    );
+    println!(
+        "    h1:         {}",
+        identity
+            .sources
+            .first_h1
+            .as_deref()
+            .map(|t| format!("\"{}\"", t))
+            .unwrap_or_else(|| "<missing>".to_string())
+    );
+    println!(
+        "    og:title:   {}",
+        identity
+            .sources
+            .og_title
+            .as_deref()
+            .map(|t| format!("\"{}\"", t))
+            .unwrap_or_else(|| "<missing>".to_string())
+    );
+    if identity.sources.schema_names.is_empty() {
+        println!("    schema name:  <missing>");
+    } else {
+        println!(
+            "    schema name:  {}",
+            identity
+                .sources
+                .schema_names
+                .iter()
+                .map(|n| format!("\"{}\"", n))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    if !identity.sources.schema_headlines.is_empty() {
+        println!(
+            "    headline:   {}",
+            identity
+                .sources
+                .schema_headlines
+                .iter()
+                .map(|n| format!("\"{}\"", n))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    println!();
+    if identity.agrees {
+        println!("  status: ✓ all signals agree with the canonical");
+    } else {
+        println!("  status: ✗ {} drift dimension(s):", identity.drift.len());
+        for entry in &identity.drift {
+            println!(
+                "    - {}: \"{}\" disagrees with canonical \"{}\"",
+                entry.dimension, entry.observed, entry.canonical
+            );
+        }
+        println!();
+        println!(
+            "  fix: build your templates from the canonical so the four signals can't drift independently."
+        );
+    }
 }

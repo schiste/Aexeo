@@ -2,11 +2,13 @@ mod evidence;
 mod facts_prompt;
 mod fanout;
 mod grounding;
+mod identity;
 mod score;
 mod trust;
 mod truth;
 
 pub use facts_prompt::render_facts_prompt;
+pub use identity::{IdentityDrift, PageIdentity, PageIdentitySources, compute_page_identity};
 
 pub use evidence::{
     EvidenceClaim, EvidenceClaimKind, EvidenceRouteAssessment, EvidenceSectionAssessment,

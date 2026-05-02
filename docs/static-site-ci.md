@@ -218,6 +218,59 @@ This silences the `ROB005` ("page declares both canonical and
 noindex") warning specifically for that route, without broadening
 the ignore for the whole site.
 
+## Tuning rules for site-specific noise
+
+Two rules tend to fire on legitimate site patterns and have config
+knobs worth knowing about up-front rather than learning by hitting
+them.
+
+### `GEO003` — duplicate `data-ui` on a page
+
+Fires when the same `data-ui` value appears more than once on a
+single page. By default Aexeo accepts a known set of repeatable
+component kinds (`card`, `item`, `entry`, `result`, `tile`, `row`,
+`skill-card`) — multiple `<section data-ui="card">` blocks on a
+listing page don't trigger the rule. Add your own component names
+when your design system uses different vocabulary:
+
+```toml
+[checks]
+repeatable_data_ui = [
+  "card",
+  "item",
+  "entry",
+  "result",
+  "tile",
+  "row",
+  "skill-card",
+  # add your own:
+  "feature-card",
+  "doc-link",
+  "step",
+]
+```
+
+Matching is case-insensitive and accepts hyphen-prefixed and
+hyphen-suffixed forms (so listing `card` also accepts
+`feature-card` and `card-large`). If you're unsure which value
+to add, run `aexeo-cli check .` once and copy the offending
+`data-ui` value verbatim.
+
+### `aexeo-cli intelligence identity <route>`
+
+For pages where title, H1, OG title, and JSON-LD seem to drift,
+the `intelligence identity` command computes Aexeo's canonical
+identity for the route and shows which source it came from plus
+any disagreement:
+
+```bash
+aexeo-cli intelligence identity /pricing dist
+```
+
+Use the output to either fix the host's templates so all four
+signals derive from one canonical title, or as a debugging step
+to understand what `GEO009` / `SCH005` is responding to.
+
 ## Bumping the CLI
 
 When a new `aexeo-cli` release ships, the consumer-side update flow
