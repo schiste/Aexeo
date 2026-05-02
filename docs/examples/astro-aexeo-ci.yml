@@ -1,0 +1,64 @@
+name: astro-aexeo-ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  static-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate resolved Aexeo config
+        run: cargo run -q -p aexeo-cli -- config print . --format json > /dev/null
+
+      - name: Build Astro site
+        run: pnpm astro build
+
+      - name: Run static Aexeo gate
+        run: cargo run -q -p aexeo-cli -- check . --format text
+
+      - name: Upload audit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aexeo-audit
+          path: .aexeo-reports/
+
+  preview-verify:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    needs: static-audit
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify deployed preview
+        env:
+          PREVIEW_URL: ${{ secrets.ASTRO_PREVIEW_URL }}
+        run: |
+          test -n "$PREVIEW_URL"
+          cargo run -q -p aexeo-cli -- verify "$PREVIEW_URL" --baseline .aexeo-baseline.json --engine http --max-pages 500

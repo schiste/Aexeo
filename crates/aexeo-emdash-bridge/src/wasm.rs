@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 
-use seogeo_core::{
+use aexeo_core::{
     Config, TruthManifest, assess_evidence_coverage, assess_truth_layer, map_grounding_queries,
     render_facts_prompt, score_intelligence, validate_truth_manifest,
 };

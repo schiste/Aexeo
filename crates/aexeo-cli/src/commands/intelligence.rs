@@ -1,0 +1,1019 @@
+use aexeo_contracts::AuditStatus;
+use aexeo_core::{
+    AnswerFanoutReport, EvidenceSiteAssessment, GroundingCoverageGap, GroundingSiteAnalysis,
+    MachineSurfaceGraph, MachineSurfaceOptions, SiteIntelligenceScore, TrustSurfaceReconciliation,
+    TruthAssessment, TruthManifestGeneration, TruthManifestValidation, TruthStructuredSource,
+    assess_answer_fanout, assess_evidence_coverage, assess_truth_layer,
+    discover_machine_surface_graph, discover_truth_manifest, generate_truth_manifest_with_options,
+    import_trust_surface_records, load_site, load_site_from_audit_artifact, map_grounding_queries,
+    reconcile_trust_surfaces, score_intelligence, validate_truth_manifest,
+};
+use anyhow::{Context, Result, bail};
+use clap::ArgMatches;
+use serde::Serialize;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use crate::commands::common::{canonicalize_or_keep, required_arg};
+use crate::output::{render_data_command_json, render_failed_command_json};
+
+#[derive(Debug, Clone, Serialize)]
+struct IntelligenceInputMetadata {
+    source: String,
+    path: String,
+    report_root: String,
+    site_url: Option<String>,
+    status: Option<String>,
+    partial: bool,
+    pages: usize,
+    warning: Option<String>,
+}
+
+struct IntelligenceInput {
+    site: aexeo_core::Site,
+    report_root: PathBuf,
+    metadata: IntelligenceInputMetadata,
+}
+
+pub fn command_intelligence(submatches: &ArgMatches) -> Result<i32> {
+    match submatches.subcommand() {
+        Some(("grounding-map", map_matches)) => command_grounding_map(map_matches),
+        Some(("evidence", evidence_matches)) => match evidence_matches.subcommand() {
+            Some(("assess", assess_matches)) => command_evidence_assess(assess_matches),
+            Some((other, _)) => bail!("unsupported evidence command: {}", other),
+            None => bail!("missing evidence subcommand"),
+        },
+        Some(("fanout", fanout_matches)) => match fanout_matches.subcommand() {
+            Some(("assess", assess_matches)) => command_fanout_assess(assess_matches),
+            Some((other, _)) => bail!("unsupported fanout command: {}", other),
+            None => bail!("missing fanout subcommand"),
+        },
+        Some(("facts", truth_matches)) | Some(("truth", truth_matches)) => {
+            match truth_matches.subcommand() {
+                Some(("validate", validate_matches)) => command_truth_validate(validate_matches),
+                Some(("generate", generate_matches)) => command_truth_generate(generate_matches),
+                Some(("assess", assess_matches)) => command_truth_assess(assess_matches),
+                Some((other, _)) => bail!("unsupported facts command: {}", other),
+                None => bail!("missing facts subcommand"),
+            }
+        }
+        Some(("trust-surface", trust_matches)) => match trust_matches.subcommand() {
+            Some(("import", import_matches)) => command_trust_surface_import(import_matches),
+            Some(("reconcile", reconcile_matches)) => {
+                command_trust_surface_reconcile(reconcile_matches)
+            }
+            Some((other, _)) => bail!("unsupported trust-surface command: {}", other),
+            None => bail!("missing trust-surface subcommand"),
+        },
+        Some(("surfaces", surfaces_matches)) => match surfaces_matches.subcommand() {
+            Some(("discover", discover_matches)) => command_surfaces_discover(discover_matches),
+            Some((other, _)) => bail!("unsupported surfaces command: {}", other),
+            None => bail!("missing surfaces subcommand"),
+        },
+        Some(("score", score_matches)) => command_intelligence_score(score_matches),
+        Some((other, _)) => bail!("unsupported intelligence command: {}", other),
+        None => bail!("missing intelligence subcommand"),
+    }
+}
+
+fn command_evidence_assess(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let root = PathBuf::from(required_arg(submatches, "path")?);
+    match load_site(&root).map(|site| assess_evidence_coverage(&site)) {
+        Ok(report) => {
+            let report_path = write_report(&root, "evidence-latest.json", &report)?;
+            match format {
+                "json" => println!(
+                    "{}",
+                    render_data_command_json(
+                        "intelligence evidence assess",
+                        true,
+                        serde_json::json!({
+                            "report_path": report_path.to_string_lossy(),
+                            "assessment": report,
+                        }),
+                        Vec::new()
+                    )?
+                ),
+                _ => println!("{}", evidence_text(&report, &report_path)),
+            }
+            Ok(0)
+        }
+        Err(error) => emit_failure("intelligence evidence assess", format, error),
+    }
+}
+
+fn command_grounding_map(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let root = PathBuf::from(required_arg(submatches, "path")?);
+    match load_site(&root).map(|site| map_grounding_queries(&site)) {
+        Ok(report) => {
+            let report_path = write_report(&root, "grounding-map-latest.json", &report)?;
+            match format {
+                "json" => println!(
+                    "{}",
+                    render_data_command_json(
+                        "intelligence grounding-map",
+                        true,
+                        serde_json::json!({
+                            "report_path": report_path.to_string_lossy(),
+                            "analysis": report,
+                        }),
+                        Vec::new()
+                    )?
+                ),
+                _ => println!("{}", grounding_text(&report, &report_path)),
+            }
+            Ok(0)
+        }
+        Err(error) => emit_failure("intelligence grounding-map", format, error),
+    }
+}
+
+fn command_fanout_assess(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let input = match load_intelligence_input(submatches) {
+        Ok(input) => input,
+        Err(error) => return emit_failure("intelligence fanout assess", format, error),
+    };
+    let report = assess_answer_fanout(&input.site);
+    let report_path = write_report(&input.report_root, "answer-fanout-latest.json", &report)?;
+    match format {
+        "json" => println!(
+            "{}",
+            render_data_command_json(
+                "intelligence fanout assess",
+                true,
+                serde_json::json!({
+                    "input": input.metadata,
+                    "report_path": report_path.to_string_lossy(),
+                    "assessment": report,
+                }),
+                Vec::new()
+            )?
+        ),
+        _ => println!(
+            "{}",
+            with_input_text(fanout_text(&report, &report_path), &input.metadata)
+        ),
+    }
+    Ok(0)
+}
+
+fn command_surfaces_discover(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let input = match load_intelligence_input(submatches) {
+        Ok(input) => input,
+        Err(error) => return emit_failure("intelligence surfaces discover", format, error),
+    };
+    let explicit_site_url = submatches.get_one::<String>("site-url").map(String::as_str);
+    let snapshot_site_url = input.metadata.site_url.as_deref();
+    let site_url = explicit_site_url.or(snapshot_site_url);
+    let report = discover_machine_surface_graph(&input.site, MachineSurfaceOptions::new(site_url));
+    let report_path = write_report(&input.report_root, "machine-surfaces-latest.json", &report)?;
+    match format {
+        "json" => println!(
+            "{}",
+            render_data_command_json(
+                "intelligence surfaces discover",
+                true,
+                serde_json::json!({
+                    "input": input.metadata,
+                    "report_path": report_path.to_string_lossy(),
+                    "graph": report,
+                }),
+                Vec::new()
+            )?
+        ),
+        _ => println!(
+            "{}",
+            with_input_text(surfaces_text(&report, &report_path), &input.metadata)
+        ),
+    }
+    Ok(0)
+}
+
+fn command_truth_validate(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let root = PathBuf::from(required_arg(submatches, "path")?);
+    let manifest_path = submatches.get_one::<String>("manifest").map(PathBuf::from);
+    match discover_truth_manifest(&root, manifest_path.as_deref())? {
+        Some((path, manifest)) => {
+            let validation = validate_truth_manifest(&manifest);
+            match format {
+                "json" => println!(
+                    "{}",
+                    render_data_command_json(
+                        "intelligence facts validate",
+                        validation.valid,
+                        serde_json::json!({
+                            "manifest_path": canonicalize_or_keep(&path.to_string_lossy()).display().to_string(),
+                            "validation": validation,
+                        }),
+                        Vec::new()
+                    )?
+                ),
+                _ => println!(
+                    "{}",
+                    truth_manifest_text(
+                        &validation,
+                        &canonicalize_or_keep(&path.to_string_lossy()),
+                    )
+                ),
+            }
+            Ok(if validation.valid { 0 } else { 1 })
+        }
+        None => emit_failure(
+            "intelligence facts validate",
+            format,
+            anyhow::anyhow!("no facts manifest found"),
+        ),
+    }
+}
+
+fn command_truth_generate(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let root = PathBuf::from(required_arg(submatches, "path")?);
+    let curate = submatches.get_flag("curate");
+    let deploy_location = submatches
+        .get_one::<String>("deploy-location")
+        .map(String::as_str);
+    let explicit_write = submatches.get_one::<String>("write").map(PathBuf::from);
+
+    match load_site(&root).map(|site| generate_truth_manifest_with_options(&site, curate)) {
+        Ok(report) => {
+            let report_path = write_report(&root, "facts-manifest-generated.json", &report)?;
+            let write_path = if let Some(path) = explicit_write {
+                Some(path)
+            } else {
+                deploy_location.map(|location| match location {
+                    "well-known" => root.join(".well-known/facts.json"),
+                    _ => root.join("facts.json"),
+                })
+            };
+            if let Some(path) = write_path.as_ref() {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::write(path, serde_json::to_string_pretty(&report.manifest)?)?;
+            }
+            match format {
+                "json" => println!(
+                    "{}",
+                    render_data_command_json(
+                        "intelligence facts generate",
+                        report.validation.valid,
+                        serde_json::json!({
+                            "report_path": report_path.to_string_lossy(),
+                            "write_path": write_path.as_ref().map(|path| canonicalize_or_keep(&path.to_string_lossy()).display().to_string()),
+                            "generation": report,
+                        }),
+                        Vec::new()
+                    )?
+                ),
+                _ => println!(
+                    "{}",
+                    truth_generate_text(&report, write_path.as_deref(), &report_path,)
+                ),
+            }
+            Ok(if report.validation.valid { 0 } else { 1 })
+        }
+        Err(error) => emit_failure("intelligence facts generate", format, error),
+    }
+}
+
+fn command_truth_assess(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let root = PathBuf::from(required_arg(submatches, "path")?);
+    let manifest_path = submatches.get_one::<String>("manifest").map(PathBuf::from);
+    let manifest = discover_truth_manifest(&root, manifest_path.as_deref())?;
+    match load_site(&root)
+        .map(|site| assess_truth_layer(&site, manifest.as_ref().map(|(_, item)| item)))
+    {
+        Ok(report) => {
+            let report_path = write_report(&root, "facts-layer-latest.json", &report)?;
+            let manifest_path = manifest.as_ref().map(|(path, _)| {
+                canonicalize_or_keep(&path.to_string_lossy())
+                    .display()
+                    .to_string()
+            });
+            let manifest_validation = manifest
+                .as_ref()
+                .map(|(_, item)| validate_truth_manifest(item));
+            match format {
+                "json" => println!(
+                    "{}",
+                    render_data_command_json(
+                        "intelligence facts assess",
+                        true,
+                        serde_json::json!({
+                            "manifest_path": manifest_path,
+                            "manifest_validation": manifest_validation,
+                            "report_path": report_path.to_string_lossy(),
+                            "assessment": report,
+                        }),
+                        Vec::new()
+                    )?
+                ),
+                _ => println!(
+                    "{}",
+                    truth_text(
+                        &report,
+                        manifest_validation.as_ref(),
+                        manifest_path.as_deref(),
+                        &report_path,
+                    )
+                ),
+            }
+            Ok(0)
+        }
+        Err(error) => emit_failure("intelligence facts assess", format, error),
+    }
+}
+
+fn command_trust_surface_import(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let path = PathBuf::from(required_arg(submatches, "path")?);
+    let root = submatches.get_one::<String>("root").map(PathBuf::from);
+    match import_trust_surface_records(&path) {
+        Ok(records) => {
+            let report_path = if let Some(root) = root.as_ref() {
+                Some(write_report(
+                    root,
+                    "trust-surface-import-latest.json",
+                    &records,
+                )?)
+            } else {
+                None
+            };
+            match format {
+                "json" => println!(
+                    "{}",
+                    render_data_command_json(
+                        "intelligence trust-surface import",
+                        true,
+                        serde_json::json!({
+                            "rows_read": records.len(),
+                            "source_types": unique_source_types(&records),
+                            "report_path": report_path.as_ref().map(|item| item.to_string_lossy().to_string()),
+                            "records": records,
+                        }),
+                        Vec::new()
+                    )?
+                ),
+                _ => println!("{}", trust_import_text(&records, report_path.as_deref())),
+            }
+            Ok(0)
+        }
+        Err(error) => emit_failure("intelligence trust-surface import", format, error),
+    }
+}
+
+fn command_trust_surface_reconcile(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let input_path = PathBuf::from(required_arg(submatches, "input")?);
+    let root = PathBuf::from(required_arg(submatches, "path")?);
+    let manifest_path = submatches.get_one::<String>("manifest").map(PathBuf::from);
+    let site_url = submatches.get_one::<String>("site_url").map(String::as_str);
+
+    let manifest = discover_truth_manifest(&root, manifest_path.as_deref())?;
+    let site = match load_site(&root) {
+        Ok(site) => site,
+        Err(error) => return emit_failure("intelligence trust-surface reconcile", format, error),
+    };
+    match import_trust_surface_records(&input_path).map(|records| {
+        reconcile_trust_surfaces(
+            &records,
+            &site,
+            site_url,
+            manifest.as_ref().map(|(_, item)| item),
+        )
+    }) {
+        Ok(report) => {
+            let report_path = write_report(&root, "trust-surface-reconcile-latest.json", &report)?;
+            match format {
+                "json" => println!(
+                    "{}",
+                    render_data_command_json(
+                        "intelligence trust-surface reconcile",
+                        true,
+                        serde_json::json!({
+                            "report_path": report_path.to_string_lossy(),
+                            "reconciliation": report,
+                        }),
+                        Vec::new()
+                    )?
+                ),
+                _ => println!("{}", trust_reconcile_text(&report, &report_path)),
+            }
+            Ok(0)
+        }
+        Err(error) => emit_failure("intelligence trust-surface reconcile", format, error),
+    }
+}
+
+fn command_intelligence_score(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let root = PathBuf::from(required_arg(submatches, "path")?);
+    let manifest_path = submatches.get_one::<String>("manifest").map(PathBuf::from);
+    let trust_surface_path = submatches
+        .get_one::<String>("trust-surfaces")
+        .map(PathBuf::from);
+    let site_url = submatches.get_one::<String>("site-url").map(String::as_str);
+
+    let site = match load_site(&root) {
+        Ok(site) => site,
+        Err(error) => return emit_failure("intelligence score", format, error),
+    };
+    let manifest = discover_truth_manifest(&root, manifest_path.as_deref())?;
+    let grounding = map_grounding_queries(&site);
+    let evidence = assess_evidence_coverage(&site);
+    let truth = assess_truth_layer(&site, manifest.as_ref().map(|(_, item)| item));
+    let trust = match trust_surface_path.as_ref() {
+        Some(path) => Some(reconcile_trust_surfaces(
+            &import_trust_surface_records(path)?,
+            &site,
+            site_url,
+            manifest.as_ref().map(|(_, item)| item),
+        )),
+        None => None,
+    };
+    let score = score_intelligence(&grounding, &truth, &evidence, trust.as_ref());
+    let report_path = write_report(&root, "intelligence-score-latest.json", &score)?;
+
+    match format {
+        "json" => println!(
+            "{}",
+            render_data_command_json(
+                "intelligence score",
+                true,
+                serde_json::json!({
+                    "report_path": report_path.to_string_lossy(),
+                    "score": score,
+                }),
+                Vec::new()
+            )?
+        ),
+        _ => println!("{}", score_text(&score, &report_path)),
+    }
+    Ok(0)
+}
+
+fn status_label(status: AuditStatus) -> &'static str {
+    match status {
+        AuditStatus::Complete => "complete",
+        AuditStatus::Partial => "partial",
+        AuditStatus::Failed => "failed",
+    }
+}
+
+fn report_root_for_artifact(path: &Path) -> PathBuf {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    if parent.file_name().and_then(|item| item.to_str()) == Some(".aexeo-reports") {
+        let root = parent
+            .parent()
+            .filter(|candidate| !candidate.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        return root.to_path_buf();
+    }
+    if parent.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        parent.to_path_buf()
+    }
+}
+
+fn load_intelligence_input(submatches: &ArgMatches) -> Result<IntelligenceInput> {
+    if let Some(path) = submatches.get_one::<String>("from-crawl-artifact") {
+        let artifact_path = PathBuf::from(path);
+        let (artifact, site) =
+            load_site_from_audit_artifact(&artifact_path).with_context(|| {
+                format!(
+                    "failed to load crawl artifact input from {}",
+                    artifact_path.display()
+                )
+            })?;
+        let snapshot = artifact
+            .site
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("audit artifact does not include a site snapshot"))?;
+        let report_root = report_root_for_artifact(&artifact_path);
+        let partial = artifact.is_partial();
+        let warning = if partial {
+            Some(
+                "input crawl artifact is partial; downstream intelligence may miss routes"
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+        return Ok(IntelligenceInput {
+            site,
+            metadata: IntelligenceInputMetadata {
+                source: "crawl_artifact".to_string(),
+                path: artifact_path.to_string_lossy().to_string(),
+                report_root: report_root.to_string_lossy().to_string(),
+                site_url: snapshot.site_url.clone(),
+                status: Some(status_label(artifact.status).to_string()),
+                partial,
+                pages: snapshot.pages.len(),
+                warning,
+            },
+            report_root,
+        });
+    }
+
+    let root = PathBuf::from(required_arg(submatches, "path")?);
+    if root.is_file() {
+        bail!(
+            "{} is a file; pass --from-crawl-artifact for crawl audit artifacts or provide a site directory",
+            root.display()
+        );
+    }
+    let site = load_site(&root)?;
+    Ok(IntelligenceInput {
+        metadata: IntelligenceInputMetadata {
+            source: "directory".to_string(),
+            path: root.to_string_lossy().to_string(),
+            report_root: root.to_string_lossy().to_string(),
+            site_url: None,
+            status: None,
+            partial: false,
+            pages: site.pages.len(),
+            warning: None,
+        },
+        report_root: root,
+        site,
+    })
+}
+
+fn with_input_text(mut text: String, metadata: &IntelligenceInputMetadata) -> String {
+    text.push_str("\n\nInput\n");
+    text.push_str(&format!("- Source: {}\n", metadata.source));
+    text.push_str(&format!("- Path: {}\n", metadata.path));
+    text.push_str(&format!("- Pages: {}\n", metadata.pages));
+    if let Some(status) = metadata.status.as_deref() {
+        text.push_str(&format!("- Crawl status: {status}\n"));
+    }
+    if let Some(warning) = metadata.warning.as_deref() {
+        text.push_str(&format!("- Warning: {warning}\n"));
+    }
+    text
+}
+
+fn emit_failure(command: &str, format: &str, error: anyhow::Error) -> Result<i32> {
+    match format {
+        "json" => println!(
+            "{}",
+            render_failed_command_json(command, error.to_string(), Vec::new())?
+        ),
+        _ => eprintln!("{}", error),
+    }
+    Ok(1)
+}
+
+fn write_report<T: Serialize>(root: &Path, file_name: &str, payload: &T) -> Result<PathBuf> {
+    let reports_dir = root.join(".aexeo-reports");
+    fs::create_dir_all(&reports_dir)?;
+    let path = reports_dir.join(file_name);
+    fs::write(&path, serde_json::to_string_pretty(payload)?)?;
+    Ok(path)
+}
+
+fn surfaces_text(report: &MachineSurfaceGraph, report_path: &Path) -> String {
+    let coverage = &report.coverage;
+    let mut lines = vec![
+        "Machine Surface Graph".to_string(),
+        String::new(),
+        format!("Site root: {}", report.site_root),
+        format!("Site URL: {}", report.site_url.as_deref().unwrap_or("-")),
+        format!("Surfaces discovered: {}", report.surfaces.len()),
+        format!("Routes analyzed: {}", coverage.total_routes),
+        format!(
+            "Markdown mirror coverage: {}/{}",
+            coverage.routes_with_markdown_mirror, coverage.total_routes
+        ),
+        format!(
+            "Schema coverage: {}/{}",
+            coverage.routes_with_schema, coverage.total_routes
+        ),
+        format!("Static machine links: {}", coverage.static_machine_links),
+        format!("llms.txt links: {}", coverage.llms_index_links),
+        format!("Convention mirror hits: {}", coverage.convention_probe_hits),
+        format!("Facts present: {}", coverage.facts_present),
+        format!("llms.txt present: {}", coverage.llms_present),
+        format!("sitemap.xml present: {}", coverage.sitemap_present),
+        format!("robots.txt present: {}", coverage.robots_present),
+        format!("Report: {}", report_path.display()),
+    ];
+    if !report.recommendations.is_empty() {
+        lines.push(String::new());
+        lines.push("Recommendations:".to_string());
+        for recommendation in &report.recommendations {
+            lines.push(format!("- {}", recommendation));
+        }
+    }
+    let routes_with_issues = report
+        .routes
+        .iter()
+        .filter(|route| !route.issues.is_empty())
+        .take(10)
+        .collect::<Vec<_>>();
+    if !routes_with_issues.is_empty() {
+        lines.push(String::new());
+        lines.push("Routes needing attention:".to_string());
+        for route in routes_with_issues {
+            lines.push(format!(
+                "- /{} schema={} markdown={} static_links={} issues={}",
+                route.route,
+                route.schema_types.len(),
+                route.markdown_mirrors.len(),
+                route.static_machine_links.len(),
+                route.issues.join("; ")
+            ));
+        }
+    }
+    lines.join("\n")
+}
+
+fn grounding_text(report: &GroundingSiteAnalysis, report_path: &Path) -> String {
+    let mut lines = vec![
+        "Grounding Map".to_string(),
+        String::new(),
+        format!("Pages analyzed: {}", report.pages_analyzed),
+        format!("Routes with topics: {}", report.routes_with_topics),
+        format!("Elapsed: {}ms", report.elapsed_us / 1000),
+        format!("Report: {}", report_path.display()),
+    ];
+    if !report.intent_distribution.is_empty() {
+        lines.push(String::new());
+        lines.push("Intent distribution:".to_string());
+        for (intent, count) in &report.intent_distribution {
+            lines.push(format!("- {} {}", intent, count));
+        }
+    }
+    lines.push(String::new());
+    lines.push("Top routes:".to_string());
+    for route in report.routes.iter().take(10) {
+        lines.push(format!(
+            "- /{} topic='{}' intents={} gaps={}",
+            route.route,
+            route.primary_topic,
+            route
+                .intents
+                .iter()
+                .map(|intent| format!("{:?}", intent).to_ascii_lowercase())
+                .collect::<Vec<_>>()
+                .join(","),
+            route
+                .coverage_gaps
+                .iter()
+                .map(gap_label)
+                .collect::<Vec<_>>()
+                .join(",")
+        ));
+    }
+    lines.join("\n")
+}
+
+fn fanout_text(report: &AnswerFanoutReport, report_path: &Path) -> String {
+    let mut lines = vec![
+        "Answer Fan-out Assessment".to_string(),
+        String::new(),
+        format!("Routes analyzed: {}", report.routes_analyzed),
+        format!("Queries generated: {}", report.query_count),
+        format!("Covered queries: {}", report.covered_queries),
+        format!("Coverage score: {}", report.coverage_score),
+        format!("Elapsed: {}ms", report.elapsed_us / 1000),
+        format!("Report: {}", report_path.display()),
+    ];
+    let weak_queries = report
+        .queries
+        .iter()
+        .filter(|query| query.coverage_score < 60 || !query.gaps.is_empty())
+        .take(10)
+        .collect::<Vec<_>>();
+    if !weak_queries.is_empty() {
+        lines.push(String::new());
+        lines.push("Weak fan-out queries:".to_string());
+        for query in weak_queries {
+            let best = query
+                .matched_routes
+                .first()
+                .map(|item| format!("/{} ({})", item.route, item.score))
+                .unwrap_or_else(|| "none".to_string());
+            lines.push(format!(
+                "- [{}] '{}' score={} best={} expected={}",
+                query.family, query.query, query.coverage_score, best, query.expected_surface
+            ));
+            if !query.gaps.is_empty() {
+                lines.push(format!("  gaps: {}", query.gaps.join("; ")));
+            }
+        }
+    }
+    lines.join("\n")
+}
+
+fn evidence_text(report: &EvidenceSiteAssessment, report_path: &Path) -> String {
+    let mut lines = vec![
+        "Evidence Assessment".to_string(),
+        String::new(),
+        format!("Pages analyzed: {}", report.pages_analyzed),
+        format!("Routes with claims: {}", report.routes_with_claims),
+        format!("Claims detected: {}", report.claim_count),
+        format!("Unsupported claims: {}", report.unsupported_claims),
+        format!("Evidence density: {}", report.evidence_density_score),
+        format!("Evidence quality: {}", report.evidence_quality_score),
+        format!("Citation readiness: {}", report.citation_readiness_score),
+        format!(
+            "Average fidelity risk: {}",
+            report.average_fidelity_risk_score
+        ),
+        format!("Elapsed: {}ms", report.elapsed_us / 1000),
+        format!("Report: {}", report_path.display()),
+    ];
+    if !report.claim_kind_distribution.is_empty() {
+        lines.push(String::new());
+        lines.push("Claim kinds:".to_string());
+        for (kind, count) in &report.claim_kind_distribution {
+            lines.push(format!("- {} {}", kind, count));
+        }
+    }
+    lines.push(String::new());
+    lines.push("Top risky routes:".to_string());
+    for route in report.routes.iter().take(10) {
+        lines.push(format!(
+            "- /{} claims={} unsupported={} fidelity_risk={} citation_readiness={}",
+            route.route,
+            route.claim_count,
+            route.unsupported_claims,
+            route.fidelity_risk_score,
+            route.citation_readiness_score
+        ));
+    }
+    lines.join("\n")
+}
+
+fn score_text(report: &SiteIntelligenceScore, report_path: &Path) -> String {
+    let mut lines = vec![
+        "Intelligence Score".to_string(),
+        String::new(),
+        format!("Overall score: {}", report.overall_score),
+        format!("Citation readiness: {}", report.citation_readiness_score),
+        format!("Facts consistency: {}", report.truth_consistency_score),
+        format!("Answer pack: {}", report.answer_pack_score),
+        format!(
+            "External trust alignment: {}",
+            report
+                .external_trust_alignment_score
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "n/a".to_string())
+        ),
+        format!("Elapsed: {}ms", report.elapsed_us / 1000),
+        format!("Report: {}", report_path.display()),
+    ];
+    if !report.blockers.is_empty() {
+        lines.push(String::new());
+        lines.push("Top blockers:".to_string());
+        for blocker in report.blockers.iter().take(10) {
+            lines.push(format!(
+                "- [{}] {} route={}",
+                blocker.category,
+                blocker.message,
+                blocker.route.as_deref().unwrap_or("(sitewide)")
+            ));
+        }
+    }
+    lines.push(String::new());
+    lines.push("Lowest scoring routes:".to_string());
+    for route in report.route_scores.iter().take(10) {
+        lines.push(format!(
+            "- /{} overall={} citation={} facts={} answer_pack={} trust={}",
+            route.route,
+            route.overall_score,
+            route.citation_readiness_score,
+            route.truth_consistency_score,
+            route.answer_pack_score,
+            route
+                .external_trust_alignment_score
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "n/a".to_string())
+        ));
+    }
+    lines.join("\n")
+}
+
+fn gap_label(gap: &GroundingCoverageGap) -> &'static str {
+    match gap {
+        GroundingCoverageGap::MissingDirectAnswer => "missing_direct_answer",
+        GroundingCoverageGap::ThinAnswerCoverage => "thin_answer_coverage",
+        GroundingCoverageGap::WeakComparisonStructure => "weak_comparison_structure",
+        GroundingCoverageGap::MissingPricingSignals => "missing_pricing_signals",
+        GroundingCoverageGap::MissingProceduralSignals => "missing_procedural_signals",
+    }
+}
+
+fn truth_text(
+    report: &TruthAssessment,
+    manifest_validation: Option<&TruthManifestValidation>,
+    manifest_path: Option<&str>,
+    report_path: &Path,
+) -> String {
+    let mut lines = vec![
+        "Facts Assessment".to_string(),
+        String::new(),
+        format!(
+            "Structured source: {}",
+            trust_source_label(&report.structured_truth_source)
+        ),
+        format!(
+            "Structured prerequisite met: {}",
+            report.structured_truth_prerequisite_met
+        ),
+        format!("Score: {}/{}", report.score, report.score_ceiling),
+        format!("Pages analyzed: {}", report.pages_analyzed),
+        format!("Pages with schema: {}", report.pages_with_schema),
+        format!("Manifest present: {}", report.manifest_present),
+        format!("Preferred term hits: {}", report.preferred_term_hits),
+        format!("Forbidden term hits: {}", report.forbidden_term_hits),
+        format!("Elapsed: {}ms", report.elapsed_us / 1000),
+        format!("Report: {}", report_path.display()),
+    ];
+    if let Some(path) = manifest_path {
+        lines.push(format!("Manifest: {}", path));
+    }
+    if let Some(validation) = manifest_validation {
+        lines.push(format!("Manifest valid: {}", validation.valid));
+        if !validation.errors.is_empty() {
+            lines.push(format!(
+                "Manifest errors: {}",
+                validation.errors.join(" | ")
+            ));
+        }
+    }
+    if !report.mismatches.is_empty() {
+        lines.push(String::new());
+        lines.push("Mismatches:".to_string());
+        for mismatch in report.mismatches.iter().take(10) {
+            lines.push(format!(
+                "- {} [{}] expected='{}' observed='{}' route={}",
+                mismatch.field,
+                mismatch.source,
+                mismatch.expected,
+                mismatch.observed,
+                mismatch.route
+            ));
+        }
+    }
+    lines.join("\n")
+}
+
+fn truth_manifest_text(report: &TruthManifestValidation, manifest_path: &Path) -> String {
+    let mut lines = vec![
+        "Facts Manifest Validation".to_string(),
+        String::new(),
+        format!("Manifest: {}", manifest_path.display()),
+        format!("Valid: {}", report.valid),
+        format!("Version: {}", report.version),
+        format!("Organization present: {}", report.organization_present),
+        format!("Products: {}", report.product_count),
+        format!("Preferred terms: {}", report.preferred_term_count),
+        format!("Forbidden terms: {}", report.forbidden_term_count),
+        format!("Elapsed: {}ms", report.elapsed_us / 1000),
+    ];
+    if !report.warnings.is_empty() {
+        lines.push(String::new());
+        lines.push("Warnings:".to_string());
+        for warning in &report.warnings {
+            lines.push(format!("- {}", warning));
+        }
+    }
+    if !report.errors.is_empty() {
+        lines.push(String::new());
+        lines.push("Errors:".to_string());
+        for error in &report.errors {
+            lines.push(format!("- {}", error));
+        }
+    }
+    lines.join("\n")
+}
+
+fn truth_generate_text(
+    report: &TruthManifestGeneration,
+    write_path: Option<&Path>,
+    report_path: &Path,
+) -> String {
+    let mut lines = vec![
+        "Facts Manifest Generation".to_string(),
+        String::new(),
+        format!("Curated: {}", report.curated),
+        format!("Generated manifest valid: {}", report.validation.valid),
+        format!(
+            "Organization: {}",
+            report
+                .manifest
+                .organization
+                .as_ref()
+                .map(|entity| entity.name.as_str())
+                .unwrap_or("(missing)")
+        ),
+        format!("Products: {}", report.manifest.products.len()),
+        format!("Elapsed: {}ms", report.elapsed_us / 1000),
+        format!("Report: {}", report_path.display()),
+    ];
+    if let Some(path) = write_path {
+        lines.push(format!("Manifest written to: {}", path.display()));
+    } else {
+        lines.push(format!(
+            "Suggested deploy paths: {}",
+            report.suggested_deploy_paths.join(", ")
+        ));
+    }
+    if !report.warnings.is_empty() {
+        lines.push(String::new());
+        lines.push("Warnings:".to_string());
+        for warning in &report.warnings {
+            lines.push(format!("- {}", warning));
+        }
+    }
+    if !report.provenance.is_empty() {
+        lines.push(String::new());
+        lines.push("Provenance:".to_string());
+        for (field, sources) in report.provenance.iter().take(10) {
+            lines.push(format!("- {} <- {}", field, sources.join(", ")));
+        }
+    }
+    lines.join("\n")
+}
+
+fn trust_source_label(source: &TruthStructuredSource) -> &'static str {
+    match source {
+        TruthStructuredSource::Manifest => "manifest",
+        TruthStructuredSource::Schema => "schema",
+        TruthStructuredSource::SchemaAndManifest => "schema_and_manifest",
+        TruthStructuredSource::None => "none",
+    }
+}
+
+fn trust_import_text(
+    records: &[aexeo_core::TrustSurfaceRecord],
+    report_path: Option<&Path>,
+) -> String {
+    let mut lines = vec![
+        "Trust Surface Import".to_string(),
+        String::new(),
+        format!("Rows read: {}", records.len()),
+        format!("Source types: {}", unique_source_types(records).join(",")),
+    ];
+    if let Some(path) = report_path {
+        lines.push(format!("Report: {}", path.display()));
+    }
+    for record in records.iter().take(10) {
+        lines.push(format!("- [{}] {}", record.source_type, record.url));
+    }
+    lines.join("\n")
+}
+
+fn trust_reconcile_text(report: &TrustSurfaceReconciliation, report_path: &Path) -> String {
+    let mut lines = vec![
+        "Trust Surface Reconciliation".to_string(),
+        String::new(),
+        format!("Rows read: {}", report.rows_read),
+        format!(
+            "Matched first-party routes: {}",
+            report.matched_first_party_routes
+        ),
+        format!("Offsite mentions: {}", report.offsite_mentions),
+        format!("Issues: {}", report.issues.len()),
+        format!("Elapsed: {}ms", report.elapsed_us / 1000),
+        format!("Report: {}", report_path.display()),
+    ];
+    if !report.source_summaries.is_empty() {
+        lines.push(String::new());
+        lines.push("Sources:".to_string());
+        for source in &report.source_summaries {
+            lines.push(format!("- {} {}", source.source_type, source.rows));
+        }
+    }
+    if !report.issues.is_empty() {
+        lines.push(String::new());
+        lines.push("Issues:".to_string());
+        for issue in report.issues.iter().take(10) {
+            lines.push(format!(
+                "- [{}] {} {}",
+                issue.source_type, issue.url, issue.message
+            ));
+        }
+    }
+    lines.join("\n")
+}
+
+fn unique_source_types(records: &[aexeo_core::TrustSurfaceRecord]) -> Vec<String> {
+    let mut sources = records
+        .iter()
+        .map(|item| item.source_type.clone())
+        .collect::<Vec<_>>();
+    sources.sort();
+    sources.dedup();
+    sources
+}

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use seogeo_core::site::{Page, build_page_from_source};
+use aexeo_core::site::{Page, build_page_from_source};
 
 use crate::document::EmdashDocument;
 use crate::render::{append_attribute_value, append_escaped_text, render_html};
@@ -118,7 +118,7 @@ mod tests {
         let page = build_page_from_document(&minimal_document());
         assert_eq!(page.route, "about");
         assert_eq!(page.title.as_deref(), Some("About us"));
-        // seogeo-core preserves HTML entities in meta attribute values rather
+        // aexeo-core preserves HTML entities in meta attribute values rather
         // than decoding them; authors of Portable Text ampersands therefore
         // surface to rules as `&amp;`.
         assert_eq!(

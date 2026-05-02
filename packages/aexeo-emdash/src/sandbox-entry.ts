@@ -77,7 +77,7 @@ async function handleAdminRoute(
   ctx: SandboxCtx,
 ): Promise<BlockResponse> {
   ctx.log?.info?.(
-    `seogeo route: type=${input.input?.type} page=${(input.input as { page?: string })?.page ?? ""}`,
+    `aexeo route: type=${input.input?.type} page=${(input.input as { page?: string })?.page ?? ""}`,
   );
   const dispatch: DispatchCtx = { body: input.input, kv: ctx.kv, ctx };
   if (dispatch.body.type === "page_load") {
@@ -128,7 +128,7 @@ async function handlePageLoad(
   if (normalized === "findings") {
     return renderFindingsPage(ctx);
   }
-  if (normalized === "widget:seogeo-score") {
+  if (normalized === "widget:aexeo-score") {
     return renderScoreWidget(ctx);
   }
   if (normalized === "document") {
@@ -172,7 +172,7 @@ async function handleRefresh(ctx: DispatchCtx): Promise<BlockResponse> {
         ok: false,
         reason: "config_missing",
         detail:
-          "sidecar not configured — open the seogeo Setup page and enter your evaluator URL and token",
+          "sidecar not configured — open the Aexeo Setup page and enter your evaluator URL and token",
       };
     }
     return evaluateViaSidecar(
@@ -487,11 +487,11 @@ async function renderSetupPage(
   // the URL is shown in plain text since it's not sensitive on its own.
   const existing = await readSidecarConfig(ctx.kv);
   const blocks: unknown[] = [
-    { type: "header", text: "seogeo setup" },
+    { type: "header", text: "Aexeo setup" },
     {
       type: "context",
       text:
-        "Paste the URL and auth token of your deployed seogeo-crawl-worker. " +
+        "Paste the URL and auth token of your deployed aexeo-crawl-worker. " +
         "These are stored in plugin KV and read at runtime — no rebuild required " +
         "after a change. Rotate the token here whenever you redeploy the sidecar with a new secret.",
     },
@@ -517,7 +517,7 @@ async function renderSetupPage(
           type: "text_input",
           action_id: "evaluator_url",
           label: "Sidecar URL",
-          placeholder: "https://seogeo-crawl-worker.<subdomain>.workers.dev",
+          placeholder: "https://aexeo-crawl-worker.<subdomain>.workers.dev",
           initial_value:
             options.initialUrl ?? existing?.url ?? "",
         },

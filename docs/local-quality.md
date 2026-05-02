@@ -27,14 +27,14 @@ What it enforces:
 - repo-wide `cargo clippy --workspace --all-targets -- -D warnings`
 - repo-wide `cargo test --workspace --all-targets`
 - generated docs drift detection
-- repo-quality policy enforcement via `seogeo quality .`
-- canonical config rendering through `seogeo config print`
-- example config validation through `docs/examples/seogeo.v1.toml`
+- repo-quality policy enforcement via `aexeo-cli quality .`
+- canonical config rendering through `aexeo-cli config print`
+- example config validation through `docs/examples/aexeo.v1.toml`
 
 This run also writes per-step timing telemetry to:
 
 ```bash
-.seogeo-reports/quality-timings-latest.json
+.aexeo-reports/quality-timings-latest.json
 ```
 
 Each step records:
@@ -60,7 +60,7 @@ sh scripts/pre-push.sh
 What it enforces:
 
 - `cargo build --release`
-- install-path smoke test through `scripts/install-seogeo.sh`
+- install-path smoke test through `scripts/install-aexeo.sh`
 
 ### Local CI
 
@@ -84,17 +84,17 @@ It now also enforces release-mode benchmark budgets through:
 sh scripts/check-performance.sh
 ```
 
-This compares the static and runtime benchmark fixtures against `performance-budget.json` and writes `.seogeo-reports/benchmarks-latest.json`.
+This compares the static and runtime benchmark fixtures against `performance-budget.json` and writes `.aexeo-reports/benchmarks-latest.json`.
 
 Runtime audit artifacts can also be compared directly:
 
 ```bash
-seogeo perf diff .seogeo-reports/crawl-baseline.json .seogeo-reports/crawl-latest.json
+aexeo-cli perf diff .aexeo-reports/crawl-baseline.json .aexeo-reports/crawl-latest.json
 ```
 
 The command exits non-zero when one or more metrics regress beyond the configured relative threshold. Timing metrics can also use an absolute millisecond threshold to ignore small jitter, and the command emits warnings when the two runs are not directly comparable, such as different engines or page counts.
 
-`ci-local.sh` also refreshes `.seogeo-reports/quality-timings-latest.json` with top-level timing data for:
+`ci-local.sh` also refreshes `.aexeo-reports/quality-timings-latest.json` with top-level timing data for:
 
 - `check-repo`
 - `pre-push`
@@ -154,13 +154,13 @@ sh scripts/ci-local.sh
 Inspect browser-runtime readiness explicitly:
 
 ```bash
-cargo run -p seogeo-cli -- doctor runtime --format text
+cargo run -p aexeo-cli -- doctor runtime --format text
 ```
 
 Render a saved audit artifact into Markdown or text:
 
 ```bash
-cargo run -p seogeo-cli -- report render .seogeo-reports/crawl-latest.json --format md
+cargo run -p aexeo-cli -- report render .aexeo-reports/crawl-latest.json --format md
 ```
 
 For large runtime audits, the latest crawl artifact is now refreshed during checkpoint intervals. If a live crawl is interrupted or still in progress, `crawl-latest.json` can still be rendered as a partial audit with current crawl stats.

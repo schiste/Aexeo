@@ -2,7 +2,7 @@
 
 This repository currently has two release surfaces:
 
-- GitHub release artifacts for `seogeo-cli`
+- GitHub release artifacts for `aexeo-cli`
 - the `@aeptus/aexeo-emdash` npm package
 
 ## Pre-Release Validation
@@ -11,7 +11,7 @@ Run the required checks from the repository root:
 
 ```bash
 cargo test --workspace
-cargo run -p seogeo-cli -- quality . --format json
+cargo run -p aexeo-cli -- quality . --format json
 cargo audit
 cargo deny check
 cargo +nightly udeps --workspace --all-targets
@@ -39,13 +39,13 @@ Package release assets:
 sh scripts/build_internal_release.sh
 ```
 
-This produces platform-specific `seogeo-cli-*` binaries and checksum files in `dist/`.
+This produces platform-specific `aexeo-cli-*` binaries and checksum files in `dist/`.
 
 Smoke-test the packaged binary:
 
 ```bash
-sh scripts/install-seogeo.sh --from-binary dist/seogeo-cli --dest-dir /tmp/seogeo-smoke/bin
-/tmp/seogeo-smoke/bin/seogeo-cli --help
+sh scripts/install-aexeo.sh --from-binary dist/aexeo-cli --dest-dir /tmp/aexeo-smoke/bin
+/tmp/aexeo-smoke/bin/aexeo-cli --help
 ```
 
 ## NPM Package Release

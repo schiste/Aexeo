@@ -1,10 +1,10 @@
 #!/bin/sh
 set -eu
 
-STATIC_JSON=$(cargo run --release -q -p seogeo-core --example bench_static_audit -- --json 5)
-RUNTIME_JSON=$(cargo run --release -q -p seogeo-core --example bench_runtime_audit -- --json 5)
+STATIC_JSON=$(cargo run --release -q -p aexeo-core --example bench_static_audit -- --json 5)
+RUNTIME_JSON=$(cargo run --release -q -p aexeo-core --example bench_runtime_audit -- --json 5)
 
-mkdir -p .seogeo-reports
+mkdir -p .aexeo-reports
 printf '%s\n%s\n' "$STATIC_JSON" "$RUNTIME_JSON" | node -e '
 const fs = require("fs");
 const input = fs.readFileSync(0, "utf8")
@@ -17,7 +17,7 @@ const report = {
   generated_at: Math.floor(Date.now() / 1000),
   benchmarks: input
 };
-fs.writeFileSync(".seogeo-reports/benchmarks-latest.json", JSON.stringify(report, null, 2));
+fs.writeFileSync(".aexeo-reports/benchmarks-latest.json", JSON.stringify(report, null, 2));
 let failed = false;
 for (const entry of input) {
   const budget = budgets[entry.name];

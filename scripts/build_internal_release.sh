@@ -5,7 +5,7 @@ usage() {
     cat <<'EOF'
 Usage: sh scripts/build_internal_release.sh [--target <os-arch>]
 
-Builds the seogeo-cli release binary and stages it under dist/ with a
+Builds the aexeo-cli release binary and stages it under dist/ with a
 target-specific filename plus matching .sha256 file.
 
   --target <os-arch>   Output suffix. One of:
@@ -23,8 +23,8 @@ target-specific filename plus matching .sha256 file.
                        for testing the packaging pipeline itself.
 
 Output:
-  dist/seogeo-cli-<os-arch>
-  dist/seogeo-cli-<os-arch>.sha256
+  dist/aexeo-cli-<os-arch>
+  dist/aexeo-cli-<os-arch>.sha256
 
 The release workflow concatenates per-target .sha256 files into a single
 SHA256SUMS.txt asset on the GitHub Release.
@@ -87,8 +87,8 @@ fi
 cargo build --release
 
 mkdir -p dist
-OUT_BIN="dist/seogeo-cli-$TARGET"
-cp target/release/seogeo-cli "$OUT_BIN"
+OUT_BIN="dist/aexeo-cli-$TARGET"
+cp target/release/aexeo-cli "$OUT_BIN"
 shasum -a 256 "$OUT_BIN" > "$OUT_BIN.sha256"
 
 # Smoke test the produced binary so a broken build never reaches a release.

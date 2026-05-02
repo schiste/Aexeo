@@ -39,13 +39,13 @@ useful than wrong.
 
 ```bash
 # 1. Generate the prompt with curated context from your built site.
-seogeo-cli generate facts-prompt dist > prompt.md
+aexeo-cli generate facts-prompt dist > prompt.md
 
 # 2. Open prompt.md, copy to your LLM of choice, run the interview,
 #    capture the JSON the LLM produces into facts.json.
 
 # 3. Validate the result against the live site:
-seogeo-cli facts validate facts.json --site-path dist
+aexeo-cli facts validate facts.json --site-path dist
 
 # 4. Iterate: fix any mismatches the validator surfaces, re-run.
 
@@ -130,7 +130,7 @@ what changed and why.
 ## Where the manifest fits in the broader machine-surfaces story
 
 `facts.json` is one of several artifacts the CLI generates with
-`seogeo-cli generate machine-bundle`. The full bundle:
+`aexeo-cli generate machine-bundle`. The full bundle:
 
 - `llms.txt` / `llms-full.txt` — LLM-readable site index
 - `sitemap.xml` — standard search-engine sitemap

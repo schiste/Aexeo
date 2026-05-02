@@ -12,7 +12,7 @@
 //     hits the upstream content:afterSave bridge bug (refresh becomes
 //     manual-only) until emdash 0.8.x lands a fix.
 //
-// For Aexeo's own deploys, prefer seogeoPlugin() (configured) — see
+// For Aexeo's own deploys, prefer aexeoPlugin() (configured) — see
 // src/configured.ts. Use this factory only when you need the
 // isolation guarantee.
 
@@ -55,17 +55,17 @@ export interface SandboxedPluginDescriptor {
 // sandboxed path:
 //
 //   import { d1, r2, sandbox } from "@emdash-cms/cloudflare";
-//   import { seogeoPluginSandboxed } from "@aeptus/aexeo-emdash";
+//   import { aexeoPluginSandboxed } from "@aeptus/aexeo-emdash";
 //   emdash({
 //     database: d1({ binding: "DB" }),
 //     storage: r2({ binding: "MEDIA" }),
-//     sandboxed: [seogeoPluginSandboxed({
-//       evaluatorHost: "seogeo-crawl-worker.<your-subdomain>.workers.dev",
+//     sandboxed: [aexeoPluginSandboxed({
+//       evaluatorHost: "aexeo-crawl-worker.<your-subdomain>.workers.dev",
 //     })],
 //     sandboxRunner: sandbox(),
 //   });
-export interface SeogeoSandboxedOptions {
-  // Public host of the deployed seogeo-crawl-worker. We need this at
+export interface AexeoSandboxedOptions {
+  // Public host of the deployed aexeo-crawl-worker. We need this at
   // descriptor-creation time because emdash's sandbox bridge enforces
   // outbound HTTP via an `allowedHosts` list that's read once at
   // integration setup and never changed at runtime. The host you pass
@@ -78,18 +78,18 @@ export interface SeogeoSandboxedOptions {
   // rebuild. The host part stays constant for the life of the
   // sidecar deploy.
   //
-  // Falls back to process.env.SEOGEO_EVALUATOR_HOST so CI / Cloudflare
+  // Falls back to process.env.AEXEO_EVALUATOR_HOST so CI / Cloudflare
   // Pages builds can configure it without editing astro.config.
   evaluatorHost?: string;
 }
 
-export function seogeoPluginSandboxed(
-  options: SeogeoSandboxedOptions = {},
+export function aexeoPluginSandboxed(
+  options: AexeoSandboxedOptions = {},
 ): SandboxedPluginDescriptor {
   const evaluatorHost =
-    options.evaluatorHost ?? process.env.SEOGEO_EVALUATOR_HOST ?? null;
+    options.evaluatorHost ?? process.env.AEXEO_EVALUATOR_HOST ?? null;
   return {
-    id: "aexeo-seogeo",
+    id: "aexeo-emdash",
     version: PACKAGE_VERSION,
     // Subpath export of this same package; must match package.json
     // `exports["./sandbox"]`.
@@ -97,7 +97,7 @@ export function seogeoPluginSandboxed(
     format: "standard",
     capabilities: buildCapabilities(evaluatorHost),
     allowedHosts: buildAllowedHosts(evaluatorHost),
-    // Pages mount at /admin/plugins/aexeo-seogeo/<path>. The page name
+    // Pages mount at /admin/plugins/aexeo-emdash/<path>. The page name
     // (without leading slash) is what the sandbox entry receives in
     // `body.page` when emdash POSTs the page_load interaction.
     adminPages: [
@@ -106,7 +106,7 @@ export function seogeoPluginSandboxed(
       { path: "/setup", label: "Setup" },
     ],
     adminWidgets: [
-      { id: "seogeo-score", size: "third", title: "SEO score" },
+      { id: "aexeo-score", size: "third", title: "SEO score" },
     ],
   };
 }

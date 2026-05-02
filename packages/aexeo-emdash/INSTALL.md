@@ -1,6 +1,6 @@
 # Installing `@aeptus/aexeo-emdash`
 
-This package adds Aexeo's seogeo SEO/GEO content evaluator to an emdash
+This package adds Aexeo SEO/GEO content evaluation to an emdash
 site. Findings show up as a Block Kit admin page; a sidebar widget
 shows the site's current intelligence score; saves auto-evaluate the
 changed document.
@@ -9,11 +9,11 @@ changed document.
 
 The package exports two factories:
 
-- **`seogeoPlugin()`** — **configured mode** (recommended). Plugin
+- **`aexeoPlugin()`** — **configured mode** (recommended). Plugin
   runs in-process inside the host emdash Worker. No separate
   deployment, no auth token, no admin Setup page. Use this for
   first-party emdash sites.
-- **`seogeoPluginSandboxed({ evaluatorHost })`** — **sandboxed
+- **`aexeoPluginSandboxed({ evaluatorHost })`** — **sandboxed
   mode**. Plugin runs inside emdash's Worker Loader isolate; WASM
   evaluation runs in a separate sidecar Worker the operator
   deploys. Use this only when a third party hosts emdash and
@@ -42,7 +42,7 @@ npm install @aeptus/aexeo-emdash vite-plugin-wasm
 `vite-plugin-wasm` is required because Vite's defaults treat `.wasm`
 imports as static-asset URLs, but Cloudflare Workers can only run
 WASM as precompiled `WebAssembly.Module` instances. The plugin
-bridges the two; without it, the seogeo plugin's first call throws
+bridges the two; without it, the Aexeo plugin's first call throws
 "WASM module did not resolve to a WebAssembly.Module."
 
 > **If installing from a private git remote or as a vendored
@@ -54,7 +54,7 @@ bridges the two; without it, the seogeo plugin's first call throws
 ```js
 import cloudflare from "@astrojs/cloudflare";
 import { d1, r2 } from "@emdash-cms/cloudflare";
-import { seogeoPlugin } from "@aeptus/aexeo-emdash";
+import { aexeoPlugin } from "@aeptus/aexeo-emdash";
 import { defineConfig } from "astro/config";
 import emdash from "emdash/astro";
 import wasm from "vite-plugin-wasm";
@@ -68,7 +68,7 @@ export default defineConfig({
     // workerd disallow runtime WebAssembly.instantiate from raw
     // bytes, so the bundler has to do the compilation.
     plugins: [wasm()],
-    // The seogeo plugin's WASM import confuses Vite's dep
+    // The Aexeo plugin's WASM import confuses Vite's dep
     // optimizer when it tries to pre-bundle the package.
     optimizeDeps: { exclude: ["@aeptus/aexeo-emdash"] },
   },
@@ -76,7 +76,7 @@ export default defineConfig({
     emdash({
       database: d1({ binding: "DB" }),
       storage: r2({ binding: "MEDIA" }),
-      plugins: [seogeoPlugin()],
+      plugins: [aexeoPlugin()],
     }),
   ],
 });
@@ -96,7 +96,7 @@ no sidecar to deploy.
    http://localhost:4321/_emdash/admin/plugins
    ```
 
-   The seogeo plugin will appear in the list. Click it.
+   The Aexeo plugin will appear in the list. Click it.
 
 3. The findings page renders with a Refresh button. Click **Refresh**
    — toast says "Refreshed N routes (M findings across K documents)"
@@ -151,7 +151,7 @@ token to rotate, no Setup page to revisit.
 
 **Verify after a plugin update:**
 
-1. Visit `/admin/plugins/aexeo-seogeo/findings` and click **Refresh**.
+1. Visit `/admin/plugins/aexeo-emdash/findings` and click **Refresh**.
    Toast should show non-zero rules sweeping. (A zero count *can*
    be valid for a clean site, but if you previously had findings
    and now have none, suspect the upgrade.)
@@ -216,7 +216,7 @@ Treat anything outside that range as best-effort.
 
 ## Removing
 
-Delete the dependency, the import, and the `seogeoPlugin()` line in
+Delete the dependency, the import, and the `aexeoPlugin()` line in
 `integrations:[emdash({plugins:[...]})]`. The KV keys the plugin
 wrote remain in your KV namespace — purge with
 `wrangler kv:key delete --prefix=findings:` and
@@ -243,26 +243,26 @@ Trade-offs vs. configured mode:
 ```js
 // astro.config.mjs (sandboxed mode)
 import { sandbox } from "@emdash-cms/cloudflare";
-import { seogeoPluginSandboxed } from "@aeptus/aexeo-emdash";
+import { aexeoPluginSandboxed } from "@aeptus/aexeo-emdash";
 
 emdash({
   database: d1({ binding: "DB" }),
   storage: r2({ binding: "MEDIA" }),
   sandboxed: [
-    seogeoPluginSandboxed({
+    aexeoPluginSandboxed({
       // Public host of the deployed sidecar Worker.
-      evaluatorHost: "seogeo-crawl-worker.<subdomain>.workers.dev",
+      evaluatorHost: "aexeo-crawl-worker.<subdomain>.workers.dev",
     }),
   ],
   sandboxRunner: sandbox(),
 });
 ```
 
-The sidecar Worker template lives at `packages/seogeo-crawl-worker/`
+The sidecar Worker template lives at `packages/aexeo-crawl-worker/`
 in this repo. Per-site deploy:
 
 ```bash
-cd seogeo-crawl-worker
+cd aexeo-crawl-worker
 # Edit wrangler.toml: name, R2 bucket name, SITE_URL
 npx wrangler login
 npx wrangler r2 bucket create <bucket-name>
@@ -271,7 +271,7 @@ echo "$(openssl rand -hex 32)" | npx wrangler secret put EVAL_TOKEN
 ```
 
 Then in the admin UI, visit
-`/admin/plugins/aexeo-seogeo/setup` and paste the deployed URL +
+`/admin/plugins/aexeo-emdash/setup` and paste the deployed URL +
 the same token.
 
 ## Alternative install sources
@@ -316,7 +316,7 @@ present, double-check the package version is recent (≥ the version
 that switched to direct .wasm imports — see git log for `Switch
 configured-mode WASM from inlined bytes to direct .wasm import`).
 
-**`seogeo: WASM module did not resolve to a WebAssembly.Module`**
+**`aexeo: WASM module did not resolve to a WebAssembly.Module`**
 The bundler resolved the .wasm import but produced something other
 than a Module (URL string, Uint8Array). Same fix as above: ensure
 `vite-plugin-wasm` is loaded.
@@ -327,7 +327,7 @@ sandboxed two-arg ctx shape. Update; it's fixed in the version with
 `Switch configured-mode WASM from inlined bytes to direct .wasm
 import` in the commit log.
 
-**`/admin/plugins` doesn't list seogeo, but `/findings` works.** The
+**`/admin/plugins` doesn't list Aexeo, but `/findings` works.** The
 emdash version's plugins meta page may filter out plugins without a
 `/` adminPage entry. The package declares one explicitly; if you see
 this on a recent version, it's an emdash regression — file upstream.
@@ -344,7 +344,7 @@ Node adapter.
 
 ## What the plugin actually does
 
-- **Findings page** (`/_emdash/admin/plugins/aexeo-seogeo/findings`):
+- **Findings page** (`/_emdash/admin/plugins/aexeo-emdash/findings`):
   Block Kit table of every rule violation across the site. Filter by
   severity. Click a route in the picker to drill into per-document
   findings.
@@ -371,6 +371,6 @@ inline. Findings are stored in the host's plugin KV (the
 `PluginContext.kv` accessor). The Refresh button does the same thing
 but for every document in every configured collection. The WASM
 itself is the same `aexeo-emdash-bridge` Rust crate that powers the
-seogeo CLI; it's compiled to WebAssembly via wasm-pack and imported
+Aexeo CLI; it's compiled to WebAssembly via wasm-pack and imported
 by the host's bundler (Vite + `vite-plugin-wasm`). No separate
 service, no sidecar, no auth token.

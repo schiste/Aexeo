@@ -34,9 +34,9 @@ export interface CheckOutput {
 }
 
 const checkTool: McpToolDefinition<CheckInput, CheckOutput> = {
-  name: "seogeo.check",
+  name: "aexeo.check",
   description:
-    "Evaluate a list of EmdashDocument values against the seogeo rule engine and return the stable Finding contract. Mirrors the CLI's `seogeo-cli check` surface so agents, the admin UI, and the CI gate all see the same rule ids.",
+    "Evaluate a list of EmdashDocument values against the Aexeo rule engine and return the stable Finding contract. Mirrors the CLI's `aexeo-cli check` surface so agents, the admin UI, and the CI gate all see the same rule ids.",
   inputSchema: {
     type: "object",
     properties: {
@@ -48,7 +48,7 @@ const checkTool: McpToolDefinition<CheckInput, CheckOutput> = {
       configJson: {
         type: "string",
         description:
-          "Optional JSON-serialized seogeo Config. When absent the evaluator uses Config::default(), matching a cold CLI run.",
+          "Optional JSON-serialized Aexeo config. When absent the evaluator uses Config::default(), matching a cold CLI run.",
       },
     },
     required: ["documents"],
@@ -84,9 +84,9 @@ const indexNowSubmitTool: McpToolDefinition<
   IndexNowSubmitInput,
   IndexNowSubmission
 > = {
-  name: "seogeo.indexnow.submit",
+  name: "aexeo.indexnow.submit",
   description:
-    "Submit a list of URLs to the IndexNow freshness endpoint. Mirrors the seogeo-cli `indexnow submit` contract: the IndexNow protocol requires every submitted URL to belong to the configured site host. URLs that do not match the host are returned in `rejected` and never sent over the wire.",
+    "Submit a list of URLs to the IndexNow freshness endpoint. Mirrors the aexeo-cli `indexnow submit` contract: the IndexNow protocol requires every submitted URL to belong to the configured site host. URLs that do not match the host are returned in `rejected` and never sent over the wire.",
   inputSchema: {
     type: "object",
     properties: {
@@ -113,7 +113,7 @@ const indexNowSubmitTool: McpToolDefinition<
 };
 
 // Exposed as a readonly tuple so the plugin registers tools in a stable
-// order. seogeo.intelligence.score and seogeo.generate.machine_bundle
+// order. aexeo.intelligence.score and aexeo.generate.machine_bundle
 // will join here once the bridge grows the WASM-side surface to back
 // them; submission and check are the two flows that work today.
 export const tools = [checkTool, indexNowSubmitTool] as const;

@@ -138,7 +138,7 @@ await mkdir(resolve(root, "dist"), { recursive: true });
 // Three bundle targets:
 //
 //   1. dist/index.js — the public factory entry. Re-exports
-//      seogeoPlugin (configured) and seogeoPluginSandboxed.
+//      aexeoPlugin (configured) and aexeoPluginSandboxed.
 //   2. dist/sandbox-entry.js — the sandboxed runtime entry. Loaded
 //      as a string by emdash's Worker Loader; cannot include WASM
 //      (1.2MB exceeds the 50ms cpuMs at module init). Routes

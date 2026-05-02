@@ -1,7 +1,7 @@
 # Static-Site CI Recipe
 
 This is the canonical CI shape for a static-site repo (Astro, Hugo,
-Next.js export, etc.) consuming `seogeo-cli` via the bootstrap script
+Next.js export, etc.) consuming `aexeo-cli` via the bootstrap script
 described in [docs/install.md](install.md).
 
 ## End-to-end shape
@@ -19,24 +19,24 @@ This pattern is what the consumer team adopts after step 4 of
 ## Concrete CI step
 
 ```yaml
-- name: Install seogeo
+- name: Install Aexeo
   run: |
-    SEOGEO_BIN=$(./scripts/bootstrap-seogeo.sh)
-    echo "$(dirname "$SEOGEO_BIN")" >> "$GITHUB_PATH"
+    AEXEO_BIN=$(./scripts/bootstrap-aexeo.sh)
+    echo "$(dirname "$AEXEO_BIN")" >> "$GITHUB_PATH"
 
 - name: Build site
   run: npm run build   # or whatever produces dist/
 
 - name: Generate machine-readable surfaces
   run: |
-    seogeo-cli generate machine-bundle dist \
+    aexeo-cli generate machine-bundle dist \
       --site-url https://example.com \
       --write-dir dist
 
 - name: Audit built site (regressions only)
   run: |
-    seogeo-cli check dist \
-      --baseline .seogeo-baseline.json \
+    aexeo-cli check dist \
+      --baseline .aexeo-baseline.json \
       --regressions-only
 ```
 
@@ -67,12 +67,12 @@ If you only want one file, use the per-kind subcommands instead of
 `machine-bundle`:
 
 ```bash
-seogeo-cli generate sitemap dist --site-url https://example.com --write-dir dist
-seogeo-cli generate robots  dist --site-url https://example.com --write-dir dist
-seogeo-cli generate llms    dist --write-dir dist
+aexeo-cli generate sitemap dist --site-url https://example.com --write-dir dist
+aexeo-cli generate robots  dist --site-url https://example.com --write-dir dist
+aexeo-cli generate llms    dist --write-dir dist
 ```
 
-`--site-url` overrides the `site.url` value in `seogeo.toml`. Use the
+`--site-url` overrides the `site.url` value in `aexeo.toml`. Use the
 config file for stable values; use the flag for one-off invocations
 (e.g. preview deploys with a different host).
 
@@ -84,8 +84,8 @@ site matches the static audit:
 ```yaml
 - name: Verify preview against baseline
   run: |
-    seogeo-cli verify https://preview-${{ github.sha }}.example.com \
-      --baseline .seogeo-baseline.json
+    aexeo-cli verify https://preview-${{ github.sha }}.example.com \
+      --baseline .aexeo-baseline.json
 ```
 
 This catches issues that only appear at runtime — broken redirects,
@@ -100,26 +100,26 @@ its own directory layout:
 ```
 sites/
   marketing/
-    seogeo.toml
-    .seogeo-baseline.json
+    aexeo.toml
+    .aexeo-baseline.json
     dist/                    (built output, gitignored)
   docs/
-    seogeo.toml
-    .seogeo-baseline.json
+    aexeo.toml
+    .aexeo-baseline.json
     dist/
   blog/
-    seogeo.toml
-    .seogeo-baseline.json
+    aexeo.toml
+    .aexeo-baseline.json
     dist/
-.seogeo-version              (one CLI version for the whole repo)
-.seogeo-version.lock
+.aexeo-version              (one CLI version for the whole repo)
+.aexeo-version.lock
 scripts/
-  bootstrap-seogeo.sh        (vendored once at the repo root)
+  bootstrap-aexeo.sh        (vendored once at the repo root)
 ```
 
-Each site gets its own `seogeo.toml` and baseline. The bootstrap
+Each site gets its own `aexeo.toml` and baseline. The bootstrap
 script and version pin live at the repo root and are shared across
-sites — there's only ever one `seogeo-cli` binary in play.
+sites — there's only ever one `aexeo-cli` binary in play.
 
 CI then iterates per site:
 
@@ -127,17 +127,17 @@ CI then iterates per site:
 - name: Audit each site
   run: |
     for site in sites/*/; do
-      ( cd "$site" && seogeo-cli check dist \
-          --baseline .seogeo-baseline.json \
+      ( cd "$site" && aexeo-cli check dist \
+          --baseline .aexeo-baseline.json \
           --regressions-only )
     done
 ```
 
-The `(cd ...)` subshell scope is important — `seogeo-cli` reads
-`seogeo.toml` from the current directory, so each site sees its own
+The `(cd ...)` subshell scope is important — `aexeo-cli` reads
+`aexeo.toml` from the current directory, so each site sees its own
 config.
 
-## Per-site `seogeo.toml` essentials
+## Per-site `aexeo.toml` essentials
 
 Minimum config for a static site:
 
@@ -146,7 +146,7 @@ Minimum config for a static site:
 url = "https://example.com"
 
 [output]
-baseline_file = ".seogeo-baseline.json"
+baseline_file = ".aexeo-baseline.json"
 
 [ignore]
 paths = [
@@ -157,7 +157,7 @@ paths = [
 ]
 ```
 
-For a monorepo, each site's `seogeo.toml` lives next to its `dist/`
+For a monorepo, each site's `aexeo.toml` lives next to its `dist/`
 and only sees its own paths.
 
 ## Placeholder Routes
@@ -176,12 +176,12 @@ response header.
 <meta name="robots" content="noindex">
 ```
 
-The page is excluded from `sitemap.xml`, and `seogeo-cli check`
+The page is excluded from `sitemap.xml`, and `aexeo-cli check`
 treats it differently from indexable pages (no missing-canonical
 warning, etc.). This is the right answer for "this page exists but
 we don't want it crawled yet."
 
-### 2. Add path-level ignore in `seogeo.toml`
+### 2. Add path-level ignore in `aexeo.toml`
 
 For pages that shouldn't even be audited — e.g. infrastructure
 files, generated reports, draft directories outside the published
@@ -206,7 +206,7 @@ but is noindex," which should use pattern 1.
 For one-off cases where a route legitimately has both `canonical`
 and `noindex` (e.g. a search results page that should not be
 indexed but should still self-canonical), use a route-policy
-override in `seogeo.toml`:
+override in `aexeo.toml`:
 
 ```toml
 [[ignore.route_overrides]]
@@ -220,15 +220,15 @@ the ignore for the whole site.
 
 ## Bumping the CLI
 
-When a new `seogeo-cli` release ships, the consumer-side update flow
+When a new `aexeo-cli` release ships, the consumer-side update flow
 is the same regardless of whether the consumer is a static site or
 not:
 
 ```bash
-rm .seogeo-version.lock
-GITHUB_TOKEN=<PAT> ./scripts/bootstrap-seogeo.sh
-$(./scripts/bootstrap-seogeo.sh) check dist --baseline .seogeo-baseline.json --regressions-only
-git add .seogeo-version.lock
+rm .aexeo-version.lock
+GITHUB_TOKEN=<PAT> ./scripts/bootstrap-aexeo.sh
+$(./scripts/bootstrap-aexeo.sh) check dist --baseline .aexeo-baseline.json --regressions-only
+git add .aexeo-version.lock
 ```
 
 If the new CLI introduces rule changes that fire on existing pages,
@@ -236,8 +236,8 @@ refresh the baseline as part of the same PR so the diff explicitly
 acknowledges the new findings:
 
 ```bash
-$(./scripts/bootstrap-seogeo.sh) baseline dist
-git add .seogeo-baseline.json
+$(./scripts/bootstrap-aexeo.sh) baseline dist
+git add .aexeo-baseline.json
 ```
 
 A reviewer of the PR sees both the lock bump *and* the baseline
@@ -247,7 +247,7 @@ delta in one place — no surprise findings appearing in unrelated PRs.
 
 | Symptom | Likely cause |
 |---|---|
-| `site_url is required to generate sitemap.xml` | No `[site] url = ...` in `seogeo.toml` and no `--site-url` flag. Set one. |
+| `site_url is required to generate sitemap.xml` | No `[site] url = ...` in `aexeo.toml` and no `--site-url` flag. Set one. |
 | `no indexable routes found; sitemap.xml would be empty` | Wrong path passed (not the built dist), all pages have `noindex`, or `[ignore]` is too aggressive. |
 | `lockfile ... missing or stale for constraint '...'` in CI | Constraint changed but lock wasn't regenerated. Run bootstrap locally and commit the new lock. |
 | GitHub API rate-limit or auth error during bootstrap | Set `GITHUB_TOKEN` for the bootstrap step, or verify the release repo is public and reachable from CI. |

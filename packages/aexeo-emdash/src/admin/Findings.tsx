@@ -14,9 +14,9 @@
 //
 // The component fetches data from two routes:
 //
-//   POST /_emdash/api/plugins/aexeo-seogeo/data
+//   POST /_emdash/api/plugins/aexeo-emdash/data
 //     Read current findings without re-evaluating.
-//   POST /_emdash/api/plugins/aexeo-seogeo/refresh
+//   POST /_emdash/api/plugins/aexeo-emdash/refresh
 //     Sweep the configured collections, write findings to KV,
 //     return the freshly-written set.
 //
@@ -29,7 +29,7 @@ import * as React from "react";
 import { useCallback, useEffect, useState } from "react";
 import type { FindingsPayload, RouteSummary } from "../data-route.js";
 
-const PLUGIN_ID = "aexeo-seogeo";
+const PLUGIN_ID = "aexeo-emdash";
 const API_BASE = "/_emdash/api";
 
 interface FetchState {

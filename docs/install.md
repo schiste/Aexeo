@@ -11,7 +11,7 @@ This repository supports three practical install paths today:
 Run the CLI directly:
 
 ```bash
-cargo run -p seogeo-cli -- check .
+cargo run -p aexeo-cli -- check .
 ```
 
 Build a release binary:
@@ -20,29 +20,29 @@ Build a release binary:
 cargo build --release
 ```
 
-The binary will be available at `target/release/seogeo-cli`.
+The binary will be available at `target/release/aexeo-cli`.
 
 ## Install A Built Binary Locally
 
 Copy a locally built binary into a stable destination:
 
 ```bash
-sh scripts/install-seogeo.sh --from-binary target/release/seogeo-cli
+sh scripts/install-aexeo.sh --from-binary target/release/aexeo-cli
 ```
 
 Override the destination when needed:
 
 ```bash
-sh scripts/install-seogeo.sh \
-  --from-binary target/release/seogeo-cli \
+sh scripts/install-aexeo.sh \
+  --from-binary target/release/aexeo-cli \
   --dest-dir /opt/aexeo/bin
 ```
 
 ## Bootstrap From GitHub Releases
 
-For consumer repositories that want pinned, reproducible CLI installs without a Rust toolchain, vendor `scripts/bootstrap-seogeo.template.sh` as `scripts/bootstrap-seogeo.sh`.
+For consumer repositories that want pinned, reproducible CLI installs without a Rust toolchain, vendor `scripts/bootstrap-aexeo.template.sh` as `scripts/bootstrap-aexeo.sh`.
 
-Create a `.seogeo-version` file in the consumer repo:
+Create a `.aexeo-version` file in the consumer repo:
 
 ```text
 ^0.2
@@ -51,20 +51,20 @@ Create a `.seogeo-version` file in the consumer repo:
 Run the bootstrap:
 
 ```bash
-./scripts/bootstrap-seogeo.sh
+./scripts/bootstrap-aexeo.sh
 ```
 
 The bootstrap:
 
 - resolves the highest matching GitHub release tag
-- writes `.seogeo-version.lock`
-- downloads the matching platform binary into `~/.cache/seogeo/<tag>/`
+- writes `.aexeo-version.lock`
+- downloads the matching platform binary into `~/.cache/aexeo/<tag>/`
 - verifies the checksum from `SHA256SUMS.txt`
 - prints the installed binary path on stdout
 
 `GITHUB_TOKEN` is optional for public releases. Supply it in CI or when you need higher GitHub API rate limits.
 
-In CI, treat `.seogeo-version.lock` as a committed lockfile. When `CI=true`, the bootstrap refuses to rewrite it.
+In CI, treat `.aexeo-version.lock` as a committed lockfile. When `CI=true`, the bootstrap refuses to rewrite it.
 
 ## Plugin Build And Install
 

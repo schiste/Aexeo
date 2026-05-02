@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use seogeo_core::site::{
+use aexeo_core::site::{
     DeploymentModel, Site, SiteArtifacts, SiteBuildInput, build_site_from_parts,
 };
 

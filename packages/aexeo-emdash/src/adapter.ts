@@ -1,7 +1,7 @@
 import type { EmdashDocument, PortableTextBlock } from "./types.js";
 
 // Adapts emdash's ContentItem (the shape passed to content:afterSave)
-// into the EmdashDocument shape the seogeo WASM bridge expects.
+// into the EmdashDocument shape the Aexeo WASM bridge expects.
 //
 // emdash's ContentItem is the storage row:
 //   { id, type, slug, status, locale, data: Record<string, unknown>, seo?, ... }

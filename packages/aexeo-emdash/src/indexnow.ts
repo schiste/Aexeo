@@ -1,5 +1,5 @@
 // IndexNow submission for the publish hook. Workers have native fetch
-// so we do not pull in any HTTP client; the seogeo-cli ledger model is
+// so we do not pull in any HTTP client; the aexeo-cli ledger model is
 // reused by storing one entry per submission attempt in KV.
 
 const INDEXNOW_ENDPOINT = "https://api.indexnow.org/indexnow";
@@ -11,7 +11,7 @@ export interface IndexNowConfig {
   // The IndexNow key. Must already be served at keyLocation.
   key: string;
   // Optional override for the location of the key file. Defaults to
-  // <siteUrl>/<key>.txt, matching seogeo-cli's default contract.
+  // <siteUrl>/<key>.txt, matching aexeo-cli's default contract.
   keyLocation?: string;
 }
 

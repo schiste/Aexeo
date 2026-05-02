@@ -1,5 +1,5 @@
-use seogeo_contracts::Finding;
-use seogeo_core::{Config, run_checks_for_site};
+use aexeo_contracts::Finding;
+use aexeo_core::{Config, run_checks_for_site};
 
 use crate::document::EmdashDocument;
 use crate::site::build_site_from_documents;
@@ -60,7 +60,7 @@ mod tests {
     #[test]
     fn evaluate_routes_findings_through_the_same_rule_ids_a_static_site_would_see() {
         let mut document = rich_document();
-        // Drop the description; seogeo-core SEO002 fires on missing meta description.
+        // Drop the description; aexeo-core SEO002 fires on missing meta description.
         document.description = None;
         let config = Config::default();
         let findings = evaluate_documents(&[document], &config).unwrap();

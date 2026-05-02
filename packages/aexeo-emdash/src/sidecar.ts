@@ -1,12 +1,12 @@
 import type { EmdashDocument, Finding } from "./types.js";
 
-// HTTP client for the seogeo sidecar Worker (POST /evaluate).
+// HTTP client for the Aexeo sidecar Worker (POST /evaluate).
 //
 // The sandbox isolate cannot run the 1.2MB WASM bridge directly —
 // Worker Loader's default 50ms cpuMs budget is too tight for module-
 // level WebAssembly.instantiate. Heavy evaluation runs in a per-user
 // Cloudflare Worker the plugin user deploys (template lives in
-// packages/seogeo-crawl-worker). This module is the sandbox's
+// packages/aexeo-crawl-worker). This module is the sandbox's
 // minimal-surface-area client to that Worker.
 //
 // Auth model: shared secret in an Authorization: Bearer header. The
@@ -32,7 +32,7 @@ export interface SidecarConfig {
   authToken: string;
   // Pass-through to the bridge; mirrors the bridge's evaluate_documents
   // optional configJson argument. Most callers leave this empty and
-  // accept the default seogeo Config the bridge builds.
+  // accept the default Aexeo config the bridge builds.
   configJson?: string;
 }
 

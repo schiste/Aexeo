@@ -11,7 +11,7 @@ STARTED_AT=$2
 FINISHED_AT=$3
 JSONL_LOG=$4
 
-mkdir -p .seogeo-reports
+mkdir -p .aexeo-reports
 
 COMMAND_NAME=$COMMAND_NAME \
 STARTED_AT=$STARTED_AT \
@@ -24,7 +24,7 @@ const command = process.env.COMMAND_NAME;
 const startedAt = process.env.STARTED_AT;
 const finishedAt = process.env.FINISHED_AT;
 const logPath = process.env.JSONL_LOG;
-const outputPath = ".seogeo-reports/quality-timings-latest.json";
+const outputPath = ".aexeo-reports/quality-timings-latest.json";
 
 const raw = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8") : "";
 const steps = raw

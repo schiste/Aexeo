@@ -2,7 +2,7 @@
 // aexeo-emdash-bridge crate. Field names follow what serde actually
 // serializes, not what the Rust struct fields look like: _key, listItem,
 // markDefs are the JSON shape, rule_id and snake_case scope values come
-// from seogeo-contracts. Keep them in sync when the bridge's types move.
+// from aexeo-contracts. Keep them in sync when the bridge's types move.
 
 export type BlockStyle =
   | "normal"
@@ -73,10 +73,10 @@ export interface Finding {
   scope: FindingScope;
 }
 
-// Mirror of seogeo-core's SiteIntelligenceScore. Exact subset the
+// Mirror of aexeo-core's SiteIntelligenceScore. Exact subset the
 // dashboard widget consumes; less-used fields like elapsed_us live in
 // the JSON the bridge emits but are not typed here.
-// Mirror of seogeo-core's TruthStructuredSource enum (snake_case as
+// Mirror of aexeo-core's TruthStructuredSource enum (snake_case as
 // serialized by serde). The bridge splices this onto SiteIntelligenceScore
 // JSON so the dashboard widget can badge the truth score with the actual
 // signal source — telling editors "you're seeing schema-only" vs "you're

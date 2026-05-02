@@ -7,7 +7,7 @@ Current status:
 - the crate is part of the main Cargo workspace
 - it compiles and tests from the repository root
 - `packages/aexeo-emdash/scripts/build-wasm.sh` rebuilds the published bridge assets from this source tree
-- `seogeo-core` exposes a `net` feature so the bridge can depend on the core without pulling network-only code into the WASM target
+- `aexeo-core` exposes a `net` feature so the bridge can depend on the core without pulling network-only code into the WASM target
 
 Useful commands:
 

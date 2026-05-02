@@ -34,7 +34,7 @@ function ensureInitialized(): void {
   }
   if (!(bridgeModule instanceof WebAssembly.Module)) {
     throw new Error(
-      "seogeo: WASM module did not resolve to a WebAssembly.Module — " +
+      "aexeo: WASM module did not resolve to a WebAssembly.Module — " +
         "the consumer's bundler isn't configured for .wasm imports. " +
         "Add the .wasm loader to your Vite/wrangler config; see " +
         "@aeptus/aexeo-emdash INSTALL.md for the recipe.",

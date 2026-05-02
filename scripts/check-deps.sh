@@ -3,7 +3,7 @@ set -eu
 
 . scripts/timing-lib.sh
 
-prefix=${SEOGEO_TIMINGS_SCOPE_PREFIX:-}
+prefix=${AEXEO_TIMINGS_SCOPE_PREFIX:-}
 
 if ! cargo audit --version >/dev/null 2>&1; then
     echo "cargo-audit is required; install it with: cargo install cargo-audit" >&2
@@ -26,6 +26,6 @@ EOF
     exit 1
 fi
 
-seogeo_run_timed "${prefix}cargo-audit" "network-and-cache-sensitive" cargo audit
-seogeo_run_timed "${prefix}cargo-deny-check" "cache-sensitive" cargo deny check
-seogeo_run_timed "${prefix}cargo-udeps-workspace" "cache-sensitive" cargo +nightly udeps --workspace --all-targets
+aexeo_run_timed "${prefix}cargo-audit" "network-and-cache-sensitive" cargo audit
+aexeo_run_timed "${prefix}cargo-deny-check" "cache-sensitive" cargo deny check
+aexeo_run_timed "${prefix}cargo-udeps-workspace" "cache-sensitive" cargo +nightly udeps --workspace --all-targets

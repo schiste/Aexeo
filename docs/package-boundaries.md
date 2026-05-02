@@ -11,9 +11,9 @@ application code.
 The current standalone repository already has the three core packages that must
 survive the move.
 
-- `crates/seogeo-contracts`
-- `crates/seogeo-core`
-- `crates/seogeo-cli`
+- `crates/aexeo-contracts`
+- `crates/aexeo-core`
+- `crates/aexeo-cli`
 
 ## Target Monorepo Landing Shape
 

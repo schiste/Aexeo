@@ -1,12 +1,12 @@
 # Architecture
 
-`seogeo` is now Rust-first and split into explicit product layers.
+`Aexeo` is now Rust-first and split into explicit product layers.
 
 The high-level product choices that govern this layout are recorded in [decisions.md](decisions.md).
 
 ## Contracts
 
-Stable finding and audit contracts live in [`crates/seogeo-contracts`](../crates/seogeo-contracts).
+Stable finding and audit contracts live in [`crates/aexeo-contracts`](../crates/aexeo-contracts).
 
 Responsibilities:
 - own stable finding serialization
@@ -22,7 +22,7 @@ exist in the current working directory.
 
 ## Core
 
-The canonical core lives in [`crates/seogeo-core`](../crates/seogeo-core).
+The canonical core lives in [`crates/aexeo-core`](../crates/aexeo-core).
 
 Responsibilities:
 - configuration contract and defaults
@@ -69,7 +69,7 @@ as Google-style `.md.txt` mirrors.
 
 ## CLI
 
-The canonical command surface lives in [`crates/seogeo-cli`](../crates/seogeo-cli).
+The canonical command surface lives in [`crates/aexeo-cli`](../crates/aexeo-cli).
 
 Responsibilities:
 - own the public command contract

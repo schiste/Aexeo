@@ -1,6 +1,6 @@
 # Engineering Standards
 
-This document defines implementation standards for `seogeo`.
+This document defines implementation standards for `Aexeo`.
 
 ## Goals
 

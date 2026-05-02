@@ -3,12 +3,49 @@
 version = 4
 
 [[package]]
+name = "aexeo-cli"
+version = "0.0.5"
+dependencies = [
+ "aexeo-contracts",
+ "aexeo-core",
+ "anyhow",
+ "clap",
+ "csv",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "aexeo-contracts"
+version = "0.0.5"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "aexeo-core"
+version = "0.0.5"
+dependencies = [
+ "aexeo-contracts",
+ "anyhow",
+ "base64",
+ "csv",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "url",
+]
+
+[[package]]
 name = "aexeo-emdash-bridge"
 version = "0.0.5"
 dependencies = [
+ "aexeo-contracts",
+ "aexeo-core",
  "anyhow",
- "seogeo-contracts",
- "seogeo-core",
  "serde",
  "serde_json",
  "wasm-bindgen",
@@ -902,43 +939,6 @@ name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
-
-[[package]]
-name = "seogeo-cli"
-version = "0.0.5"
-dependencies = [
- "anyhow",
- "clap",
- "csv",
- "seogeo-contracts",
- "seogeo-core",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "seogeo-contracts"
-version = "0.0.5"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "seogeo-core"
-version = "0.0.5"
-dependencies = [
- "anyhow",
- "base64",
- "csv",
- "reqwest",
- "seogeo-contracts",
- "serde",
- "serde_json",
- "tempfile",
- "toml",
- "url",
-]
 
 [[package]]
 name = "serde"

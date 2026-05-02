@@ -6,9 +6,9 @@ This document records the production-shape decisions for Aexeo.
 
 The supported command surface is the Rust workspace.
 
-- `crates/seogeo-contracts` owns stable contracts
-- `crates/seogeo-core` owns product behavior
-- `crates/seogeo-cli` owns the user-facing CLI
+- `crates/aexeo-contracts` owns stable contracts
+- `crates/aexeo-core` owns product behavior
+- `crates/aexeo-cli` owns the user-facing CLI
 
 The legacy Python runtime has been removed from the repository and must not be reintroduced as a second implementation surface.
 
@@ -67,5 +67,5 @@ The supported config contract is the nested `version = 1` TOML surface.
 
 - legacy flat keys remain compatibility inputs, not the forward-looking contract
 - compatibility mode must emit machine-readable deprecation warnings
-- CI should validate config through `seogeo config print --format json`
+- CI should validate config through `aexeo-cli config print --format json`
 - future config evolution should happen through versioned schema changes, not silent drift

@@ -1,15 +1,15 @@
-# Aexeo / seogeo
+# Aexeo
 
-`seogeo` is a Rust-first SEO and GEO linting/runtime toolkit for websites.
+`Aexeo` is a Rust-first SEO and GEO linting/runtime toolkit for websites.
 
 The repository currently contains:
 
-- `crates/seogeo-contracts`: stable finding and audit contracts
-- `crates/seogeo-core`: config, rule engine, reporting, generation, and intelligence logic
-- `crates/seogeo-cli`: the canonical CLI surface
+- `crates/aexeo-contracts`: stable finding and audit contracts
+- `crates/aexeo-core`: config, rule engine, reporting, generation, and intelligence logic
+- `crates/aexeo-cli`: the canonical CLI surface
 - `crates/aexeo-emdash-bridge`: the WASM bridge used by the emdash plugin
 - `packages/aexeo-emdash`: the published `@aeptus/aexeo-emdash` npm package
-- `packages/seogeo-crawl-worker`: optional Cloudflare worker for sandboxed plugin deployments
+- `packages/aexeo-crawl-worker`: optional Cloudflare worker for sandboxed plugin deployments
 
 The source tree is licensed under [MIT](LICENSE). The Rust crates are not yet published on `crates.io`; build from source or consume GitHub release artifacts. The emdash plugin ships on npm and now rebuilds its bridge WASM from the current Rust source during `npm run build`.
 
@@ -18,7 +18,7 @@ The source tree is licensed under [MIT](LICENSE). The Rust crates are not yet pu
 Build and run the CLI from source:
 
 ```bash
-cargo run -p seogeo-cli -- check .
+cargo run -p aexeo-cli -- check .
 ```
 
 Run the Rust test suite:
@@ -51,27 +51,27 @@ sh scripts/ci-local.sh
 ## Commands
 
 ```bash
-cargo run -p seogeo-cli -- check .
-cargo run -p seogeo-cli -- crawl http://localhost:8000 --engine http
-cargo run -p seogeo-cli -- fix .
-cargo run -p seogeo-cli -- generate llms .
-cargo run -p seogeo-cli -- generate robots .
-cargo run -p seogeo-cli -- generate sitemap . --site-url https://example.com
-cargo run -p seogeo-cli -- generate links .
-cargo run -p seogeo-cli -- config print . --format toml
-cargo run -p seogeo-cli -- baseline .
-cargo run -p seogeo-cli -- verify https://staging.example.com --baseline .seogeo-baseline.json
-cargo run -p seogeo-cli -- diff baseline.json current.json
-cargo run -p seogeo-cli -- docs generate .
-cargo run -p seogeo-cli -- docs check .
-cargo run -p seogeo-cli -- quality .
-cargo run -p seogeo-cli -- snippet inspect --path . --route about
-cargo run -p seogeo-cli -- indexnow validate https://example.com abc123 --path .
-cargo run -p seogeo-cli -- bing-ai import bing-ai.csv --audit .seogeo-reports/crawl-latest.json
-cargo run -p seogeo-cli -- search-console export .seogeo-reports/check-latest.json --site-url https://example.com --format csv
-cargo run -p seogeo-cli -- publish-hook run . --changed-url https://example.com/ --indexnow-key abc123
-cargo run -p seogeo-cli -- rules
-cargo run -p seogeo-cli -- adapters
+cargo run -p aexeo-cli -- check .
+cargo run -p aexeo-cli -- crawl http://localhost:8000 --engine http
+cargo run -p aexeo-cli -- fix .
+cargo run -p aexeo-cli -- generate llms .
+cargo run -p aexeo-cli -- generate robots .
+cargo run -p aexeo-cli -- generate sitemap . --site-url https://example.com
+cargo run -p aexeo-cli -- generate links .
+cargo run -p aexeo-cli -- config print . --format toml
+cargo run -p aexeo-cli -- baseline .
+cargo run -p aexeo-cli -- verify https://staging.example.com --baseline .aexeo-baseline.json
+cargo run -p aexeo-cli -- diff baseline.json current.json
+cargo run -p aexeo-cli -- docs generate .
+cargo run -p aexeo-cli -- docs check .
+cargo run -p aexeo-cli -- quality .
+cargo run -p aexeo-cli -- snippet inspect --path . --route about
+cargo run -p aexeo-cli -- indexnow validate https://example.com abc123 --path .
+cargo run -p aexeo-cli -- bing-ai import bing-ai.csv --audit .aexeo-reports/crawl-latest.json
+cargo run -p aexeo-cli -- search-console export .aexeo-reports/check-latest.json --site-url https://example.com --format csv
+cargo run -p aexeo-cli -- publish-hook run . --changed-url https://example.com/ --indexnow-key abc123
+cargo run -p aexeo-cli -- rules
+cargo run -p aexeo-cli -- adapters
 ```
 
 ## Product Areas
@@ -107,4 +107,4 @@ cargo run -p seogeo-cli -- adapters
 
 ## Notes
 
-`cargo run -p seogeo-cli -- docs generate .` refreshes generated docs from the Rust codebase. `cargo run -p seogeo-cli -- docs check .` fails when those docs are stale.
+`cargo run -p aexeo-cli -- docs generate .` refreshes generated docs from the Rust codebase. `cargo run -p aexeo-cli -- docs check .` fails when those docs are stale.

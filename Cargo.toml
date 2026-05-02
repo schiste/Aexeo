@@ -1,9 +1,9 @@
 [workspace]
 members = [
   "crates/tempfile",
-  "crates/seogeo-contracts",
-  "crates/seogeo-core",
-  "crates/seogeo-cli",
+  "crates/aexeo-contracts",
+  "crates/aexeo-core",
+  "crates/aexeo-cli",
   "crates/aexeo-emdash-bridge",
 ]
 resolver = "2"

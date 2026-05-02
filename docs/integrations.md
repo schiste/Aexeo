@@ -1,6 +1,6 @@
 # Integrations
 
-`seogeo` now exposes a small integration surface for snippet eligibility, Bing AI export alignment, Search Console-oriented exports, and IndexNow freshness workflows.
+`Aexeo` now exposes a small integration surface for snippet eligibility, Bing AI export alignment, Search Console-oriented exports, and IndexNow freshness workflows.
 
 ## Intelligence
 
@@ -18,10 +18,10 @@ Grounding map infers:
 Example:
 
 ```bash
-cargo run -p seogeo-cli -- intelligence grounding-map .
+cargo run -p aexeo-cli -- intelligence grounding-map .
 ```
 
-The command writes `.seogeo-reports/grounding-map-latest.json` and reports:
+The command writes `.aexeo-reports/grounding-map-latest.json` and reports:
 
 - pages analyzed
 - topic clusters
@@ -42,10 +42,10 @@ Evidence assessment focuses on:
 Example:
 
 ```bash
-cargo run -p seogeo-cli -- intelligence evidence assess .
+cargo run -p aexeo-cli -- intelligence evidence assess .
 ```
 
-The command writes `.seogeo-reports/evidence-latest.json` and reports:
+The command writes `.aexeo-reports/evidence-latest.json` and reports:
 
 - claim count and claim-kind mix
 - unsupported claim volume
@@ -62,17 +62,17 @@ related subqueries. It is deterministic and does not require an LLM.
 Example:
 
 ```bash
-cargo run -p seogeo-cli -- intelligence fanout assess .
+cargo run -p aexeo-cli -- intelligence fanout assess .
 ```
 
 Runtime crawl artifacts are the preferred input for live-site analysis:
 
 ```bash
-cargo run -p seogeo-cli -- intelligence fanout assess \
-  --from-crawl-artifact .seogeo-reports/crawl-latest.json
+cargo run -p aexeo-cli -- intelligence fanout assess \
+  --from-crawl-artifact .aexeo-reports/crawl-latest.json
 ```
 
-The command writes `.seogeo-reports/answer-fanout-latest.json` and generates
+The command writes `.aexeo-reports/answer-fanout-latest.json` and generates
 coverage checks for:
 
 - definition queries
@@ -103,18 +103,18 @@ Markdown mirrors, sitemap, robots, feeds, and static discovery links.
 Example:
 
 ```bash
-cargo run -p seogeo-cli -- intelligence surfaces discover . --site-url https://example.com
+cargo run -p aexeo-cli -- intelligence surfaces discover . --site-url https://example.com
 ```
 
 Runtime crawl artifacts preserve the actual crawled HTML and optional machine
 artifacts, so they avoid accidentally scanning a repository checkout:
 
 ```bash
-cargo run -p seogeo-cli -- intelligence surfaces discover \
-  --from-crawl-artifact .seogeo-reports/crawl-latest.json
+cargo run -p aexeo-cli -- intelligence surfaces discover \
+  --from-crawl-artifact .aexeo-reports/crawl-latest.json
 ```
 
-The command writes `.seogeo-reports/machine-surfaces-latest.json` and records:
+The command writes `.aexeo-reports/machine-surfaces-latest.json` and records:
 
 - discovered surfaces
 - discovery source such as `static_link`, `llms_index`, `sitemap`,
@@ -144,8 +144,8 @@ Facts assessment compares:
 Examples:
 
 ```bash
-cargo run -p seogeo-cli -- intelligence facts assess .
-cargo run -p seogeo-cli -- intelligence facts assess . --manifest ./facts.json --format json
+cargo run -p aexeo-cli -- intelligence facts assess .
+cargo run -p aexeo-cli -- intelligence facts assess . --manifest ./facts.json --format json
 ```
 
 Manifest discovery order:
@@ -159,7 +159,7 @@ Manifest discovery order:
 Validate the manifest contract explicitly before relying on it for scoring:
 
 ```bash
-cargo run -p seogeo-cli -- intelligence facts validate .
+cargo run -p aexeo-cli -- intelligence facts validate .
 ```
 
 The manifest contract is documented in [docs/schemas/facts.schema.json](/Users/christophehenner/Downloads/Repositories/Aexeo/docs/schemas/facts.schema.json).
@@ -177,10 +177,10 @@ Use facts generation to bootstrap a first deployable `facts.json` from existing 
 Examples:
 
 ```bash
-cargo run -p seogeo-cli -- intelligence facts generate .
-cargo run -p seogeo-cli -- intelligence facts generate . --curate
-cargo run -p seogeo-cli -- intelligence facts generate . --deploy-location root
-cargo run -p seogeo-cli -- intelligence facts generate . --write .well-known/facts.json --format json
+cargo run -p aexeo-cli -- intelligence facts generate .
+cargo run -p aexeo-cli -- intelligence facts generate . --curate
+cargo run -p aexeo-cli -- intelligence facts generate . --deploy-location root
+cargo run -p aexeo-cli -- intelligence facts generate . --write .well-known/facts.json --format json
 ```
 
 What it does:
@@ -193,7 +193,7 @@ What it does:
 
 Default report artifact:
 
-- `.seogeo-reports/facts-manifest-generated.json`
+- `.aexeo-reports/facts-manifest-generated.json`
 
 Deploy options:
 
@@ -209,9 +209,9 @@ core AI-readable artifacts.
 Examples:
 
 ```bash
-cargo run -p seogeo-cli -- generate machine-bundle .
-cargo run -p seogeo-cli -- generate machine-bundle . --write-dir ./public
-cargo run -p seogeo-cli -- generate markdown-pages . --write-dir ./public
+cargo run -p aexeo-cli -- generate machine-bundle .
+cargo run -p aexeo-cli -- generate machine-bundle . --write-dir ./public
+cargo run -p aexeo-cli -- generate markdown-pages . --write-dir ./public
 ```
 
 The full bundle includes:
@@ -239,13 +239,13 @@ The feature is import-based rather than scraper-based so that it stays determini
 Example import:
 
 ```bash
-cargo run -p seogeo-cli -- intelligence trust-surface import trust-surfaces.csv --root .
+cargo run -p aexeo-cli -- intelligence trust-surface import trust-surfaces.csv --root .
 ```
 
 For a realistic fixture-driven workflow, see:
 
-- [crates/seogeo-cli/tests/fixtures/chau7-trust-surfaces.json](/Users/christophehenner/Downloads/Repositories/Aexeo/crates/seogeo-cli/tests/fixtures/chau7-trust-surfaces.json)
-- [crates/seogeo-cli/tests/fixtures/chau7-mini-site](/Users/christophehenner/Downloads/Repositories/Aexeo/crates/seogeo-cli/tests/fixtures/chau7-mini-site)
+- [crates/aexeo-cli/tests/fixtures/chau7-trust-surfaces.json](/Users/christophehenner/Downloads/Repositories/Aexeo/crates/aexeo-cli/tests/fixtures/chau7-trust-surfaces.json)
+- [crates/aexeo-cli/tests/fixtures/chau7-mini-site](/Users/christophehenner/Downloads/Repositories/Aexeo/crates/aexeo-cli/tests/fixtures/chau7-mini-site)
 
 Supported columns:
 
@@ -266,7 +266,7 @@ Reconciliation compares those imported surfaces against:
 Example:
 
 ```bash
-cargo run -p seogeo-cli -- intelligence trust-surface reconcile trust-surfaces.csv . --site-url https://example.com
+cargo run -p aexeo-cli -- intelligence trust-surface reconcile trust-surfaces.csv . --site-url https://example.com
 ```
 
 The reconciliation report highlights:
@@ -283,7 +283,7 @@ Use the score workflow when you want a product-level summary instead of separate
 Example:
 
 ```bash
-cargo run -p seogeo-cli -- intelligence score . --site-url https://example.com --trust-surfaces trust-surfaces.json
+cargo run -p aexeo-cli -- intelligence score . --site-url https://example.com --trust-surfaces trust-surfaces.json
 ```
 
 The score report combines:
@@ -293,7 +293,7 @@ The score report combines:
 - answer-pack quality from grounding gaps
 - optional external trust alignment from reconciled trust surfaces
 
-It writes `.seogeo-reports/intelligence-score-latest.json` and includes:
+It writes `.aexeo-reports/intelligence-score-latest.json` and includes:
 
 - site-level score breakdown
 - route-level scores
@@ -307,8 +307,8 @@ Use snippet inspection when you need to understand whether a route or live URL i
 Examples:
 
 ```bash
-cargo run -p seogeo-cli -- snippet inspect --path . --route about
-cargo run -p seogeo-cli -- snippet inspect --url https://example.com/about --format json
+cargo run -p aexeo-cli -- snippet inspect --path . --route about
+cargo run -p aexeo-cli -- snippet inspect --url https://example.com/about --format json
 ```
 
 What it reports:
@@ -327,11 +327,11 @@ Use IndexNow validation to confirm key format and key-file placement before publ
 Examples:
 
 ```bash
-cargo run -p seogeo-cli -- indexnow validate https://example.com abc123 --path .
-cargo run -p seogeo-cli -- indexnow plan https://api.indexnow.org/indexnow https://example.com abc123 --path . https://example.com/a
-cargo run -p seogeo-cli -- indexnow submit https://api.indexnow.org/indexnow https://example.com abc123 https://example.com/a https://example.com/b
-cargo run -p seogeo-cli -- indexnow ledger .
-cargo run -p seogeo-cli -- indexnow retry --path . abc123
+cargo run -p aexeo-cli -- indexnow validate https://example.com abc123 --path .
+cargo run -p aexeo-cli -- indexnow plan https://api.indexnow.org/indexnow https://example.com abc123 --path . https://example.com/a
+cargo run -p aexeo-cli -- indexnow submit https://api.indexnow.org/indexnow https://example.com abc123 https://example.com/a https://example.com/b
+cargo run -p aexeo-cli -- indexnow ledger .
+cargo run -p aexeo-cli -- indexnow retry --path . abc123
 ```
 
 `indexnow validate` supports two modes:
@@ -354,7 +354,7 @@ cargo run -p seogeo-cli -- indexnow retry --path . abc123
 - `keyLocation`
 - `urlList`
 
-When `--path` is provided on submit, Aexeo records the attempt into `.seogeo-reports/indexnow-ledger.json`. The ledger stores:
+When `--path` is provided on submit, Aexeo records the attempt into `.aexeo-reports/indexnow-ledger.json`. The ledger stores:
 
 - submission timestamp
 - attempt number
@@ -376,9 +376,9 @@ Use Bing AI import to align exported Bing AI visibility rows with Aexeo audit fi
 Examples:
 
 ```bash
-cargo run -p seogeo-cli -- bing-ai import bing-ai.csv --audit .seogeo-reports/crawl-latest.json
-cargo run -p seogeo-cli -- bing-ai import bing-ai.json --format json
-cargo run -p seogeo-cli -- bing-ai opportunities bing-ai.csv --audit .seogeo-reports/crawl-latest.json
+cargo run -p aexeo-cli -- bing-ai import bing-ai.csv --audit .aexeo-reports/crawl-latest.json
+cargo run -p aexeo-cli -- bing-ai import bing-ai.json --format json
+cargo run -p aexeo-cli -- bing-ai opportunities bing-ai.csv --audit .aexeo-reports/crawl-latest.json
 ```
 
 Supported inputs:
@@ -404,12 +404,12 @@ Use the trend workflow to persist repeated Bing AI imports and compare week-over
 Examples:
 
 ```bash
-cargo run -p seogeo-cli -- bing-ai trend import bing-ai-week-1.csv --root . --audit .seogeo-reports/crawl-latest.json
-cargo run -p seogeo-cli -- bing-ai trend import bing-ai-week-2.csv --root . --audit .seogeo-reports/crawl-latest.json
-cargo run -p seogeo-cli -- bing-ai trend show .
+cargo run -p aexeo-cli -- bing-ai trend import bing-ai-week-1.csv --root . --audit .aexeo-reports/crawl-latest.json
+cargo run -p aexeo-cli -- bing-ai trend import bing-ai-week-2.csv --root . --audit .aexeo-reports/crawl-latest.json
+cargo run -p aexeo-cli -- bing-ai trend show .
 ```
 
-Trend history is written to `.seogeo-reports/bing-ai-trends.json`.
+Trend history is written to `.aexeo-reports/bing-ai-trends.json`.
 
 The trend report highlights:
 
@@ -425,8 +425,8 @@ Use Search Console export to turn one audit artifact into route-level rows that 
 Examples:
 
 ```bash
-cargo run -p seogeo-cli -- search-console export .seogeo-reports/crawl-latest.json --site-url https://example.com --format csv
-cargo run -p seogeo-cli -- search-console export .seogeo-reports/check-latest.json --format json
+cargo run -p aexeo-cli -- search-console export .aexeo-reports/crawl-latest.json --site-url https://example.com --format csv
+cargo run -p aexeo-cli -- search-console export .aexeo-reports/check-latest.json --format json
 ```
 
 Each row includes:
@@ -446,7 +446,7 @@ Use the publish-hook flow when a deployment system already knows which URLs chan
 Examples:
 
 ```bash
-cargo run -p seogeo-cli -- publish-hook run . \
+cargo run -p aexeo-cli -- publish-hook run . \
   --changed-url https://example.com/ \
   --changed-url https://example.com/about \
   --indexnow-key abc123 \

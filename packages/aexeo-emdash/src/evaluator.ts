@@ -16,8 +16,8 @@ import {
 } from "../wasm/aexeo_emdash_bridge.js";
 
 export interface EvaluateOptions {
-  // Serialized seogeo Config. When omitted, the bridge evaluates with
-  // Config::default(), matching what a cold seogeo CLI run would use.
+  // Serialized Aexeo config. When omitted, the bridge evaluates with
+  // Config::default(), matching what a cold Aexeo CLI run would use.
   configJson?: string;
 }
 

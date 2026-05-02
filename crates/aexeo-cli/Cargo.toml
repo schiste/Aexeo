@@ -1,0 +1,20 @@
+[package]
+name = "aexeo-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+csv.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+aexeo-core = { version = "0.0.5", path = "../aexeo-core" }
+aexeo-contracts = { version = "0.0.5", path = "../aexeo-contracts" }
+
+[dev-dependencies]
+tempfile = { version = "0.0.5", path = "../tempfile" }

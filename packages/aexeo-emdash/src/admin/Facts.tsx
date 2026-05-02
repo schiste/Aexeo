@@ -17,7 +17,7 @@
 import * as React from "react";
 import { useCallback, useEffect, useState } from "react";
 
-const PLUGIN_ID = "aexeo-seogeo";
+const PLUGIN_ID = "aexeo-emdash";
 const API_BASE = "/_emdash/api";
 
 interface ManifestData {
