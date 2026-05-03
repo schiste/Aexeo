@@ -62,6 +62,21 @@ export type FindingSeverity = "error" | "warning";
 
 export type FindingScope = "page" | "template" | "sitewide";
 
+/// The four-layer GEO model. Mirror of aexeo-contracts::Layer.
+/// The bridge enriches each Finding with its rule's primary + secondary
+/// layers; the plugin admin groups findings by primary layer for the
+/// four-pillar UI restructure.
+export type Layer =
+  | "retrievability"
+  | "citability"
+  | "absorbability"
+  | "entity_legitimacy";
+
+export interface RuleLayers {
+  primary: Layer;
+  secondaries: Layer[];
+}
+
 export interface Finding {
   rule_id: string;
   message: string;
@@ -71,6 +86,45 @@ export interface Finding {
   severity: FindingSeverity;
   suggestion: string | null;
   scope: FindingScope;
+  /// Populated by the bridge when emitting findings via
+  /// evaluateDocuments. Optional in the type so legacy KV entries
+  /// (written before the bridge enrichment landed) still parse.
+  layers?: RuleLayers;
+}
+
+/// Stable display order for the four pillars. Used by the plugin's
+/// admin pages and dashboard widget. Mirrors Layer::ordered() in Rust.
+export const LAYERS_ORDERED: readonly Layer[] = [
+  "retrievability",
+  "citability",
+  "absorbability",
+  "entity_legitimacy",
+] as const;
+
+export function layerHumanLabel(layer: Layer): string {
+  switch (layer) {
+    case "retrievability":
+      return "Retrievability";
+    case "citability":
+      return "Citability";
+    case "absorbability":
+      return "Absorbability";
+    case "entity_legitimacy":
+      return "Entity legitimacy";
+  }
+}
+
+export function layerOneLineDescription(layer: Layer): string {
+  switch (layer) {
+    case "retrievability":
+      return "Can the engine find the page at all? Robots, sitemap, internal links, machine-readable surfaces.";
+    case "citability":
+      return "Once retrieved, does it look worth citing? Structure, schema, evidence density, scannability.";
+    case "absorbability":
+      return "Does the answer actually use this content? Cite-ready evidence, mirrors, llms.txt.";
+    case "entity_legitimacy":
+      return "Does the entity exist strongly enough to be selected at all? Aexeo surfaces this layer; it does not fix it.";
+  }
 }
 
 // Mirror of aexeo-core's SiteIntelligenceScore. Exact subset the
