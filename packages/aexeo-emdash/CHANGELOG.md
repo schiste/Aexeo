@@ -6,6 +6,26 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-05-03
+
+Fix for the entity-presence diagnostic shipped in 0.8.0.
+
+### Fixed
+
+- `EntityPresence` admin component's fetch to `/presence` was
+  missing the `X-EmDash-Request: 1` header that emdash's catch-all
+  plugin-route handler requires for state-changing methods on
+  private routes. Without it the host returns 403 CSRF_REJECTED
+  before the plugin handler runs, and the host's plugin-registry
+  bundle then crashes on the rejected response shape with a
+  `Cannot read properties of undefined (reading 'trim')` error
+  during admin-page render. With the header added, both the 403
+  and the downstream trim crash clear.
+
+  The `/data`, `/refresh`, and `/facts` routes were already sending
+  the header — `/presence` was the new addition and the omission
+  shipped in 0.8.0.
+
 ## [0.8.0] - 2026-05-03
 
 Layer-4 entity-presence diagnostic. The `/entity-legitimacy`
@@ -499,7 +519,8 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.0...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.1...HEAD
+[0.8.1]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.0...aexeo-emdash-v0.8.1
 [0.8.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.7.0...aexeo-emdash-v0.8.0
 [0.7.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.6.0...aexeo-emdash-v0.7.0
 [0.6.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.5.0...aexeo-emdash-v0.6.0
