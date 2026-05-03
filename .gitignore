@@ -14,3 +14,7 @@ build/
 .aexeo-reports/
 target/
 .DS_Store
+
+# Local research scratch — paper PDFs and HTML downloads. Always
+# session-local, never committed.
+tmp/

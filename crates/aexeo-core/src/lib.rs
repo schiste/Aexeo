@@ -80,13 +80,13 @@ pub use policy::apply_policy;
 pub use quality::{QUALITY_RULES, run_repo_quality_checks};
 pub use registry::{
     AdapterDefinition, RuleDescriptor, RuleGroupDefinition, builtin_adapters, builtin_rule_groups,
-    list_adapter_names, list_rule_group_names,
+    list_adapter_names, list_rule_group_names, rule_descriptor_for_id, rule_layers_for_id,
 };
 pub use reporting::{
-    DEFAULT_AUDIT_LOG_LIMIT, build_audit_artifact, build_recap_lines, render_audit_artifact_json,
-    render_json, render_markdown_artifact, render_sarif, render_text, render_text_artifact,
-    rule_group_name, summarize_findings, write_audit_artifact, write_partial_audit_artifact,
-    write_progress_audit_artifact,
+    DEFAULT_AUDIT_LOG_LIMIT, LayerBreakdown, build_audit_artifact, build_recap_lines,
+    render_audit_artifact_json, render_json, render_markdown_artifact, render_sarif, render_text,
+    render_text_artifact, rule_group_name, summarize_findings, summarize_findings_by_layer,
+    write_audit_artifact, write_partial_audit_artifact, write_progress_audit_artifact,
 };
 pub use robots_rules::run_robots_rules;
 #[cfg(feature = "net")]

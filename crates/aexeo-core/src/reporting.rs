@@ -76,6 +76,43 @@ pub fn summarize_findings(findings: &[Finding]) -> AuditSummary {
     }
 }
 
+/// Per-layer breakdown of a finding set. Used by `aexeo-cli check`
+/// rendering and the plugin's dashboard widget. A finding is counted
+/// once at its rule's primary layer; secondary layers are not counted
+/// here to keep totals stable (sum of layer counts == total findings).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LayerBreakdown {
+    pub layer: aexeo_contracts::Layer,
+    pub total: usize,
+    pub errors: usize,
+    pub warnings: usize,
+}
+
+pub fn summarize_findings_by_layer(findings: &[Finding]) -> Vec<LayerBreakdown> {
+    use aexeo_contracts::Layer;
+    let mut out: Vec<LayerBreakdown> = Layer::ordered()
+        .iter()
+        .map(|&layer| LayerBreakdown {
+            layer,
+            total: 0,
+            errors: 0,
+            warnings: 0,
+        })
+        .collect();
+    for finding in findings {
+        let primary = crate::registry::rule_layers_for_id(&finding.rule_id).primary;
+        if let Some(bucket) = out.iter_mut().find(|b| b.layer == primary) {
+            bucket.total += 1;
+            if finding.is_error() {
+                bucket.errors += 1;
+            } else {
+                bucket.warnings += 1;
+            }
+        }
+    }
+    out
+}
+
 fn rule_is_sitewide(rule_id: &str) -> bool {
     matches!(
         rule_id,
@@ -516,6 +553,37 @@ pub fn render_text_artifact(
     let mut lines = vec!["Audit Report".to_string(), String::new()];
     lines.extend(artifact_status_lines(artifact));
     if !lines.last().is_some_and(|line| line.is_empty()) {
+        lines.push(String::new());
+    }
+
+    // Per-layer breakdown — gives the editor a one-glance read of which
+    // GEO layer needs attention before they dive into the per-scope
+    // findings list. Entity legitimacy is always shown as "not measured"
+    // for now (Aexeo surfaces it via the plugin's external-presence
+    // diagnostic, not via static rule findings).
+    let breakdown = summarize_findings_by_layer(&artifact.findings);
+    if !breakdown.is_empty() {
+        lines.push("By layer:".to_string());
+        for entry in &breakdown {
+            if entry.layer == aexeo_contracts::Layer::EntityLegitimacy {
+                lines.push(format!(
+                    "  {}: not measured by static audit (use the plugin's entity-presence diagnostic)",
+                    entry.layer.label()
+                ));
+                continue;
+            }
+            if entry.total == 0 {
+                lines.push(format!("  {}: clean", entry.layer.label()));
+            } else {
+                lines.push(format!(
+                    "  {}: {} ({} errors, {} warnings)",
+                    entry.layer.label(),
+                    entry.total,
+                    entry.errors,
+                    entry.warnings,
+                ));
+            }
+        }
         lines.push(String::new());
     }
 

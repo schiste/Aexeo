@@ -1,4 +1,4 @@
-use aexeo_contracts::{ConfidenceLevel, RuleClass, RuleMetadata};
+use aexeo_contracts::{ConfidenceLevel, Layer, RuleClass, RuleLayers, RuleMetadata};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuleDescriptor {
@@ -24,6 +24,10 @@ pub struct AdapterDefinition {
 impl RuleDescriptor {
     pub fn metadata(&self) -> RuleMetadata {
         rule_metadata_for_id(self.rule_id)
+    }
+
+    pub fn layers(&self) -> RuleLayers {
+        rule_layers_for_id(self.rule_id)
     }
 }
 
@@ -104,6 +108,93 @@ pub fn rule_metadata_for_id(rule_id: &str) -> RuleMetadata {
         metadata.confidence = ConfidenceLevel::High;
     }
     metadata
+}
+
+/// Default layer assignment by rule-ID prefix. The prefix usually
+/// determines the family (LNK = retrievability links, SCH = citability
+/// schema, etc.); per-rule overrides in `rule_layers_for_id` handle the
+/// outliers.
+fn layers_for_prefix(prefix: &str) -> RuleLayers {
+    match prefix {
+        // SEO: title / description / meta. Most directly help the
+        // generator decide what's worth citing once retrieved.
+        // Secondary retrievability because search engines also use these.
+        "SEO" => RuleLayers::with_secondaries(Layer::Citability, vec![Layer::Retrievability]),
+        // LNK: link integrity. Broken or missing links break crawl /
+        // graph traversal — purely retrievability.
+        "LNK" => RuleLayers::primary_only(Layer::Retrievability),
+        // MAP: sitemap. Pure retrievability.
+        "MAP" => RuleLayers::primary_only(Layer::Retrievability),
+        // ROB: robots.txt and meta-robots. Pure retrievability.
+        "ROB" => RuleLayers::primary_only(Layer::Retrievability),
+        // SOC: Open Graph / Twitter. Snippet content shown in shared
+        // contexts. Citability primary (it's how previews compose);
+        // retrievability secondary (some engines weigh OG).
+        "SOC" => RuleLayers::with_secondaries(Layer::Citability, vec![Layer::Retrievability]),
+        // SCH: schema.org / JSON-LD. Citability primary (machine-legible
+        // structure for citation); absorbability secondary (entities
+        // and relations the generator can lift).
+        "SCH" => RuleLayers::with_secondaries(Layer::Citability, vec![Layer::Absorbability]),
+        // LLM: llms.txt and friends. Absorbability primary (cite-ready
+        // content for LLMs); retrievability secondary (a discovered
+        // surface).
+        "LLM" => RuleLayers::with_secondaries(Layer::Absorbability, vec![Layer::Retrievability]),
+        // SRF: surface graph (machine-readable surfaces, manifests,
+        // discovery). Retrievability primary; absorbability secondary
+        // because mirrors and llms feed both.
+        "SRF" => RuleLayers::with_secondaries(Layer::Retrievability, vec![Layer::Absorbability]),
+        // CNT: content rules. Citability primary (whether the content
+        // is structured well enough to cite); absorbability secondary.
+        "CNT" => RuleLayers::with_secondaries(Layer::Citability, vec![Layer::Absorbability]),
+        // GEO: structural and content patterns specifically for
+        // generative engines. Citability primary; absorbability
+        // secondary.
+        "GEO" => RuleLayers::with_secondaries(Layer::Citability, vec![Layer::Absorbability]),
+        // CRW: crawl-state diagnostics. Pure retrievability.
+        "CRW" => RuleLayers::primary_only(Layer::Retrievability),
+        // DEP: deprecated / migration warnings. Citability default
+        // (most are about page metadata).
+        "DEP" => RuleLayers::primary_only(Layer::Citability),
+        // QLT: quality / repo-config. Citability default — these are
+        // typically about content quality.
+        "QLT" => RuleLayers::primary_only(Layer::Citability),
+        // FACTS: truth manifest rules. Pure entity legitimacy.
+        "FACTS" => RuleLayers::primary_only(Layer::EntityLegitimacy),
+        // Unknown prefix: default to citability (most rules are about
+        // making the page worth citing). Better than crashing.
+        _ => RuleLayers::primary_only(Layer::Citability),
+    }
+}
+
+/// Per-rule layer overrides. Most rules pick up the prefix default.
+/// The overrides here are for rules whose individual purpose differs
+/// from their family's typical layer.
+pub fn rule_layers_for_id(rule_id: &str) -> RuleLayers {
+    let prefix: String = rule_id
+        .chars()
+        .take_while(|ch| ch.is_ascii_uppercase())
+        .collect();
+    let mut layers = layers_for_prefix(&prefix);
+
+    // Schema rules whose primary effect is retrievability / discovery
+    // rather than citation-shape:
+    //   SCH011 — home page sitewide context (retrievability primary)
+    //   SCH015 — search page SearchAction (retrievability primary)
+    if matches!(rule_id, "SCH011" | "SCH015") {
+        layers = RuleLayers::with_secondaries(Layer::Retrievability, vec![Layer::Citability]);
+    }
+    // GEO009 (fact alignment across title/H1/OG/JSON-LD) is pure
+    // citability — it doesn't help absorbability.
+    if rule_id == "GEO009" {
+        layers = RuleLayers::primary_only(Layer::Citability);
+    }
+    // SRF005 / SRF006 (mirror discoverability) are absorbability primary
+    // because the mirror is the content the generator absorbs.
+    if matches!(rule_id, "SRF005" | "SRF006") {
+        layers = RuleLayers::with_secondaries(Layer::Absorbability, vec![Layer::Retrievability]);
+    }
+
+    layers
 }
 
 pub fn rule_descriptor_for_id(rule_id: &str) -> Option<&'static RuleDescriptor> {
@@ -635,8 +726,11 @@ pub fn list_adapter_names() -> Vec<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{list_adapter_names, list_rule_group_names, rule_metadata_for_id};
-    use aexeo_contracts::{ConfidenceLevel, RuleClass};
+    use super::{
+        builtin_rule_groups, list_adapter_names, list_rule_group_names, rule_layers_for_id,
+        rule_metadata_for_id,
+    };
+    use aexeo_contracts::{ConfidenceLevel, Layer, RuleClass};
 
     #[test]
     fn preserves_rule_group_order() {
@@ -675,5 +769,70 @@ mod tests {
 
         let geo = rule_metadata_for_id("GEO007");
         assert!(matches!(geo.class, RuleClass::Heuristic));
+    }
+
+    #[test]
+    fn assigns_layers_by_prefix_default() {
+        // SEO defaults to citability primary, retrievability secondary.
+        let seo = rule_layers_for_id("SEO001");
+        assert_eq!(seo.primary, Layer::Citability);
+        assert!(seo.secondaries.contains(&Layer::Retrievability));
+
+        // ROB and MAP are pure retrievability.
+        assert_eq!(rule_layers_for_id("ROB001").primary, Layer::Retrievability);
+        assert!(rule_layers_for_id("ROB001").secondaries.is_empty());
+        assert_eq!(rule_layers_for_id("MAP001").primary, Layer::Retrievability);
+
+        // SCH defaults to citability.
+        assert_eq!(rule_layers_for_id("SCH001").primary, Layer::Citability);
+        assert!(
+            rule_layers_for_id("SCH001")
+                .secondaries
+                .contains(&Layer::Absorbability)
+        );
+
+        // LLM defaults to absorbability.
+        assert_eq!(rule_layers_for_id("LLM001").primary, Layer::Absorbability);
+    }
+
+    #[test]
+    fn applies_per_rule_layer_overrides() {
+        // SCH011 / SCH015 are retrievability-primary, not citability.
+        assert_eq!(
+            rule_layers_for_id("SCH011").primary,
+            Layer::Retrievability,
+            "SCH011 (home sitewide context) is retrievability-primary"
+        );
+        assert_eq!(
+            rule_layers_for_id("SCH015").primary,
+            Layer::Retrievability,
+            "SCH015 (search SearchAction) is retrievability-primary"
+        );
+        // SRF005 / SRF006 are absorbability-primary (mirror discoverability
+        // is about reaching content the generator absorbs).
+        assert_eq!(
+            rule_layers_for_id("SRF005").primary,
+            Layer::Absorbability,
+            "SRF005 mirror-discoverability is absorbability-primary"
+        );
+    }
+
+    #[test]
+    fn every_rule_in_registry_has_a_layer_assignment() {
+        // Smoke test: layer_for_id must not panic on any registered rule
+        // and every assignment must have a sensible primary layer.
+        for group in builtin_rule_groups() {
+            for descriptor in group.rules {
+                let layers = rule_layers_for_id(descriptor.rule_id);
+                assert!(
+                    layers.primary == Layer::Retrievability
+                        || layers.primary == Layer::Citability
+                        || layers.primary == Layer::Absorbability
+                        || layers.primary == Layer::EntityLegitimacy,
+                    "rule {} has no valid primary layer",
+                    descriptor.rule_id
+                );
+            }
+        }
     }
 }

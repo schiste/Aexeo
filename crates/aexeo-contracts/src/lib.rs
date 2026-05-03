@@ -22,6 +22,94 @@ pub struct RuleMetadata {
     pub confidence: ConfidenceLevel,
 }
 
+/// The four-layer GEO model from the May 2026 literature synthesis.
+/// Each rule is tagged with one primary layer (the one it most directly
+/// serves) plus zero or more secondary layers (the ones it also affects).
+///
+/// - `Retrievability`: can the engine find the page at all? (robots,
+///   sitemap, internal links, machine-readable surfaces)
+/// - `Citability`: once retrieved, does it look worth citing? (structure,
+///   schema, evidence density, scannable content)
+/// - `Absorbability`: does the answer actually use this content? (cite-
+///   ready evidence units, markdown mirrors, llms.txt)
+/// - `EntityLegitimacy`: does the entity exist strongly enough to be
+///   selected at all? (truth manifest, external presence — Aexeo
+///   surfaces but does not fix this layer)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Layer {
+    Retrievability,
+    Citability,
+    Absorbability,
+    EntityLegitimacy,
+}
+
+impl Layer {
+    /// Stable display order for grouping output. Mirrors the
+    /// upstream-to-downstream reading the synthesis paper proposes:
+    /// retrievability gates everything; entity legitimacy is the
+    /// hardest-to-fix outermost concern.
+    pub fn ordered() -> [Layer; 4] {
+        [
+            Layer::Retrievability,
+            Layer::Citability,
+            Layer::Absorbability,
+            Layer::EntityLegitimacy,
+        ]
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Layer::Retrievability => "retrievability",
+            Layer::Citability => "citability",
+            Layer::Absorbability => "absorbability",
+            Layer::EntityLegitimacy => "entity_legitimacy",
+        }
+    }
+
+    pub fn human_label(self) -> &'static str {
+        match self {
+            Layer::Retrievability => "Retrievability",
+            Layer::Citability => "Citability",
+            Layer::Absorbability => "Absorbability",
+            Layer::EntityLegitimacy => "Entity legitimacy",
+        }
+    }
+}
+
+/// Layer assignment for a single rule. Always has a primary layer;
+/// `secondaries` lists other layers the rule meaningfully affects.
+/// Most rules have an empty secondaries list — only cross-cutting rules
+/// (e.g. a rule about meta descriptions affects both retrievability
+/// search-result snippets and citability AI-engine reuse) carry one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuleLayers {
+    pub primary: Layer,
+    pub secondaries: Vec<Layer>,
+}
+
+impl RuleLayers {
+    pub fn primary_only(layer: Layer) -> Self {
+        Self {
+            primary: layer,
+            secondaries: Vec::new(),
+        }
+    }
+
+    pub fn with_secondaries(primary: Layer, secondaries: Vec<Layer>) -> Self {
+        Self {
+            primary,
+            secondaries,
+        }
+    }
+
+    /// True if any of the rule's layer assignments matches `layer`.
+    /// Useful for `--layer X` filtering at call sites.
+    pub fn touches(&self, layer: Layer) -> bool {
+        self.primary == layer || self.secondaries.contains(&layer)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FindingScope {
