@@ -2,12 +2,37 @@ use wasm_bindgen::prelude::*;
 
 use aexeo_core::{
     Config, TruthManifest, assess_evidence_coverage, assess_truth_layer, map_grounding_queries,
-    render_facts_prompt, score_intelligence, validate_truth_manifest,
+    render_facts_prompt, rule_layers_for_id, score_intelligence, validate_truth_manifest,
 };
 
 use crate::document::EmdashDocument;
 use crate::evaluate::evaluate_documents;
 use crate::site::build_site_from_documents;
+
+/// Enrich each Finding with its rule's layer assignment. The plugin's
+/// admin pages group by primary layer (Phase 2 pillar restructure);
+/// without this enrichment the plugin would have to maintain a parallel
+/// rule-id → layer mapping in TypeScript that drifts from Rust.
+fn findings_with_layers_json(findings: &[aexeo_contracts::Finding]) -> serde_json::Value {
+    let enriched: Vec<serde_json::Value> = findings
+        .iter()
+        .map(|finding| {
+            let layers = rule_layers_for_id(&finding.rule_id);
+            let mut value = serde_json::to_value(finding).unwrap_or(serde_json::Value::Null);
+            if let Some(map) = value.as_object_mut() {
+                map.insert(
+                    "layers".to_string(),
+                    serde_json::json!({
+                        "primary": layers.primary,
+                        "secondaries": layers.secondaries,
+                    }),
+                );
+            }
+            value
+        })
+        .collect();
+    serde_json::Value::Array(enriched)
+}
 
 #[wasm_bindgen(js_name = "evaluateDocuments")]
 pub fn evaluate_documents_js(
@@ -23,7 +48,8 @@ pub fn evaluate_documents_js(
     };
     let findings = evaluate_documents(&documents, &config)
         .map_err(|error| JsError::new(&format!("evaluator failed: {error}")))?;
-    serde_json::to_string(&findings)
+    let enriched = findings_with_layers_json(&findings);
+    serde_json::to_string(&enriched)
         .map_err(|error| JsError::new(&format!("failed to serialize findings: {error}")))
 }
 
