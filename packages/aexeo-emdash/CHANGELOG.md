@@ -6,6 +6,64 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-05-03
+
+Restructures the admin sidebar around the four-layer GEO model
+(retrievability, citability, absorbability, entity legitimacy) from
+the May 2026 research synthesis. Each pillar is its own admin page,
+each finding carries its rule's layer assignment, and the
+entity-legitimacy pillar folds in the truth-manifest authoring UI.
+
+**Compatibility:** verified against emdash `0.7.0` and `0.8.0`.
+
+### Added
+
+- **Four pillar admin pages**: `/retrievability`, `/citability`,
+  `/absorbability`, `/entity-legitimacy`. Each filters findings to
+  rules whose primary layer matches; cross-cutting rules surface
+  their secondary layers as chips on the row ("this rule also
+  affects citability").
+- **`layerBreakdown` field** on the `FindingsPayload` wire shape.
+  One entry per layer with totals, errors, and warnings; primary
+  layer only, so the sum equals `totals.findings`. Powers the
+  pillar header counts and a future dashboard widget badge.
+- **`layers` field on each `Finding`**, populated by the bridge
+  during `evaluateDocuments`. Optional in the type so legacy KV
+  entries written before the enrichment landed still parse —
+  legacy rows fall back to `citability` (the most common layer)
+  until the next refresh repopulates them.
+- **Type exports**: `Layer`, `RuleLayers`, `LAYERS_ORDERED`,
+  `layerHumanLabel`, `layerOneLineDescription` from the package
+  root for hosts that want to reuse the framework.
+
+### Changed
+
+- **`/facts` is now an alias** for `/entity-legitimacy`. The
+  truth-manifest authoring UI is unchanged but it lives inside the
+  entity-legitimacy pillar page (composed alongside FACTS00x
+  findings and a placeholder for the layer-4 presence diagnostic
+  shipping in 0.8.0). Old bookmarks to `/facts` keep working.
+- **Sidebar order changed**: pillar entries first, then `/document`
+  (cross-layer per-document panel), then `/findings` (the existing
+  cross-pillar flat-view, kept for "show me everything" triage).
+  Editors who had the old "SEO findings / Document SEO / Truth
+  manifest" layout in muscle memory will need to re-orient.
+- **WASM bridge enriches each finding** with its layer assignment
+  before returning JSON. The Rust engine is the canonical layer
+  authority; the plugin doesn't maintain a parallel mapping.
+
+### Notes for hosts upgrading from 0.6.x
+
+- No code changes required for hosts using only `aexeoPlugin({ ... })`.
+  The configured factory is unchanged.
+- The four pillar pages each carry their own URL path — links to
+  `/admin/plugins/aexeo-emdash/retrievability` etc. work
+  immediately after upgrade.
+- Editors will see four new sidebar entries and one renamed entry
+  (`Truth manifest` is gone from the sidebar; its content lives at
+  `Entity legitimacy`). Worth a brief internal note to the
+  editorial team before deploying the bump.
+
 ## [0.6.0] - 2026-05-03
 
 **Breaking change**: the `seogeo` → `aexeo` rename across the
@@ -379,7 +437,8 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.6.0...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.7.0...HEAD
+[0.7.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.6.0...aexeo-emdash-v0.7.0
 [0.6.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.5.0...aexeo-emdash-v0.6.0
 [0.5.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.4.0...aexeo-emdash-v0.5.0
 [0.4.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.3.0...aexeo-emdash-v0.4.0
