@@ -158,3 +158,27 @@ export interface IntelligenceBlocker {
   route?: string;
   severity?: string;
 }
+
+// Minimal projection of aexeo-core's TruthManifest — only the fields
+// the plugin reads on the TS side. The Rust validator is the
+// authority on full shape; here we just need what the
+// entity-presence diagnostic and admin UI consume. Everything is
+// optional because manifests can be partial during authoring.
+export interface TruthEntity {
+  name: string;
+  aliases?: string[];
+  website?: string;
+  category?: string;
+  descriptors?: string[];
+  features?: string[];
+}
+
+export interface TruthManifest {
+  version?: number;
+  organization?: TruthEntity;
+  products?: TruthEntity[];
+  terminology?: {
+    preferred?: Record<string, string>;
+    forbidden?: Record<string, string>;
+  };
+}
