@@ -44,10 +44,21 @@ export interface FindingsPayload {
     warnings: number;
     documentsIndexed: number;
   };
+  // Per-layer breakdown of findings (primary layer only, so the sum
+  // matches totals.findings). Drives the dashboard widget's layer-
+  // coverage row and each pillar admin page's header stats.
+  layerBreakdown: LayerBreakdown[];
   // When the bridge tagged a finding with scope: "sitewide" or
   // "template" rather than a specific page, it's bucketed under "*"
   // server-side and surfaced separately in the UI.
   sitewideFindings: Finding[];
+}
+
+export interface LayerBreakdown {
+  layer: import("./types.js").Layer;
+  total: number;
+  errors: number;
+  warnings: number;
 }
 
 export interface RouteSummary {
@@ -78,6 +89,12 @@ export interface FindingRow {
   column: number;
   scope: string;
   suggestion: string | null;
+  // Layer assignment for this rule. Set by the bridge during
+  // evaluateDocuments enrichment. Optional because legacy KV entries
+  // written before the enrichment landed don't carry it; the plugin
+  // falls back to "citability" for those (the most common layer)
+  // rather than dropping the row.
+  layers?: import("./types.js").RuleLayers;
 }
 
 interface DataRouteOptions {
@@ -191,6 +208,18 @@ async function buildFindingsPayload(
     sitewide.push(...cached.findings);
   }
 
+  // Per-layer breakdown computed AFTER manifest-state findings have
+  // been added to `sitewide` so the totals are stable. Each finding is
+  // counted once at its primary layer; secondaries don't add to totals.
+  // FACTS00x findings (manifest-state) carry layer = entity_legitimacy,
+  // which is the only way that pillar gets non-zero counts in the
+  // current rule set.
+  //
+  // Both findings (FindingRow[]) and sitewide (Finding[]) carry the
+  // same fields the breakdown looks at (severity + layers); structural
+  // typing keeps the breakdown helper one signature.
+  const layerBreakdown = computeLayerBreakdown([...findings, ...sitewide]);
+
   return {
     routes,
     findings,
@@ -201,8 +230,41 @@ async function buildFindingsPayload(
       warnings: findings.filter((f) => f.severity === "warning").length,
       documentsIndexed: documents.size,
     },
+    layerBreakdown,
     sitewideFindings: sitewide,
   };
+}
+
+function computeLayerBreakdown(
+  findings: ReadonlyArray<{
+    severity: string;
+    layers?: import("./types.js").RuleLayers;
+  }>,
+): LayerBreakdown[] {
+  const ordered = [
+    "retrievability",
+    "citability",
+    "absorbability",
+    "entity_legitimacy",
+  ] as const;
+  const buckets = new Map<string, LayerBreakdown>();
+  for (const layer of ordered) {
+    buckets.set(layer, { layer, total: 0, errors: 0, warnings: 0 });
+  }
+  for (const finding of findings) {
+    // Fall back to "citability" when a legacy KV entry doesn't carry
+    // layer info (most rules are citability-primary; this matches the
+    // Rust default in registry.rs:layers_for_prefix). The plugin will
+    // re-acquire correct layers on the next refresh — this is a
+    // transient backwards-compat shim.
+    const primary = finding.layers?.primary ?? "citability";
+    const bucket = buckets.get(primary);
+    if (bucket === undefined) continue;
+    bucket.total += 1;
+    if (finding.severity === "error") bucket.errors += 1;
+    else bucket.warnings += 1;
+  }
+  return ordered.map((layer) => buckets.get(layer)!);
 }
 
 // KV slot for cached manifest-state findings. Populated on refresh,
@@ -248,6 +310,7 @@ async function deriveManifestStateFindings(
         column: 0,
         scope: "sitewide",
         suggestion: null,
+        layers: { primary: "entity_legitimacy", secondaries: [] },
       },
     ];
   }
@@ -284,6 +347,7 @@ async function deriveManifestStateFindings(
         column: 0,
         scope: "sitewide",
         suggestion: null,
+        layers: { primary: "entity_legitimacy", secondaries: [] },
       });
     }
     const errCount = result.assessment.mismatches.filter(
@@ -300,6 +364,7 @@ async function deriveManifestStateFindings(
         column: 0,
         scope: "sitewide",
         suggestion: null,
+        layers: { primary: "entity_legitimacy", secondaries: [] },
       });
     }
     return out;
