@@ -344,7 +344,7 @@ pub fn render_llms_txt(site: &Site, _site_url: Option<&str>) -> String {
     }
     lines.push("## Pages".to_string());
     let mut grouped: BTreeMap<PageKind, Vec<String>> = BTreeMap::new();
-    for route in std::iter::once(String::new()).chain(pages.into_iter()) {
+    for route in std::iter::once(String::new()).chain(pages) {
         grouped
             .entry(classify_page_kind(&route))
             .or_default()

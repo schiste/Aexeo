@@ -505,7 +505,7 @@ impl RuntimePerformance {
             ),
         ];
         phases.retain(|phase| phase.elapsed_us > 0);
-        phases.sort_by(|left, right| right.elapsed_us.cmp(&left.elapsed_us));
+        phases.sort_by_key(|phase| std::cmp::Reverse(phase.elapsed_us));
         phases
     }
 
@@ -1535,7 +1535,7 @@ fn build_partial_runtime_artifact(
         p99_us: snapshot_build_us,
         ..PhaseTiming::default()
     });
-    phases.sort_by(|left, right| right.elapsed_us.cmp(&left.elapsed_us));
+    phases.sort_by_key(|phase| std::cmp::Reverse(phase.elapsed_us));
     artifact.performance = Some(build_audit_performance(
         crawl_stats.elapsed_us,
         phases,

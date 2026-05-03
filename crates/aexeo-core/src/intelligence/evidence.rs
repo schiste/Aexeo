@@ -158,11 +158,17 @@ fn assess_route(page: &crate::site::Page) -> EvidenceRouteAssessment {
         .iter()
         .map(|section| section.unsupported_claims)
         .sum::<usize>();
-    let evidence_density_score = if claim_count == 0 {
-        if page.blocks.is_empty() { 75 } else { 90 }
-    } else {
-        (((claim_count.saturating_sub(unsupported_claims)) * 100) / claim_count) as u8
-    };
+    let evidence_density_score =
+        match (claim_count.saturating_sub(unsupported_claims) * 100).checked_div(claim_count) {
+            Some(value) => value as u8,
+            None => {
+                if page.blocks.is_empty() {
+                    75
+                } else {
+                    90
+                }
+            }
+        };
     let evidence_quality_score = if sections.is_empty() {
         0
     } else {
