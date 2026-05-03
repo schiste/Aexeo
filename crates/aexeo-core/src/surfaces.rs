@@ -452,6 +452,47 @@ fn discover_page_surfaces(
         );
     }
 
+    // <link rel="alternate" type="text/markdown" href="..."> discovery
+    // tags also count as static machine links — that's the whole point
+    // of the manifest-driven discovery-link injection in `aexeo-cli fix`.
+    // Without this loop, SRF005 fires on pages where the fix has already
+    // wired up the discovery link, which contradicts the fix's intent.
+    for alternate in &page.alternate_links {
+        let Some(type_attr) = alternate.type_attr.as_deref() else {
+            continue;
+        };
+        let kind = match type_attr.to_ascii_lowercase().as_str() {
+            "text/markdown" => MachineSurfaceKind::MarkdownMirror,
+            _ => continue,
+        };
+        let url = absolute_url(site_url, &alternate.href).or_else(|| Some(alternate.href.clone()));
+        if matches!(kind, MachineSurfaceKind::MarkdownMirror)
+            && let Some(url) = &url
+        {
+            markdown_mirrors.push(url.clone());
+        }
+        if let Some(url) = &url {
+            static_machine_links.push(url.clone());
+        }
+        add_surface(
+            surfaces,
+            MachineSurface {
+                kind,
+                status: MachineSurfaceStatus::Unverified,
+                discovery_source: MachineSurfaceDiscoverySource::StaticLink,
+                url,
+                path: linked_route_for_href(&alternate.href),
+                route: None,
+                source_route: Some(route.clone()),
+                confidence: 85,
+                notes: vec![format!(
+                    "linked from {} via <link rel=\"alternate\" type=\"text/markdown\">",
+                    route_display_path(&route)
+                )],
+            },
+        );
+    }
+
     for candidate in markdown_mirror_candidates(&route) {
         if local_artifact_exists(site, &candidate) {
             let href = format!("/{candidate}");

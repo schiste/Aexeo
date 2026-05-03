@@ -14,7 +14,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::schema_rules::iter_schema_field_values;
 use crate::site::{Page, Site};
 
 /// All identity-bearing signals collected from a single page.
@@ -73,6 +72,48 @@ fn compute_for_page(page: &Page) -> PageIdentity {
     }
 }
 
+/// Schema types whose top-level `name` / `headline` is a page-identity
+/// signal. Navigation/list types (`BreadcrumbList`, `ItemList`, `FAQPage`,
+/// `CollectionPage` when it just enumerates children) are excluded —
+/// their nested entity names are about *other* pages, not the host page.
+fn is_identity_bearing_schema_type(t: &str) -> bool {
+    matches!(
+        t,
+        "Article"
+            | "BlogPosting"
+            | "NewsArticle"
+            | "TechArticle"
+            | "Report"
+            | "Book"
+            | "Course"
+            | "CreativeWork"
+            | "HowTo"
+            | "Recipe"
+            | "ImageObject"
+            | "VideoObject"
+            | "Movie"
+            | "Episode"
+            | "Organization"
+            | "Corporation"
+            | "EducationalOrganization"
+            | "GovernmentOrganization"
+            | "LocalBusiness"
+            | "NewsMediaOrganization"
+            | "NGO"
+            | "Person"
+            | "Product"
+            | "SoftwareApplication"
+            | "MobileApplication"
+            | "WebPage"
+            | "AboutPage"
+            | "ContactPage"
+            | "ProfilePage"
+            | "WebSite"
+            | "Service"
+            | "Event"
+    )
+}
+
 fn collect_sources(page: &Page) -> PageIdentitySources {
     let mut schema_names = Vec::new();
     let mut schema_headlines = Vec::new();
@@ -80,15 +121,24 @@ fn collect_sources(page: &Page) -> PageIdentitySources {
         let Ok(payload) = serde_json::from_str::<serde_json::Value>(&block.raw) else {
             continue;
         };
-        for name in iter_schema_field_values(&payload, "name") {
-            if !schema_names.contains(&name) {
-                schema_names.push(name);
-            }
+        // Only the TOP-LEVEL @type of each block contributes to identity.
+        // Nested objects (e.g. BreadcrumbList.itemListElement[].name,
+        // ItemList children, FAQPage Q/A pairs) describe other entities
+        // and would otherwise pollute the identity signal — that was the
+        // v0.0.6 bug where listing pages saw breadcrumb crumb names and
+        // child item-list names as identity drift.
+        if !is_top_level_identity_object(&payload) {
+            continue;
         }
-        for headline in iter_schema_field_values(&payload, "headline") {
-            if !schema_headlines.contains(&headline) {
-                schema_headlines.push(headline);
-            }
+        if let Some(name) = top_level_string(&payload, "name")
+            && !schema_names.contains(&name)
+        {
+            schema_names.push(name);
+        }
+        if let Some(headline) = top_level_string(&payload, "headline")
+            && !schema_headlines.contains(&headline)
+        {
+            schema_headlines.push(headline);
         }
     }
     PageIdentitySources {
@@ -98,6 +148,28 @@ fn collect_sources(page: &Page) -> PageIdentitySources {
         schema_names,
         schema_headlines,
     }
+}
+
+/// True when the JSON-LD root object's `@type` is one of the
+/// identity-bearing types (or contains one when `@type` is an array).
+fn is_top_level_identity_object(value: &serde_json::Value) -> bool {
+    let Some(map) = value.as_object() else {
+        return false;
+    };
+    let Some(type_value) = map.get("@type") else {
+        return false;
+    };
+    match type_value {
+        serde_json::Value::String(s) => is_identity_bearing_schema_type(s),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .any(|item| item.as_str().is_some_and(is_identity_bearing_schema_type)),
+        _ => false,
+    }
+}
+
+fn top_level_string(value: &serde_json::Value, field: &str) -> Option<String> {
+    value.as_object()?.get(field)?.as_str().map(str::to_string)
 }
 
 /// Pick the canonical title in priority order: title → first H1 → first
@@ -281,6 +353,69 @@ mod tests {
         let identity = compute_page_identity(&site, "").expect("home identity");
         assert_eq!(identity.canonical_source, "h1");
         assert_eq!(identity.canonical_title.as_deref(), Some("Fallback Title"));
+        Ok(())
+    }
+
+    #[test]
+    fn listing_page_does_not_treat_breadcrumb_or_itemlist_names_as_identity() -> Result<()> {
+        // Regression for the v0.0.6 bug surfaced in feedback: on listing
+        // pages with auto-injected BreadcrumbList + ItemList schema, the
+        // identity command was treating the breadcrumb crumb names and
+        // ItemList child names as schema_name signals, producing noisy
+        // drift rows.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        write(
+            &root.join("blog/index.html"),
+            r#"<html lang="en"><head>
+                <title>Blog</title>
+                <meta name="description" content="x">
+                <meta property="og:title" content="Blog">
+                <link rel="canonical" href="https://example.com/blog">
+                <script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://example.com/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://example.com/blog"}]}</script>
+                <script type="application/ld+json">{"@context":"https://schema.org","@type":"ItemList","itemListElement":[{"@type":"ListItem","position":1,"name":"Post One","url":"https://example.com/blog/one"},{"@type":"ListItem","position":2,"name":"Post Two","url":"https://example.com/blog/two"}]}</script>
+            </head><body><h1>Blog</h1></body></html>"#,
+        );
+        let site = load_site(root)?;
+        let identity = compute_page_identity(&site, "blog").expect("blog identity");
+        // Title agrees with H1 + OG and there's no identity-bearing schema
+        // block, so schema_names/headlines must be empty — neither the
+        // breadcrumb crumbs ("Home", "Blog") nor the child names ("Post
+        // One", "Post Two") should leak in.
+        assert!(
+            identity.sources.schema_names.is_empty(),
+            "schema_names must not include breadcrumb or item-list children, got {:?}",
+            identity.sources.schema_names,
+        );
+        assert!(identity.agrees, "identity should agree on a clean listing");
+        Ok(())
+    }
+
+    #[test]
+    fn identity_bearing_schema_top_level_name_still_counts() -> Result<()> {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        write(
+            &root.join("index.html"),
+            r#"<html lang="en"><head>
+                <title>Aexeo</title>
+                <meta name="description" content="x">
+                <link rel="canonical" href="https://example.com/">
+                <script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Aexeo Inc."}</script>
+            </head><body><h1>Aexeo</h1></body></html>"#,
+        );
+        let site = load_site(root)?;
+        let identity = compute_page_identity(&site, "").expect("home identity");
+        // Top-level Organization is identity-bearing, so its name DOES count.
+        assert_eq!(identity.sources.schema_names, vec!["Aexeo Inc."]);
+        // And it disagrees with the canonical title — drift surfaced.
+        assert!(!identity.agrees);
+        let dimensions: Vec<_> = identity
+            .drift
+            .iter()
+            .map(|d| d.dimension.as_str())
+            .collect();
+        assert!(dimensions.contains(&"schema_name"));
         Ok(())
     }
 

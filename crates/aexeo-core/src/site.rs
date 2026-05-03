@@ -13,6 +13,11 @@ use std::path::{Path, PathBuf};
 pub struct AlternateLink {
     pub href: String,
     pub hreflang: Option<String>,
+    /// `type` attribute when present (e.g. `"text/markdown"` for the
+    /// markdown-mirror discovery link Aexeo's fix injects). Optional
+    /// because the i18n-style `hreflang` alternates this struct was
+    /// originally for don't carry one.
+    pub type_attr: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

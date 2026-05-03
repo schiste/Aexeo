@@ -597,7 +597,7 @@ pub fn build_machine_artifact_bundle(site: &Site, site_url: Option<&str>) -> Mac
         deploy_notes: vec![
             "Deploy generated files at the same relative paths from the public site root.".to_string(),
             "Review facts.json before publishing; generated facts are a deterministic first draft, not a legal source of truth.".to_string(),
-            "Reference manifest.json from your site root and let `aexeo-cli fix add-discovery-links dist` inject the matching <link rel=\"alternate\"> tags into HTML <head>.".to_string(),
+            "Run `aexeo-cli fix dist` to inject manifest-driven `<link rel=\"alternate\">` discovery tags into HTML <head>; pass `--inject-schema` if you also want the synthesized JSON-LD blocks injected (per-type augmentation, off by default).".to_string(),
         ],
     }
 }

@@ -145,7 +145,12 @@ fn capture_alternate_links(raw: &str) -> Vec<AlternateLink> {
             continue;
         };
         let hreflang = attr_value(&snippet, "hreflang").filter(|value| !value.is_empty());
-        links.push(AlternateLink { href, hreflang });
+        let type_attr = attr_value(&snippet, "type").filter(|value| !value.is_empty());
+        links.push(AlternateLink {
+            href,
+            hreflang,
+            type_attr,
+        });
     }
     links
 }

@@ -164,6 +164,34 @@ mod tests {
     }
 
     #[test]
+    fn discovery_link_satisfies_srf005() {
+        // Regression: <link rel="alternate" type="text/markdown" ...>
+        // tags injected by `aexeo-cli fix` are static machine links and
+        // must satisfy SRF005. Before the fix, SRF005 only counted <a>
+        // tags in static_machine_links, so injected discovery <link>
+        // tags didn't satisfy the rule and the lint kept firing on
+        // pages that had been wired up.
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            r#"<html><head>
+                <title>x</title>
+                <meta name="description" content="y">
+                <link rel="alternate" type="text/markdown" href="/index.md.txt">
+            </head><body><h1>x</h1></body></html>"#,
+        );
+        // Mirror file present so the page has a Markdown surface.
+        write(&root.join("index.md.txt"), "# Mirror\n");
+        let site = load_site(root).unwrap();
+        let findings = run_surface_rules(&site, &Config::default());
+        assert!(
+            !findings.iter().any(|finding| finding.rule_id == "SRF005"),
+            "SRF005 must NOT fire when a <link rel=\"alternate\" type=\"text/markdown\"> tag is present",
+        );
+    }
+
+    #[test]
     fn flags_broken_llms_machine_reference() {
         let temp_dir = tempfile::tempdir().unwrap();
         let root = temp_dir.path();
