@@ -10,17 +10,30 @@
 // rendered instead of the default Block-Kit-driven
 // SandboxedPluginPage.
 //
-// Only /findings has a custom React component today — that's where
-// clickable links matter. /document and the score widget keep using
-// the Block Kit path because they don't need link rendering.
+// Phase 2 of the four-layer GEO restructure: the admin sidebar is now
+// organized around the four pillars. /findings stays as a flat-view
+// fallback for editors who want everything in one list, and /facts
+// stays as an alias for /entity-legitimacy so existing bookmarks keep
+// working.
 
+import { Absorbability } from "./admin/Absorbability.js";
+import { Citability } from "./admin/Citability.js";
+import { EntityLegitimacy } from "./admin/EntityLegitimacy.js";
 import { Facts } from "./admin/Facts.js";
 import { Findings } from "./admin/Findings.js";
+import { Retrievability } from "./admin/Retrievability.js";
 
 export const pages = {
+  // Four pillar pages — the canonical organization going forward.
+  "/retrievability": Retrievability,
+  "/citability": Citability,
+  "/absorbability": Absorbability,
+  "/entity-legitimacy": EntityLegitimacy,
+  // /findings stays as a cross-pillar flat view for users who want
+  // every finding in one list. Not removed because it's still useful
+  // for triage — "show me everything that's wrong" is a real workflow.
   "/findings": Findings,
-  // /facts is the truth-manifest authoring page. Block Kit can't render
-  // a textarea or copy-to-clipboard button, so this path goes through
-  // the React adminEntry. Same mechanism as /findings.
+  // /facts kept as an alias so old bookmarks don't 404. Renders the
+  // same Facts component the EntityLegitimacy page composes.
   "/facts": Facts,
 };

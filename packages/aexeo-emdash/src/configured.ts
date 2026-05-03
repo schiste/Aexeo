@@ -230,15 +230,24 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
       },
     } as never,
     admin: {
+      // Sidebar ordered around the four-layer GEO model — each pillar
+      // is its own sidebar entry. The root URL `/admin/plugins/<id>/`
+      // routes through the same dispatcher (handlePageLoad treats ""
+      // and "findings" as aliases), so editors landing on the plugin
+      // root see the cross-pillar flat view.
+      //
+      // /document keeps its own entry because per-document inspection
+      // is cross-layer by definition. /findings stays as a flat-view
+      // fallback for triage workflows. /facts is kept as a back-compat
+      // alias for the relocated /entity-legitimacy page; not in the
+      // sidebar to avoid two entries pointing at the same content.
       pages: [
-        // The root URL `/admin/plugins/<id>/` routes through the same
-        // dispatcher (handlePageLoad treats "" and "findings" as
-        // aliases). Listing "/" alongside "/findings" here would create
-        // duplicate "SEO findings" sidebar entries — that was the
-        // visible 0.1.0 / 0.1.1 bug fixed in 0.1.2.
-        { path: "/findings", label: "SEO findings" },
+        { path: "/retrievability", label: "Retrievability" },
+        { path: "/citability", label: "Citability" },
+        { path: "/absorbability", label: "Absorbability" },
+        { path: "/entity-legitimacy", label: "Entity legitimacy" },
         { path: "/document", label: "Document SEO" },
-        { path: "/facts", label: "Truth manifest" },
+        { path: "/findings", label: "All findings" },
       ],
       widgets: [
         { id: "aexeo-score", size: "third", title: "SEO score" },
