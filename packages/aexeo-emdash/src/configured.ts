@@ -28,6 +28,7 @@ import {
 } from "./plugin.js";
 import { handleDataRoute } from "./data-route.js";
 import { handleFactsRoute } from "./facts-route.js";
+import { handlePresenceRoute } from "./presence-route.js";
 import { compileSuppressions } from "./suppressions.js";
 import type { Suppression } from "./suppressions.js";
 import { PACKAGE_VERSION } from "./version.js";
@@ -227,6 +228,15 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
       // facts-route.ts for the full contract.
       facts: {
         handler: (ctx: SandboxCtx) => handleFactsRoute(ctx as never),
+      },
+      // /presence route serves the layer-4 entity-presence
+      // diagnostic on the /entity-legitimacy admin page. It hits
+      // five free public APIs (Wikipedia, Wikidata, GitHub, RDAP,
+      // Common Crawl) for the configured organization and caches
+      // results in KV for 24h. Multiplexes data / refresh kinds —
+      // see presence-route.ts.
+      presence: {
+        handler: (ctx: SandboxCtx) => handlePresenceRoute(ctx as never),
       },
     } as never,
     admin: {
