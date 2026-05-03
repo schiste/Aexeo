@@ -323,7 +323,15 @@ async function callPresenceRoute(
 ): Promise<PresenceData> {
   const res = await fetch(`${API_BASE}/plugins/${PLUGIN_ID}/presence`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      // Required by emdash's catch-all plugin-route handler for any
+      // POST/PUT/PATCH/DELETE on a private (default) plugin route.
+      // Without it the host returns 403 CSRF_REJECTED before the
+      // plugin handler even runs. Same convention as the /facts and
+      // /data routes the other admin components use.
+      "X-EmDash-Request": "1",
+    },
     body: JSON.stringify({ kind }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
