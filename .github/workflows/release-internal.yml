@@ -30,10 +30,10 @@ jobs:
       - name: Upload target artifact
         uses: actions/upload-artifact@v4
         with:
-          name: seogeo-cli-${{ matrix.target }}
+          name: aexeo-cli-${{ matrix.target }}
           path: |
-            dist/seogeo-cli-${{ matrix.target }}
-            dist/seogeo-cli-${{ matrix.target }}.sha256
+            dist/aexeo-cli-${{ matrix.target }}
+            dist/aexeo-cli-${{ matrix.target }}.sha256
           if-no-files-found: error
           retention-days: 1
 
@@ -54,7 +54,7 @@ jobs:
           mkdir -p release
           # Workflow artifacts strip POSIX mode bits, so re-mark each
           # binary executable before it becomes a release asset.
-          for f in artifacts/*/seogeo-cli-*; do
+          for f in artifacts/*/aexeo-cli-*; do
             case "$f" in
               *.sha256) ;;
               *)
@@ -67,7 +67,7 @@ jobs:
           # Re-derive the combined SHA256SUMS.txt from the staged files
           # so each line is "<hex>  <basename>" with no path prefix.
           cd release
-          shasum -a 256 seogeo-cli-* > SHA256SUMS.txt
+          shasum -a 256 aexeo-cli-* > SHA256SUMS.txt
           ls -la
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
