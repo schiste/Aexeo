@@ -6,6 +6,68 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-03
+
+Layer-4 entity-presence diagnostic. The `/entity-legitimacy`
+admin page now queries five free public APIs against the
+configured organization in the truth manifest and surfaces what
+the open web actually shows.
+
+**Compatibility:** verified against emdash `0.7.0` and `0.8.0`.
+
+### Added
+
+- **Public web presence diagnostic** on `/entity-legitimacy`,
+  below the truth-manifest authoring section. Five sources, one
+  card each, one Refresh button:
+  - **Wikipedia** (OpenSearch)
+  - **Wikidata** (`wbsearchentities`)
+  - **GitHub** (`/users/<handle>`)
+  - **Domain registration** (RDAP via the `rdap.org` redirector)
+  - **Common Crawl** (CDX index latest available)
+
+  Each card shows one of four states: *found* (with deep-link),
+  *no record*, *couldn't reach* (network/timeout/rate-limit),
+  *skipped* (preconditions missing). No scoring — Aexeo surfaces
+  this layer, it does not grade it. The "Open ↗" link on each
+  *found* row deep-links to the source's record so editors can
+  verify directly.
+- **`POST .../plugins/aexeo-emdash/presence`** route with `kind:
+  "data"` (cached read) and `kind: "refresh"` (re-query and
+  persist) operations. Cached for 24h in `presence:current`; the
+  cache is invalidated when the manifest's organization name
+  changes (so stale results against a different entity never show).
+- **`TruthEntity` and `TruthManifest` type exports** — minimal
+  TS projections of the Rust truth-manifest shape, sufficient for
+  the fields the plugin reads on the TS side.
+
+### Notes on rate limits
+
+The five APIs are all free and unauthenticated. The 24h cache
+is the rate-limit backstop:
+- GitHub's 60/hr unauth cap is the binding constraint and stays
+  comfortably under the limit even with liberal manual refreshing.
+- Wikipedia, Wikidata, and Common Crawl have no published cap;
+  the plugin sends a polite `User-Agent` identifying itself.
+- RDAP via `rdap.org` is a community redirector with no published
+  cap.
+
+If a fetch times out (>5s) or returns 429/5xx, the corresponding
+source card shows "couldn't reach" with the underlying error;
+hitting Refresh later retries.
+
+### Notes for hosts upgrading from 0.7.x
+
+- No code changes required. The configured factory is unchanged
+  and the new route is registered automatically.
+- Editors who haven't authored a truth manifest yet will see the
+  "Author the truth manifest first" CTA on `/entity-legitimacy`
+  — this is the same page where they author the manifest, so the
+  CTA composes cleanly.
+- The presence diagnostic doesn't run on its own. Editors must
+  click Refresh once after authoring (or updating) the manifest
+  to populate the cache.
+
 ## [0.7.0] - 2026-05-03
 
 Restructures the admin sidebar around the four-layer GEO model
@@ -437,7 +499,8 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.7.0...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.0...HEAD
+[0.8.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.7.0...aexeo-emdash-v0.8.0
 [0.7.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.6.0...aexeo-emdash-v0.7.0
 [0.6.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.5.0...aexeo-emdash-v0.6.0
 [0.5.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.4.0...aexeo-emdash-v0.5.0
