@@ -2,8 +2,8 @@ use aexeo_contracts::AuditStatus;
 use aexeo_core::adapter::resolve_static_site_root;
 use aexeo_core::config::load_config_with_diagnostics;
 use aexeo_core::{
-    MachineArtifactBundle, apply_safe_fixes, build_audit_artifact, build_machine_artifact_bundle,
-    diff_finding_sets, load_findings_from_audit, load_site, render_facts_prompt,
+    MachineArtifactBundle, build_audit_artifact, build_machine_artifact_bundle, diff_finding_sets,
+    generate_schema_suggestions, load_findings_from_audit, load_site, render_facts_prompt,
     render_llms_full_txt, render_llms_txt, render_markdown_mirror, render_markdown_mirror_pages,
     render_robots_txt, render_sarif, render_sitemap_xml, render_text_artifact,
     run_native_static_audit_with_config, suggest_internal_links, write_audit_artifact,
@@ -172,6 +172,25 @@ pub fn command_generate(submatches: &ArgMatches) -> Result<i32> {
         }
         "links" => suggest_internal_links(&site, 3),
         "facts-prompt" => render_facts_prompt(&site),
+        "schema" => {
+            let Some(site_url) = resolved_site_url else {
+                println!("site_url is required to generate schema suggestions");
+                return Ok(2);
+            };
+            let suggestions = generate_schema_suggestions(&site, Some(site_url));
+            if suggestions.is_empty() {
+                println!(
+                    "no schema suggestions generated (no eligible routes — sites with only home or skipped page kinds get no output)"
+                );
+                return Ok(2);
+            }
+            let payload = serde_json::json!({
+                "version": 1,
+                "site_url": site_url,
+                "suggestions": suggestions,
+            });
+            serde_json::to_string_pretty(&payload)?
+        }
         other => bail!("unsupported generate kind: {}", other),
     };
     match submatches
@@ -301,7 +320,13 @@ pub fn command_fix(submatches: &ArgMatches) -> Result<i32> {
     let loaded = load_config_with_diagnostics(&root, explicit_config.as_deref())?;
     emit_config_warnings(&loaded.warnings);
     let config = loaded.config;
-    let changed = apply_safe_fixes(&resolve_static_site_root(&root, &config)?, &config)?;
+    let inject_schema = submatches.get_flag("inject-schema");
+    let fix_options = aexeo_core::FixOptions { inject_schema };
+    let changed = aexeo_core::apply_safe_fixes_with_options(
+        &resolve_static_site_root(&root, &config)?,
+        &config,
+        fix_options,
+    )?;
     let changed_paths = changed
         .iter()
         .map(|path| path.display().to_string())

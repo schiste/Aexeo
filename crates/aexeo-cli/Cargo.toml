@@ -13,8 +13,8 @@ clap.workspace = true
 csv.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-aexeo-core = { version = "0.0.5", path = "../aexeo-core" }
-aexeo-contracts = { version = "0.0.5", path = "../aexeo-contracts" }
+aexeo-core = { version = "0.0.6", path = "../aexeo-core" }
+aexeo-contracts = { version = "0.0.6", path = "../aexeo-contracts" }
 
 [dev-dependencies]
-tempfile = { version = "0.0.5", path = "../tempfile" }
+tempfile = { version = "0.0.6", path = "../tempfile" }

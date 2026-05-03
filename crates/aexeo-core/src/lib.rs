@@ -38,7 +38,7 @@ pub use docs::{
     find_reference_doc_drift, reference_documents, render_adapter_reference,
     render_config_reference, render_rule_reference, write_reference_documents,
 };
-pub use fix::apply_safe_fixes;
+pub use fix::{FixOptions, apply_safe_fixes, apply_safe_fixes_with_options};
 pub use generate::{
     GeneratedMachineArtifact, MachineArtifactBundle, build_link_suggestions,
     build_machine_artifact_bundle, render_llms_full_txt, render_llms_txt, render_markdown_mirror,
@@ -63,14 +63,15 @@ pub use intelligence::{
     EvidenceClaimKind, EvidenceRouteAssessment, EvidenceSectionAssessment, EvidenceSiteAssessment,
     GroundingCoverageGap, GroundingIntentFamily, GroundingRouteAnalysis, GroundingSiteAnalysis,
     IdentityDrift, IntelligenceBlocker, PageIdentity, PageIdentitySources, RouteIntelligenceScore,
-    SiteIntelligenceScore, TrustSurfaceIssue, TrustSurfaceIssueKind, TrustSurfaceReconciliation,
-    TrustSurfaceRecord, TrustSurfaceSourceSummary, TruthAssessment, TruthEntity, TruthManifest,
-    TruthManifestGeneration, TruthManifestValidation, TruthMismatch, TruthMismatchSeverity,
-    TruthStructuredSource, assess_answer_fanout, assess_evidence_coverage, assess_truth_layer,
-    compute_page_identity, default_truth_manifest_version, discover_truth_manifest,
-    generate_truth_manifest, generate_truth_manifest_with_options, import_trust_surface_records,
-    load_truth_manifest, map_grounding_queries, reconcile_trust_surfaces, render_facts_prompt,
-    score_intelligence, validate_truth_manifest,
+    SchemaSuggestion, SiteIntelligenceScore, TrustSurfaceIssue, TrustSurfaceIssueKind,
+    TrustSurfaceReconciliation, TrustSurfaceRecord, TrustSurfaceSourceSummary, TruthAssessment,
+    TruthEntity, TruthManifest, TruthManifestGeneration, TruthManifestValidation, TruthMismatch,
+    TruthMismatchSeverity, TruthStructuredSource, assess_answer_fanout, assess_evidence_coverage,
+    assess_truth_layer, compute_page_identity, default_truth_manifest_version,
+    discover_truth_manifest, generate_schema_suggestions, generate_truth_manifest,
+    generate_truth_manifest_with_options, import_trust_surface_records, load_truth_manifest,
+    map_grounding_queries, reconcile_trust_surfaces, render_facts_prompt, score_intelligence,
+    validate_truth_manifest,
 };
 pub use link_rules::run_link_rules;
 pub use llm_rules::run_llm_rules;

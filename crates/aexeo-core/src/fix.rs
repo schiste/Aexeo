@@ -171,6 +171,137 @@ fn apply_related_link_insertions(site: &Site, config: &Config) -> Result<Vec<Pat
     Ok(changed)
 }
 
+/// Inject schema-suggestions JSON-LD blocks into HTML pages, applying
+/// per-type augmentation. Reads schema-suggestions.json from the same
+/// root; for each route in the suggestions, finds the matching HTML
+/// page (index.html / route/index.html / route.html) and adds any
+/// suggested types the page does not already have. Existing
+/// `<script type="application/ld+json">` blocks are inspected for
+/// their `@type` and respected — Aexeo never overwrites or duplicates.
+///
+/// Silent no-op when the suggestions file is missing. Opt-in fix: only
+/// runs when the caller explicitly enables it (the default `fix`
+/// invocation does not write JSON-LD into pages).
+fn apply_schema_injection_fixes(root: &Path) -> Result<Vec<PathBuf>> {
+    let suggestions_path = root.join("schema-suggestions.json");
+    let Ok(suggestions_text) = fs::read_to_string(&suggestions_path) else {
+        return Ok(Vec::new());
+    };
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(&suggestions_text) else {
+        return Ok(Vec::new());
+    };
+    let Some(suggestions) = payload.get("suggestions").and_then(|v| v.as_array()) else {
+        return Ok(Vec::new());
+    };
+
+    let mut changed = Vec::new();
+    for entry in suggestions {
+        let Some(route) = entry.get("route").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(types) = entry.get("types").and_then(|v| v.as_object()) else {
+            continue;
+        };
+        let candidates: Vec<PathBuf> = if route.is_empty() {
+            vec![root.join("index.html")]
+        } else {
+            vec![
+                root.join(route).join("index.html"),
+                root.join(format!("{route}.html")),
+            ]
+        };
+        let Some(html_path) = candidates.into_iter().find(|p| p.exists()) else {
+            continue;
+        };
+        let raw_text = fs::read_to_string(&html_path)?;
+        let existing_types = collect_existing_schema_types(&raw_text);
+        let mut to_inject = Vec::new();
+        for (type_name, body) in types {
+            if existing_types.contains(type_name.as_str()) {
+                continue;
+            }
+            let body_text = serde_json::to_string(body).unwrap_or_else(|_| "{}".to_string());
+            to_inject.push(format!(
+                "<script type=\"application/ld+json\">{body_text}</script>"
+            ));
+        }
+        if to_inject.is_empty() {
+            continue;
+        }
+        let updated = inject_head_tags(&raw_text, &to_inject);
+        if updated != raw_text {
+            fs::write(&html_path, updated)?;
+            changed.push(html_path);
+        }
+    }
+    Ok(changed)
+}
+
+/// Scan an HTML string for the `@type` values of every existing
+/// `<script type="application/ld+json">` block. We intentionally don't
+/// fully parse the page or the JSON; we only need to know which types
+/// are present so per-type augmentation can skip them. Both string and
+/// array forms of `@type` are recognized (JSON-LD permits either).
+fn collect_existing_schema_types(html: &str) -> std::collections::BTreeSet<String> {
+    let mut found = std::collections::BTreeSet::new();
+    let mut cursor = 0;
+    let lower = html.to_ascii_lowercase();
+    while let Some(start) = lower[cursor..].find("<script") {
+        let absolute_start = cursor + start;
+        let Some(open_end) = lower[absolute_start..].find('>') else {
+            break;
+        };
+        let tag_end = absolute_start + open_end;
+        let tag_open = &lower[absolute_start..=tag_end];
+        if !tag_open.contains("application/ld+json") {
+            cursor = tag_end + 1;
+            continue;
+        }
+        let body_start = tag_end + 1;
+        let Some(close_offset) = lower[body_start..].find("</script>") else {
+            break;
+        };
+        let body_end = body_start + close_offset;
+        let body = &html[body_start..body_end];
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(body.trim()) {
+            collect_at_types(&value, &mut found);
+        }
+        cursor = body_end;
+    }
+    found
+}
+
+fn collect_at_types(value: &serde_json::Value, out: &mut std::collections::BTreeSet<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(t) = map.get("@type") {
+                match t {
+                    serde_json::Value::String(s) => {
+                        out.insert(s.clone());
+                    }
+                    serde_json::Value::Array(items) => {
+                        for item in items {
+                            if let serde_json::Value::String(s) = item {
+                                out.insert(s.clone());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for nested in map.values() {
+                collect_at_types(nested, out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_at_types(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Inject `<link rel="alternate" type="text/markdown" href="...">` tags into
 /// every HTML page that has a markdown mirror declared in the bundle's
 /// manifest.json. Idempotent: re-runs are no-ops once the tag is present.
@@ -252,7 +383,29 @@ fn apply_discovery_link_fixes(root: &Path) -> Result<Vec<PathBuf>> {
     Ok(changed)
 }
 
+/// Caller-controlled toggles for fixes that mutate the host's HTML beyond
+/// the minimum-viable metadata path. Each flag opts into one specific
+/// content-bearing change, so hosts can gate them per release rather than
+/// inheriting them all when the package version bumps.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FixOptions {
+    /// When true, inject schema-suggestions.json contents as JSON-LD
+    /// blocks into matching HTML pages, applying per-type augmentation.
+    /// Off by default because schema injection is content-bearing — the
+    /// host is making claims about its own content; that should be
+    /// deliberate.
+    pub inject_schema: bool,
+}
+
 pub fn apply_safe_fixes(root: &Path, config: &Config) -> Result<Vec<PathBuf>> {
+    apply_safe_fixes_with_options(root, config, FixOptions::default())
+}
+
+pub fn apply_safe_fixes_with_options(
+    root: &Path,
+    config: &Config,
+    options: FixOptions,
+) -> Result<Vec<PathBuf>> {
     let mut changed = BTreeSet::new();
     let site = load_site(root)?;
 
@@ -300,6 +453,11 @@ pub fn apply_safe_fixes(root: &Path, config: &Config) -> Result<Vec<PathBuf>> {
     // mirror paths from filename conventions.
     for path in apply_discovery_link_fixes(root)? {
         changed.insert(path);
+    }
+    if options.inject_schema {
+        for path in apply_schema_injection_fixes(root)? {
+            changed.insert(path);
+        }
     }
 
     Ok(changed.into_iter().collect())
@@ -391,6 +549,93 @@ mod tests {
         apply_safe_fixes(root, &config)?;
         let updated = fs::read_to_string(root.join("index.html"))?;
         assert!(updated.contains("/alpha") || updated.contains("data-ui=\"related-links\""));
+        Ok(())
+    }
+
+    #[test]
+    fn injects_schema_with_per_type_augmentation_and_idempotency() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        // Page already has Article schema — that one type should be
+        // skipped during injection. BreadcrumbList should still land.
+        write(
+            &root.join("guide.html"),
+            r#"<html lang="en"><head>
+                <title>Guide</title>
+                <meta name="description" content="g">
+                <link rel="canonical" href="https://example.com/guide">
+                <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Hand-authored"}</script>
+            </head><body><h1>Guide</h1></body></html>"#,
+        );
+        write(
+            &root.join("schema-suggestions.json"),
+            r#"{
+              "version": 1,
+              "site_url": "https://example.com",
+              "suggestions": [
+                {
+                  "route": "guide",
+                  "types": {
+                    "BreadcrumbList": {"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": []},
+                    "Article": {"@context": "https://schema.org", "@type": "Article", "headline": "Aexeo-generated"}
+                  }
+                }
+              ]
+            }"#,
+        );
+
+        let config = Config::default();
+        let options = super::FixOptions {
+            inject_schema: true,
+        };
+        super::apply_safe_fixes_with_options(root, &config, options)?;
+
+        let updated = fs::read_to_string(root.join("guide.html"))?;
+        // Per-type augmentation: BreadcrumbList added, Article NOT
+        // duplicated.
+        assert!(updated.contains("\"BreadcrumbList\""));
+        assert_eq!(
+            updated.matches("\"Article\"").count(),
+            1,
+            "Article type must not be duplicated when host already authored one"
+        );
+        // The hand-authored Article must survive verbatim.
+        assert!(updated.contains("Hand-authored"));
+        assert!(!updated.contains("Aexeo-generated"));
+
+        // Idempotency: a second run does not re-add the BreadcrumbList.
+        super::apply_safe_fixes_with_options(root, &config, options)?;
+        let twice = fs::read_to_string(root.join("guide.html"))?;
+        assert_eq!(
+            twice.matches("\"BreadcrumbList\"").count(),
+            1,
+            "schema injection must not duplicate types on second run"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn schema_injection_off_by_default() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("page.html"),
+            r#"<html lang="en"><head><title>p</title><meta name="description" content="p"><link rel="canonical" href="https://example.com/page"></head><body><h1>p</h1></body></html>"#,
+        );
+        write(
+            &root.join("schema-suggestions.json"),
+            r#"{"version": 1, "site_url": "https://example.com", "suggestions": [
+              {"route": "page", "types": {"BreadcrumbList": {"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": []}}}
+            ]}"#,
+        );
+
+        let config = Config::default();
+        // Default options (inject_schema=false) — schema-suggestions.json
+        // is on disk but the fix should not write any schema into the
+        // page. Content-bearing changes are opt-in.
+        super::apply_safe_fixes(root, &config)?;
+        let unchanged = fs::read_to_string(root.join("page.html"))?;
+        assert!(!unchanged.contains("BreadcrumbList"));
         Ok(())
     }
 

@@ -545,6 +545,30 @@ pub fn build_machine_artifact_bundle(site: &Site, site_url: Option<&str>) -> Mac
         "facts_manifest",
         facts_content,
     ));
+
+    // Schema suggestions: emitted only when a site_url is configured
+    // (every synthesized type needs absolute URLs). The bundle ships
+    // them in one JSON file; the inject-schema fix reads it to apply
+    // per-type augmentation into HTML <head> blocks. Suggestions are
+    // additive — never replacements — so the artifact is safe to ship
+    // even when consumers don't run the inject-fix.
+    if let Some(url) = site_url {
+        let suggestions = crate::intelligence::generate_schema_suggestions(site, Some(url));
+        if !suggestions.is_empty() {
+            let payload = serde_json::json!({
+                "version": 1,
+                "site_url": url,
+                "suggestions": suggestions,
+            });
+            let content =
+                serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string());
+            artifacts.push(machine_artifact(
+                "schema-suggestions.json",
+                "schema_suggestions",
+                content,
+            ));
+        }
+    }
     let markdown_pages = render_markdown_mirror_pages(site);
     let markdown_count = markdown_pages.len();
     artifacts.extend(markdown_pages);

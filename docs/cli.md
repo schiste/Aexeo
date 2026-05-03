@@ -166,7 +166,7 @@ Usage: generate [OPTIONS] <kind> [path]
 
 Arguments:
   <kind>
-          [possible values: llms, llms-full, public-bundle, markdown-mirror, markdown-pages, robots, sitemap, links, facts-prompt]
+          [possible values: llms, llms-full, public-bundle, markdown-mirror, markdown-pages, robots, sitemap, links, facts-prompt, schema]
 
   [path]
           [default: .]
@@ -601,6 +601,9 @@ Arguments:
 Options:
       --config <config>
 
+
+      --inject-schema
+          Read schema-suggestions.json from the path and inject suggested JSON-LD into HTML <head> blocks (per-type augmentation; existing types are skipped).
 
       --format <format>
           [default: text]

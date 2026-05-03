@@ -164,6 +164,7 @@ pub fn build_cli() -> Command {
                     "sitemap",
                     "links",
                     "facts-prompt",
+                    "schema",
                 ]))
                 .arg(Arg::new("path").default_value("."))
                 .arg(Arg::new("config").long("config").num_args(1))
@@ -983,6 +984,14 @@ pub fn build_cli() -> Command {
                 .about("Apply safe deterministic fixes")
                 .arg(Arg::new("path").default_value("."))
                 .arg(Arg::new("config").long("config").num_args(1))
+                .arg(
+                    Arg::new("inject-schema")
+                        .long("inject-schema")
+                        .action(clap::ArgAction::SetTrue)
+                        .help(
+                            "Read schema-suggestions.json from the path and inject suggested JSON-LD into HTML <head> blocks (per-type augmentation; existing types are skipped).",
+                        ),
+                )
                 .arg(
                     Arg::new("format")
                         .long("format")
