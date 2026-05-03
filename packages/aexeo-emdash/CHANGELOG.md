@@ -6,6 +6,68 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-03
+
+**Breaking change**: the `seogeo` → `aexeo` rename across the
+codebase reaches the published API. Hosts on 0.5.x using the
+sandboxed factory or the env-var fallback need to update their
+imports and config. The configured factory was already named
+`aexeoPlugin` in 0.5.x, so consumers using only that path are
+unaffected.
+
+**Compatibility:** verified against emdash `0.7.0` and `0.8.0`.
+
+### Changed (breaking)
+
+- **Sandboxed factory rename:** `seogeoPluginSandboxed(...)` is now
+  `aexeoPluginSandboxed(...)`. Update your import:
+
+  ```ts
+  // before (0.5.x)
+  import { seogeoPluginSandboxed } from "@aeptus/aexeo-emdash";
+  // after (0.6.0)
+  import { aexeoPluginSandboxed } from "@aeptus/aexeo-emdash";
+  ```
+
+- **Sandboxed options type rename:** `SeogeoSandboxedOptions` →
+  `AexeoSandboxedOptions`. Same migration as above for any host
+  that referenced the type name explicitly.
+
+- **Env var rename:** `SEOGEO_EVALUATOR_HOST` →
+  `AEXEO_EVALUATOR_HOST`. Update any CI / Cloudflare Pages build
+  config that sets the old name. The fallback chain is unchanged
+  otherwise (factory option > env var > none).
+
+- **Plugin id rename:** the plugin's emdash id is now `aexeo-emdash`
+  (was `aexeo-seogeo`). This affects:
+  - admin URL paths: `/admin/plugins/aexeo-emdash/...` (was
+    `/admin/plugins/aexeo-seogeo/...`)
+  - any host code that referenced the plugin id explicitly (e.g.
+    in `usePluginPage(pluginId, ...)` or in plugin-bridge URLs)
+  - the React `adminEntry` URL convention is unchanged at the
+    HTTP route level (the React pages still mount under the new
+    plugin id automatically)
+
+- **Widget id rename:** `seogeo-score` → `aexeo-score`. Hosts that
+  declared this widget id explicitly in their dashboard config need
+  to update.
+
+### Notes for hosts upgrading from 0.5.x
+
+The configured factory has been `aexeoPlugin` since 0.5.0 — sites
+using only `aexeoPlugin({ ... })` need no code changes for this
+release. The breaking changes above only affect:
+
+1. Hosts using the sandboxed factory.
+2. Hosts deploying with the `SEOGEO_EVALUATOR_HOST` env var.
+3. Host-side code or workflows that hardcode the plugin id
+   (`aexeo-seogeo`) or widget id (`seogeo-score`).
+
+Migration is a sed-and-rebuild for most hosts. The rename was the
+last user-facing trace of the original `seogeo` codebase name —
+0.6.0 closes the renaming pass that started across the workspace
+in late April.
+
 ## [0.5.0] - 2026-05-01
 
 Three follow-ups from real-world adoption feedback after 0.4.0:
@@ -317,7 +379,8 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.5.0...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.6.0...HEAD
+[0.6.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.5.0...aexeo-emdash-v0.6.0
 [0.5.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.4.0...aexeo-emdash-v0.5.0
 [0.4.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.3.0...aexeo-emdash-v0.4.0
 [0.3.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.2.0...aexeo-emdash-v0.3.0
