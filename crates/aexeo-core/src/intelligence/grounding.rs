@@ -1,6 +1,6 @@
+use crate::time_shim::Instant;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::Instant;
 
 use crate::schema_rules::iter_schema_types;
 use crate::site::{Page, PageKind, Site};

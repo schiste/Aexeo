@@ -1,9 +1,9 @@
+use crate::time_shim::Instant;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 use url::Url;
 
 use crate::schema_rules::{iter_schema_field_values, iter_schema_types};

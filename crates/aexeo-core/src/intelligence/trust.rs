@@ -1,3 +1,4 @@
+use crate::time_shim::Instant;
 use anyhow::{Context, Result, bail};
 use csv::ReaderBuilder;
 use serde::{Deserialize, Serialize};
@@ -5,7 +6,6 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
-use std::time::Instant;
 use url::Url;
 
 use crate::intelligence::truth::TruthManifest;

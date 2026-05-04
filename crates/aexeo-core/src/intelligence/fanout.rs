@@ -1,6 +1,6 @@
+use crate::time_shim::Instant;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use std::time::Instant;
 
 use super::grounding::{GroundingIntentFamily, GroundingRouteAnalysis, map_grounding_queries};
 use crate::site::Site;

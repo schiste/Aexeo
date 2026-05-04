@@ -1,7 +1,7 @@
+use crate::time_shim::Instant;
 use aexeo_contracts::{Finding, FindingScope, RuleTiming};
 use anyhow::Result;
 use std::path::Path;
-use std::time::Instant;
 
 use crate::adapter::resolve_static_site_root;
 use crate::config::{Config, default_rule_switches, load_config};

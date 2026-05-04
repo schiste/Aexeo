@@ -1,6 +1,6 @@
+use crate::time_shim::Instant;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::time::Instant;
 
 use crate::site::Site;
 
