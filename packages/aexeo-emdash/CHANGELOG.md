@@ -6,6 +6,62 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.10] - 2026-05-04
+
+Two follow-up quality fixes from Aeptus's 0.8.9 retest. The
+local refresh path is now end-to-end correct.
+
+### Fixed
+
+- **Findings now attribute to document routes, not synthesized
+  HTML filenames.** v0.8.9's bridge set `page.path` to
+  `emdash/<route>.html`, which the plugin's
+  `evaluateAndPersistAll` then used as the bucket key when
+  distributing findings to document routes. The synthesized
+  filename never matched the documentRoutes set, so every
+  finding landed in a shadow bucket keyed by the filename and
+  the document's row in the admin showed zero findings. Bridge
+  now sets `page.path` to the document route directly
+  (`/about` rather than `emdash/about.html`); `Finding.path`
+  matches the bucket the plugin pre-populates.
+
+### Changed
+
+- **CMS evaluation suppresses site-wide infrastructure rule
+  groups.** The plugin's configured-mode evaluator now passes
+  a Config to `evaluateDocuments` that disables `robots`,
+  `sitemap`, `llm`, `surfaces`, `well_known`, `headers`, and
+  `deployment` rule groups. The CMS document set has no
+  robots.txt or sitemap.xml or llms.txt — those are the
+  host's deployed-site artifacts, audited by the CLI's
+  static-site mode against a real filesystem. Running them
+  against the bridge's synthetic CMS site produced
+  `missing robots.txt` / `missing sitemap.xml` / `missing
+  llms.txt` / `missing markdown mirrors` noise on every
+  refresh, none of which the editor could act on from inside
+  the CMS.
+
+  Per-page rule groups stay on: `html`, `social`, `schema`,
+  `content`, `structure`, `links`. Those audit per-document
+  content editors can actually fix.
+
+  CLI static-site audits are unaffected — they use
+  `Config::default()` with all groups on, against a
+  filesystem-rooted Site.
+
+### Notes for hosts upgrading from 0.8.9
+
+- No code changes required.
+- After bumping, the admin's findings page will show fewer
+  findings (because the infrastructure noise is gone) and
+  every finding now attributes to its document route. Editors
+  should expect their per-document finding count to match the
+  document row's findingCount in the table — those were the
+  same number before, but the path mismatch was hiding it.
+- If you want the infrastructure-level audit (robots/sitemap/
+  llms/well-known/etc.), run `aexeo-cli check` against your
+  static dist; that's where those rules belong.
+
 ## [0.8.9] - 2026-05-04
 
 ### Fixed
@@ -908,7 +964,8 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.9...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.10...HEAD
+[0.8.10]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.9...aexeo-emdash-v0.8.10
 [0.8.9]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.8...aexeo-emdash-v0.8.9
 [0.8.8]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.7...aexeo-emdash-v0.8.8
 [0.8.7]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.6...aexeo-emdash-v0.8.7
