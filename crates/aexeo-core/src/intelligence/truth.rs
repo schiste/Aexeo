@@ -874,6 +874,15 @@ fn detect_descriptors(site: &Site, organization_name: Option<&str>) -> Vec<Strin
             }
         }
     }
+    // Raised the score threshold from `> 0` to `>= 2` after Aeptus
+    // reported low-quality bigram fragments leaking through:
+    // "behind long", "engineer small", "bloated pricing",
+    // "cycles heavy", "heavy deployments", "autonomous engineer".
+    // These all score exactly +1 from the 2-word bonus alone with
+    // no anchor or core token, so they passed the previous `> 0`
+    // gate. Requiring the phrase to land at least one anchor
+    // (+3) or core word (+2) before being emitted as a descriptor
+    // drops the fragment class entirely.
     let mut descriptors = counts
         .into_iter()
         .filter_map(|(phrase, count)| {
@@ -881,7 +890,7 @@ fn detect_descriptors(site: &Site, organization_name: Option<&str>) -> Vec<Strin
                 return None;
             }
             let score = descriptor_score(&phrase);
-            (score > 0).then_some((phrase, count, score))
+            (score >= 2).then_some((phrase, count, score))
         })
         .collect::<Vec<_>>();
     descriptors.sort_by(
@@ -1605,6 +1614,44 @@ mod tests {
         assert!(descriptors.iter().any(|value| value == "coding agents"));
         assert!(descriptors.iter().all(|value| value != "24 bit true"));
         assert!(descriptors.iter().all(|value| value != "26 mcp tools"));
+    }
+
+    #[test]
+    fn generated_manifest_drops_bigram_fragment_descriptors() {
+        // Regression for Aeptus post-v0.0.12: bigram fragments like
+        // "behind long", "engineer small", "bloated pricing",
+        // "cycles heavy" were leaking through as descriptors. They
+        // scored exactly +1 from the 2-word bonus alone; raising
+        // the descriptor threshold to >= 2 (require an anchor or
+        // core word) drops the entire fragment class.
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("index.html"),
+            r#"<html><head><title>Aeptus</title><meta name="description" content="Aeptus helps small teams behind long deployment cycles heavy with bloated pricing tiers; autonomous engineer workflows are the answer."><meta property="og:description" content="Aeptus is for teams behind long deployments and cycles heavy with bloated pricing problems."><meta name="twitter:description" content="Aeptus solves bloated pricing and engineer small team productivity in heavy deployments."></head><body><h1>Aeptus</h1></body></html>"#,
+        )
+        .unwrap();
+        let site = load_site(root).unwrap();
+        let generated = generate_truth_manifest(&site);
+        let descriptors: Vec<&str> = generated
+            .manifest
+            .organization
+            .as_ref()
+            .map(|o| o.descriptors.iter().map(String::as_str).collect())
+            .unwrap_or_default();
+        for forbidden in &[
+            "behind long",
+            "engineer small",
+            "cycles heavy",
+            "bloated pricing",
+            "heavy deployments",
+            "autonomous engineer",
+        ] {
+            assert!(
+                !descriptors.contains(forbidden),
+                "descriptor '{forbidden}' should be filtered as a bigram fragment; got: {descriptors:?}"
+            );
+        }
     }
 
     #[test]
