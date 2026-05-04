@@ -14,8 +14,8 @@ crate-type = ["cdylib", "rlib"]
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-aexeo-contracts = { version = "0.0.8", path = "../aexeo-contracts" }
-aexeo-core = { version = "0.0.8", path = "../aexeo-core", default-features = false }
+aexeo-contracts = { version = "0.0.9", path = "../aexeo-contracts" }
+aexeo-core = { version = "0.0.9", path = "../aexeo-core", default-features = false }
 wasm-bindgen = { version = "0.2", optional = true }
 
 [features]
