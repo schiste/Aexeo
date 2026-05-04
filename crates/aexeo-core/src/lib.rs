@@ -30,6 +30,7 @@ pub mod structure_rules;
 pub mod surface_rules;
 pub mod surfaces;
 pub mod verification;
+pub mod well_known_rules;
 
 pub use config::{
     Config, ConfigFieldDoc, render_resolved_config_json, render_resolved_config_toml,

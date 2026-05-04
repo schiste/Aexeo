@@ -584,6 +584,38 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                     rule_id: "SRF006",
                     summary: "llms.txt references missing machine-readable artifact",
                 },
+                RuleDescriptor {
+                    rule_id: "SRF010",
+                    summary: "agent-skills index missing despite tool-bearing manifest",
+                },
+                RuleDescriptor {
+                    rule_id: "SRF011",
+                    summary: "agent-skills index has invalid shape",
+                },
+                RuleDescriptor {
+                    rule_id: "SRF015",
+                    summary: "MCP server card missing despite MCP claim",
+                },
+                RuleDescriptor {
+                    rule_id: "SRF016",
+                    summary: "MCP server card has invalid shape",
+                },
+                RuleDescriptor {
+                    rule_id: "SRF020",
+                    summary: "API catalog missing despite API surface signal",
+                },
+                RuleDescriptor {
+                    rule_id: "SRF021",
+                    summary: "API catalog has invalid linkset shape",
+                },
+                RuleDescriptor {
+                    rule_id: "SRF025",
+                    summary: "OAuth-protected APIs missing OIDC/OAuth discovery metadata",
+                },
+                RuleDescriptor {
+                    rule_id: "SRF026",
+                    summary: "OAuth-protected APIs missing protected-resource metadata",
+                },
             ],
         },
         RuleGroupDefinition {

@@ -110,6 +110,14 @@ Machine-readable discovery, citation, and agent-retrieval surfaces.
 - `SRF004`: route has no discovered Markdown mirror
 - `SRF005`: route has Markdown mirror but no static discovery link
 - `SRF006`: llms.txt references missing machine-readable artifact
+- `SRF010`: agent-skills index missing despite tool-bearing manifest
+- `SRF011`: agent-skills index has invalid shape
+- `SRF015`: MCP server card missing despite MCP claim
+- `SRF016`: MCP server card has invalid shape
+- `SRF020`: API catalog missing despite API surface signal
+- `SRF021`: API catalog has invalid linkset shape
+- `SRF025`: OAuth-protected APIs missing OIDC/OAuth discovery metadata
+- `SRF026`: OAuth-protected APIs missing protected-resource metadata
 
 ## `content`
 

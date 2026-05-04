@@ -120,6 +120,16 @@ pub fn run_checks_for_site_profiled(site: &crate::site::Site, config: &Config) -
         || run_surface_rules(site, config),
     );
     time_rule_group(
+        rules.checks.get("well_known").copied().unwrap_or(true),
+        "well_known",
+        &mut rule_timings,
+        &mut findings,
+        || {
+            let capabilities = crate::capabilities::infer_site_capabilities(site);
+            crate::well_known_rules::run_well_known_rules(site, &capabilities)
+        },
+    );
+    time_rule_group(
         rules.checks.get("schema").copied().unwrap_or(true),
         "schema",
         &mut rule_timings,
