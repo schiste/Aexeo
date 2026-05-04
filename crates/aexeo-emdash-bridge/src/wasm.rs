@@ -5,6 +5,18 @@ use aexeo_core::{
     render_facts_prompt, rule_layers_for_id, score_intelligence, validate_truth_manifest,
 };
 
+/// Wire Rust panics through to the browser/Node console with the
+/// usual file:line + message instead of the bare WASM `unreachable`
+/// trap. Without this, a Rust panic inside the bridge surfaces as
+/// `wasm_error: unreachable` at the WASM-host boundary with no
+/// indication of which line panicked — which is exactly the
+/// diagnostic gap that left the v0.8.7→0.8.8 `Instant::now()` panic
+/// undebuggable from the host side. `set_once()` is idempotent so
+/// every entry point can call it cheaply.
+fn install_panic_hook() {
+    console_error_panic_hook::set_once();
+}
+
 use crate::document::EmdashDocument;
 use crate::evaluate::evaluate_documents;
 use crate::site::build_site_from_documents;
@@ -39,6 +51,7 @@ pub fn evaluate_documents_js(
     documents_json: &str,
     config_json: Option<String>,
 ) -> Result<String, JsError> {
+    install_panic_hook();
     let documents: Vec<EmdashDocument> = serde_json::from_str(documents_json)
         .map_err(|error| JsError::new(&format!("failed to parse documents: {error}")))?;
     let config: Config = match config_json.as_deref() {
@@ -58,6 +71,7 @@ pub fn score_intelligence_js(
     documents_json: &str,
     manifest_json: Option<String>,
 ) -> Result<String, JsError> {
+    install_panic_hook();
     let documents: Vec<EmdashDocument> = serde_json::from_str(documents_json)
         .map_err(|error| JsError::new(&format!("failed to parse documents: {error}")))?;
     let site = build_site_from_documents(&documents)
@@ -101,6 +115,7 @@ pub fn score_intelligence_js(
 /// string is what the editor pastes into Claude/GPT/etc.
 #[wasm_bindgen(js_name = "generateFactsPrompt")]
 pub fn generate_facts_prompt_js(documents_json: &str) -> Result<String, JsError> {
+    install_panic_hook();
     let documents: Vec<EmdashDocument> = serde_json::from_str(documents_json)
         .map_err(|error| JsError::new(&format!("failed to parse documents: {error}")))?;
     let site = build_site_from_documents(&documents)
@@ -117,6 +132,7 @@ pub fn validate_facts_manifest_js(
     manifest_json: &str,
     documents_json: &str,
 ) -> Result<String, JsError> {
+    install_panic_hook();
     let manifest: TruthManifest = serde_json::from_str(manifest_json)
         .map_err(|error| JsError::new(&format!("failed to parse manifest: {error}")))?;
     let validation = validate_truth_manifest(&manifest);
