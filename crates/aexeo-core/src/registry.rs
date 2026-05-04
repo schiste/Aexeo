@@ -429,7 +429,7 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                 },
                 RuleDescriptor {
                     rule_id: "SOC009",
-                    summary: "social image is smaller than recommended",
+                    summary: "twitter:card is `summary`; consider `summary_large_image`",
                 },
                 RuleDescriptor {
                     rule_id: "SOC010",

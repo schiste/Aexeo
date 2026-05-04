@@ -19,8 +19,9 @@ use self::defaults::{
     default_repeatable_data_ui, default_require_fact_consistency, default_require_html_lang,
     default_require_meta_robots_consistency, default_require_open_graph,
     default_require_robots_sitemap, default_require_schema_title_alignment,
-    default_require_twitter_card, default_required_feature_markers, default_source_dir,
-    default_typecheck_command, default_utility_route_patterns, default_weak_anchor_text,
+    default_require_social_images, default_require_twitter_card, default_required_feature_markers,
+    default_source_dir, default_typecheck_command, default_utility_route_patterns,
+    default_weak_anchor_text,
 };
 
 pub use self::defaults::default_rule_switches;
@@ -143,7 +144,7 @@ pub struct Config {
     pub require_twitter_card: bool,
     #[serde(default = "default_default_twitter_card")]
     pub default_twitter_card: String,
-    #[serde(default)]
+    #[serde(default = "default_require_social_images")]
     pub require_social_images: bool,
     #[serde(default)]
     pub require_twitter_image: bool,
@@ -246,7 +247,7 @@ impl Default for Config {
             require_open_graph: default_require_open_graph(),
             require_twitter_card: default_require_twitter_card(),
             default_twitter_card: default_default_twitter_card(),
-            require_social_images: false,
+            require_social_images: default_require_social_images(),
             require_twitter_image: false,
             require_robots_sitemap: default_require_robots_sitemap(),
             weak_anchor_text: default_weak_anchor_text(),

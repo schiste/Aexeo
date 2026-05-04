@@ -65,7 +65,7 @@
 - `SOC006`: missing og:image
 - `SOC007`: missing twitter:image
 - `SOC008`: social image points to a missing internal asset
-- `SOC009`: social image is smaller than recommended
+- `SOC009`: twitter:card is `summary`; consider `summary_large_image`
 - `SOC010`: social image aspect ratio is outside recommended range
 - `SOC011`: social image is larger than recommended
 

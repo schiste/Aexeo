@@ -106,6 +106,9 @@ pub(super) fn default_require_twitter_card() -> bool {
 pub(super) fn default_default_twitter_card() -> String {
     "summary".to_string()
 }
+pub(super) fn default_require_social_images() -> bool {
+    true
+}
 pub(super) fn default_require_robots_sitemap() -> bool {
     true
 }

@@ -66,6 +66,22 @@ pub fn run_social_rules(site: &Site, config: &Config) -> Vec<Finding> {
         if rules.require_twitter_image && page.metadata("twitter:image").is_none() {
             findings.push(finding("SOC007", "missing twitter:image", page));
         }
+        // SOC009 — heuristic recommendation. When the page declares
+        // `twitter:card = summary`, suggest `summary_large_image`
+        // for the richer preview. Only fires when twitter:card is
+        // explicitly set; pages without twitter:card already get
+        // SOC004 (the structural finding). Skipped automatically
+        // when twitter:card is already a non-`summary` value.
+        if rules.require_twitter_card
+            && let Some(card) = page.metadata("twitter:card")
+            && card.eq_ignore_ascii_case("summary")
+        {
+            findings.push(finding(
+                "SOC009",
+                "twitter:card is `summary`; consider `summary_large_image` for richer link previews",
+                page,
+            ));
+        }
 
         for key in ["og:image", "twitter:image"] {
             let Some(value) = page.metadata(key) else {
@@ -118,5 +134,54 @@ mod tests {
         assert!(rule_ids.contains("SOC002"));
         assert!(rule_ids.contains("SOC003"));
         assert!(rule_ids.contains("SOC004"));
+    }
+
+    #[test]
+    fn soc006_fires_by_default_when_og_image_is_missing() {
+        // Aeptus asked for og:image presence detection; SOC006
+        // already existed but was gated behind require_social_images
+        // = false. Now default-on so missing og:image surfaces on
+        // every audit without explicit opt-in.
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><title>x</title><meta name=\"description\" content=\"y\"><meta property=\"og:title\" content=\"x\"><meta property=\"og:description\" content=\"y\"><meta property=\"og:type\" content=\"website\"><meta name=\"twitter:card\" content=\"summary_large_image\"><link rel=\"canonical\" href=\"https://example.com/\"></head><body><h1>x</h1></body></html>",
+        );
+        let rule_ids = run_social_rules(&load_site(root).unwrap(), &Config::default())
+            .into_iter()
+            .map(|finding| finding.rule_id)
+            .collect::<BTreeSet<_>>();
+        assert!(rule_ids.contains("SOC006"));
+    }
+
+    #[test]
+    fn soc009_recommends_summary_large_image_when_card_is_summary() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><title>x</title><meta name=\"description\" content=\"y\"><meta property=\"og:title\" content=\"x\"><meta property=\"og:description\" content=\"y\"><meta property=\"og:type\" content=\"website\"><meta property=\"og:image\" content=\"https://example.com/og.png\"><meta name=\"twitter:card\" content=\"summary\"><link rel=\"canonical\" href=\"https://example.com/\"></head><body><h1>x</h1></body></html>",
+        );
+        let rule_ids = run_social_rules(&load_site(root).unwrap(), &Config::default())
+            .into_iter()
+            .map(|finding| finding.rule_id)
+            .collect::<BTreeSet<_>>();
+        assert!(rule_ids.contains("SOC009"));
+    }
+
+    #[test]
+    fn soc009_silent_when_card_is_already_summary_large_image() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><title>x</title><meta name=\"description\" content=\"y\"><meta property=\"og:title\" content=\"x\"><meta property=\"og:description\" content=\"y\"><meta property=\"og:type\" content=\"website\"><meta property=\"og:image\" content=\"https://example.com/og.png\"><meta name=\"twitter:card\" content=\"summary_large_image\"><link rel=\"canonical\" href=\"https://example.com/\"></head><body><h1>x</h1></body></html>",
+        );
+        let rule_ids = run_social_rules(&load_site(root).unwrap(), &Config::default())
+            .into_iter()
+            .map(|finding| finding.rule_id)
+            .collect::<BTreeSet<_>>();
+        assert!(!rule_ids.contains("SOC009"));
     }
 }
