@@ -96,6 +96,12 @@ pub struct Config {
     pub severity_overrides: BTreeMap<String, String>,
     #[serde(default)]
     pub suppressions: Vec<SuppressionRule>,
+    /// Named route kinds. The map key is the kind label
+    /// (e.g. "manifesto", "archive"); the value bundles the
+    /// match pattern + skip_rules + noindex policy. Compiles to
+    /// virtual SuppressionRules at policy-apply time.
+    #[serde(default)]
+    pub route_kinds: BTreeMap<String, RouteKind>,
     #[serde(default = "default_checks")]
     pub checks: BTreeMap<String, bool>,
     #[serde(default = "default_orphan_exclude")]
@@ -182,6 +188,38 @@ pub struct SuppressionRule {
     pub expires: Option<String>,
 }
 
+/// A named "kind" of route — a manifesto, a listing page, an
+/// archive, etc. — that bundles a pattern set with a stance:
+/// which rule IDs should skip this route, and whether the route
+/// is intentionally noindex. Aeptus's request: the manifesto
+/// page on /foundations/* is a thin-on-purpose page that
+/// shouldn't trip GEO007 / GEO008 / GEO010, and editors want
+/// the policy expressed at the route-kind level rather than as
+/// scattered per-rule suppressions.
+///
+/// Route kinds compile down to `SuppressionRule`s internally
+/// (one per skip_rule × match pattern), so the existing policy
+/// pipeline doesn't need a second mechanism. Path matching is
+/// substring-based, identical to suppressions; full glob
+/// support is a follow-up if/when path patterns get more
+/// complex than `/foundations/`.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
+pub struct RouteKind {
+    /// Path patterns that select routes belonging to this kind.
+    /// Substring match against `Finding.path` (same semantics as
+    /// `SuppressionRule.path_pattern`).
+    #[serde(default)]
+    pub r#match: Vec<String>,
+    /// Rule IDs that should NOT fire on routes of this kind.
+    #[serde(default)]
+    pub skip_rules: Vec<String>,
+    /// Marks the route-kind as intentionally noindex; the existing
+    /// `route_policy_overrides.allow_canonical_noindex` machinery
+    /// reads this so editors don't have to declare twice.
+    #[serde(default)]
+    pub noindex: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigFieldDoc {
     pub key: &'static str,
@@ -223,6 +261,7 @@ impl Default for Config {
             ignore_paths: Vec::new(),
             severity_overrides: BTreeMap::new(),
             suppressions: Vec::new(),
+            route_kinds: BTreeMap::new(),
             checks: default_checks(),
             orphan_exclude: default_orphan_exclude(),
             repeatable_data_ui: default_repeatable_data_ui(),

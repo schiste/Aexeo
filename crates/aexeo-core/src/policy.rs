@@ -1,6 +1,6 @@
 use aexeo_contracts::Finding;
 
-use crate::config::{Config, SuppressionRule};
+use crate::config::{Config, RouteKind, SuppressionRule};
 
 fn looks_expired(expires: Option<&str>) -> bool {
     let Some(expires) = expires.map(str::trim).filter(|value| !value.is_empty()) else {
@@ -72,14 +72,122 @@ pub fn apply_policy(findings: Vec<Finding>, config: &Config) -> Vec<Finding> {
                     && suppression_matches(suppression, finding)
             })
         })
+        .filter(|finding| !route_kind_skips_finding(&config.route_kinds, finding))
         .collect()
+}
+
+/// Returns true when any route kind matches this finding's path
+/// AND lists the finding's rule_id in its skip_rules. Compiled
+/// inline rather than expanded into a Vec<SuppressionRule>
+/// upfront — saves an allocation per audit and keeps the
+/// route-kind name available for future provenance reporting.
+fn route_kind_skips_finding(
+    route_kinds: &std::collections::BTreeMap<String, RouteKind>,
+    finding: &Finding,
+) -> bool {
+    for kind in route_kinds.values() {
+        if !kind.skip_rules.iter().any(|rule| rule == &finding.rule_id) {
+            continue;
+        }
+        if kind
+            .r#match
+            .iter()
+            .any(|pattern| !pattern.trim().is_empty() && finding.path.contains(pattern))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::apply_policy;
-    use crate::config::{Config, SuppressionRule};
+    use crate::config::{Config, RouteKind, SuppressionRule};
     use aexeo_contracts::{Finding, FindingScope};
+
+    #[test]
+    fn route_kind_skips_listed_rules_on_matching_paths() {
+        // Aeptus's request: declaring [route_kinds.manifesto]
+        // with match=["/foundations/"] and
+        // skip_rules=["GEO007","GEO008","GEO010"] should silence
+        // those rules on /foundations/* without scattering one
+        // suppression entry per rule.
+        let findings = vec![
+            Finding {
+                rule_id: "GEO007".to_string(),
+                message: "thin content".to_string(),
+                path: "/foundations/principles".to_string(),
+                line: 1,
+                column: 1,
+                severity: "warning".to_string(),
+                suggestion: None,
+                scope: FindingScope::Page,
+            },
+            Finding {
+                rule_id: "GEO007".to_string(),
+                message: "thin content".to_string(),
+                path: "/blog/some-post".to_string(),
+                line: 1,
+                column: 1,
+                severity: "warning".to_string(),
+                suggestion: None,
+                scope: FindingScope::Page,
+            },
+        ];
+        let mut route_kinds = BTreeMap::new();
+        route_kinds.insert(
+            "manifesto".to_string(),
+            RouteKind {
+                r#match: vec!["/foundations/".to_string()],
+                skip_rules: vec!["GEO007".to_string(), "GEO008".to_string()],
+                noindex: false,
+            },
+        );
+        let config = Config {
+            route_kinds,
+            ..Config::default()
+        };
+        let surviving = apply_policy(findings, &config);
+        assert_eq!(
+            surviving.len(),
+            1,
+            "blog post finding survives, manifesto's gets skipped: {surviving:?}"
+        );
+        assert_eq!(surviving[0].path, "/blog/some-post");
+    }
+
+    #[test]
+    fn route_kind_does_not_skip_unlisted_rules() {
+        let findings = vec![Finding {
+            rule_id: "SEO002".to_string(),
+            message: "missing description".to_string(),
+            path: "/foundations/principles".to_string(),
+            line: 1,
+            column: 1,
+            severity: "warning".to_string(),
+            suggestion: None,
+            scope: FindingScope::Page,
+        }];
+        let mut route_kinds = BTreeMap::new();
+        route_kinds.insert(
+            "manifesto".to_string(),
+            RouteKind {
+                r#match: vec!["/foundations/".to_string()],
+                skip_rules: vec!["GEO007".to_string()],
+                noindex: false,
+            },
+        );
+        let config = Config {
+            route_kinds,
+            ..Config::default()
+        };
+        // SEO002 isn't in skip_rules, so the finding survives.
+        let surviving = apply_policy(findings, &config);
+        assert_eq!(surviving.len(), 1);
+    }
 
     #[test]
     fn suppresses_matching_active_findings() {
