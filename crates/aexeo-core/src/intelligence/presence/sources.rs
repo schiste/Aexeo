@@ -192,19 +192,41 @@ fn check_wikidata(client: &Client, input: &EntityInput) -> SourceResult {
         return not_found_result("wikidata");
     }
 
-    // Second pass: prefer candidates whose description doesn't look
-    // like a natural-world or place disambiguator. If every match is
-    // generic, return the top result but flag it loudly in `extra`
-    // so editors see the disambiguation problem.
-    let pick = matching
+    // Score each candidate and pick the highest. The previous
+    // strategy was "find the first non-generic match, fall back to
+    // the top hit" — that lost on edge cases like
+    // "Aeptus singularis" (Q119813945, a species record) where the
+    // description doesn't start with the canonical "species of"
+    // prefix and the label is binomial nomenclature. The scoring
+    // now considers both signals explicitly:
+    //
+    //   +score for organizational descriptions (company, software, …)
+    //   -score for taxonomic/geographic descriptions
+    //   -score for binomial-nomenclature labels
+    //
+    // If no candidate scores positively, we emit a "not_found"
+    // result rather than picking the top wrong answer; a clear
+    // miss is more useful than a confidently-wrong match.
+    let mut scored: Vec<(&Value, i32)> = matching
         .iter()
-        .find(|c| {
-            !is_generic_concept_description(
-                c.get("description").and_then(Value::as_str).unwrap_or(""),
-            )
+        .map(|c| {
+            let label = c.get("label").and_then(Value::as_str).unwrap_or("");
+            let description = c.get("description").and_then(Value::as_str).unwrap_or("");
+            (*c, score_wikidata_candidate(label, description))
         })
-        .copied()
-        .unwrap_or_else(|| matching[0]);
+        .collect();
+    scored.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let (pick, top_score) = scored[0];
+    if top_score <= NEGATIVE_MATCH_THRESHOLD {
+        // Every candidate is taxonomic / geographic / otherwise
+        // off-target. Emit not_found rather than reporting a
+        // confidently-wrong match. The previous behavior was to
+        // emit "found" with a disambiguation note, which Aeptus
+        // reported as "still false-matching" — too easy to
+        // overlook when the result block says "found".
+        return not_found_result("wikidata");
+    }
 
     let id = pick.get("id").and_then(Value::as_str).unwrap_or_default();
     if id.is_empty() {
@@ -229,21 +251,100 @@ fn check_wikidata(client: &Client, input: &EntityInput) -> SourceResult {
         .get("description")
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty());
-    let all_matches_are_generic = matching.iter().all(|c| {
-        is_generic_concept_description(c.get("description").and_then(Value::as_str).unwrap_or(""))
-    });
-    let extra = match (description, all_matches_are_generic) {
+    let extra = match (description, top_score < POSITIVE_MATCH_THRESHOLD) {
         (Some(desc), true) => Some(format!(
-            "{desc} — likely disambiguation needed; the configured entity may not be on Wikidata"
+            "{desc} — low-confidence match; verify before relying on it"
         )),
         (Some(desc), false) => Some(desc.to_string()),
-        (None, true) => Some(
-            "likely disambiguation needed; the configured entity may not be on Wikidata"
-                .to_string(),
-        ),
+        (None, true) => Some("low-confidence match; verify before relying on it".to_string()),
         (None, false) => None,
     };
     found_result("wikidata", display_label, Some(url), extra)
+}
+
+/// Threshold below which we treat the match as a hard miss and
+/// emit `not_found` rather than reporting a wrong answer.
+const NEGATIVE_MATCH_THRESHOLD: i32 = -3;
+
+/// Threshold below which the match is included but flagged as
+/// low-confidence in the result extra text.
+const POSITIVE_MATCH_THRESHOLD: i32 = 5;
+
+/// Score a Wikidata candidate by how likely it is to be a real
+/// organization/product/person rather than a taxonomic or
+/// geographic concept. Positive total is good; negative is bad.
+fn score_wikidata_candidate(label: &str, description: &str) -> i32 {
+    let mut score = 0;
+    let lower = description.to_ascii_lowercase();
+
+    // Strong positive signals — descriptions for company-like
+    // entities follow Wikidata's editorial conventions.
+    const POSITIVE_TOKENS: &[&str] = &[
+        "company",
+        "corporation",
+        "business",
+        "startup",
+        "software",
+        "platform",
+        "service",
+        "brand",
+        "organization",
+        "organisation",
+        "foundation",
+        "non-profit",
+        "nonprofit",
+        "ngo",
+        "agency",
+        "publisher",
+        "vendor",
+        "framework",
+        "library",
+        "tool",
+        "app",
+        "application",
+        "website",
+        "database",
+        "operating system",
+    ];
+    for token in POSITIVE_TOKENS {
+        if lower.contains(token) {
+            score += 5;
+            break;
+        }
+    }
+
+    // Strong negative signals — taxonomic/geographic.
+    if is_generic_concept_description(description) {
+        score -= 8;
+    }
+
+    // Binomial nomenclature label ("Aeptus singularis"): two
+    // words, capital + lowercase, both purely alphabetic. Strongly
+    // suggests a taxonomic record regardless of description.
+    if looks_like_binomial_nomenclature(label) {
+        score -= 8;
+    }
+
+    score
+}
+
+fn looks_like_binomial_nomenclature(label: &str) -> bool {
+    let parts: Vec<&str> = label.split_whitespace().collect();
+    if parts.len() != 2 {
+        return false;
+    }
+    let first = parts[0];
+    let second = parts[1];
+    let first_ok = first.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && first.chars().all(|c| c.is_ascii_alphabetic())
+        && first.len() >= 3;
+    let second_ok = second
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase())
+        && second.chars().all(|c| c.is_ascii_alphabetic())
+        && second.len() >= 4;
+    first_ok && second_ok
 }
 
 /// Detect Wikidata descriptions that describe a generic natural-world
@@ -592,5 +693,59 @@ mod tests {
             "non-profit organization based in Paris"
         ));
         assert!(!is_generic_concept_description("French CMS startup"));
+    }
+
+    #[test]
+    fn binomial_nomenclature_labels_are_detected() {
+        assert!(looks_like_binomial_nomenclature("Aeptus singularis"));
+        assert!(looks_like_binomial_nomenclature("Homo sapiens"));
+        assert!(looks_like_binomial_nomenclature("Drosophila melanogaster"));
+    }
+
+    #[test]
+    fn brand_labels_are_not_flagged_as_binomial() {
+        // Single word — not binomial.
+        assert!(!looks_like_binomial_nomenclature("Aeptus"));
+        // Two capitalized words — brand pattern, not binomial.
+        assert!(!looks_like_binomial_nomenclature("Aeptus Inc"));
+        // Title case with spaces — likely a product name.
+        assert!(!looks_like_binomial_nomenclature("Aeptus Platform"));
+        // Two words but with non-alpha — version string, not binomial.
+        assert!(!looks_like_binomial_nomenclature("Aeptus 1.0"));
+    }
+
+    #[test]
+    fn wikidata_candidate_scoring_prefers_company_descriptions() {
+        let company_score =
+            score_wikidata_candidate("Aeptus", "American technology company based in Palo Alto");
+        let species_score = score_wikidata_candidate("Aeptus singularis", "");
+        let unknown_score = score_wikidata_candidate("Aeptus", "");
+        assert!(
+            company_score > 0,
+            "company description should score positive"
+        );
+        assert!(species_score < 0, "binomial label should score negative");
+        assert!(
+            company_score > species_score,
+            "company description should outscore binomial label"
+        );
+        assert!(
+            unknown_score == 0,
+            "no signal both ways → neutral score, not picked"
+        );
+    }
+
+    #[test]
+    fn wikidata_candidate_scoring_handles_aeptus_singularis_case() {
+        // The exact case Aeptus reported: an entity labeled
+        // "Aeptus singularis" with a non-canonical description.
+        // Even though the description doesn't start with "species
+        // of", the binomial label trips the negative signal.
+        let score =
+            score_wikidata_candidate("Aeptus singularis", "described 1856; family Carabidae");
+        assert!(
+            score < 0,
+            "Aeptus singularis with taxonomic context must score negative"
+        );
     }
 }
