@@ -20,7 +20,7 @@ serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 url.workspace = true
-aexeo-contracts = { version = "0.0.10", path = "../aexeo-contracts" }
+aexeo-contracts = { version = "0.0.11", path = "../aexeo-contracts" }
 
 [dev-dependencies]
-tempfile = { version = "0.0.10", path = "../tempfile" }
+tempfile = { version = "0.0.11", path = "../tempfile" }
