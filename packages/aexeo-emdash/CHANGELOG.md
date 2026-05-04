@@ -6,6 +6,49 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-05-04
+
+Fix for the residual entity-presence trim() crash that 0.8.1
+didn't solve.
+
+### Fixed
+
+- **`/facts` and `/presence` routes were double-wrapping their
+  return values.** Both handlers returned `{ data: ... }` payloads,
+  but emdash's route registry already wraps a handler's return as
+  `{ data: <result> }` at the wire boundary. The result was
+  `{ data: { data: ... } }` on the wire. The React caller's
+  single-unwrap (`body.data`) surfaced `{ data: ... }` to the
+  consumer where the actual payload was expected — so
+  `(res as ManifestData).manifest` came back as `undefined`,
+  `JSON.stringify(undefined)` returned the literal `undefined`,
+  `setDraft(undefined)` set the textarea draft to undefined, and
+  the next render crashed on `draft.trim()`.
+
+  Fixed by changing both route handlers to return raw payloads
+  (matching the `/data` and `/refresh` route convention that has
+  always worked correctly). Errors are now signaled by throwing
+  `PluginRouteError` from the `emdash` package — the registry
+  treats thrown PluginRouteErrors as structured failures and
+  routes them through the host's standard error path. Returned
+  `{ error: ... }` objects (the previous pattern) flowed through
+  the success path and silently masqueraded as data.
+
+### Notes for hosts upgrading from 0.8.x
+
+- No code changes required.
+- The wire format of the `/facts` and `/presence` route responses
+  changes: where they previously returned
+  `{ data: { data: <payload> } }`, they now return
+  `{ data: <payload> }`. Anyone calling these routes directly
+  (outside the bundled React admin) needs to drop one unwrap.
+  The bundled admin is updated in lockstep so editors see no
+  behavioral difference beyond the bug being fixed.
+- Error responses for these routes now come back through the
+  standard `PluginRouteError` envelope (HTTP 4xx with
+  `{ error: { code, message } }`) instead of being silently
+  embedded in success responses.
+
 ## [0.8.1] - 2026-05-03
 
 Fix for the entity-presence diagnostic shipped in 0.8.0.
@@ -519,7 +562,8 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.1...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.2...HEAD
+[0.8.2]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.1...aexeo-emdash-v0.8.2
 [0.8.1]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.0...aexeo-emdash-v0.8.1
 [0.8.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.7.0...aexeo-emdash-v0.8.0
 [0.7.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.6.0...aexeo-emdash-v0.7.0
