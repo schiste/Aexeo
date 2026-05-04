@@ -6,6 +6,61 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-05-04
+
+Code-review follow-ups on the 0.8.5 agent-readiness rule bundles.
+All five issues are real correctness fixes; no behavior change
+for sites that already had clean output.
+
+### Fixed (engine via bridge)
+
+- **Public API exposure.** `SiteCapabilities`, `infer_site_capabilities`,
+  `well_known_path_exists`, `run_well_known_rules`, and
+  `run_header_rules` are now re-exported at the `aexeo-core` root
+  to match the existing pattern (`run_robots_rules`,
+  `run_surface_rules`, etc.). Previously consumers had to use the
+  long `aexeo_core::well_known_rules::run_well_known_rules` form.
+- **LNK020 group/check-key mismatch.** The rule was registered under
+  the `links` group but gated on the `headers` config key in
+  `static_check.rs`; toggling `links: false` would not silence it
+  and toggling `headers: false` would silence an unrelated group.
+  Fixed by moving LNK020 to a new `headers` rule group so the
+  registry name matches the toggle key.
+- **`route_looks_api` over-match.** Bare `v1/`, `v2/`, and
+  `graphql` prefixes incorrectly classified docs routes
+  (`/v1/getting-started`, `/v2/migration-guide`, `/graphql-101`)
+  as API surfaces, triggering SRF020 false-positives on
+  content-only docs sites. Tightened to require `api/` or
+  `graphql/` (with the slash) — the conditional-firing design's
+  whole point is to keep these silent on content sites.
+- **`render_robots_txt` round-trip.** Aexeo's own generator emitted
+  a robots.txt that tripped ROB010 + ROB011 (no AI-bot block, no
+  Content-Signal). Generator now emits explicit AI-bot blocks
+  (GPTBot, ClaudeBot, PerplexityBot, Google-Extended, CCBot) and
+  a permissive Content-Signal default so Aexeo's own output
+  passes Aexeo's own rules.
+- **SRF010/SRF015 unreachable from path-only signals.** The
+  capability gate required the canonical card/index file to
+  exist, but the rule fires when that exact file is missing —
+  structurally unreachable. Inference now also fires when the
+  `.well-known/mcp/` or `.well-known/agent-skills/` directory
+  exists without a canonical file inside (the partial-stub
+  pattern editors hit when starting an implementation).
+
+### Notes for hosts upgrading from 0.8.5
+
+- No code changes required.
+- `aexeo-cli generate robots-txt` (and the deploy generator) now
+  produces a robots.txt with explicit AI-bot blocks and a
+  Content-Signal directive. Editors who want a non-permissive
+  stance edit the line; the defaults match the wildcard `Allow: /`
+  posture so existing crawl behavior is unchanged.
+- Sites that have a `.well-known/mcp/` or
+  `.well-known/agent-skills/` directory stub without canonical
+  files inside will now see SRF010 / SRF015 fire (correctly —
+  the directory-stub state is exactly what the rule was meant
+  to catch).
+
 ## [0.8.5] - 2026-05-04
 
 Brings in the agent-readiness audit rules from upstream
@@ -705,7 +760,8 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.5...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.6...HEAD
+[0.8.6]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.5...aexeo-emdash-v0.8.6
 [0.8.5]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.4...aexeo-emdash-v0.8.5
 [0.8.4]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.3...aexeo-emdash-v0.8.4
 [0.8.3]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.2...aexeo-emdash-v0.8.3
