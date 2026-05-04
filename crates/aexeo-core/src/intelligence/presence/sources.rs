@@ -156,52 +156,129 @@ fn check_wikidata(client: &Client, input: &EntityInput) -> SourceResult {
             return unreachable_result("wikidata", &format!("URL build failed: {err}"));
         }
     };
+    // Ask for several candidates so we can disambiguate. The
+    // wbsearchentities endpoint matches on labels, so a query for
+    // "Aeptus" returns both Aeptus-the-company and Aeptus-the-genus
+    // of insects (Aeptus reported the latter as a false positive
+    // after v0.0.9 shipped). Pulling 10 candidates lets us prefer
+    // entries whose Wikidata description doesn't start with
+    // natural-world disambiguators ("genus of", "species of", …).
     url.query_pairs_mut()
         .append_pair("action", "wbsearchentities")
         .append_pair("search", &input.name)
         .append_pair("language", "en")
         .append_pair("format", "json")
-        .append_pair("limit", "1");
+        .append_pair("limit", "10");
 
     let body = match send_json_get(client, url.as_str(), "wikidata") {
         Ok(body) => body,
         Err(result) => return *result,
     };
-    let top = body
+    let candidates = body
         .get("search")
         .and_then(Value::as_array)
-        .and_then(|s| s.first());
-    let Some(top) = top else {
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+
+    // First pass: name-matching candidates only.
+    let matching: Vec<&Value> = candidates
+        .iter()
+        .filter(|c| {
+            let label = c.get("label").and_then(Value::as_str).unwrap_or_default();
+            fuzzy_match(label, &input.name)
+        })
+        .collect();
+    if matching.is_empty() {
         return not_found_result("wikidata");
-    };
-    let id = top.get("id").and_then(Value::as_str).unwrap_or_default();
+    }
+
+    // Second pass: prefer candidates whose description doesn't look
+    // like a natural-world or place disambiguator. If every match is
+    // generic, return the top result but flag it loudly in `extra`
+    // so editors see the disambiguation problem.
+    let pick = matching
+        .iter()
+        .find(|c| {
+            !is_generic_concept_description(
+                c.get("description").and_then(Value::as_str).unwrap_or(""),
+            )
+        })
+        .copied()
+        .unwrap_or_else(|| matching[0]);
+
+    let id = pick.get("id").and_then(Value::as_str).unwrap_or_default();
     if id.is_empty() {
         return not_found_result("wikidata");
     }
-    let label = top
+    let label = pick
         .get("label")
         .and_then(Value::as_str)
         .unwrap_or(&input.name)
         .to_string();
-    if !fuzzy_match(&label, &input.name) {
-        return not_found_result("wikidata");
-    }
     let display_label = if label.is_empty() {
         id.to_string()
     } else {
         format!("{id} — {label}")
     };
-    let url = top
+    let url = pick
         .get("concepturi")
         .and_then(Value::as_str)
         .map(str::to_string)
         .unwrap_or_else(|| format!("https://www.wikidata.org/wiki/{id}"));
-    let description = top
+    let description = pick
         .get("description")
         .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string);
-    found_result("wikidata", display_label, Some(url), description)
+        .filter(|s| !s.is_empty());
+    let all_matches_are_generic = matching.iter().all(|c| {
+        is_generic_concept_description(c.get("description").and_then(Value::as_str).unwrap_or(""))
+    });
+    let extra = match (description, all_matches_are_generic) {
+        (Some(desc), true) => Some(format!(
+            "{desc} — likely disambiguation needed; the configured entity may not be on Wikidata"
+        )),
+        (Some(desc), false) => Some(desc.to_string()),
+        (None, true) => Some(
+            "likely disambiguation needed; the configured entity may not be on Wikidata"
+                .to_string(),
+        ),
+        (None, false) => None,
+    };
+    found_result("wikidata", display_label, Some(url), extra)
+}
+
+/// Detect Wikidata descriptions that describe a generic natural-world
+/// or geographic concept rather than an organization/product/person.
+/// These are the false-positive class Aeptus reported (Aeptus
+/// matched a genus of insects rather than the company).
+fn is_generic_concept_description(description: &str) -> bool {
+    let lower = description.to_ascii_lowercase();
+    const PREFIXES: &[&str] = &[
+        "genus of",
+        "species of",
+        "family of",
+        "subgenus of",
+        "subfamily of",
+        "extinct genus",
+        "extinct species",
+        "fossil ",
+        "moth in the",
+        "beetle in the",
+        "fly in the",
+        "fish of the",
+        "plant in the",
+        "asteroid",
+        "crater on",
+        "village in",
+        "town in",
+        "city in",
+        "commune in",
+        "municipality of",
+        "river in",
+        "mountain in",
+    ];
+    PREFIXES
+        .iter()
+        .any(|prefix| lower.starts_with(prefix) || lower.contains(&format!(" {prefix}")))
 }
 
 fn check_github(client: &Client, input: &EntityInput) -> SourceResult {
@@ -271,7 +348,22 @@ fn check_rdap(client: &Client, input: &EntityInput) -> SourceResult {
     let Some(host) = extract_host(input.website.as_deref()) else {
         return skipped_result("rdap", "no website URL in manifest, can't check domain age");
     };
-    let url = format!("https://rdap.org/domain/{host}");
+    // RDAP is keyed on the registrable domain, not whatever
+    // subdomain the manifest happened to record. Aeptus reported
+    // their `https://www.aeptus.com` website returning a not_found
+    // because rdap.org was being asked about `www.aeptus.com`. Strip
+    // the leading `www.` for the lookup; we still surface the
+    // original host in the result label so editors see what was
+    // actually checked.
+    //
+    // Known limitation: deeper subdomains (e.g. `blog.foo.bar`) would
+    // need public-suffix-list-aware logic to identify the apex. For
+    // now we only normalize the `www.` case, which covers the
+    // common-on-CMS-installs pattern. If a manifest stores a deeper
+    // subdomain and RDAP says not_found, the user can update the
+    // manifest's website to the apex.
+    let rdap_host = host.strip_prefix("www.").unwrap_or(&host);
+    let url = format!("https://rdap.org/domain/{rdap_host}");
     let response = match client.get(&url).send() {
         Ok(r) => r,
         Err(err) => {
@@ -302,6 +394,13 @@ fn check_rdap(client: &Client, input: &EntityInput) -> SourceResult {
         })
         .and_then(|event| event.get("eventDate").and_then(Value::as_str))
         .map(str::to_string);
+    // Distinguish the looked-up host from the manifest host in the
+    // result text so editors can see when www-stripping kicked in.
+    let label = if rdap_host == host {
+        host.clone()
+    } else {
+        format!("{rdap_host} (apex of {host})")
+    };
     let extra = match registration.as_deref() {
         None => Some("registered (date not disclosed by registry)".to_string()),
         Some(date) => {
@@ -314,7 +413,7 @@ fn check_rdap(client: &Client, input: &EntityInput) -> SourceResult {
             }
         }
     };
-    found_result("rdap", host, None, extra)
+    found_result("rdap", label, None, extra)
 }
 
 fn check_common_crawl(client: &Client, input: &EntityInput) -> SourceResult {
@@ -464,5 +563,34 @@ fn skipped_result(source: &str, reason: &str) -> SourceResult {
         extra: None,
         error: Some(reason.to_string()),
         checked_at: iso_now(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generic_concept_descriptions_are_detected() {
+        assert!(is_generic_concept_description("genus of insects"));
+        assert!(is_generic_concept_description("species of moths"));
+        assert!(is_generic_concept_description("Genus of moths"));
+        assert!(is_generic_concept_description(
+            "extinct genus of cnidarians"
+        ));
+        assert!(is_generic_concept_description("village in France"));
+        assert!(is_generic_concept_description("asteroid"));
+    }
+
+    #[test]
+    fn organizational_descriptions_are_not_flagged_as_generic() {
+        assert!(!is_generic_concept_description(
+            "American multinational technology company"
+        ));
+        assert!(!is_generic_concept_description("software company"));
+        assert!(!is_generic_concept_description(
+            "non-profit organization based in Paris"
+        ));
+        assert!(!is_generic_concept_description("French CMS startup"));
     }
 }
