@@ -251,6 +251,17 @@ pub fn generate_truth_manifest_with_options(site: &Site, curate: bool) -> TruthM
                 "organization '{}' was inferred but no strong descriptors were found",
                 name
             ));
+        } else {
+            // Descriptors are extracted from page meta-description /
+            // og:description / twitter:description / h1 / title. They
+            // are heuristic quality even after the score threshold
+            // tightening — content-page phrases can still leak in
+            // when they share anchor tokens. Editors who rely on
+            // this field for downstream identity should review.
+            warnings.push(format!(
+                "organization.descriptors are heuristic-quality; review the {} entries before relying on them for downstream identity workflows",
+                organization_descriptors.len()
+            ));
         }
     } else {
         warnings.push(
@@ -278,14 +289,27 @@ pub fn generate_truth_manifest_with_options(site: &Site, curate: bool) -> TruthM
 
     let mut products = Vec::new();
     if let Some(name) = product_name.clone() {
+        let is_org_fallback = name == organization_name.clone().unwrap_or_default();
         provenance.insert(
             "products[0].name".to_string(),
-            if name == organization_name.clone().unwrap_or_default() {
+            if is_org_fallback {
                 vec!["organization_name_fallback".to_string()]
             } else {
                 product_name_sources(site)
             },
         );
+        // Per-field confidence warnings — surfaced so downstream
+        // features (presence diagnostic, intelligence layer) can
+        // treat low-confidence fields cautiously rather than acting
+        // on guessed identity. Aeptus reported in their post-0.0.12
+        // feedback that the manifest "looks deterministic but parts
+        // are still heuristic and low-confidence" — these warnings
+        // make the heuristic origins explicit.
+        if is_org_fallback {
+            warnings.push(format!(
+                "products[0].name was set to the organization name '{name}' as a conservative fallback; no JSON-LD-typed Product or SoftwareApplication was found on the site. If you have a distinct product name, edit the manifest before relying on it for presence diagnostics or downstream identity workflows."
+            ));
+        }
         let mut product = TruthEntity {
             name,
             aliases: Vec::new(),
@@ -1614,6 +1638,31 @@ mod tests {
         assert!(descriptors.iter().any(|value| value == "coding agents"));
         assert!(descriptors.iter().all(|value| value != "24 bit true"));
         assert!(descriptors.iter().all(|value| value != "26 mcp tools"));
+    }
+
+    #[test]
+    fn generated_manifest_warns_when_product_name_is_org_fallback() {
+        // When no schema-typed Product/SoftwareApplication is
+        // declared, products[0].name falls back to the org name —
+        // and an explicit low-confidence warning makes the
+        // heuristic origin visible to downstream consumers.
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("index.html"),
+            r#"<html><head><title>Aeptus</title></head><body><h1>Aeptus</h1></body></html>"#,
+        )
+        .unwrap();
+        let site = load_site(root).unwrap();
+        let generated = generate_truth_manifest(&site);
+        assert!(
+            generated
+                .warnings
+                .iter()
+                .any(|w| w.contains("organization name") && w.contains("conservative fallback")),
+            "expected fallback warning; got warnings: {:?}",
+            generated.warnings
+        );
     }
 
     #[test]
