@@ -607,6 +607,12 @@ fn validate_entity(
 fn detect_organization_name(site: &Site) -> Option<String> {
     let mut counts = BTreeMap::<String, usize>::new();
     for page in site.route_pages() {
+        // Skip 404/error pages entirely. Their titles ("Page not
+        // found") and h1s ("Oops") otherwise leak in as candidate
+        // organization names.
+        if looks_like_error_page(page.title.as_deref(), &page.h1_texts) {
+            continue;
+        }
         if let Some(title) = &page.title {
             for candidate in title_segments(title) {
                 if is_viable_name(&candidate) && !is_generic_site_label(&candidate) {
@@ -631,6 +637,14 @@ fn detect_organization_name(site: &Site) -> Option<String> {
             }
         }
     }
+    // Strong homepage preference: if any homepage signal exists in
+    // the corpus, prefer the highest-scoring homepage candidate over
+    // any subpage signal regardless of count. The previous "max by
+    // count then quality" let high-frequency listing labels (Blog,
+    // Posts) outvote a single-occurrence homepage signal.
+    if let Some(homepage_winner) = pick_homepage_winner(site, &counts) {
+        return Some(homepage_winner);
+    }
     counts
         .into_iter()
         .max_by(|(left_name, left_count), (right_name, right_count)| {
@@ -638,6 +652,57 @@ fn detect_organization_name(site: &Site) -> Option<String> {
                 .cmp(right_count)
                 .then_with(|| score_name_quality(right_name).cmp(&score_name_quality(left_name)))
                 .then_with(|| right_name.len().cmp(&left_name.len()))
+        })
+        .map(|(name, _)| name)
+}
+
+/// Restrict to candidates that came from the homepage (route ""):
+/// title segments, h1s, and JSON-LD `name` values. Returns the
+/// highest-scoring one, or None when the homepage produced none.
+fn pick_homepage_winner(site: &Site, overall_counts: &BTreeMap<String, usize>) -> Option<String> {
+    let mut homepage = BTreeMap::<String, usize>::new();
+    for page in site.route_pages() {
+        if !page.route.is_empty() {
+            continue;
+        }
+        if looks_like_error_page(page.title.as_deref(), &page.h1_texts) {
+            continue;
+        }
+        if let Some(title) = &page.title {
+            for candidate in title_segments(title) {
+                if is_viable_name(&candidate) && !is_generic_site_label(&candidate) {
+                    *homepage.entry(candidate).or_default() += 5;
+                }
+            }
+        }
+        for h1 in &page.h1_texts {
+            if is_viable_name(h1) && !is_generic_site_label(h1) {
+                *homepage.entry(h1.clone()).or_default() += 4;
+            }
+        }
+        for block in &page.json_ld_blocks {
+            let Ok(payload) = serde_json::from_str::<serde_json::Value>(&block.raw) else {
+                continue;
+            };
+            for value in iter_schema_field_values(&payload, "name") {
+                if is_viable_name(&value) && !is_generic_site_label(&value) {
+                    *homepage.entry(value).or_default() += 4;
+                }
+            }
+        }
+    }
+    homepage
+        .into_iter()
+        .max_by(|(left_name, left_count), (right_name, right_count)| {
+            left_count
+                .cmp(right_count)
+                .then_with(|| score_name_quality(right_name).cmp(&score_name_quality(left_name)))
+                .then_with(|| {
+                    overall_counts
+                        .get(right_name)
+                        .unwrap_or(&0)
+                        .cmp(overall_counts.get(left_name).unwrap_or(&0))
+                })
         })
         .map(|(name, _)| name)
 }
@@ -701,6 +766,12 @@ fn detect_category(site: &Site) -> Option<String> {
 fn detect_product_name(site: &Site, organization_name: Option<&str>) -> Option<String> {
     let mut counts = BTreeMap::<String, usize>::new();
     for page in site.route_pages() {
+        // Skip 404/error pages — same reason as detect_organization_name.
+        // This was the root of "Page not found" being chosen as the
+        // product name on Aeptus.
+        if looks_like_error_page(page.title.as_deref(), &page.h1_texts) {
+            continue;
+        }
         if let Some(title) = &page.title {
             for candidate in title_segments(title) {
                 if is_viable_name(&candidate) && !is_generic_site_label(&candidate) {
@@ -1004,10 +1075,51 @@ fn phrase_chunks(text: &str, brand_words: &BTreeSet<String>) -> Vec<Vec<String>>
 }
 
 fn is_generic_site_label(value: &str) -> bool {
-    matches!(
-        value.trim().to_ascii_lowercase().as_str(),
+    let normalized = value.trim().to_ascii_lowercase();
+    if matches!(
+        normalized.as_str(),
+        // Original site-chrome blocklist.
         "home" | "homepage" | "features" | "feature" | "pricing" | "docs" | "documentation"
-    )
+        // Listing/index pages — labels for these surface in titles and
+        // h1s of routes that aren't the organization. They were the
+        // top false-positive on Aeptus's facts-manifest generation
+        // ("Blog" got picked as the organization name).
+        | "blog" | "blogs" | "posts" | "articles" | "news" | "stories"
+        | "authors" | "author" | "tags" | "tag" | "categories" | "category"
+        | "search" | "results" | "archive" | "archives" | "index" | "all"
+        // 404 / error pages — these get crawled into the corpus and
+        // surface their titles ("Page not found", "404") as candidate
+        // organization or product names.
+        | "page not found" | "not found" | "404" | "404 not found"
+        | "error" | "errors" | "oops" | "something went wrong"
+    ) {
+        return true;
+    }
+    // Catch numeric labels (year archives "2024", date paginations "12")
+    // that pass the viable-name length filter but mean nothing as
+    // entity identifiers.
+    if !normalized.is_empty() && normalized.chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+    false
+}
+
+/// Heuristic: does this title or h1 look like it came from a 404 /
+/// error page? Used to drop entire pages from the candidate corpus
+/// before name extraction runs, not just the individual label.
+fn looks_like_error_page(title: Option<&str>, h1_texts: &[String]) -> bool {
+    let candidates: Vec<&str> = title
+        .into_iter()
+        .chain(h1_texts.iter().map(String::as_str))
+        .collect();
+    candidates.iter().any(|raw| {
+        let lower = raw.to_ascii_lowercase();
+        lower.contains("404")
+            || lower.contains("page not found")
+            || lower.contains("not found")
+            || lower.contains("page doesn't exist")
+            || lower.contains("does not exist")
+    })
 }
 
 fn score_name_quality(value: &str) -> usize {
@@ -1455,6 +1567,62 @@ mod tests {
         assert!(descriptors.iter().any(|value| value == "coding agents"));
         assert!(descriptors.iter().all(|value| value != "24 bit true"));
         assert!(descriptors.iter().all(|value| value != "26 mcp tools"));
+    }
+
+    #[test]
+    fn generated_manifest_skips_listing_labels_and_404_titles() {
+        // Regression for the Aeptus rollout: facts generate produced
+        // organization = "Blog" and product = "Page not found" because
+        // the listing page's title outvoted the homepage's signal and
+        // the 404 page's title leaked in as a candidate name.
+        let temp = tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("index.html"),
+            r#"<html><head><title>Aeptus</title></head><body><h1>Aeptus</h1></body></html>"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(temp.path().join("blog")).unwrap();
+        std::fs::write(
+            temp.path().join("blog/index.html"),
+            r#"<html><head><title>Blog</title></head><body><h1>Blog</h1></body></html>"#,
+        )
+        .unwrap();
+        for slug in &["first-post", "second-post", "third-post"] {
+            std::fs::write(
+                temp.path().join(format!("blog/{slug}.html")),
+                format!(
+                    "<html><head><title>{slug} | Blog</title></head><body><h1>{slug}</h1></body></html>"
+                ),
+            )
+            .unwrap();
+        }
+        std::fs::write(
+            temp.path().join("404.html"),
+            r#"<html><head><title>Page not found</title></head><body><h1>Page not found</h1></body></html>"#,
+        )
+        .unwrap();
+
+        let site = load_site(temp.path()).unwrap();
+        let generated = generate_truth_manifest(&site);
+
+        let org_name = generated
+            .manifest
+            .organization
+            .as_ref()
+            .map(|o| o.name.as_str());
+        assert_eq!(org_name, Some("Aeptus"));
+
+        let product_name = generated.manifest.products.first().map(|p| p.name.as_str());
+        assert_ne!(
+            product_name,
+            Some("Page not found"),
+            "404 page title should never become a product name"
+        );
+        assert_ne!(
+            product_name,
+            Some("Blog"),
+            "listing page title should never become a product name"
+        );
     }
 
     #[test]
