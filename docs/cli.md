@@ -111,6 +111,12 @@ Options:
           [default: text]
           [possible values: text, json, sarif]
 
+      --cf-access-id <cf-access-id>
+          Cloudflare Access service-token Client ID (or env CF_ACCESS_CLIENT_ID); injected as CF-Access-Client-Id header on every fetch
+
+      --cf-access-secret <cf-access-secret>
+          Cloudflare Access service-token Client Secret (or env CF_ACCESS_CLIENT_SECRET); injected as CF-Access-Client-Secret header on every fetch
+
   -h, --help
           Print help
 ```

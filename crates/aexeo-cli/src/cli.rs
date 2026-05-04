@@ -122,6 +122,22 @@ pub fn build_cli() -> Command {
                         .long("format")
                         .value_parser(["text", "json", "sarif"])
                         .default_value("text"),
+                )
+                .arg(
+                    Arg::new("cf-access-id")
+                        .long("cf-access-id")
+                        .num_args(1)
+                        .help(
+                            "Cloudflare Access service-token Client ID (or env CF_ACCESS_CLIENT_ID); injected as CF-Access-Client-Id header on every fetch",
+                        ),
+                )
+                .arg(
+                    Arg::new("cf-access-secret")
+                        .long("cf-access-secret")
+                        .num_args(1)
+                        .help(
+                            "Cloudflare Access service-token Client Secret (or env CF_ACCESS_CLIENT_SECRET); injected as CF-Access-Client-Secret header on every fetch",
+                        ),
                 ),
         )
         .subcommand(

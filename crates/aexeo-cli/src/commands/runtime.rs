@@ -34,6 +34,43 @@ fn apply_runtime_cli_overrides(config: &mut aexeo_core::Config, submatches: &Arg
     if submatches.get_flag("no-sitemap-seed") {
         config.crawl_use_sitemap = false;
     }
+    apply_cf_access_credentials(config, submatches);
+}
+
+/// Inject Cloudflare Access service-token headers into the runtime
+/// audit's crawl_headers so every fetch passes the Access gate.
+///
+/// Resolution order: explicit CLI flags first, then env vars
+/// (CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET), then nothing —
+/// in which case the request goes through unchanged. Both the ID
+/// and the secret must be present together; if only one resolves,
+/// neither header gets set (better to fail visibly at the Access
+/// gate than to send a half-credential).
+fn apply_cf_access_credentials(config: &mut aexeo_core::Config, submatches: &ArgMatches) {
+    // try_get_one rather than get_one because not every runtime
+    // subcommand registers these flags (only `crawl` does today).
+    // get_one would panic on the others; try_get_one returns Ok(None)
+    // which falls through to the env-var path cleanly.
+    let cli_id = submatches
+        .try_get_one::<String>("cf-access-id")
+        .ok()
+        .flatten()
+        .cloned();
+    let cli_secret = submatches
+        .try_get_one::<String>("cf-access-secret")
+        .ok()
+        .flatten()
+        .cloned();
+    let id = cli_id.or_else(|| std::env::var("CF_ACCESS_CLIENT_ID").ok());
+    let secret = cli_secret.or_else(|| std::env::var("CF_ACCESS_CLIENT_SECRET").ok());
+    if let (Some(id), Some(secret)) = (id, secret) {
+        config
+            .crawl_headers
+            .insert("CF-Access-Client-Id".to_string(), id);
+        config
+            .crawl_headers
+            .insert("CF-Access-Client-Secret".to_string(), secret);
+    }
 }
 
 fn selected_runtime_engine<'a>(
