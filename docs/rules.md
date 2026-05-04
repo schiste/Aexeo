@@ -29,6 +29,7 @@
 - `LNK002`: orphan page
 - `LNK003`: weak internal anchor text
 - `LNK004`: insufficient inbound internal links
+- `LNK020`: homepage response sends no Link headers
 
 ## `sitemap`
 
@@ -118,6 +119,7 @@ Machine-readable discovery, citation, and agent-retrieval surfaces.
 - `SRF021`: API catalog has invalid linkset shape
 - `SRF025`: OAuth-protected APIs missing OIDC/OAuth discovery metadata
 - `SRF026`: OAuth-protected APIs missing protected-resource metadata
+- `SRF030`: homepage doesn't honor `Accept: text/markdown` content negotiation
 
 ## `content`
 

@@ -298,6 +298,10 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                     rule_id: "LNK004",
                     summary: "insufficient inbound internal links",
                 },
+                RuleDescriptor {
+                    rule_id: "LNK020",
+                    summary: "homepage response sends no Link headers",
+                },
             ],
         },
         RuleGroupDefinition {
@@ -615,6 +619,10 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                 RuleDescriptor {
                     rule_id: "SRF026",
                     summary: "OAuth-protected APIs missing protected-resource metadata",
+                },
+                RuleDescriptor {
+                    rule_id: "SRF030",
+                    summary: "homepage doesn't honor `Accept: text/markdown` content negotiation",
                 },
             ],
         },

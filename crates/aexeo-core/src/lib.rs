@@ -7,6 +7,7 @@ pub mod content_rules;
 pub mod docs;
 pub mod fix;
 pub mod generate;
+pub mod header_rules;
 pub mod html_rules;
 #[cfg(feature = "net")]
 pub mod integrations;

@@ -130,6 +130,13 @@ pub fn run_checks_for_site_profiled(site: &crate::site::Site, config: &Config) -
         },
     );
     time_rule_group(
+        rules.checks.get("headers").copied().unwrap_or(true),
+        "headers",
+        &mut rule_timings,
+        &mut findings,
+        || crate::header_rules::run_header_rules(site),
+    );
+    time_rule_group(
         rules.checks.get("schema").copied().unwrap_or(true),
         "schema",
         &mut rule_timings,

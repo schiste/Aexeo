@@ -1940,6 +1940,7 @@ pub fn run_runtime_audit_with_options(
     performance.apply_to(&mut crawl_stats);
     let mut findings = crawl_findings.clone();
     findings.extend(profiled.findings.clone());
+    findings.extend(probe_markdown_negotiation_finding(base_url, config));
     let status = if crawl_stats.truncated {
         AuditStatus::Partial
     } else {
@@ -1994,6 +1995,73 @@ pub fn verify_runtime_audit(audit: &RuntimeAudit, baseline_findings: &[Finding])
 
 pub fn runtime_doctor() -> PlaywrightDoctor {
     probe_playwright_runtime()
+}
+
+/// SRF030 — Markdown-for-Agents content negotiation probe.
+///
+/// Refetches the homepage with `Accept: text/markdown`. If the
+/// response is `text/markdown` (or `text/markdown; charset=…`),
+/// the site supports the Cloudflare-style Markdown-for-Agents
+/// flow and the rule stays silent. Otherwise we emit a finding
+/// — the site doesn't honor markdown content negotiation at the
+/// HTTP layer, even if it has separate per-page Markdown mirrors
+/// (those are tested by SRF002/SRF004).
+///
+/// Returns at most one finding. Static audits don't reach this
+/// path; only `run_runtime_audit_with_options` calls it.
+fn probe_markdown_negotiation_finding(base_url: &str, config: &Config) -> Vec<Finding> {
+    use reqwest::blocking::Client;
+    use reqwest::header::ACCEPT;
+
+    if !config
+        .rules()
+        .checks
+        .get("headers")
+        .copied()
+        .unwrap_or(true)
+    {
+        return Vec::new();
+    }
+
+    let client = match Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return Vec::new(),
+    };
+    let response = match client.get(base_url).header(ACCEPT, "text/markdown").send() {
+        Ok(response) => response,
+        Err(_) => return Vec::new(),
+    };
+    if !response.status().is_success() {
+        return Vec::new();
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if content_type.contains("text/markdown") {
+        return Vec::new();
+    }
+    vec![Finding {
+        rule_id: "SRF030".to_string(),
+        message: format!(
+            "homepage doesn't honor `Accept: text/markdown` content negotiation; observed `{content_type}` instead of `text/markdown`"
+        ),
+        path: format!("{base_url}/"),
+        line: 1,
+        column: 1,
+        severity: "warning".to_string(),
+        suggestion: Some(
+            "implement Markdown-for-Agents per https://developers.cloudflare.com/fundamentals/reference/markdown-for-agents/, or document why per-route .md.txt mirrors are sufficient"
+                .to_string(),
+        ),
+        scope: FindingScope::Sitewide,
+    }]
 }
 
 #[cfg(test)]
