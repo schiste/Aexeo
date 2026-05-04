@@ -17,6 +17,8 @@
 // constraint and a 24h cache leaves it plenty of headroom even with
 // liberal manual refreshing.
 
+import { PluginRouteError } from "emdash";
+
 import type { SandboxCtx } from "./plugin.js";
 import { readStoredFacts } from "./plugin.js";
 import {
@@ -46,14 +48,17 @@ interface PresenceCachePayload {
   entityName: string;
 }
 
-interface PresenceWireResponse {
-  data: {
-    state: "no_manifest" | "no_organization" | "fresh" | "stale" | "empty";
-    results: SourceResult[];
-    generatedAt: string | null;
-    entityName: string | null;
-    ageMinutes: number | null;
-  };
+// The on-the-wire payload after emdash's route registry wraps the
+// handler return as `{ data: <PresencePayload> }`. The handler
+// itself returns the raw payload (no extra `{ data: ... }` wrap)
+// per the route-handler contract — see facts-route.ts for the
+// double-wrap bug that motivated this convention.
+interface PresencePayload {
+  state: "no_manifest" | "no_organization" | "fresh" | "stale" | "empty";
+  results: SourceResult[];
+  generatedAt: string | null;
+  entityName: string | null;
+  ageMinutes: number | null;
 }
 
 interface RouteContext extends SandboxCtx {
@@ -74,76 +79,71 @@ export async function handlePresenceRoute(
     case "refresh":
       return await handleRefresh(ctx);
     default:
-      return {
-        error: {
-          code: "unknown_kind",
-          message: `unknown presence route kind: ${String(body.kind)}`,
-        },
-      };
+      throw PluginRouteError.badRequest(
+        `unknown presence route kind: ${String(body.kind)}`,
+      );
   }
 }
 
-async function handleData(ctx: SandboxCtx): Promise<PresenceWireResponse> {
+async function handleData(ctx: SandboxCtx): Promise<PresencePayload> {
   const manifest = (await readStoredFacts(ctx.kv)) as TruthManifest | null;
   if (manifest === null) {
-    return wireResponse("no_manifest", [], null, null);
+    return payload("no_manifest", [], null, null);
   }
   const entity = entityFromManifest(manifest);
   if (entity === null) {
-    return wireResponse("no_organization", [], null, null);
+    return payload("no_organization", [], null, null);
   }
 
   const cached = await ctx.kv.get<PresenceCachePayload>(PRESENCE_KEY);
   if (!cached) {
-    return wireResponse("empty", [], null, entity.name);
+    return payload("empty", [], null, entity.name);
   }
   // Manifest drift: editor changed the org name since the last run;
   // don't show stale results against a different entity. Caller can
   // hit Refresh to re-check.
   if (cached.entityName !== entity.name) {
-    return wireResponse("empty", [], null, entity.name);
+    return payload("empty", [], null, entity.name);
   }
   const ageMs = ageMillis(cached.generatedAt);
   const state =
     ageMs !== null && ageMs > CACHE_TTL_MS ? "stale" : "fresh";
-  return wireResponse(state, cached.results, cached.generatedAt, entity.name);
+  return payload(state, cached.results, cached.generatedAt, entity.name);
 }
 
 async function handleRefresh(
   ctx: SandboxCtx,
-): Promise<PresenceWireResponse> {
+): Promise<PresencePayload> {
   const manifest = (await readStoredFacts(ctx.kv)) as TruthManifest | null;
   if (manifest === null) {
-    return wireResponse("no_manifest", [], null, null);
+    return payload("no_manifest", [], null, null);
   }
   const entity = entityFromManifest(manifest);
   if (entity === null) {
-    return wireResponse("no_organization", [], null, null);
+    return payload("no_organization", [], null, null);
   }
   const results = await checkAllSources(entity);
   const generatedAt = new Date().toISOString();
-  const payload: PresenceCachePayload = {
+  const cachePayload: PresenceCachePayload = {
     results,
     generatedAt,
     entityName: entity.name,
   };
-  await ctx.kv.set(PRESENCE_KEY, payload);
-  return wireResponse("fresh", results, generatedAt, entity.name);
+  await ctx.kv.set(PRESENCE_KEY, cachePayload);
+  return payload("fresh", results, generatedAt, entity.name);
 }
 
-function wireResponse(
-  state: PresenceWireResponse["data"]["state"],
+function payload(
+  state: PresencePayload["state"],
   results: SourceResult[],
   generatedAt: string | null,
   entityName: string | null,
-): PresenceWireResponse {
+): PresencePayload {
   const ageMinutes =
     generatedAt === null
       ? null
       : Math.max(0, Math.floor((ageMillis(generatedAt) ?? 0) / 60_000));
-  return {
-    data: { state, results, generatedAt, entityName, ageMinutes },
-  };
+  return { state, results, generatedAt, entityName, ageMinutes };
 }
 
 function ageMillis(iso: string): number | null {

@@ -12,6 +12,8 @@
 // (each top-level handler costs a route declaration in the descriptor).
 // A four-route fan-out would also work but adds churn for marginal benefit.
 
+import { PluginRouteError } from "emdash";
+
 import type { SandboxCtx } from "./plugin.js";
 import { FACTS_KEY, readAllDocuments, readStoredFacts } from "./plugin.js";
 import { persistManifestStateFindings } from "./data-route.js";
@@ -29,6 +31,18 @@ interface RouteContext extends SandboxCtx {
   input?: unknown;
 }
 
+// Route handler contract: return RAW data; emdash's route registry
+// wraps the return value as `{ data: <result> }` once at the wire
+// boundary. Returning `{ data: ... }` here would double-wrap, and
+// the React caller's single-unwrap (`body.data`) would surface
+// `{ data: ... }` to the consumer where the actual payload was
+// expected — that's the bug that shipped 0.8.0/0.8.1 and crashed
+// the Facts component with a `draft.trim()` on undefined.
+//
+// Errors must be signalled via `throw PluginRouteError.<kind>(...)`,
+// not by returning `{ error: ... }`. The registry only treats thrown
+// PluginRouteErrors as failures; a returned `{ error: ... }` flows
+// through the success path and silently masquerades as data.
 export async function handleFactsRoute(ctx: RouteContext): Promise<unknown> {
   const body = (ctx.input ?? {}) as FactsBody;
   switch (body.kind) {
@@ -41,41 +55,32 @@ export async function handleFactsRoute(ctx: RouteContext): Promise<unknown> {
     case "save":
       return await handleSave(ctx, body);
     default:
-      return {
-        error: {
-          code: "unknown_kind",
-          message: `unknown facts route kind: ${String(body.kind)}`,
-        },
-      };
+      throw PluginRouteError.badRequest(
+        `unknown facts route kind: ${String(body.kind)}`,
+      );
   }
 }
 
 async function handleData(ctx: SandboxCtx): Promise<unknown> {
   const manifest = await readStoredFacts(ctx.kv);
   return {
-    data: {
-      manifest,
-      // The presence flag lets the React component branch on
-      // "show authoring CTA" vs "show 'manifest stored' state" without
-      // having to introspect the manifest shape.
-      present: manifest !== null,
-    },
+    manifest,
+    // The presence flag lets the React component branch on
+    // "show authoring CTA" vs "show 'manifest stored' state" without
+    // having to introspect the manifest shape.
+    present: manifest !== null,
   };
 }
 
 async function handlePrompt(ctx: SandboxCtx): Promise<unknown> {
   const documents = await readAllDocuments(ctx.kv);
   if (documents.length === 0) {
-    return {
-      error: {
-        code: "no_documents",
-        message:
-          "no documents indexed yet — click Refresh on the Findings page first, then come back to author the manifest",
-      },
-    };
+    throw PluginRouteError.badRequest(
+      "no documents indexed yet — click Refresh on the Findings page first, then come back to author the manifest",
+    );
   }
   const prompt = await generateFactsPrompt(JSON.stringify(documents));
-  return { data: { prompt } };
+  return { prompt };
 }
 
 async function handleValidate(
@@ -83,12 +88,7 @@ async function handleValidate(
   body: FactsBody,
 ): Promise<unknown> {
   if (typeof body.manifest_json !== "string" || body.manifest_json.length === 0) {
-    return {
-      error: {
-        code: "missing_manifest",
-        message: "manifest_json field is required",
-      },
-    };
+    throw PluginRouteError.badRequest("manifest_json field is required");
   }
   const documents = await readAllDocuments(ctx.kv);
   try {
@@ -96,14 +96,11 @@ async function handleValidate(
       body.manifest_json,
       JSON.stringify(documents),
     );
-    return { data: JSON.parse(raw) };
+    return JSON.parse(raw);
   } catch (error) {
-    return {
-      error: {
-        code: "validate_failed",
-        message: error instanceof Error ? error.message : String(error),
-      },
-    };
+    throw PluginRouteError.badRequest(
+      error instanceof Error ? error.message : String(error),
+    );
   }
 }
 
@@ -112,12 +109,7 @@ async function handleSave(
   body: FactsBody,
 ): Promise<unknown> {
   if (typeof body.manifest_json !== "string" || body.manifest_json.length === 0) {
-    return {
-      error: {
-        code: "missing_manifest",
-        message: "manifest_json field is required",
-      },
-    };
+    throw PluginRouteError.badRequest("manifest_json field is required");
   }
   // Re-validate at save time so the editor can't accidentally persist a
   // candidate that was edited after the last validate click. This is
@@ -134,31 +126,22 @@ async function handleSave(
     };
     validation = parsed.validation;
   } catch (error) {
-    return {
-      error: {
-        code: "validate_failed",
-        message: error instanceof Error ? error.message : String(error),
-      },
-    };
+    throw PluginRouteError.badRequest(
+      error instanceof Error ? error.message : String(error),
+    );
   }
   if (!validation.valid || validation.errors.length > 0) {
-    return {
-      error: {
-        code: "validation_failed",
-        message: `manifest does not pass shape validation: ${validation.errors.slice(0, 3).join("; ")}`,
-      },
-    };
+    throw PluginRouteError.badRequest(
+      `manifest does not pass shape validation: ${validation.errors.slice(0, 3).join("; ")}`,
+    );
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(body.manifest_json);
   } catch (error) {
-    return {
-      error: {
-        code: "parse_failed",
-        message: error instanceof Error ? error.message : String(error),
-      },
-    };
+    throw PluginRouteError.badRequest(
+      error instanceof Error ? error.message : String(error),
+    );
   }
   await ctx.kv.set(FACTS_KEY, parsed);
   // Re-derive the cached manifest-state findings so the Findings page
@@ -167,5 +150,5 @@ async function handleSave(
   // editor saves, navigates back to /findings, and sees the old finding
   // still listed until they click Refresh.
   await persistManifestStateFindings(ctx);
-  return { data: { saved: true } };
+  return { saved: true };
 }
