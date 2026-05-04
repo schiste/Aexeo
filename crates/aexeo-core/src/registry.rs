@@ -298,10 +298,6 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                     rule_id: "LNK004",
                     summary: "insufficient inbound internal links",
                 },
-                RuleDescriptor {
-                    rule_id: "LNK020",
-                    summary: "homepage response sends no Link headers",
-                },
             ],
         },
         RuleGroupDefinition {
@@ -627,6 +623,15 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             ],
         },
         RuleGroupDefinition {
+            name: "headers",
+            title: "HTTP Response Headers",
+            description: "Header-level rules that consult Page.response_headers (runtime audits) or do additional HTTP probes; silent on pure static audits.",
+            rules: &[RuleDescriptor {
+                rule_id: "LNK020",
+                summary: "homepage response sends no Link headers (RFC 8288)",
+            }],
+        },
+        RuleGroupDefinition {
             name: "content",
             title: "Content Policy",
             description: "",
@@ -793,6 +798,7 @@ mod tests {
                 "schema",
                 "llm",
                 "surfaces",
+                "headers",
                 "content",
                 "structure",
                 "runtime",
