@@ -3,6 +3,7 @@ mod facts_prompt;
 mod fanout;
 mod grounding;
 mod identity;
+pub mod presence;
 mod schema_gen;
 mod score;
 mod trust;
