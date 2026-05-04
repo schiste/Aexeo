@@ -6,6 +6,57 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-05-04
+
+Three follow-up quality fixes from Aeptus's post-0.8.3 rollout
+report. The 0.8.3 manifest-quality and GEO009 fixes landed
+correctly; this release closes the remaining edges that surfaced
+once those were out the door.
+
+### Fixed (engine via bridge)
+
+- **Multilingual 404 detection.** v0.0.9's blocklist was
+  English-only, so French, Spanish, Italian, German, Dutch, and
+  Portuguese 404 titles still leaked through as candidate
+  organization/product names. Aeptus reported a French
+  "Page introuvable" landing as `products[0].name`. The detector
+  now matches on cross-language morphological cues
+  (`introuvable`, `non trouv`, `no encontrad`, `não encontrad`,
+  `non trovat`, `nicht gefunden`, `niet gevonden`) plus the
+  literal numeric `404` anchor.
+
+### Fixed (presence diagnostic via bridge)
+
+- **RDAP normalizes to the apex domain.** The diagnostic was
+  asking rdap.org about `www.aeptus.com` (whatever subdomain the
+  manifest's website happened to record), which returns
+  not_found because the registrable domain is the apex
+  (`aeptus.com`). The RDAP fetcher now strips a leading `www.`
+  before the lookup; the result text shows the original host
+  alongside the apex so editors can see what was actually
+  checked. Deeper subdomains (`blog.foo.bar`) still need
+  manual manifest correction — full public-suffix-list-aware
+  resolution is a future hardening.
+- **Wikidata disambiguation.** wbsearchentities returns
+  label-matched candidates without distinguishing
+  Aeptus-the-company from Aeptus-the-genus-of-insects. The
+  fetcher now requests up to 10 candidates and prefers ones
+  whose description doesn't begin with natural-world or
+  geographic disambiguators (`genus of`, `species of`, `village
+  in`, `asteroid`, …). When every match is a generic-concept
+  description, the result still lands but `extra` flags
+  "likely disambiguation needed" so the editor sees the
+  problem instead of trusting the wrong record.
+
+### Notes for hosts upgrading from 0.8.3
+
+- No code changes required; pure engine-side improvements.
+- Worth re-running `intelligence facts generate` if your site
+  has any non-English 404 page that was leaking through.
+- Worth re-running `intelligence presence` if you saw
+  Wikidata false-positives or RDAP not-found on a www-prefixed
+  domain.
+
 ## [0.8.3] - 2026-05-04
 
 Picks up the upstream aexeo-core 0.0.9 improvements that address
@@ -608,7 +659,8 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.3...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.4...HEAD
+[0.8.4]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.3...aexeo-emdash-v0.8.4
 [0.8.3]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.2...aexeo-emdash-v0.8.3
 [0.8.2]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.1...aexeo-emdash-v0.8.2
 [0.8.1]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.0...aexeo-emdash-v0.8.1
