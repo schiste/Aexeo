@@ -6,6 +6,68 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-05-04
+
+Picks up upstream aexeo-core 0.0.13 — three quality fixes from
+Aeptus's post-0.0.12 rollout feedback. All affect `intelligence
+facts generate` output and `intelligence presence` Wikidata
+disambiguation; no plugin-side UI change.
+
+### Changed (engine via bridge)
+
+- **Product name inference is now schema-first.** When no JSON-LD
+  `SoftwareApplication` or `Product` block declares a name, the
+  generator falls back to the organization name rather than
+  inferring from title-segment frequency. The old algorithm
+  picked the most-frequent title segment across content pages,
+  which on Aeptus produced `products[0].name = "ISO 27001"`
+  (the compliance keyword that appeared in many content-page
+  titles). Generators that do declare typed products keep
+  picking the typed name.
+- **Wikidata disambiguation uses positive scoring.** Candidates
+  whose description mentions company/organization/software-like
+  terms score positively; binomial-nomenclature labels
+  ("Aeptus singularis" — Q119813945, the species record Aeptus
+  reported as a false-match) and taxonomic descriptions score
+  negatively. When no candidate scores positively, the result is
+  `not_found` rather than a confidently-wrong match. Aeptus
+  reported the species match was still slipping through after
+  the 0.0.10 disambiguation fix because the description didn't
+  start with the canonical "species of" prefix.
+- **Descriptor scoring threshold raised from `> 0` to `>= 2`.**
+  The 2-word bonus alone is no longer enough to qualify a
+  bigram as a descriptor; a phrase needs at least one anchor
+  word (+3) or core descriptor word (+2) to be emitted. Drops
+  the bigram-fragment class Aeptus reported: `"behind long"`,
+  `"engineer small"`, `"cycles heavy"`, `"bloated pricing"`,
+  `"heavy deployments"`, `"autonomous engineer"`.
+
+### Added
+
+- **Per-field low-confidence warnings on generated manifests.**
+  `TruthManifestGeneration.warnings` now includes:
+  - An explicit "organization name fallback" note when
+    `products[0].name` was set conservatively because no
+    schema-typed Product was found.
+  - A "descriptors are heuristic-quality" note when the
+    organization has any descriptors at all, so downstream
+    consumers know not to take them at face value for identity
+    matching.
+  These reach the CLI via `intelligence facts generate`'s
+  warnings section and the JSON output's `warnings` array.
+
+### Notes for hosts upgrading from 0.8.6
+
+- No code changes required; engine-side improvements only.
+- Re-run `intelligence facts generate` to regenerate manifests
+  with the cleaner output. Sites that had a generated
+  `products[0].name` of an unrelated keyword (compliance
+  standard, technology, blog topic) will now get the org name
+  with a conservative-fallback warning.
+- Re-run `intelligence presence` to get the cleaner Wikidata
+  disambiguation. False-positive matches against species /
+  taxonomic / geographic Wikidata records should drop.
+
 ## [0.8.6] - 2026-05-04
 
 Code-review follow-ups on the 0.8.5 agent-readiness rule bundles.
@@ -760,7 +822,8 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.6...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.7...HEAD
+[0.8.7]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.6...aexeo-emdash-v0.8.7
 [0.8.6]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.5...aexeo-emdash-v0.8.6
 [0.8.5]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.4...aexeo-emdash-v0.8.5
 [0.8.4]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.3...aexeo-emdash-v0.8.4
