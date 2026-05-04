@@ -75,12 +75,51 @@ function resolveCollections(
   return result;
 }
 
+// CMS-context Config: disables rule groups whose subject is a
+// site-wide infrastructure artifact the plugin's CMS-document
+// view doesn't actually own. These are real concerns, but they
+// belong to the host's deployed-site surface (audited by the
+// CLI's static-site mode), not to the per-document CMS audit:
+//
+//   robots, sitemap, llm, surfaces, well_known, headers,
+//   deployment
+//
+// Aeptus reported in their 0.8.9 retest that the synthetic site
+// was producing "missing robots.txt", "missing sitemap.xml",
+// "missing llms.txt", "missing markdown mirrors" findings on
+// every refresh — one set per CMS scan. The CMS document set
+// has no robots.txt or sitemap.xml; those don't materialize
+// until the site is built and deployed. Suppressing the
+// infrastructure groups in this context cuts the noise without
+// losing the per-page rules editors actually drive (html /
+// social / schema / content / structure / links remain on).
+const CMS_DISABLED_GROUPS = [
+  "robots",
+  "sitemap",
+  "llm",
+  "surfaces",
+  "well_known",
+  "headers",
+  "deployment",
+] as const;
+
+function buildCmsContextConfig(): string {
+  const checks: Record<string, boolean> = {};
+  for (const group of CMS_DISABLED_GROUPS) {
+    checks[group] = false;
+  }
+  return JSON.stringify({ checks });
+}
+
 // In-process WASM evaluator. Wraps the bridge's stringly-typed
 // interface in the structured EvaluatorFn contract that
 // evaluateAndPersistAll expects.
 const inProcessEvaluator: EvaluatorFn = async (documents) => {
   try {
-    const raw = await evaluateDocuments(JSON.stringify(documents));
+    const raw = await evaluateDocuments(
+      JSON.stringify(documents),
+      buildCmsContextConfig(),
+    );
     const findings = JSON.parse(raw) as Finding[];
     if (!Array.isArray(findings)) {
       return {
