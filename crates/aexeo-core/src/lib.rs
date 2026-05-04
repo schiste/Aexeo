@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod adapter;
+pub mod capabilities;
 pub mod config;
 pub mod content_rules;
 pub mod docs;
