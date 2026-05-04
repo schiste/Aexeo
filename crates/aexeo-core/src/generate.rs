@@ -713,8 +713,29 @@ pub fn render_markdown_mirror(site: &Site) -> String {
 
 pub fn render_robots_txt(site_url: &str) -> String {
     let normalized = site_url.trim_end_matches('/');
+    // Default robots.txt now includes:
+    //   - explicit AI-bot blocks (so ROB010 stays quiet on Aexeo's
+    //     own generated output — earlier versions emitted only the
+    //     wildcard block and tripped the rule on round-trip)
+    //   - a Content-Signal directive declaring permissive defaults
+    //     (so ROB011 stays quiet); editors who want a different
+    //     stance edit the line, they don't have to add it
+    //
+    // The defaults are permissive (Allow: /, ai-train=yes,
+    // search=yes, ai-input=yes) because a generic generator can't
+    // know an editor's actual policy preference. Editors should
+    // override these once they decide.
     format!(
-        "User-agent: *\nAllow: /\nSitemap: {}/sitemap.xml\n",
+        "User-agent: *\nAllow: /\n\n\
+         # AI-crawler block (override per bot to opt out)\n\
+         User-agent: GPTBot\nAllow: /\n\
+         User-agent: ClaudeBot\nAllow: /\n\
+         User-agent: PerplexityBot\nAllow: /\n\
+         User-agent: Google-Extended\nAllow: /\n\
+         User-agent: CCBot\nAllow: /\n\n\
+         # Content-Signal preferences (https://contentsignals.org/)\n\
+         Content-Signal: ai-train=yes, search=yes, ai-input=yes\n\n\
+         Sitemap: {}/sitemap.xml\n",
         normalized
     )
 }
@@ -943,6 +964,41 @@ mod tests {
             "<html lang=\"en\"><head><title>x</title><meta name=\"description\" content=\"y\"><link rel=\"canonical\" href=\"{}\"></head><body><h1>x</h1>{}</body></html>",
             canonical, body,
         )
+    }
+
+    #[test]
+    fn generated_robots_txt_passes_rob010_and_rob011() {
+        // Round-trip: render_robots_txt's output should not trip
+        // the ROB010 (no AI-bot directives) or ROB011 (no
+        // Content-Signal) rules. Earlier versions emitted only the
+        // wildcard block and a Sitemap line, which failed both
+        // rules on Aexeo's own generated output.
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        std::fs::write(
+            root.join("index.html"),
+            "<html><head><title>x</title><meta name=\"description\" content=\"y\"><link rel=\"canonical\" href=\"https://example.com/\"></head><body><h1>x</h1></body></html>",
+        )
+        .unwrap();
+        std::fs::write(root.join("sitemap.xml"), "<urlset></urlset>").unwrap();
+        std::fs::write(
+            root.join("robots.txt"),
+            super::render_robots_txt("https://example.com"),
+        )
+        .unwrap();
+
+        let site = crate::site::load_site(root).unwrap();
+        let findings = crate::robots_rules::run_robots_rules(&site, &crate::Config::default());
+        let ids: std::collections::BTreeSet<_> =
+            findings.iter().map(|f| f.rule_id.clone()).collect();
+        assert!(
+            !ids.contains("ROB010"),
+            "render_robots_txt output should declare AI bots; got findings: {findings:?}"
+        );
+        assert!(
+            !ids.contains("ROB011"),
+            "render_robots_txt output should declare Content-Signal; got findings: {findings:?}"
+        );
     }
 
     #[test]
