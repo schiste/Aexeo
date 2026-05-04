@@ -397,21 +397,39 @@ mod tests {
     }
 
     #[test]
-    fn srf015_fires_for_partial_mcp_with_no_card() {
+    fn srf015_fires_when_mcp_dir_exists_but_no_canonical_card() {
+        // The capability now fires on a partial implementation: the
+        // `.well-known/mcp/` directory is there (a stub the editor
+        // started) but no canonical server-card file landed yet.
+        // SRF015 surfaces the gap. Earlier versions had a circular
+        // gate where the capability only triggered when the file
+        // existed, making SRF015 structurally unreachable.
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();
         site_with_index(root);
-        // Drop only the legacy alternate; capability infers from
-        // file presence in well-known/mcp* set.
-        write(&root.join(".well-known/mcp.json"), "{}");
-        // Delete it before running so we model "MCP claimed but no card."
-        fs::remove_file(root.join(".well-known/mcp.json")).unwrap();
-        write(&root.join(".well-known/mcp/.placeholder"), "");
+        // Stub the directory without putting a canonical card inside.
+        write(&root.join(".well-known/mcp/.gitkeep"), "");
         let site = load_site(root).unwrap();
-        let mut caps = infer_site_capabilities(&site);
-        caps.declares_mcp = true; // force the capability
+        let caps = infer_site_capabilities(&site);
+        assert!(caps.declares_mcp, "capability should fire on dir-partial");
         let findings = run_well_known_rules(&site, &caps);
         assert!(findings.iter().any(|f| f.rule_id == "SRF015"));
+    }
+
+    #[test]
+    fn srf010_fires_when_skills_dir_exists_but_no_canonical_index() {
+        // Mirror of the MCP test: stub directory without canonical
+        // index file should make the capability fire AND let SRF010
+        // surface the missing index.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        site_with_index(root);
+        write(&root.join(".well-known/agent-skills/.gitkeep"), "");
+        let site = load_site(root).unwrap();
+        let caps = infer_site_capabilities(&site);
+        assert!(caps.declares_agent_skills);
+        let findings = run_well_known_rules(&site, &caps);
+        assert!(findings.iter().any(|f| f.rule_id == "SRF010"));
     }
 
     #[test]

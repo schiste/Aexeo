@@ -88,20 +88,42 @@ pub fn infer_site_capabilities(site: &Site) -> SiteCapabilities {
     }
 
     // --- MCP server ----------------------------------------------------
-    let mcp_signal = well_known_path_exists(site, ".well-known/mcp/server-card.json")
+    // Capability fires on two distinct conditions:
+    //   1. A canonical card file already exists (then SRF015 is silent
+    //      because the file is there; SRF016 may fire on shape).
+    //   2. A `.well-known/mcp/` directory exists but no canonical card
+    //      file inside it. This is the partial-implementation signal
+    //      SRF015 was added to catch.
+    // Earlier versions only checked condition 1, which made SRF015
+    // structurally unreachable (the rule fires when the file is
+    // missing, but the capability that gates the rule required the
+    // file to exist).
+    let mcp_card_present = well_known_path_exists(site, ".well-known/mcp/server-card.json")
         || well_known_path_exists(site, ".well-known/mcp/server-cards.json")
         || well_known_path_exists(site, ".well-known/mcp.json");
-    if mcp_signal {
+    let mcp_dir_partial = site.root.join(".well-known/mcp").is_dir() && !mcp_card_present;
+    if mcp_card_present || mcp_dir_partial {
         caps.declares_mcp = true;
-        provenance
-            .entry("declares_mcp".into())
-            .or_default()
-            .push("partial `.well-known/mcp*` file or directory present".into());
+        let entry = provenance.entry("declares_mcp".into()).or_default();
+        if mcp_card_present {
+            entry.push("canonical MCP card file present".into());
+        }
+        if mcp_dir_partial {
+            entry.push("`.well-known/mcp/` directory exists but no canonical card inside".into());
+        }
     }
 
     // --- Agent Skills surface ------------------------------------------
-    let skills_path_signal = well_known_path_exists(site, ".well-known/agent-skills/index.json")
+    // Same partial-implementation logic as MCP: capability fires when
+    // either the canonical index file exists or the directory exists
+    // without it. Without the second branch, SRF010 (missing index)
+    // would be structurally unreachable from path-only signals.
+    let skills_index_present = well_known_path_exists(site, ".well-known/agent-skills/index.json")
         || well_known_path_exists(site, ".well-known/skills/index.json");
+    let skills_dir_partial = (site.root.join(".well-known/agent-skills").is_dir()
+        || site.root.join(".well-known/skills").is_dir())
+        && !skills_index_present;
+    let skills_path_signal = skills_index_present || skills_dir_partial;
     let skills_in_llms = site
         .llms_text
         .as_deref()
