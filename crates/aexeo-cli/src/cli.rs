@@ -313,6 +313,18 @@ pub fn build_cli() -> Command {
                         ),
                 )
                 .subcommand(
+                    Command::new("presence")
+                        .about("Surface what the open web shows about the manifest's organization (5 sources, no scoring)")
+                        .arg(Arg::new("path").default_value("."))
+                        .arg(Arg::new("manifest").long("manifest").num_args(1))
+                        .arg(
+                            Arg::new("format")
+                                .long("format")
+                                .value_parser(["text", "json"])
+                                .default_value("text"),
+                        ),
+                )
+                .subcommand(
                     Command::new("trust-surface")
                         .about("Import and reconcile trusted external surfaces against site truth")
                         .subcommand(

@@ -1,4 +1,7 @@
 use aexeo_contracts::AuditStatus;
+use aexeo_core::intelligence::presence::{
+    SOURCE_ORDER, SourceResult, SourceStatus, check_all_sources, entity_from_manifest, source_label,
+};
 use aexeo_core::{
     AnswerFanoutReport, EvidenceSiteAssessment, GroundingCoverageGap, GroundingSiteAnalysis,
     MachineSurfaceGraph, MachineSurfaceOptions, PageIdentity, SiteIntelligenceScore,
@@ -73,6 +76,7 @@ pub fn command_intelligence(submatches: &ArgMatches) -> Result<i32> {
             None => bail!("missing surfaces subcommand"),
         },
         Some(("score", score_matches)) => command_intelligence_score(score_matches),
+        Some(("presence", presence_matches)) => command_intelligence_presence(presence_matches),
         Some((other, _)) => bail!("unsupported intelligence command: {}", other),
         None => bail!("missing intelligence subcommand"),
     }
@@ -1171,4 +1175,156 @@ fn print_identity_text(identity: &PageIdentity) {
             "  fix: build your templates from the canonical so the four signals can't drift independently."
         );
     }
+}
+
+fn command_intelligence_presence(submatches: &ArgMatches) -> Result<i32> {
+    let format = required_arg(submatches, "format")?;
+    let root = PathBuf::from(required_arg(submatches, "path")?);
+    let manifest_path = submatches.get_one::<String>("manifest").map(PathBuf::from);
+
+    let (manifest_path_resolved, manifest) = match discover_truth_manifest(
+        &root,
+        manifest_path.as_deref(),
+    ) {
+        Ok(Some(found)) => found,
+        Ok(None) => {
+            return emit_failure(
+                "intelligence presence",
+                format,
+                anyhow::anyhow!(
+                    "no truth manifest found at {} — run `aexeo-cli intelligence facts generate --write facts.json` first",
+                    root.display()
+                ),
+            );
+        }
+        Err(error) => return emit_failure("intelligence presence", format, error),
+    };
+
+    let entity = match entity_from_manifest(&manifest) {
+        Some(entity) => entity,
+        None => {
+            return emit_failure(
+                "intelligence presence",
+                format,
+                anyhow::anyhow!(
+                    "manifest at {} has no organization — add `organization.name` (and ideally `organization.website`) and re-run",
+                    manifest_path_resolved.display()
+                ),
+            );
+        }
+    };
+
+    let results = check_all_sources(&entity);
+    let report_path = write_report(
+        &root,
+        "presence-latest.json",
+        &serde_json::json!({
+            "entity_name": entity.name,
+            "website": entity.website,
+            "results": results,
+        }),
+    )?;
+
+    match format {
+        "json" => println!(
+            "{}",
+            render_data_command_json(
+                "intelligence presence",
+                true,
+                serde_json::json!({
+                    "report_path": report_path.to_string_lossy(),
+                    "entity_name": entity.name,
+                    "website": entity.website,
+                    "results": results,
+                }),
+                Vec::new(),
+            )?
+        ),
+        _ => println!(
+            "{}",
+            presence_text(
+                &entity.name,
+                entity.website.as_deref(),
+                &results,
+                &report_path,
+            )
+        ),
+    }
+    Ok(0)
+}
+
+fn presence_text(
+    entity_name: &str,
+    website: Option<&str>,
+    results: &[SourceResult],
+    report_path: &Path,
+) -> String {
+    let mut lines = vec![
+        "Entity Presence (layer 4 — surfaced, not scored)".to_string(),
+        String::new(),
+        format!("Entity: {entity_name}"),
+        format!("Website: {}", website.unwrap_or("-")),
+        String::new(),
+    ];
+
+    let ordered = order_results(results);
+    for result in &ordered {
+        lines.push(format_source_line(result));
+        if let Some(label) = &result.label {
+            lines.push(format!("    {label}"));
+        }
+        if let Some(extra) = &result.extra {
+            lines.push(format!("    {extra}"));
+        }
+        if let Some(url) = &result.url {
+            lines.push(format!("    -> {url}"));
+        }
+        if let Some(error) = &result.error
+            && matches!(
+                result.status,
+                SourceStatus::Unreachable | SourceStatus::Skipped
+            )
+        {
+            lines.push(format!("    ({error})"));
+        }
+    }
+
+    lines.push(String::new());
+    lines.push(format!(
+        "Report: {}",
+        canonicalize_or_keep(&report_path.to_string_lossy()).display()
+    ));
+    lines.join("\n")
+}
+
+fn order_results(results: &[SourceResult]) -> Vec<SourceResult> {
+    let mut ordered: Vec<SourceResult> = SOURCE_ORDER
+        .iter()
+        .filter_map(|name| results.iter().find(|r| r.source == *name).cloned())
+        .collect();
+    for result in results {
+        if !SOURCE_ORDER.contains(&result.source.as_str()) {
+            ordered.push(result.clone());
+        }
+    }
+    ordered
+}
+
+fn format_source_line(result: &SourceResult) -> String {
+    let symbol = match result.status {
+        SourceStatus::Found => "[+]",
+        SourceStatus::NotFound => "[ ]",
+        SourceStatus::Unreachable => "[!]",
+        SourceStatus::Skipped => "[-]",
+    };
+    let status = match result.status {
+        SourceStatus::Found => "found",
+        SourceStatus::NotFound => "no record",
+        SourceStatus::Unreachable => "couldn't reach",
+        SourceStatus::Skipped => "skipped",
+    };
+    format!(
+        "  {symbol} {label:<22} {status}",
+        label = source_label(&result.source)
+    )
 }
