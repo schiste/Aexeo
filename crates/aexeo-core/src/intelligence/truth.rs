@@ -1121,6 +1121,13 @@ fn is_generic_site_label(value: &str) -> bool {
 /// Heuristic: does this title or h1 look like it came from a 404 /
 /// error page? Used to drop entire pages from the candidate corpus
 /// before name extraction runs, not just the individual label.
+///
+/// Multilingual coverage matters here: Aeptus reported a French
+/// "Page introuvable" leaking through the v0.0.9 blocklist that
+/// was English-only. Rather than enumerate every locale, we match
+/// on cross-language morphological cues (`-found`, `-trouv`,
+/// `-encontr`, `-trovat`, `-gefunden`) plus the literal numeric
+/// "404" anchor that's the same across languages.
 fn looks_like_error_page(title: Option<&str>, h1_texts: &[String]) -> bool {
     let candidates: Vec<&str> = title
         .into_iter()
@@ -1129,10 +1136,22 @@ fn looks_like_error_page(title: Option<&str>, h1_texts: &[String]) -> bool {
     candidates.iter().any(|raw| {
         let lower = raw.to_ascii_lowercase();
         lower.contains("404")
-            || lower.contains("page not found")
-            || lower.contains("not found")
             || lower.contains("page doesn't exist")
             || lower.contains("does not exist")
+            // English: "page not found", "not found"
+            || lower.contains("not found")
+            // French: "page introuvable", "introuvable", "page non trouvée"
+            || lower.contains("introuvable")
+            || lower.contains("non trouv")
+            // Spanish / Portuguese: "página no encontrada", "página não encontrada"
+            || lower.contains("no encontrad")
+            || lower.contains("não encontrad")
+            // Italian: "pagina non trovata"
+            || lower.contains("non trovat")
+            // German: "Seite nicht gefunden"
+            || lower.contains("nicht gefunden")
+            // Dutch: "pagina niet gevonden"
+            || lower.contains("niet gevonden")
     })
 }
 
@@ -1581,6 +1600,42 @@ mod tests {
         assert!(descriptors.iter().any(|value| value == "coding agents"));
         assert!(descriptors.iter().all(|value| value != "24 bit true"));
         assert!(descriptors.iter().all(|value| value != "26 mcp tools"));
+    }
+
+    #[test]
+    fn generated_manifest_skips_localized_404_titles() {
+        // Regression for Aeptus post-v0.0.9: the v0.0.9 blocklist was
+        // English-only, so a French "Page introuvable" 404 leaked
+        // through and became products[0].name. Multilingual
+        // coverage now lives in looks_like_error_page.
+        let temp = tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("index.html"),
+            r#"<html><head><title>Aeptus</title></head><body><h1>Aeptus</h1></body></html>"#,
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("404.html"),
+            r#"<html lang="fr"><head><title>Page introuvable</title></head><body><h1>Page introuvable</h1></body></html>"#,
+        )
+        .unwrap();
+
+        let site = load_site(temp.path()).unwrap();
+        let generated = generate_truth_manifest(&site);
+
+        assert_eq!(
+            generated
+                .manifest
+                .organization
+                .as_ref()
+                .map(|o| o.name.as_str()),
+            Some("Aeptus")
+        );
+        assert_ne!(
+            generated.manifest.products.first().map(|p| p.name.as_str()),
+            Some("Page introuvable"),
+            "French 404 title should never become a product name"
+        );
     }
 
     #[test]
