@@ -6,6 +6,51 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-05-04
+
+### Fixed
+
+- **Astro dev mode no longer 500s on every request.** v0.8.7's
+  configured runtime relied on a synchronous default `.wasm`
+  import that Cloudflare Workers resolved to a
+  `WebAssembly.Module`, but Node ESM (Astro 6.1.3 + Vite 7.3.1
+  SSR runner) rejected at parse time with
+  `SyntaxError: The requested module ... does not provide an
+  export named 'default'`. The static import is gone; the plugin
+  now uses a dual-path runtime loader:
+  - Path A (Cloudflare Workers): dynamic `import()` of the
+    `.wasm` resolves to `{ default: WebAssembly.Module }` via
+    Wrangler's bundler integration; we use it synchronously.
+  - Path B (Node / Astro dev / Vite SSR): when Path A throws or
+    yields something that isn't a Module, fall back to
+    `node:fs/promises` `readFile` + `WebAssembly.compile`.
+  - Path C (browser-like edges): `fetch` + `compileStreaming` as
+    a last resort.
+
+  Production deploys to Cloudflare were unaffected by the v0.8.7
+  bug — only `pnpm dev` / `astro dev` workflows hit it. The fix
+  preserves the synchronous-Module path on Workers (Path A) so
+  there's no production regression.
+
+### Changed
+
+- **`vite-plugin-wasm` is no longer required.** With the dual-path
+  loader, Vite hosts can drop `vite-plugin-wasm` from dev deps and
+  `plugins: [wasm()]` from `vite.plugins`. INSTALL.md updated. The
+  plugins remain harmless if left in place — backwards-compatible.
+- **`optimizeDeps: { exclude: ["@aeptus/aexeo-emdash"] }`** is
+  still recommended (avoids Vite optimizer churn on dev start) but
+  no longer load-bearing.
+
+### Notes for hosts upgrading from 0.8.7
+
+- No code changes required for the fix to take effect; just bump
+  the package version. Astro dev should work on the next
+  `pnpm dev` / `astro dev` run.
+- If you want to clean up after the upgrade: `pnpm remove
+  vite-plugin-wasm` and remove `plugins: [wasm()]` + the
+  `wasm()` import from `astro.config.mjs`.
+
 ## [0.8.7] - 2026-05-04
 
 Picks up upstream aexeo-core 0.0.13 — three quality fixes from
@@ -822,7 +867,8 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.7...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.8...HEAD
+[0.8.8]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.7...aexeo-emdash-v0.8.8
 [0.8.7]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.6...aexeo-emdash-v0.8.7
 [0.8.6]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.5...aexeo-emdash-v0.8.6
 [0.8.5]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.4...aexeo-emdash-v0.8.5
