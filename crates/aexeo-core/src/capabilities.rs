@@ -177,12 +177,16 @@ pub fn well_known_path_exists(site: &Site, relative: &str) -> bool {
 
 fn route_looks_api(route: &str) -> bool {
     let trimmed = route.trim_start_matches('/');
+    // Require the literal `api/` or `graphql` segment — bare `v1/` /
+    // `v2/` / `graphql-tutorial` would over-match on versioned docs
+    // routes like `/v1/getting-started` or `/graphql-101` that have
+    // nothing to do with API surfaces. The conditional-firing design
+    // is meant to keep SRF020 (api-catalog missing) silent on
+    // content-only sites; over-broad matching here defeats that.
     trimmed == "api"
         || trimmed.starts_with("api/")
-        || trimmed == "v1"
-        || trimmed.starts_with("v1/")
-        || trimmed.starts_with("v2/")
-        || trimmed.starts_with("graphql")
+        || trimmed == "graphql"
+        || trimmed.starts_with("graphql/")
 }
 
 #[cfg(test)]
@@ -233,6 +237,38 @@ mod tests {
                 .get("declares_api")
                 .map(|v| v.iter().any(|s| s.contains("api")))
                 .unwrap_or(false)
+        );
+    }
+
+    #[test]
+    fn versioned_docs_routes_do_not_trigger_declares_api() {
+        // Regression: a docs site that uses `/v1/getting-started` or
+        // `/v2/migration-guide` for versioned docs should NOT have
+        // declares_api fire. Earlier versions matched bare `v1/`,
+        // `v2/`, and `graphql` prefixes which over-fired on docs.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><title>x</title></head><body><h1>x</h1></body></html>",
+        );
+        write(
+            &root.join("v1/getting-started.html"),
+            "<html><head><title>v1</title></head><body><h1>v1</h1></body></html>",
+        );
+        write(
+            &root.join("v2/migration.html"),
+            "<html><head><title>v2</title></head><body><h1>v2</h1></body></html>",
+        );
+        write(
+            &root.join("graphql-101.html"),
+            "<html><head><title>tut</title></head><body><h1>tut</h1></body></html>",
+        );
+        let caps = infer_site_capabilities(&load_site(root).unwrap());
+        assert!(
+            !caps.declares_api,
+            "versioned docs routes should not infer API surface; provenance: {:?}",
+            caps.provenance
         );
     }
 
