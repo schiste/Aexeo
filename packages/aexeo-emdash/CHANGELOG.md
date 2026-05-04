@@ -6,6 +6,47 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.9] - 2026-05-04
+
+### Fixed
+
+- **`wasm_error: unreachable` on refresh in Astro dev.** v0.8.8
+  fixed the Astro/Vite startup regression but a second issue
+  remained: refresh evaluation traps with bare
+  `wasm_error: unreachable` in Node-loaded WASM. Root cause is
+  `std::time::Instant::now()` panicking on
+  `wasm32-unknown-unknown` ("time not implemented on this
+  platform"). Cloudflare Workers' workerd runtime appears to
+  provide a clock shim that masks the panic in production; Node's
+  experimental WASM ESM runner does not.
+
+  Fixed by adding `aexeo_core::time_shim::Instant` — a transparent
+  re-export of `std::time::Instant` on non-wasm targets, and a
+  no-op `Duration::ZERO` returner on `wasm32-unknown-unknown`.
+  Eval-path callers (`static_check.rs` + the intelligence
+  modules) swap their import; CLI and native tests still report
+  real timings on real OSes. The `RuleTiming` `elapsed_us` value
+  in `SiteCheckProfile` is `0` when the bridge runs in the
+  plugin, but no host consumes that field from the bridge today.
+
+### Added
+
+- **`console_error_panic_hook` in the bridge.** Future Rust
+  panics inside the bridge surface as console errors with
+  `file:line` + message instead of bare `unreachable` traps.
+  Installed lazily at every `#[wasm_bindgen]` entry point;
+  `set_once` is idempotent so repeated calls are cheap. Without
+  this, the v0.8.7→v0.8.8 `Instant::now()` panic was effectively
+  undebuggable from the host side — every future bridge bug now
+  carries its own diagnostic.
+
+### Notes for hosts upgrading from 0.8.8
+
+- No code changes required. Bump the package; refresh should
+  stop trapping in `pnpm dev` / `astro dev`.
+- Production behavior unchanged — the shim is only active on
+  the wasm32 build path.
+
 ## [0.8.8] - 2026-05-04
 
 ### Fixed
@@ -867,7 +908,8 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.8...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.9...HEAD
+[0.8.9]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.8...aexeo-emdash-v0.8.9
 [0.8.8]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.7...aexeo-emdash-v0.8.8
 [0.8.7]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.6...aexeo-emdash-v0.8.7
 [0.8.6]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.5...aexeo-emdash-v0.8.6
