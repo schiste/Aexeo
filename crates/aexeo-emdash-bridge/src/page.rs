@@ -8,7 +8,25 @@ use crate::render::{append_attribute_value, append_escaped_text, render_html};
 
 pub fn build_page_from_document(document: &EmdashDocument) -> Page {
     let relative_path = route_to_relative_path(&document.route);
-    let path = PathBuf::from(format!("emdash/{relative_path}"));
+    // page.path is what flows into Finding.path on every per-page
+    // rule. The plugin's evaluateAndPersistAll uses Finding.path
+    // as the bucket key when assigning findings to document
+    // routes — so this MUST match the document's route or the
+    // findings land in a shadow bucket keyed by the synthesized
+    // HTML filename and the route's row in the admin shows zero.
+    //
+    // Aeptus reported in their 0.8.9 retest that findings were
+    // landing on `emdash/<route>.html` instead of `/<route>` for
+    // exactly this reason. Use the route string directly so
+    // Finding.path = "/about" matches what the plugin's
+    // findingsByRoute map already pre-populates.
+    let path = PathBuf::from(if document.route.is_empty() {
+        "/".to_string()
+    } else if document.route.starts_with('/') {
+        document.route.clone()
+    } else {
+        format!("/{}", document.route)
+    });
     let raw = render_document_html(document);
     build_page_from_source(path, relative_path, raw, BTreeMap::new())
 }
@@ -184,5 +202,44 @@ mod tests {
         let page = build_page_from_document(&document);
         assert_eq!(page.relative_path, "index.html");
         assert_eq!(page.route, "");
+    }
+
+    #[test]
+    fn page_path_uses_document_route_so_findings_attribute_correctly() {
+        // Regression for Aeptus 0.8.9 retest: findings on a
+        // CMS document with route "/about" were being bucketed
+        // under "emdash/about.html" by the plugin's
+        // evaluateAndPersistAll because Finding.path = page.path
+        // = synthesized HTML filename, not the document route.
+        let document = EmdashDocument {
+            route: "/about".to_string(),
+            title: "About".to_string(),
+            description: None,
+            canonical: None,
+            lang: None,
+            alternates: Vec::new(),
+            meta: Default::default(),
+            schema: Vec::new(),
+            body: Vec::new(),
+        };
+        let page = build_page_from_document(&document);
+        assert_eq!(page.path.to_string_lossy(), "/about");
+    }
+
+    #[test]
+    fn page_path_normalizes_routes_without_leading_slash() {
+        let document = EmdashDocument {
+            route: "blog/hello".to_string(),
+            title: "Hello".to_string(),
+            description: None,
+            canonical: None,
+            lang: None,
+            alternates: Vec::new(),
+            meta: Default::default(),
+            schema: Vec::new(),
+            body: Vec::new(),
+        };
+        let page = build_page_from_document(&document);
+        assert_eq!(page.path.to_string_lossy(), "/blog/hello");
     }
 }
