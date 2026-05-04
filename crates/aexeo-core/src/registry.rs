@@ -380,6 +380,14 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                     rule_id: "ROB008",
                     summary: "page is in sitemap but declares noindex in X-Robots-Tag",
                 },
+                RuleDescriptor {
+                    rule_id: "ROB010",
+                    summary: "robots.txt has no AI-bot User-agent directives",
+                },
+                RuleDescriptor {
+                    rule_id: "ROB011",
+                    summary: "robots.txt has no Content-Signal directives",
+                },
             ],
         },
         RuleGroupDefinition {

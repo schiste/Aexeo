@@ -121,7 +121,81 @@ fn collect_robot_file_findings(site: &Site, config: &Config) -> Vec<Finding> {
         }
     }
 
+    if !lines
+        .iter()
+        .any(|line| line.starts_with("user-agent:") && declares_known_ai_bot(line))
+    {
+        // Heuristic, not a hard rule: a wildcard-only robots.txt is
+        // a defensible policy choice. The rule's job is to surface
+        // that the editor hasn't *explicitly* declared a stance on
+        // AI crawlers, not to demand AI rules. Cloudflare's
+        // agent-readiness scan flagged this as PARTIAL on Aeptus
+        // (wildcard rules apply but no AI-specific entries).
+        findings.push(finding(
+            "ROB010",
+            "robots.txt has no AI-bot User-agent directives (GPTBot, ClaudeBot, ChatGPT-User, PerplexityBot, …); editors who want a different policy for AI crawlers than for general crawlers must declare it explicitly",
+            &robots_path,
+            Some(
+                "add explicit User-agent blocks for the AI bots you want to allow or disallow; see https://developers.cloudflare.com/ai-crawl-control/",
+            ),
+        ));
+    }
+
+    if !lines.iter().any(|line| line.starts_with("content-signal:")) {
+        // Content-Signal directives (contentsignals.org,
+        // draft-romm-aipref-contentsignals) declare the editor's
+        // preferences for ai-train, search, and ai-input usage.
+        // Heuristic — declaring a stance is editorial, not technical.
+        findings.push(finding(
+            "ROB011",
+            "robots.txt has no Content-Signal directives; AI training/search/input preferences are not declared",
+            &robots_path,
+            Some(
+                "add `Content-Signal: ai-train=…, search=…, ai-input=…` per https://contentsignals.org/",
+            ),
+        ));
+    }
+
     findings
+}
+
+/// Canonical list of AI-bot User-agent names that crawl content
+/// for LLM training, retrieval, or answer-engine indexing. The
+/// list is conservative: only widely-published, named bots that
+/// honor robots.txt. Not exhaustive — editors may want to add
+/// niche bots locally — but covers the bots Cloudflare's
+/// AI-crawl-control surface tracks.
+const KNOWN_AI_BOTS: &[&str] = &[
+    "gptbot",
+    "claude-web",
+    "claudebot",
+    "chatgpt-user",
+    "perplexitybot",
+    "google-extended",
+    "googleother",
+    "ccbot",
+    "bytespider",
+    "applebot-extended",
+    "meta-externalagent",
+    "facebookbot",
+    "anthropic-ai",
+    "cohere-ai",
+    "diffbot",
+    "amazonbot",
+    "youbot",
+];
+
+fn declares_known_ai_bot(user_agent_line: &str) -> bool {
+    let value = user_agent_line
+        .strip_prefix("user-agent:")
+        .map(str::trim)
+        .unwrap_or("");
+    if value.is_empty() || value == "*" {
+        return false;
+    }
+    KNOWN_AI_BOTS
+        .iter()
+        .any(|bot| value == *bot || value.contains(bot))
 }
 
 fn collect_page_robot_findings(page: &Page, site: &Site, config: &Config) -> Vec<Finding> {
@@ -217,6 +291,86 @@ mod tests {
             .map(|finding| finding.rule_id)
             .collect::<BTreeSet<_>>();
         assert!(rule_ids.contains("ROB002"));
+    }
+
+    #[test]
+    fn flags_missing_ai_bot_directives_when_only_wildcard_present() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><title>x</title><meta name=\"description\" content=\"y\"><link rel=\"canonical\" href=\"https://example.com/\"></head><body><h1>x</h1></body></html>",
+        );
+        write(&root.join("sitemap.xml"), "<urlset></urlset>");
+        write(
+            &root.join("robots.txt"),
+            "User-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.xml\n",
+        );
+        let rule_ids = run_robots_rules(&load_site(root).unwrap(), &Config::default())
+            .into_iter()
+            .map(|finding| finding.rule_id)
+            .collect::<BTreeSet<_>>();
+        assert!(rule_ids.contains("ROB010"));
+    }
+
+    #[test]
+    fn does_not_flag_ai_bot_rule_when_named_bot_directive_present() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><title>x</title><meta name=\"description\" content=\"y\"><link rel=\"canonical\" href=\"https://example.com/\"></head><body><h1>x</h1></body></html>",
+        );
+        write(&root.join("sitemap.xml"), "<urlset></urlset>");
+        write(
+            &root.join("robots.txt"),
+            "User-agent: *\nAllow: /\nUser-agent: GPTBot\nDisallow: /\nSitemap: https://example.com/sitemap.xml\n",
+        );
+        let rule_ids = run_robots_rules(&load_site(root).unwrap(), &Config::default())
+            .into_iter()
+            .map(|finding| finding.rule_id)
+            .collect::<BTreeSet<_>>();
+        assert!(!rule_ids.contains("ROB010"));
+    }
+
+    #[test]
+    fn flags_missing_content_signal_directives() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><title>x</title><meta name=\"description\" content=\"y\"><link rel=\"canonical\" href=\"https://example.com/\"></head><body><h1>x</h1></body></html>",
+        );
+        write(&root.join("sitemap.xml"), "<urlset></urlset>");
+        write(
+            &root.join("robots.txt"),
+            "User-agent: *\nAllow: /\nSitemap: https://example.com/sitemap.xml\n",
+        );
+        let rule_ids = run_robots_rules(&load_site(root).unwrap(), &Config::default())
+            .into_iter()
+            .map(|finding| finding.rule_id)
+            .collect::<BTreeSet<_>>();
+        assert!(rule_ids.contains("ROB011"));
+    }
+
+    #[test]
+    fn does_not_flag_content_signal_when_declared() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><title>x</title><meta name=\"description\" content=\"y\"><link rel=\"canonical\" href=\"https://example.com/\"></head><body><h1>x</h1></body></html>",
+        );
+        write(&root.join("sitemap.xml"), "<urlset></urlset>");
+        write(
+            &root.join("robots.txt"),
+            "User-agent: *\nAllow: /\nContent-Signal: ai-train=no, search=yes, ai-input=no\nSitemap: https://example.com/sitemap.xml\n",
+        );
+        let rule_ids = run_robots_rules(&load_site(root).unwrap(), &Config::default())
+            .into_iter()
+            .map(|finding| finding.rule_id)
+            .collect::<BTreeSet<_>>();
+        assert!(!rule_ids.contains("ROB011"));
     }
 
     #[test]

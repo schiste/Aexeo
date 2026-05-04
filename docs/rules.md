@@ -52,6 +52,8 @@
 - `ROB006`: page declares nofollow
 - `ROB007`: robots.txt may overblock crawl budget
 - `ROB008`: page is in sitemap but declares noindex in X-Robots-Tag
+- `ROB010`: robots.txt has no AI-bot User-agent directives
+- `ROB011`: robots.txt has no Content-Signal directives
 
 ## `social`
 
