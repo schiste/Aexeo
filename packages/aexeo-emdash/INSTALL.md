@@ -36,14 +36,16 @@ when it's actually needed.
 ### Install
 
 ```bash
-npm install @aeptus/aexeo-emdash vite-plugin-wasm
+npm install @aeptus/aexeo-emdash
 ```
 
-`vite-plugin-wasm` is required because Vite's defaults treat `.wasm`
-imports as static-asset URLs, but Cloudflare Workers can only run
-WASM as precompiled `WebAssembly.Module` instances. The plugin
-bridges the two; without it, the Aexeo plugin's first call throws
-"WASM module did not resolve to a WebAssembly.Module."
+Starting in v0.8.8 the plugin loads its WASM internally with a
+dual-path runtime that tries the bundler-resolved import first
+(Cloudflare Workers) and falls back to `node:fs/promises` +
+`WebAssembly.compile` (Astro dev / Node ESM / Vite SSR runner).
+Earlier versions required `vite-plugin-wasm` because the plugin's
+single static `.wasm` import broke Astro dev mode with a
+SyntaxError; that's no longer needed.
 
 > **If installing from a private git remote or as a vendored
 > directory** — see the "Alternative install sources" section at the
@@ -57,19 +59,15 @@ import { d1, r2 } from "@emdash-cms/cloudflare";
 import { aexeoPlugin } from "@aeptus/aexeo-emdash";
 import { defineConfig } from "astro/config";
 import emdash from "emdash/astro";
-import wasm from "vite-plugin-wasm";
 
 export default defineConfig({
   output: "server",
   adapter: cloudflare(),
   vite: {
-    // Required: makes `import x from "./foo.wasm"` resolve to a
-    // precompiled WebAssembly.Module. Cloudflare Workers /
-    // workerd disallow runtime WebAssembly.instantiate from raw
-    // bytes, so the bundler has to do the compilation.
-    plugins: [wasm()],
-    // The Aexeo plugin's WASM import confuses Vite's dep
-    // optimizer when it tries to pre-bundle the package.
+    // Recommended: prevents Vite's dep optimizer from trying to
+    // pre-bundle the package, which churns on every dev start.
+    // The plugin itself works without this — but the optimizer
+    // chatter is annoying.
     optimizeDeps: { exclude: ["@aeptus/aexeo-emdash"] },
   },
   integrations: [
@@ -81,6 +79,12 @@ export default defineConfig({
   ],
 });
 ```
+
+> **Upgrading from 0.8.7 or earlier?** You can drop `vite-plugin-wasm`
+> from your dev dependencies and `plugins: [wasm()]` from the Vite
+> config; the new dual-path loader handles both runtimes internally.
+> Leaving them in place is harmless if you'd rather not touch the
+> config right away.
 
 That's it for code. No environment variables, no secrets to manage,
 no sidecar to deploy.
