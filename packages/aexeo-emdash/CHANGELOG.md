@@ -6,6 +6,52 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-05-04
+
+Brings in the agent-readiness audit rules from upstream
+aexeo-core 0.0.11 — three bundles extracted from the Cloudflare
+"Is Your Site Agent-Ready?" scan model.
+
+### Added (engine via bridge)
+
+- **Bundle A — robots.txt extensions** (always-on, retrievability):
+  - `ROB010` — robots.txt has no AI-bot User-agent directives
+    (GPTBot, ClaudeBot, ChatGPT-User, PerplexityBot, …)
+  - `ROB011` — robots.txt has no Content-Signal directives
+    (`ai-train`, `search`, `ai-input`)
+
+- **Bundle B — `.well-known/*` discovery surfaces** (conditional,
+  absorbability). All gated on a new `SiteCapabilities` inference
+  that reads route patterns, JSON-LD schema, llms.txt content,
+  and partial-file presence to decide whether the site claims
+  the underlying capability — so these rules don't fire on
+  content-only sites that have no business exposing the surface:
+  - `SRF010 / SRF011` — agent-skills index (Cloudflare RFC v0.2.0)
+  - `SRF015 / SRF016` — MCP server card (SEP-1649)
+  - `SRF020 / SRF021` — API catalog (RFC 9727 linkset+json)
+  - `SRF025` — OAuth/OIDC discovery (RFC 8414, OIDC Discovery 1.0)
+  - `SRF026` — OAuth protected-resource metadata (RFC 9728)
+
+- **Bundle C — runtime header audits** (runtime-only, mixed):
+  - `LNK020` — homepage response sends no Link headers (RFC 8288).
+    Silent on pure static audits — fires only when `Page.response_headers`
+    is populated.
+  - `SRF030` — homepage doesn't honor `Accept: text/markdown`
+    content negotiation (Cloudflare Markdown for Agents). Adds
+    one extra HTTP probe at the end of the runtime audit.
+
+### Notes for hosts upgrading from 0.8.4
+
+- No code changes required.
+- Static audits will gain ROB010/011 immediately on every site;
+  the SRF010+ rules are silent unless the site has the
+  capability signal (so most content sites see no new findings).
+- LNK020 + SRF030 only fire during runtime audits — static
+  audits don't reach that code path.
+- The new `SiteCapabilities` API is exported from aexeo-core
+  for hosts that want to reuse the inference in their own
+  tooling.
+
 ## [0.8.4] - 2026-05-04
 
 Three follow-up quality fixes from Aeptus's post-0.8.3 rollout
@@ -659,7 +705,8 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.4...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.5...HEAD
+[0.8.5]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.4...aexeo-emdash-v0.8.5
 [0.8.4]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.3...aexeo-emdash-v0.8.4
 [0.8.3]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.2...aexeo-emdash-v0.8.3
 [0.8.2]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.1...aexeo-emdash-v0.8.2
