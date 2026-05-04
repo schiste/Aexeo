@@ -222,6 +222,7 @@ Commands:
   evidence       Assess evidence coverage and citation fidelity risk
   fanout         Assess deterministic answer-engine query fan-out coverage
   facts          Assess structured facts readiness and cross-surface consistency [aliases: truth]
+  presence       Surface what the open web shows about the manifest's organization (5 sources, no scoring)
   trust-surface  Import and reconcile trusted external surfaces against site truth
   surfaces       Discover machine-readable website surfaces and retrieval paths
   score          Compute site and route intelligence scores
