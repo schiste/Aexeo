@@ -133,6 +133,7 @@ Header-level rules that consult Page.response_headers (runtime audits) or do add
 - `CNT003`: inline image is missing alt text
 - `CNT004`: inline image is too large
 - `CNT005`: duplicate visible content cluster
+- `CNT006`: generic-beneficiary copy without concrete anchors
 
 ## `structure`
 

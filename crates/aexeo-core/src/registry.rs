@@ -656,6 +656,10 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                     rule_id: "CNT005",
                     summary: "duplicate visible content cluster",
                 },
+                RuleDescriptor {
+                    rule_id: "CNT006",
+                    summary: "generic-beneficiary copy without concrete anchors",
+                },
             ],
         },
         RuleGroupDefinition {
