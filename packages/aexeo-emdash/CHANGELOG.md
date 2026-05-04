@@ -6,6 +6,52 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-05-04
+
+Picks up the upstream aexeo-core 0.0.9 improvements that address
+the two open quality items Aeptus flagged after the 0.8.1 + CLI
+0.0.8 rollout.
+
+### Changed (engine via bridge)
+
+- **Truth-manifest generator no longer picks listing-page or
+  404 titles as the organization/product name.** Aeptus's
+  facts.json was being generated with `organization.name = "Blog"`
+  and `product.name = "Page not found"` because the listing page's
+  title outvoted the homepage and the 404 page's title leaked into
+  the candidate corpus. Three engine fixes ship in this release:
+  (a) the generic-label blocklist now covers blog, posts,
+  articles, authors, tags, categories, search, archive, page not
+  found, 404, error, oops, and pure-numeric labels;
+  (b) 404 / error pages are detected by title/h1 patterns and
+  excluded from the candidate corpus entirely;
+  (c) the homepage signal wins over any subpage signal regardless
+  of count when present.
+
+  This is a generation-quality improvement, not a wire-format
+  change — existing stored manifests are unaffected. Hosts who
+  re-run `intelligence facts generate` will get a cleaner draft.
+
+- **GEO009 ("page facts misalign across title/H1/OG/schema")
+  now uses the same identity-extraction logic as the
+  `intelligence identity` diagnostic.** Previously the rule read
+  every JSON-LD `name` field (including BreadcrumbList items and
+  ItemList children), so it fired on listing/author/localized
+  routes where breadcrumb crumbs leaked in. The diagnostic
+  already restricted to top-level identity-bearing schema; the
+  rule and the diagnostic now share that filter. Aeptus's
+  ~44 GEO009 warnings on listing/author/localized routes should
+  drop after re-running the audit.
+
+### Notes for hosts upgrading from 0.8.x
+
+- No code changes required — pure engine-side improvements.
+- Re-run `intelligence facts generate` if you generated your
+  manifest with v0.0.7 or earlier of the CLI; the new generator
+  output is materially better.
+- Re-run the audit; expect GEO009 counts to drop on listing
+  pages without any host-side change.
+
 ## [0.8.2] - 2026-05-04
 
 Fix for the residual entity-presence trim() crash that 0.8.1
@@ -562,7 +608,8 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.2...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.3...HEAD
+[0.8.3]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.2...aexeo-emdash-v0.8.3
 [0.8.2]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.1...aexeo-emdash-v0.8.2
 [0.8.1]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.0...aexeo-emdash-v0.8.1
 [0.8.0]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.7.0...aexeo-emdash-v0.8.0
