@@ -8,8 +8,36 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [0.8.10] - 2026-05-04
 
-Two follow-up quality fixes from Aeptus's 0.8.9 retest. The
-local refresh path is now end-to-end correct.
+Two follow-up quality fixes from Aeptus's 0.8.9 retest, plus
+four new product-level capabilities from the post-retest
+roadmap discussion.
+
+### Added (engine via bridge)
+
+- **`SOC006` enabled by default.** Missing `og:image` now
+  surfaces on every audit. The rule existed but was gated
+  behind `require_social_images = false`; flipped to true.
+- **`SOC009` (heuristic).** Recommends `summary_large_image`
+  when `twitter:card` is plain `summary`. Editors can keep
+  `summary` if they want; this is a nudge, not a blocker.
+- **`CNT006` (heuristic, low-confidence).** Generic-beneficiary
+  detector — flags abstract audience-needs copy
+  ("Needs speed and clarity to make decisions") that has no
+  concrete anchoring (numbers, named tools, quotes). Skips
+  when concrete-anchor tokens (`study`, `research`, etc.)
+  appear nearby. Editors can suppress via the new
+  `[route_kinds]` config block.
+- **`[route_kinds]` config block.** Named per-pattern rule
+  masking that compiles to virtual suppressions:
+  ```toml
+  [route_kinds.manifesto]
+  match = ["/foundations/"]
+  skip_rules = ["GEO007", "GEO008", "GEO010"]
+  noindex = false
+  ```
+  Bundles a path-pattern set with a stance (which rules
+  to skip, whether routes are intentionally noindex). Lighter
+  than scattering one suppression per rule × pattern.
 
 ### Fixed
 
@@ -51,16 +79,38 @@ local refresh path is now end-to-end correct.
 
 ### Notes for hosts upgrading from 0.8.9
 
-- No code changes required.
-- After bumping, the admin's findings page will show fewer
-  findings (because the infrastructure noise is gone) and
-  every finding now attributes to its document route. Editors
-  should expect their per-document finding count to match the
-  document row's findingCount in the table — those were the
-  same number before, but the path mismatch was hiding it.
-- If you want the infrastructure-level audit (robots/sitemap/
-  llms/well-known/etc.), run `aexeo-cli check` against your
-  static dist; that's where those rules belong.
+- No code changes required for any of the fixes or additions.
+- After bumping, the admin's findings page will show:
+  - Fewer findings overall (infrastructure noise is gone) and
+    every finding correctly attributed to its document route.
+  - **New** SOC006 findings on every document missing og:image.
+  - **New** SOC009 nudges on documents declaring
+    `twitter:card = summary`.
+  - **New** CNT006 nudges on documents whose visible text has
+    generic-beneficiary copy without concrete anchors.
+- If the new SOC/CNT findings are too noisy on a specific
+  route family, declare a `[route_kinds.X]` block in
+  `aexeo.toml` with `match` patterns and a `skip_rules` list.
+  Example:
+  ```toml
+  [route_kinds.manifesto]
+  match = ["/foundations/"]
+  skip_rules = ["CNT006", "GEO007"]
+  noindex = false
+  ```
+- For the infrastructure-level audit (robots/sitemap/llms/
+  well-known/etc.), run `aexeo-cli check` against your static
+  dist; that's where those rules belong.
+
+### CLI side (aexeo-cli, same release)
+
+- **`aexeo-cli crawl --cf-access-id … --cf-access-secret …`**
+  injects Cloudflare Access service-token headers
+  (`CF-Access-Client-Id` + `CF-Access-Client-Secret`) on every
+  fetch. Falls back to env vars `CF_ACCESS_CLIENT_ID` /
+  `CF_ACCESS_CLIENT_SECRET` when flags are absent. Closes the
+  loop for hosts whose preview deploys are behind Cloudflare
+  Access (Aeptus's CI was blocked on this).
 
 ## [0.8.9] - 2026-05-04
 
