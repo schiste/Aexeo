@@ -33,6 +33,7 @@ pub mod surfaces;
 pub mod verification;
 pub mod well_known_rules;
 
+pub use capabilities::{SiteCapabilities, infer_site_capabilities, well_known_path_exists};
 pub use config::{
     Config, ConfigFieldDoc, render_resolved_config_json, render_resolved_config_toml,
 };
@@ -47,6 +48,7 @@ pub use generate::{
     build_machine_artifact_bundle, render_llms_full_txt, render_llms_txt, render_markdown_mirror,
     render_markdown_mirror_pages, render_robots_txt, render_sitemap_xml, suggest_internal_links,
 };
+pub use header_rules::run_header_rules;
 pub use html_rules::{run_html_rules, run_static_html_audit};
 #[cfg(feature = "net")]
 pub use integrations::{
@@ -120,3 +122,4 @@ pub use verification::{
     DiffResult, diff_finding_sets, load_audit_artifact, load_findings_from_audit,
     load_site_from_audit_artifact, render_diff_text, site_from_audit_artifact, write_baseline_file,
 };
+pub use well_known_rules::run_well_known_rules;
