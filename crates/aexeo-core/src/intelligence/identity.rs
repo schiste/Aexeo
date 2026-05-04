@@ -52,10 +52,14 @@ pub struct PageIdentity {
 /// doesn't exist on the site.
 pub fn compute_page_identity(site: &Site, route: &str) -> Option<PageIdentity> {
     let page = site.page(route)?;
-    Some(compute_for_page(page))
+    Some(compute_page_identity_from_page(page))
 }
 
-fn compute_for_page(page: &Page) -> PageIdentity {
+/// Page-level entry point. Used by `compute_page_identity` (route
+/// lookup) and by structure rules that already iterate pages — most
+/// notably GEO009, which delegates its drift detection here so the
+/// rule and the diagnostic share one implementation.
+pub fn compute_page_identity_from_page(page: &Page) -> PageIdentity {
     let sources = collect_sources(page);
     let (canonical_title, canonical_source) = pick_canonical(&sources);
     let drift = match canonical_title.as_deref() {

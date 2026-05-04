@@ -10,7 +10,10 @@ mod trust;
 mod truth;
 
 pub use facts_prompt::render_facts_prompt;
-pub use identity::{IdentityDrift, PageIdentity, PageIdentitySources, compute_page_identity};
+pub use identity::{
+    IdentityDrift, PageIdentity, PageIdentitySources, compute_page_identity,
+    compute_page_identity_from_page,
+};
 pub use schema_gen::{SchemaSuggestion, generate_schema_suggestions};
 
 pub use evidence::{

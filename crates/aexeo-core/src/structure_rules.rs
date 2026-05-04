@@ -4,7 +4,6 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::config::Config;
-use crate::schema_rules::iter_schema_field_values;
 use crate::site::{PageKind, Site, collapse_whitespace};
 
 fn finding(
@@ -209,22 +208,6 @@ fn strip_primary_entities(text: &str, entities: &[String]) -> String {
         normalized = collapse_whitespace(&normalized.replace(&entity, " "));
     }
     normalized
-}
-
-fn fact_values_conflict(left: &str, right: &str) -> bool {
-    if left.is_empty()
-        || right.is_empty()
-        || left == right
-        || left.contains(right)
-        || right.contains(left)
-    {
-        return false;
-    }
-    let left_tokens: BTreeSet<&str> = left.split_whitespace().collect();
-    let right_tokens: BTreeSet<&str> = right.split_whitespace().collect();
-    let overlap = left_tokens.intersection(&right_tokens).count();
-    let minimum_overlap = left_tokens.len().min(right_tokens.len()).min(2);
-    overlap < minimum_overlap
 }
 
 fn strong_answer_block_count(page: &crate::site::Page, config: &Config) -> usize {
@@ -487,67 +470,59 @@ fn collect_fact_consistency_findings(page: &crate::site::Page, config: &Config) 
     ) {
         return Vec::new();
     }
-    let mut fact_values = Vec::new();
-    if let Some(title) = &page.title {
-        fact_values.push(title.clone());
+    // Delegate to the same identity-drift logic the
+    // `intelligence identity` diagnostic uses, so the audit rule and
+    // the diagnostic agree by construction. The previous in-rule
+    // implementation read every JSON-LD `name`/`headline` (including
+    // nested objects like BreadcrumbList items and ItemList children)
+    // and treated those as identity signals, which produced
+    // false-positive drift on listing/author/localized routes where
+    // breadcrumb crumbs leak in. compute_page_identity_from_page
+    // restricts to top-level identity-bearing schema types only.
+    let identity = crate::intelligence::compute_page_identity_from_page(page);
+    if identity.canonical_title.is_none() || identity.agrees {
+        return Vec::new();
     }
-    if let Some(first_h1) = page.h1_texts.first() {
-        fact_values.push(first_h1.clone());
-    }
-    if let Some(og_title) = page.metadata("og:title") {
-        fact_values.push(og_title.to_string());
-    }
-    for block in &page.json_ld_blocks {
-        let Ok(payload) = serde_json::from_str::<Value>(&block.raw) else {
-            continue;
-        };
-        if let Some(name) = iter_schema_field_values(&payload, "name")
-            .into_iter()
-            .next()
-        {
-            fact_values.push(name);
-        }
-        if let Some(headline) = iter_schema_field_values(&payload, "headline")
-            .into_iter()
-            .next()
-        {
-            fact_values.push(headline);
-        }
-    }
-    let mut normalized_facts = Vec::new();
+    // Brand-layering exemption: a page may legitimately layer the
+    // brand into its title ("Terminal Search | Chau7 Terminal")
+    // while the JSON-LD declares the brand entity directly ("Chau7").
+    // Strip primary-entity occurrences from both sides of each drift
+    // item; if the residuals don't conflict in the
+    // fact_values_conflict sense, treat as template-suffix noise
+    // rather than factual disagreement.
     let primary_entities = primary_entity_names(page);
-    for value in fact_values {
-        let normalized = normalize_fact_text(&value);
-        let stripped = strip_primary_entities(&value, &primary_entities);
-        if stripped.is_empty() && primary_entities.contains(&normalized) {
-            continue;
-        }
-        let normalized = if stripped.is_empty() {
-            normalized
-        } else {
-            stripped
-        };
-        if !normalized.is_empty() && !normalized_facts.contains(&normalized) {
-            normalized_facts.push(normalized);
-        }
+    let all_drift_is_primary_entity_noise = identity.drift.iter().all(|drift| {
+        let canonical = strip_primary_entities(&drift.canonical, &primary_entities);
+        let observed = strip_primary_entities(&drift.observed, &primary_entities);
+        !fact_values_conflict(&canonical, &observed)
+    });
+    if all_drift_is_primary_entity_noise {
+        return Vec::new();
     }
-    if normalized_facts.len() >= 2 {
-        let base = normalized_facts[0].clone();
-        if normalized_facts[1..]
-            .iter()
-            .any(|value| fact_values_conflict(&base, value))
-        {
-            return vec![finding(
-                "GEO009",
-                "core page facts do not align across title, H1, OpenGraph, and schema",
-                &page.path,
-                1,
-                1,
-                "warning",
-            )];
-        }
+    vec![finding(
+        "GEO009",
+        "core page facts do not align across title, H1, OpenGraph, and schema",
+        &page.path,
+        1,
+        1,
+        "warning",
+    )]
+}
+
+fn fact_values_conflict(left: &str, right: &str) -> bool {
+    if left.is_empty()
+        || right.is_empty()
+        || left == right
+        || left.contains(right)
+        || right.contains(left)
+    {
+        return false;
     }
-    Vec::new()
+    let left_tokens: BTreeSet<&str> = left.split_whitespace().collect();
+    let right_tokens: BTreeSet<&str> = right.split_whitespace().collect();
+    let overlap = left_tokens.intersection(&right_tokens).count();
+    let minimum_overlap = left_tokens.len().min(right_tokens.len()).min(2);
+    overlap < minimum_overlap
 }
 
 pub fn run_structure_rules(site: &Site, config: &Config) -> Vec<Finding> {
@@ -667,6 +642,63 @@ mod tests {
             .filter(|finding| finding.rule_id == "GEO010")
             .count();
         assert_eq!(geo010_count, 1);
+    }
+
+    #[test]
+    fn geo009_does_not_fire_on_listing_pages_with_breadcrumbs() {
+        // Regression for the recurring Aeptus complaint: GEO009 was
+        // firing on /blog and /authors/<x> because the rule's
+        // pre-refactor implementation read every JSON-LD `name`
+        // (including BreadcrumbList items) and treated those as
+        // identity signals. The diagnostic `intelligence identity`
+        // already filtered to top-level identity-bearing schema; the
+        // rule and the diagnostic now share that filter so they
+        // agree by construction.
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("blog/index.html"),
+            r#"<html><head><title>Blog | Aeptus</title><meta name="description" content="Posts from the team."><meta property="og:title" content="Blog | Aeptus"><link rel="canonical" href="https://example.com/blog"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"https://example.com/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://example.com/blog"}]}</script></head><body><h1>Blog</h1><section data-ui="answer"><h2>Latest</h2><p>Recent posts about the platform with enough body content here to be a real answer block on the listing page.</p></section></body></html>"#,
+        );
+        let findings = run_structure_rules(&load_site(root).unwrap(), &Config::default());
+        assert!(
+            !findings.iter().any(|finding| finding.rule_id == "GEO009"),
+            "expected GEO009 to be quiet on /blog with BreadcrumbList; got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn geo009_does_not_fire_on_author_pages_with_listing_schema() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("authors/christophe-henner/index.html"),
+            r#"<html><head><title>Christophe Henner | Aeptus</title><meta name="description" content="Posts by Christophe Henner."><meta property="og:title" content="Christophe Henner | Aeptus"><link rel="canonical" href="https://example.com/authors/christophe-henner"><script type="application/ld+json">{"@context":"https://schema.org","@type":"CollectionPage","name":"Christophe Henner","mainEntity":{"@type":"ItemList","itemListElement":[{"@type":"ListItem","position":1,"name":"First post"},{"@type":"ListItem","position":2,"name":"Second post"}]}}</script></head><body><h1>Christophe Henner</h1><section data-ui="answer"><h2>Posts</h2><p>The author has a long history of posts that contains enough body text to be a real answer block on this listing page.</p></section></body></html>"#,
+        );
+        let findings = run_structure_rules(&load_site(root).unwrap(), &Config::default());
+        assert!(
+            !findings.iter().any(|finding| finding.rule_id == "GEO009"),
+            "expected GEO009 to be quiet on /authors with CollectionPage+ItemList; got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn geo009_still_fires_on_real_drift_between_title_and_h1() {
+        // Make sure the unification didn't accidentally muzzle the
+        // rule when there IS real drift. Title says one thing, h1
+        // says something completely different — that's the genuine
+        // cross-signal disagreement GEO009 is meant to catch.
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("post/index.html"),
+            r#"<html><head><title>Pricing comparison guide</title><meta name="description" content="A long-form article."><meta property="og:title" content="Pricing comparison guide"><link rel="canonical" href="https://example.com/post"></head><body><h1>How we built our internal incident review process</h1><section data-ui="answer"><h2>Section</h2><p>This block has enough body text to count as a real answer block while the page-identity signals openly disagree across title and h1.</p></section></body></html>"#,
+        );
+        let findings = run_structure_rules(&load_site(root).unwrap(), &Config::default());
+        assert!(
+            findings.iter().any(|finding| finding.rule_id == "GEO009"),
+            "expected GEO009 to fire on real title/h1 drift; got: {findings:?}"
+        );
     }
 
     #[test]
