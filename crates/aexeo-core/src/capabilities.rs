@@ -41,7 +41,9 @@ pub struct SiteCapabilities {
 }
 
 /// Infer the site's claimed capabilities from concrete static
-/// signals. Pure function; no IO.
+/// signals. Reads a small set of `.well-known/*` filenames off
+/// disk to detect partial implementations — those files aren't
+/// indexed as Pages, so we can't get the signal from `Site` alone.
 pub fn infer_site_capabilities(site: &Site) -> SiteCapabilities {
     let mut caps = SiteCapabilities::default();
     let mut provenance: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -66,10 +68,9 @@ pub fn infer_site_capabilities(site: &Site) -> SiteCapabilities {
                 .unwrap_or(false)
         })
     });
-    let api_well_known_partial = site
-        .indexed_paths
-        .iter()
-        .any(|p| p.contains(".well-known/api-catalog") || p.contains("openapi"));
+    let api_well_known_partial = well_known_path_exists(site, ".well-known/api-catalog")
+        || well_known_path_exists(site, "openapi.json")
+        || well_known_path_exists(site, "openapi.yaml");
     if api_route_count > 0 || api_schema || api_well_known_partial {
         caps.declares_api = true;
         let entry = provenance.entry("declares_api".into()).or_default();
@@ -87,10 +88,9 @@ pub fn infer_site_capabilities(site: &Site) -> SiteCapabilities {
     }
 
     // --- MCP server ----------------------------------------------------
-    let mcp_signal = site
-        .indexed_paths
-        .iter()
-        .any(|p| p.contains(".well-known/mcp"));
+    let mcp_signal = well_known_path_exists(site, ".well-known/mcp/server-card.json")
+        || well_known_path_exists(site, ".well-known/mcp/server-cards.json")
+        || well_known_path_exists(site, ".well-known/mcp.json");
     if mcp_signal {
         caps.declares_mcp = true;
         provenance
@@ -100,10 +100,8 @@ pub fn infer_site_capabilities(site: &Site) -> SiteCapabilities {
     }
 
     // --- Agent Skills surface ------------------------------------------
-    let skills_path_signal = site
-        .indexed_paths
-        .iter()
-        .any(|p| p.contains(".well-known/agent-skills") || p.contains(".well-known/skills"));
+    let skills_path_signal = well_known_path_exists(site, ".well-known/agent-skills/index.json")
+        || well_known_path_exists(site, ".well-known/skills/index.json");
     let skills_in_llms = site
         .llms_text
         .as_deref()
@@ -133,9 +131,9 @@ pub fn infer_site_capabilities(site: &Site) -> SiteCapabilities {
     let oauth_response_header = site
         .route_pages()
         .any(|p| p.response_headers.contains_key("www-authenticate"));
-    let oauth_well_known = site.indexed_paths.iter().any(|p| {
-        p.contains(".well-known/oauth-") || p.contains(".well-known/openid-configuration")
-    });
+    let oauth_well_known = well_known_path_exists(site, ".well-known/oauth-authorization-server")
+        || well_known_path_exists(site, ".well-known/openid-configuration")
+        || well_known_path_exists(site, ".well-known/oauth-protected-resource");
     if oauth_response_header || oauth_well_known {
         caps.declares_oauth = true;
         let entry = provenance.entry("declares_oauth".into()).or_default();
@@ -154,10 +152,8 @@ pub fn infer_site_capabilities(site: &Site) -> SiteCapabilities {
     // makes outbound bot requests." An opt-in flag for editors
     // who want the rule active without the file in place is a
     // future extension when the first consumer requests it.
-    let bot_auth_signal = site
-        .indexed_paths
-        .iter()
-        .any(|p| p.contains(".well-known/http-message-signatures-directory"));
+    let bot_auth_signal =
+        well_known_path_exists(site, ".well-known/http-message-signatures-directory");
     if bot_auth_signal {
         caps.declares_bot_identity = true;
         provenance
@@ -168,6 +164,15 @@ pub fn infer_site_capabilities(site: &Site) -> SiteCapabilities {
 
     caps.provenance = provenance;
     caps
+}
+
+/// Static-site `.well-known/*` files aren't indexed as Pages, so
+/// the only reliable signal is filesystem existence under the
+/// site's root. Symlinks resolve to their target as a side effect
+/// of `Path::exists`, which is the right behavior here (a symlink
+/// to a real file should count as "the file is present").
+pub fn well_known_path_exists(site: &Site, relative: &str) -> bool {
+    site.root.join(relative).exists()
 }
 
 fn route_looks_api(route: &str) -> bool {
