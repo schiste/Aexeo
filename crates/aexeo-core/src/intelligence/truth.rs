@@ -764,20 +764,26 @@ fn detect_category(site: &Site) -> Option<String> {
 }
 
 fn detect_product_name(site: &Site, organization_name: Option<&str>) -> Option<String> {
-    let mut counts = BTreeMap::<String, usize>::new();
+    // Inference is now strictly two-tier:
+    //
+    //   1. Strong: a JSON-LD block with @type SoftwareApplication or
+    //      Product declares a `name`. We trust that.
+    //   2. Weak: no schema-typed match exists. Fall back to the
+    //      organization name. We do NOT try to infer the product
+    //      from title segments — that's how Aeptus ended up with
+    //      `products[0].name = "ISO 27001"` (the most-frequent
+    //      title segment across content pages, but not the product).
+    //
+    // Title segments are too noisy to drive product inference on
+    // content sites. The previous algorithm summed +2 per
+    // occurrence regardless of whether the segment had any
+    // semantic relationship to the org or product, so any
+    // sufficiently-repeated content keyword (compliance standard,
+    // technology name, blog topic) outscored the truth.
+    let mut schema_counts = BTreeMap::<String, usize>::new();
     for page in site.route_pages() {
-        // Skip 404/error pages — same reason as detect_organization_name.
-        // This was the root of "Page not found" being chosen as the
-        // product name on Aeptus.
         if looks_like_error_page(page.title.as_deref(), &page.h1_texts) {
             continue;
-        }
-        if let Some(title) = &page.title {
-            for candidate in title_segments(title) {
-                if is_viable_name(&candidate) && !is_generic_site_label(&candidate) {
-                    *counts.entry(candidate).or_default() += 2;
-                }
-            }
         }
         for block in &page.json_ld_blocks {
             let Ok(payload) = serde_json::from_str::<serde_json::Value>(&block.raw) else {
@@ -792,20 +798,13 @@ fn detect_product_name(site: &Site, organization_name: Option<&str>) -> Option<S
             }
             for value in iter_schema_field_values(&payload, "name") {
                 if is_viable_name(&value) && !is_generic_site_label(&value) {
-                    *counts.entry(value).or_default() += 4;
+                    *schema_counts.entry(value).or_default() += 1;
                 }
             }
         }
     }
-    if let Some(name) = organization_name
-        && let Some(score) = counts.get_mut(name)
-    {
-        *score += 3;
-    }
-    if counts.is_empty() {
-        organization_name.map(ToString::to_string)
-    } else {
-        counts
+    if !schema_counts.is_empty() {
+        return schema_counts
             .into_iter()
             .max_by(|(left_name, left_count), (right_name, right_count)| {
                 left_count
@@ -815,8 +814,14 @@ fn detect_product_name(site: &Site, organization_name: Option<&str>) -> Option<S
                     })
                     .then_with(|| right_name.len().cmp(&left_name.len()))
             })
-            .map(|(value, _)| value)
+            .map(|(value, _)| value);
     }
+    // Conservative fallback: assume the product name equals the
+    // organization name when there's no schema-typed product on
+    // the site. Editors can correct manually; the manifest will
+    // also carry a low-confidence warning (see
+    // generate_truth_manifest_with_options).
+    organization_name.map(ToString::to_string)
 }
 
 fn detect_feature_names(site: &Site) -> Vec<String> {
@@ -1600,6 +1605,70 @@ mod tests {
         assert!(descriptors.iter().any(|value| value == "coding agents"));
         assert!(descriptors.iter().all(|value| value != "24 bit true"));
         assert!(descriptors.iter().all(|value| value != "26 mcp tools"));
+    }
+
+    #[test]
+    fn generated_manifest_does_not_infer_product_from_content_keywords() {
+        // Regression for Aeptus post-v0.0.12: high-frequency content
+        // keywords (compliance standards, technology names, blog
+        // topics) were outscoring the org name and getting picked as
+        // products[0].name. Specifically, several pages mentioning
+        // "ISO 27001" produced products[0].name = "ISO 27001". The
+        // generator should fall back to the org name when no
+        // schema-typed Product/SoftwareApplication is declared.
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("index.html"),
+            r#"<html><head><title>Aeptus</title></head><body><h1>Aeptus</h1></body></html>"#,
+        )
+        .unwrap();
+        for slug in &[
+            "iso-27001",
+            "iso-27001-checklist",
+            "iso-27001-controls",
+            "iso-27001-audit",
+            "iso-27001-implementation",
+        ] {
+            std::fs::write(
+                root.join(format!("{slug}.html")),
+                format!(
+                    "<html><head><title>ISO 27001 — Aeptus</title></head><body><h1>{slug}</h1></body></html>"
+                ),
+            )
+            .unwrap();
+        }
+        let site = load_site(root).unwrap();
+        let generated = generate_truth_manifest(&site);
+        let product_name = generated.manifest.products.first().map(|p| p.name.as_str());
+        assert_ne!(
+            product_name,
+            Some("ISO 27001"),
+            "high-frequency content keyword should not become a product name"
+        );
+        assert_eq!(
+            product_name,
+            Some("Aeptus"),
+            "without schema-typed product, fall back to org name"
+        );
+    }
+
+    #[test]
+    fn generated_manifest_uses_schema_typed_product_when_available() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("index.html"),
+            r#"<html><head><title>Aeptus</title><script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"AeptusOS","url":"https://aeptus.com"}</script></head><body><h1>Aeptus</h1></body></html>"#,
+        )
+        .unwrap();
+        let site = load_site(root).unwrap();
+        let generated = generate_truth_manifest(&site);
+        assert_eq!(
+            generated.manifest.products.first().map(|p| p.name.as_str()),
+            Some("AeptusOS"),
+            "schema-typed product should win over org-name fallback"
+        );
     }
 
     #[test]
