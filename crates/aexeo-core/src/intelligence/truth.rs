@@ -1074,6 +1074,20 @@ fn phrase_chunks(text: &str, brand_words: &BTreeSet<String>) -> Vec<Vec<String>>
     chunks
 }
 
+/// Public-facing variant of the internal blocklist check. Used by
+/// the CLI's `intelligence presence` command to warn loudly when
+/// the manifest's organization name looks like a generic listing or
+/// 404 label that won't produce useful Wikipedia / Wikidata hits.
+///
+/// Distinct from the internal `is_generic_site_label` mainly to
+/// give the public API a name that reads correctly at the call
+/// site ("is this entity name suspicious?") and to leave us room
+/// to expand the public check (e.g. confidence scoring) without
+/// touching the internal one.
+pub fn looks_like_generic_entity_name(value: &str) -> bool {
+    is_generic_site_label(value)
+}
+
 fn is_generic_site_label(value: &str) -> bool {
     let normalized = value.trim().to_ascii_lowercase();
     if matches!(

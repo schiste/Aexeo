@@ -36,5 +36,5 @@ pub use truth::{
     TruthMismatch, TruthMismatchSeverity, TruthStructuredSource, TruthTerminology,
     assess_truth_layer, default_truth_manifest_version, discover_truth_manifest,
     generate_truth_manifest, generate_truth_manifest_with_options, load_truth_manifest,
-    validate_truth_manifest,
+    looks_like_generic_entity_name, validate_truth_manifest,
 };

@@ -9,8 +9,8 @@ use aexeo_core::{
     TruthStructuredSource, assess_answer_fanout, assess_evidence_coverage, assess_truth_layer,
     compute_page_identity, discover_machine_surface_graph, discover_truth_manifest,
     generate_truth_manifest_with_options, import_trust_surface_records, load_site,
-    load_site_from_audit_artifact, map_grounding_queries, reconcile_trust_surfaces,
-    score_intelligence, validate_truth_manifest,
+    load_site_from_audit_artifact, looks_like_generic_entity_name, map_grounding_queries,
+    reconcile_trust_surfaces, score_intelligence, validate_truth_manifest,
 };
 use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
@@ -1214,6 +1214,23 @@ fn command_intelligence_presence(submatches: &ArgMatches) -> Result<i32> {
         }
     };
 
+    // Warn-but-proceed when the entity name looks like a generic
+    // listing label or 404 title — those produce misleading
+    // Wikipedia/Wikidata hits (the generic concept of "blog" rather
+    // than the actual brand). Symptom Aeptus reported on /blog and
+    // "Page not found" with v0.0.8's generated facts.json.
+    let suspicion = if looks_like_generic_entity_name(&entity.name) {
+        Some(format!(
+            "manifest's organization.name '{}' looks like a generic listing or error-page label; presence results below are likely matching the generic concept rather than the brand. Curate facts.json before relying on these results.",
+            entity.name
+        ))
+    } else {
+        None
+    };
+    if let Some(message) = &suspicion {
+        eprintln!("warning: {message}");
+    }
+
     let results = check_all_sources(&entity);
     let report_path = write_report(
         &root,
@@ -1222,6 +1239,7 @@ fn command_intelligence_presence(submatches: &ArgMatches) -> Result<i32> {
             "entity_name": entity.name,
             "website": entity.website,
             "results": results,
+            "suspicion_warning": suspicion,
         }),
     )?;
 
@@ -1236,6 +1254,7 @@ fn command_intelligence_presence(submatches: &ArgMatches) -> Result<i32> {
                     "entity_name": entity.name,
                     "website": entity.website,
                     "results": results,
+                    "suspicion_warning": suspicion,
                 }),
                 Vec::new(),
             )?
@@ -1247,6 +1266,7 @@ fn command_intelligence_presence(submatches: &ArgMatches) -> Result<i32> {
                 entity.website.as_deref(),
                 &results,
                 &report_path,
+                suspicion.as_deref(),
             )
         ),
     }
@@ -1258,6 +1278,7 @@ fn presence_text(
     website: Option<&str>,
     results: &[SourceResult],
     report_path: &Path,
+    suspicion_warning: Option<&str>,
 ) -> String {
     let mut lines = vec![
         "Entity Presence (layer 4 — surfaced, not scored)".to_string(),
@@ -1266,6 +1287,11 @@ fn presence_text(
         format!("Website: {}", website.unwrap_or("-")),
         String::new(),
     ];
+    if let Some(warning) = suspicion_warning {
+        lines.push("⚠ Suspicion warning:".to_string());
+        lines.push(format!("  {warning}"));
+        lines.push(String::new());
+    }
 
     let ordered = order_results(results);
     for result in &ordered {

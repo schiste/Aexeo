@@ -70,8 +70,8 @@ pub use intelligence::{
     assess_truth_layer, compute_page_identity, default_truth_manifest_version,
     discover_truth_manifest, generate_schema_suggestions, generate_truth_manifest,
     generate_truth_manifest_with_options, import_trust_surface_records, load_truth_manifest,
-    map_grounding_queries, reconcile_trust_surfaces, render_facts_prompt, score_intelligence,
-    validate_truth_manifest,
+    looks_like_generic_entity_name, map_grounding_queries, reconcile_trust_surfaces,
+    render_facts_prompt, score_intelligence, validate_truth_manifest,
 };
 pub use link_rules::run_link_rules;
 pub use llm_rules::run_llm_rules;
