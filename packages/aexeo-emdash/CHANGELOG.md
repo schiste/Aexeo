@@ -6,11 +6,12 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.8.10] - 2026-05-04
+## [0.8.11] - 2026-05-05
 
-Two follow-up quality fixes from Aeptus's 0.8.9 retest, plus
-four new product-level capabilities from the post-retest
-roadmap discussion.
+Picks up the post-0.8.10 product additions and the FACTS003
+quality fixes Aeptus reported after running 0.8.10 in
+preview. 0.8.10 was already on npm before these landed; this
+release bundles them into one consumer-visible bump.
 
 ### Added (engine via bridge)
 
@@ -47,12 +48,13 @@ roadmap discussion.
   `organization_schema.name` (Error) and `organization_schema.url`
   (Warning) with empty `observed` — `iter().any()` is trivially
   false on an empty set, so the negation always fired. Aeptus
-  reported this as the first half of FACTS003 noise. Schema
-  block is now gated on `pages_with_schema > 0`; the
-  `structured_truth_source` enum (`Manifest` vs
-  `SchemaAndManifest`) still records whether schema participated,
-  so downstream consumers can tell the difference between
-  "schema agreed" and "schema wasn't part of the assessment".
+  reported this as the first half of FACTS003 noise after
+  installing 0.8.10. Schema block is now gated on
+  `pages_with_schema > 0`; the `structured_truth_source` enum
+  (`Manifest` vs `SchemaAndManifest`) still records whether
+  schema participated, so downstream consumers can tell the
+  difference between "schema agreed" and "schema wasn't part
+  of the assessment".
 - **FACTS003 title check no longer fires on legal/utility
   pages or on pages whose JSON-LD declares the brand.** Aeptus
   reported title warnings on `/privacy`, `/terms`, `/principles`,
@@ -65,6 +67,42 @@ roadmap discussion.
   in any identity-bearing surface still fire — the user can
   silence those via the `[route_kinds]` block from this same
   release.
+
+### Notes for hosts upgrading from 0.8.10
+
+- No code changes required.
+- After bumping, the admin's findings page will show:
+  - **New** SOC006 findings on every document missing og:image.
+  - **New** SOC009 nudges on documents declaring
+    `twitter:card = summary`.
+  - **New** CNT006 nudges on documents whose visible text has
+    generic-beneficiary copy without concrete anchors.
+  - **Fewer** FACTS003 findings: schema-half mismatches gone
+    when the CMS doc set lacks JSON-LD; title warnings gone
+    on legal/utility pages.
+- If the new SOC/CNT findings are too noisy on a specific
+  route family, declare a `[route_kinds.X]` block in
+  `aexeo.toml` with `match` patterns and a `skip_rules` list.
+- For the infrastructure-level audit (robots/sitemap/llms/
+  well-known/etc.), run `aexeo-cli check` against your static
+  dist; that's where those rules belong.
+
+### CLI side (aexeo-cli v0.0.16, same release window)
+
+- **`aexeo-cli crawl --cf-access-id … --cf-access-secret …`**
+  injects Cloudflare Access service-token headers
+  (`CF-Access-Client-Id` + `CF-Access-Client-Secret`) on every
+  fetch. Falls back to env vars `CF_ACCESS_CLIENT_ID` /
+  `CF_ACCESS_CLIENT_SECRET` when flags are absent. Closes the
+  loop for hosts whose preview deploys are behind Cloudflare
+  Access (Aeptus's CI was blocked on this).
+
+## [0.8.10] - 2026-05-04
+
+Two follow-up quality fixes from Aeptus's 0.8.9 retest. The
+local refresh path is now end-to-end correct.
+
+### Fixed
 
 - **Findings now attribute to document routes, not synthesized
   HTML filenames.** v0.8.9's bridge set `page.path` to
@@ -104,38 +142,13 @@ roadmap discussion.
 
 ### Notes for hosts upgrading from 0.8.9
 
-- No code changes required for any of the fixes or additions.
-- After bumping, the admin's findings page will show:
-  - Fewer findings overall (infrastructure noise is gone) and
-    every finding correctly attributed to its document route.
-  - **New** SOC006 findings on every document missing og:image.
-  - **New** SOC009 nudges on documents declaring
-    `twitter:card = summary`.
-  - **New** CNT006 nudges on documents whose visible text has
-    generic-beneficiary copy without concrete anchors.
-- If the new SOC/CNT findings are too noisy on a specific
-  route family, declare a `[route_kinds.X]` block in
-  `aexeo.toml` with `match` patterns and a `skip_rules` list.
-  Example:
-  ```toml
-  [route_kinds.manifesto]
-  match = ["/foundations/"]
-  skip_rules = ["CNT006", "GEO007"]
-  noindex = false
-  ```
+- No code changes required.
+- After bumping, the admin's findings page will show fewer
+  findings (infrastructure noise gone) and every finding
+  correctly attributed to its document route.
 - For the infrastructure-level audit (robots/sitemap/llms/
   well-known/etc.), run `aexeo-cli check` against your static
   dist; that's where those rules belong.
-
-### CLI side (aexeo-cli, same release)
-
-- **`aexeo-cli crawl --cf-access-id … --cf-access-secret …`**
-  injects Cloudflare Access service-token headers
-  (`CF-Access-Client-Id` + `CF-Access-Client-Secret`) on every
-  fetch. Falls back to env vars `CF_ACCESS_CLIENT_ID` /
-  `CF_ACCESS_CLIENT_SECRET` when flags are absent. Closes the
-  loop for hosts whose preview deploys are behind Cloudflare
-  Access (Aeptus's CI was blocked on this).
 
 ## [0.8.9] - 2026-05-04
 
@@ -1039,7 +1052,8 @@ First public release.
   `astro.config.mjs` for the WASM import to resolve to a
   precompiled `WebAssembly.Module`. Not optional.
 
-[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.10...HEAD
+[Unreleased]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.11...HEAD
+[0.8.11]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.10...aexeo-emdash-v0.8.11
 [0.8.10]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.9...aexeo-emdash-v0.8.10
 [0.8.9]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.8...aexeo-emdash-v0.8.9
 [0.8.8]: https://github.com/schiste/Aexeo/compare/aexeo-emdash-v0.8.7...aexeo-emdash-v0.8.8
