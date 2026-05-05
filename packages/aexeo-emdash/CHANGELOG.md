@@ -41,6 +41,31 @@ roadmap discussion.
 
 ### Fixed
 
+- **FACTS003 schema half no longer fires on no-schema input.**
+  Configured-mode CMS document sets don't carry rendered JSON-LD,
+  so `pages_with_schema = 0`. The previous logic emitted
+  `organization_schema.name` (Error) and `organization_schema.url`
+  (Warning) with empty `observed` — `iter().any()` is trivially
+  false on an empty set, so the negation always fired. Aeptus
+  reported this as the first half of FACTS003 noise. Schema
+  block is now gated on `pages_with_schema > 0`; the
+  `structured_truth_source` enum (`Manifest` vs
+  `SchemaAndManifest`) still records whether schema participated,
+  so downstream consumers can tell the difference between
+  "schema agreed" and "schema wasn't part of the assessment".
+- **FACTS003 title check no longer fires on legal/utility
+  pages or on pages whose JSON-LD declares the brand.** Aeptus
+  reported title warnings on `/privacy`, `/terms`, `/principles`,
+  `/references`, `/signup` simply because their titles weren't
+  "Aeptus". The check now (a) skips pages classified as
+  `PageKind::{Search, Admin, Feed, Utility, NotFound, Legal}`,
+  and (b) treats per-page identity-bearing schema with a name
+  matching the brand as another `identity_present_elsewhere`
+  signal. Content pages that genuinely never mention the brand
+  in any identity-bearing surface still fire — the user can
+  silence those via the `[route_kinds]` block from this same
+  release.
+
 - **Findings now attribute to document routes, not synthesized
   HTML filenames.** v0.8.9's bridge set `page.path` to
   `emdash/<route>.html`, which the plugin's
