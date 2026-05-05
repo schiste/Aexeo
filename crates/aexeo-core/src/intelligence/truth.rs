@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use url::Url;
 
 use crate::schema_rules::{iter_schema_field_values, iter_schema_types};
-use crate::site::Site;
+use crate::site::{PageKind, Site};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct TruthEntity {
@@ -419,6 +419,10 @@ pub fn assess_truth_layer(site: &Site, manifest: Option<&TruthManifest>) -> Trut
             }
         }
 
+        // Per-page schema names — collected here so the title
+        // check below can use them as one of the
+        // identity-present-elsewhere signals without re-parsing.
+        let mut page_schema_names: BTreeSet<String> = BTreeSet::new();
         for block in &page.json_ld_blocks {
             let Ok(payload) = serde_json::from_str::<serde_json::Value>(&block.raw) else {
                 continue;
@@ -431,6 +435,7 @@ pub fn assess_truth_layer(site: &Site, manifest: Option<&TruthManifest>) -> Trut
                 website_schema_pages += 1;
             }
             for value in iter_schema_field_values(&payload, "name") {
+                page_schema_names.insert(value.clone());
                 site_schema_names.insert(value);
             }
             for value in iter_schema_field_values(&payload, "url") {
@@ -438,12 +443,36 @@ pub fn assess_truth_layer(site: &Site, manifest: Option<&TruthManifest>) -> Trut
             }
         }
 
-        if let Some(manifest) = manifest
+        // Title-vs-brand check. Skipped on utility-classified
+        // pages (Search/Admin/Feed/NotFound/Utility) — those
+        // legitimately carry their own titles like "Privacy
+        // Policy" or "404" without re-asserting brand identity.
+        // Aeptus reported page-title warnings on /privacy /terms
+        // /signup as the second half of the FACTS003 noise; this
+        // is the fix.
+        let title_check_applies = !matches!(
+            page.page_kind,
+            PageKind::Search
+                | PageKind::Admin
+                | PageKind::Feed
+                | PageKind::Utility
+                | PageKind::NotFound
+                | PageKind::Legal
+        );
+
+        if title_check_applies
+            && let Some(manifest) = manifest
             && let Some(entity) = first_matching_entity(manifest, &observed_surface)
             && let Some(title) = &page.title
         {
             let allowed = entity_aliases(entity);
             let normalized = title.to_ascii_lowercase();
+            // identity_present_elsewhere now includes per-page
+            // JSON-LD schema names — a page declaring an
+            // Organization or Product schema that mentions the
+            // entity by name has stated brand identity through
+            // structured data, so the title text doesn't need to
+            // repeat it.
             let identity_present_elsewhere = page.h1_texts.iter().any(|heading| {
                 let heading = heading.to_ascii_lowercase();
                 allowed.iter().any(|candidate| heading.contains(candidate))
@@ -462,6 +491,10 @@ pub fn assess_truth_layer(site: &Site, manifest: Option<&TruthManifest>) -> Trut
                         allowed.iter().any(|candidate| value.contains(candidate))
                     })
                     .unwrap_or(false)
+                || page_schema_names.iter().any(|name| {
+                    let lower = name.to_ascii_lowercase();
+                    allowed.iter().any(|candidate| lower.contains(candidate))
+                })
                 || page.route.is_empty();
             if !allowed
                 .iter()
@@ -480,7 +513,21 @@ pub fn assess_truth_layer(site: &Site, manifest: Option<&TruthManifest>) -> Trut
         }
     }
 
-    if let Some(manifest) = manifest
+    // Schema-mismatch block: silenced when the input set has no
+    // schema-bearing pages at all. On a configured-mode CMS audit
+    // where documents don't carry rendered JSON-LD, the previous
+    // logic emitted a false-positive sitewide error/warning with
+    // empty `observed` because `iter().any()` is trivially false
+    // on an empty set. Aeptus reported this as the first half of
+    // the FACTS003 noise.
+    //
+    // The structured_truth_source enum below already records
+    // whether schema participated in the assessment (Manifest vs
+    // SchemaAndManifest), so silencing here doesn't lose
+    // information — it just stops emitting per-field mismatches
+    // the validator can't actually compute.
+    if pages_with_schema > 0
+        && let Some(manifest) = manifest
         && let Some(organization) = &manifest.organization
     {
         let allowed = entity_aliases(organization);
@@ -1882,6 +1929,116 @@ mod tests {
                 .mismatches
                 .iter()
                 .any(|mismatch| { mismatch.route == "remote" && mismatch.field == "title" })
+        );
+    }
+
+    #[test]
+    fn facts_assessment_silent_on_schema_mismatch_when_no_pages_have_schema() {
+        // Aeptus regression: configured-mode CMS document set
+        // doesn't carry rendered JSON-LD, so pages_with_schema is
+        // 0. The previous implementation emitted
+        // organization_schema.name (Error) and
+        // organization_schema.url (Warning) with empty
+        // `observed` because `iter().any()` is trivially false on
+        // an empty set. Fixed by gating the schema-mismatch block
+        // on pages_with_schema > 0.
+        let temp = tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("index.html"),
+            r#"<html><head><title>Aeptus</title><meta name="description" content="Aeptus is a platform."></head><body><h1>Aeptus</h1></body></html>"#,
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("facts.json"),
+            r#"{"version":1,"organization":{"name":"Aeptus","website":"https://aeptus.com"}}"#,
+        )
+        .unwrap();
+        let site = load_site(temp.path()).unwrap();
+        let manifest = load_truth_manifest(&temp.path().join("facts.json")).unwrap();
+        let assessment = assess_truth_layer(&site, Some(&manifest));
+
+        assert_eq!(assessment.pages_with_schema, 0);
+        assert!(
+            !assessment
+                .mismatches
+                .iter()
+                .any(|m| m.field == "organization_schema.name"),
+            "should not emit organization_schema.name when no schema-bearing pages: {:?}",
+            assessment.mismatches
+        );
+        assert!(
+            !assessment
+                .mismatches
+                .iter()
+                .any(|m| m.field == "organization_schema.url"),
+            "should not emit organization_schema.url when no schema-bearing pages: {:?}",
+            assessment.mismatches
+        );
+    }
+
+    #[test]
+    fn facts_assessment_skips_title_check_on_legal_pages() {
+        // Aeptus regression: page-title warnings on /privacy and
+        // /terms because their titles are "Privacy Policy" /
+        // "Terms of Service" — pages that legitimately don't
+        // re-assert brand identity. PageKind::Legal exempts the
+        // title check entirely.
+        let temp = tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("privacy")).unwrap();
+        std::fs::write(
+            temp.path().join("privacy/index.html"),
+            r#"<html><head><title>Privacy Policy</title><meta name="description" content="How we handle data."></head><body><h1>Privacy Policy</h1></body></html>"#,
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("facts.json"),
+            r#"{"version":1,"organization":{"name":"Aeptus","website":"https://aeptus.com"}}"#,
+        )
+        .unwrap();
+        let site = load_site(temp.path()).unwrap();
+        let manifest = load_truth_manifest(&temp.path().join("facts.json")).unwrap();
+        let assessment = assess_truth_layer(&site, Some(&manifest));
+
+        assert!(
+            !assessment
+                .mismatches
+                .iter()
+                .any(|m| m.route == "privacy" && m.field == "title"),
+            "Legal pages should be exempt from title check; got: {:?}",
+            assessment.mismatches
+        );
+    }
+
+    #[test]
+    fn facts_assessment_skips_title_check_when_page_schema_carries_brand_name() {
+        // Aeptus's "Add schema-name + page_kind exemption"
+        // choice: a content page that declares its brand
+        // identity through structured data shouldn't get a
+        // title warning, even if the title text doesn't repeat
+        // the brand name.
+        let temp = tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("workflows")).unwrap();
+        std::fs::write(
+            temp.path().join("workflows/index.html"),
+            r#"<html><head><title>Audit Workflows</title><meta name="description" content="Workflow examples."><script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Aeptus","url":"https://aeptus.com"}</script></head><body><h1>Audit Workflows</h1></body></html>"#,
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("facts.json"),
+            r#"{"version":1,"organization":{"name":"Aeptus","website":"https://aeptus.com"}}"#,
+        )
+        .unwrap();
+        let site = load_site(temp.path()).unwrap();
+        let manifest = load_truth_manifest(&temp.path().join("facts.json")).unwrap();
+        let assessment = assess_truth_layer(&site, Some(&manifest));
+
+        assert!(
+            !assessment
+                .mismatches
+                .iter()
+                .any(|m| m.route == "workflows" && m.field == "title"),
+            "page with identity-bearing schema name should be exempt: {:?}",
+            assessment.mismatches
         );
     }
 
