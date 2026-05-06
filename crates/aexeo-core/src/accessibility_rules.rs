@@ -301,7 +301,7 @@ fn rule_a11y004_heading_jump(page: &Page) -> Vec<Finding> {
                 &page.path,
                 line,
                 column,
-                "warn",
+                "warning",
             ));
         }
         last_level = Some(level);
@@ -361,7 +361,7 @@ fn rule_a11y005_missing_main_landmark(page: &Page) -> Vec<Finding> {
         &page.path,
         1,
         1,
-        "warn",
+        "warning",
     )]
 }
 
@@ -394,7 +394,7 @@ fn rule_a11y006_alt_equals_filename(page: &Page) -> Vec<Finding> {
                 &page.path,
                 image.line,
                 image.column,
-                "warn",
+                "warning",
             ));
         }
     }

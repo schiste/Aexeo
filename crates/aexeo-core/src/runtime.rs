@@ -2018,8 +2018,13 @@ pub fn runtime_doctor() -> PlaywrightDoctor {
 /// Used to gate SRF030 off sites that publish per-route `.md.txt`
 /// mirrors with explicit discovery — that's a valid alternative to
 /// `Accept: text/markdown` content negotiation.
+///
+/// The home page's route is the empty string `""` (matching
+/// `page.route.is_empty()` checks elsewhere in the crate); a
+/// previous version of this helper looked for `site.page("/")`
+/// which always returned None because of that convention.
 fn homepage_advertises_markdown_mirror_discovery(site: &crate::site::Site) -> bool {
-    let Some(home) = site.page("/") else {
+    let Some(home) = site.route_pages().find(|page| page.route.is_empty()) else {
         return false;
     };
     home.alternate_links.iter().any(|alt| {
@@ -2119,10 +2124,15 @@ fn probe_markdown_negotiation_finding(
 mod tests {
     use super::{
         RuntimeArtifactMode, RuntimeAuditOptions, RuntimeProgressMode, diff_performance_artifacts,
-        evaluate_performance_budget, render_performance_diff_text, run_runtime_audit,
-        run_runtime_audit_with_options, verify_runtime_audit,
+        evaluate_performance_budget, homepage_advertises_markdown_mirror_discovery,
+        render_performance_diff_text, run_runtime_audit, run_runtime_audit_with_options,
+        verify_runtime_audit,
     };
     use crate::config::{Config, default_rule_switches};
+    use crate::site::{
+        AlternateLink, DeploymentModel, Page, PageKind, SiteArtifacts, SiteBuildInput,
+        build_site_from_parts,
+    };
     use aexeo_contracts::{
         AuditArtifact, AuditStatus, CrawlStats, Finding, FindingScope, PerformanceBudget,
         PerformanceDiffThresholds, PhaseTiming, RuleTiming,
@@ -2781,6 +2791,77 @@ mod tests {
                 .any(|finding| finding.rule_id == "CRW001")
         );
         handle.join().unwrap();
+    }
+
+    fn home_page_with_alternates(alternates: Vec<AlternateLink>) -> Page {
+        Page {
+            // Crucially: the home page route is the empty string, not
+            // "/", to match capture_route_for_relative_path's mapping.
+            // A previous version of homepage_advertises_markdown_mirror_discovery
+            // looked for site.page("/") which always returned None;
+            // this test locks the route convention in.
+            path: PathBuf::from("dist/index.html"),
+            relative_path: "index.html".to_string(),
+            route: String::new(),
+            page_kind: PageKind::Home,
+            raw_text: String::new(),
+            title: Some("Home".to_string()),
+            meta_by_name: BTreeMap::new(),
+            meta_by_property: BTreeMap::new(),
+            canonical: None,
+            html_lang: None,
+            h1_count: 1,
+            h1_texts: vec!["Home".to_string()],
+            has_breadcrumb_nav: false,
+            response_headers: BTreeMap::new(),
+            links: Vec::new(),
+            internal_links: Vec::new(),
+            alternate_links: alternates,
+            images: Vec::new(),
+            blocks: Vec::new(),
+            details_blocks: Vec::new(),
+            pre_blocks: Vec::new(),
+            json_ld_blocks: Vec::new(),
+        }
+    }
+
+    fn site_with_home(alternates: Vec<AlternateLink>) -> crate::site::Site {
+        build_site_from_parts(SiteBuildInput {
+            root: PathBuf::from("dist"),
+            pages: vec![home_page_with_alternates(alternates)],
+            artifacts: SiteArtifacts {
+                llms_text: None,
+                robots_text: None,
+                sitemap_text: None,
+            },
+            deployment_model: DeploymentModel::StaticExport,
+            deployment_markers: Vec::new(),
+            crawl_meta: None,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn srf030_recognizes_markdown_mirror_discovery_on_home() {
+        let site = site_with_home(vec![AlternateLink {
+            href: "/index.md.txt".to_string(),
+            hreflang: None,
+            type_attr: Some("text/markdown".to_string()),
+        }]);
+        assert!(
+            homepage_advertises_markdown_mirror_discovery(&site),
+            "rel=alternate type=text/markdown on the home page (route=\"\") must be detected"
+        );
+    }
+
+    #[test]
+    fn srf030_skips_unrelated_alternate_types() {
+        let site = site_with_home(vec![AlternateLink {
+            href: "/feed.xml".to_string(),
+            hreflang: None,
+            type_attr: Some("application/atom+xml".to_string()),
+        }]);
+        assert!(!homepage_advertises_markdown_mirror_discovery(&site));
     }
 
     #[test]

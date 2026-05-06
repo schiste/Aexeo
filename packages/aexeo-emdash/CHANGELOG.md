@@ -6,6 +6,39 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.14] - 2026-05-06
+
+Two regressions Aeptus surfaced after running the v0.0.18 CLI
+release against their preview deployment.
+
+### Fixed
+
+- **A11Y findings now use `severity: "warning"` (not `"warn"`).**
+  `Finding::is_error()` is implemented as `severity != "warning"`,
+  so the four-letter form was bucketed as an error in audit
+  summaries and made `success: false` even when the only
+  findings were warning-grade A11Y heuristics (heading-jump,
+  alt-equals-filename, missing-main-landmark). The three A11Y
+  rules emitted `"warn"` (A11Y004, A11Y005, A11Y006);
+  switched all three to `"warning"` to match the rest of the
+  rule corpus. No new `is_error` semantics — just severity-
+  string normalization.
+- **SRF030 now actually finds the homepage's markdown-mirror
+  alternates.** The 0.8.13 fix introduced
+  `homepage_advertises_markdown_mirror_discovery(site)` which
+  looked up `site.page("/")` — but the home page's route is
+  the empty string `""` in this codebase (per
+  `capture_route_for_relative_path`'s mapping for
+  `index.html`), not `"/"`. The lookup always returned None,
+  the helper always returned false, and SRF030 fired anyway
+  on Aeptus's preview despite the homepage carrying
+  `<link rel="alternate" type="text/markdown" href="/index.md.txt">`.
+  Switched to `site.route_pages().find(|p| p.route.is_empty())`
+  to match the rest of the crate's home-page convention.
+  Locked in by two new unit tests
+  (srf030_recognizes_markdown_mirror_discovery_on_home,
+  srf030_skips_unrelated_alternate_types).
+
 ## [0.8.13] - 2026-05-06
 
 Closes four false-positive paths Aeptus surfaced while running
