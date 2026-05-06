@@ -51,7 +51,10 @@ const FALLBACK_ARTIFACT_PATHS: &[&str] = &[
 /// The function never errors — at worst it returns an empty Vec
 /// and the caller sees the same false-negative pre-fix behavior
 /// (no regression vs not probing at all).
-pub(crate) fn probe_well_known_artifacts(base_url: &str, runtime: &RuntimeConfig<'_>) -> Vec<String> {
+pub(crate) fn probe_well_known_artifacts(
+    base_url: &str,
+    runtime: &RuntimeConfig<'_>,
+) -> Vec<String> {
     let normalized_base = base_url.trim_end_matches('/');
     let client = match build_client(runtime) {
         Some(client) => client,

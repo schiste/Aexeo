@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "aexeo-cli"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "aexeo-contracts",
  "aexeo-core",
@@ -18,14 +18,14 @@ dependencies = [
 
 [[package]]
 name = "aexeo-contracts"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "aexeo-core"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "aexeo-contracts",
  "anyhow",
@@ -41,7 +41,7 @@ dependencies = [
 
 [[package]]
 name = "aexeo-emdash-bridge"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "aexeo-contracts",
  "aexeo-core",
@@ -1094,7 +1094,7 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "0.0.17"
+version = "0.0.18"
 
 [[package]]
 name = "thiserror"

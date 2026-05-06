@@ -544,8 +544,7 @@ pub fn build_site_from_parts(input: SiteBuildInput) -> Result<Site> {
         },
         None => (BTreeSet::new(), None),
     };
-    let mut indexed_paths =
-        build_indexed_paths(&pages, ["robots.txt", "llms.txt", "sitemap.xml"]);
+    let mut indexed_paths = build_indexed_paths(&pages, ["robots.txt", "llms.txt", "sitemap.xml"]);
     // Probed artifact paths from the live crawl (facts.json,
     // llms-full.txt, manifest-listed siblings) get folded into
     // indexed_paths so surface discovery and rules consulting
