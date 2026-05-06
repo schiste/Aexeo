@@ -374,6 +374,7 @@ coverage_threshold = 85
 Built-in rule-group toggles. Unknown plugin rule groups default to enabled unless explicitly disabled.
 
 - `accessibility`: default `true`
+- `agent_discovery`: default `true`
 - `content`: default `true`
 - `html`: default `true`
 - `links`: default `true`

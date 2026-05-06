@@ -5,6 +5,7 @@ use std::path::Path;
 
 use crate::accessibility_rules::{AccessibilityOptions, run_accessibility_rules};
 use crate::adapter::resolve_static_site_root;
+use crate::agent_discovery_rules::run_agent_discovery_rules;
 use crate::config::{Config, default_rule_switches, load_config};
 use crate::content_rules::run_content_rules;
 use crate::html_rules::run_html_rules;
@@ -172,6 +173,13 @@ pub fn run_checks_for_site_profiled(site: &crate::site::Site, config: &Config) -
             )
         },
     );
+    time_rule_group(
+        rules.checks.get("agent_discovery").copied().unwrap_or(true),
+        "agent_discovery",
+        &mut rule_timings,
+        &mut findings,
+        || run_agent_discovery_rules(site, config),
+    );
 
     let policy_started_at = Instant::now();
     let findings = apply_policy(findings, config);
@@ -212,6 +220,7 @@ pub fn can_run_native_static_audit(config: &Config) -> bool {
                     | "content"
                     | "structure"
                     | "accessibility"
+                    | "agent_discovery"
             )
     })
 }

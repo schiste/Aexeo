@@ -29,13 +29,23 @@ const MAX_PROBES_PER_CRAWL: usize = 64;
 
 /// Default canonical artifact paths probed even when manifest.json
 /// isn't reachable. These are the discovery files Aexeo's own
-/// `generate` command produces, plus the legacy `aexeo-truth.json`
-/// for sites that haven't migrated to `facts.json` yet.
+/// `generate` command produces (facts.json, llms-full.txt), the
+/// legacy `aexeo-truth.json` for sites that haven't migrated, plus
+/// the well-known agent-discovery artifacts the AGT rule group
+/// audits (api-catalog per RFC 9727, mcp server-card per
+/// SEP-1649). Probing them unconditionally is cheap (HEAD per
+/// path, time-boxed) and means AGT rules get a free presence
+/// signal during live crawls without needing a separate probe
+/// step keyed to whether `[agent_discovery] enabled = true`.
+/// Sites that don't enable AGT rules just see the probed paths
+/// recorded on `CrawlMeta` without any rule-side effect.
 const FALLBACK_ARTIFACT_PATHS: &[&str] = &[
     "facts.json",
     ".well-known/facts.json",
     "aexeo-truth.json",
     "llms-full.txt",
+    ".well-known/api-catalog",
+    ".well-known/mcp/server-card.json",
 ];
 
 /// HEAD-probe well-known machine-readable artifacts at `base_url`

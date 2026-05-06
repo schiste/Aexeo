@@ -2,6 +2,7 @@
 
 pub mod accessibility_rules;
 pub mod adapter;
+pub mod agent_discovery_rules;
 pub mod capabilities;
 pub mod config;
 pub mod content_rules;
@@ -36,9 +37,11 @@ pub mod verification;
 pub mod well_known_rules;
 
 pub use accessibility_rules::{AccessibilityOptions, run_accessibility_rules};
+pub use agent_discovery_rules::run_agent_discovery_rules;
 pub use capabilities::{SiteCapabilities, infer_site_capabilities, well_known_path_exists};
 pub use config::{
-    Accessibility, Config, ConfigFieldDoc, render_resolved_config_json, render_resolved_config_toml,
+    Accessibility, AgentDiscovery, Config, ConfigFieldDoc, render_resolved_config_json,
+    render_resolved_config_toml,
 };
 pub use content_rules::run_content_rules;
 pub use docs::{

@@ -147,10 +147,22 @@ pub fn default_rule_switches() -> BTreeMap<&'static str, bool> {
         ("content", true),
         ("structure", true),
         ("accessibility", true),
+        // agent_discovery is the rule group switch (the structural
+        // "do we run this group at all"); the [agent_discovery]
+        // config section's `enabled` field is the opt-in for the
+        // *checks themselves*, since they're nascent specs (RFC 9727
+        // finalized April 2025; SEP-1649 still a draft) that would
+        // generate false positives on sites that don't care. Both
+        // gates must be true for AGT* findings to fire.
+        ("agent_discovery", true),
     ])
 }
 
 pub(super) fn default_accessibility_strict() -> bool {
+    false
+}
+
+pub(super) fn default_agent_discovery_enabled() -> bool {
     false
 }
 

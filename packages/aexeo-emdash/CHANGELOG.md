@@ -9,7 +9,40 @@ and the project follows [Semantic Versioning](https://semver.org/).
 ## [0.8.14] - 2026-05-06
 
 Two regressions Aeptus surfaced after running the v0.0.18 CLI
-release against their preview deployment.
+release against their preview deployment, plus a new opt-in
+agent-discovery audit axis.
+
+### Added
+
+- **New `agent_discovery` rule group** with two opt-in checks
+  for the well-known machine-readable artifacts that signal a
+  site's agent-facing capabilities. Off by default since the
+  underlying specs (RFC 9727 api-catalog, SEP-1649 MCP server-
+  card) have nascent adoption and would otherwise generate
+  false positives across the long tail of sites that don't
+  publish them yet. Adopters opt in via:
+  ```toml
+  [agent_discovery]
+  enabled = true
+  ```
+  - `AGT001` (warning, policy/medium): missing
+    `/.well-known/api-catalog` (RFC 9727, finalized April
+    2025). The JSON Linkset format that lets agents enumerate
+    public APIs without crawling documentation.
+  - `AGT002` (warning, policy/medium): missing
+    `/.well-known/mcp/server-card.json` (SEP-1649, draft).
+    Lets MCP clients discover the site's MCP server endpoint
+    and capabilities without prior configuration.
+- **AGT layer mapping**: Retrievability primary (these files
+  exist so agents can *find* the site's surfaces), Absorbability
+  secondary (the surfaces they point at feed agent absorption
+  of the site's content).
+- **Post-crawl artifact probe extended** to HEAD-check the AGT
+  paths during live `aexeo-cli crawl` so AGT findings respect
+  the same presence signals as facts.json / llms-full.txt.
+  Probe runs unconditionally — the cost is two extra HEAD
+  requests, and sites that don't enable AGT just see the paths
+  recorded on `CrawlMeta` without any rule-side effect.
 
 ### Fixed
 

@@ -9,11 +9,12 @@ use crate::plugin::validate_plugin_settings;
 
 const VERSIONED_TOP_LEVEL_TABLES: &[&str] =
     &["site", "runtime", "policy", "rules", "output", "quality"];
-// `[accessibility]` lives outside the versioned set because it has
-// no flat-key counterpart — there's nothing in old configs for the
-// version=1 gate to protect against. Users can adopt A11Y settings
-// on any config shape without needing to migrate to versioned form.
-const UNVERSIONED_NEW_TABLES: &[&str] = &["accessibility"];
+// `[accessibility]` and `[agent_discovery]` live outside the
+// versioned set because they have no flat-key counterpart — there's
+// nothing in old configs for the version=1 gate to protect against.
+// Users can adopt A11Y / agent-discovery settings on any config
+// shape without needing to migrate to versioned form.
+const UNVERSIONED_NEW_TABLES: &[&str] = &["accessibility", "agent_discovery"];
 const FLAT_TOP_LEVEL_KEYS: &[&str] = &[
     "site_url",
     "source_dir",
@@ -483,6 +484,13 @@ fn validate_versioned_sections(root: &toml::map::Map<String, Value>) -> Result<(
             expect_table(value, "accessibility", "config root")?,
             &["strict"],
             "[accessibility]",
+        )?;
+    }
+    if let Some(value) = root.get("agent_discovery") {
+        validate_allowed_keys(
+            expect_table(value, "agent_discovery", "config root")?,
+            &["enabled"],
+            "[agent_discovery]",
         )?;
     }
     Ok(())

@@ -94,6 +94,16 @@ fn metadata_for_prefix(prefix: &str) -> RuleMetadata {
             class: RuleClass::Hard,
             confidence: ConfidenceLevel::High,
         },
+        // AGT: agent-discovery checks (api-catalog, mcp server-card,
+        // future agent-card / agent-skills). Policy class because
+        // they advocate for nascent specs (RFC 9727, SEP-1649) that
+        // sites can defensibly skip — but Medium confidence, not
+        // High, because spec adoption is uneven and a missing file
+        // doesn't always mean a misconfiguration.
+        "AGT" => RuleMetadata {
+            class: RuleClass::Policy,
+            confidence: ConfidenceLevel::Medium,
+        },
         _ => RuleMetadata {
             class: RuleClass::Heuristic,
             confidence: ConfidenceLevel::Medium,
@@ -183,6 +193,13 @@ fn layers_for_prefix(prefix: &str) -> RuleLayers {
         // signal genuinely feeds retrievability or citability
         // (alt text → image search, landmarks → snippet shape).
         "A11Y" => RuleLayers::primary_only(Layer::Accessibility),
+        // AGT: agent-discovery files (api-catalog, mcp server-card).
+        // Retrievability primary — these files exist so agents can
+        // *find* the site's machine-readable surfaces. Absorbability
+        // secondary because the surfaces they point at (mcp server,
+        // api catalog) feed agent absorption of the site's content
+        // and capabilities.
+        "AGT" => RuleLayers::with_secondaries(Layer::Retrievability, vec![Layer::Absorbability]),
         // Unknown prefix: default to citability (most rules are about
         // making the page worth citing). Better than crashing.
         _ => RuleLayers::primary_only(Layer::Citability),
@@ -783,6 +800,21 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             }],
         },
         RuleGroupDefinition {
+            name: "agent_discovery",
+            title: "Agent Discovery (AGT)",
+            description: "Well-known machine-readable artifacts that signal a site's agent-facing capabilities. Off by default ([agent_discovery] enabled = true to opt in) because the underlying specs (RFC 9727 api-catalog, SEP-1649 MCP server-card) have nascent adoption. Use the post-crawl artifact probe (live `aexeo-cli crawl`) so HEAD-discoverable artifacts populate Site::indexed_paths automatically.",
+            rules: &[
+                RuleDescriptor {
+                    rule_id: "AGT001",
+                    summary: "missing /.well-known/api-catalog (RFC 9727)",
+                },
+                RuleDescriptor {
+                    rule_id: "AGT002",
+                    summary: "missing /.well-known/mcp/server-card.json (SEP-1649)",
+                },
+            ],
+        },
+        RuleGroupDefinition {
             name: "accessibility",
             title: "Accessibility (A11Y)",
             description: "Static accessibility checks. Catches the deterministic HTML-spec violations that affect screen-reader users (missing alt, empty buttons, duplicate ids, heading jumps, missing landmarks, placeholder alt text). Browser-backed checks (focus order, contrast, ARIA semantics) are out of scope for the static auditor.",
@@ -881,6 +913,7 @@ mod tests {
                 "structure",
                 "runtime",
                 "deployment",
+                "agent_discovery",
                 "accessibility",
             ]
         );
