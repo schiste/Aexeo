@@ -96,6 +96,36 @@ pub struct ImageReference {
     pub alt: Option<String>,
     pub line: usize,
     pub column: usize,
+    /// `role` attribute on the `<img>` if any. Captured for the
+    /// A11Y "smart" alt-text mode: an image with role="presentation"
+    /// or role="none" is the canonical author signal that the image
+    /// is decorative and should be skipped by missing-alt checks.
+    pub role: Option<String>,
+    /// True iff the `<img>` had `aria-hidden="true"`. Same purpose
+    /// as `role`: marks the image as not-conveying-information so
+    /// strict missing-alt checks can be relaxed.
+    pub aria_hidden: bool,
+}
+
+impl ImageReference {
+    /// True when the author has explicitly marked this image as
+    /// decorative — either via `alt=""` (the canonical HTML form),
+    /// `role="presentation"` / `role="none"`, or `aria-hidden="true"`.
+    /// The A11Y001 rule consults this in default ("smart") mode to
+    /// avoid flagging properly-tagged decorative imagery; `--strict`
+    /// mode bypasses this method and only treats `alt=""` as decorative.
+    pub fn is_marked_decorative(&self) -> bool {
+        if matches!(self.alt.as_deref(), Some("")) {
+            return true;
+        }
+        if self.aria_hidden {
+            return true;
+        }
+        matches!(
+            self.role.as_deref().map(str::trim),
+            Some("presentation") | Some("none")
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

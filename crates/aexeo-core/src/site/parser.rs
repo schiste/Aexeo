@@ -213,12 +213,18 @@ fn capture_images(raw: &str) -> Vec<ImageReference> {
             continue;
         };
         let alt = attr_value(snippet, "alt");
+        let role = attr_value(snippet, "role");
+        let aria_hidden = attr_value(snippet, "aria-hidden")
+            .map(|value| value.trim().eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
         let (line, column) = line_column_for(raw, start);
         images.push(ImageReference {
             src,
             alt,
             line,
             column,
+            role,
+            aria_hidden,
         });
         offset = end + 1;
     }

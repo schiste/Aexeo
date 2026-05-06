@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod accessibility_rules;
 pub mod adapter;
 pub mod capabilities;
 pub mod config;
@@ -34,6 +35,7 @@ pub mod time_shim;
 pub mod verification;
 pub mod well_known_rules;
 
+pub use accessibility_rules::{AccessibilityOptions, run_accessibility_rules};
 pub use capabilities::{SiteCapabilities, infer_site_capabilities, well_known_path_exists};
 pub use config::{
     Config, ConfigFieldDoc, render_resolved_config_json, render_resolved_config_toml,

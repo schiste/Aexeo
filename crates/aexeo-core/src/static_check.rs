@@ -3,6 +3,7 @@ use aexeo_contracts::{Finding, FindingScope, RuleTiming};
 use anyhow::Result;
 use std::path::Path;
 
+use crate::accessibility_rules::{AccessibilityOptions, run_accessibility_rules};
 use crate::adapter::resolve_static_site_root;
 use crate::config::{Config, default_rule_switches, load_config};
 use crate::content_rules::run_content_rules;
@@ -157,6 +158,20 @@ pub fn run_checks_for_site_profiled(site: &crate::site::Site, config: &Config) -
         &mut findings,
         || run_structure_rules(site, config),
     );
+    time_rule_group(
+        rules.checks.get("accessibility").copied().unwrap_or(true),
+        "accessibility",
+        &mut rule_timings,
+        &mut findings,
+        || {
+            run_accessibility_rules(
+                site,
+                AccessibilityOptions {
+                    strict: config.accessibility_strict,
+                },
+            )
+        },
+    );
 
     let policy_started_at = Instant::now();
     let findings = apply_policy(findings, config);
@@ -196,6 +211,7 @@ pub fn can_run_native_static_audit(config: &Config) -> bool {
                     | "schema"
                     | "content"
                     | "structure"
+                    | "accessibility"
             )
     })
 }

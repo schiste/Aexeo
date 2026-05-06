@@ -8,16 +8,16 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use self::defaults::{
-    default_adapter, default_audit_log_limit, default_baseline_file, default_browser_engine,
-    default_browser_wait_until, default_cache_dir, default_cache_ttl_seconds,
-    default_canonical_style, default_checks, default_complexity_threshold,
-    default_coverage_threshold, default_crawl_artifact_dir, default_crawl_use_sitemap,
-    default_default_twitter_card, default_enable_cache, default_link_suggestion_count,
-    default_max_workers, default_min_answer_blocks, default_min_block_text_length,
-    default_min_inbound_links, default_min_page_size, default_orphan_exclude,
-    default_performance_budget_file, default_profile, default_related_links_heading,
-    default_repeatable_data_ui, default_require_fact_consistency, default_require_html_lang,
-    default_require_meta_robots_consistency, default_require_open_graph,
+    default_accessibility_strict, default_adapter, default_audit_log_limit, default_baseline_file,
+    default_browser_engine, default_browser_wait_until, default_cache_dir,
+    default_cache_ttl_seconds, default_canonical_style, default_checks,
+    default_complexity_threshold, default_coverage_threshold, default_crawl_artifact_dir,
+    default_crawl_use_sitemap, default_default_twitter_card, default_enable_cache,
+    default_link_suggestion_count, default_max_workers, default_min_answer_blocks,
+    default_min_block_text_length, default_min_inbound_links, default_min_page_size,
+    default_orphan_exclude, default_performance_budget_file, default_profile,
+    default_related_links_heading, default_repeatable_data_ui, default_require_fact_consistency,
+    default_require_html_lang, default_require_meta_robots_consistency, default_require_open_graph,
     default_require_robots_sitemap, default_require_schema_title_alignment,
     default_require_social_images, default_require_twitter_card, default_required_feature_markers,
     default_source_dir, default_typecheck_command, default_utility_route_patterns,
@@ -158,6 +158,14 @@ pub struct Config {
     pub require_robots_sitemap: bool,
     #[serde(default = "default_weak_anchor_text")]
     pub weak_anchor_text: Vec<String>,
+    /// Strict mode for the accessibility (A11Y) axis. Default false:
+    /// images marked decorative (`alt=""`, `role="presentation"`,
+    /// `role="none"`, `aria-hidden="true"`) are skipped by A11Y001.
+    /// When true, only the canonical `alt=""` form is treated as
+    /// decorative; `role`/`aria-hidden` signals do not exempt.
+    /// Mirrored on the CLI as `--a11y-strict`.
+    #[serde(default = "default_accessibility_strict")]
+    pub accessibility_strict: bool,
     #[serde(default)]
     pub plugin_settings: BTreeMap<String, BTreeMap<String, toml::Value>>,
     #[serde(default = "default_typecheck_command")]
@@ -290,6 +298,7 @@ impl Default for Config {
             require_twitter_image: false,
             require_robots_sitemap: default_require_robots_sitemap(),
             weak_anchor_text: default_weak_anchor_text(),
+            accessibility_strict: default_accessibility_strict(),
             plugin_settings: BTreeMap::new(),
             typecheck_command: default_typecheck_command(),
             coverage_threshold: default_coverage_threshold(),

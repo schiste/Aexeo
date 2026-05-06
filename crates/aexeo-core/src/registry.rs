@@ -213,6 +213,30 @@ pub fn rule_layers_for_id(rule_id: &str) -> RuleLayers {
         layers = RuleLayers::with_secondaries(Layer::Absorbability, vec![Layer::Retrievability]);
     }
 
+    // A11Y per-rule cross-tag secondaries. Most A11Y rules are
+    // primary-only on Accessibility (the prefix default) — these
+    // are the ones whose signal genuinely feeds a GEO axis too.
+    match rule_id {
+        // Alt text: image search and crawlers use it. Decorative
+        // images don't fire here, so when this rule fires the
+        // missing alt is also a retrievability gap.
+        "A11Y001" | "A11Y006" => {
+            layers =
+                RuleLayers::with_secondaries(Layer::Accessibility, vec![Layer::Retrievability]);
+        }
+        // Empty links break the link graph that crawlers and AI
+        // engines walk; landmarks shape the snippets engines
+        // extract. Both feed citability.
+        "A11Y002" | "A11Y005" => {
+            layers = RuleLayers::with_secondaries(Layer::Accessibility, vec![Layer::Citability]);
+        }
+        // Heading hierarchy is heavily used by snippet selection.
+        "A11Y004" => {
+            layers = RuleLayers::with_secondaries(Layer::Accessibility, vec![Layer::Citability]);
+        }
+        _ => {}
+    }
+
     layers
 }
 
@@ -758,6 +782,37 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                 summary: "runtime deployment output detected; static directory audit may be incomplete",
             }],
         },
+        RuleGroupDefinition {
+            name: "accessibility",
+            title: "Accessibility (A11Y)",
+            description: "Static accessibility checks. Catches the deterministic HTML-spec violations that affect screen-reader users (missing alt, empty buttons, duplicate ids, heading jumps, missing landmarks, placeholder alt text). Browser-backed checks (focus order, contrast, ARIA semantics) are out of scope for the static auditor.",
+            rules: &[
+                RuleDescriptor {
+                    rule_id: "A11Y001",
+                    summary: "<img> missing alt attribute (skipped on canonically decorative images in default mode)",
+                },
+                RuleDescriptor {
+                    rule_id: "A11Y002",
+                    summary: "<a> or <button> with no accessible text or label",
+                },
+                RuleDescriptor {
+                    rule_id: "A11Y003",
+                    summary: "duplicate id attribute on the same page",
+                },
+                RuleDescriptor {
+                    rule_id: "A11Y004",
+                    summary: "heading hierarchy jumps a level (e.g. h2 → h4)",
+                },
+                RuleDescriptor {
+                    rule_id: "A11Y005",
+                    summary: "page has no <main> landmark or role=\"main\" element",
+                },
+                RuleDescriptor {
+                    rule_id: "A11Y006",
+                    summary: "alt text matches the image filename (likely placeholder)",
+                },
+            ],
+        },
     ]
 }
 
@@ -826,6 +881,7 @@ mod tests {
                 "structure",
                 "runtime",
                 "deployment",
+                "accessibility",
             ]
         );
     }
@@ -863,13 +919,43 @@ mod tests {
 
     #[test]
     fn a11y_prefix_maps_to_accessibility_layer() {
-        let layers = rule_layers_for_id("A11Y001");
+        // A11Y003 is the cleanest test of the prefix-only default
+        // since it's primary-only on Accessibility — no per-rule
+        // override touches it. (Other A11Y rules carry GEO secondaries
+        // for cross-tag impact; see the per_rule_a11y_overrides test.)
+        let layers = rule_layers_for_id("A11Y003");
         assert_eq!(layers.primary, Layer::Accessibility);
         assert!(layers.secondaries.is_empty());
 
         let metadata = rule_metadata_for_id("A11Y001");
         assert!(matches!(metadata.class, RuleClass::Hard));
         assert!(matches!(metadata.confidence, ConfidenceLevel::High));
+    }
+
+    #[test]
+    fn per_rule_a11y_overrides_carry_geo_secondaries() {
+        // A11Y001 / A11Y006: alt text → image search and crawlers,
+        // so accessibility primary + retrievability secondary.
+        for rule_id in ["A11Y001", "A11Y006"] {
+            let layers = rule_layers_for_id(rule_id);
+            assert_eq!(layers.primary, Layer::Accessibility, "{}", rule_id);
+            assert!(
+                layers.secondaries.contains(&Layer::Retrievability),
+                "{} should carry Retrievability secondary",
+                rule_id
+            );
+        }
+        // A11Y002 / A11Y004 / A11Y005: link graph, heading shape,
+        // landmarks all feed citability.
+        for rule_id in ["A11Y002", "A11Y004", "A11Y005"] {
+            let layers = rule_layers_for_id(rule_id);
+            assert_eq!(layers.primary, Layer::Accessibility, "{}", rule_id);
+            assert!(
+                layers.secondaries.contains(&Layer::Citability),
+                "{} should carry Citability secondary",
+                rule_id
+            );
+        }
     }
 
     #[test]
@@ -922,14 +1008,21 @@ mod tests {
     fn every_rule_in_registry_has_a_layer_assignment() {
         // Smoke test: layer_for_id must not panic on any registered rule
         // and every assignment must have a sensible primary layer.
+        // The match expression below relies on Layer's exhaustiveness —
+        // adding a new Layer variant deliberately fails compile here so
+        // we don't silently miss it.
         for group in builtin_rule_groups() {
             for descriptor in group.rules {
                 let layers = rule_layers_for_id(descriptor.rule_id);
+                let valid = match layers.primary {
+                    Layer::Retrievability
+                    | Layer::Citability
+                    | Layer::Absorbability
+                    | Layer::EntityLegitimacy
+                    | Layer::Accessibility => true,
+                };
                 assert!(
-                    layers.primary == Layer::Retrievability
-                        || layers.primary == Layer::Citability
-                        || layers.primary == Layer::Absorbability
-                        || layers.primary == Layer::EntityLegitimacy,
+                    valid,
                     "rule {} has no valid primary layer",
                     descriptor.rule_id
                 );

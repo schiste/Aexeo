@@ -81,10 +81,22 @@ pub fn apply_policy(findings: Vec<Finding>, config: &Config) -> Vec<Finding> {
 /// inline rather than expanded into a Vec<SuppressionRule>
 /// upfront — saves an allocation per audit and keeps the
 /// route-kind name available for future provenance reporting.
+///
+/// Accessibility (A11Y) findings always bypass the route_kinds
+/// mask: humans navigate utility/admin/legal routes too, and a
+/// missing alt or duplicate id matters there exactly as much as
+/// on a marketing page. Operators can still suppress specific
+/// A11Y rules via [policy.suppressions] when an exception is
+/// genuinely needed.
 fn route_kind_skips_finding(
     route_kinds: &std::collections::BTreeMap<String, RouteKind>,
     finding: &Finding,
 ) -> bool {
+    if crate::registry::rule_layers_for_id(&finding.rule_id).primary
+        == aexeo_contracts::Layer::Accessibility
+    {
+        return false;
+    }
     for kind in route_kinds.values() {
         if !kind.skip_rules.iter().any(|rule| rule == &finding.rule_id) {
             continue;

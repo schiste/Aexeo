@@ -146,7 +146,12 @@ pub fn default_rule_switches() -> BTreeMap<&'static str, bool> {
         ("surfaces", true),
         ("content", true),
         ("structure", true),
+        ("accessibility", true),
     ])
+}
+
+pub(super) fn default_accessibility_strict() -> bool {
+    false
 }
 
 pub(super) fn default_checks() -> BTreeMap<String, bool> {
