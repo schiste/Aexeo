@@ -22,7 +22,9 @@ pub struct RuleMetadata {
     pub confidence: ConfidenceLevel,
 }
 
-/// The four-layer GEO model from the May 2026 literature synthesis.
+/// The four-layer GEO model from the May 2026 literature synthesis,
+/// extended with a fifth axis for accessibility added in 0.0.17 /
+/// 0.8.12 per Aeptus's third-axis proposal.
 /// Each rule is tagged with one primary layer (the one it most directly
 /// serves) plus zero or more secondary layers (the ones it also affects).
 ///
@@ -35,6 +37,12 @@ pub struct RuleMetadata {
 /// - `EntityLegitimacy`: does the entity exist strongly enough to be
 ///   selected at all? (truth manifest, external presence — Aexeo
 ///   surfaces but does not fix this layer)
+/// - `Accessibility`: can humans use the page? (semantic markup,
+///   keyboard access, focus, contrast, labels, landmarks). Distinct
+///   from the GEO axes because it serves human users directly, not
+///   answer-engine pipelines — but A11Y signals frequently feed
+///   the GEO layers as secondaries (alt text → retrievability,
+///   landmarks → citability, etc.).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Layer {
@@ -42,19 +50,21 @@ pub enum Layer {
     Citability,
     Absorbability,
     EntityLegitimacy,
+    Accessibility,
 }
 
 impl Layer {
-    /// Stable display order for grouping output. Mirrors the
-    /// upstream-to-downstream reading the synthesis paper proposes:
-    /// retrievability gates everything; entity legitimacy is the
-    /// hardest-to-fix outermost concern.
-    pub fn ordered() -> [Layer; 4] {
+    /// Stable display order for grouping output. The four GEO axes
+    /// stay in their original upstream-to-downstream order;
+    /// Accessibility lands last as a separate axis rather than
+    /// being interleaved into the GEO ordering.
+    pub fn ordered() -> [Layer; 5] {
         [
             Layer::Retrievability,
             Layer::Citability,
             Layer::Absorbability,
             Layer::EntityLegitimacy,
+            Layer::Accessibility,
         ]
     }
 
@@ -64,6 +74,7 @@ impl Layer {
             Layer::Citability => "citability",
             Layer::Absorbability => "absorbability",
             Layer::EntityLegitimacy => "entity_legitimacy",
+            Layer::Accessibility => "accessibility",
         }
     }
 
@@ -73,6 +84,7 @@ impl Layer {
             Layer::Citability => "Citability",
             Layer::Absorbability => "Absorbability",
             Layer::EntityLegitimacy => "Entity legitimacy",
+            Layer::Accessibility => "Accessibility",
         }
     }
 }

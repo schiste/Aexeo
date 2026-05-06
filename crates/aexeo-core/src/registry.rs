@@ -85,6 +85,15 @@ fn metadata_for_prefix(prefix: &str) -> RuleMetadata {
             class: RuleClass::Policy,
             confidence: ConfidenceLevel::Medium,
         },
+        // A11Y: static accessibility rules. Most low-hanging static
+        // checks (missing alt, empty link, duplicate id) are
+        // deterministic HTML-spec facts — Hard / High by default.
+        // Heuristic rules (heading-jump, alt-equals-filename) can
+        // be downgraded per-rule.
+        "A11Y" => RuleMetadata {
+            class: RuleClass::Hard,
+            confidence: ConfidenceLevel::High,
+        },
         _ => RuleMetadata {
             class: RuleClass::Heuristic,
             confidence: ConfidenceLevel::Medium,
@@ -92,12 +101,20 @@ fn metadata_for_prefix(prefix: &str) -> RuleMetadata {
     }
 }
 
+/// Strip the trailing numeric suffix from a rule id to recover the
+/// family prefix. Rule ids follow the shape `<PREFIX><NNN>` where the
+/// prefix is letters-and-digits but never *ends* in a digit
+/// (e.g. `SEO001`, `FACTS003`, `A11Y001`). The earlier
+/// `take_while(uppercase)` form broke on alphanumeric prefixes like
+/// `A11Y` (it would yield `"A"` and silently fall to the default
+/// citability layer, losing the accessibility mapping).
+pub fn rule_prefix(rule_id: &str) -> &str {
+    rule_id.trim_end_matches(|c: char| c.is_ascii_digit())
+}
+
 pub fn rule_metadata_for_id(rule_id: &str) -> RuleMetadata {
-    let prefix: String = rule_id
-        .chars()
-        .take_while(|ch| ch.is_ascii_uppercase())
-        .collect();
-    let mut metadata = metadata_for_prefix(&prefix);
+    let prefix = rule_prefix(rule_id);
+    let mut metadata = metadata_for_prefix(prefix);
     if rule_id.starts_with("GEO0") {
         metadata.confidence = ConfidenceLevel::Low;
     }
@@ -160,6 +177,12 @@ fn layers_for_prefix(prefix: &str) -> RuleLayers {
         "QLT" => RuleLayers::primary_only(Layer::Citability),
         // FACTS: truth manifest rules. Pure entity legitimacy.
         "FACTS" => RuleLayers::primary_only(Layer::EntityLegitimacy),
+        // A11Y: static accessibility. The fifth axis is its own
+        // primary by default — humans-using-the-page is the goal.
+        // Per-rule overrides add GEO secondaries where the A11Y
+        // signal genuinely feeds retrievability or citability
+        // (alt text → image search, landmarks → snippet shape).
+        "A11Y" => RuleLayers::primary_only(Layer::Accessibility),
         // Unknown prefix: default to citability (most rules are about
         // making the page worth citing). Better than crashing.
         _ => RuleLayers::primary_only(Layer::Citability),
@@ -170,11 +193,7 @@ fn layers_for_prefix(prefix: &str) -> RuleLayers {
 /// The overrides here are for rules whose individual purpose differs
 /// from their family's typical layer.
 pub fn rule_layers_for_id(rule_id: &str) -> RuleLayers {
-    let prefix: String = rule_id
-        .chars()
-        .take_while(|ch| ch.is_ascii_uppercase())
-        .collect();
-    let mut layers = layers_for_prefix(&prefix);
+    let mut layers = layers_for_prefix(rule_prefix(rule_id));
 
     // Schema rules whose primary effect is retrievability / discovery
     // rather than citation-shape:
@@ -785,7 +804,7 @@ pub fn list_adapter_names() -> Vec<&'static str> {
 mod tests {
     use super::{
         builtin_rule_groups, list_adapter_names, list_rule_group_names, rule_layers_for_id,
-        rule_metadata_for_id,
+        rule_metadata_for_id, rule_prefix,
     };
     use aexeo_contracts::{ConfidenceLevel, Layer, RuleClass};
 
@@ -827,6 +846,30 @@ mod tests {
 
         let geo = rule_metadata_for_id("GEO007");
         assert!(matches!(geo.class, RuleClass::Heuristic));
+    }
+
+    #[test]
+    fn rule_prefix_strips_trailing_digits() {
+        // The prior take_while(uppercase) form yielded "A" for "A11Y001"
+        // and silently fell through to the default citability layer,
+        // losing the accessibility mapping. Lock that in.
+        assert_eq!(rule_prefix("SEO001"), "SEO");
+        assert_eq!(rule_prefix("FACTS003"), "FACTS");
+        assert_eq!(rule_prefix("A11Y001"), "A11Y");
+        assert_eq!(rule_prefix("A11Y042"), "A11Y");
+        // No trailing digits is fine — returns the whole id.
+        assert_eq!(rule_prefix("UNKNOWN"), "UNKNOWN");
+    }
+
+    #[test]
+    fn a11y_prefix_maps_to_accessibility_layer() {
+        let layers = rule_layers_for_id("A11Y001");
+        assert_eq!(layers.primary, Layer::Accessibility);
+        assert!(layers.secondaries.is_empty());
+
+        let metadata = rule_metadata_for_id("A11Y001");
+        assert!(matches!(metadata.class, RuleClass::Hard));
+        assert!(matches!(metadata.confidence, ConfidenceLevel::High));
     }
 
     #[test]
