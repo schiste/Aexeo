@@ -81,6 +81,58 @@ shared `Layer` type carries `"accessibility"` as a value.
 
 ### Fixed
 
+- **Surface discovery for facts.json / llms-full.txt /
+  manifest-listed mirrors.** Aeptus reported false-negative
+  `facts_present: false` and `llms_full_present: false` on a
+  live Cloudflare Pages crawl where curl returned 200 for
+  both URLs. Root cause: the page-crawler skips non-HTML
+  responses, so JSON / plain-text artifacts not reachable
+  via the HTML link graph were never recorded as visited
+  and `local_artifact_exists` returned false even though the
+  files existed.
+  Fix: a new `artifact_probe` module HEAD-probes well-known
+  artifact paths after the main page-crawl, manifest-first.
+  If `manifest.json` is reachable, every `path` it lists
+  under `artifacts` is added to the candidate set. Each
+  candidate is independently HEAD-probed with the existing
+  crawl auth (basic auth + custom headers, including the
+  `--cf-access-*` Cloudflare Access headers). 2xx paths are
+  recorded on `CrawlMeta.probed_artifact_paths` and folded
+  into `Site::indexed_paths` so surface discovery and rules
+  see them as present.
+  Probes are time-boxed (3s per request) and bounded (max 64
+  paths per crawl) so a manifest with thousands of entries
+  can't blow up the audit budget. The probed list round-trips
+  through the audit artifact, so `intelligence surfaces
+  discover --from-crawl-artifact` sees the same presence
+  signal a fresh live crawl would.
+- **SEO009 no longer flags `<link rel="alternate"
+  type="text/markdown">` discovery links** as "hreflang
+  alternates pointing to missing internal paths." The rule
+  now consults the `type` attribute on the alternate and
+  skips the missing-target check for non-HTML media types
+  (text/markdown, text/plain, application/json,
+  application/ld+json, atom/rss/feed+json). Genuine hreflang
+  alternates that happen to declare `type="text/html"` still
+  fire SEO009.
+- **SRF030 now recognizes the `.md.txt` mirror discovery
+  pattern.** When the homepage advertises one or more
+  `<link rel="alternate" type="text/markdown">` discovery
+  links (the per-route mirror pattern Aeptus and similar
+  sites use), the probe stays silent. This is a valid
+  Markdown-for-Agents alternative to HTTP content
+  negotiation; the rule's role is to flag *absence* of any
+  markdown discovery contract, not the choice of which one.
+- **ROB008 skips deliberate sitewide-noindex deployments.**
+  Cloudflare Pages preview sets `X-Robots-Tag: noindex`
+  sitewide while the build still emits sitemap.xml for
+  parity with production; the prior rule fired on every
+  sitemap-listed route. The rule now detects when every
+  crawled page carries `X-Robots-Tag: noindex` and skips —
+  the inconsistency narrative no longer applies. A single
+  page lacking the header breaks uniformity (it would
+  actually be indexed), and ROB008 fires normally.
+
 - **Rule-id prefix extractor now handles alphanumeric
   prefixes.** Previously `take_while(is_ascii_uppercase)`
   was used, which would silently truncate `A11Y001` to

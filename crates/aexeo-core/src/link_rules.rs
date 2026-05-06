@@ -224,6 +224,7 @@ mod tests {
             max_pages: 1,
             discovered_internal_routes: 4,
             truncated: true,
+            ..crate::site::CrawlMeta::default()
         });
         let findings = run_link_rules(&site, &Config::default());
         let ids = findings

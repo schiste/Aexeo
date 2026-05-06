@@ -60,12 +60,18 @@ pub struct JsonLdBlock {
     pub column: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CrawlMeta {
     pub visited_pages: usize,
     pub max_pages: usize,
     pub discovered_internal_routes: usize,
     pub truncated: bool,
+    /// Well-known machine-readable artifact paths that were
+    /// HEAD-probed during the crawl and returned 2xx. Folded into
+    /// `Site::indexed_paths` at site-build time so surface
+    /// discovery sees them as present even when they're not
+    /// reachable from the HTML link graph.
+    pub probed_artifact_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -538,7 +544,19 @@ pub fn build_site_from_parts(input: SiteBuildInput) -> Result<Site> {
         },
         None => (BTreeSet::new(), None),
     };
-    let indexed_paths = build_indexed_paths(&pages, ["robots.txt", "llms.txt", "sitemap.xml"]);
+    let mut indexed_paths =
+        build_indexed_paths(&pages, ["robots.txt", "llms.txt", "sitemap.xml"]);
+    // Probed artifact paths from the live crawl (facts.json,
+    // llms-full.txt, manifest-listed siblings) get folded into
+    // indexed_paths so surface discovery and rules consulting
+    // `site.indexed_paths.contains(...)` find them. Without this,
+    // artifacts not reachable via the HTML link graph appear
+    // "missing" in surface coverage even when curl returns 200.
+    if let Some(meta) = crawl_meta.as_ref() {
+        for path in &meta.probed_artifact_paths {
+            indexed_paths.insert(path.clone());
+        }
+    }
     Ok(Site {
         root,
         inbound_links: build_inbound_link_map(&pages),
@@ -584,6 +602,7 @@ pub fn audit_site_snapshot(site: &Site, site_url: Option<&str>) -> AuditSiteSnap
             max_pages: meta.max_pages,
             discovered_internal_routes: meta.discovered_internal_routes,
             truncated: meta.truncated,
+            probed_artifact_paths: meta.probed_artifact_paths.clone(),
         }),
         llms_text: site.llms_text.clone(),
         robots_text: site.robots_text.clone(),
@@ -630,6 +649,7 @@ pub fn build_site_from_audit_snapshot(snapshot: &AuditSiteSnapshot) -> Result<Si
             max_pages: meta.max_pages,
             discovered_internal_routes: meta.discovered_internal_routes,
             truncated: meta.truncated,
+            probed_artifact_paths: meta.probed_artifact_paths.clone(),
         }),
     })
 }

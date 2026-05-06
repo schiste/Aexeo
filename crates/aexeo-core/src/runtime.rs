@@ -1,3 +1,4 @@
+mod artifact_probe;
 mod fetcher;
 mod graph;
 mod http;
@@ -1822,13 +1823,28 @@ fn materialize_runtime_site(
     let optional_fetch_us =
         snapshot.capture_optional_artifacts(planner.normalized_base(), &runtime)?;
     performance.record_optional_artifact_fetch(optional_fetch_us);
+    // Probe well-known machine-readable artifact paths (manifest-
+    // listed + canonical fallbacks). The crawler skipped non-HTML
+    // responses, so without this step facts.json / llms-full.txt /
+    // .md.txt mirrors only reachable via manifest.json appear as
+    // missing in surface discovery.
+    let probed_artifact_paths =
+        artifact_probe::probe_well_known_artifacts(planner.normalized_base(), &runtime);
     let snapshot_started_at = Instant::now();
-    let (site, snapshot_findings) = snapshot.finalize(
+    let (mut site, snapshot_findings) = snapshot.finalize(
         planner.visited_count(),
         max_pages,
         planner.discovered_route_count(),
         planner.truncated(),
     )?;
+    if !probed_artifact_paths.is_empty() {
+        if let Some(meta) = site.crawl_meta.as_mut() {
+            meta.probed_artifact_paths = probed_artifact_paths.clone();
+        }
+        for path in &probed_artifact_paths {
+            site.indexed_paths.insert(path.clone());
+        }
+    }
     performance.record_snapshot_build(snapshot_started_at.elapsed().as_micros() as u64);
     crawl_stats.visited_pages = planner.visited_count();
     crawl_stats.discovered_internal_routes = planner.discovered_route_count();

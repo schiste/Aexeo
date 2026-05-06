@@ -127,6 +127,7 @@ impl RuntimeSnapshotBuilder {
                 max_pages,
                 discovered_internal_routes,
                 truncated,
+                probed_artifact_paths: Vec::new(),
             },
         )
     }
@@ -150,6 +151,7 @@ impl RuntimeSnapshotBuilder {
                 max_pages,
                 discovered_internal_routes,
                 truncated,
+                probed_artifact_paths: Vec::new(),
             },
         )
     }

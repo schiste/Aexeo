@@ -349,6 +349,16 @@ pub struct AuditCrawlMeta {
     pub max_pages: usize,
     pub discovered_internal_routes: usize,
     pub truncated: bool,
+    /// Paths of well-known machine-readable artifacts that were
+    /// HEAD-probed during the live crawl and returned 2xx. Populated
+    /// by `probe_well_known_artifacts` after the page-crawl loop.
+    /// `discover_machine_surface_graph` consults these to mark
+    /// `facts_present` / `llms_full_present` / etc. for sites where
+    /// the artifacts aren't reachable via the HTML link graph
+    /// (manifest.json-listed only, robots-Sitemap-only, etc).
+    /// `#[serde(default)]` so old artifacts deserialize cleanly.
+    #[serde(default)]
+    pub probed_artifact_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
