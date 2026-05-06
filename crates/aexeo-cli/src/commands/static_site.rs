@@ -24,8 +24,11 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
     let root = canonicalize_or_keep(required_arg(submatches, "path")?);
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
     let loaded = load_config_with_diagnostics(&root, explicit_config.as_deref())?;
-    let config = loaded.config;
+    let mut config = loaded.config;
     let warnings = loaded.warnings;
+    if submatches.get_flag("a11y-strict") {
+        config.accessibility.strict = true;
+    }
 
     let baseline_path = submatches.get_one::<String>("baseline");
     let regressions_only = submatches.get_flag("regressions-only");

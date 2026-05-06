@@ -31,6 +31,9 @@ Options:
           [default: text]
           [possible values: text, json, sarif]
 
+      --a11y-strict
+          Strict mode for the accessibility axis: A11Y001 fires on every <img> without alt regardless of role/aria-hidden. Default is smart mode (skips canonically decorative images). Equivalent to [accessibility].strict = true in config.
+
   -h, --help
           Print help
 ```
@@ -116,6 +119,9 @@ Options:
 
       --cf-access-secret <cf-access-secret>
           Cloudflare Access service-token Client Secret (or env CF_ACCESS_CLIENT_SECRET); injected as CF-Access-Client-Secret header on every fetch
+
+      --a11y-strict
+          Strict mode for the accessibility axis: A11Y001 fires on every <img> without alt regardless of role/aria-hidden. Default is smart mode (skips canonically decorative images). Equivalent to [accessibility].strict = true in config.
 
   -h, --help
           Print help

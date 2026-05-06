@@ -34,6 +34,14 @@ fn apply_runtime_cli_overrides(config: &mut aexeo_core::Config, submatches: &Arg
     if submatches.get_flag("no-sitemap-seed") {
         config.crawl_use_sitemap = false;
     }
+    // try_get_one because not every runtime subcommand registers
+    // --a11y-strict (only `crawl` does today). get_flag would panic.
+    if matches!(
+        submatches.try_get_one::<bool>("a11y-strict"),
+        Ok(Some(true))
+    ) {
+        config.accessibility.strict = true;
+    }
     apply_cf_access_credentials(config, submatches);
 }
 

@@ -9,6 +9,11 @@ use crate::plugin::validate_plugin_settings;
 
 const VERSIONED_TOP_LEVEL_TABLES: &[&str] =
     &["site", "runtime", "policy", "rules", "output", "quality"];
+// `[accessibility]` lives outside the versioned set because it has
+// no flat-key counterpart — there's nothing in old configs for the
+// version=1 gate to protect against. Users can adopt A11Y settings
+// on any config shape without needing to migrate to versioned form.
+const UNVERSIONED_NEW_TABLES: &[&str] = &["accessibility"];
 const FLAT_TOP_LEVEL_KEYS: &[&str] = &[
     "site_url",
     "source_dir",
@@ -473,6 +478,13 @@ fn validate_versioned_sections(root: &toml::map::Map<String, Value>) -> Result<(
             "[quality]",
         )?;
     }
+    if let Some(value) = root.get("accessibility") {
+        validate_allowed_keys(
+            expect_table(value, "accessibility", "config root")?,
+            &["strict"],
+            "[accessibility]",
+        )?;
+    }
     Ok(())
 }
 
@@ -493,6 +505,7 @@ fn validate_config_surface(value: &Value) -> Result<()> {
         Some(1) => {
             let mut allowed_keys = FLAT_TOP_LEVEL_KEYS.to_vec();
             allowed_keys.extend(VERSIONED_TOP_LEVEL_TABLES);
+            allowed_keys.extend(UNVERSIONED_NEW_TABLES);
             allowed_keys.push("version");
             validate_allowed_keys(root, &allowed_keys, "config root")?;
             validate_versioned_sections(root)?;
@@ -502,7 +515,10 @@ fn validate_config_surface(value: &Value) -> Result<()> {
             if has_versioned_tables {
                 bail!("nested config tables require `version = 1`");
             }
-            validate_allowed_keys(root, FLAT_TOP_LEVEL_KEYS, "config root")?;
+            let mut allowed_keys = FLAT_TOP_LEVEL_KEYS.to_vec();
+            allowed_keys.extend(UNVERSIONED_NEW_TABLES);
+            validate_allowed_keys(root, &allowed_keys, "config root")?;
+            validate_versioned_sections(root)?;
         }
     }
 
@@ -1147,6 +1163,34 @@ enabled = true
             error
                 .to_string()
                 .contains("plugin_settings.example.plugin requires `plugins`")
+        );
+    }
+
+    #[test]
+    fn accessibility_section_defaults_to_smart_mode() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = load_config(temp_dir.path(), None).unwrap();
+        assert!(
+            !config.accessibility.strict,
+            "default accessibility mode is smart (skips canonically decorative images)"
+        );
+    }
+
+    #[test]
+    fn loads_accessibility_strict_from_nested_toml() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join("aexeo.toml"),
+            r#"
+[accessibility]
+strict = true
+"#,
+        )
+        .unwrap();
+        let config = load_config(temp_dir.path(), None).unwrap();
+        assert!(
+            config.accessibility.strict,
+            "[accessibility].strict = true should set Config.accessibility.strict"
         );
     }
 

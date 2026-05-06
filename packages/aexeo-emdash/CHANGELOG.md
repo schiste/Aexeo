@@ -27,9 +27,10 @@ shared `Layer` type carries `"accessibility"` as a value.
   - `A11Y001` (error) — `<img>` missing `alt`. Default mode
     skips images marked decorative via `alt=""`,
     `role="presentation"`, `role="none"`, or
-    `aria-hidden="true"`. Strict mode (CLI flag /
-    `accessibility_strict = true`) treats only `alt=""` as
-    decorative.
+    `aria-hidden="true"`. Strict mode (CLI flag
+    `--a11y-strict` on `aexeo-cli check` / `crawl`, or
+    `[accessibility] strict = true` in `aexeo.toml`) treats
+    only `alt=""` as decorative.
   - `A11Y002` (error) — `<a>` / `<button>` with no
     accessible text or label. Exempts elements whose only
     inner content is `<img alt="...">` per ARIA accessible-

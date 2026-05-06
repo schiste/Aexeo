@@ -167,7 +167,7 @@ pub fn run_checks_for_site_profiled(site: &crate::site::Site, config: &Config) -
             run_accessibility_rules(
                 site,
                 AccessibilityOptions {
-                    strict: config.accessibility_strict,
+                    strict: config.accessibility.strict,
                 },
             )
         },

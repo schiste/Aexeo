@@ -158,14 +158,16 @@ pub struct Config {
     pub require_robots_sitemap: bool,
     #[serde(default = "default_weak_anchor_text")]
     pub weak_anchor_text: Vec<String>,
-    /// Strict mode for the accessibility (A11Y) axis. Default false:
-    /// images marked decorative (`alt=""`, `role="presentation"`,
-    /// `role="none"`, `aria-hidden="true"`) are skipped by A11Y001.
-    /// When true, only the canonical `alt=""` form is treated as
-    /// decorative; `role`/`aria-hidden` signals do not exempt.
-    /// Mirrored on the CLI as `--a11y-strict`.
-    #[serde(default = "default_accessibility_strict")]
-    pub accessibility_strict: bool,
+    /// Accessibility (A11Y) axis configuration. Nested
+    /// `[accessibility]` block in TOML, e.g.:
+    /// ```toml
+    /// [accessibility]
+    /// strict = true
+    /// ```
+    /// Defaults to `Accessibility { strict: false }` (smart-mode
+    /// decorative-image detection).
+    #[serde(default)]
+    pub accessibility: Accessibility,
     #[serde(default)]
     pub plugin_settings: BTreeMap<String, BTreeMap<String, toml::Value>>,
     #[serde(default = "default_typecheck_command")]
@@ -226,6 +228,30 @@ pub struct RouteKind {
     /// reads this so editors don't have to declare twice.
     #[serde(default)]
     pub noindex: bool,
+}
+
+/// Configuration for the accessibility (A11Y) audit axis.
+/// Nested under `[accessibility]` in TOML so future knobs (e.g.
+/// per-rule severity overrides, browser-backed mode toggles)
+/// have a place to live without polluting the top-level config.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct Accessibility {
+    /// When true, A11Y001 fires on every `<img>` without an `alt`
+    /// attribute regardless of role/aria/empty-alt status. When
+    /// false (default), images marked decorative via the canonical
+    /// signals (`alt=""`, `role="presentation"`, `role="none"`,
+    /// `aria-hidden="true"`) are skipped. CLI `--a11y-strict`
+    /// overrides this to `true` at runtime.
+    #[serde(default = "default_accessibility_strict")]
+    pub strict: bool,
+}
+
+impl Default for Accessibility {
+    fn default() -> Self {
+        Self {
+            strict: default_accessibility_strict(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -298,7 +324,7 @@ impl Default for Config {
             require_twitter_image: false,
             require_robots_sitemap: default_require_robots_sitemap(),
             weak_anchor_text: default_weak_anchor_text(),
-            accessibility_strict: default_accessibility_strict(),
+            accessibility: Accessibility::default(),
             plugin_settings: BTreeMap::new(),
             typecheck_command: default_typecheck_command(),
             coverage_threshold: default_coverage_threshold(),

@@ -38,7 +38,7 @@ pub mod well_known_rules;
 pub use accessibility_rules::{AccessibilityOptions, run_accessibility_rules};
 pub use capabilities::{SiteCapabilities, infer_site_capabilities, well_known_path_exists};
 pub use config::{
-    Config, ConfigFieldDoc, render_resolved_config_json, render_resolved_config_toml,
+    Accessibility, Config, ConfigFieldDoc, render_resolved_config_json, render_resolved_config_toml,
 };
 pub use content_rules::run_content_rules;
 pub use docs::{
