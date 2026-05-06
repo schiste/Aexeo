@@ -43,6 +43,32 @@ fn is_valid_hreflang(value: &str) -> bool {
     }
 }
 
+/// True when an `<link rel="alternate">` carries a `type` attribute
+/// pointing at a media type that signals "this is a machine-readable
+/// discovery link, not an hreflang alternate." Used to gate SEO009
+/// off the .md.txt-mirror discovery pattern (Aeptus and similar
+/// sites) where alternates are content-format alternates rather
+/// than language alternates. HTML media types (`text/html`,
+/// `application/xhtml+xml`) are NOT in the bypass set — those are
+/// genuine hreflang alternates that just happen to declare type.
+fn is_non_hreflang_alternate_type(type_attr: Option<&str>) -> bool {
+    let Some(value) = type_attr else {
+        return false;
+    };
+    let lower = value.trim().to_ascii_lowercase();
+    let media_type = lower.split(';').next().unwrap_or("").trim();
+    matches!(
+        media_type,
+        "text/markdown"
+            | "text/plain"
+            | "application/json"
+            | "application/ld+json"
+            | "application/atom+xml"
+            | "application/rss+xml"
+            | "application/feed+json"
+    )
+}
+
 fn normalize_project_href(href: &str, site_url: Option<&str>) -> Option<String> {
     if let Some(normalized) = normalize_internal_href(href) {
         return Some(normalized);
@@ -236,7 +262,15 @@ pub fn run_html_rules(site: &Site, config: &Config) -> Vec<Finding> {
             }
 
             if let Some(target) = normalize_project_href(&alternate.href, site_url) {
-                if !site.indexed_paths.contains(&target) {
+                // SEO009 is about hreflang alternates only. A
+                // <link rel="alternate" type="text/markdown" href="/x.md.txt">
+                // is a machine-readable discovery link, not an
+                // hreflang alternate; firing on it falsely reports
+                // missing internal paths for sites using the
+                // .md.txt-mirror discovery pattern (Aeptus, etc).
+                let is_hreflang_alternate = alternate.hreflang.is_some()
+                    || !is_non_hreflang_alternate_type(alternate.type_attr.as_deref());
+                if is_hreflang_alternate && !site.indexed_paths.contains(&target) {
                     findings.push(finding(
                         "SEO009",
                         format!(
@@ -366,6 +400,52 @@ mod tests {
         assert!(rule_ids.contains("SEO008"));
         assert!(rule_ids.contains("SEO009"));
         assert!(rule_ids.contains("SEO011"));
+    }
+
+    #[test]
+    fn seo009_skips_markdown_mirror_alternates() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html lang=\"en\"><head><title>x</title><meta name=\"description\" content=\"y\"><link rel=\"canonical\" href=\"https://example.com/\"><link rel=\"alternate\" type=\"text/markdown\" href=\"/index.md.txt\"></head><body><h1>x</h1></body></html>",
+        );
+        let config = Config {
+            site_url: Some("https://example.com".to_string()),
+            ..Config::default()
+        };
+        let site = load_site(root).unwrap();
+        let rule_ids = run_html_rules(&site, &config)
+            .into_iter()
+            .map(|finding| finding.rule_id)
+            .collect::<BTreeSet<_>>();
+        assert!(
+            !rule_ids.contains("SEO009"),
+            "SEO009 should not fire on rel=alternate type=text/markdown discovery links"
+        );
+    }
+
+    #[test]
+    fn seo009_still_fires_on_genuine_hreflang_with_missing_target() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html lang=\"en\"><head><title>x</title><meta name=\"description\" content=\"y\"><link rel=\"canonical\" href=\"https://example.com/\"><link rel=\"alternate\" hreflang=\"fr\" type=\"text/html\" href=\"/missing-fr\"></head><body><h1>x</h1></body></html>",
+        );
+        let config = Config {
+            site_url: Some("https://example.com".to_string()),
+            ..Config::default()
+        };
+        let site = load_site(root).unwrap();
+        let rule_ids = run_html_rules(&site, &config)
+            .into_iter()
+            .map(|finding| finding.rule_id)
+            .collect::<BTreeSet<_>>();
+        assert!(
+            rule_ids.contains("SEO009"),
+            "SEO009 must still fire on hreflang alternates pointing to missing internal paths"
+        );
     }
 
     #[test]

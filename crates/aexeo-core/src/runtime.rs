@@ -1940,7 +1940,7 @@ pub fn run_runtime_audit_with_options(
     performance.apply_to(&mut crawl_stats);
     let mut findings = crawl_findings.clone();
     findings.extend(profiled.findings.clone());
-    findings.extend(probe_markdown_negotiation_finding(base_url, config));
+    findings.extend(probe_markdown_negotiation_finding(base_url, config, &site));
     let status = if crawl_stats.truncated {
         AuditStatus::Partial
     } else {
@@ -1997,6 +1997,27 @@ pub fn runtime_doctor() -> PlaywrightDoctor {
     probe_playwright_runtime()
 }
 
+/// True when the homepage exposes one or more
+/// `<link rel="alternate" type="text/markdown">` discovery links.
+/// Used to gate SRF030 off sites that publish per-route `.md.txt`
+/// mirrors with explicit discovery — that's a valid alternative to
+/// `Accept: text/markdown` content negotiation.
+fn homepage_advertises_markdown_mirror_discovery(site: &crate::site::Site) -> bool {
+    let Some(home) = site.page("/") else {
+        return false;
+    };
+    home.alternate_links.iter().any(|alt| {
+        alt.type_attr
+            .as_deref()
+            .map(|value| {
+                let lower = value.trim().to_ascii_lowercase();
+                let media_type = lower.split(';').next().unwrap_or("").trim();
+                media_type == "text/markdown"
+            })
+            .unwrap_or(false)
+    })
+}
+
 /// SRF030 — Markdown-for-Agents content negotiation probe.
 ///
 /// Refetches the homepage with `Accept: text/markdown`. If the
@@ -2007,9 +2028,20 @@ pub fn runtime_doctor() -> PlaywrightDoctor {
 /// HTTP layer, even if it has separate per-page Markdown mirrors
 /// (those are tested by SRF002/SRF004).
 ///
+/// Sites using the per-route `.md.txt` mirror pattern advertise
+/// the alternative via `<link rel="alternate" type="text/markdown">`
+/// discovery links on the homepage. When that pattern is detected,
+/// we treat the mirror strategy as the chosen markdown discovery
+/// mechanism and skip SRF030 — the site has expressed a different
+/// (also-valid) discovery contract, not an absence of one.
+///
 /// Returns at most one finding. Static audits don't reach this
 /// path; only `run_runtime_audit_with_options` calls it.
-fn probe_markdown_negotiation_finding(base_url: &str, config: &Config) -> Vec<Finding> {
+fn probe_markdown_negotiation_finding(
+    base_url: &str,
+    config: &Config,
+    site: &crate::site::Site,
+) -> Vec<Finding> {
     use reqwest::blocking::Client;
     use reqwest::header::ACCEPT;
 
@@ -2020,6 +2052,9 @@ fn probe_markdown_negotiation_finding(base_url: &str, config: &Config) -> Vec<Fi
         .copied()
         .unwrap_or(true)
     {
+        return Vec::new();
+    }
+    if homepage_advertises_markdown_mirror_discovery(site) {
         return Vec::new();
     }
 

@@ -198,7 +198,43 @@ fn declares_known_ai_bot(user_agent_line: &str) -> bool {
         .any(|bot| value == *bot || value.contains(bot))
 }
 
-fn collect_page_robot_findings(page: &Page, site: &Site, config: &Config) -> Vec<Finding> {
+/// True when every crawled page carries an X-Robots-Tag header
+/// containing `noindex`. A page without the header counts as
+/// indexable and breaks uniformity — that's deliberate, since a
+/// page lacking the header would actually be indexed by crawlers
+/// regardless of what its siblings look like, and ROB008's
+/// inconsistent-sitemap finding still applies on the others.
+///
+/// Detects deliberate sitewide-noindex deployments (Cloudflare
+/// Pages preview, staging, internal admin — anywhere Robots are
+/// uniformly suppressed). Used to gate ROB008 off such deployments
+/// since the rule is meant to catch *inconsistent* sitemap-vs-
+/// noindex configuration, not deliberate sitewide noindex with
+/// sitemap parity to production.
+fn site_is_uniformly_noindex(site: &Site) -> bool {
+    let mut observed = 0usize;
+    let mut noindex_count = 0usize;
+    for page in site.route_pages() {
+        observed += 1;
+        let header = page
+            .response_headers
+            .get("x-robots-tag")
+            .map(String::as_str)
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if header.contains("noindex") {
+            noindex_count += 1;
+        }
+    }
+    observed > 0 && observed == noindex_count
+}
+
+fn collect_page_robot_findings(
+    page: &Page,
+    site: &Site,
+    config: &Config,
+    sitewide_noindex: bool,
+) -> Vec<Finding> {
     let mut findings = Vec::new();
     let robots_meta = page.metadata("robots").unwrap_or("").to_ascii_lowercase();
     let robots_header = page
@@ -237,7 +273,10 @@ fn collect_page_robot_findings(page: &Page, site: &Site, config: &Config) -> Vec
             None,
         ));
     }
-    if robots_header.contains("noindex") && site.sitemap_routes.contains(&page.route) {
+    if !sitewide_noindex
+        && robots_header.contains("noindex")
+        && site.sitemap_routes.contains(&page.route)
+    {
         findings.push(finding(
             "ROB008",
             "page is listed in sitemap.xml but declares noindex via X-Robots-Tag",
@@ -255,19 +294,61 @@ pub fn run_robots_rules(site: &Site, config: &Config) -> Vec<Finding> {
     if site.robots_text.is_none() || !rules.require_meta_robots_consistency {
         return findings;
     }
+    let sitewide_noindex = site_is_uniformly_noindex(site);
     for page in site.route_pages() {
-        findings.extend(collect_page_robot_findings(page, site, config));
+        findings.extend(collect_page_robot_findings(
+            page,
+            site,
+            config,
+            sitewide_noindex,
+        ));
     }
     findings
 }
 
 #[cfg(test)]
 mod tests {
-    use super::run_robots_rules;
+    use super::{run_robots_rules, site_is_uniformly_noindex};
     use crate::config::Config;
-    use crate::site::load_site;
-    use std::collections::BTreeSet;
+    use crate::site::{
+        DeploymentModel, Page, PageKind, SiteArtifacts, SiteBuildInput, build_site_from_parts,
+        load_site,
+    };
+    use std::collections::{BTreeMap, BTreeSet};
     use std::fs;
+    use std::path::PathBuf;
+
+    fn page_with_x_robots(route: &str, header_value: &str) -> Page {
+        let mut response_headers = BTreeMap::new();
+        response_headers.insert("x-robots-tag".to_string(), header_value.to_string());
+        Page {
+            path: PathBuf::from(format!(
+                "dist{}.html",
+                if route == "/" { "/index" } else { route }
+            )),
+            relative_path: format!("{}.html", route.trim_start_matches('/')),
+            route: route.to_string(),
+            page_kind: PageKind::Generic,
+            raw_text: String::new(),
+            title: Some("x".to_string()),
+            meta_by_name: BTreeMap::new(),
+            meta_by_property: BTreeMap::new(),
+            canonical: None,
+            html_lang: None,
+            h1_count: 1,
+            h1_texts: vec!["x".to_string()],
+            has_breadcrumb_nav: false,
+            response_headers,
+            links: Vec::new(),
+            internal_links: Vec::new(),
+            alternate_links: Vec::new(),
+            images: Vec::new(),
+            blocks: Vec::new(),
+            details_blocks: Vec::new(),
+            pre_blocks: Vec::new(),
+            json_ld_blocks: Vec::new(),
+        }
+    }
 
     fn write(path: &std::path::Path, text: &str) {
         if let Some(parent) = path.parent() {
@@ -371,6 +452,60 @@ mod tests {
             .map(|finding| finding.rule_id)
             .collect::<BTreeSet<_>>();
         assert!(!rule_ids.contains("ROB011"));
+    }
+
+    #[test]
+    fn site_is_uniformly_noindex_detects_pages_preview() {
+        let pages = vec![
+            page_with_x_robots("/", "noindex"),
+            page_with_x_robots("/about", "noindex, nofollow"),
+            page_with_x_robots("/contact", "noindex"),
+        ];
+        let site = build_site_from_parts(SiteBuildInput {
+            root: PathBuf::from("dist"),
+            pages,
+            artifacts: SiteArtifacts {
+                llms_text: None,
+                robots_text: Some("Sitemap: https://preview.example/sitemap.xml\n".to_string()),
+                sitemap_text: None,
+            },
+            deployment_model: DeploymentModel::StaticExport,
+            deployment_markers: Vec::new(),
+            crawl_meta: None,
+        })
+        .unwrap();
+        assert!(
+            site_is_uniformly_noindex(&site),
+            "all pages share X-Robots-Tag: noindex; should be detected as uniform"
+        );
+    }
+
+    #[test]
+    fn site_is_uniformly_noindex_false_when_one_page_misses_header() {
+        let mut indexed_page = page_with_x_robots("/leak", "");
+        indexed_page.response_headers.clear();
+        let pages = vec![
+            page_with_x_robots("/", "noindex"),
+            page_with_x_robots("/about", "noindex"),
+            indexed_page,
+        ];
+        let site = build_site_from_parts(SiteBuildInput {
+            root: PathBuf::from("dist"),
+            pages,
+            artifacts: SiteArtifacts {
+                llms_text: None,
+                robots_text: None,
+                sitemap_text: None,
+            },
+            deployment_model: DeploymentModel::StaticExport,
+            deployment_markers: Vec::new(),
+            crawl_meta: None,
+        })
+        .unwrap();
+        // Two pages with noindex header, one with no header at all
+        // (so it's NOT uniformly noindex'd — that one page would
+        // actually be indexed by crawlers). Should NOT be skipped.
+        assert!(!site_is_uniformly_noindex(&site));
     }
 
     #[test]
