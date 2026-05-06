@@ -295,6 +295,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
         { path: "/citability", label: "Citability" },
         { path: "/absorbability", label: "Absorbability" },
         { path: "/entity-legitimacy", label: "Entity legitimacy" },
+        { path: "/accessibility", label: "Accessibility" },
         { path: "/document", label: "Document SEO" },
         { path: "/findings", label: "All findings" },
       ],

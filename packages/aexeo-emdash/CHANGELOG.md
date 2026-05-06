@@ -6,6 +6,90 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.12] - 2026-05-06
+
+Adds **Accessibility (A11Y)** as a fifth audit pillar alongside
+the four GEO axes. Per Aeptus's third-axis proposal, accessibility
+is its own primary layer rather than cross-tags onto existing
+pillars; the admin sidebar now has five pillar pages and the
+shared `Layer` type carries `"accessibility"` as a value.
+
+### Added (engine via bridge)
+
+- **Layer::Accessibility**, the fifth value of the `Layer`
+  enum / TS union. Mirror of the new `Accessibility` variant
+  added in `aexeo-contracts`. Findings produced by A11Y rules
+  carry `layers.primary === "accessibility"` and group under
+  the new pillar.
+- **Six static A11Y rules** — pattern-matched on raw HTML
+  (no DOM, no browser; consistent with the rest of the
+  static auditor):
+  - `A11Y001` (error) — `<img>` missing `alt`. Default mode
+    skips images marked decorative via `alt=""`,
+    `role="presentation"`, `role="none"`, or
+    `aria-hidden="true"`. Strict mode (CLI flag /
+    `accessibility_strict = true`) treats only `alt=""` as
+    decorative.
+  - `A11Y002` (error) — `<a>` / `<button>` with no
+    accessible text or label. Exempts elements whose only
+    inner content is `<img alt="...">` per ARIA accessible-
+    name calculation, plus those carrying `aria-label`,
+    `aria-labelledby`, or `title`.
+  - `A11Y003` (error) — duplicate `id="..."` values within
+    a single page. `<script>` and `<style>` blocks are
+    masked before scanning so JS/CSS string literals don't
+    trigger false positives.
+  - `A11Y004` (warn) — heading hierarchy jump (e.g. `h2 → h4`).
+  - `A11Y005` (warn) — page has no `<main>` landmark or
+    `role="main"` element. Skipped on non-content page kinds
+    (search, admin, feed, utility, notfound, legal).
+  - `A11Y006` (warn) — `alt` text matches the image filename
+    (placeholder/auto-generated alt text).
+
+### Cross-axis behavior
+
+- Per-rule layer overrides give A11Y rules secondary GEO
+  layers where the signal genuinely feeds discovery or
+  citation: `A11Y001` / `A11Y006` add Retrievability
+  (alt → image search); `A11Y002` / `A11Y004` / `A11Y005`
+  add Citability (link graph, heading shape, landmarks all
+  feed citability).
+- **A11Y findings ALWAYS bypass the `route_kinds` skip mask.**
+  Accessibility is for human users on every route — utility,
+  admin, and legal pages are not exempted. Per-rule
+  `[policy.suppressions]` still apply when an exception is
+  genuinely needed.
+- The CMS plugin context does NOT disable the accessibility
+  group (unlike robots/sitemap/llm/surfaces/well_known/
+  headers/deployment, which describe the deployed-site
+  surface the CMS doesn't own). A missing alt or duplicate
+  id is exactly as wrong in a CMS preview as on the
+  deployed site.
+
+### Added (admin)
+
+- **`/accessibility` admin page** — fifth pillar in the
+  sidebar, between Entity legitimacy and Document SEO.
+  Renders via the existing `PillarView` component
+  (parameterized by `layer` prop). Same finding-list shape
+  as the GEO pillars; nothing new for editors to learn.
+- `Layer` union, `LAYERS_ORDERED`, `layerHumanLabel`, and
+  `layerOneLineDescription` extended with the new value;
+  every TS switch statement that consumed Layer was
+  updated.
+
+### Fixed
+
+- **Rule-id prefix extractor now handles alphanumeric
+  prefixes.** Previously `take_while(is_ascii_uppercase)`
+  was used, which would silently truncate `A11Y001` to
+  `"A"` and fall through to the default citability layer.
+  Replaced with `trim_end_matches(is_ascii_digit)` based
+  on the structural rule (rule ids are `<PREFIX><NNN>`,
+  prefixes never end in a digit). No existing rule used
+  an alphanumeric prefix so this is forward-compatible
+  only. Locked in by new unit tests in `aexeo-core`.
+
 ## [0.8.11] - 2026-05-05
 
 Picks up the post-0.8.10 product additions and the FACTS003

@@ -11,12 +11,13 @@
 // SandboxedPluginPage.
 //
 // Phase 2 of the four-layer GEO restructure: the admin sidebar is now
-// organized around the four pillars. /findings stays as a flat-view
-// fallback for editors who want everything in one list, and /facts
-// stays as an alias for /entity-legitimacy so existing bookmarks keep
-// working.
+// organized around the GEO pillars plus Accessibility (the third audit
+// axis added in 0.8.12). /findings stays as a flat-view fallback for
+// editors who want everything in one list, and /facts stays as an
+// alias for /entity-legitimacy so existing bookmarks keep working.
 
 import { Absorbability } from "./admin/Absorbability.js";
+import { Accessibility } from "./admin/Accessibility.js";
 import { Citability } from "./admin/Citability.js";
 import { EntityLegitimacy } from "./admin/EntityLegitimacy.js";
 import { Facts } from "./admin/Facts.js";
@@ -24,11 +25,12 @@ import { Findings } from "./admin/Findings.js";
 import { Retrievability } from "./admin/Retrievability.js";
 
 export const pages = {
-  // Four pillar pages — the canonical organization going forward.
+  // Pillar pages — the canonical organization going forward.
   "/retrievability": Retrievability,
   "/citability": Citability,
   "/absorbability": Absorbability,
   "/entity-legitimacy": EntityLegitimacy,
+  "/accessibility": Accessibility,
   // /findings stays as a cross-pillar flat view for users who want
   // every finding in one list. Not removed because it's still useful
   // for triage — "show me everything that's wrong" is a real workflow.

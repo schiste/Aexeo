@@ -62,15 +62,18 @@ export type FindingSeverity = "error" | "warning";
 
 export type FindingScope = "page" | "template" | "sitewide";
 
-/// The four-layer GEO model. Mirror of aexeo-contracts::Layer.
-/// The bridge enriches each Finding with its rule's primary + secondary
-/// layers; the plugin admin groups findings by primary layer for the
-/// four-pillar UI restructure.
+/// The five-axis audit model. Mirror of aexeo-contracts::Layer.
+/// The first four are the GEO axes from the May 2026 synthesis;
+/// `accessibility` is the third audit axis added per Aeptus's
+/// proposal. The bridge enriches each Finding with its rule's primary
+/// + secondary layers; the plugin admin groups findings by primary
+/// layer for the five-pillar UI.
 export type Layer =
   | "retrievability"
   | "citability"
   | "absorbability"
-  | "entity_legitimacy";
+  | "entity_legitimacy"
+  | "accessibility";
 
 export interface RuleLayers {
   primary: Layer;
@@ -92,13 +95,14 @@ export interface Finding {
   layers?: RuleLayers;
 }
 
-/// Stable display order for the four pillars. Used by the plugin's
+/// Stable display order for the five pillars. Used by the plugin's
 /// admin pages and dashboard widget. Mirrors Layer::ordered() in Rust.
 export const LAYERS_ORDERED: readonly Layer[] = [
   "retrievability",
   "citability",
   "absorbability",
   "entity_legitimacy",
+  "accessibility",
 ] as const;
 
 export function layerHumanLabel(layer: Layer): string {
@@ -111,6 +115,8 @@ export function layerHumanLabel(layer: Layer): string {
       return "Absorbability";
     case "entity_legitimacy":
       return "Entity legitimacy";
+    case "accessibility":
+      return "Accessibility";
   }
 }
 
@@ -124,6 +130,8 @@ export function layerOneLineDescription(layer: Layer): string {
       return "Does the answer actually use this content? Cite-ready evidence, mirrors, llms.txt.";
     case "entity_legitimacy":
       return "Does the entity exist strongly enough to be selected at all? Aexeo surfaces this layer; it does not fix it.";
+    case "accessibility":
+      return "Can humans use the page? Alt text, accessible labels, valid id usage, heading shape, landmarks.";
   }
 }
 
