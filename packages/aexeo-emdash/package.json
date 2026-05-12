@@ -65,11 +65,15 @@
   },
   "peerDependencies": {
     "@emdash-cms/core": "*",
+    "@emdash-cms/plugin-types": "*",
     "emdash": ">=0.7.0",
     "react": "^18.0.0 || ^19.0.0"
   },
   "peerDependenciesMeta": {
     "@emdash-cms/core": {
+      "optional": true
+    },
+    "@emdash-cms/plugin-types": {
       "optional": true
     },
     "emdash": {
