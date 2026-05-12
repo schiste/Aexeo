@@ -6,6 +6,43 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.15] - 2026-05-06
+
+Plugin-only release tracking EmDash 0.11.x compatibility. The
+CLI workspace stays at 0.0.19 because the Rust crates aren't
+affected.
+
+### Added
+
+- **`@emdash-cms/plugin-types` declared as optional peerDep.**
+  EmDash 0.11.x split plugin manifest types into a dedicated
+  package; declaring it now (alongside `@emdash-cms/core`,
+  also optional) signals awareness of the split and removes
+  one step from the eventual migration when we touch the
+  manifest surface. No source-code change yet — all
+  manifest-shaped imports still come from the `emdash`
+  umbrella, which is still valid.
+
+### EmDash 0.11.x compatibility notes (no code change)
+
+- **Native locale-aware menu writes.** EmDash 0.11.x menu
+  automation is first-class locale-aware upstream with fail-
+  loud behavior on ambiguous writes. The plugin doesn't write
+  menus today, so no change is forced — the constraint matters
+  if we ever add menu-writing helpers (the read-side
+  constraint was already covered when 0.10's native i18n
+  shipped: never infer locale from menu names, always resolve
+  through `translation_group`).
+- **Seed/export/apply improvements for translated menu items.**
+  Doesn't affect Aexeo (no seed flows).
+- **Stricter sandbox bundle caps.** Doesn't affect today's
+  workspace-local install at Aeptus; matters if Aexeo ever
+  ships through an EmDash marketplace. Current bundle sizes
+  (configured.js 54KB, admin.js 43KB, sandbox-entry.js 27KB,
+  WASM kept external) remain lean — no action needed.
+- **Field-level `allowedTypes`.** Not relevant; no Aexeo rule
+  defines schema helpers for media fields.
+
 ## [0.8.14] - 2026-05-06
 
 Two regressions Aeptus surfaced after running the v0.0.18 CLI
