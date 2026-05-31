@@ -215,7 +215,7 @@ fn check_wikidata(client: &Client, input: &EntityInput) -> SourceResult {
             (*c, score_wikidata_candidate(label, description))
         })
         .collect();
-    scored.sort_by(|a, b| b.1.cmp(&a.1));
+    scored.sort_by_key(|&(_, score)| std::cmp::Reverse(score));
 
     let (pick, top_score) = scored[0];
     if top_score <= NEGATIVE_MATCH_THRESHOLD {
