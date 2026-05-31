@@ -86,7 +86,7 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.14",
-    "emdash": "^0.7.0",
+    "emdash": "^0.15.0",
     "esbuild": "^0.28.0",
     "react": "^19.2.5",
     "typescript": "^5.6.0"
