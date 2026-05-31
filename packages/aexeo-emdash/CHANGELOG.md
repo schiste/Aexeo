@@ -6,6 +6,53 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.16] - 2026-05-29
+
+Plugin-only release confirming source-level compatibility with
+EmDash 0.15.0 (released 2026-05-28). The CLI workspace stays at
+0.0.19 because no Rust crate is affected.
+
+### Changed
+
+- **`emdash` devDependency bumped from `^0.7.0` to `^0.15.0`.**
+  Local typecheck and the build pipeline now resolve against the
+  current EmDash API surface; the eight-minor-version gap
+  (workerd sandboxing in 0.15, byline i18n mirroring the
+  menu/taxonomy row-per-locale model from 0.10/0.11, plugin
+  manifest types split into `@emdash-cms/plugin-types`,
+  code-block language picker, registry plugin uninstall/update)
+  produced zero shape changes at the plugin author surface we
+  consume.
+
+### Verified
+
+- `definePlugin` and `PluginRouteError` imports unchanged.
+- `PluginDefinition`, `PluginAdminPage`, `PluginDashboardWidget`,
+  and `PluginRoute` shapes remain backward-compatible — new
+  optional fields on `PluginRoute` (`input`, `public`) don't
+  affect us.
+- `tsc --noEmit` passes against `emdash@^0.15.0`.
+- Build emits identical bundle sizes (configured.js 54KB,
+  admin.js 43KB, sandbox-entry.js 27KB; WASM kept external).
+- `peerDep` range `>=0.7.0` stays permissive — tightening it
+  would force older hosts to upgrade for installation reasons
+  rather than functional ones.
+
+### Not changed (deliberately)
+
+- **No source-code refactor.** EmDash's i18n work (menus,
+  taxonomies, bylines) lives at the data-layer rows we don't
+  consume. The bridge's `EmdashDocument` shape (route, title,
+  description, canonical, lang, alternates, meta, schema, body)
+  is still the same projection.
+- **Sandbox bundle caps**: not engaged today (workspace-local
+  install at Aeptus, no marketplace distribution). Current
+  bundle sizes remain lean.
+- **`@emdash-cms/plugin-types` direct import**: still imports
+  manifest-shape via the `emdash` umbrella. The optional
+  peerDep declaration added in 0.8.15 is sufficient signaling
+  until we touch the manifest surface for real.
+
 ## [0.8.15] - 2026-05-06
 
 Plugin-only release tracking EmDash 0.11.x compatibility. The
