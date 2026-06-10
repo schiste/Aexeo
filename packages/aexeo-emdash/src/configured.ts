@@ -338,15 +338,80 @@ interface BlockResponse {
 // content) hang off ctx directly. We use a permissive type because
 // emdash's full RouteContext type pulls in @emdash-cms/core that
 // the package doesn't take as a hard peer dep.
+//
+// Permissive at the *input* layer because emdash 0.17 reaches this
+// endpoint with empty / partial bodies on admin and widget
+// hydration paths. The compile-time BlockInteraction shape no
+// longer matches the runtime reality, so the route normalizes
+// every entry through normalizeInteraction() before dispatch.
 interface RouteContext extends SandboxCtx {
-  input: BlockInteraction;
+  input?: unknown;
+}
+
+/**
+ * Coerce raw `ctx.input` (which emdash 0.17 may deliver as
+ * undefined, an empty object, or a partial interaction during
+ * admin/widget hydration) into a well-shaped BlockInteraction.
+ *
+ * Defaults follow Aeptus's hardening suggestion:
+ * - Missing/non-object → `page_load /findings` (the canonical
+ *   landing view).
+ * - `page_load` with missing `page` → `/findings`.
+ * - `block_action` with missing `action_id` → empty string;
+ *   falls through to `notFound("")` rather than throwing.
+ * - `form_submit` with missing `values` → empty object;
+ *   downstream code already handles "no route picked" via
+ *   the `typeof picked === "string"` guard.
+ */
+function normalizeInteraction(input: unknown): BlockInteraction {
+  if (!input || typeof input !== "object") {
+    return { type: "page_load", page: "/findings" };
+  }
+  const raw = input as Partial<{
+    type: string;
+    page: string;
+    action_id: string;
+    block_id: string;
+    value: unknown;
+    values: Record<string, unknown>;
+  }>;
+  if (raw.type === "page_load") {
+    return {
+      type: "page_load",
+      page:
+        typeof raw.page === "string" && raw.page.length > 0
+          ? raw.page
+          : "/findings",
+    };
+  }
+  if (raw.type === "block_action") {
+    return {
+      type: "block_action",
+      action_id: typeof raw.action_id === "string" ? raw.action_id : "",
+      ...(typeof raw.block_id === "string" ? { block_id: raw.block_id } : {}),
+      value: raw.value,
+    };
+  }
+  if (raw.type === "form_submit") {
+    return {
+      type: "form_submit",
+      action_id: typeof raw.action_id === "string" ? raw.action_id : "",
+      ...(typeof raw.block_id === "string" ? { block_id: raw.block_id } : {}),
+      values:
+        raw.values && typeof raw.values === "object"
+          ? (raw.values as Record<string, unknown>)
+          : {},
+    };
+  }
+  // Unknown / missing type — treat as the canonical landing.
+  return { type: "page_load", page: "/findings" };
 }
 
 async function handleAdminRoute(
   ctx: RouteContext,
   collections: readonly string[],
 ): Promise<BlockResponse> {
-  const body = ctx.input;
+  const body = normalizeInteraction(ctx.input);
   if (body.type === "page_load") {
     return handlePageLoad(ctx, body.page);
   }

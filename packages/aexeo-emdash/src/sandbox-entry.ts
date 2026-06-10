@@ -49,10 +49,64 @@ export type BlockInteraction =
 // invokeRoute(): { input, request: serializedRequest, requestMeta }.
 // We only consume `input` (the BlockInteraction body); the others
 // are surfaced for forward compat.
+//
+// `input` is typed as unknown because emdash 0.17 may deliver
+// undefined / partial bodies during admin and widget hydration
+// paths; normalizeInteraction() coerces every entry into a valid
+// BlockInteraction before dispatch.
 export interface RouteInput {
-  input: BlockInteraction;
+  input?: unknown;
   request?: unknown;
   requestMeta?: unknown;
+}
+
+/**
+ * Coerce raw route-handler input into a well-shaped
+ * BlockInteraction. See configured.ts for the rationale and the
+ * canonical defaults — this is the sandboxed-entry mirror of the
+ * same helper.
+ */
+function normalizeInteraction(input: unknown): BlockInteraction {
+  if (!input || typeof input !== "object") {
+    return { type: "page_load", page: "/findings" };
+  }
+  const raw = input as Partial<{
+    type: string;
+    page: string;
+    action_id: string;
+    block_id: string;
+    value: unknown;
+    values: Record<string, unknown>;
+  }>;
+  if (raw.type === "page_load") {
+    return {
+      type: "page_load",
+      page:
+        typeof raw.page === "string" && raw.page.length > 0
+          ? raw.page
+          : "/findings",
+    };
+  }
+  if (raw.type === "block_action") {
+    return {
+      type: "block_action",
+      action_id: typeof raw.action_id === "string" ? raw.action_id : "",
+      ...(typeof raw.block_id === "string" ? { block_id: raw.block_id } : {}),
+      value: raw.value,
+    };
+  }
+  if (raw.type === "form_submit") {
+    return {
+      type: "form_submit",
+      action_id: typeof raw.action_id === "string" ? raw.action_id : "",
+      ...(typeof raw.block_id === "string" ? { block_id: raw.block_id } : {}),
+      values:
+        raw.values && typeof raw.values === "object"
+          ? (raw.values as Record<string, unknown>)
+          : {},
+    };
+  }
+  return { type: "page_load", page: "/findings" };
 }
 
 // What we actually thread through the dispatch helpers — the
@@ -76,25 +130,26 @@ async function handleAdminRoute(
   input: RouteInput,
   ctx: SandboxCtx,
 ): Promise<BlockResponse> {
+  const body = normalizeInteraction(input?.input);
   ctx.log?.info?.(
-    `aexeo route: type=${input.input?.type} page=${(input.input as { page?: string })?.page ?? ""}`,
+    `aexeo route: type=${body.type} page=${body.type === "page_load" ? body.page : ""}`,
   );
-  const dispatch: DispatchCtx = { body: input.input, kv: ctx.kv, ctx };
-  if (dispatch.body.type === "page_load") {
-    return handlePageLoad(dispatch, dispatch.body.page);
+  const dispatch: DispatchCtx = { body, kv: ctx.kv, ctx };
+  if (body.type === "page_load") {
+    return handlePageLoad(dispatch, body.page);
   }
-  if (dispatch.body.type === "block_action") {
+  if (body.type === "block_action") {
     return handleBlockAction(
       dispatch,
-      dispatch.body.action_id,
-      dispatch.body.value,
+      body.action_id,
+      body.value,
     );
   }
-  if (dispatch.body.type === "form_submit") {
+  if (body.type === "form_submit") {
     return handleFormSubmit(
       dispatch,
-      dispatch.body.action_id,
-      dispatch.body.values,
+      body.action_id,
+      body.values,
     );
   }
   return handlePageLoad(dispatch, "findings");
