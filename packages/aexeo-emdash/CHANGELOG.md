@@ -6,6 +6,49 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.17] - 2026-05-29
+
+Hotfix release. Closes the production admin-route regression
+Aeptus reported on 0.8.16 + emdash@0.17.2.
+
+### Fixed
+
+- **`TypeError: Cannot read properties of undefined (reading 'type')`
+  at `/_emdash/api/plugins/aexeo-emdash/admin`.** The legacy
+  Block Kit admin route assumed `ctx.input` is always a complete
+  `BlockInteraction`. EmDash 0.17 reaches the endpoint with
+  empty / partial bodies on admin and widget hydration paths;
+  the first `body.type === "page_load"` read crashed on
+  undefined.
+  Fix: added `normalizeInteraction(input: unknown): BlockInteraction`
+  at the top of dispatch in both `configured.ts` (production-hit
+  path) and `sandbox-entry.ts` (same bug shape in the sandbox-
+  bundled flavor). Defaults follow Aeptus's hardening
+  suggestion:
+  - Missing / non-object input → `page_load /findings`.
+  - `page_load` with missing or empty `page` → `/findings`.
+  - `block_action` with missing `action_id` → `""` (falls
+    through to `notFound("")` rather than throwing).
+  - `form_submit` with missing `values` → `{}` (downstream
+    code already guards "no route picked").
+  Verified against 10 edge-case inputs (undefined, null, empty
+  object, missing/empty page, missing action_id, missing
+  values, unknown type, string input, valid payload) — all
+  produce the expected default without throwing.
+- **`RouteContext` / `RouteInput` types loosened.** `input`
+  goes from `BlockInteraction` to `unknown` because the
+  upstream guarantee from emdash 0.17 is genuinely weaker. The
+  compile-time shape now lives inside the normalizer's return
+  type, where it can be enforced uniformly across both
+  handlers.
+
+### Bundle deltas
+
+- `configured.js` +985 bytes
+- `sandbox-entry.js` +940 bytes
+- `admin.js` unchanged (React admin pages don't include the
+  Block Kit admin route)
+
 ## [0.8.16] - 2026-05-29
 
 Plugin-only release confirming source-level compatibility with
