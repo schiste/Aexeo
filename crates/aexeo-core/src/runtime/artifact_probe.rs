@@ -209,29 +209,54 @@ mod tests {
                     }
                     Err(_) => continue,
                 };
+                // The accepted socket must be blocking. Whether O_NONBLOCK is
+                // inherited from a non-blocking listener is platform- and
+                // kernel-dependent; when it is, `read` returns WouldBlock
+                // before the request bytes have arrived, `read_size` becomes
+                // 0, and the connection is dropped without a response. That
+                // race is the second half of this fixture's flakiness.
+                let _ = stream.set_nonblocking(false);
                 let mut buffer = [0u8; 1024];
                 let read_size = stream.read(&mut buffer).unwrap_or(0);
                 if read_size == 0 {
                     continue;
                 }
                 let request = String::from_utf8_lossy(&buffer[..read_size]);
-                let path = request
-                    .split_whitespace()
-                    .nth(1)
+                let mut parts = request.split_whitespace();
+                let method = parts.next().unwrap_or("GET").to_ascii_uppercase();
+                let path = parts
+                    .next()
                     .unwrap_or("/")
                     .trim_start_matches('/')
                     .to_string();
+                // A HEAD response carries the headers of the equivalent GET
+                // but no body. `Content-Length` still describes the body a GET
+                // would return. Replying to HEAD with a body makes the client
+                // read those bytes as a second, unsolicited response on the
+                // connection, which shows up as an intermittent
+                // `UnexpectedMessage` or a silently empty result — this
+                // probe issues HEAD for every candidate artifact path.
+                let is_head = method == "HEAD";
                 let response = match responses.get(&path) {
-                    Some((status, content_type, body)) => format!(
-                        "HTTP/1.1 {} OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n{}",
-                        status,
-                        content_type,
-                        body.len(),
-                        body
-                    ),
-                    None => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_string(),
+                    Some((status, content_type, body)) => {
+                        let mut head = format!(
+                            "HTTP/1.1 {} OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            status,
+                            content_type,
+                            body.len()
+                        );
+                        if !is_head {
+                            head.push_str(body);
+                        }
+                        head
+                    }
+                    None => {
+                        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            .to_string()
+                    }
                 };
                 let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
             }
         });
         (base_url, keep_running, handle)
@@ -292,5 +317,65 @@ mod tests {
             probed.contains(&"about.md.txt".to_string()),
             "manifest-listed paths should be probed even when not in fallback list"
         );
+    }
+
+    /// Regression: the probe issues HEAD for every candidate artifact path,
+    /// and the fixture server used to reply with a body. A client that asked
+    /// for HEAD and received one reads those bytes as a second, unsolicited
+    /// response on the connection, which surfaced as an intermittent failure
+    /// in `probe_picks_up_paths_from_manifest_json` — roughly one run in
+    /// fourteen, and only under load.
+    ///
+    /// Assert the wire behaviour directly with a raw socket rather than
+    /// through the probe, so the failure mode is pinned precisely: the
+    /// `Content-Length` header must still describe the body a GET would
+    /// return, but no body may follow it for HEAD.
+    #[test]
+    fn fixture_server_omits_the_body_for_head_but_keeps_content_length() {
+        let mut responses = std::collections::BTreeMap::new();
+        responses.insert(
+            "facts.json".to_string(),
+            (200, "application/json", "{\"version\": 1}"),
+        );
+        let (base_url, keep, handle) = spawn_probe_server(responses);
+
+        let raw_head = send_raw_request(&base_url, "HEAD /facts.json HTTP/1.1");
+        assert!(
+            raw_head.contains("Content-Length: 14"),
+            "HEAD must still advertise the GET body length: {raw_head}"
+        );
+        assert!(
+            !raw_head.contains("{\"version\": 1}"),
+            "a HEAD response must not carry a body: {raw_head}"
+        );
+
+        let raw_get = send_raw_request(&base_url, "GET /facts.json HTTP/1.1");
+        assert!(
+            raw_get.contains("{\"version\": 1}"),
+            "GET must still return the body: {raw_get}"
+        );
+
+        *keep.lock().unwrap() = false;
+        let _ = handle.join();
+    }
+
+    /// Send one request over a fresh socket and return the raw response.
+    fn send_raw_request(base_url: &str, request_line: &str) -> String {
+        use std::io::{Read as _, Write as _};
+        use std::net::TcpStream;
+        use std::time::Duration;
+
+        let address = base_url.trim_start_matches("http://").to_string();
+        let mut stream = TcpStream::connect(address).expect("connect to fixture server");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .expect("set read timeout");
+        stream
+            .write_all(format!("{request_line}\r\nHost: fixture\r\n\r\n").as_bytes())
+            .expect("write request");
+        let mut raw = String::new();
+        // The server closes after one response, so read to EOF.
+        let _ = stream.read_to_string(&mut raw);
+        raw
     }
 }
