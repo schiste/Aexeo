@@ -1,0 +1,10 @@
+{
+  "slug": "aexeo-emdash-host-test",
+  "publisher": "aexeo.example.com",
+  "license": "MIT",
+  "author": { "name": "Aeptus" },
+  "security": { "email": "security@example.com" },
+  "capabilities": ["content:read", "network:request"],
+  "allowedHosts": ["evaluator.test"],
+  "storage": {}
+}

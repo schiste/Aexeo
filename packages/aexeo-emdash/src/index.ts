@@ -197,11 +197,7 @@ export function aexeoPlugin(
             })),
           }),
     },
-    capabilities: [
-      "read:content",
-      "read:schema",
-      "kv:aexeo-baselines",
-    ],
+    capabilities: ["content:read"],
     // adminPages drives the admin sidebar — one nav entry per item.
     // Don't list "/" alongside "/findings": both would render as
     // duplicate "SEO findings" links in the sidebar (0.1.0 / 0.1.1

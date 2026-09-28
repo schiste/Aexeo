@@ -178,7 +178,6 @@ async function buildFindingsPayload(
   }
   findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
 
-  const siteUrl = ctx.site?.url ?? "";
   const routes: RouteSummary[] = [];
   for (const [route, bucket] of perRoute) {
     const stored = documents.get(route);
@@ -189,7 +188,7 @@ async function buildFindingsPayload(
       collection: stored?.meta.collection ?? "",
       id: stored?.meta.id ?? "",
       editUrl: stored ? buildEditUrl(stored.meta) : "",
-      publishedUrl: stored ? buildPublishedUrl(stored.meta, route, siteUrl) : "",
+      publishedUrl: stored?.meta.publicUrl ?? "",
       findingCount: bucket.findings.length,
       errorCount: bucket.errors,
       warningCount: bucket.warnings,
@@ -386,19 +385,4 @@ function buildEditUrl(meta: { collection: string; id: string }): string {
   // emdash's admin edit-content URL pattern: /_emdash/admin/content/<collection>/<id>
   // Stable since at least 0.7.0 — confirmed against the admin source.
   return `/_emdash/admin/content/${encodeURIComponent(meta.collection)}/${encodeURIComponent(meta.id)}`;
-}
-
-function buildPublishedUrl(
-  meta: { status: string; slug: string | null },
-  route: string,
-  siteUrl: string,
-): string {
-  // Only published documents get a public URL; drafts are not
-  // reachable. siteUrl is what emdash exposes via ctx.site.url —
-  // empty string when the host hasn't configured one, in which
-  // case we don't link at all.
-  if (meta.status !== "published") return "";
-  if (siteUrl === "") return "";
-  const trimmed = siteUrl.endsWith("/") ? siteUrl.slice(0, -1) : siteUrl;
-  return `${trimmed}${route}`;
 }

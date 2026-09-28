@@ -216,10 +216,8 @@ async function handleBlockAction(
 }
 
 async function handleRefresh(ctx: DispatchCtx): Promise<BlockResponse> {
-  // The route handler runs in a live request context, so the bridge
-  // bindings (kv, http, content) are valid here — unlike afterSave
-  // which fires post-response when bindings are stale. This is where
-  // the actual eval flow lives for the sandboxed plugin path.
+  // The route handler runs in a live request context. Refresh remains
+  // the full-site evaluation path; afterSave updates the changed entry.
   const sandboxEvaluator: EvaluatorFn = async (documents) => {
     const runtime = await readSidecarConfig(ctx.kv);
     if (runtime === null) {
@@ -301,10 +299,8 @@ async function renderFindingsPage(ctx: DispatchCtx): Promise<BlockResponse> {
     {
       type: "actions",
       elements: [
-        // Refresh is the primary action: emdash 0.7.0's afterSave hook
-        // can't reliably do I/O (post-response bridge invalidation), so
-        // re-evaluation is admin-triggered rather than save-triggered.
-        // Pressing this lists all content via the live in-request bridge,
+        // Refresh evaluates every configured entry. Pressing it lists
+        // content via the live in-request bridge,
         // calls the sidecar /evaluate, and writes findings back to KV.
         {
           type: "button",

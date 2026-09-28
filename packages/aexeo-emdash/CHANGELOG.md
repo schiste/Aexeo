@@ -6,6 +6,37 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.18] - 2026-09-27
+
+Updates the EmDash integration to the current plugin and content APIs.
+
+**Compatibility target:** EmDash `>=0.41.0 <0.42.0`.
+
+### Fixed
+
+- **Sandbox access declaration:** replace obsolete capability strings with
+  `content:read` and conditional `network:request`, scoped to the configured
+  evaluator host. Remove unused schema, artifact, KV, and IndexNow host grants.
+- **Typed `blocks` content:** distinguish EmDash block compositions from
+  Portable Text and adapt their editorial strings into the evaluator's text
+  format instead of discarding them.
+- **Routes and translations:** use EmDash's `getPublicUrl()` and
+  `getTranslations()` APIs for collection patterns, locale paths, trailing
+  slash policy, and hreflang alternates. Keep draft and unroutable entries
+  under stable collection/ID keys, and link only to URLs the host resolves.
+- **Sandbox save evaluation:** `content:afterSave` now persists and evaluates
+  the saved item through the configured sidecar, matching configured mode.
+- **Route migrations:** remove obsolete document and finding entries when a
+  document's resolved route changes or a successful refresh no longer finds
+  an entry in the selected collections.
+
+### Changed
+
+- Bump the EmDash peer and development ranges to `0.41.x`; update the README
+  and install guide to name the supported range and sandbox save behavior.
+- Add Vitest coverage using EmDash's official plugin runtime test host for
+  sandbox hooks, blocks extraction, resolved URLs, and translation alternates.
+
 ## [0.8.17] - 2026-05-29
 
 Hotfix release. Closes the production admin-route regression

@@ -10,11 +10,10 @@ import type { EmdashDocument, Finding } from "./types.js";
 // minimal-surface-area client to that Worker.
 //
 // Auth model: shared secret in an Authorization: Bearer header. The
-// secret is configured via `wrangler secret put EVAL_TOKEN` on the
-// sidecar and inlined into this bundle at build time via esbuild
-// defines (see scripts/build-bundle.mjs). The sandbox never sees a
-// rotateable secret at runtime; rotation requires a plugin rebuild
-// AND a wrangler secret update.
+// sidecar receives its secret through `wrangler secret put EVAL_TOKEN`;
+// the plugin stores the sidecar URL and matching token in its private
+// EmDash KV namespace through the Setup page, so token rotation does
+// not require rebuilding the plugin.
 
 export interface SidecarHttp {
   fetch(
@@ -40,9 +39,8 @@ export type SidecarResult =
   | { ok: true; findings: Finding[] }
   | {
       ok: false;
-      // We surface the failure shape so the policy hook in plugin.ts
-      // can decide whether to swallow, log, or rethrow. A coarser
-      // boolean would force every caller to lose context.
+      // Preserve the failure detail so each caller can decide whether
+      // to display, log, or retry it.
       reason:
         | "network_error"
         | "auth_error"

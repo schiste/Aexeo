@@ -3,10 +3,10 @@ import type { EmdashDocument, Finding } from "./types.js";
 import {
   type EmdashContentItem,
   type EmdashContentMeta,
-  adaptContentItem,
-  contentItemToEmdashDocument,
+  adaptContentItemWithContext,
 } from "./adapter.js";
 import type { SidecarHttp } from "./sidecar.js";
+import { evaluateViaSidecar } from "./sidecar.js";
 
 // What we actually store at documentKey(route): the WASM-shaped doc
 // plus the metadata (id, collection, slug, status, title) the admin
@@ -29,54 +29,38 @@ export interface StoredDocument {
 // before deploying: overly broad capabilities re-create the WordPress
 // failure mode the emdash sandbox was designed to prevent.
 //
-// emdash 0.7.0's bridge only recognizes a small set of literal
-// capabilities (read:content, read:schema, write:content, write:artifacts,
-// kv:<namespace>, network:fetch, network:fetch:any, email:send, ...).
-// Hypothetical host-pinned forms like `network:fetch:<host>` are silently
-// ignored — host enforcement is split into a literal capability AND a
-// separate `allowedHosts` field on the descriptor. Sidecar reachability
-// is therefore a two-part declaration: include "network:fetch" here and
-// list the sidecar host plus IndexNow's host in allowedHosts (computed
-// in src/index.ts aexeoPlugin()).
-const baseCapabilities = [
-  "read:content",
-  "read:schema",
-  "write:artifacts:public/llms.txt",
-  "write:artifacts:public/llms-full.txt",
-  "write:artifacts:public/facts.json",
-  "write:artifacts:public/*.md.txt",
-  "kv:aexeo-baselines",
-] as const;
+// The sandbox reads CMS content and, when configured, calls its evaluator
+// sidecar. Plugin KV does not need a separate capability, and Aexeo does
+// not write schema or content artifacts.
+const baseCapabilities = ["content:read"] as const;
 
 // Compute the capability list. When the consumer declares an
 // evaluatorHost (the public host of their deployed sidecar Worker),
-// we add the literal network:fetch capability that emdash's bridge
+// we add the network:request capability that EmDash's bridge
 // recognizes; the host-level allow-list is enforced separately via
 // the descriptor's allowedHosts field.
 export function buildCapabilities(
   evaluatorHost: string | null,
 ): readonly string[] {
-  if (evaluatorHost === null) {
+  const host = normalizeHost(evaluatorHost);
+  if (host === null) {
     return baseCapabilities;
   }
-  return [...baseCapabilities, "network:fetch"];
+  return [...baseCapabilities, "network:request"];
 }
 
-// Hosts the plugin is permitted to fetch from. Pairs with the
-// network:fetch capability — both are required for outbound HTTP.
-// emdash 0.7.x reads the descriptor once at integration setup, so the
-// allow-list cannot change after dev-server / build start; the URL the
-// plugin actually fetches is read from KV at runtime, but the host part
-// must already be on this list. Site operators declare it once via
-// aexeoPlugin({ evaluatorHost }) in astro.config.mjs.
+// The evaluator sidecar is the sandbox's only HTTP dependency. The
+// host-side IndexNow tool does not use the sandbox HTTP bridge.
 export function buildAllowedHosts(
   evaluatorHost: string | null,
 ): readonly string[] {
-  const hosts: string[] = ["api.indexnow.org"];
-  if (evaluatorHost !== null && evaluatorHost.length > 0) {
-    hosts.push(evaluatorHost);
-  }
-  return hosts;
+  const host = normalizeHost(evaluatorHost);
+  return host === null ? [] : [host];
+}
+
+function normalizeHost(evaluatorHost: string | null): string | null {
+  const host = evaluatorHost?.trim() ?? "";
+  return host.length === 0 ? null : host;
 }
 
 // Backwards-compat re-export for existing imports. New callers should
@@ -107,10 +91,10 @@ export interface KvNamespace {
 
 // KV keys for runtime-managed sidecar configuration. Operators paste
 // their values once via the Setup admin page — see renderSetupPage in
-// sandbox-entry.ts. The plugin reads them on every Refresh; rotation
-// is a single Setup-page edit, no rebuild or redeploy.
+// sandbox-entry.ts. The plugin reads them on each save and Refresh;
+// rotation is a single Setup-page edit, no rebuild or redeploy.
 //
-// Whyever-not env vars / build-time inlining: emdash 0.7.x doesn't
+// Whyever-not env vars / build-time inlining: the sandbox does not
 // surface plugin descriptor options to the sandbox at runtime, and
 // the alternative (esbuild defines fed by env vars at the consumer's
 // `npm run build:bundle`) forces every site operator to add a
@@ -147,11 +131,8 @@ export async function writeSidecarConfig(
   await kv.set(CONFIG_TOKEN_KEY, config.token);
 }
 
-// emdash sandbox ctx shape we depend on. The full shape is broader,
-// but we only thread kv, http, and content through this plugin;
-// declaring this locally keeps the plugin typecheckable without
-// @emdash-cms/core. content.list goes through bridge.contentList
-// which requires the read:content capability (which we declare).
+// EmDash context surface used by the plugin, kept local so this package
+// remains typecheckable without importing the full host package.
 export interface ContentList {
   items: EmdashContentItem[];
   cursor?: string;
@@ -163,16 +144,16 @@ export interface SandboxContentApi {
     collection: string,
     opts?: { limit?: number; cursor?: string },
   ): Promise<ContentList>;
+  getPublicUrl(collection: string, id: string): Promise<string | null>;
+  getTranslations: import("./adapter.js").ContentUrlApi["getTranslations"];
 }
 
 export interface SandboxCtx {
   kv: KvNamespace;
   http: SidecarHttp;
   content: SandboxContentApi;
-  // emdash's wrapper injects site info at wrapper-generation time
-  // (see @emdash-cms/cloudflare/dist/sandbox/index.mjs:800). The
-  // `url` field comes from the `emdash:site_url` option, empty when
-  // unset. Used by the React findings page to construct public URLs.
+  // EmDash injects site info; locale is the fallback for rows without
+  // an explicit content locale.
   site?: { url: string; name?: string; locale?: string };
   log?: {
     info(msg: string, data?: unknown): void;
@@ -184,43 +165,35 @@ export interface SandboxCtx {
 // Shape emdash's runtime hands to content:afterSave handlers. The
 // host invokes hooks with `{content, collection, isNew}` (see
 // emdash/dist/astro/middleware.mjs `runAfterSaveHooks`). content is
-// the raw ContentItem row from the storage table — we adapt it to
-// the WASM bridge's EmdashDocument shape via contentItemToEmdashDocument.
+// the raw ContentItem row from storage, which we adapt to the WASM
+// bridge's EmdashDocument shape with the host URL helpers.
 export interface ContentAfterSaveEvent {
   content: EmdashContentItem;
   collection: string;
   isNew: boolean;
 }
 
-// (Note: a previous version of this module exposed an
-// EvaluationFailurePolicy hook for sandboxed afterSave. With the
-// configured plugin path, afterSave runs in the host's request
-// context and exceptions propagate naturally — there's nothing for a
-// policy hook to decide. The hook will be reintroduced if/when the
-// sandboxed afterSave bug is fixed upstream and we re-enable that
-// path. See git log for the previous design.)
-
-// emdash 0.7.0's sandbox runner invokes content:afterSave fire-and-
-// forget after the request response is sent. The bridge bindings the
-// sandbox uses for KV, HTTP, and content access are tied to the
-// originating request's context — and by the time our hook runs they
-// are stale: `await ctx.kv.get(...)` and `await ctx.http.fetch(...)`
-// hang forever with no error surfacing (the host's wallTimeMs catch
-// also doesn't fire, even after minutes). We verified this with a
-// stepwise throwing probe: synchronous code before the first await
-// runs fine; anything past the first bridge call never returns.
-//
-// Because we can't perform I/O here, the hook can't actually trigger
-// evaluation. Eval runs from the admin route handler instead — see
-// the "Refresh" button on the findings page in sandbox-entry.ts. The
-// hook is kept as a no-op so we still appear in the loaded plugin
-// log line and can flip back to active mode the day emdash fixes
-// the post-response bridge contract (likely 0.8.x).
+// EmDash 0.41 keeps the sandbox bridge available for afterSave work.
+// Use the same persistence path as configured mode and evaluate through
+// the sidecar that keeps WASM out of the isolate.
 export async function handleAfterSave(
-  _event: ContentAfterSaveEvent,
-  _ctx: SandboxCtx,
+  event: ContentAfterSaveEvent,
+  ctx: SandboxCtx,
 ): Promise<void> {
-  // No-op. Sandboxed mode only. See block above.
+  const runtime = await readSidecarConfig(ctx.kv);
+  if (runtime === null) {
+    ctx.log?.warn?.(
+      "Aexeo afterSave skipped: configure the evaluator URL and token on the Setup page",
+    );
+    return;
+  }
+  await handleAfterSaveConfigured(event, ctx, (documents) =>
+    evaluateViaSidecar(
+      ctx.http,
+      { url: runtime.url, authToken: runtime.token },
+      documents,
+    ),
+  );
 }
 
 // Parameterized afterSave for the configured plugin path. Runs in
@@ -239,16 +212,18 @@ export async function handleAfterSaveConfigured(
   evaluator: EvaluatorFn,
   suppressionFilter?: SuppressionFilter,
 ): Promise<void> {
-  const adapted = adaptContentItem(event.content);
+  const adapted = await adaptContentItemWithContext(
+    event.content,
+    ctx.content,
+    ctx.site?.locale,
+  );
   const document = adapted.document;
   const { kv, log } = ctx;
 
-  // Persist both the WASM-shaped document and the admin metadata.
-  // The metadata (id, collection, status) lets the React findings
-  // page build edit URLs into emdash and public URLs to the live
-  // site without an extra DB lookup at render time.
+  // Persist the WASM-shaped document and metadata, including the exact
+  // public URL resolved by EmDash, so the admin needs no second lookup.
   const stored: StoredDocument = { document, meta: adapted.meta };
-  await kv.set(documentKey(document.route), stored);
+  await persistDocument(ctx, stored);
 
   const result = await evaluator([document]);
   if (!result.ok) {
@@ -284,9 +259,8 @@ export async function handleAfterSaveConfigured(
 }
 
 // Default set of content collections the plugin sweeps when an admin
-// clicks Refresh. We can't introspect the host's schema from the
-// sandbox bridge in 0.7.0; the user can override this set via the
-// aexeoPlugin({ collections }) factory option once we plumb it.
+// clicks Refresh. The user can override this set via the collection
+// options on aexeoPlugin().
 export const DEFAULT_COLLECTIONS = ["posts", "pages"] as const;
 
 export interface RefreshSummary {
@@ -347,7 +321,7 @@ export async function evaluateAndPersistAll(
     errors: [],
   };
 
-  // 1. Pull every published document from each collection. The bridge
+  // 1. Pull every document from each collection. The bridge
   //    enforces a per-call limit of 100; iterate by cursor so the full
   //    set is collected even on larger sites. Empty collections (or
   //    permissions errors) are tolerated — they accrue to summary.errors.
@@ -363,7 +337,11 @@ export async function evaluateAndPersistAll(
           ...(cursor === undefined ? {} : { cursor }),
         });
         for (const item of page.items) {
-          const adapted = adaptContentItem(item);
+          const adapted = await adaptContentItemWithContext(
+            item,
+            ctx.content,
+            ctx.site?.locale,
+          );
           documents.push(adapted.document);
           documentRoutes.add(adapted.document.route);
           adaptedByRoute.set(adapted.document.route, {
@@ -382,9 +360,8 @@ export async function evaluateAndPersistAll(
   summary.documentsScanned = documents.length;
 
   // 2. Persist documents (with metadata) in KV — the score widget
-  //    and the admin findings page both read these. The meta blob
-  //    is what powers per-route edit URLs and live links in the
-  //    React admin.
+  //    and admin findings page both read these. Metadata carries the
+  //    editor identity and EmDash-resolved public URL.
   for (const stored of adaptedByRoute.values()) {
     await kv.set(documentKey(stored.document.route), stored);
   }
@@ -447,7 +424,84 @@ export async function evaluateAndPersistAll(
     totalAfterSuppression += filtered.length;
   }
   summary.totalFindings = totalAfterSuppression;
+  if (summary.errors.length === 0) {
+    await removeStaleDocuments(ctx, collections, documentRoutes);
+  }
   return summary;
+}
+
+async function persistDocument(
+  ctx: SandboxCtx,
+  stored: StoredDocument,
+): Promise<void> {
+  const route = stored.document.route;
+  const entries = await ctx.kv.list<unknown>("document:");
+  for (const entry of entries) {
+    const previous = toStoredDocument(entry.value);
+    if (
+      previous === null ||
+      previous.document.route === route ||
+      previous.meta.id !== stored.meta.id ||
+      previous.meta.collection !== stored.meta.collection
+    ) {
+      continue;
+    }
+    await ctx.kv.delete(entry.key);
+    await ctx.kv.delete(findingsKey(previous.document.route));
+  }
+  await ctx.kv.set(documentKey(route), stored);
+}
+
+async function removeStaleDocuments(
+  ctx: SandboxCtx,
+  collections: readonly string[],
+  currentRoutes: ReadonlySet<string>,
+): Promise<void> {
+  const scannedCollections = new Set(collections);
+  const entries = await ctx.kv.list<unknown>("document:");
+  for (const entry of entries) {
+    const stored = toStoredDocument(entry.value);
+    if (
+      stored === null ||
+      !scannedCollections.has(stored.meta.collection) ||
+      currentRoutes.has(stored.document.route)
+    ) {
+      continue;
+    }
+    await ctx.kv.delete(entry.key);
+    await ctx.kv.delete(findingsKey(stored.document.route));
+  }
+}
+
+function toStoredDocument(value: unknown): StoredDocument | null {
+  if (value === null || typeof value !== "object") return null;
+  if (
+    "document" in value &&
+    "meta" in value &&
+    value.document !== null &&
+    typeof value.document === "object" &&
+    "route" in value.document &&
+    typeof value.document.route === "string" &&
+    value.meta !== null &&
+    typeof value.meta === "object"
+  ) {
+    return value as StoredDocument;
+  }
+  if ("route" in value && typeof value.route === "string") {
+    const document = value as EmdashDocument;
+    return {
+      document,
+      meta: {
+        id: document.route,
+        collection: "",
+        slug: null,
+        status: "",
+        title: document.title ?? "",
+        publicUrl: null,
+      },
+    };
+  }
+  return null;
 }
 
 export function findingsKey(route: string): string {
@@ -487,34 +541,14 @@ export async function readAllDocuments(
 export async function readAllStoredDocuments(
   kv: KvNamespace,
 ): Promise<StoredDocument[]> {
-  // kv.list returns the parsed values inline — one round-trip, no
-  // get-per-key follow-up. We tolerate two storage shapes for
-  // backwards-compat: pre-0.2.0 entries stored a bare EmdashDocument
-  // (no meta); 0.2.0+ entries store {document, meta}. The narrower
-  // legacy shape gets a synthesized minimal meta so callers don't
-  // have to special-case it.
+  // kv.list returns parsed values inline. Older installations stored a
+  // bare EmdashDocument; toStoredDocument adds minimal metadata for those
+  // entries so readers can continue to render them during migration.
   const entries = await kv.list<unknown>("document:");
   const out: StoredDocument[] = [];
   for (const entry of entries) {
-    const value = entry.value;
-    if (value === null || typeof value !== "object") continue;
-    if ("document" in value && "meta" in value) {
-      out.push(value as StoredDocument);
-      continue;
-    }
-    if ("route" in value) {
-      const document = value as EmdashDocument;
-      out.push({
-        document,
-        meta: {
-          id: document.route,
-          collection: "",
-          slug: null,
-          status: "",
-          title: document.title ?? "",
-        },
-      });
-    }
+    const stored = toStoredDocument(entry.value);
+    if (stored !== null) out.push(stored);
   }
   return out;
 }

@@ -31,7 +31,8 @@ when it's actually needed.
   (`@astrojs/cloudflare` + `@emdash-cms/cloudflare`'s `sandbox()`
   runner is fine — sandboxed plugins use Worker Loader, configured
   plugins don't, but both adapters import cleanly).
-- emdash 0.7.0 or later as a peer dependency.
+- EmDash `>=0.41.0 <0.42.0` as a peer dependency. The integration
+  coverage targets `0.41.0` with EmDash's official plugin test host.
 
 ### Install
 
@@ -106,9 +107,8 @@ no sidecar to deploy.
    — toast says "Refreshed N routes (M findings across K documents)"
    and the table populates.
 
-4. Save a document: the `content:afterSave` hook auto-evaluates that
-   one document; refresh the findings page and that route's findings
-   are updated. (The dashboard widget also picks up the new score.)
+4. Save a document: `content:afterSave` evaluates that document. Reload
+   the findings page to see the updated row and dashboard score.
 
 ### Production deploy
 
@@ -171,8 +171,8 @@ Pre-flight before bumping:
 
 1. Look up the plugin version's tested emdash range in our
    [CHANGELOG](./CHANGELOG.md). The latest plugin version's
-   `Compatibility` line says e.g. "tested against emdash 0.7.0
-   through 0.8.0." If the emdash version you want is **inside that
+   `Compatibility` line names the supported EmDash range and test-host
+   target. If the EmDash version you want is **inside that
    range**, the bump is safe. If it's **above the range**, treat it
    as untested.
 2. If untested, scan the emdash release notes for breaking changes
@@ -181,7 +181,7 @@ Pre-flight before bumping:
    - Hook signatures (`content:afterSave`, etc.)
    - Block Kit element schemas (banner variants, button styles,
      table column formats)
-   - Capability validation strings (`read:content`, `network:fetch`)
+   - Capability names (`content:read`, `network:request`)
    - The `definePlugin` API
    - The `createPlugin` / configured-plugin descriptor contract
    If any of those changed, expect to bump the plugin too.
@@ -240,9 +240,8 @@ Trade-offs vs. configured mode:
   prevents the plugin from ever reading host state directly.
 - **Con**: separate sidecar Worker to deploy and maintain; an
   EVAL_TOKEN to rotate; a Setup admin page to configure. The
-  `content:afterSave` hook is also non-functional in emdash 0.7.x's
-  sandbox (post-response bridge invalidation — known upstream issue);
-  evaluation is manual-Refresh-only.
+  `content:afterSave` hook evaluates through the sidecar after you save
+  its URL and token on the Setup page. Refresh still runs a full-site sweep.
 
 ```js
 // astro.config.mjs (sandboxed mode)

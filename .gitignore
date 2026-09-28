@@ -1,3 +1,29 @@
+node_modules/
+dist/
+build/
+target/
+.aexeo-reports/
+
+# Local research scratch — paper PDFs and HTML downloads. Always
+# session-local, never committed.
+tmp/
+
+# macOS filesystem sidecars. On a non-HFS volume (external exFAT drive,
+# network share, Docker bind mount) macOS writes `._<name>` resource forks
+# next to every real file. They are untracked noise, they show up as
+# untracked paths in `git status`, and tools that glob for `*.ts` collect
+# them as phantom duplicates of real source files.
+.DS_Store
+._*
+
+# Tooling scratch directories. These are local agent/tooling state, not
+# part of the project, and must never be committed.
+.aethyme/
+.chau7/
+
+# Python leftovers from before the workspace moved to Rust. Kept ignored so
+# a stray local Python experiment cannot be committed by accident, but
+# nothing in this repository is Python.
 __pycache__/
 *.py[cod]
 *.pyo
@@ -6,15 +32,4 @@ __pycache__/
 .mypy_cache/
 .venv/
 venv/
-node_modules/
-dist/
-build/
 *.egg-info/
-.seogeo-reports/
-.aexeo-reports/
-target/
-.DS_Store
-
-# Local research scratch — paper PDFs and HTML downloads. Always
-# session-local, never committed.
-tmp/

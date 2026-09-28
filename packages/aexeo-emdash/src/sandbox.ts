@@ -8,9 +8,7 @@
 //     future public release.
 //   - CON: requires deploying a sidecar Worker (the WASM evaluator
 //     can't fit the sandbox's 50ms cpuMs budget). Adds an EVAL_TOKEN
-//     lifecycle, a Setup admin page, and a workers.dev URL. Also
-//     hits the upstream content:afterSave bridge bug (refresh becomes
-//     manual-only) until emdash 0.8.x lands a fix.
+//     lifecycle, a Setup admin page, and a workers.dev URL.
 //
 // For Aexeo's own deploys, prefer aexeoPlugin() (configured) — see
 // src/configured.ts. Use this factory only when you need the

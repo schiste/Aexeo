@@ -1,0 +1,6 @@
+{
+  "name": "@aeptus/aexeo-emdash-plugin-host-test",
+  "private": true,
+  "version": "0.8.18",
+  "type": "module"
+}

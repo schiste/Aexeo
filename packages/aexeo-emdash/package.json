@@ -1,6 +1,6 @@
 {
   "name": "@aeptus/aexeo-emdash",
-  "version": "0.8.17",
+  "version": "0.8.18",
   "description": "Aexeo SEO/GEO content evaluator as an emdash plugin",
   "license": "MIT",
   "author": "Aeptus",
@@ -61,12 +61,13 @@
     "build:bundle": "node scripts/build-bundle.mjs",
     "build": "npm run sync-version && npm run build:wasm && npm run build:ts && npm run build:bundle",
     "typecheck": "npm run sync-version && tsc --noEmit",
+    "test": "vitest run",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
     "@emdash-cms/core": "*",
     "@emdash-cms/plugin-types": "*",
-    "emdash": ">=0.7.0",
+    "emdash": ">=0.41.0 <0.42.0",
     "react": "^18.0.0 || ^19.0.0"
   },
   "peerDependenciesMeta": {
@@ -86,9 +87,12 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.14",
-    "emdash": "^0.15.0",
+    "@emdash-cms/plugin-test": "^0.2.4",
+    "emdash": "^0.41.0",
     "esbuild": "^0.28.0",
     "react": "^19.2.5",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "vite": "^8.0.0",
+    "vitest": "^4.1.0"
   }
 }

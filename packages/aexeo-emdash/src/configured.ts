@@ -5,7 +5,7 @@
 // from npm, add `aexeoPlugin()` to astro.config, done.
 //
 // Runs in the host's request context, so:
-//   - content:afterSave fires for real (no post-response bridge bug)
+//   - content:afterSave can use host URL and translation APIs directly
 //   - WASM eval happens in-process (no sidecar fetch)
 //   - kv/http/content access goes through emdash directly (no bridge)
 //
@@ -209,14 +209,12 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
 
   // Capability enforcement for configured plugins is informational;
   // emdash's host plugins (formsPlugin, etc.) declare what they need
-  // so the admin/audit surface can display it. Note: emdash's
-  // definePlugin validates the capability strings against a closed
-  // set — read:content, network:fetch, etc. Hypothetical strings
-  // like kv:aexeo-baselines aren't accepted there.
+  // so the admin/audit surface can display it. Use EmDash's canonical
+  // capability names for consistency with sandbox descriptors.
   return definePlugin({
     id: "aexeo-emdash",
     version: PACKAGE_VERSION,
-    capabilities: ["read:content"],
+    capabilities: ["content:read"],
     hooks: {
       // afterSave processes one saved document at a time — collections
       // list isn't needed here. The hook always runs regardless of

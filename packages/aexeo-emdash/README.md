@@ -47,12 +47,15 @@ troubleshooting list, see [INSTALL.md](./INSTALL.md).
   answer-pack, external-trust dimensions). Banner appears below 60.
 - **Refresh button**: re-evaluate every document in the configured
   collections (`posts`, `pages` by default).
-- **Auto-evaluate on save**: emdash's `content:afterSave` hook fires,
-  re-evaluates the saved document, updates the findings table.
+- **Auto-evaluate on save**: EmDash's `content:afterSave` hook evaluates
+  the saved document and updates its findings. Sandboxed installs need a
+  configured evaluator sidecar; configured installs run evaluation in-process.
 
 ## Compatibility
 
-- emdash `>= 0.7.0` (peer dep)
+- EmDash `>= 0.41.0 < 0.42.0` (peer dependency; current supported range)
+- Runtime integration coverage targets EmDash `0.41.0` via the official
+  `@emdash-cms/plugin-test` host.
 - Cloudflare Workers via `@astrojs/cloudflare`. The plugin uses
   Cloudflare-specific APIs and silently no-ops on the Node adapter.
 - WASM eval ships with the package; the consumer's Vite/Wrangler
