@@ -122,9 +122,15 @@ pub fn run_checks_for_site_profiled(site: &crate::site::Site, config: &Config) -
         &mut findings,
         || run_surface_rules(site, config),
     );
+    // `well_known_rules` emits SRF rules, and the registry files those under
+    // the `surfaces` group. The timing label has to match, or the performance
+    // artifact grows a `well_known` bucket that `aexeo-cli rules` and
+    // `docs/rules.md` never mention. The stage still runs separately — it is
+    // a distinct execution step and a distinct `[checks] well_known` switch —
+    // it just reports under the group its findings belong to.
     time_rule_group(
         rules.checks.get("well_known").copied().unwrap_or(true),
-        "well_known",
+        "surfaces",
         &mut rule_timings,
         &mut findings,
         || {
@@ -224,6 +230,8 @@ pub fn can_run_native_static_audit(config: &Config) -> bool {
                     | "sitemap"
                     | "llm"
                     | "surfaces"
+                    | "well_known"
+                    | "headers"
                     | "schema"
                     | "content"
                     | "editorial"
@@ -270,6 +278,37 @@ mod tests {
             ..Config::default()
         };
         assert!(can_run_native_static_audit(&config));
+    }
+
+    /// Every group name written into a performance artifact must be a group
+    /// the registry actually knows about, so `RuleTiming.group` and
+    /// `aexeo-cli rules` / `docs/rules.md` cannot disagree.
+    ///
+    /// The `well_known` stage used to be timed under its own name even though
+    /// the rules it emits are registered under `surfaces`, which is how a
+    /// bucket appeared in the perf artifact that nothing documented.
+    #[test]
+    fn rule_timing_group_names_are_registered_groups() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        fs::write(
+            root.join("index.html"),
+            "<html><head><title>x</title><meta name=\"description\" content=\"y\"><link rel=\"canonical\" href=\"https://example.com/\"></head><body><h1>x</h1></body></html>",
+        )
+        .unwrap();
+        let site = crate::site::load_site(root).unwrap();
+        let result = super::run_checks_for_site_profiled(&site, &Config::default());
+        let registered: Vec<&str> = crate::registry::builtin_rule_groups()
+            .iter()
+            .map(|group| group.name)
+            .collect();
+        for timing in &result.rule_timings {
+            assert!(
+                registered.contains(&timing.group.as_str()),
+                "performance artifact reports group {:?}, which is not a registered rule group; known groups: {registered:?}",
+                timing.group
+            );
+        }
     }
 
     #[test]

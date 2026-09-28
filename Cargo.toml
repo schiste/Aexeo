@@ -11,6 +11,10 @@ resolver = "2"
 [workspace.package]
 version = "0.0.20"
 edition = "2024"
+# Minimum supported Rust version. `edition = "2024"` already requires 1.85;
+# stating it explicitly turns "your toolchain is too old" into a cargo error
+# naming the requirement, instead of a confusing parse failure.
+rust-version = "1.85"
 authors = ["Christophe Henner"]
 license = "MIT"
 publish = false

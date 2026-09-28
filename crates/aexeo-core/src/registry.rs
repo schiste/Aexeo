@@ -326,13 +326,6 @@ pub fn rule_layers_for_id(rule_id: &str) -> RuleLayers {
     layers
 }
 
-pub fn rule_descriptor_for_id(rule_id: &str) -> Option<&'static RuleDescriptor> {
-    builtin_rule_groups()
-        .iter()
-        .flat_map(|group| group.rules.iter())
-        .find(|descriptor| descriptor.rule_id == rule_id)
-}
-
 pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
     &[
         RuleGroupDefinition {

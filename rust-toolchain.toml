@@ -1,0 +1,14 @@
+# Pinned toolchain for the workspace.
+#
+# The workspace declares `edition = "2024"`, which requires Rust 1.85 or
+# newer. There was no `rust-toolchain.toml` and no `rust-version` in
+# `Cargo.toml`, so a stable-channel regression would have broken every CI run
+# and every contributor's build with no earlier warning and no statement of
+# the minimum supported version.
+#
+# `stable` is pinned rather than a fixed release number: contributors should
+# track the current stable toolchain, and the components below are the ones
+# `scripts/check-code.sh` and `scripts/clippy-strict.sh` actually invoke.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

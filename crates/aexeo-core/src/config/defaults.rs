@@ -13,7 +13,7 @@ pub(super) fn default_canonical_style() -> String {
     "extensionless".to_string()
 }
 pub(super) fn default_audit_log_limit() -> usize {
-    5
+    crate::reporting::DEFAULT_AUDIT_LOG_LIMIT
 }
 pub(super) fn default_browser_engine() -> String {
     "http".to_string()
@@ -138,6 +138,14 @@ pub fn default_rule_switches() -> BTreeMap<&'static str, bool> {
         // generate false positives on sites that don't care. Both
         // gates must be true for AGT* findings to fire.
         ("agent_discovery", true),
+        // `well_known` and `headers` are execution stages rather than
+        // registry groups: `well_known_rules` emits SRF rules (registered
+        // under `surfaces`) but is gated independently because the
+        // capability inference it depends on is not free, and `headers` is
+        // the LNK020 HTTP response check. Both were reachable only through
+        // an undocumented `[checks]` key because they were missing here.
+        ("well_known", true),
+        ("headers", true),
     ])
 }
 

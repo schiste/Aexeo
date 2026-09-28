@@ -358,6 +358,7 @@ Built-in rule-group toggles. Unknown plugin rule groups default to enabled unles
 - `agent_discovery`: default `true`
 - `content`: default `true`
 - `editorial`: default `true`
+- `headers`: default `true`
 - `html`: default `true`
 - `links`: default `true`
 - `llm`: default `true`
@@ -367,3 +368,4 @@ Built-in rule-group toggles. Unknown plugin rule groups default to enabled unles
 - `social`: default `true`
 - `structure`: default `true`
 - `surfaces`: default `true`
+- `well_known`: default `true`

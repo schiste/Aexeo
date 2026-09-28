@@ -25,7 +25,12 @@ pub fn command_quality(path: &str, output_format: &str) -> Result<i32> {
     let findings = run_repo_quality_checks(&root, &cli_reference)?;
     let audit_artifact =
         build_audit_artifact("quality", &findings, AuditStatus::Complete, None, None);
-    let audit_path = write_audit_artifact(&audit_artifact, &root, "quality", 5)?;
+    let audit_path = write_audit_artifact(
+        &audit_artifact,
+        &root,
+        "quality",
+        aexeo_core::DEFAULT_AUDIT_LOG_LIMIT,
+    )?;
     match output_format {
         "json" => println!(
             "{}",
