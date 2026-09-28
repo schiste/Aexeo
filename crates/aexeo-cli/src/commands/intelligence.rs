@@ -18,6 +18,7 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use super::exit_code::{EXIT_FINDINGS, EXIT_SUCCESS, EXIT_UNSUPPORTED};
 use crate::commands::common::{canonicalize_or_keep, required_arg};
 use crate::output::{render_data_command_json, render_failed_command_json};
 
@@ -103,7 +104,7 @@ fn command_evidence_assess(submatches: &ArgMatches) -> Result<i32> {
                 ),
                 _ => println!("{}", evidence_text(&report, &report_path)),
             }
-            Ok(0)
+            Ok(EXIT_SUCCESS)
         }
         Err(error) => emit_failure("intelligence evidence assess", format, error),
     }
@@ -130,7 +131,7 @@ fn command_grounding_map(submatches: &ArgMatches) -> Result<i32> {
                 ),
                 _ => println!("{}", grounding_text(&report, &report_path)),
             }
-            Ok(0)
+            Ok(EXIT_SUCCESS)
         }
         Err(error) => emit_failure("intelligence grounding-map", format, error),
     }
@@ -163,7 +164,7 @@ fn command_fanout_assess(submatches: &ArgMatches) -> Result<i32> {
             with_input_text(fanout_text(&report, &report_path), &input.metadata)
         ),
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }
 
 fn command_surfaces_discover(submatches: &ArgMatches) -> Result<i32> {
@@ -196,7 +197,7 @@ fn command_surfaces_discover(submatches: &ArgMatches) -> Result<i32> {
             with_input_text(surfaces_text(&report, &report_path), &input.metadata)
         ),
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }
 
 fn command_truth_validate(submatches: &ArgMatches) -> Result<i32> {
@@ -331,7 +332,7 @@ fn command_truth_assess(submatches: &ArgMatches) -> Result<i32> {
                     )
                 ),
             }
-            Ok(0)
+            Ok(EXIT_SUCCESS)
         }
         Err(error) => emit_failure("intelligence facts assess", format, error),
     }
@@ -369,7 +370,7 @@ fn command_trust_surface_import(submatches: &ArgMatches) -> Result<i32> {
                 ),
                 _ => println!("{}", trust_import_text(&records, report_path.as_deref())),
             }
-            Ok(0)
+            Ok(EXIT_SUCCESS)
         }
         Err(error) => emit_failure("intelligence trust-surface import", format, error),
     }
@@ -412,7 +413,7 @@ fn command_trust_surface_reconcile(submatches: &ArgMatches) -> Result<i32> {
                 ),
                 _ => println!("{}", trust_reconcile_text(&report, &report_path)),
             }
-            Ok(0)
+            Ok(EXIT_SUCCESS)
         }
         Err(error) => emit_failure("intelligence trust-surface reconcile", format, error),
     }
@@ -462,7 +463,7 @@ fn command_intelligence_score(submatches: &ArgMatches) -> Result<i32> {
         ),
         _ => println!("{}", score_text(&score, &report_path)),
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }
 
 fn status_label(status: AuditStatus) -> &'static str {
@@ -575,7 +576,7 @@ fn emit_failure(command: &str, format: &str, error: anyhow::Error) -> Result<i32
         ),
         _ => eprintln!("{}", error),
     }
-    Ok(1)
+    Ok(EXIT_FINDINGS)
 }
 
 fn write_report<T: Serialize>(root: &Path, file_name: &str, payload: &T) -> Result<PathBuf> {
@@ -1065,7 +1066,7 @@ fn command_identity(submatches: &ArgMatches) -> Result<i32> {
                 );
             }
         }
-        return Ok(2);
+        return Ok(EXIT_UNSUPPORTED);
     };
 
     match format {
@@ -1270,7 +1271,7 @@ fn command_intelligence_presence(submatches: &ArgMatches) -> Result<i32> {
             )
         ),
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }
 
 fn presence_text(

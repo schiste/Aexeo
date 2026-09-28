@@ -14,6 +14,7 @@ use clap::ArgMatches;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use super::exit_code::{EXIT_FINDINGS, EXIT_SUCCESS, EXIT_UNSUPPORTED};
 use crate::commands::common::{canonicalize_or_keep, required_arg};
 use crate::output::{
     emit_config_warnings, render_audit_command_json, render_data_command_json,
@@ -113,7 +114,7 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
         }
     }
 
-    let exit_code = if success { 0 } else { 1 };
+    let exit_code = if success { EXIT_SUCCESS } else { EXIT_FINDINGS };
     Ok(exit_code)
 }
 
@@ -153,14 +154,14 @@ pub fn command_generate(submatches: &ArgMatches) -> Result<i32> {
         "robots" => {
             let Some(site_url) = resolved_site_url else {
                 println!("site_url is required to generate robots.txt");
-                return Ok(2);
+                return Ok(EXIT_UNSUPPORTED);
             };
             render_robots_txt(site_url)
         }
         "sitemap" => {
             let Some(site_url) = resolved_site_url else {
                 println!("site_url is required to generate sitemap.xml");
-                return Ok(2);
+                return Ok(EXIT_UNSUPPORTED);
             };
             let xml = render_sitemap_xml(&site, site_url);
             // An empty <urlset/> almost always means a misconfiguration
@@ -169,7 +170,7 @@ pub fn command_generate(submatches: &ArgMatches) -> Result<i32> {
                 println!(
                     "no indexable routes found; sitemap.xml would be empty (check input path and noindex coverage)"
                 );
-                return Ok(2);
+                return Ok(EXIT_UNSUPPORTED);
             }
             xml
         }
@@ -178,14 +179,14 @@ pub fn command_generate(submatches: &ArgMatches) -> Result<i32> {
         "schema" => {
             let Some(site_url) = resolved_site_url else {
                 println!("site_url is required to generate schema suggestions");
-                return Ok(2);
+                return Ok(EXIT_UNSUPPORTED);
             };
             let suggestions = generate_schema_suggestions(&site, Some(site_url));
             if suggestions.is_empty() {
                 println!(
                     "no schema suggestions generated (no eligible routes — sites with only home or skipped page kinds get no output)"
                 );
-                return Ok(2);
+                return Ok(EXIT_UNSUPPORTED);
             }
             let payload = serde_json::json!({
                 "version": 1,
@@ -210,7 +211,7 @@ pub fn command_generate(submatches: &ArgMatches) -> Result<i32> {
             println!("{}", output);
         }
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }
 
 fn command_generate_machine_artifacts(
@@ -262,7 +263,7 @@ fn command_generate_machine_artifacts(
             println!("{}", machine_bundle_text(kind, &bundle, &written));
         }
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }
 
 fn write_machine_artifact_bundle(
@@ -354,7 +355,7 @@ pub fn command_fix(submatches: &ArgMatches) -> Result<i32> {
             }
         }
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }
 
 pub fn command_baseline(submatches: &ArgMatches) -> Result<i32> {
@@ -389,5 +390,5 @@ pub fn command_baseline(submatches: &ArgMatches) -> Result<i32> {
             println!("{}", output_path.display());
         }
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }

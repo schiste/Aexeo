@@ -13,6 +13,7 @@ use clap::ArgMatches;
 use csv::Writer;
 use std::path::{Path, PathBuf};
 
+use super::exit_code::{EXIT_FINDINGS, EXIT_SUCCESS};
 use crate::commands::common::{canonicalize_or_keep, required_arg};
 use crate::output::{emit_config_warnings, render_data_command_json, render_failed_command_json};
 
@@ -77,7 +78,7 @@ fn emit_integration_failure(command: &str, format: &str, error: anyhow::Error) -
         ),
         _ => eprintln!("{}", error),
     }
-    Ok(1)
+    Ok(EXIT_FINDINGS)
 }
 
 fn snippet_text(inspection: &SnippetInspection) -> String {
@@ -535,7 +536,7 @@ fn command_snippet_inspect(submatches: &ArgMatches) -> Result<i32> {
         ),
         _ => println!("{}", snippet_text(&inspection)),
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }
 
 fn command_indexnow_validate(submatches: &ArgMatches) -> Result<i32> {
@@ -656,7 +657,7 @@ fn command_indexnow_ledger(submatches: &ArgMatches) -> Result<i32> {
         ),
         _ => println!("{}", indexnow_ledger_text(&ledger)),
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }
 
 fn command_indexnow_retry(submatches: &ArgMatches) -> Result<i32> {
@@ -693,7 +694,7 @@ fn command_bing_ai_import(submatches: &ArgMatches) -> Result<i32> {
         ),
         _ => println!("{}", bing_ai_import_text(&report)),
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }
 
 fn command_bing_ai_opportunities(submatches: &ArgMatches) -> Result<i32> {
@@ -712,7 +713,7 @@ fn command_bing_ai_opportunities(submatches: &ArgMatches) -> Result<i32> {
         ),
         _ => println!("{}", bing_ai_opportunities_text(&report)),
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }
 
 fn command_bing_ai_trend_import(submatches: &ArgMatches) -> Result<i32> {
@@ -733,7 +734,7 @@ fn command_bing_ai_trend_import(submatches: &ArgMatches) -> Result<i32> {
         ),
         _ => println!("{}", bing_ai_snapshot_text(&snapshot)),
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }
 
 fn command_bing_ai_trend_show(submatches: &ArgMatches) -> Result<i32> {
@@ -750,7 +751,7 @@ fn command_bing_ai_trend_show(submatches: &ArgMatches) -> Result<i32> {
         ),
         _ => println!("{}", bing_ai_trend_text(&report)),
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }
 
 fn command_search_console_export(submatches: &ArgMatches) -> Result<i32> {
@@ -770,7 +771,7 @@ fn command_search_console_export(submatches: &ArgMatches) -> Result<i32> {
         "csv" => println!("{}", render_search_console_csv(&rows)?),
         _ => println!("{}", search_console_text(&rows)),
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }
 
 fn command_publish_hook_run(submatches: &ArgMatches) -> Result<i32> {

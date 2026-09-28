@@ -7,12 +7,17 @@ mod output;
 use anyhow::Result;
 use std::process::ExitCode;
 
+use commands::exit_code::EXIT_INTERNAL_ERROR;
+
 fn main() -> ExitCode {
     match run() {
         Ok(code) => ExitCode::from(code as u8),
         Err(error) => {
             eprintln!("{}", error);
-            ExitCode::from(1)
+            // Not 1: a command that legitimately reports blocking findings
+            // also returns 1, and a CI gate must be able to tell "your site
+            // has problems" from "aexeo failed to run". See commands/exit_code.
+            ExitCode::from(EXIT_INTERNAL_ERROR as u8)
         }
     }
 }

@@ -2,6 +2,7 @@ use aexeo_core::{list_adapter_names, list_rule_group_names, validate_python_plug
 use anyhow::Result;
 use clap::ArgMatches;
 
+use super::exit_code::EXIT_SUCCESS;
 use crate::commands::common::required_arg;
 use crate::output::{render_list_command_json, render_plugin_check_command_json};
 
@@ -19,7 +20,7 @@ pub fn command_rules(submatches: &ArgMatches) -> Result<i32> {
             }
         }
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }
 
 pub fn command_adapters(submatches: &ArgMatches) -> Result<i32> {
@@ -36,7 +37,7 @@ pub fn command_adapters(submatches: &ArgMatches) -> Result<i32> {
             }
         }
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }
 
 pub fn command_plugin_check(submatches: &ArgMatches) -> Result<i32> {
@@ -55,5 +56,5 @@ pub fn command_plugin_check(submatches: &ArgMatches) -> Result<i32> {
             manifest.capabilities.join(",")
         ),
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }

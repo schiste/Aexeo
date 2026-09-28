@@ -15,6 +15,7 @@ use clap::ArgMatches;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use super::exit_code::EXIT_UNSUPPORTED;
 use crate::commands::common::required_arg;
 use crate::output::{
     emit_config_warnings, render_audit_command_json, render_diff_command_json,
@@ -351,7 +352,7 @@ fn emit_runtime_failure(
             eprintln!("Runtime audit failed: {}", error);
         }
     }
-    Ok(2)
+    Ok(EXIT_UNSUPPORTED)
 }
 
 pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {

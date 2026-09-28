@@ -1,3 +1,4 @@
+use super::exit_code::EXIT_SUCCESS;
 use crate::cli::render_cli_reference;
 use crate::output::{
     render_audit_command_json, render_diff_command_json, render_paths_command_json,
@@ -74,7 +75,7 @@ pub fn command_docs(action: &str, path: &str, output_format: &str) -> Result<i32
                 }
             }
         }
-        return Ok(0);
+        return Ok(EXIT_SUCCESS);
     }
     let drifted = find_reference_doc_drift(&root, cli_reference)?;
     let success = drifted.is_empty();
@@ -118,13 +119,13 @@ pub fn command_trend(command_name: &str, path: &str, output_format: &str) -> Res
         .join(format!("{}-trends.json", command_name));
     if !trend_path.exists() {
         println!("No trend history found.");
-        return Ok(0);
+        return Ok(EXIT_SUCCESS);
     }
     let text = fs::read_to_string(&trend_path)?;
     let payload: serde_json::Value = serde_json::from_str(&text)?;
     if output_format == "json" {
         println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(0);
+        return Ok(EXIT_SUCCESS);
     }
     let entries = payload
         .as_array()
@@ -154,7 +155,7 @@ pub fn command_trend(command_name: &str, path: &str, output_format: &str) -> Res
                 .unwrap_or_default(),
         );
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }
 
 pub fn command_report_render(audit: &str, output_format: &str) -> Result<i32> {
@@ -171,5 +172,5 @@ pub fn command_report_render(audit: &str, output_format: &str) -> Result<i32> {
             render_text_artifact(&artifact, "All checks passed.", Some(Path::new(audit)))
         ),
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }

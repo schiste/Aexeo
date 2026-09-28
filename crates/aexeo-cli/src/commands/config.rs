@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 use clap::ArgMatches;
 use std::path::PathBuf;
 
+use super::exit_code::EXIT_SUCCESS;
 use crate::commands::common::{canonicalize_or_keep, required_arg};
 use crate::output::{emit_config_warnings, render_config_command_json};
 
@@ -40,5 +41,5 @@ fn command_config_print(submatches: &ArgMatches) -> Result<i32> {
         }
         other => bail!("unsupported config format: {}", other),
     }
-    Ok(0)
+    Ok(EXIT_SUCCESS)
 }

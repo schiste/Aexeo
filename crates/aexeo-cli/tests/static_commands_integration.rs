@@ -208,3 +208,46 @@ fn diff_json_contract_reports_summary() {
     assert!(payload["summary"]["new"].as_u64().unwrap() >= 1);
     assert!(payload["diff"]["new_findings"].is_array());
 }
+
+/// Regression: a command that legitimately reports findings and an internal
+/// error both used to exit 1, so a CI gate could not tell "your site has
+/// problems" from "aexeo failed to run". Internal errors now use 70
+/// (`EX_SOFTWARE`), keeping 0/1/2 exactly as `SPEC.md` documents them.
+#[test]
+fn internal_errors_exit_distinctly_from_findings() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    write_minimal_site(temp_dir.path());
+
+    // A real run that finds problems: a result, exit 1.
+    write(
+        &temp_dir.path().join("index.html"),
+        "<html><head><title>Home</title><meta name=\"description\" content=\"Home page\"></head><body><h1>Home</h1><a href=\"/nowhere\">Learn more</a></body></html>",
+    );
+    let with_findings = Command::new(bin())
+        .arg("check")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("text")
+        .output()
+        .unwrap();
+    assert_eq!(
+        with_findings.status.code(),
+        Some(1),
+        "findings are a result and must stay exit 1"
+    );
+
+    // An unexpected error: aexeo itself failed, exit 70.
+    let internal_error = Command::new(bin())
+        .arg("check")
+        .arg(temp_dir.path().join("does-not-exist"))
+        .arg("--format")
+        .arg("text")
+        .output()
+        .unwrap();
+    assert_eq!(
+        internal_error.status.code(),
+        Some(70),
+        "an internal error must not be reported as findings; stderr: {}",
+        String::from_utf8_lossy(&internal_error.stderr)
+    );
+}

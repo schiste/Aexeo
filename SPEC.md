@@ -75,6 +75,13 @@ Where supported:
 - `0`: success with no blocking findings or no regressions
 - `1`: one or more blocking findings or regressions
 - `2`: invalid command usage or unsupported input state
+- `70`: an internal error in Aexeo itself (`EX_SOFTWARE`)
+
+`0`, `1`, and `2` are all *results*: the command did what it was asked and
+the exit code is the answer. `70` is the only code that means the tool
+failed, so automation can separate "this site has problems" from "Aexeo
+has a problem worth reporting". It used to be `1`, which made the two
+indistinguishable.
 
 ## 4. Finding Contract
 
