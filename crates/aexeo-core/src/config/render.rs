@@ -10,9 +10,6 @@ struct ResolvedConfigDocument {
     plugins: Vec<String>,
     extends: Vec<String>,
     max_workers: usize,
-    enable_cache: bool,
-    cache_dir: String,
-    cache_ttl_seconds: usize,
     plugin_settings: BTreeMap<String, BTreeMap<String, toml::Value>>,
     editorial: Editorial,
     site: SiteSection,
@@ -145,9 +142,6 @@ struct OutputSection {
 
 #[derive(Debug, Clone, Serialize)]
 struct QualitySection {
-    typecheck_command: String,
-    coverage_threshold: usize,
-    complexity_threshold: usize,
     performance_budget_file: String,
 }
 
@@ -162,9 +156,6 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
         plugins: config.plugins.clone(),
         extends: config.extends.clone(),
         max_workers: config.max_workers,
-        enable_cache: config.enable_cache,
-        cache_dir: config.cache_dir.clone(),
-        cache_ttl_seconds: config.cache_ttl_seconds,
         plugin_settings: config.plugin_settings.clone(),
         editorial: config.editorial.clone(),
         site: SiteSection {
@@ -258,9 +249,6 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
             audit_log_limit: config.audit_log_limit,
         },
         quality: QualitySection {
-            typecheck_command: config.typecheck_command.clone(),
-            coverage_threshold: config.coverage_threshold,
-            complexity_threshold: config.complexity_threshold,
             performance_budget_file: config.performance_budget_file.clone(),
         },
     }

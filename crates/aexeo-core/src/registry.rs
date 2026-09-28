@@ -38,8 +38,13 @@ impl RuleDescriptor {
     }
 }
 
-fn metadata_for_prefix(prefix: &str) -> RuleMetadata {
-    match prefix {
+/// Metadata for an explicitly known rule-ID prefix, or `None`.
+///
+/// Same shape and rationale as [`explicit_layers_for_prefix`]: the returned
+/// option distinguishes "this family is registered" from "this fell through
+/// to the default", which a bare value cannot.
+fn explicit_metadata_for_prefix(prefix: &str) -> Option<RuleMetadata> {
+    let value = match prefix {
         "SEO" => RuleMetadata {
             class: RuleClass::Hard,
             confidence: ConfidenceLevel::High,
@@ -115,11 +120,25 @@ fn metadata_for_prefix(prefix: &str) -> RuleMetadata {
             class: RuleClass::Policy,
             confidence: ConfidenceLevel::Medium,
         },
-        _ => RuleMetadata {
-            class: RuleClass::Heuristic,
-            confidence: ConfidenceLevel::Medium,
-        },
-    }
+        _ => return None,
+    };
+    Some(value)
+}
+
+/// Metadata by rule-ID prefix, with a documented default for unrecognised
+/// prefixes. Unknown families are treated as medium-confidence heuristics,
+/// which is the conservative classification: it keeps an unregistered rule
+/// visible without claiming it is a hard spec violation.
+pub fn metadata_for_prefix(prefix: &str) -> RuleMetadata {
+    explicit_metadata_for_prefix(prefix).unwrap_or(RuleMetadata {
+        class: RuleClass::Heuristic,
+        confidence: ConfidenceLevel::Medium,
+    })
+}
+
+/// Whether `prefix` has an explicit entry in the metadata table.
+pub fn is_known_metadata_prefix(prefix: &str) -> bool {
+    explicit_metadata_for_prefix(prefix).is_some()
 }
 
 /// Strip the trailing numeric suffix from a rule id to recover the
@@ -148,12 +167,16 @@ pub fn rule_metadata_for_id(rule_id: &str) -> RuleMetadata {
     metadata
 }
 
-/// Default layer assignment by rule-ID prefix. The prefix usually
-/// determines the family (LNK = retrievability links, SCH = citability
-/// schema, etc.); per-rule overrides in `rule_layers_for_id` handle the
-/// outliers.
-fn layers_for_prefix(prefix: &str) -> RuleLayers {
-    match prefix {
+/// Layer assignment for an explicitly known rule-ID prefix.
+///
+/// Returns `None` for an unrecognised prefix so the caller decides what to
+/// do. That distinction matters: several real prefixes map to
+/// `Layer::Citability` legitimately, so a returned value cannot tell you
+/// whether a family was registered or simply fell through to the default.
+/// `A11Y`, `SRF`, `AGT`, and `EDT` all once fell through, and nothing
+/// noticed until reports started labelling those findings "Other".
+fn explicit_layers_for_prefix(prefix: &str) -> Option<RuleLayers> {
+    let value = match prefix {
         // SEO: title / description / meta. Most directly help the
         // generator decide what's worth citing once retrieved.
         // Secondary retrievability because search engines also use these.
@@ -214,9 +237,41 @@ fn layers_for_prefix(prefix: &str) -> RuleLayers {
         // api catalog) feed agent absorption of the site's content
         // and capabilities.
         "AGT" => RuleLayers::with_secondaries(Layer::Retrievability, vec![Layer::Absorbability]),
-        // Unknown prefix: default to citability (most rules are about
-        // making the page worth citing). Better than crashing.
-        _ => RuleLayers::primary_only(Layer::Citability),
+        _ => return None,
+    };
+    Some(value)
+}
+
+/// Layer assignment by rule-ID prefix, with a documented default for
+/// unrecognised prefixes.
+///
+/// Unknown prefixes default to citability (most rules are about making the
+/// page worth citing) rather than panicking. Use
+/// [`explicit_layers_for_prefix`] when you need to know whether a family
+/// was actually registered.
+pub fn layers_for_prefix(prefix: &str) -> RuleLayers {
+    explicit_layers_for_prefix(prefix)
+        .unwrap_or_else(|| RuleLayers::primary_only(Layer::Citability))
+}
+
+/// Whether `prefix` has an explicit entry in the layer table.
+pub fn is_known_layer_prefix(prefix: &str) -> bool {
+    explicit_layers_for_prefix(prefix).is_some()
+}
+
+/// Compile-time exhaustiveness guard for [`Layer`].
+///
+/// Exists so a new layer variant cannot be added without every exhaustive
+/// `match` over layers in the crate being revisited. Deliberately has no
+/// runtime effect.
+#[cfg(test)]
+fn assert_exhaustive_layer(layer: Layer) {
+    match layer {
+        Layer::Retrievability
+        | Layer::Citability
+        | Layer::Absorbability
+        | Layer::EntityLegitimacy
+        | Layer::Accessibility => {}
     }
 }
 
@@ -1096,6 +1151,11 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                     sitewide: true,
                     summary: "missing Node package lockfile for browser runtime",
                 },
+                RuleDescriptor {
+                    rule_id: "QLT024",
+                    sitewide: true,
+                    summary: "config key declared and documented but never read",
+                },
             ],
         },
     ]
@@ -1155,8 +1215,9 @@ pub fn list_adapter_names() -> Vec<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        builtin_rule_groups, list_adapter_names, list_rule_group_names, rule_group_title_for_id,
-        rule_layers_for_id, rule_metadata_for_id, rule_prefix,
+        assert_exhaustive_layer, builtin_rule_groups, is_known_layer_prefix,
+        is_known_metadata_prefix, layers_for_prefix, list_adapter_names, list_rule_group_names,
+        rule_group_title_for_id, rule_layers_for_id, rule_metadata_for_id, rule_prefix,
     };
     use aexeo_contracts::{ConfidenceLevel, Layer, RuleClass};
 
@@ -1391,27 +1452,76 @@ mod tests {
 
     #[test]
     fn every_rule_in_registry_has_a_layer_assignment() {
-        // Smoke test: layer_for_id must not panic on any registered rule
-        // and every assignment must have a sensible primary layer.
-        // The match expression below relies on Layer's exhaustiveness —
-        // adding a new Layer variant deliberately fails compile here so
-        // we don't silently miss it.
+        // Two things are checked here, and the original version of this test
+        // only really managed one of them.
+        //
+        // The `match` on `Layer` is a compile-time exhaustiveness guard:
+        // adding a variant breaks the build rather than letting a rule
+        // silently fall through to a default. That part was real.
+        //
+        // It was also the *only* part, because every arm of that match
+        // returned `true`, so the runtime `assert!` could never fail. What
+        // it could not catch was a rule whose prefix had no entry in the
+        // table and therefore got the fallback — which is exactly the bug
+        // that made `A11Y`, `SRF`, `AGT`, and `EDT` findings report as
+        // "Other" until the group lookup replaced the prefix table.
+        //
+        // The runtime check is now on the thing that can actually regress:
+        // that the rule's own prefix is a registered family. `match layers.primary`
+        // is kept only as the exhaustiveness guard it genuinely is.
         for group in builtin_rule_groups() {
             for descriptor in group.rules {
-                let layers = rule_layers_for_id(descriptor.rule_id);
-                let valid = match layers.primary {
-                    Layer::Retrievability
-                    | Layer::Citability
-                    | Layer::Absorbability
-                    | Layer::EntityLegitimacy
-                    | Layer::Accessibility => true,
-                };
                 assert!(
-                    valid,
-                    "rule {} has no valid primary layer",
+                    is_known_layer_prefix(rule_prefix(descriptor.rule_id)),
+                    "rule {} has no layer mapping for prefix {}",
+                    descriptor.rule_id,
+                    rule_prefix(descriptor.rule_id)
+                );
+                let layers = rule_layers_for_id(descriptor.rule_id);
+                // Compile-time exhaustiveness guard: adding a `Layer` variant
+                // breaks this build rather than letting a rule reach a
+                // default arm silently. Kept as a bare expression because
+                // binding a unit value trips clippy's `let_unit_value`.
+                assert_exhaustive_layer(layers.primary);
+            }
+        }
+    }
+
+    /// Same idea for the metadata table: an unregistered family must be a
+    /// loud gap rather than a silent default.
+    #[test]
+    fn every_registered_prefix_has_explicit_metadata() {
+        for group in builtin_rule_groups() {
+            for descriptor in group.rules {
+                let prefix = rule_prefix(descriptor.rule_id);
+                assert!(
+                    is_known_metadata_prefix(prefix),
+                    "rule {} has no metadata mapping for prefix {prefix}",
                     descriptor.rule_id
                 );
             }
         }
+    }
+
+    /// The families that were once missing from the layer table, pinned
+    /// explicitly so a future refactor cannot quietly drop them again.
+    #[test]
+    fn formerly_missing_families_have_layer_mappings() {
+        for prefix in ["A11Y", "SRF", "AGT", "EDT", "SCH", "SEO", "LLM", "QLT"] {
+            assert!(
+                is_known_layer_prefix(prefix),
+                "{prefix} should have an explicit layer mapping"
+            );
+        }
+        assert_eq!(layers_for_prefix("A11Y").primary, Layer::Accessibility);
+        assert_eq!(layers_for_prefix("AGT").primary, Layer::Retrievability);
+    }
+
+    #[test]
+    fn unknown_prefixes_fall_back_to_citability() {
+        // The fallback still has to exist for robustness; these tests exist
+        // so that "unknown" cannot quietly become a registered family.
+        assert!(!is_known_layer_prefix("ZZZZ"));
+        assert_eq!(layers_for_prefix("ZZZZ").primary, Layer::Citability);
     }
 }

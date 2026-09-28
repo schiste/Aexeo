@@ -209,6 +209,7 @@ Repository self-checks for the Aexeo workspace itself. These audit the project r
 - `QLT021`: missing cargo-deny policy file
 - `QLT022`: missing dependency hygiene script
 - `QLT023`: missing Node package lockfile for browser runtime
+- `QLT024`: config key declared and documented but never read
 
 ## Internal Quality
 
@@ -230,3 +231,4 @@ Repository self-checks for the Aexeo workspace itself. These audit the project r
 - `QLT021`: missing cargo-deny policy file
 - `QLT022`: missing dependency hygiene script
 - `QLT023`: missing Node package lockfile for browser runtime
+- `QLT024`: config key declared and documented but never read

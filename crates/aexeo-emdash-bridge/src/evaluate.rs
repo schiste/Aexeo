@@ -49,6 +49,16 @@ mod tests {
         let config = Config::default();
         let findings = evaluate_documents(&[rich_document()], &config).unwrap();
         // Every finding the evaluator returns must carry a stable Aexeo rule id.
+        //
+        // This loop used to be the whole test, which meant it passed vacuously
+        // whenever the evaluator returned nothing at all — including if the
+        // bridge were wired to return an empty vector for every input. Assert
+        // that the document is actually being evaluated first, so the
+        // rule-id invariant below is checked against real output.
+        assert!(
+            !findings.is_empty(),
+            "a document with no title should produce at least one finding; got none"
+        );
         for finding in &findings {
             assert!(
                 !finding.rule_id.is_empty(),

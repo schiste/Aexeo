@@ -120,21 +120,6 @@ coverage_threshold = 85
 - Default: `4`
 - Meaning: Worker count used for parallel file parsing and selected analysis tasks.
 
-## `enable_cache`
-
-- Default: `true`
-- Meaning: Whether persistent parse and crawl caches may be used.
-
-## `cache_dir`
-
-- Default: `.aexeo-cache`
-- Meaning: Directory for persistent Aexeo caches.
-
-## `cache_ttl_seconds`
-
-- Default: `3600`
-- Meaning: Maximum age for reusable crawl cache entries.
-
 ## `crawl_headers`
 
 - Default: (none)
@@ -359,21 +344,6 @@ coverage_threshold = 85
 
 - Default: (none)
 - Meaning: Reserved plugin-specific configuration grouped by plugin namespace. Use quoted TOML tables such as `[plugin_settings."example.plugin"]` only when a plugin publishes a registered settings schema. No built-in plugin settings schemas are currently shipped.
-
-## `typecheck_command`
-
-- Default: `cargo check`
-- Meaning: Command used for static type checking in internal quality workflows.
-
-## `coverage_threshold`
-
-- Default: `85`
-- Meaning: Minimum expected test coverage percentage for internal quality workflows.
-
-## `complexity_threshold`
-
-- Default: `12`
-- Meaning: Maximum allowed AST branch complexity score per public function.
 
 ## `performance_budget_file`
 

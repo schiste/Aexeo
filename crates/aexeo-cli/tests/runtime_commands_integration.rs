@@ -135,7 +135,14 @@ fn crawl_accepts_playwright_with_custom_runner() {
         .arg("json")
         .output()
         .unwrap();
-    assert!(output.status.code().is_some());
+    // `code()` is Some for any normal exit, so assert the documented
+    // success codes rather than mere termination. 1 is "findings", which
+    // is still a successful run.
+    assert!(
+        matches!(output.status.code(), Some(0 | 1)),
+        "expected exit 0 or 1, got {:?}",
+        output.status.code()
+    );
     let payload = parse_json(&output.stdout);
     assert_eq!(payload["command"], "crawl");
     assert!(payload["artifact"]["crawl"]["engine"].as_str().is_some());
@@ -337,7 +344,11 @@ fn crawl_checkpoint_and_resume_complete_a_partial_runtime_audit() {
         .arg("json")
         .output()
         .unwrap();
-    assert!(partial_output.status.code().is_some());
+    assert!(
+        matches!(partial_output.status.code(), Some(0 | 1)),
+        "expected exit 0 or 1, got {:?}",
+        partial_output.status.code()
+    );
     assert!(checkpoint.exists());
     let partial_payload = parse_json(&partial_output.stdout);
     assert_eq!(partial_payload["artifact"]["status"], "partial");
@@ -391,7 +402,14 @@ fn crawl_writes_progress_artifact_and_performance_metadata() {
         .arg("json")
         .output()
         .unwrap();
-    assert!(output.status.code().is_some());
+    // `code()` is Some for any normal exit, so assert the documented
+    // success codes rather than mere termination. 1 is "findings", which
+    // is still a successful run.
+    assert!(
+        matches!(output.status.code(), Some(0 | 1)),
+        "expected exit 0 or 1, got {:?}",
+        output.status.code()
+    );
     let payload = parse_json(&output.stdout);
     assert!(payload["artifact"]["performance"]["phases"].is_array());
     let progress_artifact = temp_dir
@@ -711,9 +729,41 @@ fn runtime_doctor_reports_json_contract() {
         .arg("json")
         .output()
         .unwrap();
-    assert!(matches!(output.status.code(), Some(0 | 1)));
+    // This used to assert only that the exit code was `Some(0 | 1)` — which
+    // permits both success and failure — and then that four JSON fields had
+    // the right *type* without checking any value. Both halves could pass
+    // against output that was wrong.
+    //
+    // `doctor runtime` is environment-dependent: with Playwright installed
+    // it reports `available: true` and exits 0; without it, `available:
+    // false` and exit 1. The contract worth pinning is that the exit code
+    // tracks the reported availability, plus the concrete shape of a
+    // non-available report (a diagnostic mode, a named executable, and a
+    // non-empty message — otherwise an operator gets nothing to act on).
     let payload = parse_json(&output.stdout);
-    assert!(payload["available"].is_boolean());
-    assert!(payload["mode"].is_string());
-    assert!(payload["message"].is_string());
+    let available = payload["available"].as_bool().expect("available is a bool");
+    assert_eq!(
+        available,
+        output.status.success(),
+        "exit code and `available` disagree: success={} available={available}; stdout: {}",
+        output.status.success(),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(
+        payload["mode"], "node_module",
+        "doctor should report the resolution mode it used"
+    );
+    assert_eq!(payload["executable"], "node");
+    let message = payload["message"].as_str().expect("message is a string");
+    if !available {
+        assert!(
+            !message.trim().is_empty(),
+            "an unavailable runtime must explain why; got an empty message"
+        );
+    } else {
+        assert!(
+            message.trim().is_empty(),
+            "an available runtime should not carry a failure diagnostic; got {message:?}"
+        );
+    }
 }

@@ -71,15 +71,6 @@
       "description": "Browser navigation wait strategy.",
       "type": "string"
     },
-    "cache_dir": {
-      "description": "Directory for persistent caches.",
-      "type": "string"
-    },
-    "cache_ttl_seconds": {
-      "description": "Maximum age for reusable crawl cache entries.",
-      "minimum": 0,
-      "type": "integer"
-    },
     "canonical_style": {
       "description": "Preferred internal canonical style.",
       "type": "string"
@@ -90,16 +81,6 @@
       },
       "description": "Built-in rule-group toggles.",
       "type": "object"
-    },
-    "complexity_threshold": {
-      "description": "Maximum allowed complexity threshold.",
-      "minimum": 0,
-      "type": "integer"
-    },
-    "coverage_threshold": {
-      "description": "Minimum coverage percentage expected by quality checks.",
-      "minimum": 0,
-      "type": "integer"
     },
     "crawl_artifact_dir": {
       "description": "Directory used for crawl artifacts.",
@@ -217,10 +198,6 @@
         }
       },
       "type": "object"
-    },
-    "enable_cache": {
-      "description": "Whether persistent caches may be used.",
-      "type": "boolean"
     },
     "enable_link_autofix": {
       "description": "Whether safe fix mode may insert related-links sections.",
@@ -402,18 +379,7 @@
     "quality": {
       "additionalProperties": false,
       "properties": {
-        "complexity_threshold": {
-          "minimum": 0,
-          "type": "integer"
-        },
-        "coverage_threshold": {
-          "minimum": 0,
-          "type": "integer"
-        },
         "performance_budget_file": {
-          "type": "string"
-        },
-        "typecheck_command": {
           "type": "string"
         }
       },
@@ -919,10 +885,6 @@
         "type": "object"
       },
       "type": "array"
-    },
-    "typecheck_command": {
-      "description": "Typecheck command used by repo quality checks.",
-      "type": "string"
     },
     "utility_route_patterns": {
       "description": "Route substrings treated as utility routes.",

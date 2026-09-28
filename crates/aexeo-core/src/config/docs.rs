@@ -66,21 +66,6 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
             description: "Worker count used for parallel file parsing and selected analysis tasks.",
         },
         ConfigFieldDoc {
-            key: "enable_cache",
-            default_value: "`true`",
-            description: "Whether persistent parse and crawl caches may be used.",
-        },
-        ConfigFieldDoc {
-            key: "cache_dir",
-            default_value: "`.aexeo-cache`",
-            description: "Directory for persistent Aexeo caches.",
-        },
-        ConfigFieldDoc {
-            key: "cache_ttl_seconds",
-            default_value: "`3600`",
-            description: "Maximum age for reusable crawl cache entries.",
-        },
-        ConfigFieldDoc {
             key: "crawl_headers",
             default_value: "(none)",
             description: "Extra HTTP headers applied to runtime crawl requests.",
@@ -306,21 +291,6 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
             description: "Reserved plugin-specific configuration grouped by plugin namespace. Use quoted TOML tables such as `[plugin_settings.\"example.plugin\"]` only when a plugin publishes a registered settings schema. No built-in plugin settings schemas are currently shipped.",
         },
         ConfigFieldDoc {
-            key: "typecheck_command",
-            default_value: "`cargo check`",
-            description: "Command used for static type checking in internal quality workflows.",
-        },
-        ConfigFieldDoc {
-            key: "coverage_threshold",
-            default_value: "`85`",
-            description: "Minimum expected test coverage percentage for internal quality workflows.",
-        },
-        ConfigFieldDoc {
-            key: "complexity_threshold",
-            default_value: "`12`",
-            description: "Maximum allowed AST branch complexity score per public function.",
-        },
-        ConfigFieldDoc {
             key: "performance_budget_file",
             default_value: "`performance-budget.json`",
             description: "Path to a JSON file describing runtime performance budgets.",
@@ -492,18 +462,6 @@ fn flat_properties() -> Map<String, Value> {
     properties.insert(
         "max_workers".to_string(),
         integer_schema("Worker count used for parallel analysis tasks."),
-    );
-    properties.insert(
-        "enable_cache".to_string(),
-        boolean_schema("Whether persistent caches may be used."),
-    );
-    properties.insert(
-        "cache_dir".to_string(),
-        string_schema("Directory for persistent caches."),
-    );
-    properties.insert(
-        "cache_ttl_seconds".to_string(),
-        integer_schema("Maximum age for reusable crawl cache entries."),
     );
     properties.insert(
         "crawl_headers".to_string(),
@@ -735,18 +693,6 @@ fn flat_properties() -> Map<String, Value> {
     );
     properties.insert("plugin_settings".to_string(), plugin_settings_schema());
     properties.insert(
-        "typecheck_command".to_string(),
-        string_schema("Typecheck command used by repo quality checks."),
-    );
-    properties.insert(
-        "coverage_threshold".to_string(),
-        integer_schema("Minimum coverage percentage expected by quality checks."),
-    );
-    properties.insert(
-        "complexity_threshold".to_string(),
-        integer_schema("Maximum allowed complexity threshold."),
-    );
-    properties.insert(
         "performance_budget_file".to_string(),
         string_schema("Performance budget file checked by repo quality."),
     );
@@ -944,9 +890,6 @@ fn nested_properties() -> Map<String, Value> {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "typecheck_command": { "type": "string" },
-                "coverage_threshold": { "type": "integer", "minimum": 0 },
-                "complexity_threshold": { "type": "integer", "minimum": 0 },
                 "performance_budget_file": { "type": "string" }
             }
         }),

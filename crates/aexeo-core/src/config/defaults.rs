@@ -27,15 +27,6 @@ pub(super) fn default_baseline_file() -> String {
 pub(super) fn default_max_workers() -> usize {
     4
 }
-pub(super) fn default_enable_cache() -> bool {
-    true
-}
-pub(super) fn default_cache_dir() -> String {
-    ".aexeo-cache".to_string()
-}
-pub(super) fn default_cache_ttl_seconds() -> usize {
-    3600
-}
 pub(super) fn default_crawl_artifact_dir() -> String {
     ".aexeo-reports/crawl-artifacts".to_string()
 }
@@ -120,15 +111,6 @@ pub(super) fn default_weak_anchor_text() -> Vec<String> {
         "more".to_string(),
         "read more".to_string(),
     ]
-}
-pub(super) fn default_typecheck_command() -> String {
-    "cargo check".to_string()
-}
-pub(super) fn default_coverage_threshold() -> usize {
-    85
-}
-pub(super) fn default_complexity_threshold() -> usize {
-    12
 }
 pub(super) fn default_performance_budget_file() -> String {
     "performance-budget.json".to_string()

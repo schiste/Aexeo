@@ -28,9 +28,6 @@ const FLAT_TOP_LEVEL_KEYS: &[&str] = &[
     "browser_wait_until",
     "baseline_file",
     "max_workers",
-    "enable_cache",
-    "cache_dir",
-    "cache_ttl_seconds",
     "crawl_headers",
     "crawl_cookies",
     "crawl_basic_auth",
@@ -76,9 +73,6 @@ const FLAT_TOP_LEVEL_KEYS: &[&str] = &[
     "require_robots_sitemap",
     "weak_anchor_text",
     "plugin_settings",
-    "typecheck_command",
-    "coverage_threshold",
-    "complexity_threshold",
     "performance_budget_file",
 ];
 const DEPRECATED_FLAT_KEYS: &[&str] = &[
@@ -134,9 +128,6 @@ const DEPRECATED_FLAT_KEYS: &[&str] = &[
     "require_twitter_image",
     "require_robots_sitemap",
     "weak_anchor_text",
-    "typecheck_command",
-    "coverage_threshold",
-    "complexity_threshold",
     "performance_budget_file",
 ];
 
@@ -472,12 +463,7 @@ fn validate_versioned_sections(root: &toml::map::Map<String, Value>) -> Result<(
     if let Some(value) = root.get("quality") {
         validate_allowed_keys(
             expect_table(value, "quality", "config root")?,
-            &[
-                "typecheck_command",
-                "coverage_threshold",
-                "complexity_threshold",
-                "performance_budget_file",
-            ],
+            &["performance_budget_file"],
             "[quality]",
         )?;
     }
@@ -676,14 +662,6 @@ fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
     }
 
     if let Some(Value::Table(mut table)) = root.remove("quality") {
-        move_table_field_if_absent(root, &mut table, "typecheck_command", "typecheck_command");
-        move_table_field_if_absent(root, &mut table, "coverage_threshold", "coverage_threshold");
-        move_table_field_if_absent(
-            root,
-            &mut table,
-            "complexity_threshold",
-            "complexity_threshold",
-        );
         move_table_field_if_absent(
             root,
             &mut table,
@@ -1037,7 +1015,7 @@ baseline_file = "baseline.json"
 audit_log_limit = 9
 
 [quality]
-coverage_threshold = 90
+performance_budget_file = "custom-budget.json"
 "#,
         )
         .unwrap();
@@ -1062,7 +1040,7 @@ coverage_threshold = 90
         assert!(!config.require_schema_title_alignment);
         assert_eq!(config.baseline_file, "baseline.json");
         assert_eq!(config.audit_log_limit, 9);
-        assert_eq!(config.coverage_threshold, 90);
+        assert_eq!(config.performance_budget_file, "custom-budget.json");
     }
 
     #[test]

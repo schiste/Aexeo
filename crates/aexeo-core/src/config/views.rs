@@ -16,9 +16,6 @@ pub struct RuntimeConfig<'a> {
     pub browser_engine: &'a str,
     pub browser_wait_until: &'a str,
     pub max_workers: usize,
-    pub enable_cache: bool,
-    pub cache_dir: &'a str,
-    pub cache_ttl_seconds: usize,
     pub crawl_headers: &'a BTreeMap<String, String>,
     pub crawl_cookies: &'a [BTreeMap<String, String>],
     pub crawl_basic_auth: &'a BTreeMap<String, String>,
@@ -79,14 +76,6 @@ pub struct OutputConfig<'a> {
     pub audit_log_limit: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct QualityConfig<'a> {
-    pub typecheck_command: &'a str,
-    pub coverage_threshold: usize,
-    pub complexity_threshold: usize,
-    pub performance_budget_file: &'a str,
-}
-
 impl Config {
     pub fn site(&self) -> SiteConfig<'_> {
         SiteConfig {
@@ -103,9 +92,6 @@ impl Config {
             browser_engine: &self.browser_engine,
             browser_wait_until: &self.browser_wait_until,
             max_workers: self.max_workers,
-            enable_cache: self.enable_cache,
-            cache_dir: &self.cache_dir,
-            cache_ttl_seconds: self.cache_ttl_seconds,
             crawl_headers: &self.crawl_headers,
             crawl_cookies: &self.crawl_cookies,
             crawl_basic_auth: &self.crawl_basic_auth,
@@ -169,15 +155,6 @@ impl Config {
             audit_log_limit: self.audit_log_limit,
         }
     }
-
-    pub fn quality(&self) -> QualityConfig<'_> {
-        QualityConfig {
-            typecheck_command: &self.typecheck_command,
-            coverage_threshold: self.coverage_threshold,
-            complexity_threshold: self.complexity_threshold,
-            performance_budget_file: &self.performance_budget_file,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -191,6 +168,9 @@ mod tests {
         assert_eq!(config.runtime().browser_engine, "http");
         assert!(config.rules().checks.get("html").copied().unwrap_or(false));
         assert_eq!(config.output().baseline_file, ".aexeo-baseline.json");
-        assert_eq!(config.quality().coverage_threshold, 85);
+        assert_eq!(
+            config.performance_budget_file, "performance-budget.json",
+            "the only [quality] key that is actually read"
+        );
     }
 }

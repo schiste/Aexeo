@@ -341,9 +341,6 @@ credibility, factual accuracy, originality, or likely ranking/citation
 outcomes.
 
 Internal quality and repo policy keys include:
-- `typecheck_command`
-- `coverage_threshold`
-- `complexity_threshold`
 - `performance_budget_file`
 
 The generated config reference in [docs/config.md](docs/config.md) is part of the authoritative documentation surface.
