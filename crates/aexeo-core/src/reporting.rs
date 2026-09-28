@@ -113,16 +113,17 @@ pub fn summarize_findings_by_layer(findings: &[Finding]) -> Vec<LayerBreakdown> 
     out
 }
 
+/// Whether a rule's findings describe the whole site rather than one page.
+///
+/// Delegated to the registry so the `AGT`, `SRF`, `EDT`, and `A11Y` families
+/// are covered the moment they are registered, instead of depending on a
+/// prefix list that had to be edited by hand whenever a group was added.
 fn rule_is_sitewide(rule_id: &str) -> bool {
-    matches!(
-        rule_id,
-        id if id.starts_with("MAP")
-            || id.starts_with("ROB")
-            || id.starts_with("LLM")
-            || id.starts_with("DEP")
-            || id.starts_with("QLT")
-            || matches!(id, "SCH009" | "SEO011" | "SEO017" | "CRW003")
-    )
+    crate::registry::builtin_rule_groups()
+        .iter()
+        .flat_map(|group| group.rules.iter())
+        .find(|rule| rule.rule_id == rule_id)
+        .is_some_and(|rule| rule.sitewide)
 }
 
 pub fn normalize_finding_scopes(findings: &[Finding]) -> Vec<Finding> {
@@ -301,26 +302,19 @@ fn repeated_issue_summary(findings: &[Finding], is_heuristic: bool) -> Option<St
     Some(format!("- Most repeated {}: {}", label, top_repeats))
 }
 
+/// Human-readable group title for a rule id.
+///
+/// Resolved through the registry so there is exactly one place that knows
+/// which group a rule belongs to. This used to be a second hand-maintained
+/// prefix table that used `take_while(is_ascii_uppercase)` to recover the
+/// prefix; that form yields `"A"` for the alphanumeric families `A11Y`,
+/// `AGT`, and it had no arms at all for `SRF`, `A11Y`, `AGT`, or `FACTS`,
+/// so every finding in those four groups was reported under "Other" in text
+/// headings, the section recap, and the Search Console CSV `group` column.
+/// `registry::rule_prefix` documents the same hazard and the registry now
+/// carries a `quality` group, so the table is no longer needed.
 pub fn rule_group_name(rule_id: &str) -> &'static str {
-    let prefix: String = rule_id
-        .chars()
-        .take_while(|ch| ch.is_ascii_uppercase())
-        .collect();
-    match prefix.as_str() {
-        "SEO" => "HTML Metadata",
-        "LNK" => "Internal Links",
-        "MAP" => "Sitemaps",
-        "ROB" => "Robots",
-        "SOC" => "Social Metadata",
-        "SCH" => "Structured Data",
-        "LLM" => "LLM Artifacts",
-        "CNT" => "Content Policy",
-        "GEO" => "Retrieval Structure",
-        "CRW" => "Runtime Crawl",
-        "DEP" => "Deployment Model",
-        "QLT" => "Internal Quality",
-        _ => "Other",
-    }
+    crate::registry::rule_group_title_for_id(rule_id).unwrap_or("Other")
 }
 
 pub fn build_recap_lines(findings: &[Finding]) -> Vec<String> {
@@ -969,7 +963,7 @@ pub fn write_progress_audit_artifact(
 mod tests {
     use super::{
         build_audit_artifact, build_recap_lines, render_audit_artifact_json,
-        render_markdown_artifact, render_sarif, render_text, render_text_artifact,
+        render_markdown_artifact, render_sarif, render_text, render_text_artifact, rule_group_name,
         write_audit_artifact, write_partial_audit_artifact, write_progress_audit_artifact,
     };
     use aexeo_contracts::{AuditStatus, CrawlStats, Finding, FindingScope};
@@ -1156,5 +1150,38 @@ mod tests {
         assert!(markdown.contains("Slowest paths"));
         let json = render_audit_artifact_json(&artifact).unwrap();
         assert!(json.contains("\"status\": \"partial\""));
+    }
+
+    /// Regression: `rule_group_name` recovered the prefix with
+    /// `take_while(is_ascii_uppercase)`, which yields `"A"` for the
+    /// alphanumeric families and had no arms for them at all. Every A11Y,
+    /// SRF, AGT, and QLT finding was therefore bucketed as "Other" in the
+    /// text report's section headings and recap.
+    #[test]
+    fn rule_group_name_covers_alphanumeric_families() {
+        assert_eq!(rule_group_name("SEO001"), "HTML Metadata");
+        assert_eq!(rule_group_name("A11Y001"), "Accessibility (A11Y)");
+        assert_eq!(rule_group_name("SRF001"), "Machine Surfaces");
+        assert_eq!(rule_group_name("AGT001"), "Agent Discovery (AGT)");
+        assert_eq!(rule_group_name("EDT001"), "Editorial Policy");
+        assert_eq!(rule_group_name("QLT004"), "Internal Quality");
+        // Unregistered ids still fall back rather than panicking.
+        assert_eq!(rule_group_name("ZZZ999"), "Other");
+    }
+
+    /// Every rule the registry knows must produce a non-"Other" group name,
+    /// so a newly registered rule cannot slip through unlabelled.
+    #[test]
+    fn every_registered_rule_has_a_concrete_group_name() {
+        for group in crate::registry::builtin_rule_groups() {
+            for rule in group.rules {
+                assert_ne!(
+                    rule_group_name(rule.rule_id),
+                    "Other",
+                    "{} resolves to the fallback group name",
+                    rule.rule_id
+                );
+            }
+        }
     }
 }

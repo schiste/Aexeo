@@ -4,6 +4,13 @@ use aexeo_contracts::{ConfidenceLevel, Layer, RuleClass, RuleLayers, RuleMetadat
 pub struct RuleDescriptor {
     pub rule_id: &'static str,
     pub summary: &'static str,
+    /// Whether the finding describes the whole site rather than one page.
+    ///
+    /// Scope used to live in a second prefix table in `reporting.rs`, which
+    /// predated the `AGT`, `SRF`, `EDT`, and `A11Y` families and silently
+    /// reported their sitewide findings as page-scoped. Recording it here
+    /// keeps the registry the single source of truth.
+    pub sitewide: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -280,66 +287,82 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             rules: &[
                 RuleDescriptor {
                     rule_id: "SEO001",
+                    sitewide: false,
                     summary: "missing <title>",
                 },
                 RuleDescriptor {
                     rule_id: "SEO002",
+                    sitewide: false,
                     summary: "missing meta description",
                 },
                 RuleDescriptor {
                     rule_id: "SEO004",
+                    sitewide: false,
                     summary: "missing canonical",
                 },
                 RuleDescriptor {
                     rule_id: "SEO005",
+                    sitewide: false,
                     summary: "missing <h1>",
                 },
                 RuleDescriptor {
                     rule_id: "SEO006",
+                    sitewide: false,
                     summary: "multiple <h1> tags",
                 },
                 RuleDescriptor {
                     rule_id: "SEO007",
+                    sitewide: false,
                     summary: "missing root html lang attribute",
                 },
                 RuleDescriptor {
                     rule_id: "SEO008",
+                    sitewide: false,
                     summary: "page has hreflang alternates but no self-referencing hreflang",
                 },
                 RuleDescriptor {
                     rule_id: "SEO009",
+                    sitewide: false,
                     summary: "hreflang alternate points to a missing internal path",
                 },
                 RuleDescriptor {
                     rule_id: "SEO010",
+                    sitewide: false,
                     summary: "invalid hreflang locale code",
                 },
                 RuleDescriptor {
                     rule_id: "SEO011",
+                    sitewide: true,
                     summary: "hreflang cluster is missing x-default",
                 },
                 RuleDescriptor {
                     rule_id: "SEO012",
+                    sitewide: false,
                     summary: "hreflang alternate is not reciprocally linked",
                 },
                 RuleDescriptor {
                     rule_id: "SEO013",
+                    sitewide: false,
                     summary: "page suppresses snippets via nosnippet",
                 },
                 RuleDescriptor {
                     rule_id: "SEO014",
+                    sitewide: false,
                     summary: "page restricts snippets via max-snippet",
                 },
                 RuleDescriptor {
                     rule_id: "SEO015",
+                    sitewide: false,
                     summary: "page uses data-nosnippet blocks",
                 },
                 RuleDescriptor {
                     rule_id: "SEO016",
+                    sitewide: false,
                     summary: "page canonicals to another crawlable route",
                 },
                 RuleDescriptor {
                     rule_id: "SEO017",
+                    sitewide: true,
                     summary: "duplicate title and meta description cluster",
                 },
             ],
@@ -351,18 +374,22 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             rules: &[
                 RuleDescriptor {
                     rule_id: "LNK001",
+                    sitewide: false,
                     summary: "broken internal link",
                 },
                 RuleDescriptor {
                     rule_id: "LNK002",
+                    sitewide: false,
                     summary: "orphan page",
                 },
                 RuleDescriptor {
                     rule_id: "LNK003",
+                    sitewide: false,
                     summary: "weak internal anchor text",
                 },
                 RuleDescriptor {
                     rule_id: "LNK004",
+                    sitewide: false,
                     summary: "insufficient inbound internal links",
                 },
             ],
@@ -374,38 +401,47 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             rules: &[
                 RuleDescriptor {
                     rule_id: "MAP001",
+                    sitewide: true,
                     summary: "missing sitemap.xml",
                 },
                 RuleDescriptor {
                     rule_id: "MAP002",
+                    sitewide: true,
                     summary: "invalid sitemap XML",
                 },
                 RuleDescriptor {
                     rule_id: "MAP003",
+                    sitewide: true,
                     summary: "empty sitemap set",
                 },
                 RuleDescriptor {
                     rule_id: "MAP004",
+                    sitewide: true,
                     summary: "canonical missing from sitemap coverage",
                 },
                 RuleDescriptor {
                     rule_id: "MAP005",
+                    sitewide: true,
                     summary: "sitemap.xml exists but is empty",
                 },
                 RuleDescriptor {
                     rule_id: "MAP006",
+                    sitewide: true,
                     summary: "sitemap endpoint returned HTML instead of sitemap XML",
                 },
                 RuleDescriptor {
                     rule_id: "MAP007",
+                    sitewide: true,
                     summary: "sitemap endpoint exists but is not recognizable sitemap XML",
                 },
                 RuleDescriptor {
                     rule_id: "MAP008",
+                    sitewide: true,
                     summary: "sitemap.xml is missing lastmod values",
                 },
                 RuleDescriptor {
                     rule_id: "MAP009",
+                    sitewide: true,
                     summary: "sitemap.xml has invalid lastmod values",
                 },
             ],
@@ -417,42 +453,52 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             rules: &[
                 RuleDescriptor {
                     rule_id: "ROB001",
+                    sitewide: true,
                     summary: "missing robots.txt",
                 },
                 RuleDescriptor {
                     rule_id: "ROB002",
+                    sitewide: true,
                     summary: "missing Sitemap: declaration in robots.txt",
                 },
                 RuleDescriptor {
                     rule_id: "ROB003",
+                    sitewide: true,
                     summary: "robots.txt blocks the whole site for User-agent: *",
                 },
                 RuleDescriptor {
                     rule_id: "ROB004",
+                    sitewide: true,
                     summary: "page is in sitemap but declares noindex in meta robots",
                 },
                 RuleDescriptor {
                     rule_id: "ROB005",
+                    sitewide: true,
                     summary: "page declares both canonical and noindex",
                 },
                 RuleDescriptor {
                     rule_id: "ROB006",
+                    sitewide: true,
                     summary: "page declares nofollow",
                 },
                 RuleDescriptor {
                     rule_id: "ROB007",
+                    sitewide: true,
                     summary: "robots.txt may overblock crawl budget",
                 },
                 RuleDescriptor {
                     rule_id: "ROB008",
+                    sitewide: true,
                     summary: "page is in sitemap but declares noindex in X-Robots-Tag",
                 },
                 RuleDescriptor {
                     rule_id: "ROB010",
+                    sitewide: true,
                     summary: "robots.txt has no AI-bot User-agent directives",
                 },
                 RuleDescriptor {
                     rule_id: "ROB011",
+                    sitewide: true,
                     summary: "robots.txt has no Content-Signal directives",
                 },
             ],
@@ -464,46 +510,57 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             rules: &[
                 RuleDescriptor {
                     rule_id: "SOC001",
+                    sitewide: false,
                     summary: "missing og:title",
                 },
                 RuleDescriptor {
                     rule_id: "SOC002",
+                    sitewide: false,
                     summary: "missing og:description",
                 },
                 RuleDescriptor {
                     rule_id: "SOC003",
+                    sitewide: false,
                     summary: "missing og:type",
                 },
                 RuleDescriptor {
                     rule_id: "SOC004",
+                    sitewide: false,
                     summary: "missing twitter:card",
                 },
                 RuleDescriptor {
                     rule_id: "SOC005",
+                    sitewide: false,
                     summary: "og:url does not match canonical",
                 },
                 RuleDescriptor {
                     rule_id: "SOC006",
+                    sitewide: false,
                     summary: "missing og:image",
                 },
                 RuleDescriptor {
                     rule_id: "SOC007",
+                    sitewide: false,
                     summary: "missing twitter:image",
                 },
                 RuleDescriptor {
                     rule_id: "SOC008",
+                    sitewide: false,
                     summary: "social image points to a missing internal asset",
                 },
                 RuleDescriptor {
                     rule_id: "SOC009",
+                    sitewide: false,
                     summary: "twitter:card is `summary`; consider `summary_large_image`",
                 },
                 RuleDescriptor {
                     rule_id: "SOC010",
+                    sitewide: false,
                     summary: "social image aspect ratio is outside recommended range",
                 },
                 RuleDescriptor {
                     rule_id: "SOC011",
+                    sitewide: false,
                     summary: "social image is larger than recommended",
                 },
             ],
@@ -515,74 +572,92 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             rules: &[
                 RuleDescriptor {
                     rule_id: "SCH001",
+                    sitewide: false,
                     summary: "invalid JSON-LD",
                 },
                 RuleDescriptor {
                     rule_id: "SCH002",
+                    sitewide: false,
                     summary: "missing required schema type from config",
                 },
                 RuleDescriptor {
                     rule_id: "SCH003",
+                    sitewide: false,
                     summary: "visible FAQ-like <details> blocks without FAQPage JSON-LD",
                 },
                 RuleDescriptor {
                     rule_id: "SCH004",
+                    sitewide: false,
                     summary: "nested page missing BreadcrumbList JSON-LD when required",
                 },
                 RuleDescriptor {
                     rule_id: "SCH005",
+                    sitewide: false,
                     summary: "JSON-LD name/headline does not align with the visible title/H1",
                 },
                 RuleDescriptor {
                     rule_id: "SCH006",
+                    sitewide: false,
                     summary: "schema family object is missing required fields",
                 },
                 RuleDescriptor {
                     rule_id: "SCH007",
+                    sitewide: false,
                     summary: "schema url does not align with canonical",
                 },
                 RuleDescriptor {
                     rule_id: "SCH008",
+                    sitewide: false,
                     summary: "missing configured schema family",
                 },
                 RuleDescriptor {
                     rule_id: "SCH009",
+                    sitewide: true,
                     summary: "sitewide schema entity graph is inconsistent",
                 },
                 RuleDescriptor {
                     rule_id: "SCH010",
+                    sitewide: false,
                     summary: "docs-like page is missing docs-oriented schema",
                 },
                 RuleDescriptor {
                     rule_id: "SCH011",
+                    sitewide: false,
                     summary: "home page is missing sitewide schema context",
                 },
                 RuleDescriptor {
                     rule_id: "SCH012",
+                    sitewide: false,
                     summary: "listing-like page likely wants ItemList schema",
                 },
                 RuleDescriptor {
                     rule_id: "SCH013",
+                    sitewide: false,
                     summary: "detail-like page looks under-described for its schema type",
                 },
                 RuleDescriptor {
                     rule_id: "SCH014",
+                    sitewide: false,
                     summary: "docs-like page likely wants docs-oriented schema",
                 },
                 RuleDescriptor {
                     rule_id: "SCH015",
+                    sitewide: false,
                     summary: "search page could expose SearchAction schema",
                 },
                 RuleDescriptor {
                     rule_id: "SCH016",
+                    sitewide: false,
                     summary: "utility page should not repeat Organization schema inline",
                 },
                 RuleDescriptor {
                     rule_id: "SCH017",
+                    sitewide: false,
                     summary: "editorial schema author is not visible on the page",
                 },
                 RuleDescriptor {
                     rule_id: "SCH018",
+                    sitewide: false,
                     summary: "editorial schema dates are not visible on the page",
                 },
             ],
@@ -594,30 +669,37 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             rules: &[
                 RuleDescriptor {
                     rule_id: "LLM001",
+                    sitewide: true,
                     summary: "missing llms.txt",
                 },
                 RuleDescriptor {
                     rule_id: "LLM002",
+                    sitewide: true,
                     summary: "empty llms.txt",
                 },
                 RuleDescriptor {
                     rule_id: "LLM003",
+                    sitewide: true,
                     summary: "missing expected page sections in llms.txt",
                 },
                 RuleDescriptor {
                     rule_id: "LLM004",
+                    sitewide: true,
                     summary: "broken internal reference in llms.txt",
                 },
                 RuleDescriptor {
                     rule_id: "LLM005",
+                    sitewide: true,
                     summary: "noncanonical .html links in llms.txt when extensionless canonicals are expected",
                 },
                 RuleDescriptor {
                     rule_id: "LLM006",
+                    sitewide: true,
                     summary: "feature/category claim drift against feature-data.json",
                 },
                 RuleDescriptor {
                     rule_id: "LLM007",
+                    sitewide: true,
                     summary: "feature-page count drift against feature-data.json",
                 },
             ],
@@ -629,62 +711,77 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             rules: &[
                 RuleDescriptor {
                     rule_id: "SRF001",
+                    sitewide: true,
                     summary: "missing facts.json machine-readable facts manifest",
                 },
                 RuleDescriptor {
                     rule_id: "SRF002",
+                    sitewide: true,
                     summary: "no per-page Markdown mirrors discovered",
                 },
                 RuleDescriptor {
                     rule_id: "SRF003",
+                    sitewide: true,
                     summary: "larger site is missing llms-full.txt compiled context",
                 },
                 RuleDescriptor {
                     rule_id: "SRF004",
+                    sitewide: true,
                     summary: "route has no discovered Markdown mirror",
                 },
                 RuleDescriptor {
                     rule_id: "SRF005",
+                    sitewide: true,
                     summary: "route has Markdown mirror but no static discovery link",
                 },
                 RuleDescriptor {
                     rule_id: "SRF006",
+                    sitewide: true,
                     summary: "llms.txt references missing machine-readable artifact",
                 },
                 RuleDescriptor {
                     rule_id: "SRF010",
+                    sitewide: true,
                     summary: "agent-skills index missing despite tool-bearing manifest",
                 },
                 RuleDescriptor {
                     rule_id: "SRF011",
+                    sitewide: true,
                     summary: "agent-skills index has invalid shape",
                 },
                 RuleDescriptor {
                     rule_id: "SRF015",
+                    sitewide: true,
                     summary: "MCP server card missing despite MCP claim",
                 },
                 RuleDescriptor {
                     rule_id: "SRF016",
+                    sitewide: true,
                     summary: "MCP server card has invalid shape",
                 },
                 RuleDescriptor {
                     rule_id: "SRF020",
+                    sitewide: true,
                     summary: "API catalog missing despite API surface signal",
                 },
                 RuleDescriptor {
                     rule_id: "SRF021",
+                    sitewide: true,
                     summary: "API catalog has invalid linkset shape",
                 },
                 RuleDescriptor {
                     rule_id: "SRF025",
+                    sitewide: true,
                     summary: "OAuth-protected APIs missing OIDC/OAuth discovery metadata",
                 },
                 RuleDescriptor {
                     rule_id: "SRF026",
+                    sitewide: true,
                     summary: "OAuth-protected APIs missing protected-resource metadata",
                 },
                 RuleDescriptor {
                     rule_id: "SRF030",
+                    sitewide: true,
                     summary: "homepage doesn't honor `Accept: text/markdown` content negotiation",
                 },
             ],
@@ -695,6 +792,7 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             description: "Header-level rules that consult Page.response_headers (runtime audits) or do additional HTTP probes; silent on pure static audits.",
             rules: &[RuleDescriptor {
                 rule_id: "LNK020",
+                sitewide: true,
                 summary: "homepage response sends no Link headers (RFC 8288)",
             }],
         },
@@ -705,26 +803,32 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             rules: &[
                 RuleDescriptor {
                     rule_id: "CNT001",
+                    sitewide: false,
                     summary: "page is unusually small after stripping markup",
                 },
                 RuleDescriptor {
                     rule_id: "CNT002",
+                    sitewide: false,
                     summary: "feature-like page is missing a configured section marker",
                 },
                 RuleDescriptor {
                     rule_id: "CNT003",
+                    sitewide: false,
                     summary: "inline image is missing alt text",
                 },
                 RuleDescriptor {
                     rule_id: "CNT004",
+                    sitewide: false,
                     summary: "inline image is too large",
                 },
                 RuleDescriptor {
                     rule_id: "CNT005",
+                    sitewide: false,
                     summary: "duplicate visible content cluster",
                 },
                 RuleDescriptor {
                     rule_id: "CNT006",
+                    sitewide: false,
                     summary: "generic-beneficiary copy without concrete anchors",
                 },
             ],
@@ -736,14 +840,17 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             rules: &[
                 RuleDescriptor {
                     rule_id: "EDT001",
+                    sitewide: true,
                     summary: "editorial route or declared answer summary is missing, misplaced, or outside the two-to-three sentence range",
                 },
                 RuleDescriptor {
                     rule_id: "EDT002",
+                    sitewide: false,
                     summary: "declared target question is missing, mismatched, or has under 20 visible answer characters",
                 },
                 RuleDescriptor {
                     rule_id: "EDT003",
+                    sitewide: false,
                     summary: "claim marked as requiring evidence has no usable evidence link",
                 },
             ],
@@ -755,54 +862,67 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             rules: &[
                 RuleDescriptor {
                     rule_id: "GEO001",
+                    sitewide: false,
                     summary: "<section> missing data-ui",
                 },
                 RuleDescriptor {
                     rule_id: "GEO002",
+                    sitewide: false,
                     summary: "<article> missing data-ui",
                 },
                 RuleDescriptor {
                     rule_id: "GEO003",
+                    sitewide: false,
                     summary: "duplicate data-ui on a page",
                 },
                 RuleDescriptor {
                     rule_id: "GEO004",
+                    sitewide: false,
                     summary: "<section> missing a heading",
                 },
                 RuleDescriptor {
                     rule_id: "GEO005",
+                    sitewide: false,
                     summary: "<details> missing <summary>",
                 },
                 RuleDescriptor {
                     rule_id: "GEO006",
+                    sitewide: false,
                     summary: "<pre> missing nested <code>",
                 },
                 RuleDescriptor {
                     rule_id: "GEO007",
+                    sitewide: false,
                     summary: "semantic block is too thin for retrieval",
                 },
                 RuleDescriptor {
                     rule_id: "GEO008",
+                    sitewide: false,
                     summary: "page does not have enough answer-oriented blocks",
                 },
                 RuleDescriptor {
                     rule_id: "GEO009",
+                    sitewide: false,
                     summary: "core page facts do not align across title, H1, OpenGraph, and schema",
                 },
                 RuleDescriptor {
                     rule_id: "GEO010",
+                    sitewide: false,
                     summary: "numeric claims lack source cues",
                 },
                 RuleDescriptor {
                     rule_id: "GEO011",
+                    sitewide: false,
                     summary: "page title is weakly disambiguated",
                 },
                 RuleDescriptor {
                     rule_id: "GEO012",
+                    sitewide: false,
                     summary: "question-like block appears under-explained",
                 },
                 RuleDescriptor {
                     rule_id: "GEO013",
+                    sitewide: false,
                     summary: "page contains overlapping answer chunks",
                 },
             ],
@@ -813,6 +933,7 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             description: "",
             rules: &[RuleDescriptor {
                 rule_id: "CRW003",
+                sitewide: true,
                 summary: "crawl ended before the full internal route graph could be reviewed",
             }],
         },
@@ -822,6 +943,7 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             description: "",
             rules: &[RuleDescriptor {
                 rule_id: "DEP001",
+                sitewide: true,
                 summary: "runtime deployment output detected; static directory audit may be incomplete",
             }],
         },
@@ -832,10 +954,12 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             rules: &[
                 RuleDescriptor {
                     rule_id: "AGT001",
+                    sitewide: true,
                     summary: "missing /.well-known/api-catalog (RFC 9727)",
                 },
                 RuleDescriptor {
                     rule_id: "AGT002",
+                    sitewide: true,
                     summary: "missing /.well-known/mcp/server-card.json (SEP-1649)",
                 },
             ],
@@ -847,31 +971,146 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             rules: &[
                 RuleDescriptor {
                     rule_id: "A11Y001",
+                    sitewide: false,
                     summary: "<img> missing alt attribute (skipped on canonically decorative images in default mode)",
                 },
                 RuleDescriptor {
                     rule_id: "A11Y002",
+                    sitewide: false,
                     summary: "<a> or <button> with no accessible text or label",
                 },
                 RuleDescriptor {
                     rule_id: "A11Y003",
+                    sitewide: false,
                     summary: "duplicate id attribute on the same page",
                 },
                 RuleDescriptor {
                     rule_id: "A11Y004",
+                    sitewide: false,
                     summary: "heading hierarchy jumps a level (e.g. h2 → h4)",
                 },
                 RuleDescriptor {
                     rule_id: "A11Y005",
+                    sitewide: false,
                     summary: "page has no <main> landmark or role=\"main\" element",
                 },
                 RuleDescriptor {
                     rule_id: "A11Y006",
+                    sitewide: false,
                     summary: "alt text matches the image filename (likely placeholder)",
                 },
             ],
         },
+        RuleGroupDefinition {
+            name: "quality",
+            title: "Internal Quality",
+            description: "Repository self-checks for the Aexeo workspace itself. These audit the project rather than a reviewed site: required documentation, generated-doc drift, workspace wiring, and source hygiene such as forbidden macros, unwrap/expect in production code, and unsafe markers. Enabled by the `quality` command, not by `check`.",
+            rules: &[
+                RuleDescriptor {
+                    rule_id: "QLT004",
+                    sitewide: true,
+                    summary: "missing required project documentation file",
+                },
+                RuleDescriptor {
+                    rule_id: "QLT005",
+                    sitewide: true,
+                    summary: "built-in rule group missing from docs/rules.md",
+                },
+                RuleDescriptor {
+                    rule_id: "QLT007",
+                    sitewide: true,
+                    summary: "generated docs drift from code and must be regenerated",
+                },
+                RuleDescriptor {
+                    rule_id: "QLT009",
+                    sitewide: true,
+                    summary: "missing Cargo workspace manifest",
+                },
+                RuleDescriptor {
+                    rule_id: "QLT010",
+                    sitewide: true,
+                    summary: "missing Rust build script",
+                },
+                RuleDescriptor {
+                    rule_id: "QLT011",
+                    sitewide: true,
+                    summary: "missing performance budget file",
+                },
+                RuleDescriptor {
+                    rule_id: "QLT012",
+                    sitewide: true,
+                    summary: "missing Rust CLI integration test coverage",
+                },
+                RuleDescriptor {
+                    rule_id: "QLT013",
+                    sitewide: true,
+                    summary: "missing install script",
+                },
+                RuleDescriptor {
+                    rule_id: "QLT014",
+                    sitewide: true,
+                    summary: "missing local CI script",
+                },
+                RuleDescriptor {
+                    rule_id: "QLT015",
+                    sitewide: true,
+                    summary: "missing git hook installation script",
+                },
+                RuleDescriptor {
+                    rule_id: "QLT016",
+                    sitewide: true,
+                    summary: "missing pre-commit hook",
+                },
+                RuleDescriptor {
+                    rule_id: "QLT017",
+                    sitewide: true,
+                    summary: "missing pre-push hook",
+                },
+                RuleDescriptor {
+                    rule_id: "QLT018",
+                    sitewide: true,
+                    summary: "debug or placeholder macro in non-test Rust source",
+                },
+                RuleDescriptor {
+                    rule_id: "QLT019",
+                    sitewide: true,
+                    summary: "unwrap or expect in non-test Rust source",
+                },
+                RuleDescriptor {
+                    rule_id: "QLT020",
+                    sitewide: true,
+                    summary: "unsafe Rust marker in non-test Rust source",
+                },
+                RuleDescriptor {
+                    rule_id: "QLT021",
+                    sitewide: true,
+                    summary: "missing cargo-deny policy file",
+                },
+                RuleDescriptor {
+                    rule_id: "QLT022",
+                    sitewide: true,
+                    summary: "missing dependency hygiene script",
+                },
+                RuleDescriptor {
+                    rule_id: "QLT023",
+                    sitewide: true,
+                    summary: "missing Node package lockfile for browser runtime",
+                },
+            ],
+        },
     ]
+}
+
+/// Human-readable group title for `rule_id`, e.g. `"A11Y001" -> "Accessibility (A11Y)"`.
+///
+/// Resolved from the registry rather than a second prefix table so a group
+/// added above is picked up everywhere automatically. Returns `None` for ids
+/// the registry does not know.
+pub fn rule_group_title_for_id(rule_id: &str) -> Option<&'static str> {
+    builtin_rule_groups()
+        .iter()
+        .find(|group| group.rules.iter().any(|rule| rule.rule_id == rule_id))
+        .map(|group| group.title)
 }
 
 pub fn builtin_adapters() -> &'static [AdapterDefinition] {
@@ -916,8 +1155,8 @@ pub fn list_adapter_names() -> Vec<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        builtin_rule_groups, list_adapter_names, list_rule_group_names, rule_layers_for_id,
-        rule_metadata_for_id, rule_prefix,
+        builtin_rule_groups, list_adapter_names, list_rule_group_names, rule_group_title_for_id,
+        rule_layers_for_id, rule_metadata_for_id, rule_prefix,
     };
     use aexeo_contracts::{ConfidenceLevel, Layer, RuleClass};
 
@@ -942,6 +1181,7 @@ mod tests {
                 "deployment",
                 "agent_discovery",
                 "accessibility",
+                "quality",
             ]
         );
     }
@@ -952,6 +1192,91 @@ mod tests {
             list_adapter_names(),
             vec!["nextjs-export", "astro-dist", "docusaurus-build", "generic"]
         );
+    }
+
+    /// Regression: every alphanumeric family must resolve to a real group
+    /// title. `reporting::rule_group_name` used a `take_while(uppercase)`
+    /// prefix scan with no arms for these prefixes, so all of them rendered
+    /// as "Other" in report headings, the section recap, and the Search
+    /// Console CSV export.
+    ///
+    /// `FACTS` is deliberately absent: it survives only as a layer mapping and
+    /// a doc comment, with no live rules behind it.
+    #[test]
+    fn every_alphanumeric_rule_family_resolves_to_a_group_title() {
+        for id in ["A11Y001", "SRF001", "AGT001", "EDT001", "SEO001"] {
+            assert!(
+                rule_group_title_for_id(id).is_some(),
+                "{id} should resolve to a registered group title"
+            );
+        }
+        assert_eq!(
+            rule_group_title_for_id("A11Y001"),
+            Some("Accessibility (A11Y)")
+        );
+        assert_eq!(
+            rule_group_title_for_id("AGT001"),
+            Some("Agent Discovery (AGT)")
+        );
+        assert_eq!(rule_group_title_for_id("QLT004"), Some("Internal Quality"));
+    }
+
+    /// Every registered rule must belong to exactly one group, and every
+    /// group must have a non-empty title. `docs/rules.md` is generated from
+    /// this list, so an unregistered rule silently disappears from the
+    /// published inventory.
+    #[test]
+    fn every_registered_rule_appears_exactly_once_across_groups() {
+        let mut seen: Vec<(&str, &str)> = Vec::new();
+        for group in builtin_rule_groups() {
+            assert!(!group.title.is_empty(), "{} has no title", group.name);
+            for rule in group.rules {
+                assert!(
+                    !rule.summary.is_empty(),
+                    "{} has no summary for {}",
+                    group.name,
+                    rule.rule_id
+                );
+                seen.push((rule.rule_id, group.name));
+            }
+        }
+        let mut ids: Vec<&str> = seen.iter().map(|(id, _)| *id).collect();
+        let before = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), before, "a rule id is registered in two groups");
+        assert!(!ids.is_empty());
+    }
+
+    #[test]
+    fn unknown_rule_ids_have_no_group_title() {
+        assert_eq!(rule_group_title_for_id("ZZZ999"), None);
+        assert_eq!(rule_group_title_for_id(""), None);
+    }
+
+    /// Guards the invariant the reporting layer now depends on: every
+    /// registered rule carries scope metadata, and the sitewide set matches
+    /// the groups that emit `FindingScope::Sitewide`.
+    #[test]
+    fn sitewide_scope_is_recorded_for_the_expected_families() {
+        let find = |id: &str| {
+            builtin_rule_groups()
+                .iter()
+                .flat_map(|group| group.rules.iter())
+                .find(|rule| rule.rule_id == id)
+                .map(|rule| rule.sitewide)
+        };
+        for id in [
+            "MAP001", "ROB001", "LLM001", "DEP001", "QLT004", "AGT001", "SRF001",
+        ] {
+            assert_eq!(find(id), Some(true), "{id} should be sitewide");
+        }
+        for id in ["SEO011", "SEO017", "LNK020", "SCH009", "EDT001", "CRW003"] {
+            assert_eq!(find(id), Some(true), "{id} should be sitewide");
+        }
+        for id in ["SEO001", "LNK001", "A11Y001", "SCH001", "CNT001", "EDT002"] {
+            assert_eq!(find(id), Some(false), "{id} should be page-scoped");
+        }
     }
 
     #[test]

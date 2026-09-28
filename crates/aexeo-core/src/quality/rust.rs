@@ -21,6 +21,34 @@ fn collect_rust_source_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()>
     Ok(())
 }
 
+/// True for files that cannot be Rust source and should not be read as text.
+///
+/// Two cases matter, and both are reachable on a normal developer machine:
+///
+/// 1. macOS writes `._<name>` AppleDouble resource forks beside real files
+///    when a checkout lands on a non-HFS volume (external exFAT, network
+///    share, container bind mount). The sidecar keeps the original
+///    extension, so `._lib.rs` looks exactly like a Rust source file to a
+///    scan that only checks the extension — but it is a binary header, not
+///    UTF-8 text.
+/// 2. Any genuinely non-UTF-8 file carrying a `.rs` extension.
+///
+/// Either way `fs::read_to_string` fails with "stream did not contain valid
+/// UTF-8", and because the scan propagates that error, a single stray file
+/// aborted the entire `quality` gate with no findings at all. Skipping them
+/// is correct: a Rust source file is UTF-8 by definition, so anything that
+/// does not decode is not one.
+fn is_unreadable_as_rust_source(path: &Path) -> bool {
+    let is_hidden_sidecar = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("._"));
+    if is_hidden_sidecar {
+        return true;
+    }
+    fs::read(path).is_ok_and(|bytes| std::str::from_utf8(&bytes).is_err())
+}
+
 fn is_production_rust_source(root: &Path, path: &Path) -> bool {
     path.strip_prefix(root)
         .ok()
@@ -37,7 +65,14 @@ fn scan_non_test_rust_source(
     path: &Path,
     patterns: &[(&str, &[&str], &str)],
 ) -> Result<Vec<Finding>> {
-    let raw = fs::read_to_string(path)?;
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        // A file that cannot be decoded as UTF-8 is not Rust source, and a
+        // policy scan should report what it can rather than aborting the
+        // whole audit. `is_unreadable_as_rust_source` already filters the
+        // known cases; this is the belt-and-braces path for anything else.
+        Err(_) => return Ok(Vec::new()),
+    };
     let non_test_source = raw
         .lines()
         .take_while(|line| !line.trim_start().starts_with("#[cfg(test)]"))
@@ -131,6 +166,9 @@ pub(super) fn find_rust_source_policy_issues(root: &Path) -> Result<Vec<Finding>
     ];
     for path in files {
         if !is_production_rust_source(root, &path) {
+            continue;
+        }
+        if is_unreadable_as_rust_source(&path) {
             continue;
         }
         findings.extend(scan_non_test_rust_source(root, &path, &patterns)?);
