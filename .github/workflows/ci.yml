@@ -149,3 +149,37 @@ jobs:
       # job would pay that price from cold on every run.
       - name: Enforce performance budget
         run: sh scripts/check-performance.sh
+      # Coverage was not measured anywhere. The repository carried a root
+      # `.coveragerc` — a Python `coverage.py` config pointing at
+      # `src/seogeo`, a directory it has never had, referenced by no script
+      # and no workflow — which was the only thing in the repo that looked
+      # like a coverage gate. That file is gone; this is the real thing.
+      #
+      # Separate job, not a step here: instrumented builds are a third full
+      # recompile of the workspace and would roughly double this job, which
+      # is already the slowest. It gets its own timeout and its own cache.
+      #
+      # COVERAGE_MIN is 80 against a measured 82.5% (2026-09-28, 44,346
+      # lines). The gap is deliberate headroom for platform noise; the point
+      # is to stop coverage falling, not to demand a number the suite does
+      # not meet today. Raise it as coverage improves.
+  coverage:
+    name: coverage (llvm-cov floor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # Instrumented artifacts are not interchangeable with normal ones.
+          key: coverage
+      - name: Install cargo-llvm-cov
+        run: cargo install --locked cargo-llvm-cov
+      - name: Measure coverage floor
+        env:
+          COVERAGE_MIN: 80
+        run: |
+          cargo llvm-cov --workspace --all-targets --summary-only \
+            --fail-under-lines "$COVERAGE_MIN"

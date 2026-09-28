@@ -3,6 +3,22 @@ dist/
 build/
 target/
 
+# macOS filesystem sidecars. On a non-HFS volume (external exFAT drive,
+# network share, container bind mount) macOS writes a `._<name>` resource
+# fork beside every real file. This is not cosmetic here: a sidecar keeps
+# the original extension, so several tools treat it as a real file and fail.
+# Observed in this repository, all fixed at the source but worth listing:
+#
+#   * `aexeo-cli quality` aborted with "stream did not contain valid UTF-8"
+#     because its source scan read every `*.rs` it found. A single `._lib.rs`
+#     sidecar killed the whole gate. See quality/rust.rs
+#     `is_unreadable_as_rust_source`.
+#   * `vitest` collected `._plugin-host.test.ts` as a second copy of the real
+#     suite, booting a competing workerd instance. See the plugin's
+#     vitest.config.ts `exclude`.
+#   * `llvm-profdata merge` failed outright on `._*.profraw` files, so
+#     `cargo llvm-cov` could not produce a report at all.
+
 # Aexeo audit artifacts. Only the current post-rename directory name is
 # listed; the name used before the rename is intentionally absent because
 # nothing writes it anymore.
@@ -12,11 +28,9 @@ target/
 # session-local, never committed.
 tmp/
 
-# macOS filesystem sidecars. On a non-HFS volume (external exFAT drive,
-# network share, Docker bind mount) macOS writes `._<name>` resource forks
-# next to every real file. They are untracked noise, they show up as
-# untracked paths in `git status`, and tools that glob for `*.ts` collect
-# them as phantom duplicates of real source files.
+# See the longer note near the top of this file: these sidecars have broken
+# the quality gate, the plugin test runner, and coverage reporting, because
+# they keep the extension of the file they shadow.
 .DS_Store
 ._*
 
