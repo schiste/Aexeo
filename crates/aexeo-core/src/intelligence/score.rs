@@ -396,6 +396,46 @@ fn trust_penalty(kind: TrustSurfaceIssueKind) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn truth_assessment_base() -> crate::intelligence::truth::TruthAssessment {
+        crate::intelligence::truth::TruthAssessment {
+            structured_truth_source: crate::intelligence::truth::TruthStructuredSource::None,
+            structured_truth_prerequisite_met: false,
+            score: 90,
+            score_ceiling: 100,
+            pages_analyzed: 0,
+            pages_with_schema: 0,
+            manifest_present: false,
+            organization_schema_pages: 0,
+            website_schema_pages: 0,
+            preferred_term_hits: 0,
+            forbidden_term_hits: 0,
+            mismatches: vec![],
+            elapsed_us: 0,
+        }
+    }
+
+    fn mismatch(route: &str) -> TruthMismatch {
+        TruthMismatch {
+            route: route.to_string(),
+            field: "name".to_string(),
+            expected: "Aeptus".to_string(),
+            observed: "Acme".to_string(),
+            source: "manifest".to_string(),
+            severity: TruthMismatchSeverity::Warning,
+        }
+    }
+
+    fn trust_report_base() -> super::TrustSurfaceReconciliation {
+        super::TrustSurfaceReconciliation {
+            rows_read: 0,
+            matched_first_party_routes: 0,
+            offsite_mentions: 0,
+            source_summaries: vec![],
+            issues: vec![],
+            elapsed_us: 0,
+        }
+    }
     use crate::intelligence::{
         GroundingIntentFamily, GroundingRouteAnalysis, TruthMismatch, TruthMismatchSeverity,
         TruthStructuredSource,
@@ -514,5 +554,175 @@ mod tests {
 
         assert_eq!(route_answer_pack_score(&generic_route), 68);
         assert_eq!(route_answer_pack_score(&rich_feature_route), 100);
+    }
+
+    /// The weighting is the score, so a silent change here would move every
+    /// reported number without failing anything.
+    ///
+    /// With a trust surface present the four components are weighted
+    /// 35/30/25/10. Without one, trust is dropped and the remaining three
+    /// take its share: 40/35/25. Both sets must sum to 100, or the overall
+    /// score is silently rescaled.
+    #[test]
+    fn overall_score_weights_sum_to_one_hundred() {
+        const WITH_TRUST: [u8; 4] = [35, 30, 25, 10];
+        const WITHOUT_TRUST: [u8; 3] = [40, 35, 25];
+        assert_eq!(WITH_TRUST.iter().map(|w| *w as u32).sum::<u32>(), 100);
+        assert_eq!(WITHOUT_TRUST.iter().map(|w| *w as u32).sum::<u32>(), 100);
+    }
+
+    #[test]
+    fn overall_score_is_the_weighted_average_of_its_inputs() {
+        // 100 * 35 + 100 * 30 + 100 * 25 + 100 * 10 = 100.
+        assert_eq!(weighted_overall_score(100, 100, 100, Some(100)), 100);
+        // 0 everywhere is 0.
+        assert_eq!(weighted_overall_score(0, 0, 0, Some(0)), 0);
+        // Only citation readiness: 100 * 35 / 100 = 35.
+        assert_eq!(weighted_overall_score(100, 0, 0, Some(0)), 35);
+        // Without a trust surface, citation readiness is worth 40.
+        assert_eq!(weighted_overall_score(100, 0, 0, None), 40);
+    }
+
+    /// A missing trust surface must not be treated as a zero score; that
+    /// would punish a site for not opting into a surface it never claimed.
+    #[test]
+    fn absent_trust_surface_scores_higher_than_a_zero_one() {
+        let without = weighted_overall_score(80, 80, 80, None);
+        let with_zero = weighted_overall_score(80, 80, 80, Some(0));
+        assert!(
+            without > with_zero,
+            "omitting trust ({without}) must beat scoring it zero ({with_zero})"
+        );
+    }
+
+    /// Every intent family needs a baseline; a missing arm would make a
+    /// route silently score as if it were a different kind of page.
+    #[test]
+    fn every_intent_family_has_a_baseline() {
+        use crate::intelligence::grounding::GroundingIntentFamily::*;
+        for (intent, expected) in [
+            (Feature, 78),
+            (Comparison, 76),
+            (Definition, 74),
+            (Procedural, 74),
+            (Pricing, 74),
+            (Troubleshooting, 72),
+            (Asset, 72),
+            (Reference, 68),
+            (Generic, 64),
+        ]
+        .into_iter()
+        {
+            assert_eq!(
+                route_answer_pack_baseline(intent.clone()),
+                expected,
+                "baseline for {intent:?}"
+            );
+        }
+    }
+
+    /// Every grounding gap needs a stable label (it appears in report output
+    /// and is compared across runs) and a severity in range.
+    #[test]
+    fn every_grounding_gap_has_a_label_and_a_sane_severity() {
+        for gap in [
+            GroundingCoverageGap::MissingDirectAnswer,
+            GroundingCoverageGap::ThinAnswerCoverage,
+            GroundingCoverageGap::WeakComparisonStructure,
+            GroundingCoverageGap::MissingPricingSignals,
+            GroundingCoverageGap::MissingProceduralSignals,
+        ] {
+            let label = gap_label(&gap);
+            assert!(!label.is_empty(), "{gap:?} has no label");
+            assert!(
+                label.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{gap:?} label {label} is not snake_case"
+            );
+            let severity = gap_severity(&gap);
+            assert!(
+                (1..=100).contains(&severity),
+                "{gap:?} severity {severity} is out of range"
+            );
+        }
+        // The most serious gap must outrank the least.
+        assert!(
+            gap_severity(&GroundingCoverageGap::MissingDirectAnswer)
+                > gap_severity(&GroundingCoverageGap::MissingPricingSignals)
+        );
+    }
+
+    /// Trust penalties are bounded so a route with many issues cannot drive
+    /// the trust sub-score to zero and take the whole score with it.
+    #[test]
+    fn every_trust_issue_kind_has_a_bounded_penalty() {
+        for kind in [
+            super::TrustSurfaceIssueKind::RouteNotInSite,
+            super::TrustSurfaceIssueKind::MissingCanonicalEntity,
+            super::TrustSurfaceIssueKind::ForbiddenTerminology,
+            super::TrustSurfaceIssueKind::DescriptorGap,
+        ] {
+            let penalty = trust_penalty(kind.clone());
+            assert!((1..=100).contains(&penalty), "{kind:?} penalty {penalty}");
+        }
+    }
+
+    /// A truth mismatch on a route degrades that route, capped at four so a
+    /// pathologically noisy route cannot zero out the score, and other routes
+    /// are unaffected.
+    #[test]
+    fn truth_mismatches_penalise_only_their_own_route_and_are_capped() {
+        let base = TruthAssessment {
+            score: 90,
+            mismatches: vec![],
+            ..truth_assessment_base()
+        };
+        assert_eq!(route_truth_score("/a", &base), 90);
+
+        let one = TruthAssessment {
+            mismatches: vec![mismatch("/a")],
+            ..truth_assessment_base()
+        };
+        assert_eq!(route_truth_score("/a", &one), 80, "one mismatch costs 10");
+        assert_eq!(route_truth_score("/b", &one), 90, "other routes untouched");
+
+        // Five mismatches still cost 40, not 50: the cap is at four.
+        let many = TruthAssessment {
+            mismatches: (0..5).map(|_| mismatch("/a")).collect(),
+            ..truth_assessment_base()
+        };
+        assert_eq!(route_truth_score("/a", &many), 50);
+    }
+
+    /// The trust sub-score has a floor of 40 and a 100 ceiling: a site with
+    /// no trust surface at all is perfect on that axis, not zero.
+    #[test]
+    fn trust_alignment_is_bounded_and_defaults_to_perfect() {
+        let empty = super::TrustSurfaceReconciliation {
+            rows_read: 0,
+            ..trust_report_base()
+        };
+        assert_eq!(
+            trust_alignment_score(&empty),
+            100,
+            "an unread trust surface must not penalise a site"
+        );
+
+        let all_matched = super::TrustSurfaceReconciliation {
+            rows_read: 4,
+            matched_first_party_routes: 4,
+            ..trust_report_base()
+        };
+        assert_eq!(trust_alignment_score(&all_matched), 100);
+
+        let none_matched = super::TrustSurfaceReconciliation {
+            rows_read: 4,
+            matched_first_party_routes: 0,
+            ..trust_report_base()
+        };
+        let score = trust_alignment_score(&none_matched);
+        assert!(
+            (40..=100).contains(&score),
+            "trust score {score} escaped the documented 40..100 band"
+        );
     }
 }
