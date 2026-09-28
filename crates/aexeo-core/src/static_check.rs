@@ -8,6 +8,7 @@ use crate::adapter::resolve_static_site_root;
 use crate::agent_discovery_rules::run_agent_discovery_rules;
 use crate::config::{Config, default_rule_switches, load_config};
 use crate::content_rules::run_content_rules;
+use crate::editorial_rules::run_editorial_rules;
 use crate::html_rules::run_html_rules;
 use crate::link_rules::run_link_rules;
 use crate::llm_rules::run_llm_rules;
@@ -153,6 +154,13 @@ pub fn run_checks_for_site_profiled(site: &crate::site::Site, config: &Config) -
         || run_content_rules(site, config),
     );
     time_rule_group(
+        rules.checks.get("editorial").copied().unwrap_or(true),
+        "editorial",
+        &mut rule_timings,
+        &mut findings,
+        || run_editorial_rules(site, config),
+    );
+    time_rule_group(
         rules.checks.get("structure").copied().unwrap_or(true),
         "structure",
         &mut rule_timings,
@@ -218,6 +226,7 @@ pub fn can_run_native_static_audit(config: &Config) -> bool {
                     | "surfaces"
                     | "schema"
                     | "content"
+                    | "editorial"
                     | "structure"
                     | "accessibility"
                     | "agent_discovery"

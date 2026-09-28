@@ -1,10 +1,11 @@
 # Install
 
-This repository supports three practical install paths today:
+This repository supports four practical install paths today:
 
 1. Build the Rust CLI from source.
 2. Download a prebuilt CLI binary from GitHub Releases.
-3. Install the emdash plugin from npm.
+3. Install the CLI from Homebrew.
+4. Install the emdash plugin from npm.
 
 ## Build The CLI From Source
 
@@ -21,6 +22,17 @@ cargo build --release
 ```
 
 The binary will be available at `target/release/aexeo-cli`.
+
+## Install With Homebrew
+
+Install the CLI from the Aexeo formula in the `schiste/tap` tap:
+
+```bash
+brew install schiste/tap/aexeo
+```
+
+The formula supports Apple Silicon macOS and Intel x86_64 Linux, matching the
+platform binaries published by the Aexeo GitHub release workflow.
 
 ## Install A Built Binary Locally
 

@@ -1,8 +1,9 @@
 # Release Checklist
 
-This repository currently has two release surfaces:
+This repository currently has three delivery surfaces:
 
 - GitHub release artifacts for `aexeo-cli`
+- the `schiste/tap/aexeo` Homebrew formula, maintained in `schiste/homebrew-tap`
 - the `@aeptus/aexeo-emdash` npm package
 
 ## Pre-Release Validation
@@ -68,7 +69,9 @@ Check that the tarball includes:
 
 ## Publish
 
-1. Confirm the working tree is clean.
+1. Confirm the working tree is clean and the main-branch CI gate has passed.
 2. Push the release commit and version tag.
-3. Publish the GitHub release assets and, when applicable, the npm package.
-4. Record the released version, commit SHA, and checksums in the release notes.
+3. Wait for the GitHub release workflow to publish the CLI binaries and combined checksums.
+4. Update `Formula/aexeo.rb` in `schiste/homebrew-tap` with the release tag and platform-specific binary checksums.
+5. Publish the GitHub release assets and, when applicable, the npm package.
+6. Record the released version, commit SHA, and checksums in the release notes.

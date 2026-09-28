@@ -156,6 +156,11 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
             description: "Per-rule severity overrides applied after rules run.",
         },
         ConfigFieldDoc {
+            key: "editorial",
+            default_value: "(no route briefs)",
+            description: "Route-scoped editorial briefs for EDT001–EDT003. Each brief declares an answer summary element ID, target question headings, and claim IDs that need evidence links.",
+        },
+        ConfigFieldDoc {
             key: "suppressions",
             default_value: "(none)",
             description: "Explicit reviewable suppressions with rule, path pattern, reason, and optional expiry.",
@@ -581,6 +586,42 @@ fn flat_properties() -> Map<String, Value> {
     );
     properties.insert("checks".to_string(), rule_switch_schema());
     properties.insert(
+        "editorial".to_string(),
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "routes": {
+                    "type": "object",
+                    "description": "Editorial briefs keyed by canonical route path.",
+                    "additionalProperties": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "answer_summary_id": { "type": "string" },
+                            "target_questions": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "required": ["heading_id", "question"],
+                                    "properties": {
+                                        "heading_id": { "type": "string" },
+                                        "question": { "type": "string" }
+                                    }
+                                }
+                            },
+                            "claims_requiring_evidence": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            }
+                        }
+                    }
+                }
+            }
+        }),
+    );
+    properties.insert(
         "orphan_exclude".to_string(),
         string_array_schema("Routes or filenames excluded from orphan detection."),
     );
@@ -862,6 +903,13 @@ fn nested_properties() -> Map<String, Value> {
                         "enabled": { "type": "boolean" },
                         "min_page_size": { "type": "integer", "minimum": 0 },
                         "required_feature_markers": { "type": "array", "items": { "type": "string" } }
+                    }
+                }]},
+                "editorial": { "oneOf": [{ "type": "boolean" }, {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": { "type": "boolean" }
                     }
                 }]},
                 "structure": { "oneOf": [{ "type": "boolean" }, {

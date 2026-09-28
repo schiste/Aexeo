@@ -113,6 +113,9 @@ pub struct Config {
     pub utility_route_patterns: Vec<String>,
     #[serde(default)]
     pub route_policy_overrides: Vec<RoutePolicyOverride>,
+    /// Route-level declarations consumed by the deterministic editorial rules.
+    #[serde(default)]
+    pub editorial: Editorial,
     #[serde(default = "default_min_inbound_links")]
     pub min_inbound_links: usize,
     #[serde(default = "default_link_suggestion_count")]
@@ -304,6 +307,33 @@ pub struct ConfigFieldDoc {
     pub description: &'static str,
 }
 
+/// Route-level editorial declarations. Keys in `routes` are canonical paths,
+/// such as `/guides/compare-plans`.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Editorial {
+    #[serde(default)]
+    pub routes: BTreeMap<String, EditorialRouteBrief>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct EditorialRouteBrief {
+    #[serde(default)]
+    pub answer_summary_id: Option<String>,
+    #[serde(default)]
+    pub target_questions: Vec<EditorialTargetQuestion>,
+    #[serde(default)]
+    pub claims_requiring_evidence: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct EditorialTargetQuestion {
+    pub heading_id: String,
+    pub question: String,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -344,6 +374,7 @@ impl Default for Config {
             repeatable_data_ui: default_repeatable_data_ui(),
             utility_route_patterns: default_utility_route_patterns(),
             route_policy_overrides: Vec::new(),
+            editorial: Editorial::default(),
             min_inbound_links: default_min_inbound_links(),
             link_suggestion_count: default_link_suggestion_count(),
             enable_link_autofix: false,

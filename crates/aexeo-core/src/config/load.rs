@@ -9,12 +9,12 @@ use crate::plugin::validate_plugin_settings;
 
 const VERSIONED_TOP_LEVEL_TABLES: &[&str] =
     &["site", "runtime", "policy", "rules", "output", "quality"];
-// `[accessibility]` and `[agent_discovery]` live outside the
+// `[accessibility]`, `[agent_discovery]`, and `[editorial]` live outside the
 // versioned set because they have no flat-key counterpart — there's
 // nothing in old configs for the version=1 gate to protect against.
-// Users can adopt A11Y / agent-discovery settings on any config
-// shape without needing to migrate to versioned form.
-const UNVERSIONED_NEW_TABLES: &[&str] = &["accessibility", "agent_discovery"];
+// Users can adopt these settings on any config shape without needing to
+// migrate to versioned form.
+const UNVERSIONED_NEW_TABLES: &[&str] = &["accessibility", "agent_discovery", "editorial"];
 const FLAT_TOP_LEVEL_KEYS: &[&str] = &[
     "site_url",
     "source_dir",
@@ -281,6 +281,7 @@ fn merge_bool_rule_toggles(
         "llm",
         "surfaces",
         "content",
+        "editorial",
         "structure",
     ] {
         if matches!(rules_table.get(key), Some(Value::Boolean(_)))
@@ -327,6 +328,7 @@ fn validate_rules_table(table: &toml::map::Map<String, Value>) -> Result<()> {
             "llm",
             "surfaces",
             "content",
+            "editorial",
             "structure",
         ],
         "[rules]",
@@ -399,7 +401,7 @@ fn validate_rules_table(table: &toml::map::Map<String, Value>) -> Result<()> {
                 ],
                 "[rules.structure]",
             )?,
-            "sitemap" | "llm" | "surfaces" => validate_allowed_keys(
+            "sitemap" | "llm" | "surfaces" | "editorial" => validate_allowed_keys(
                 expect_table(value, key, "[rules]")?,
                 &["enabled"],
                 &format!("[rules.{}]", key),
@@ -492,6 +494,46 @@ fn validate_versioned_sections(root: &toml::map::Map<String, Value>) -> Result<(
             &["enabled"],
             "[agent_discovery]",
         )?;
+    }
+    if let Some(value) = root.get("editorial") {
+        let editorial = expect_table(value, "editorial", "config root")?;
+        validate_allowed_keys(editorial, &["routes"], "[editorial]")?;
+        if let Some(routes_value) = editorial.get("routes") {
+            let routes = expect_table(routes_value, "routes", "[editorial]")?;
+            for (route, brief_value) in routes {
+                let brief = expect_table(brief_value, route, "[editorial.routes]")?;
+                validate_allowed_keys(
+                    brief,
+                    &[
+                        "answer_summary_id",
+                        "target_questions",
+                        "claims_requiring_evidence",
+                    ],
+                    "[editorial.routes.<route>]",
+                )?;
+                if let Some(questions_value) = brief.get("target_questions") {
+                    let questions = questions_value.as_array().ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "config key 'target_questions' in [editorial.routes.{}] must be an array",
+                            route
+                        )
+                    })?;
+                    for question in questions {
+                        let question = question.as_table().ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "target_questions entries in [editorial.routes.{}] must be tables",
+                                route
+                            )
+                        })?;
+                        validate_allowed_keys(
+                            question,
+                            &["heading_id", "question"],
+                            "[editorial.routes.<route>.target_questions]",
+                        )?;
+                    }
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -794,7 +836,7 @@ fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
                 "require_fact_consistency",
             );
         }
-        for key in ["sitemap", "llm", "surfaces"] {
+        for key in ["sitemap", "llm", "surfaces", "editorial"] {
             if let Some(Value::Table(mut table)) = rules_table.remove(key) {
                 move_table_field_if_absent_checks(root, &mut table, key);
             }

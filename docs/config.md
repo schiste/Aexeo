@@ -26,6 +26,12 @@ use_sitemap = true
 
 [policy]
 ignore_rules = ["SCH012"]
+severity_overrides = { EDT001 = "error" }
+
+[editorial.routes."/guides/example"]
+answer_summary_id = "answer-summary"
+target_questions = [{ heading_id = "pricing", question = "How does pricing compare?" }]
+claims_requiring_evidence = ["benchmark"]
 
 [rules.html]
 enabled = true
@@ -204,6 +210,11 @@ coverage_threshold = 85
 - Default: (none)
 - Meaning: Per-rule severity overrides applied after rules run.
 
+## `editorial`
+
+- Default: (no route briefs)
+- Meaning: Route-scoped editorial briefs for EDT001–EDT003. Each brief declares an answer summary element ID, target question headings, and claim IDs that need evidence links.
+
 ## `suppressions`
 
 - Default: (none)
@@ -376,6 +387,7 @@ Built-in rule-group toggles. Unknown plugin rule groups default to enabled unles
 - `accessibility`: default `true`
 - `agent_discovery`: default `true`
 - `content`: default `true`
+- `editorial`: default `true`
 - `html`: default `true`
 - `links`: default `true`
 - `llm`: default `true`

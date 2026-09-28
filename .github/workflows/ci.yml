@@ -14,6 +14,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - name: Install nightly for unused-dependency analysis
+        run: rustup toolchain install nightly --profile minimal --component rust-src --component llvm-tools-preview
+      - name: Install Rust quality tools
+        run: cargo install --locked cargo-audit cargo-deny cargo-udeps
       - name: Run repo quality gate
         run: sh scripts/check-repo.sh
       - name: Run release install smoke

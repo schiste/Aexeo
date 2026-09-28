@@ -7,6 +7,7 @@ pub mod capabilities;
 pub mod config;
 pub mod content_rules;
 pub mod docs;
+pub mod editorial_rules;
 pub mod fix;
 pub mod generate;
 pub mod header_rules;
@@ -40,14 +41,15 @@ pub use accessibility_rules::{AccessibilityOptions, run_accessibility_rules};
 pub use agent_discovery_rules::run_agent_discovery_rules;
 pub use capabilities::{SiteCapabilities, infer_site_capabilities, well_known_path_exists};
 pub use config::{
-    Accessibility, AgentDiscovery, Config, ConfigFieldDoc, render_resolved_config_json,
-    render_resolved_config_toml,
+    Accessibility, AgentDiscovery, Config, ConfigFieldDoc, Editorial, EditorialRouteBrief,
+    EditorialTargetQuestion, render_resolved_config_json, render_resolved_config_toml,
 };
 pub use content_rules::run_content_rules;
 pub use docs::{
     find_reference_doc_drift, reference_documents, render_adapter_reference,
     render_config_reference, render_rule_reference, write_reference_documents,
 };
+pub use editorial_rules::run_editorial_rules;
 pub use fix::{FixOptions, apply_safe_fixes, apply_safe_fixes_with_options};
 pub use generate::{
     GeneratedMachineArtifact, MachineArtifactBundle, build_link_suggestions,
