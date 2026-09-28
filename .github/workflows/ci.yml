@@ -6,6 +6,20 @@ on:
   pull_request:
 
 jobs:
+  emdash-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/aexeo-emdash/package-lock.json
+      - name: Install EmDash plugin dependencies
+        run: npm ci --prefix packages/aexeo-emdash
+      - name: Run EmDash plugin tests
+        run: npm test --prefix packages/aexeo-emdash
+
   validate:
     runs-on: ubuntu-latest
     steps:
