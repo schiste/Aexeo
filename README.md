@@ -11,7 +11,7 @@ The repository currently contains:
 - `packages/aexeo-emdash`: the published `@aeptus/aexeo-emdash` npm package
 - `packages/aexeo-crawl-worker`: optional Cloudflare worker for sandboxed plugin deployments
 
-The source tree is licensed under [MIT](LICENSE). The Rust crates are not yet published on `crates.io`; build from source or consume GitHub release artifacts. The emdash plugin ships on npm and now rebuilds its bridge WASM from the current Rust source during `npm run build`.
+The source tree is licensed under [MIT](LICENSE). The Rust crates are not yet published on `crates.io`; build from source, consume GitHub release artifacts, or install the CLI from the [Homebrew tap](https://github.com/schiste/homebrew-tap). The emdash plugin ships on npm and rebuilds its bridge WASM from the current Rust source during `npm run build`.
 
 ## Quick Start
 

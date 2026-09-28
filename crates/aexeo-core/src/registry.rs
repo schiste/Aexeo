@@ -69,6 +69,10 @@ fn metadata_for_prefix(prefix: &str) -> RuleMetadata {
             class: RuleClass::Policy,
             confidence: ConfidenceLevel::Medium,
         },
+        "EDT" => RuleMetadata {
+            class: RuleClass::Policy,
+            confidence: ConfidenceLevel::Medium,
+        },
         "GEO" => RuleMetadata {
             class: RuleClass::Heuristic,
             confidence: ConfidenceLevel::Medium,
@@ -173,6 +177,9 @@ fn layers_for_prefix(prefix: &str) -> RuleLayers {
         // CNT: content rules. Citability primary (whether the content
         // is structured well enough to cite); absorbability secondary.
         "CNT" => RuleLayers::with_secondaries(Layer::Citability, vec![Layer::Absorbability]),
+        // EDT: explicit editorial briefs and their rendered answer, question,
+        // and evidence markers. These are citation-shape policy checks.
+        "EDT" => RuleLayers::with_secondaries(Layer::Citability, vec![Layer::Absorbability]),
         // GEO: structural and content patterns specifically for
         // generative engines. Citability primary; absorbability
         // secondary.
@@ -723,6 +730,25 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             ],
         },
         RuleGroupDefinition {
+            name: "editorial",
+            title: "Editorial Policy",
+            description: "Deterministic checks for route briefs that declare answer summaries, target questions, and claims requiring evidence. Findings are warnings by default and can be promoted by per-rule severity overrides.",
+            rules: &[
+                RuleDescriptor {
+                    rule_id: "EDT001",
+                    summary: "editorial route or declared answer summary is missing, misplaced, or outside the two-to-three sentence range",
+                },
+                RuleDescriptor {
+                    rule_id: "EDT002",
+                    summary: "declared target question is missing, mismatched, or has under 20 visible answer characters",
+                },
+                RuleDescriptor {
+                    rule_id: "EDT003",
+                    summary: "claim marked as requiring evidence has no usable evidence link",
+                },
+            ],
+        },
+        RuleGroupDefinition {
             name: "structure",
             title: "Retrieval Structure",
             description: "Reusable GEO rules extracted from the Chau7 website guidelines.",
@@ -910,6 +936,7 @@ mod tests {
                 "surfaces",
                 "headers",
                 "content",
+                "editorial",
                 "structure",
                 "runtime",
                 "deployment",

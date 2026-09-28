@@ -174,6 +174,50 @@
       "description": "Default twitter:card value used by safe fixes.",
       "type": "string"
     },
+    "editorial": {
+      "additionalProperties": false,
+      "properties": {
+        "routes": {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "answer_summary_id": {
+                "type": "string"
+              },
+              "claims_requiring_evidence": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "target_questions": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "heading_id": {
+                      "type": "string"
+                    },
+                    "question": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "heading_id",
+                    "question"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "description": "Editorial briefs keyed by canonical route path.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "enable_cache": {
       "description": "Whether persistent caches may be used.",
       "type": "boolean"
@@ -496,6 +540,22 @@
                     "type": "string"
                   },
                   "type": "array"
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "editorial": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
                 }
               },
               "type": "object"

@@ -6,7 +6,14 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.8.18] - 2026-09-27
+## [0.8.18] - 2026-09-28
+
+### Added
+
+- Include deterministic editorial-policy rules EDT001–EDT003 in the bundled Rust/WASM evaluator. Configured answer summaries, target questions, and evidence-marked claims can now be checked through the serialized Aexeo config.
+
+
+## [0.8.19] - 2026-09-28
 
 Updates the EmDash integration to the current plugin and content APIs.
 
@@ -36,7 +43,6 @@ Updates the EmDash integration to the current plugin and content APIs.
   and install guide to name the supported range and sandbox save behavior.
 - Add Vitest coverage using EmDash's official plugin runtime test host for
   sandbox hooks, blocks extraction, resolved URLs, and translation alternates.
-
 ## [0.8.17] - 2026-05-29
 
 Hotfix release. Closes the production admin-route regression
