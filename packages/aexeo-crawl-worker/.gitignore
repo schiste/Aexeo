@@ -1,3 +1,24 @@
 node_modules
 .wrangler
 .dev.vars
+# The bridge WASM and its wasm-bindgen glue are build output, not source.
+# They are produced by `npm run build:wasm`, which drives
+# ../aexeo-emdash/scripts/build-wasm.sh against this directory, and are
+# committed nowhere: a checked-in .wasm goes stale silently, and the
+# hand-written .d.ts files get edited to match the stale binary instead of
+# the plugin that actually calls it. Same reasoning, and the same carve-out,
+# as ../aexeo-emdash/.gitignore.
+#
+# Named patterns rather than `src/wasm/*`, because src/wasm/init.ts is
+# ordinary source: a directory-wide rule would ignore it too, and the
+# exception list would then have to grow every time real code lands there.
+#
+# The two `.d.ts` files ARE tracked: they are the contract this package's
+# TypeScript compiles against. wasm-bindgen does not emit `_bg.d.ts` for the
+# bundler target at all, and the `.wasm.d.ts` has to describe a precompiled
+# WebAssembly.Module rather than the ESM export shape wasm-bindgen would
+# assume. Keep them in step with ../aexeo-emdash/wasm/ when the bridge
+# surface changes.
+src/wasm/*.wasm
+src/wasm/*.js
+src/wasm/*.wasm-bindgen

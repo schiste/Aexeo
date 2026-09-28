@@ -6,12 +6,13 @@ import type {
 } from "./plugin.js";
 import {
   DEFAULT_COLLECTIONS,
+  buildAllowedHosts,
   handleAfterSave,
   readSidecarConfig,
   writeSidecarConfig,
 } from "./plugin.js";
+import { validateSidecarUrl } from "./sidecar-url.js";
 import { evaluateViaSidecar } from "./sidecar.js";
-import { tools as mcpTools } from "./mcp.js";
 import { scoreSite } from "./evaluator.js";
 import type {
   AdminViewTuning,
@@ -187,7 +188,7 @@ async function handleRefresh(ctx: DispatchCtx): Promise<BlockResponse> {
   // The route handler runs in a live request context. Refresh remains
   // the full-site evaluation path; afterSave updates the changed entry.
   const sandboxEvaluator: EvaluatorFn = async (documents) => {
-    const runtime = await readSidecarConfig(ctx.kv);
+    const runtime = await readSidecarConfig(ctx.ctx);
     if (runtime === null) {
       return {
         ok: false,
@@ -225,15 +226,16 @@ async function renderSetupPage(
   // wired up. The token is never re-displayed (secret_input.has_value
   // tells the renderer to show "••• stored" without leaking the value);
   // the URL is shown in plain text since it's not sensitive on its own.
-  const existing = await readSidecarConfig(ctx.kv);
+  const existing = await readSidecarConfig(ctx.ctx);
   const blocks: unknown[] = [
     { type: "header", text: "Aexeo setup" },
     {
       type: "context",
       text:
         "Paste the URL and auth token of your deployed aexeo-crawl-worker. " +
-        "These are stored in plugin KV and read at runtime — no rebuild required " +
-        "after a change. Rotate the token here whenever you redeploy the sidecar with a new secret.",
+        "The token is stored encrypted by the emdash host; both values are read " +
+        "at runtime, so no rebuild is required after a change. Rotate the token " +
+        "here whenever you redeploy the sidecar with a new secret.",
     },
   ];
   if (options.bannerError !== undefined) {
@@ -288,6 +290,23 @@ async function renderSetupPage(
   return { blocks };
 }
 
+// Best-effort mirror of the descriptor's outbound allowlist.
+//
+// aexeoPluginSandboxed() computes it on the consumer's Node side from
+// `options.evaluatorHost ?? process.env.AEXEO_EVALUATOR_HOST` and bakes the
+// result into the descriptor, which is the only list emdash's bridge enforces
+// at fetch time. This handler runs inside the Worker Loader isolate, where
+// that value is normally not readable — so the list is usually empty here and
+// the host check degrades to a no-op rather than locking the operator out of a
+// sidecar they configured through the factory option. When it is resolvable
+// (CI builds that set AEXEO_EVALUATOR_HOST and do expose env to the plugin)
+// the form rejects hosts the bridge would refuse anyway.
+function runtimeAllowedHosts(): readonly string[] {
+  const env: Record<string, string | undefined> | undefined =
+    typeof process === "undefined" ? undefined : process.env;
+  return buildAllowedHosts(env?.["AEXEO_EVALUATOR_HOST"] ?? null);
+}
+
 async function handleSetupSubmit(
   ctx: DispatchCtx,
   values: Record<string, unknown>,
@@ -297,40 +316,16 @@ async function handleSetupSubmit(
   const url = typeof rawUrl === "string" ? rawUrl.trim() : "";
   const token = typeof rawToken === "string" ? rawToken.trim() : "";
 
-  // The URL must parse and use HTTPS (or HTTP only for *.workers.dev
-  // dev-mode quirks — Cloudflare's deployed Workers always serve HTTPS).
-  // We also reject localhost/127.x explicitly because emdash's bridge
-  // hardcodes localhost in its SSRF blocklist; saving such a URL would
-  // pass the form check but fail every Refresh, which is hostile UX.
-  if (url.length === 0) {
+  // This URL is the target of a credentialed POST — sidecar.ts appends
+  // /evaluate and sends `Authorization: Bearer <token>` — so it has to be
+  // https, has to be a routable public host, and has to be one the plugin's
+  // own outbound allowlist will actually let through. Anything less and the
+  // Setup page would store a value that either leaks the token in cleartext
+  // or fails on every Refresh. See sidecar-url.ts for the rules.
+  const validated = validateSidecarUrl(url, runtimeAllowedHosts());
+  if (!validated.ok) {
     return renderSetupPage(ctx, {
-      bannerError: "Sidecar URL is required.",
-      initialUrl: url,
-    });
-  }
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return renderSetupPage(ctx, {
-      bannerError: `Sidecar URL is not a valid URL: ${url}`,
-      initialUrl: url,
-    });
-  }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    return renderSetupPage(ctx, {
-      bannerError: `Sidecar URL must be http(s): got ${parsed.protocol}`,
-      initialUrl: url,
-    });
-  }
-  if (
-    parsed.hostname === "localhost" ||
-    parsed.hostname.endsWith(".localhost") ||
-    /^127\./.test(parsed.hostname)
-  ) {
-    return renderSetupPage(ctx, {
-      bannerError:
-        "emdash's sandbox blocks fetches to localhost (anti-SSRF). Use the deployed *.workers.dev URL.",
+      bannerError: validated.error,
       initialUrl: url,
     });
   }
@@ -338,7 +333,7 @@ async function handleSetupSubmit(
   // Resolve the token. Empty token + existing config = keep the
   // current token (rotation-friendly UX: paste only the URL when the
   // token hasn't changed). Empty token + no existing config = error.
-  const existing = await readSidecarConfig(ctx.kv);
+  const existing = await readSidecarConfig(ctx.ctx);
   let resolvedToken: string;
   if (token.length > 0) {
     resolvedToken = token;
@@ -347,12 +342,18 @@ async function handleSetupSubmit(
   } else {
     return renderSetupPage(ctx, {
       bannerError: "EVAL_TOKEN is required on first setup.",
-      initialUrl: url,
+      initialUrl: validated.url,
     });
   }
 
-  const next: SidecarRuntimeConfig = { url, token: resolvedToken };
-  await writeSidecarConfig(ctx.kv, next);
+  const next: SidecarRuntimeConfig = {
+    url: validated.url,
+    token: resolvedToken,
+  };
+  // The URL goes to KV; the token goes to ctx.settings, where the host
+  // encrypts it (the descriptor declares it `type: "secret"`). Nothing on
+  // this path logs or echoes the token.
+  await writeSidecarConfig(ctx.ctx, next);
   return renderSetupPage(ctx, {
     bannerSuccess:
       "Configuration saved. Click Refresh on the findings page to evaluate.",
@@ -366,8 +367,4 @@ export default definePlugin({
   routes: {
     admin: { handler: handleAdminRoute },
   },
-  // emdash's MCP server picks tools up from this field. The exact
-  // host-side spec for plugin-contributed tools is still being mapped;
-  // the field is harmless if unrecognized.
-  mcpTools,
 });

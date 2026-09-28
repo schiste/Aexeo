@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Build the Aexeo WASM bridge and run wasm-bindgen over it.
+#
+# Usage: build-wasm.sh [OUT_DIR]
+#
+#   OUT_DIR  Directory for the wasm-bindgen output. Defaults to the
+#            plugin's own `wasm/`. packages/aexeo-crawl-worker passes its
+#            `src/wasm/` so both packages come out of one cargo +
+#            wasm-bindgen invocation and cannot drift apart.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ROOT_DIR="$(cd "$PLUGIN_DIR/../.." && pwd)"
-OUT_DIR="$PLUGIN_DIR/wasm"
+OUT_DIR="${1:-$PLUGIN_DIR/wasm}"
 TARGET_DIR="$ROOT_DIR/target/wasm32-unknown-unknown/release"
 WASM_NAME="aexeo_emdash_bridge"
 RAW_WASM="$TARGET_DIR/${WASM_NAME}.wasm"

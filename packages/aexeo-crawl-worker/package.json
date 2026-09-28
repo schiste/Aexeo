@@ -2,12 +2,13 @@
   "name": "@aeptus/aexeo-crawl-worker",
   "version": "0.0.1",
   "private": true,
-  "description": "Template Cloudflare Worker that serves aexeo-cli crawl artifacts from R2 to the emdash admin UI",
+  "description": "Template Cloudflare Worker that runs the Aexeo WASM evaluator on behalf of the emdash plugin",
   "type": "module",
   "main": "./src/worker.ts",
   "scripts": {
-    "deploy": "wrangler deploy",
-    "dev": "wrangler dev",
+    "build:wasm": "bash ../aexeo-emdash/scripts/build-wasm.sh src/wasm",
+    "deploy": "npm run build:wasm && wrangler deploy",
+    "dev": "npm run build:wasm && wrangler dev",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

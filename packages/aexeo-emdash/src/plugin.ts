@@ -98,11 +98,71 @@ export interface KvNamespace {
 // surface plugin descriptor options to the sandbox at runtime, and
 // the alternative (esbuild defines fed by env vars at the consumer's
 // `npm run build:bundle`) forces every site operator to add a
-// prebuild hook to their package.json. KV is the cleanest path that
-// (a) the sandbox actually reads at runtime, and (b) doesn't leak the
-// token into the bundled JS at rest.
+// prebuild hook to their package.json. The runtime config store is
+// the cleanest path that (a) the sandbox actually reads at runtime and
+// (b) doesn't leak the values into the bundled JS at rest.
+//
+// The URL is not sensitive, so it stays in KV. The token is a live bearer
+// credential, so it does not: see the settings store below.
 export const CONFIG_URL_KEY = "config:evaluator_url";
 export const CONFIG_TOKEN_KEY = "config:eval_token";
+
+// --- Encrypted settings store ---------------------------------------------
+//
+// The sidecar token is stored through `ctx.settings`, emdash's settings
+// accessor. The host encrypts any key declared `type: "secret"` in the
+// plugin's admin `settingsSchema` with AES-GCM before it reaches the
+// options table (see emdash's createSettingsAccess / encryptPluginSetting,
+// keyed off `EMDASH_ENCRYPTION_KEY`). A KV write is plaintext in the
+// database and in every database backup, which is exactly the
+// "credential or token exposure" class SECURITY.md scopes: a dump of
+// plugin KV hands over the live sidecar credential for every sandboxed
+// site.
+//
+// The declaration has to be attached to the admin config for encryption to
+// happen; src/sandbox.ts spreads it into the sandbox descriptor. Configured
+// mode does not declare it — the configured plugin evaluates in-process and
+// has no sidecar and no token.
+export const SETTINGS_TOKEN_KEY = "eval_token";
+
+// Local mirror of the host's `SecretSettingField` variant of `SettingField`
+// (emdash 0.41). Kept local so this package still typechecks without the
+// host installed, matching the other host mirrors in this file.
+export interface SecretSettingField {
+  type: "secret";
+  label: string;
+  description?: string;
+}
+
+export const PLUGIN_SETTINGS_SCHEMA: Record<string, SecretSettingField> = {
+  [SETTINGS_TOKEN_KEY]: {
+    type: "secret",
+    label: "EVAL_TOKEN",
+    description:
+      "Bearer token for your aexeo-crawl-worker Worker. Encrypted at rest by the emdash host.",
+  },
+};
+
+// Local mirror of emdash's `SettingsAccess` (PluginContext.settings). Only
+// the two verbs the plugin uses are declared.
+export interface PluginSettingsAccess {
+  get<T = unknown>(key: string): Promise<T | null>;
+  set(key: string, value: unknown): Promise<void>;
+}
+
+export interface SandboxLog {
+  warn?(msg: string, data?: unknown): void;
+}
+
+// Where sidecar configuration is read from and written to. `SandboxCtx`
+// satisfies this structurally, so callers pass the context straight through.
+// `settings` is optional: the sandboxed descriptor path builds its own
+// context and older host builds may not populate it.
+export interface SidecarConfigStore {
+  kv: KvNamespace;
+  settings?: PluginSettingsAccess;
+  log?: SandboxLog;
+}
 
 export interface SidecarRuntimeConfig {
   url: string;
@@ -110,10 +170,10 @@ export interface SidecarRuntimeConfig {
 }
 
 export async function readSidecarConfig(
-  kv: KvNamespace,
+  store: SidecarConfigStore,
 ): Promise<SidecarRuntimeConfig | null> {
-  const url = await kv.get<string>(CONFIG_URL_KEY);
-  const token = await kv.get<string>(CONFIG_TOKEN_KEY);
+  const url = await store.kv.get<string>(CONFIG_URL_KEY);
+  const token = await readStoredToken(store);
   if (typeof url !== "string" || typeof token !== "string") {
     return null;
   }
@@ -124,11 +184,75 @@ export async function readSidecarConfig(
 }
 
 export async function writeSidecarConfig(
-  kv: KvNamespace,
+  store: SidecarConfigStore,
   config: SidecarRuntimeConfig,
 ): Promise<void> {
-  await kv.set(CONFIG_URL_KEY, config.url);
-  await kv.set(CONFIG_TOKEN_KEY, config.token);
+  await store.kv.set(CONFIG_URL_KEY, config.url);
+  await writeStoredToken(store, config.token);
+}
+
+// Settings first, KV second. A site configured before the token moved out
+// of KV has a value only in KV, so the fallback is what keeps those installs
+// working without anyone re-pasting the token.
+async function readStoredToken(
+  store: SidecarConfigStore,
+): Promise<string | null> {
+  const { settings } = store;
+  if (settings !== undefined) {
+    try {
+      const stored = await settings.get<string>(SETTINGS_TOKEN_KEY);
+      if (typeof stored === "string" && stored.length > 0) {
+        return stored;
+      }
+    } catch (err) {
+      // The host throws PluginSettingEncryptionError when the stored value
+      // is an encrypted envelope the schema no longer declares as a secret
+      // (a site downgraded from a build that had it), or when the value was
+      // written under a key that is no longer in the rotation set. Fall
+      // through to KV rather than failing the editor's save.
+      store.log?.warn?.(
+        `aexeo: could not read the encrypted EVAL_TOKEN from plugin settings, falling back to KV: ${describeError(err, "")}`,
+      );
+    }
+  }
+  const legacy = await store.kv.get<string>(CONFIG_TOKEN_KEY);
+  return typeof legacy === "string" && legacy.length > 0 ? legacy : null;
+}
+
+async function writeStoredToken(
+  store: SidecarConfigStore,
+  token: string,
+): Promise<void> {
+  const { settings } = store;
+  if (settings !== undefined) {
+    try {
+      await settings.set(SETTINGS_TOKEN_KEY, token);
+      // Migration: an install set up before the token moved out of KV still
+      // holds the plaintext copy. Drop it now that an encrypted one exists
+      // so the credential is not sitting in the database twice.
+      await store.kv.delete(CONFIG_TOKEN_KEY);
+      return;
+    } catch (err) {
+      // Most often EMDASH_ENCRYPTION_KEY is unset on this host, in which
+      // case every secret setting fails closed. Warn loudly — the value
+      // below is about to land in plaintext KV — and keep the plugin
+      // usable rather than bricking the Setup page. The token itself is
+      // never part of the message.
+      store.log?.warn?.(
+        `aexeo: could not store the EVAL_TOKEN encrypted in plugin settings; it will be written to plugin KV in plaintext instead. Set EMDASH_ENCRYPTION_KEY on the emdash host to fix this. Detail: ${describeError(err, token)}`,
+      );
+    }
+  }
+  await store.kv.set(CONFIG_TOKEN_KEY, token);
+}
+
+// Error text is only safe to log once the token has been scrubbed out of
+// it. The host's own PluginSettingEncryptionError messages never quote the
+// value, but SettingsAccess is a host-supplied implementation and nothing
+// stops a future one from surfacing the plaintext it was handed.
+function describeError(err: unknown, secret: string): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  return secret.length === 0 ? raw : raw.split(secret).join("[redacted]");
 }
 
 // EmDash context surface used by the plugin, kept local so this package
@@ -150,6 +274,11 @@ export interface SandboxContentApi {
 
 export interface SandboxCtx {
   kv: KvNamespace;
+  // EmDash 0.41's encrypted settings store (PluginContext.settings).
+  // Optional because the sandboxed descriptor path assembles its own
+  // context: a host build that predates the setting leaves this
+  // undefined and the plugin falls back to KV. See readStoredToken.
+  settings?: PluginSettingsAccess;
   http: SidecarHttp;
   content: SandboxContentApi;
   // EmDash injects site info; locale is the fallback for rows without
@@ -180,7 +309,7 @@ export async function handleAfterSave(
   event: ContentAfterSaveEvent,
   ctx: SandboxCtx,
 ): Promise<void> {
-  const runtime = await readSidecarConfig(ctx.kv);
+  const runtime = await readSidecarConfig(ctx);
   if (runtime === null) {
     ctx.log?.warn?.(
       "Aexeo afterSave skipped: configure the evaluator URL and token on the Setup page",

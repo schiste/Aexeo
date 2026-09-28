@@ -250,9 +250,18 @@ describe("sandbox afterSave", () => {
     // rather than asserting immediately, which made this assertion race the
     // hook's own writes and fail intermittently.
     await vi.waitFor(async () => {
-      await expect(
-        host.inspect.kv.get(`findings:/journal/hello/`),
-      ).resolves.toMatchObject({ route: "/journal/hello/", findings: [] });
+      // `host` is module-scoped `let`, so the narrowing from the assignment
+      // at the top of this test is lost inside a callback body. Re-narrow
+      // locally rather than using `?.` here, which would turn a real
+      // assertion into an `expect(undefined).resolves` that passes vacuously.
+      const testHost = host;
+      if (testHost === undefined) {
+        throw new Error("The EmDash test host was disposed mid-test");
+      }
+      await expect(testHost.inspect.kv.get(`findings:/journal/hello/`)).resolves.toMatchObject({
+        route: "/journal/hello/",
+        findings: [],
+      });
     });
 
     // Route migration. `persistDocument` re-keys a document whenever the

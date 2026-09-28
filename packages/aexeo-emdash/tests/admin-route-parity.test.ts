@@ -124,9 +124,24 @@ const helloDoc: FakeContentItem = {
   data: { title: "Hello" },
 };
 
-function fakeCtx(kv: KvNamespace): SandboxCtx {
+function fakeCtx(kv: KvNamespace, settings?: Map<string, unknown>): SandboxCtx {
   return {
     kv,
+    // Models emdash's settings accessor for the `eval_token` key: the host
+    // encrypts anything the plugin's settingsSchema declares `type: "secret"`
+    // before it reaches the options table, and decrypts it on read. The fake
+    // stores the value as given so the tests can assert where it landed.
+    ...(settings === undefined
+      ? {}
+      : {
+          settings: {
+            get: async <T>(key: string) =>
+              (settings.get(key) as T | undefined) ?? null,
+            set: async (key: string, value: unknown) => {
+              settings.set(key, value);
+            },
+          },
+        }),
     http: {
       async fetch() {
         throw new Error("sidecar fetch is not expected in this test");
@@ -452,5 +467,156 @@ describe("Refresh applies suppressions on every path", () => {
     expect(banner.type).toBe("banner");
     expect(banner.title).toMatch(/^Refresh issues: /);
     expect(response.toast?.type).toBe("info");
+  });
+});
+
+// --- Setup form ------------------------------------------------------------
+//
+// The Setup page is the only place a user-supplied string becomes the
+// destination of a credentialed fetch, and the only place the sidecar token
+// is written. These drive the real `save_setup` route rather than the helpers
+// it calls, so the form's own validation and copy are covered too.
+
+describe("sandboxed Setup form", () => {
+  const save = (
+    kv: KvNamespace,
+    values: Record<string, unknown>,
+    settings?: Map<string, unknown>,
+  ) =>
+    sandboxAdmin()(
+      { input: { type: "form_submit", action_id: "save_setup", values } },
+      fakeCtx(kv, settings),
+    );
+
+  // The Setup page's blocks are header, context, then the banner. Scan for
+  // the banner rather than indexing, so adding copy above it cannot silently
+  // turn these assertions into header checks. Success and failure share the
+  // `type`; they are told apart by `variant` ("default" vs "error").
+  const banner = (
+    response: BlockResponse,
+  ): { type?: string; variant?: string; title?: string } => {
+    const found = response.blocks.find(
+      (block) => (block as { type?: string }).type === "banner",
+    );
+    return (found ?? {}) as { type?: string; variant?: string; title?: string };
+  };
+
+  const SIDECAR_URL = "https://aexeo-crawl-worker.example.workers.dev";
+
+  it("stores the token in settings, never in KV", async () => {
+    const kv = fakeKv();
+    const settings = new Map<string, unknown>();
+    const response = await save(
+      kv,
+      { evaluator_url: SIDECAR_URL, eval_token: "super-secret-token" },
+      settings,
+    );
+
+    expect(banner(response)).toMatchObject({
+      type: "banner",
+      variant: "default",
+    });
+    expect(banner(response).title).toMatch(/Configuration saved/);
+    expect(settings.get("eval_token")).toBe("super-secret-token");
+    // The URL is not a secret and belongs in KV; the token must appear
+    // nowhere in the KV namespace.
+    expect(kv.store.get("config:evaluator_url")).toBe(SIDECAR_URL);
+    expect([...kv.store.keys()]).toEqual(["config:evaluator_url"]);
+    expect(JSON.stringify([...kv.store.entries()])).not.toContain(
+      "super-secret-token",
+    );
+  });
+
+  it("refuses a URL that would put the token on the wire in cleartext", async () => {
+    const kv = fakeKv();
+    const settings = new Map<string, unknown>();
+    const response = await save(
+      kv,
+      { evaluator_url: `http://aexeo-crawl-worker.example.workers.dev`, eval_token: "super-secret-token" },
+      settings,
+    );
+
+    expect(banner(response)).toMatchObject({ type: "banner", variant: "error" });
+    expect(banner(response).title).toMatch(/https/i);
+    expect(kv.store.size).toBe(0);
+    expect(settings.size).toBe(0);
+  });
+
+  it("refuses loopback, private-range, and metadata-endpoint URLs", async () => {
+    for (const url of [
+      "https://127.0.0.1:8787",
+      "https://localhost:8787",
+      "https://169.254.169.254",
+      "https://10.0.0.1",
+      "https://192.168.1.10",
+      "https://[::1]",
+    ]) {
+      const kv = fakeKv();
+      const settings = new Map<string, unknown>();
+      const response = await save(
+        kv,
+        { evaluator_url: url, eval_token: "super-secret-token" },
+        settings,
+      );
+      expect(banner(response), url).toMatchObject({
+        type: "banner",
+        variant: "error",
+      });
+      expect(kv.store.size, url).toBe(0);
+      expect(settings.size, url).toBe(0);
+    }
+  });
+
+  it("still requires a token on first setup", async () => {
+    const kv = fakeKv();
+    const settings = new Map<string, unknown>();
+    const response = await save(
+      kv,
+      { evaluator_url: SIDECAR_URL },
+      settings,
+    );
+
+    expect(banner(response)).toMatchObject({ type: "banner", variant: "error" });
+    expect(banner(response).title).toMatch(/EVAL_TOKEN is required/);
+    expect(kv.store.size).toBe(0);
+  });
+
+  it("keeps the existing token when the form is re-saved with a blank token", async () => {
+    // Both halves of the config have to be present for the "keep the
+    // current token" path — readSidecarConfig returns null if either is
+    // missing, which is the "first setup" case.
+    const kv = fakeKv();
+    kv.store.set("config:evaluator_url", SIDECAR_URL);
+    const settings = new Map<string, unknown>([["eval_token", "first-token"]]);
+    const response = await save(
+      kv,
+      { evaluator_url: SIDECAR_URL, eval_token: "" },
+      settings,
+    );
+
+    expect(banner(response).variant).toBe("default");
+    expect(settings.get("eval_token")).toBe("first-token");
+  });
+
+  it("falls back to KV on a host with no settings accessor", async () => {
+    const kv = fakeKv();
+    const response = await save(kv, {
+      evaluator_url: SIDECAR_URL,
+      eval_token: "super-secret-token",
+    });
+
+    expect(banner(response).variant).toBe("default");
+    expect(kv.store.get("config:eval_token")).toBe("super-secret-token");
+  });
+
+  it("never echoes the submitted token back into the page", async () => {
+    const kv = fakeKv();
+    const settings = new Map<string, unknown>();
+    const response = await save(
+      kv,
+      { evaluator_url: SIDECAR_URL, eval_token: "super-secret-token" },
+      settings,
+    );
+    expect(JSON.stringify(response)).not.toContain("super-secret-token");
   });
 });

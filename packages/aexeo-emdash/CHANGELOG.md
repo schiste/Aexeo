@@ -6,8 +6,51 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **EVAL_TOKEN is stored through the host's encrypted plugin settings.**
+  The sidecar bearer token was written as plaintext into the plugin's KV
+  namespace. EmDash provides `PluginContext.settings` with host-side
+  encryption for fields declared `type: "secret"` in a plugin's
+  `settingsSchema`, which is exactly this case; the descriptor now declares
+  that schema and the token is written there. Installs that predate the
+  change have their plaintext KV copy deleted on the next write, so the
+  credential is not sitting in the database twice. Hosts without
+  `EMDASH_ENCRYPTION_KEY` configured fall back to the previous KV path with
+  a warning that names the missing environment variable and never the
+  token, so the Setup page keeps working instead of failing closed.
+- **Sidecar URL validation is allowlist-backed and HTTPS-only.**
+  `handleSetupSubmit` accepted `http:`, which sent the bearer token in
+  cleartext, and rejected only `localhost` and `127.*` — leaving
+  `0.0.0.0`, `[::1]`, RFC1918, CGNAT, and the `169.254.169.254` cloud
+  metadata address reachable. It now requires HTTPS, rejects the private,
+  loopback, link-local, multicast, and IPv4-mapped-IPv6 ranges, and
+  compares the submitted host against the `allowedHosts` list the plugin
+  already computes at build time, so the form cannot store a URL the
+  plugin's own allowlist would reject later.
+
+### Removed
+
+- **`src/mcp.ts` and `src/indexnow.ts`.** Both were unreachable. The host
+  reads `PluginDefinition.mcp` as a `Record` of tool definitions keyed by
+  name; the code attached a `mcpTools` array with a different container and
+  a different per-entry shape, and `configured.ts` never attached it at
+  all. No MCP tool this package offered could ever have been invoked.
+
 ### Fixed
 
+- **Unauthenticated crawl-artifact routes removed from
+  `packages/aexeo-crawl-worker`.** `GET /findings/latest` returned the full
+  body of the customer's `aexeo-cli crawl` artifact and
+  `GET /findings/list` returned R2 key names, timestamps, and sizes.
+  Neither was behind the bearer-token check that guarded `/evaluate`, and
+  neither had any caller in this repository. CORS is not access control, so
+  anyone who learned the worker hostname could read the whole crawl
+  artifact. Both routes, the R2 binding, and the `examples/github-actions.yml`
+  R2 upload workflow that existed only to feed them are gone.
+- **`/evaluate` no longer 500s when `EVAL_TOKEN` is unset.** The check read
+  `env.EVAL_TOKEN.length` without a guard, so a worker deployed without the
+  secret threw a `TypeError` on every request instead of rejecting it.
 - **Suppressions ignored by the Block Kit Refresh button.** In configured
   mode the /findings "Refresh" button called the sweep without the
   compiled `suppressionFilter`, so it re-persisted findings the editor
@@ -47,6 +90,16 @@ and the project follows [Semantic Versioning](https://semver.org/).
   production hotfix and the emdash test-host fixture plugin were both
   unchecked. `npm run typecheck` now runs `typecheck:src` and
   `typecheck:tests`.
+- `packages/aexeo-crawl-worker` no longer commits its build artifacts. The
+  checked-in `aexeo_emdash_bridge_bg.wasm` and its glue were several
+  releases behind the bridge the plugin actually calls — missing
+  `generateFactsPrompt`, `validateFactsManifest`, the manifest argument on
+  `scoreIntelligence`, and the `__wbg_*` bindings — and nothing in the
+  repository could regenerate them. The hand-written `.d.ts` files had been
+  updated to match the stale binary, which is why it went unnoticed. The
+  binary is now produced by `npm run build:wasm`, chained into `dev` and
+  `deploy`, and only the two declaration files remain tracked. The package
+  also gains a README, which it did not have.
 
 ## [0.8.18] - 2026-09-28
 

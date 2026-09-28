@@ -14,7 +14,12 @@
 // src/configured.ts. Use this factory only when you need the
 // isolation guarantee.
 
-import { buildAllowedHosts, buildCapabilities } from "./plugin.js";
+import {
+  PLUGIN_SETTINGS_SCHEMA,
+  buildAllowedHosts,
+  buildCapabilities,
+} from "./plugin.js";
+import type { SecretSettingField } from "./plugin.js";
 import { PACKAGE_VERSION } from "./version.js";
 
 // Local mirror of emdash's PluginDescriptor / SandboxedPluginDescriptor
@@ -47,6 +52,14 @@ export interface SandboxedPluginDescriptor {
   // mistake from the dashboard-side rendering vocabulary.
   adminWidgets?: readonly PluginAdminWidget[];
   allowedHosts?: readonly string[];
+  // Settings form schema. emdash copies the descriptor's `settingsSchema`
+  // onto the resolved plugin's admin config, and the host encrypts any
+  // key declared `type: "secret"` before it is written (AES-GCM, keyed off
+  // EMDASH_ENCRYPTION_KEY). Declaring EVAL_TOKEN here is what keeps the
+  // sidecar bearer token out of the database in plaintext — without it the
+  // Setup page's `secret_input` is only a UI affordance and the value would
+  // land in plugin KV verbatim.
+  settingsSchema: Record<string, SecretSettingField>;
 }
 
 // Factory consumers call from astro.config.mjs when they want the
@@ -106,5 +119,8 @@ export function aexeoPluginSandboxed(
     adminWidgets: [
       { id: "aexeo-score", size: "third", title: "SEO score" },
     ],
+    // The Setup page writes the sidecar token through ctx.settings; this
+    // declaration is what makes the host encrypt it at rest.
+    settingsSchema: PLUGIN_SETTINGS_SCHEMA,
   };
 }

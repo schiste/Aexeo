@@ -266,16 +266,25 @@ in this repo. Per-site deploy:
 
 ```bash
 cd aexeo-crawl-worker
-# Edit wrangler.toml: name, R2 bucket name, SITE_URL
+npm ci
+# Edit wrangler.toml: name, SITE_URL
 npx wrangler login
-npx wrangler r2 bucket create <bucket-name>
-npx wrangler deploy
+npm run deploy   # builds the WASM bridge, then deploys
 echo "$(openssl rand -hex 32)" | npx wrangler secret put EVAL_TOKEN
 ```
 
+The Worker's WASM is generated, not committed — `npm run deploy` runs
+`npm run build:wasm` first, which needs the Rust toolchain and
+`wasm-bindgen`. See the template's README.
+
 Then in the admin UI, visit
 `/admin/plugins/aexeo-emdash/setup` and paste the deployed URL +
-the same token.
+the same token. The URL must be `https`, must not point at a
+loopback, private, or link-local address, and must be the host in
+`evaluatorHost` above — the emdash sandbox rejects any other outbound
+host, so the form checks it before storing. The token is written
+through the host's encrypted plugin settings (`admin.settingsSchema`
+declares it `secret`), not to plugin KV.
 
 ## Alternative install sources
 
