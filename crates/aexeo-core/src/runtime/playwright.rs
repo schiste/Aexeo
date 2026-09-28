@@ -760,12 +760,14 @@ fn fetch_result_from_payload(url: &str, payload: &serde_json::Value) -> FetchRes
 #[cfg(test)]
 mod tests {
     use super::{
-        fetch_with_playwright_using, is_transient_playwright_process_error,
-        probe_playwright_runtime_with,
+        PlaywrightOwnedConfig, encode_spec, fetch_with_playwright_using,
+        is_transient_playwright_process_error, probe_playwright_runtime_with,
     };
     use crate::config::Config;
+    use std::collections::BTreeMap;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn playwright_availability_honors_explicit_runner() {
@@ -807,5 +809,291 @@ mod tests {
         assert!(!is_transient_playwright_process_error(
             "Error: playwright module missing"
         ));
+    }
+
+    /// Write an executable shell script that stands in for the Node
+    /// playwright runner, so the process-orchestration and output-parsing
+    /// half of this module is reachable without a browser installed.
+    ///
+    /// This is the same seam the two existing tests use, and it is the only
+    /// reason the fetch path can be covered at all: 54% of this file is
+    /// otherwise unreachable on a machine without Playwright.
+    fn fake_runner(dir: &Path, script: &str) -> PathBuf {
+        let runner = dir.join("runner.sh");
+        fs::write(&runner, script).expect("write runner");
+        let mut permissions = fs::metadata(&runner).expect("stat").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&runner, permissions).expect("chmod");
+        runner
+    }
+
+    fn json_runner(body: &str) -> String {
+        format!("#!/bin/sh\nprintf '%s' '{body}'\n")
+    }
+
+    /// The spec is handed to Node as base64-encoded JSON, and Node is the
+    /// only consumer. If a field is dropped or renamed here, the browser
+    /// silently receives a default instead of the configured value — headers,
+    /// cookies, and basic auth included.
+    #[test]
+    fn encoded_spec_carries_every_configured_field() {
+        use base64::Engine as _;
+        let config = PlaywrightOwnedConfig {
+            headers: BTreeMap::from([("x-test".to_string(), "yes".to_string())]),
+            cookies: vec![BTreeMap::from([(
+                "name".to_string(),
+                "session".to_string(),
+            )])],
+            basic_auth: BTreeMap::from([
+                ("username".to_string(), "user".to_string()),
+                ("password".to_string(), "pass".to_string()),
+            ]),
+            wait_until: "networkidle".to_string(),
+            capture_trace: true,
+            capture_screenshot: false,
+            capture_console: true,
+            capture_network: false,
+            artifact_dir: "/tmp/aexeo-artifacts".to_string(),
+        };
+        let encoded = encode_spec(&config.spec_for_url("https://example.com/")).expect("encode");
+        let decoded = String::from_utf8(
+            base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .unwrap(),
+        )
+        .expect("spec is base64 of utf-8 json");
+        let value: serde_json::Value = serde_json::from_str(&decoded).expect("spec is json");
+
+        assert_eq!(value["url"], "https://example.com/");
+        assert_eq!(value["headers"]["x-test"], "yes");
+        assert_eq!(value["cookies"][0]["name"], "session");
+        assert_eq!(value["basicAuth"]["username"], "user");
+        assert_eq!(value["basicAuth"]["password"], "pass");
+        assert_eq!(value["waitUntil"], "networkidle");
+        assert_eq!(value["captureTrace"], true);
+        assert_eq!(value["captureScreenshot"], false);
+        assert_eq!(value["captureConsole"], true);
+        assert_eq!(value["captureNetwork"], false);
+        assert_eq!(value["artifactDir"], "/tmp/aexeo-artifacts");
+    }
+
+    /// The spec must be base64 of UTF-8 JSON, not just base64: the runner
+    /// decodes it with `Buffer.from(...).toString('utf8')` and then
+    /// `JSON.parse`. A non-UTF-8 payload would decode to replacement
+    /// characters and fail to parse inside Node.
+    #[test]
+    fn encoded_spec_is_base64_of_utf8_json() {
+        use base64::Engine as _;
+        let config = PlaywrightOwnedConfig::from_runtime(&Config::default().runtime());
+        let encoded =
+            encode_spec(&config.spec_for_url("https://ünïcode.example/")).expect("encode");
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&encoded)
+            .expect("valid base64");
+        let text = String::from_utf8(bytes).expect("decodes as utf-8");
+        let value: serde_json::Value = serde_json::from_str(&text).expect("parses as json");
+        assert_eq!(value["url"], "https://ünïcode.example/");
+    }
+
+    /// A runner that exits non-zero must produce a clear error rather than
+    /// an empty fetch, so a broken browser install is diagnosable.
+    #[test]
+    fn failing_runner_surfaces_an_error() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let runner = fake_runner(
+            temp_dir.path(),
+            "#!/bin/sh\necho 'browser failed to launch' >&2\nexit 1\n",
+        );
+        let result = fetch_with_playwright_using(
+            Some(runner),
+            "https://example.com",
+            &Config::default().runtime(),
+        );
+        let error = result.expect_err("a failing runner must not yield a fetch result");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("browser failed to launch"),
+            "the runner's stderr must reach the user: {message}"
+        );
+    }
+
+    /// A runner that prints nothing at all is a different failure from one
+    /// that errors: there is no response to parse. It must not be reported
+    /// as a successful empty fetch.
+    #[test]
+    fn silent_runner_is_not_reported_as_a_successful_fetch() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let runner = fake_runner(temp_dir.path(), "#!/bin/sh\nexit 0\n");
+        let result = fetch_with_playwright_using(
+            Some(runner),
+            "https://example.com",
+            &Config::default().runtime(),
+        );
+        assert!(
+            result.is_err(),
+            "an empty response must be an error, not a 200 with no body"
+        );
+    }
+
+    /// Malformed JSON on stdout is a contract violation between this crate
+    /// and the runner, and must say so rather than panicking.
+    #[test]
+    fn malformed_runner_output_is_reported_clearly() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let runner = fake_runner(temp_dir.path(), &json_runner("this is not json"));
+        let result = fetch_with_playwright_using(
+            Some(runner),
+            "https://example.com",
+            &Config::default().runtime(),
+        );
+        let error = result.expect_err("malformed output must not parse");
+        assert!(!format!("{error:#}").is_empty());
+    }
+
+    /// Response headers come back as a flat map the crawler reads for
+    /// `x-robots-tag` and content type, so they must survive the crossing.
+    #[test]
+    fn response_headers_survive_the_runner_contract() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let runner = fake_runner(
+            temp_dir.path(),
+            &json_runner(
+                r#"{"statusCode":200,"contentType":"text/html; charset=utf-8","body":"<html></html>","headers":{"x-robots-tag":"noindex","content-type":"text/html; charset=utf-8"},"effectiveUrl":"https://example.com/final"}"#,
+            ),
+        );
+        let fetched = fetch_with_playwright_using(
+            Some(runner),
+            "https://example.com/redirected",
+            &Config::default().runtime(),
+        )
+        .expect("parse response");
+        assert_eq!(fetched.status_code, Some(200));
+        assert_eq!(fetched.effective_url, "https://example.com/final");
+        let headers = &fetched.headers;
+        assert_eq!(
+            headers.get("x-robots-tag").map(String::as_str),
+            Some("noindex"),
+            "a crawl decides noindex from this header; it must not be dropped"
+        );
+    }
+
+    /// A non-200 from the page is a normal result, not an error: a 404 page
+    /// is exactly what the crawler is looking for.
+    #[test]
+    fn non_success_status_is_returned_not_treated_as_an_error() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let runner = fake_runner(
+            temp_dir.path(),
+            &json_runner(
+                r#"{"statusCode":404,"contentType":"text/html","body":"<html>gone</html>","headers":{},"effectiveUrl":"https://example.com/missing"}"#,
+            ),
+        );
+        let fetched = fetch_with_playwright_using(
+            Some(runner),
+            "https://example.com/missing",
+            &Config::default().runtime(),
+        )
+        .expect("a 404 is a result, not a failure");
+        assert_eq!(fetched.status_code, Some(404));
+        assert!(fetched.body.unwrap_or_default().contains("gone"));
+    }
+
+    /// With an explicit runner, the probe answers "does this path exist",
+    /// and says so in the message. It deliberately does not execute the
+    /// runner: `doctor` must be cheap and side-effect-free, and a browser
+    /// launch is neither.
+    #[test]
+    fn probe_with_an_explicit_runner_checks_existence_not_execution() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        // Exits non-zero, so a probe that ran it would report unavailable.
+        let runner = fake_runner(
+            temp_dir.path(),
+            "#!/bin/sh\necho 'Cannot find module playwright' >&2\nexit 1\n",
+        );
+        let doctor = probe_playwright_runtime_with(Some(runner.clone()));
+        assert!(
+            doctor.available,
+            "an existing runner path is available: {doctor:?}"
+        );
+        assert_eq!(doctor.mode, "custom_runner");
+        assert_eq!(
+            doctor.executable.as_str(),
+            runner.to_str().unwrap_or_default()
+        );
+        assert!(
+            doctor.message.contains("exists"),
+            "the message should say what was actually checked: {doctor:?}"
+        );
+    }
+
+    /// Without an override, the probe really does run Node to find out, so it
+    /// must always come back with a reason an operator can act on.
+    #[test]
+    fn probe_without_an_override_always_explains_itself() {
+        let doctor = probe_playwright_runtime_with(None);
+        assert!(
+            !doctor.message.trim().is_empty(),
+            "`doctor runtime` must always say what it found: {doctor:?}"
+        );
+        if doctor.available {
+            assert_eq!(doctor.mode, "node_module");
+        } else {
+            assert!(
+                !doctor.executable.trim().is_empty(),
+                "an unavailable runtime should name the executable it tried: {doctor:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn probe_reports_available_for_a_working_runner() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let runner = fake_runner(temp_dir.path(), "#!/bin/sh\nexit 0\n");
+        let doctor = probe_playwright_runtime_with(Some(runner));
+        assert!(doctor.available, "{doctor:?}");
+    }
+
+    /// A missing executable is distinct from a failing one, and the doctor
+    /// must not try to spawn it and surface a raw OS error.
+    #[test]
+    fn probe_handles_a_nonexistent_runner() {
+        let doctor = probe_playwright_runtime_with(Some(PathBuf::from(
+            "/nonexistent/aexeo-playwright-runner",
+        )));
+        assert!(!doctor.available, "{doctor:?}");
+        assert!(!doctor.message.trim().is_empty());
+    }
+
+    /// The only error treated as transient is `EINTR` raised while Node
+    /// resolves the current working directory.
+    ///
+    /// That is a specific, narrow case: a signal can interrupt `uv_cwd` and
+    /// there is nothing to fix, so the crawl can safely continue. It is not a
+    /// general "the browser died" classifier — a closed browser or a refused
+    /// connection must fail loudly, because retrying hides a real problem.
+    #[test]
+    fn only_eintr_while_resolving_the_working_directory_is_transient() {
+        for message in [
+            "uv_cwd EINTR",
+            "Error: EINTR at process.cwd()",
+            "operation interrupted (EINTR) while reading the current working directory",
+        ] {
+            assert!(
+                is_transient_playwright_process_error(message),
+                "{message:?} should be treated as transient"
+            );
+        }
+        for message in [
+            "Target page, context or browser has been closed",
+            "net::ERR_CONNECTION_REFUSED at https://example.com",
+            "playwright: executable doesn't exist",
+            // EINTR alone is not enough without the cwd context.
+            "read ECONNRESET",
+        ] {
+            assert!(
+                !is_transient_playwright_process_error(message),
+                "{message:?} must fail loudly rather than be retried"
+            );
+        }
     }
 }
