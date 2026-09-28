@@ -70,15 +70,43 @@ Run manually before opening a PR:
 sh scripts/ci-local.sh
 ```
 
-Optional dependency audit:
+`ci-local.sh` accepts these options:
 
 ```bash
-sh scripts/ci-local.sh --with-audit
+sh scripts/ci-local.sh                 # full run
+sh scripts/ci-local.sh --staged-guard  # force the secret scan even with an empty index
+sh scripts/ci-local.sh --help
 ```
 
-`ci-local.sh` runs the full pre-commit gate, then the pre-push gate, and optionally `cargo audit` when available.
+Any other argument prints `unknown argument` and exits `2`. For a smaller
+scope, call the underlying scripts directly (`sh scripts/check-repo.sh`,
+`sh scripts/pre-push.sh`, `sh scripts/check-performance.sh`).
 
-It now also enforces release-mode benchmark budgets through:
+`--with-audit` is accepted but does nothing: the dependency audit
+(`cargo audit`, `cargo deny check`, `cargo +nightly udeps`) already runs
+unconditionally as part of the `check-repo` stage, via `check-deps.sh`. The
+flag exists so the older documented invocation still succeeds instead of
+exiting `2`, and so the run summary states plainly that the audit ran.
+
+`ci-local.sh` runs four stages in order: `guard-staged`, the full
+`check-repo.sh` gate, the pre-push gate, and the performance budget check.
+`cargo audit` is not optional in this path: `check-repo.sh` always runs
+`check-deps.sh`, which hard-fails without `cargo-audit`, `cargo-deny`, and
+nightly `cargo-udeps`.
+
+`guard-staged.sh` runs automatically when `ci-local.sh` is executed inside a
+git work tree with a non-empty index, and is skipped with a printed reason
+otherwise (an empty index has no staged diff to scan). Use
+`--staged-guard` to run it regardless. Outside a git work tree the only way
+to exercise that layer is `sh scripts/guard-staged.sh` directly, or the
+`.githooks/pre-commit` hook.
+
+`guard-staged.sh` requires `ripgrep`. If `rg` is missing it now exits `1`
+with an install hint instead of silently passing — an absent scanner used to
+look identical to a clean staged diff. `sh scripts/install-quality-tools.sh`
+installs it alongside the cargo tools.
+
+It enforces release-mode benchmark budgets through:
 
 ```bash
 sh scripts/check-performance.sh

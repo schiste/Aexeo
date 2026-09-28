@@ -1,4 +1,0 @@
-include README.md
-include CONSTITUTION.md
-include SPEC.md
-recursive-include docs *.md

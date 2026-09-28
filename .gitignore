@@ -2,6 +2,10 @@ node_modules/
 dist/
 build/
 target/
+
+# Aexeo audit artifacts. Only the current post-rename directory name is
+# listed; the name used before the rename is intentionally absent because
+# nothing writes it anymore.
 .aexeo-reports/
 
 # Local research scratch — paper PDFs and HTML downloads. Always
@@ -21,13 +25,12 @@ tmp/
 .aethyme/
 .chau7/
 
-# Python leftovers from before the workspace moved to Rust. Kept ignored so
-# a stray local Python experiment cannot be committed by accident, but
-# nothing in this repository is Python.
+# Python leftovers from before the workspace moved to Rust. The last two
+# Python artifacts in the repo (`.coveragerc`, `MANIFEST.in`) have been
+# deleted. These patterns stay ignored so a stray local Python experiment
+# cannot be committed by accident; nothing in this repository is Python.
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
 .pytest_cache/
 .mypy_cache/
 .venv/

@@ -16,9 +16,9 @@ an Astro build pipeline, or a repo-level CLI integration.
 
 - Rust is the canonical runtime.
 - The supported crates are:
-  - `crates/seogeo-contracts`
-  - `crates/seogeo-core`
-  - `crates/seogeo-cli`
+  - `crates/aexeo-contracts`
+  - `crates/aexeo-core`
+  - `crates/aexeo-cli`
 
 ### Stable external types
 
@@ -28,7 +28,7 @@ an Astro build pipeline, or a repo-level CLI integration.
 - `ConfidenceLevel`
 - `RuleMetadata`
 
-These are owned by `crates/seogeo-contracts`.
+These are owned by `crates/aexeo-contracts`.
 
 ### Stable rule identifiers
 
@@ -93,7 +93,7 @@ These semantics are part of the public reporting and integration contract.
 
 ### Stable artifact contract
 
-- retained audit artifacts under `.seogeo-reports/`
+- retained audit artifacts under `.aexeo-reports/`
 - `*-latest.json` as the stable latest artifact name
 - timestamped retained history logs
 - `*-trends.json` trend snapshots

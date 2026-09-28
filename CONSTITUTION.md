@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Aexeo exists to build `seogeo`: a fast, deterministic SEO and GEO runtime for websites.
+Aexeo exists to deliver a fast, deterministic SEO and GEO runtime for websites.
 
 The goal is not to produce another dashboard first. The goal is to give websites the equivalent of what Ruff, Black, or mypy give codebases: an automated, repeatable quality gate that catches regressions before deploy and keeps content systems clean over time.
 
@@ -19,7 +19,7 @@ A website should be able to run a single command and learn whether it is:
 - legible for AI retrieval systems
 - drifting away from its own source of truth
 
-`seogeo` should make those checks cheap enough to run locally, strict enough to trust in CI, and configurable enough to reuse across many projects.
+`Aexeo` should make those checks cheap enough to run locally, strict enough to trust in CI, and configurable enough to reuse across many projects.
 
 ## What We Mean By SEO/GEO Runtime
 
@@ -51,14 +51,14 @@ Output should feel like developer tooling: path, rule code, message, severity, a
 The engine should be generic. Project-specific constraints belong in configuration or custom policy packs.
 
 ### 6. No vanity scoring
-`seogeo` should report concrete, actionable failures. It should not hide behind a synthetic score that obscures the actual work.
+`Aexeo` should report concrete, actionable failures. It should not hide behind a synthetic score that obscures the actual work.
 
 ### 7. Search and AI are different, but adjacent
 Classic SEO checks and GEO checks should live in the same tool only where they share a deterministic substrate: links, canonicals, facts, structured data, and retrieval paths.
 
 ## Initial Scope
 
-The first useful version of `seogeo` should cover:
+The first useful version of `Aexeo` should cover:
 
 - HTML metadata integrity
 - canonical consistency

@@ -1,0 +1,12 @@
+#:schema ./docs/config.schema.json
+
+version = 1
+
+[site]
+url = "https://github.com/schiste/Aexeo"
+source_dir = "."
+adapter = "auto"
+
+[output]
+baseline_file = ".aexeo-baseline.json"
+audit_log_limit = 5

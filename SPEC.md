@@ -1,12 +1,12 @@
-# seogeo Specification
+# Aexeo Specification
 
-This document defines the current public contract for `seogeo`.
+This document defines the current public contract for `Aexeo`.
 
 Its purpose is to freeze user-visible behavior independently from implementation details.
 
 ## 1. Product Scope
 
-`seogeo` is a deterministic SEO and GEO review runtime for static websites.
+`Aexeo` is a deterministic SEO and GEO review runtime for static websites.
 
 The stable contract covers:
 - command names and core flags
@@ -26,9 +26,9 @@ It does not freeze:
 
 The canonical implementation is the Rust workspace.
 
-- `crates/seogeo-contracts` owns stable finding contracts
-- `crates/seogeo-core` owns runtime behavior
-- `crates/seogeo-cli` owns the supported CLI surface
+- `crates/aexeo-contracts` owns stable finding contracts
+- `crates/aexeo-core` owns runtime behavior
+- `crates/aexeo-cli` owns the supported CLI surface
 
 The Rust workspace is the only supported in-repository runtime surface.
 
@@ -48,19 +48,19 @@ being treated as contract breaks.
 Supported commands:
 
 ```bash
-seogeo check [PATH]
-seogeo crawl URL
-seogeo quality [PATH]
-seogeo generate KIND [PATH]
-seogeo docs generate|check [PATH]
-seogeo baseline [PATH]
-seogeo verify URL
-seogeo diff BASELINE CURRENT
-seogeo trend check|crawl|quality [PATH]
-seogeo fix [PATH]
-seogeo rules
-seogeo adapters
-seogeo plugin-check MODULE
+aexeo-cli check [PATH]
+aexeo-cli crawl URL
+aexeo-cli quality [PATH]
+aexeo-cli generate KIND [PATH]
+aexeo-cli docs generate|check [PATH]
+aexeo-cli baseline [PATH]
+aexeo-cli verify URL
+aexeo-cli diff BASELINE CURRENT
+aexeo-cli trend check|crawl|quality [PATH]
+aexeo-cli fix [PATH]
+aexeo-cli rules
+aexeo-cli adapters
+aexeo-cli plugin-check MODULE
 ```
 
 ### Output formats
@@ -259,7 +259,7 @@ Rule IDs are stable product identifiers. Messages may improve, but the underlyin
 Config format: TOML.
 
 Default config filename:
-- `seogeo.toml`
+- `aexeo.toml`
 
 Important top-level keys include:
 - `site_url`
@@ -365,7 +365,7 @@ layout changes.
 Audit runs write retained artifacts under:
 
 ```text
-.seogeo-reports/
+.aexeo-reports/
 ```
 
 For each command stream:
