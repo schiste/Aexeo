@@ -6,6 +6,12 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.18] - 2026-09-28
+
+### Added
+
+- Include deterministic editorial-policy rules EDT001–EDT003 in the bundled Rust/WASM evaluator. Configured answer summaries, target questions, and evidence-marked claims can now be checked through the serialized Aexeo config.
+
 ## [0.8.17] - 2026-05-29
 
 Hotfix release. Closes the production admin-route regression

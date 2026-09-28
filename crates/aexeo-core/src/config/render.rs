@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-use super::{Config, RoutePolicyOverride, SuppressionRule};
+use super::{Config, Editorial, RoutePolicyOverride, SuppressionRule};
 
 #[derive(Debug, Clone, Serialize)]
 struct ResolvedConfigDocument {
@@ -14,6 +14,7 @@ struct ResolvedConfigDocument {
     cache_dir: String,
     cache_ttl_seconds: usize,
     plugin_settings: BTreeMap<String, BTreeMap<String, toml::Value>>,
+    editorial: Editorial,
     site: SiteSection,
     runtime: RuntimeSection,
     policy: PolicySection,
@@ -68,6 +69,7 @@ struct RulesSection {
     llm: EnabledRuleSection,
     content: ContentRulesSection,
     structure: StructureRulesSection,
+    editorial: EnabledRuleSection,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -164,6 +166,7 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
         cache_dir: config.cache_dir.clone(),
         cache_ttl_seconds: config.cache_ttl_seconds,
         plugin_settings: config.plugin_settings.clone(),
+        editorial: config.editorial.clone(),
         site: SiteSection {
             url: config.site_url.clone(),
             source_dir: config.source_dir.clone(),
@@ -245,6 +248,9 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
                 min_block_text_length: config.min_block_text_length,
                 min_answer_blocks: config.min_answer_blocks,
                 require_fact_consistency: config.require_fact_consistency,
+            },
+            editorial: EnabledRuleSection {
+                enabled: is_enabled(config, "editorial"),
             },
         },
         output: OutputSection {

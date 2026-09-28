@@ -112,10 +112,15 @@ Stable built-in group names:
 - `social`
 - `schema`
 - `llm`
+- `surfaces`
+- `headers`
 - `content`
+- `editorial`
 - `structure`
 - `runtime`
 - `deployment`
+- `agent_discovery`
+- `accessibility`
 
 These names are part of the config and reporting contract.
 
@@ -205,6 +210,11 @@ These names are part of the config and reporting contract.
 - `CNT003`
 - `CNT004`
 
+### Editorial Policy
+- `EDT001`
+- `EDT002`
+- `EDT003`
+
 ### GEO / Retrieval Structure
 - `GEO001`
 - `GEO002`
@@ -256,6 +266,7 @@ Important top-level keys include:
 - `browser_wait_until`
 - `baseline_file`
 - `checks`
+- `editorial`
 - `ignore_rules`
 - `ignore_paths`
 - `severity_overrides`
@@ -285,6 +296,42 @@ Rule-policy keys include:
 - `require_twitter_image`
 - `require_robots_sitemap`
 - `weak_anchor_text`
+
+The `[editorial.routes."/path"]` tables declare route-specific editorial
+briefs. `EDT001` checks the route mapping, configured answer-summary element ID,
+its position after the H1, and its two-to-three sentence form. `EDT002`
+compares declared target questions with H2 IDs and exact heading text, then
+checks that at least 20 visible answer characters follow. `EDT003` checks only
+claims explicitly listed as requiring evidence and marked in HTML. All three
+rules default to warnings; `[policy].severity_overrides` can promote selected
+IDs to errors.
+
+Example:
+
+```toml
+version = 1
+
+[editorial.routes."/guides/compare-plans"]
+answer_summary_id = "answer-summary"
+target_questions = [
+  { heading_id = "price", question = "How do the plans compare on price?" },
+  { heading_id = "migration", question = "When should a team migrate?" },
+]
+claims_requiring_evidence = ["migration-benchmark"]
+
+[policy.severity_overrides]
+EDT001 = "error"
+EDT003 = "error"
+```
+
+The rendered HTML uses `id="answer-summary"` on the summary block, the
+declared `heading_id` on each matching H2, `data-aexeo-claim="migration-benchmark"`
+on the claim, and `data-aexeo-evidence-for="migration-benchmark"` on its
+descriptive source link. Evidence links must use absolute HTTP(S) URLs or
+existing internal routes/assets. The checks validate external URL shape and
+local internal targets; they do not fetch external links or judge source
+credibility, factual accuracy, originality, or likely ranking/citation
+outcomes.
 
 Internal quality and repo policy keys include:
 - `typecheck_command`

@@ -145,6 +145,7 @@ pub fn default_rule_switches() -> BTreeMap<&'static str, bool> {
         ("llm", true),
         ("surfaces", true),
         ("content", true),
+        ("editorial", true),
         ("structure", true),
         ("accessibility", true),
         // agent_discovery is the rule group switch (the structural
