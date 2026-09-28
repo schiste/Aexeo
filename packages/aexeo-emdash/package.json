@@ -60,7 +60,9 @@
     "build:ts": "tsc -p tsconfig.build.json",
     "build:bundle": "node scripts/build-bundle.mjs",
     "build": "npm run sync-version && npm run build:wasm && npm run build:ts && npm run build:bundle",
-    "typecheck": "npm run sync-version && tsc --noEmit",
+    "typecheck": "npm run sync-version && npm run typecheck:src && npm run typecheck:tests",
+    "typecheck:src": "tsc --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.test.json",
     "test": "vitest run",
     "prepublishOnly": "npm run build"
   },

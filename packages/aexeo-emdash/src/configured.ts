@@ -15,22 +15,27 @@
 import type {
   ContentAfterSaveEvent,
   EvaluatorFn,
-  RefreshSummary,
   SandboxCtx,
 } from "./plugin.js";
 import {
   DEFAULT_COLLECTIONS,
-  evaluateAndPersistAll,
   handleAfterSaveConfigured,
-  readAllDocuments,
-  readFindings,
   readStoredFacts,
 } from "./plugin.js";
+import type { AdminViewTuning, BlockResponse } from "./findings-view.js";
+import {
+  handleRefresh,
+  normalizeInteraction,
+  notFound,
+  renderDocumentPanel,
+  renderFindingsPage,
+  renderScoreWidget,
+} from "./findings-view.js";
 import { handleDataRoute } from "./data-route.js";
 import { handleFactsRoute } from "./facts-route.js";
 import { handlePresenceRoute } from "./presence-route.js";
 import { compileSuppressions } from "./suppressions.js";
-import type { Suppression } from "./suppressions.js";
+import type { Suppression, SuppressionFilter } from "./suppressions.js";
 import { PACKAGE_VERSION } from "./version.js";
 import { evaluateDocuments, scoreIntelligence } from "./wasm-init.js";
 import type { EmdashContentItem } from "./adapter.js";
@@ -232,7 +237,8 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
       // one consumer of `collections`. Bind the resolved list here so
       // every request handles the same set without re-reading options.
       admin: {
-        handler: (ctx: RouteContext) => handleAdminRoute(ctx, collections),
+        handler: (ctx: RouteContext) =>
+          handleAdminRoute(ctx, collections, suppressionFilter),
       },
       // JSON data endpoint for the React adminEntry. Two routes:
       //   POST /_emdash/api/plugins/aexeo-emdash/data    — read current findings
@@ -310,26 +316,6 @@ export default createPlugin;
 
 // --- Admin route handler -----------------------------------------------
 
-type BlockInteraction =
-  | { type: "page_load"; page: string }
-  | {
-      type: "block_action";
-      action_id: string;
-      block_id?: string;
-      value?: unknown;
-    }
-  | {
-      type: "form_submit";
-      action_id: string;
-      block_id?: string;
-      values: Record<string, unknown>;
-    };
-
-interface BlockResponse {
-  blocks: unknown[];
-  toast?: { message: string; type: "success" | "error" | "info" };
-}
-
 // Configured-plugin route handlers receive a single RouteContext
 // argument (vs. the sandboxed wrapper's (input, ctx) two-arg form).
 // The interaction body lives at ctx.input; bridges (kv, http,
@@ -346,68 +332,25 @@ interface RouteContext extends SandboxCtx {
   input?: unknown;
 }
 
-/**
- * Coerce raw `ctx.input` (which emdash 0.17 may deliver as
- * undefined, an empty object, or a partial interaction during
- * admin/widget hydration) into a well-shaped BlockInteraction.
- *
- * Defaults follow Aeptus's hardening suggestion:
- * - Missing/non-object → `page_load /findings` (the canonical
- *   landing view).
- * - `page_load` with missing `page` → `/findings`.
- * - `block_action` with missing `action_id` → empty string;
- *   falls through to `notFound("")` rather than throwing.
- * - `form_submit` with missing `values` → empty object;
- *   downstream code already handles "no route picked" via
- *   the `typeof picked === "string"` guard.
- */
-function normalizeInteraction(input: unknown): BlockInteraction {
-  if (!input || typeof input !== "object") {
-    return { type: "page_load", page: "/findings" };
-  }
-  const raw = input as Partial<{
-    type: string;
-    page: string;
-    action_id: string;
-    block_id: string;
-    value: unknown;
-    values: Record<string, unknown>;
-  }>;
-  if (raw.type === "page_load") {
-    return {
-      type: "page_load",
-      page:
-        typeof raw.page === "string" && raw.page.length > 0
-          ? raw.page
-          : "/findings",
-    };
-  }
-  if (raw.type === "block_action") {
-    return {
-      type: "block_action",
-      action_id: typeof raw.action_id === "string" ? raw.action_id : "",
-      ...(typeof raw.block_id === "string" ? { block_id: raw.block_id } : {}),
-      value: raw.value,
-    };
-  }
-  if (raw.type === "form_submit") {
-    return {
-      type: "form_submit",
-      action_id: typeof raw.action_id === "string" ? raw.action_id : "",
-      ...(typeof raw.block_id === "string" ? { block_id: raw.block_id } : {}),
-      values:
-        raw.values && typeof raw.values === "object"
-          ? (raw.values as Record<string, unknown>)
-          : {},
-    };
-  }
-  // Unknown / missing type — treat as the canonical landing.
-  return { type: "page_load", page: "/findings" };
-}
+// Copy and variant knobs for the shared renderers. The configured
+// entry is the only one that has an editor-authored truth manifest, so
+// its score widget badges the truth stat with the real signal source
+// (see formatTruthLabel) and reports a hard Refresh failure with the
+// "error" banner variant.
+const adminViewTuning: AdminViewTuning = {
+  emptyFindingsText: "Once a Refresh runs, findings will list here.",
+  emptyScoreText:
+    "No documents indexed — click Refresh on the Aexeo findings page.",
+  refreshFailureVariant: "error",
+  score: async (documents, kv) =>
+    scoreLocally(documents, await readStoredFacts(kv)),
+  truthLabel: formatTruthLabel,
+};
 
 async function handleAdminRoute(
   ctx: RouteContext,
   collections: readonly string[],
+  suppressionFilter: SuppressionFilter,
 ): Promise<BlockResponse> {
   const body = normalizeInteraction(ctx.input);
   if (body.type === "page_load") {
@@ -418,13 +361,19 @@ async function handleAdminRoute(
       body.action_id === "view_document" &&
       typeof body.value === "string"
     ) {
-      return renderDocumentPanel(ctx, body.value);
+      return renderDocumentPanel(ctx.kv, body.value);
     }
     if (body.action_id === "refresh_findings") {
-      return handleRefresh(ctx, collections);
+      return handleRefresh({
+        ctx,
+        collections,
+        evaluator: inProcessEvaluator,
+        suppressionFilter,
+        tuning: adminViewTuning,
+      });
     }
     if (body.action_id.startsWith("filter:")) {
-      return renderFindingsPage(ctx);
+      return renderFindingsPage(ctx.kv, adminViewTuning);
     }
     return notFound(body.action_id);
   }
@@ -432,12 +381,12 @@ async function handleAdminRoute(
     if (body.action_id === "view_document") {
       const picked = body.values["route_picker"];
       if (typeof picked === "string" && picked.length > 0) {
-        return renderDocumentPanel(ctx, picked);
+        return renderDocumentPanel(ctx.kv, picked);
       }
     }
-    return renderFindingsPage(ctx);
+    return renderFindingsPage(ctx.kv, adminViewTuning);
   }
-  return renderFindingsPage(ctx);
+  return renderFindingsPage(ctx.kv, adminViewTuning);
 }
 
 async function handlePageLoad(
@@ -448,215 +397,22 @@ async function handlePageLoad(
   // "/" and "/findings" both render the findings page — "/" is the
   // alias emdash's /admin/plugins/<id> root navigates to.
   if (normalized === "" || normalized === "findings") {
-    return renderFindingsPage(ctx);
+    return renderFindingsPage(ctx.kv, adminViewTuning);
   }
   if (normalized === "widget:aexeo-score") {
-    return renderScoreWidget(ctx);
+    return renderScoreWidget(ctx.kv, adminViewTuning);
   }
   if (normalized === "document") {
-    return renderDocumentPanel(ctx);
+    return renderDocumentPanel(ctx.kv);
   }
   return notFound(page);
 }
 
-async function handleRefresh(
-  ctx: SandboxCtx,
-  collections: readonly string[],
-): Promise<BlockResponse> {
-  let summary: RefreshSummary;
-  try {
-    summary = await evaluateAndPersistAll(ctx, {
-      evaluator: inProcessEvaluator,
-      collections,
-    });
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    return {
-      blocks: [
-        { type: "header", text: "SEO findings" },
-        {
-          type: "banner",
-          title: `Refresh failed: ${detail}`,
-          variant: "error",
-        },
-      ],
-      toast: { message: `Refresh failed: ${detail}`, type: "error" },
-    };
-  }
-  const refreshed = await renderFindingsPage(ctx);
-  const toastMessage =
-    summary.errors.length === 0
-      ? `Refreshed ${summary.routesUpdated} routes (${summary.totalFindings} findings across ${summary.documentsScanned} documents)`
-      : `Refresh completed with ${summary.errors.length} errors — see banner`;
-  if (summary.errors.length > 0) {
-    refreshed.blocks.unshift({
-      type: "banner",
-      title: `Refresh issues: ${summary.errors.join(" • ")}`,
-      variant: "alert",
-    });
-  }
-  return {
-    ...refreshed,
-    toast: {
-      message: toastMessage,
-      type: summary.errors.length === 0 ? "success" : "info",
-    },
-  };
-}
-
-// --- Renderers ---------------------------------------------------------
-
-interface FindingRow extends Finding {
-  document_route: string;
-}
-
-async function readAllFindings(ctx: SandboxCtx): Promise<FindingRow[]> {
-  const entries = await ctx.kv.list<{ route: string; findings: Finding[] }>(
-    "findings:",
-  );
-  const out: FindingRow[] = [];
-  for (const entry of entries) {
-    if (entry.value === null) continue;
-    const route = entry.key.replace(/^findings:/, "");
-    for (const finding of entry.value.findings) {
-      out.push({ ...finding, document_route: route });
-    }
-  }
-  return out;
-}
-
-function severityFirst(a: Finding, b: Finding): number {
-  const rank = (severity: string) => (severity === "error" ? 0 : 1);
-  const diff = rank(a.severity) - rank(b.severity);
-  if (diff !== 0) return diff;
-  return a.rule_id.localeCompare(b.rule_id);
-}
-
-function uniqueRoutes(rows: FindingRow[]): string[] {
-  const set = new Set<string>();
-  for (const row of rows) set.add(row.document_route);
-  return [...set].sort();
-}
-
-async function renderFindingsPage(ctx: SandboxCtx): Promise<BlockResponse> {
-  const findings = await readAllFindings(ctx);
-  const errors = findings.filter((f) => f.severity === "error");
-  const warnings = findings.filter((f) => f.severity === "warning");
-  const sorted = [...findings].sort(severityFirst);
-  const routes = uniqueRoutes(findings);
-  const blocks: unknown[] = [
-    { type: "header", text: "SEO findings" },
-    {
-      type: "context",
-      text:
-        findings.length === 0
-          ? "No findings yet — click Refresh to evaluate the site."
-          : `${findings.length} findings across ${routes.length} routes — ${errors.length} errors, ${warnings.length} warnings.`,
-    },
-    { type: "divider" },
-    {
-      type: "actions",
-      elements: [
-        {
-          type: "button",
-          label: "Refresh",
-          action_id: "refresh_findings",
-          style: "primary",
-        },
-        { type: "button", label: "All", action_id: "filter:all" },
-        { type: "button", label: "Errors only", action_id: "filter:errors" },
-        {
-          type: "button",
-          label: "Warnings only",
-          action_id: "filter:warnings",
-        },
-      ],
-    },
-    sorted.length === 0
-      ? {
-          type: "context",
-          text: "Once a Refresh runs, findings will list here.",
-        }
-      : findingsTable(sorted),
-  ];
-  if (routes.length > 0) {
-    blocks.push({
-      type: "form",
-      fields: [
-        {
-          type: "select",
-          action_id: "route_picker",
-          label: "Document to inspect",
-          options: routes.map((route) => ({ label: route, value: route })),
-        },
-      ],
-      submit: { label: "View document SEO", action_id: "view_document" },
-    });
-  }
-  return { blocks };
-}
-
-function findingsTable(rows: FindingRow[]): unknown {
-  return {
-    type: "table",
-    columns: [
-      { key: "route", label: "Route" },
-      { key: "rule", label: "Rule", format: "code" },
-      { key: "severity", label: "Severity", format: "badge" },
-      { key: "message", label: "Message" },
-    ],
-    rows: rows.map((row) => ({
-      route: row.document_route,
-      rule: row.rule_id,
-      severity: row.severity,
-      message: row.message,
-    })),
-  };
-}
-
-async function renderScoreWidget(ctx: SandboxCtx): Promise<BlockResponse> {
-  const documents = await readAllDocuments(ctx.kv);
-  if (documents.length === 0) {
-    return {
-      blocks: [
-        { type: "header", text: "SEO score" },
-        {
-          type: "context",
-          text: "No documents indexed — click Refresh on the Aexeo findings page.",
-        },
-      ],
-    };
-  }
-  const facts = await readStoredFacts(ctx.kv);
-  const score = await scoreLocally(documents, facts);
-  // Badge the truth score with its actual signal source so editors aren't
-  // misled into thinking a 60 from schema-only data means the same as a 60
-  // with a hand-authored manifest backing it. The bridge splices
-  // structured_truth_source onto the score JSON for exactly this purpose.
-  const truthLabel = formatTruthLabel(score);
-  const blocks: unknown[] = [
-    {
-      type: "stats",
-      items: [
-        { label: "Overall", value: `${score.overall_score}` },
-        { label: "Citation", value: `${score.citation_readiness_score}` },
-        { label: truthLabel, value: `${score.truth_consistency_score}` },
-        { label: "Answers", value: `${score.answer_pack_score}` },
-      ],
-    },
-  ];
-  if (score.overall_score < 60) {
-    blocks.unshift({
-      type: "banner",
-      title: `Site score is ${score.overall_score} — below the 60 quality threshold`,
-      variant: "alert",
-    });
-  }
-  if (score.blockers.length > 0) {
-    blocks.push({ type: "context", text: topBlockersLine(score) });
-  }
-  return { blocks };
-}
+// --- Configured-mode scorers --------------------------------------------
+//
+// Everything the Block Kit surface renders lives in findings-view.ts.
+// What stays here is the two configured-only pieces `adminViewTuning`
+// plugs into it: the in-process WASM scorer and the truth-source label.
 
 async function scoreLocally(
   documents: readonly EmdashContentItem[] | readonly { route: string }[],
@@ -694,73 +450,4 @@ function formatTruthLabel(score: SiteIntelligenceScore): string {
     default:
       return "Truth";
   }
-}
-
-function topBlockersLine(score: SiteIntelligenceScore): string {
-  const top = score.blockers.slice(0, 3).map((b) => b.message);
-  if (top.length === 0) return "No blockers identified.";
-  return `Top blockers: ${top.join(" • ")}`;
-}
-
-async function renderDocumentPanel(
-  ctx: SandboxCtx,
-  route?: string,
-): Promise<BlockResponse> {
-  if (route === undefined) {
-    return {
-      blocks: [
-        { type: "header", text: "Document SEO" },
-        {
-          type: "context",
-          text: "Pick a document from the SEO findings list to see its rule findings here.",
-        },
-      ],
-    };
-  }
-  const findings = await readFindings(ctx.kv, route);
-  const errors = findings.filter((f) => f.severity === "error");
-  const warnings = findings.filter((f) => f.severity === "warning");
-  const sorted = [...findings].sort(severityFirst);
-  return {
-    blocks: [
-      { type: "header", text: `Document SEO — ${route}` },
-      {
-        type: "context",
-        text:
-          findings.length === 0
-            ? `No findings for ${route} — the document is currently clean.`
-            : `${findings.length} findings — ${errors.length} errors, ${warnings.length} warnings.`,
-      },
-      ...(findings.length === 0
-        ? []
-        : [{ type: "divider" }, documentFindingsTable(sorted)]),
-    ],
-  };
-}
-
-function documentFindingsTable(findings: Finding[]): unknown {
-  return {
-    type: "table",
-    columns: [
-      { key: "rule", label: "Rule", format: "code" },
-      { key: "severity", label: "Severity", format: "badge" },
-      { key: "message", label: "Message" },
-      { key: "block", label: "Block", format: "code" },
-    ],
-    rows: findings.map((finding) => ({
-      rule: finding.rule_id,
-      severity: finding.severity,
-      message: finding.message,
-      block: `${finding.path}:${finding.line}`,
-    })),
-  };
-}
-
-function notFound(page: string): BlockResponse {
-  return {
-    blocks: [
-      { type: "header", text: "Not found" },
-      { type: "context", text: `unknown page: ${page}` },
-    ],
-  };
 }

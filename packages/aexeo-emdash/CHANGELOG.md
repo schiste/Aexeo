@@ -6,6 +6,48 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Suppressions ignored by the Block Kit Refresh button.** In configured
+  mode the /findings "Refresh" button called the sweep without the
+  compiled `suppressionFilter`, so it re-persisted findings the editor
+  had explicitly silenced. The React `/refresh` route always applied
+  them, so the two surfaces disagreed and the documented guarantee
+  ("suppressed findings never reach the dashboard, /findings, or the
+  per-document panel") did not hold on the Block Kit path.
+  Root cause: `configured.ts` and `sandbox-entry.ts` each carried their
+  own near-verbatim copy of the interaction normalizer, the findings
+  page, the score widget, the document panel, and the refresh handler.
+  The copies had already drifted — this missing argument was one of the
+  drifts. Fix: the whole block now lives once in `src/findings-view.ts`,
+  and `RefreshOptions.suppressionFilter` is a **required** property, so a
+  caller cannot silently omit it again.
+
+### Changed
+
+- Extract the shared Block Kit view layer (`normalizeInteraction`,
+  `BlockInteraction`, `BlockResponse`, the findings page, the score
+  widget, the document panel, and the refresh sweep) out of
+  `configured.ts` and `sandbox-entry.ts` into `src/findings-view.ts`.
+  Behaviour is unchanged apart from the suppression fix above; the two
+  entrypoints keep their own dispatch and their own copy of the three
+  strings that legitimately differ (empty-state copy, score-widget
+  empty copy, hard-refresh banner variant), passed in through
+  `AdminViewTuning`. `BlockInteraction` and `BlockResponse` are
+  re-exported from `sandbox-entry.ts`, so the `./sandbox` entry's
+  public type surface is unchanged.
+- Add regression tests for `normalizeInteraction` — the ten edge cases
+  the 0.8.17 changelog claimed to have verified but never did — plus
+  entrypoint parity tests that drive both admin routes with the same
+  malformed bodies, and a test that the configured Block Kit refresh and
+  the React `/refresh` route agree on suppressed findings.
+- Add `tsconfig.test.json` and a `typecheck:tests` script so `tests/`
+  and `vitest.config.ts` are typechecked. `tsconfig.json`'s `include`
+  covered `src/**` only, which meant the suite guarding the 0.8.17
+  production hotfix and the emdash test-host fixture plugin were both
+  unchecked. `npm run typecheck` now runs `typecheck:src` and
+  `typecheck:tests`.
+
 ## [0.8.18] - 2026-09-28
 
 ### Added

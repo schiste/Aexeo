@@ -1,22 +1,33 @@
 import type {
   EvaluatorFn,
   KvNamespace,
-  RefreshSummary,
   SandboxCtx,
   SidecarRuntimeConfig,
 } from "./plugin.js";
 import {
-  evaluateAndPersistAll,
+  DEFAULT_COLLECTIONS,
   handleAfterSave,
-  readAllDocuments,
-  readFindings,
   readSidecarConfig,
   writeSidecarConfig,
 } from "./plugin.js";
 import { evaluateViaSidecar } from "./sidecar.js";
 import { tools as mcpTools } from "./mcp.js";
 import { scoreSite } from "./evaluator.js";
-import type { Finding, SiteIntelligenceScore } from "./types.js";
+import type {
+  AdminViewTuning,
+  BlockInteraction,
+  BlockResponse,
+} from "./findings-view.js";
+import {
+  handleRefresh as refreshSweep,
+  normalizeInteraction,
+  notFound,
+  renderDocumentPanel,
+  renderFindingsPage,
+  renderScoreWidget,
+} from "./findings-view.js";
+import { compileSuppressions } from "./suppressions.js";
+import type { SuppressionFilter } from "./suppressions.js";
 
 // Stand-in for @emdash-cms/core's definePlugin. The real implementation
 // is identity-returning for the sandboxed shape (hooks + routes); this
@@ -26,23 +37,10 @@ function definePlugin<T>(plugin: T): T {
   return plugin;
 }
 
-// Interaction protocol the host POSTs to /_emdash/api/plugins/<id>/admin.
-// Mirrors @emdash-cms/blocks BlockInteraction; redeclared locally so
-// the plugin can typecheck without that package installed.
-export type BlockInteraction =
-  | { type: "page_load"; page: string }
-  | {
-      type: "block_action";
-      action_id: string;
-      block_id?: string;
-      value?: unknown;
-    }
-  | {
-      type: "form_submit";
-      action_id: string;
-      block_id?: string;
-      values: Record<string, unknown>;
-    };
+// The interaction protocol and the Block Kit response envelope are
+// re-exported from the shared view layer so the "./sandbox" entry's
+// public type surface is unchanged by the de-duplication.
+export type { BlockInteraction, BlockResponse } from "./findings-view.js";
 
 // Shape of the first argument emdash passes to a sandbox route
 // handler. Mirrors what the Cloudflare sandbox wrapper builds in
@@ -52,61 +50,13 @@ export type BlockInteraction =
 //
 // `input` is typed as unknown because emdash 0.17 may deliver
 // undefined / partial bodies during admin and widget hydration
-// paths; normalizeInteraction() coerces every entry into a valid
+// paths; normalizeInteraction() (shared with the configured entry —
+// see findings-view.ts) coerces every entry into a valid
 // BlockInteraction before dispatch.
 export interface RouteInput {
   input?: unknown;
   request?: unknown;
   requestMeta?: unknown;
-}
-
-/**
- * Coerce raw route-handler input into a well-shaped
- * BlockInteraction. See configured.ts for the rationale and the
- * canonical defaults — this is the sandboxed-entry mirror of the
- * same helper.
- */
-function normalizeInteraction(input: unknown): BlockInteraction {
-  if (!input || typeof input !== "object") {
-    return { type: "page_load", page: "/findings" };
-  }
-  const raw = input as Partial<{
-    type: string;
-    page: string;
-    action_id: string;
-    block_id: string;
-    value: unknown;
-    values: Record<string, unknown>;
-  }>;
-  if (raw.type === "page_load") {
-    return {
-      type: "page_load",
-      page:
-        typeof raw.page === "string" && raw.page.length > 0
-          ? raw.page
-          : "/findings",
-    };
-  }
-  if (raw.type === "block_action") {
-    return {
-      type: "block_action",
-      action_id: typeof raw.action_id === "string" ? raw.action_id : "",
-      ...(typeof raw.block_id === "string" ? { block_id: raw.block_id } : {}),
-      value: raw.value,
-    };
-  }
-  if (raw.type === "form_submit") {
-    return {
-      type: "form_submit",
-      action_id: typeof raw.action_id === "string" ? raw.action_id : "",
-      ...(typeof raw.block_id === "string" ? { block_id: raw.block_id } : {}),
-      values:
-        raw.values && typeof raw.values === "object"
-          ? (raw.values as Record<string, unknown>)
-          : {},
-    };
-  }
-  return { type: "page_load", page: "/findings" };
 }
 
 // What we actually thread through the dispatch helpers — the
@@ -117,10 +67,28 @@ export interface DispatchCtx {
   ctx: SandboxCtx;
 }
 
-export interface BlockResponse {
-  blocks: unknown[];
-  toast?: { message: string; type: "success" | "error" | "info" };
-}
+// The sandboxed descriptor has no `suppressions` option — that knob
+// only exists on the configured plugin (aexeoPlugin() in index.ts) —
+// but the shared refresh sweep requires a filter rather than an
+// optional one, precisely so a caller cannot forget to pass it. An
+// empty rule set compiles to the identity filter.
+const sandboxSuppressionFilter: SuppressionFilter = compileSuppressions(
+  undefined,
+);
+
+// Copy and variant knobs for the shared renderers. The sandboxed
+// score widget has no truth manifest to badge against (the manifest
+// is a configured-mode concept) and has always reported a hard
+// Refresh failure with the "alert" banner variant.
+const adminViewTuning: AdminViewTuning = {
+  emptyFindingsText:
+    "Once a document publishes, its rule findings list here.",
+  emptyScoreText:
+    "No documents saved yet — score appears after the first emdash save.",
+  refreshFailureVariant: "alert",
+  score: async (documents) => scoreSite(documents),
+  truthLabel: () => "Truth",
+};
 
 // Top-level dispatch for the admin route. emdash hands every page load
 // and every block interaction (button click, form submit) through the
@@ -166,7 +134,7 @@ async function handleFormSubmit(
   if (actionId === "view_document") {
     const picked = values["route_picker"];
     if (typeof picked === "string" && picked.length > 0) {
-      return renderDocumentPanel(ctx, picked);
+      return renderDocumentPanel(ctx.kv, picked);
     }
   }
   return handlePageLoad(ctx, "findings");
@@ -181,13 +149,13 @@ async function handlePageLoad(
   // dispatch matches whether the host evolves to send a bare name.
   const normalized = page.startsWith("/") ? page.slice(1) : page;
   if (normalized === "findings") {
-    return renderFindingsPage(ctx);
+    return renderFindingsPage(ctx.kv, adminViewTuning);
   }
   if (normalized === "widget:aexeo-score") {
-    return renderScoreWidget(ctx);
+    return renderScoreWidget(ctx.kv, adminViewTuning);
   }
   if (normalized === "document") {
-    return renderDocumentPanel(ctx);
+    return renderDocumentPanel(ctx.kv);
   }
   if (normalized === "setup") {
     return renderSetupPage(ctx);
@@ -201,7 +169,7 @@ async function handleBlockAction(
   value: unknown,
 ): Promise<BlockResponse> {
   if (actionId === "view_document" && typeof value === "string") {
-    return renderDocumentPanel(ctx, value);
+    return renderDocumentPanel(ctx.kv, value);
   }
   if (actionId === "refresh_findings") {
     return handleRefresh(ctx);
@@ -210,7 +178,7 @@ async function handleBlockAction(
   // table for now. Per-filter state is a small follow-up once we thread
   // the active filter through the response.
   if (actionId.startsWith("filter:")) {
-    return renderFindingsPage(ctx);
+    return renderFindingsPage(ctx.kv, adminViewTuning);
   }
   return notFound(actionId);
 }
@@ -234,294 +202,15 @@ async function handleRefresh(ctx: DispatchCtx): Promise<BlockResponse> {
       documents,
     );
   };
-  let summary: RefreshSummary;
-  try {
-    summary = await evaluateAndPersistAll(ctx.ctx, {
-      evaluator: sandboxEvaluator,
-    });
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    return {
-      blocks: [
-        { type: "header", text: "SEO findings" },
-        {
-          type: "banner",
-          title: `Refresh failed: ${detail}`,
-          variant: "alert",
-        },
-      ],
-      toast: { message: `Refresh failed: ${detail}`, type: "error" },
-    };
-  }
-  const refreshed = await renderFindingsPage(ctx);
-  const toastMessage =
-    summary.errors.length === 0
-      ? `Refreshed ${summary.routesUpdated} routes (${summary.totalFindings} findings across ${summary.documentsScanned} documents)`
-      : `Refresh completed with ${summary.errors.length} errors — see banner`;
-  if (summary.errors.length > 0) {
-    // Block Kit's banner variant is "default" | "alert" | "error".
-    // "warning" silently lands as undefined in the renderer's
-    // variant->classes lookup, surfacing as
-    // "Cannot read properties of undefined (reading 'classes')" in
-    // the browser. Use "alert" for soft warnings, "error" for hard
-    // failures.
-    refreshed.blocks.unshift({
-      type: "banner",
-      title: `Refresh issues: ${summary.errors.join(" • ")}`,
-      variant: "alert",
-    });
-  }
-  return {
-    ...refreshed,
-    toast: {
-      message: toastMessage,
-      type: summary.errors.length === 0 ? "success" : "info",
-    },
-  };
-}
-
-async function renderFindingsPage(ctx: DispatchCtx): Promise<BlockResponse> {
-  const findings = await readAllFindings(ctx.kv);
-  const errors = findings.filter((finding) => finding.severity === "error");
-  const warnings = findings.filter((finding) => finding.severity === "warning");
-  const sorted = [...findings].sort(severityFirst);
-  const routes = uniqueRoutes(findings);
-  const blocks: unknown[] = [
-    { type: "header", text: "SEO findings" },
-    {
-      type: "context",
-      text:
-        findings.length === 0
-          ? "No findings yet — click Refresh to evaluate the site."
-          : `${findings.length} findings across ${routes.length} routes — ${errors.length} errors, ${warnings.length} warnings.`,
-    },
-    { type: "divider" },
-    {
-      type: "actions",
-      elements: [
-        // Refresh evaluates every configured entry. Pressing it lists
-        // content via the live in-request bridge,
-        // calls the sidecar /evaluate, and writes findings back to KV.
-        {
-          type: "button",
-          label: "Refresh",
-          action_id: "refresh_findings",
-          style: "primary",
-        },
-        { type: "button", label: "All", action_id: "filter:all" },
-        { type: "button", label: "Errors only", action_id: "filter:errors" },
-        {
-          type: "button",
-          label: "Warnings only",
-          action_id: "filter:warnings",
-        },
-      ],
-    },
-    sorted.length === 0
-      ? {
-          type: "context",
-          text: "Once a document publishes, its rule findings list here.",
-        }
-      : findingsTable(sorted),
-  ];
-  // emdash table cells JSON-stringify objects rather than render
-  // interactive elements, so per-row View buttons would be dead. The
-  // route-selection flow lives below the table as a select + submit
-  // form whose form_submit dispatch routes to the document panel.
-  if (routes.length > 0) {
-    blocks.push({
-      type: "form",
-      fields: [
-        {
-          type: "select",
-          action_id: "route_picker",
-          label: "Document to inspect",
-          options: routes.map((route) => ({ label: route, value: route })),
-        },
-      ],
-      submit: { label: "View document SEO", action_id: "view_document" },
-    });
-  }
-  return { blocks };
-}
-
-interface FindingRow extends Finding {
-  // Route is stored alongside the finding in plugin.ts but not on the
-  // Finding itself; we re-attach when materializing rows.
-  document_route: string;
-}
-
-async function readAllFindings(kv: KvNamespace): Promise<FindingRow[]> {
-  // emdash's kv.list returns parsed values inline, so we don't need a
-  // second get-per-key pass — both the route key and the stored
-  // {route, findings} payload come back in one call.
-  const entries = await kv.list<{ route: string; findings: Finding[] }>(
-    "findings:",
-  );
-  const out: FindingRow[] = [];
-  for (const entry of entries) {
-    if (entry.value === null) {
-      continue;
-    }
-    const route = entry.key.replace(/^findings:/, "");
-    for (const finding of entry.value.findings) {
-      out.push({ ...finding, document_route: route });
-    }
-  }
-  return out;
-}
-
-function uniqueRoutes(rows: FindingRow[]): string[] {
-  const routes = new Set<string>();
-  for (const row of rows) {
-    routes.add(row.document_route);
-  }
-  return [...routes].sort();
-}
-
-function severityFirst(a: Finding, b: Finding): number {
-  const rank = (severity: string) => (severity === "error" ? 0 : 1);
-  const diff = rank(a.severity) - rank(b.severity);
-  if (diff !== 0) {
-    return diff;
-  }
-  return a.rule_id.localeCompare(b.rule_id);
-}
-
-function findingsTable(rows: FindingRow[]): unknown {
-  return {
-    type: "table",
-    columns: [
-      { key: "route", label: "Route" },
-      { key: "rule", label: "Rule", format: "code" },
-      { key: "severity", label: "Severity", format: "badge" },
-      { key: "message", label: "Message" },
-    ],
-    rows: rows.map((row) => ({
-      route: row.document_route,
-      rule: row.rule_id,
-      severity: row.severity,
-      message: row.message,
-    })),
-  };
-}
-
-async function renderScoreWidget(ctx: DispatchCtx): Promise<BlockResponse> {
-  const documents = await readAllDocuments(ctx.kv);
-  if (documents.length === 0) {
-    return {
-      blocks: [
-        { type: "header", text: "SEO score" },
-        {
-          type: "context",
-          text: "No documents saved yet — score appears after the first emdash save.",
-        },
-      ],
-    };
-  }
-  const score = await scoreSite(documents);
-  const blocks: unknown[] = [
-    {
-      type: "stats",
-      items: [
-        {
-          label: "Overall",
-          value: `${score.overall_score}`,
-        },
-        {
-          label: "Citation",
-          value: `${score.citation_readiness_score}`,
-        },
-        {
-          label: "Truth",
-          value: `${score.truth_consistency_score}`,
-        },
-        {
-          label: "Answers",
-          value: `${score.answer_pack_score}`,
-        },
-      ],
-    },
-  ];
-  if (score.overall_score < 60) {
-    blocks.unshift({
-      type: "banner",
-      title: `Site score is ${score.overall_score} — below the 60 quality threshold`,
-      variant: "alert",
-    });
-  }
-  if (score.blockers.length > 0) {
-    blocks.push({
-      type: "context",
-      text: topBlockersLine(score),
-    });
-  }
-  return { blocks };
-}
-
-function topBlockersLine(score: SiteIntelligenceScore): string {
-  const top = score.blockers.slice(0, 3).map((blocker) => blocker.message);
-  if (top.length === 0) {
-    return "No blockers identified.";
-  }
-  return `Top blockers: ${top.join(" • ")}`;
-}
-
-async function renderDocumentPanel(
-  ctx: DispatchCtx,
-  route?: string,
-): Promise<BlockResponse> {
-  if (route === undefined) {
-    return {
-      blocks: [
-        { type: "header", text: "Document SEO" },
-        {
-          type: "context",
-          text: "Pick a document from the SEO findings list to see its rule findings here.",
-        },
-      ],
-    };
-  }
-  const findings = await readFindings(ctx.kv, route);
-  const errors = findings.filter((finding) => finding.severity === "error");
-  const warnings = findings.filter((finding) => finding.severity === "warning");
-  const sorted = [...findings].sort(severityFirst);
-  return {
-    blocks: [
-      { type: "header", text: `Document SEO — ${route}` },
-      {
-        type: "context",
-        text:
-          findings.length === 0
-            ? `No findings for ${route} — the document is currently clean.`
-            : `${findings.length} findings — ${errors.length} errors, ${warnings.length} warnings.`,
-      },
-      ...(findings.length === 0
-        ? []
-        : [{ type: "divider" }, documentFindingsTable(sorted)]),
-    ],
-  };
-}
-
-function documentFindingsTable(findings: Finding[]): unknown {
-  return {
-    type: "table",
-    columns: [
-      { key: "rule", label: "Rule", format: "code" },
-      { key: "severity", label: "Severity", format: "badge" },
-      { key: "message", label: "Message" },
-      { key: "block", label: "Block", format: "code" },
-    ],
-    rows: findings.map((finding) => ({
-      rule: finding.rule_id,
-      severity: finding.severity,
-      message: finding.message,
-      // The bridge stamps every Portable Text block with id + data-pt-key
-      // when rendering; surfacing the path:line locator here lets authors
-      // locate the failing block via the editor's ⌘-F.
-      block: `${finding.path}:${finding.line}`,
-    })),
-  };
+  return refreshSweep({
+    ctx: ctx.ctx,
+    // The sandboxed descriptor takes no collection knobs, so the sweep
+    // always covers the default set.
+    collections: DEFAULT_COLLECTIONS,
+    evaluator: sandboxEvaluator,
+    suppressionFilter: sandboxSuppressionFilter,
+    tuning: adminViewTuning,
+  });
 }
 
 async function renderSetupPage(
@@ -668,15 +357,6 @@ async function handleSetupSubmit(
     bannerSuccess:
       "Configuration saved. Click Refresh on the findings page to evaluate.",
   });
-}
-
-function notFound(page: string): BlockResponse {
-  return {
-    blocks: [
-      { type: "header", text: "Not found" },
-      { type: "context", text: `unknown page: ${page}` },
-    ],
-  };
 }
 
 export default definePlugin({

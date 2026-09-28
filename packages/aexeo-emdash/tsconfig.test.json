@@ -1,0 +1,47 @@
+{
+  // Test-only tsconfig. `tsconfig.json` (used by `npm run typecheck:src`
+  // and inherited by tsconfig.build.json) includes src/** only, which
+  // meant the Vitest suite was never typechecked — including the suite
+  // that guards the 0.8.17 `normalizeInteraction` production hotfix and
+  // the plugin fixture emdash's test host bundles on every run.
+  //
+  // This config is a strict superset of tsconfig.json's program: same
+  // compilerOptions (strict, noUncheckedIndexedAccess,
+  // exactOptionalPropertyTypes), plus tests/ and vitest.config.ts.
+  // `npm run typecheck` runs both.
+  //
+  // `noEmit` is explicit because the inherited `declaration`/`outDir`/
+  // `rootDir` trio is emit-shaped, and `rootDir` is widened to "." so
+  // tests/ and vitest.config.ts are inside the program.
+  //
+  // `tests/fixtures/plugin-host/dist/**` is excluded: the emdash test-host
+  // plugin generates a bundled runtime plus .d.mts type probe there on
+  // every `npm test`, and those artifacts match `**/*.ts` and would be
+  // re-checked as if they were source. The fixture's real source
+  // (tests/fixtures/plugin-host/src/plugin.ts) IS checked, and its
+  // `../../../../src/plugin.js` import resolves normally — that path is
+  // correct relative to the fixture's own depth, and module resolution
+  // never sees the generated dist/ because src/ files import it only
+  // through that same specifier.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "rootDir": "."
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "tests/**/*.ts",
+    "tests/**/*.tsx",
+    "vitest.config.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "wasm",
+    "tests/fixtures/plugin-host/dist"
+  ]
+}

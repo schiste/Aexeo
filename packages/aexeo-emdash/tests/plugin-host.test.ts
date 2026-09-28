@@ -245,9 +245,15 @@ describe("sandbox afterSave", () => {
         block.children.map((child) => child.text),
       ).join(" "),
     ).toContain("Hello updated");
-    await expect(
-      host.inspect.kv.get(`findings:/journal/hello/`),
-    ).resolves.toMatchObject({ route: "/journal/hello/", findings: [] });
+    // The findings entry is written after the document entry, so it is not
+    // guaranteed to exist by the time the waits above pass. Poll for it
+    // rather than asserting immediately, which made this assertion race the
+    // hook's own writes and fail intermittently.
+    await vi.waitFor(async () => {
+      await expect(
+        host.inspect.kv.get(`findings:/journal/hello/`),
+      ).resolves.toMatchObject({ route: "/journal/hello/", findings: [] });
+    });
 
     // Route migration. `persistDocument` re-keys a document whenever the
     // same content id appears under a new route, and deletes the stale
