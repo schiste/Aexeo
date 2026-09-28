@@ -89,11 +89,7 @@ fn rule_a11y001_missing_alt(page: &Page, options: AccessibilityOptions) -> Vec<F
         if !options.strict && image.is_marked_decorative() {
             continue;
         }
-        let src_hint = if image.src.len() > 60 {
-            format!("{}…", &image.src[..60])
-        } else {
-            image.src.clone()
-        };
+        let src_hint = crate::text::truncate_at_char_boundary(&image.src, 60, "…");
         findings.push(finding(
             "A11Y001",
             format!("<img src=\"{}\"> missing alt attribute", src_hint),
@@ -671,5 +667,75 @@ mod tests {
         let p = page("", vec![img], PageKind::Generic);
         let findings = rule_a11y006_alt_equals_filename(&p);
         assert!(findings.is_empty());
+    }
+
+    /// Regression: A11Y001 shortens `image.src` for its message. The
+    /// attribute comes straight from site HTML, so a multi-byte character
+    /// straddling the 60-byte budget used to abort the whole audit with
+    /// "byte index 60 is not a char boundary".
+    #[test]
+    fn a11y001_does_not_panic_on_non_ascii_src_at_the_truncation_boundary() {
+        // Pad to 59 ASCII bytes, then a 2-byte 'é' occupying 59..61 so the
+        // budget of 60 lands inside it.
+        let mut src = String::from("/img/");
+        while src.len() < 59 {
+            src.push('a');
+        }
+        src.push('é');
+        src.push_str(".png");
+        assert!(
+            !src.is_char_boundary(60),
+            "fixture must straddle the budget"
+        );
+
+        let img = image(&src, None);
+        let p = page("", vec![img], PageKind::Generic);
+        let findings = rule_a11y001_missing_alt(&p, AccessibilityOptions { strict: false });
+        assert_eq!(findings.len(), 1, "the finding should still be reported");
+        assert!(
+            findings[0].message.contains('…'),
+            "message should be truncated: {}",
+            findings[0].message
+        );
+    }
+
+    #[test]
+    fn a11y001_does_not_panic_on_cjk_src() {
+        // CJK glyphs are 3 bytes, so byte 60 is never a boundary.
+        let src = format!("/img/{}.png", "日".repeat(30));
+        let img = image(&src, None);
+        let p = page("", vec![img], PageKind::Generic);
+        assert_eq!(
+            rule_a11y001_missing_alt(&p, AccessibilityOptions { strict: false }).len(),
+            1
+        );
+    }
+
+    /// The same non-ASCII hazard reached through the public entry point, so
+    /// the guarantee is pinned at the surface integrators actually call.
+    #[test]
+    fn run_accessibility_rules_handles_non_ascii_image_sources() {
+        let mut src = String::from("/img/");
+        while src.len() < 59 {
+            src.push('a');
+        }
+        src.push('é');
+        src.push_str(".png");
+        let html = format!("<html><body><img src=\"{src}\"></body></html>");
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        let dist = root.join("dist");
+        std::fs::create_dir_all(&dist).unwrap();
+        std::fs::write(dist.join("index.html"), &html).unwrap();
+
+        let site = crate::site::load_site(root).unwrap();
+        let findings =
+            super::run_accessibility_rules(&site, AccessibilityOptions { strict: false });
+        assert!(
+            findings.iter().any(|f| f.rule_id == "A11Y001"),
+            "expected A11Y001, got {:?}",
+            findings.iter().map(|f| &f.rule_id).collect::<Vec<_>>()
+        );
     }
 }

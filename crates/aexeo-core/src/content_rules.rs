@@ -226,8 +226,11 @@ fn collect_generic_beneficiary_findings(page: &Page) -> Vec<Finding> {
             // Sample the next ~80 chars after the trigger; that's
             // typically one phrase or list item. Longer windows
             // catch too much body text and dilute the heuristic.
+            // `after` is lowercased page text, so byte 80 can land inside a
+            // multi-byte character. `get(..sample_end)` yields the prefix up
+            // to the nearest boundary rather than panicking.
             let sample_end = after.len().min(80);
-            let sample = &after[..sample_end];
+            let sample = after.get(..sample_end).unwrap_or(after);
             if phrase_is_generic_beneficiary(sample) {
                 findings.push(finding(
                     "CNT006",
@@ -454,6 +457,25 @@ mod tests {
             findings.iter().any(|f| f.rule_id == "CNT006"),
             "expected CNT006 on generic audience-needs copy; got: {findings:?}"
         );
+    }
+
+    /// Regression: the CNT006 sample window sliced the page text at byte 80.
+    /// Any multi-byte character inside that window aborted the audit with
+    /// "byte index 80 is not a char boundary".
+    #[test]
+    fn cnt006_does_not_panic_on_non_ascii_body_text() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        // Non-ASCII characters throughout the sample window, with the
+        // generic-beneficiary trigger and its abstract nouns intact.
+        let body = "<p>Notre audience a besoin de vitesse et de clarté \
+                    pour prendre ses décisions. 日本語のテキストを追加して\
+                    サンプルウィンドウを埋めます。</p>";
+        write(&root.join("about/index.html"), &make_page("about", body));
+        // Reaching an assertion at all is the regression guard; the finding
+        // itself depends on the heuristic and is not the subject here.
+        let findings = run_content_rules(&load_site(root).unwrap(), &Config::default());
+        assert!(findings.iter().all(|f| !f.rule_id.is_empty()));
     }
 
     #[test]

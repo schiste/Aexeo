@@ -74,7 +74,12 @@ fn looks_like_iso_lastmod(value: &str) -> bool {
     if trimmed.len() < 10 {
         return false;
     }
-    let date = &trimmed[..10];
+    // `trimmed` comes from a hand-authored <lastmod>, so byte 10 is not
+    // guaranteed to be a char boundary. `get(..10)` yields None instead of
+    // panicking when a multi-byte character straddles it.
+    let Some(date) = trimmed.get(..10) else {
+        return false;
+    };
     let date_ok = date.chars().enumerate().all(|(index, ch)| match index {
         4 | 7 => ch == '-',
         _ => ch.is_ascii_digit(),
@@ -287,5 +292,49 @@ mod tests {
         let findings = run_sitemap_rules(&load_site(root).unwrap(), &Config::default());
         assert!(!findings.iter().any(|finding| finding.rule_id == "MAP005"));
         assert!(!findings.iter().any(|finding| finding.rule_id == "MAP003"));
+    }
+
+    /// Regression: `looks_like_iso_lastmod` sliced the first 10 bytes of a
+    /// hand-authored `<lastmod>`. A multi-byte character inside those 10
+    /// bytes aborted the audit with "byte index 10 is not a char boundary".
+    #[test]
+    fn non_ascii_lastmod_is_reported_as_invalid_instead_of_panicking() {
+        // 9 ASCII bytes ("2026-01-0") then a 2-byte 'é' at 9..11, so byte 10
+        // lands inside the character.
+        let value = "2026-01-0é";
+        assert!(
+            !value.is_char_boundary(10),
+            "fixture must straddle the budget"
+        );
+        assert!(!super::looks_like_iso_lastmod(value));
+
+        // A valid ISO timestamp is still accepted.
+        assert!(super::looks_like_iso_lastmod("2026-01-30"));
+    }
+
+    /// The same hazard through the public rule entry point.
+    #[test]
+    fn non_ascii_lastmod_in_sitemap_does_not_panic() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><title>x</title><meta name=\"description\" content=\"y\"><link rel=\"canonical\" href=\"https://example.com/\"></head><body><h1>x</h1></body></html>",
+        );
+        write(
+            &root.join("sitemap.xml"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://example.com/</loc><lastmod>2026-01-é</lastmod></url>
+</urlset>"#,
+        );
+
+        let site = load_site(root).unwrap();
+        let findings = run_sitemap_rules(&site, &Config::default());
+        assert!(
+            findings.iter().any(|f| f.rule_id == "MAP009"),
+            "expected the invalid lastmod to be reported, got {:?}",
+            findings.iter().map(|f| &f.rule_id).collect::<Vec<_>>()
+        );
     }
 }

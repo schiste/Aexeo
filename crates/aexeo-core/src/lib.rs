@@ -33,6 +33,7 @@ pub mod static_check;
 pub mod structure_rules;
 pub mod surface_rules;
 pub mod surfaces;
+pub(crate) mod text;
 pub mod time_shim;
 pub mod verification;
 pub mod well_known_rules;
