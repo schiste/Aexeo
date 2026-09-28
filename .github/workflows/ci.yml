@@ -5,29 +5,130 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege by default. Nothing in this workflow writes to the
+# repository, so declare it rather than inheriting the repository default,
+# which is often `write-all` and would hand every step a token that can push.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Superseded pushes and PR updates cancel the in-flight run: a PR that is
+  # force-pushed or re-queued does not need three older commits burning
+  # runner minutes. main is explicitly excluded. Cancelling a main push would
+  # tear down the very gate that is supposed to have covered the commits
+  # already landed there, and releases are cut from main after this workflow
+  # goes green.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   emdash-plugin:
+    name: emdash-plugin (typecheck, test, audit)
     runs-on: ubuntu-latest
+    # Default job timeout is 360 minutes. A hung vitest/tsc would hold a
+    # runner for six hours; this job is a few minutes of work when healthy.
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: packages/aexeo-emdash/package-lock.json
       - name: Install EmDash plugin dependencies
         run: npm ci --prefix packages/aexeo-emdash
+      # `npm test` alone was not a real gate: the test suite runs through
+      # vitest, which does not typecheck the package. A TypeScript error in
+      # src/ could merge green and only surface at consumer install time.
+      - name: Typecheck EmDash plugin
+        run: npm run typecheck --prefix packages/aexeo-emdash
       - name: Run EmDash plugin tests
         run: npm test --prefix packages/aexeo-emdash
+      # `npm run build` is deliberately NOT in this job. It expands to
+      # `sync-version && build:wasm && build:ts && build:bundle`, and
+      # build:wasm shells out to scripts/build-wasm.sh, which requires a Rust
+      # toolchain plus wasm-bindgen and the wasm32 target. Adding a second
+      # toolchain to a node job to duplicate a bundle that
+      # release-internal.yml already produces costs more minutes than the
+      # signal is worth. typecheck is the cheap, high-value half: it covers
+      # the whole TypeScript surface including the generated wasm bindings'
+      # .d.ts, and the wasm/bundle build stays owned by the release job.
+      # Scope note: the gate covers the dependency surface this package
+      # actually publishes, which is `--omit=dev`. The package has zero
+      # runtime `dependencies` — it is self-contained plus the WASM bridge —
+      # so everything a consumer installs is already in that scope. The
+      # devDependency tree pulls in `emdash` for the official plugin test
+      # host, and `emdash` currently carries a high-severity advisory in its
+      # own `@tiptap/core` dependency (GHSA-cp6q-959q-f8rh,
+      # GHSA-j95f-988m-3j2f). That is not fixable from this package: it is
+      # transitive through a dev-only peer, and `npm audit fix` cannot reach
+      # it. Widening the gate to the full tree would therefore be a
+      # permanently red check that trains everyone to ignore CI. Raise this
+      # to the full tree once emdash ships a patched release.
+      - name: Audit EmDash plugin published dependency surface
+        run: npm audit --omit=dev --audit-level=high --prefix packages/aexeo-emdash
+
+  crawl-worker:
+    name: crawl-worker (typecheck, audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/aexeo-crawl-worker/package-lock.json
+      # packages/aexeo-crawl-worker ships crawl artifacts and runtime
+      # evaluation results to the emdash admin UI behind an R2 bucket and an
+      # eval token. SECURITY.md puts it in security scope, yet it had no CI
+      # coverage at all: nothing in this workflow ever touched it, so a
+      # TypeScript error in src/worker.ts or its wasm bindings could land on
+      # main unnoticed. It has its own committed package-lock.json (not
+      # committed node_modules), so `npm ci` here is reproducible.
+      - name: Install crawl worker dependencies
+        run: npm ci --prefix packages/aexeo-crawl-worker
+      - name: Typecheck crawl worker
+        run: npm run typecheck --prefix packages/aexeo-crawl-worker
+      # Same scoping rationale as the plugin job: the worker has no runtime
+      # `dependencies` (Wrangler injects the binding types and the runtime),
+      # so `--omit=dev` is the whole shipped surface. The dev tree's four
+      # high advisories are all inside `wrangler@3.x` via `miniflare`;
+      # clearing them needs a `wrangler@4` major bump, which is a separate
+      # piece of work. This gate watches the surface consumers actually run.
+      - name: Audit crawl worker published dependency surface
+        run: npm audit --omit=dev --audit-level=high --prefix packages/aexeo-crawl-worker
 
   validate:
+    name: validate (rust gate, install smoke, perf budget)
     runs-on: ubuntu-latest
+    # Generous relative to the node jobs: this job installs a second Rust
+    # toolchain, builds three cargo tools from source, runs two clippy
+    # passes plus the whole test suite, then does a release build and two
+    # release benchmark examples. Cached, it is minutes; from cold it is the
+    # slowest thing in CI, so leave headroom rather than flap.
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        # The action's `toolchain` input defaults to `stable`, so pinning the
+        # action to a commit SHA pins the action code without freezing the
+        # Rust version it installs.
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
           components: rustfmt, clippy
+      # Nothing was cached before, so every run paid for a cold registry
+      # download plus a cold fmt + 2x clippy + full test suite + release
+      # build. With default inputs this caches ~/.cargo/registry,
+      # ~/.cargo/git, ./target and (cache-bin defaults to true)
+      # ${CARGO_HOME}/bin, which is also where cargo-audit, cargo-deny and
+      # cargo-udeps land -- those three are compiled from source and are
+      # several minutes on their own. The cache key already hashes every
+      # Cargo.toml/Cargo.lock, and it is only saved when the job succeeds.
+      # Must stay after the toolchain install: the key is derived from
+      # `rustc -vV`.
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install nightly for unused-dependency analysis
         run: rustup toolchain install nightly --profile minimal --component rust-src --component llvm-tools-preview
       - name: Install Rust quality tools
@@ -36,3 +137,15 @@ jobs:
         run: sh scripts/check-repo.sh
       - name: Run release install smoke
         run: sh scripts/pre-push.sh
+      # performance-budget.json was dead weight: nothing in CI read it, so
+      # the two budgets it declares (static audit 50ms avg, runtime audit
+      # 1500ms avg) were only ever checked by hand. Cost matters here:
+      # check-performance.sh builds and runs two --release examples
+      # (bench_static_audit, bench_runtime_audit), and each is a separate
+      # opt-level-3 codegen of aexeo-core and its dependency tree. It lives
+      # in this job, after pre-push, on purpose: pre-push.sh has already
+      # populated target/release, so the incremental cost is mostly the two
+      # example binaries rather than a second full release build. A separate
+      # job would pay that price from cold on every run.
+      - name: Enforce performance budget
+        run: sh scripts/check-performance.sh

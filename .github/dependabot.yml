@@ -1,0 +1,91 @@
+version: 2
+
+# This repository enforces `cargo audit` and `cargo deny` on every PR, so an
+# advisory that lands in the ecosystem has to reach a pull request for those
+# gates to ever see it. Dependabot is the automated path to that PR; the
+# gates are the reason it is worth running.
+updates:
+  # Workspace manifest and Cargo.lock live at the repository root. A single
+  # entry with `directory: /` is what covers `/crates`: dependabot reads the
+  # root Cargo.toml, follows `[workspace] members`, and updates every member
+  # under crates/ from it. There is deliberately no `directory: /crates`
+  # entry -- that directory has no Cargo.toml of its own, so dependabot would
+  # reject the whole config with "no Cargo.toml found in /crates", and
+  # per-member entries would collide with the root workspace entry.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    # One PR for the whole Rust dependency graph: cargo-audit/cargo-deny
+    # failures and version bumps are easier to reason about, and cheaper to
+    # re-run the quality gate over, when they arrive together.
+    groups:
+      rust-dependencies:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "chore(deps-cargo)"
+    labels:
+      - dependencies
+      - rust
+
+  # The two npm packages are independent trees with their own lockfiles and
+  # separate CI jobs, so they get separate entries: a crawl-worker bump must
+  # not be blocked behind an emdash bump, and vice versa.
+  - package-ecosystem: npm
+    directory: /packages/aexeo-emdash
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    groups:
+      emdash-plugin-dependencies:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "chore(deps-npm)"
+    labels:
+      - dependencies
+      - javascript
+
+  - package-ecosystem: npm
+    directory: /packages/aexeo-crawl-worker
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    groups:
+      crawl-worker-dependencies:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "chore(deps-npm)"
+    labels:
+      - dependencies
+      - javascript
+
+  # Keeps the SHA pins in ci.yml and release-internal.yml current. Without
+  # this, pinning actions to commit SHAs becomes a silent supply-chain
+  # liability: GitHub stops running a pinned action's node runtime, and a
+  # pinned SHA never picks up upstream security fixes.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "chore(deps-actions)"
+    labels:
+      - dependencies
+      - github-actions
