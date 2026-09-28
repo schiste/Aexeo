@@ -159,10 +159,18 @@ jobs:
       # recompile of the workspace and would roughly double this job, which
       # is already the slowest. It gets its own timeout and its own cache.
       #
-      # COVERAGE_MIN is 80 against a measured 82.5% (2026-09-28, 44,346
+      # COVERAGE_MIN is 83 against a measured 84.4% (2026-09-28, 45,645
       # lines). The gap is deliberate headroom for platform noise; the point
       # is to stop coverage falling, not to demand a number the suite does
       # not meet today. Raise it as coverage improves.
+      #
+      # The measurement that produced 84.4%: `intelligence/presence/sources.rs`
+      # went from 17.6% to 86.7% once its endpoints became injectable,
+      # `runtime/playwright.rs` from 54.3% to 71.5% once its Node contract
+      # could be exercised with a fake runner, and `schema_rules/json_ld.rs`
+      # reached 100% from zero. The remaining soft spots are
+      # `well_known_rules.rs` (72.8%) and the large rendering paths in
+      # `generate.rs` and `reporting.rs`.
   coverage:
     name: coverage (llvm-cov floor)
     runs-on: ubuntu-latest
@@ -179,7 +187,7 @@ jobs:
         run: cargo install --locked cargo-llvm-cov
       - name: Measure coverage floor
         env:
-          COVERAGE_MIN: 80
+          COVERAGE_MIN: 83
         run: |
           cargo llvm-cov --workspace --all-targets --summary-only \
             --fail-under-lines "$COVERAGE_MIN"
