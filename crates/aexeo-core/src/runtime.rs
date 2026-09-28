@@ -131,27 +131,119 @@ impl RuntimeAudit {
     }
 }
 
+/// A measured crawl phase.
+///
+/// One variant per tracked activity, and the single place a phase is declared.
+/// Previously each phase owned a `total_<name>_us` field, a near-identical
+/// `record_<name>()` method, an entry in the hand-written `tracked_us` sum, an
+/// assignment in `apply_to`, and an entry in `phase_timings`. Adding one meant
+/// six edits across three files with no compiler help, and forgetting the
+/// `tracked_us` entry silently inflated `total_overhead_us` while forgetting
+/// the `phase_timings` entry made a phase invisible in the report.
+///
+/// With the enum, the name, the accumulator, the tracked-total membership, and
+/// the report entry all derive from the variant, and the two remaining
+/// hand-written matches — copying a total into `CrawlStats`, and building the
+/// report — are exhaustive, so adding a variant breaks the build until it is
+/// handled in both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Phase {
+    Fetch,
+    PageProcessTotal,
+    QueueSelection,
+    SnapshotWrite,
+    PlannerUpdate,
+    LinkExtraction,
+    ProgressCallback,
+    CheckpointWrite,
+    ProgressArtifactWrite,
+    SitemapSeed,
+    OptionalArtifactFetch,
+    SnapshotBuild,
+    PartialAuditBuild,
+    PartialArtifactWrite,
+    FinalAudit,
+    RuleEvaluation,
+    PolicyApply,
+    PartialAuditTotal,
+}
+
+impl Phase {
+    /// Every phase, in declaration order. Drives the report and the tracked
+    /// total so neither can omit a variant.
+    const ALL: &'static [Phase] = &[
+        Phase::Fetch,
+        Phase::PageProcessTotal,
+        Phase::QueueSelection,
+        Phase::SnapshotWrite,
+        Phase::PlannerUpdate,
+        Phase::LinkExtraction,
+        Phase::ProgressCallback,
+        Phase::CheckpointWrite,
+        Phase::ProgressArtifactWrite,
+        Phase::SitemapSeed,
+        Phase::OptionalArtifactFetch,
+        Phase::SnapshotBuild,
+        Phase::PartialAuditBuild,
+        Phase::PartialArtifactWrite,
+        Phase::FinalAudit,
+        Phase::RuleEvaluation,
+        Phase::PolicyApply,
+        Phase::PartialAuditTotal,
+    ];
+
+    /// Stable identifier in the performance artifact. Contract: these strings
+    /// are compared across runs by `perf diff`, so they are part of the
+    /// reporting surface.
+    const fn name(self) -> &'static str {
+        match self {
+            Phase::Fetch => "fetch",
+            Phase::PageProcessTotal => "page_process_total",
+            Phase::QueueSelection => "queue_selection",
+            Phase::SnapshotWrite => "snapshot_write",
+            Phase::PlannerUpdate => "planner_update",
+            Phase::LinkExtraction => "link_extraction",
+            Phase::ProgressCallback => "progress_callback",
+            Phase::CheckpointWrite => "checkpoint_write",
+            Phase::ProgressArtifactWrite => "progress_artifact_write",
+            Phase::SitemapSeed => "sitemap_seed",
+            Phase::OptionalArtifactFetch => "optional_artifact_fetch",
+            Phase::SnapshotBuild => "snapshot_build",
+            Phase::PartialAuditBuild => "partial_audit_build",
+            Phase::PartialArtifactWrite => "partial_artifact_write",
+            Phase::FinalAudit => "final_audit",
+            Phase::RuleEvaluation => "rule_evaluation",
+            Phase::PolicyApply => "policy_apply",
+            Phase::PartialAuditTotal => "partial_audit_total",
+        }
+    }
+
+    /// How the number in `elapsed_us` should be read.
+    const fn basis(self) -> &'static str {
+        match self {
+            // Aggregates of time already counted under another phase.
+            Phase::PageProcessTotal | Phase::PartialAuditTotal => "derived",
+            // Runs inside another phase; tracked, so reported in context.
+            Phase::RuleEvaluation | Phase::PolicyApply => "nested",
+            _ => "cumulative",
+        }
+    }
+
+    /// Whether this phase's time is part of the cumulative tracked total.
+    ///
+    /// The two `derived` phases are excluded: they sum work already
+    /// attributed to `fetch`, `snapshot_build`, and friends, so counting them
+    /// would double-count and understate `total_overhead_us`.
+    const fn counts_toward_tracked(self) -> bool {
+        !matches!(self, Phase::PageProcessTotal | Phase::PartialAuditTotal)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 struct RuntimePerformance {
     started_at: Option<Instant>,
-    total_fetch_us: u64,
-    total_page_process_us: u64,
-    total_snapshot_write_us: u64,
-    total_queue_selection_us: u64,
-    total_planner_update_us: u64,
-    total_link_extraction_us: u64,
-    total_progress_callback_us: u64,
-    total_checkpoint_write_us: u64,
-    total_progress_artifact_write_us: u64,
-    total_sitemap_seed_us: u64,
-    total_optional_artifact_fetch_us: u64,
-    total_snapshot_build_us: u64,
-    total_partial_audit_us: u64,
-    total_partial_audit_build_us: u64,
-    total_partial_artifact_write_us: u64,
-    total_final_audit_us: u64,
-    total_rule_evaluation_us: u64,
-    total_policy_apply_us: u64,
+    /// Accumulated microseconds per phase.
+    totals: BTreeMap<Phase, u64>,
     partial_audits_built: usize,
     checkpoints_written: usize,
     progress_artifacts_written: usize,
@@ -181,14 +273,20 @@ impl RuntimePerformance {
         performance
     }
 
-    fn record_fetch(&mut self, duration_us: u64) {
-        self.total_fetch_us = self.total_fetch_us.saturating_add(duration_us);
-        self.record_sample("fetch", duration_us);
+    /// Accumulate `duration_us` against `phase` and record a sample.
+    fn record(&mut self, phase: Phase, duration_us: u64) {
+        let slot = self.totals.entry(phase).or_insert(0);
+        *slot = slot.saturating_add(duration_us);
+        self.record_sample(phase.name(), duration_us);
+    }
+
+    /// Total microseconds recorded for `phase`.
+    fn total(&self, phase: Phase) -> u64 {
+        self.totals.get(&phase).copied().unwrap_or(0)
     }
 
     fn record_page_process(&mut self, url: &str, fetch_us: u64, process_us: u64) {
-        self.total_page_process_us = self.total_page_process_us.saturating_add(process_us);
-        self.record_sample("page_process_total", process_us);
+        self.record(Phase::PageProcessTotal, process_us);
         self.slowest_paths.push(SlowCrawlPath {
             url: url.to_string(),
             fetch_us,
@@ -204,76 +302,6 @@ impl RuntimePerformance {
                 .then_with(|| left.url.cmp(&right.url))
         });
         self.slowest_paths.truncate(5);
-    }
-
-    fn record_queue_selection(&mut self, duration_us: u64) {
-        self.total_queue_selection_us = self.total_queue_selection_us.saturating_add(duration_us);
-        self.record_sample("queue_selection", duration_us);
-    }
-
-    fn record_snapshot_write(&mut self, duration_us: u64) {
-        self.total_snapshot_write_us = self.total_snapshot_write_us.saturating_add(duration_us);
-        self.record_sample("snapshot_write", duration_us);
-    }
-
-    fn record_planner_update(&mut self, duration_us: u64) {
-        self.total_planner_update_us = self.total_planner_update_us.saturating_add(duration_us);
-        self.record_sample("planner_update", duration_us);
-    }
-
-    fn record_link_extraction(&mut self, duration_us: u64) {
-        self.total_link_extraction_us = self.total_link_extraction_us.saturating_add(duration_us);
-        self.record_sample("link_extraction", duration_us);
-    }
-
-    fn record_progress_callback(&mut self, duration_us: u64) {
-        self.total_progress_callback_us =
-            self.total_progress_callback_us.saturating_add(duration_us);
-        self.record_sample("progress_callback", duration_us);
-    }
-
-    fn record_checkpoint_write(&mut self, duration_us: u64) {
-        self.total_checkpoint_write_us = self.total_checkpoint_write_us.saturating_add(duration_us);
-        self.record_sample("checkpoint_write", duration_us);
-    }
-
-    fn record_progress_artifact_write(&mut self, duration_us: u64) {
-        self.total_progress_artifact_write_us = self
-            .total_progress_artifact_write_us
-            .saturating_add(duration_us);
-        self.record_sample("progress_artifact_write", duration_us);
-    }
-
-    fn record_optional_artifact_fetch(&mut self, duration_us: u64) {
-        self.total_optional_artifact_fetch_us = self
-            .total_optional_artifact_fetch_us
-            .saturating_add(duration_us);
-        self.record_sample("optional_artifact_fetch", duration_us);
-    }
-
-    fn record_sitemap_seed(&mut self, duration_us: u64) {
-        self.total_sitemap_seed_us = self.total_sitemap_seed_us.saturating_add(duration_us);
-        self.record_sample("sitemap_seed", duration_us);
-    }
-
-    fn record_snapshot_build(&mut self, duration_us: u64) {
-        self.total_snapshot_build_us = self.total_snapshot_build_us.saturating_add(duration_us);
-        self.record_sample("snapshot_build", duration_us);
-    }
-
-    fn record_final_audit(&mut self, duration_us: u64) {
-        self.total_final_audit_us = self.total_final_audit_us.saturating_add(duration_us);
-        self.record_sample("final_audit", duration_us);
-    }
-
-    fn record_rule_evaluation(&mut self, duration_us: u64) {
-        self.total_rule_evaluation_us = self.total_rule_evaluation_us.saturating_add(duration_us);
-        self.record_sample("rule_evaluation", duration_us);
-    }
-
-    fn record_policy_apply(&mut self, duration_us: u64) {
-        self.total_policy_apply_us = self.total_policy_apply_us.saturating_add(duration_us);
-        self.record_sample("policy_apply", duration_us);
     }
 
     fn record_checkpoint(&mut self) {
@@ -331,26 +359,11 @@ impl RuntimePerformance {
     }
 
     fn record_partial_audit(&mut self, visited_pages: usize, duration_us: u64) {
-        self.total_partial_audit_us = self.total_partial_audit_us.saturating_add(duration_us);
-        self.record_sample("partial_audit_total", duration_us);
+        self.record(Phase::PartialAuditTotal, duration_us);
         self.partial_audits_built += 1;
         self.partial_artifacts_written += 1;
         self.last_partial_emit_page = visited_pages;
         self.last_partial_emit_at = Some(Instant::now());
-    }
-
-    fn record_partial_audit_build(&mut self, duration_us: u64) {
-        self.total_partial_audit_build_us = self
-            .total_partial_audit_build_us
-            .saturating_add(duration_us);
-        self.record_sample("partial_audit_build", duration_us);
-    }
-
-    fn record_partial_artifact_write(&mut self, duration_us: u64) {
-        self.total_partial_artifact_write_us = self
-            .total_partial_artifact_write_us
-            .saturating_add(duration_us);
-        self.record_sample("partial_artifact_write", duration_us);
     }
 
     fn record_sample(&mut self, name: &str, duration_us: u64) {
@@ -365,22 +378,11 @@ impl RuntimePerformance {
             .started_at
             .map(|instant| instant.elapsed().as_micros() as u64)
             .unwrap_or(0);
-        let tracked_us = self.total_fetch_us
-            + self.total_queue_selection_us
-            + self.total_snapshot_write_us
-            + self.total_planner_update_us
-            + self.total_link_extraction_us
-            + self.total_progress_callback_us
-            + self.total_checkpoint_write_us
-            + self.total_progress_artifact_write_us
-            + self.total_sitemap_seed_us
-            + self.total_optional_artifact_fetch_us
-            + self.total_snapshot_build_us
-            + self.total_partial_audit_build_us
-            + self.total_partial_artifact_write_us
-            + self.total_final_audit_us
-            + self.total_rule_evaluation_us
-            + self.total_policy_apply_us;
+        let tracked_us: u64 = Phase::ALL
+            .iter()
+            .filter(|phase| phase.counts_toward_tracked())
+            .map(|phase| self.total(*phase))
+            .sum();
         let elapsed_ms = elapsed_us / 1_000;
         crawl_stats.elapsed_us = elapsed_us;
         crawl_stats.elapsed_ms = elapsed_ms;
@@ -392,119 +394,71 @@ impl RuntimePerformance {
         crawl_stats.checkpoints_written = self.checkpoints_written;
         crawl_stats.progress_artifacts_written = self.progress_artifacts_written;
         crawl_stats.partial_artifacts_written = self.partial_artifacts_written;
-        crawl_stats.total_fetch_us = self.total_fetch_us;
-        crawl_stats.total_fetch_ms = self.total_fetch_us / 1_000;
-        crawl_stats.average_fetch_us = if crawl_stats.visited_pages == 0 {
-            0
-        } else {
-            self.total_fetch_us / crawl_stats.visited_pages as u64
-        };
-        crawl_stats.average_fetch_ms = if crawl_stats.visited_pages == 0 {
-            0
-        } else {
-            (self.total_fetch_us / crawl_stats.visited_pages as u64) / 1_000
-        };
-        crawl_stats.total_page_process_us = self.total_page_process_us;
-        crawl_stats.total_page_process_ms = self.total_page_process_us / 1_000;
-        crawl_stats.average_page_process_us = if crawl_stats.visited_pages == 0 {
-            0
-        } else {
-            self.total_page_process_us / crawl_stats.visited_pages as u64
-        };
-        crawl_stats.average_page_process_ms = if crawl_stats.visited_pages == 0 {
-            0
-        } else {
-            (self.total_page_process_us / crawl_stats.visited_pages as u64) / 1_000
-        };
-        crawl_stats.total_partial_audit_us = self.total_partial_audit_us;
-        crawl_stats.total_partial_audit_ms = self.total_partial_audit_us / 1_000;
-        crawl_stats.average_partial_audit_us = if self.partial_audits_built == 0 {
-            0
-        } else {
-            self.total_partial_audit_us / self.partial_audits_built as u64
-        };
-        crawl_stats.average_partial_audit_ms = if self.partial_audits_built == 0 {
-            0
-        } else {
-            (self.total_partial_audit_us / self.partial_audits_built as u64) / 1_000
-        };
-        crawl_stats.total_optional_artifact_fetch_us = self.total_optional_artifact_fetch_us;
-        crawl_stats.total_snapshot_build_us = self.total_snapshot_build_us;
-        crawl_stats.total_snapshot_write_us = self.total_snapshot_write_us;
-        crawl_stats.total_queue_selection_us = self.total_queue_selection_us;
-        crawl_stats.total_planner_update_us = self.total_planner_update_us;
-        crawl_stats.total_link_extraction_us = self.total_link_extraction_us;
-        crawl_stats.total_progress_callback_us = self.total_progress_callback_us;
-        crawl_stats.total_checkpoint_write_us = self.total_checkpoint_write_us;
-        crawl_stats.total_progress_artifact_write_us = self.total_progress_artifact_write_us;
-        crawl_stats.total_sitemap_seed_us = self.total_sitemap_seed_us;
-        crawl_stats.total_partial_audit_build_us = self.total_partial_audit_build_us;
-        crawl_stats.total_partial_artifact_write_us = self.total_partial_artifact_write_us;
-        crawl_stats.total_rule_evaluation_us = self.total_rule_evaluation_us;
-        crawl_stats.total_policy_apply_us = self.total_policy_apply_us;
-        crawl_stats.total_final_audit_us = self.total_final_audit_us;
+        self.apply_phase_totals(crawl_stats);
         crawl_stats.total_overhead_us = elapsed_us.saturating_sub(tracked_us);
         crawl_stats.slowest_paths = self.slowest_paths.clone();
     }
 
+    /// Copy each phase total into its `CrawlStats` field.
+    ///
+    /// One exhaustive match rather than ~45 flat assignments: adding a
+    /// `Phase` variant fails to compile until it is wired into the artifact
+    /// here, which is the whole point of the enum.
+    fn apply_phase_totals(&self, crawl_stats: &mut CrawlStats) {
+        let visited = crawl_stats.visited_pages as u64;
+        let partial_audits = self.partial_audits_built as u64;
+        for phase in Phase::ALL {
+            let total = self.total(*phase);
+            let per_page = total.checked_div(visited).unwrap_or(0);
+            let per_audit = total.checked_div(partial_audits).unwrap_or(0);
+            match phase {
+                Phase::Fetch => {
+                    crawl_stats.total_fetch_us = total;
+                    crawl_stats.total_fetch_ms = total / 1_000;
+                    crawl_stats.average_fetch_us = per_page;
+                    crawl_stats.average_fetch_ms = per_page / 1_000;
+                }
+                Phase::PageProcessTotal => {
+                    crawl_stats.total_page_process_us = total;
+                    crawl_stats.total_page_process_ms = total / 1_000;
+                    crawl_stats.average_page_process_us = per_page;
+                    crawl_stats.average_page_process_ms = per_page / 1_000;
+                }
+                Phase::PartialAuditTotal => {
+                    crawl_stats.total_partial_audit_us = total;
+                    crawl_stats.total_partial_audit_ms = total / 1_000;
+                    crawl_stats.average_partial_audit_us = per_audit;
+                    crawl_stats.average_partial_audit_ms = per_audit / 1_000;
+                }
+                Phase::QueueSelection => crawl_stats.total_queue_selection_us = total,
+                Phase::SnapshotWrite => crawl_stats.total_snapshot_write_us = total,
+                Phase::PlannerUpdate => crawl_stats.total_planner_update_us = total,
+                Phase::LinkExtraction => crawl_stats.total_link_extraction_us = total,
+                Phase::ProgressCallback => crawl_stats.total_progress_callback_us = total,
+                Phase::CheckpointWrite => crawl_stats.total_checkpoint_write_us = total,
+                Phase::ProgressArtifactWrite => {
+                    crawl_stats.total_progress_artifact_write_us = total
+                }
+                Phase::SitemapSeed => crawl_stats.total_sitemap_seed_us = total,
+                Phase::OptionalArtifactFetch => {
+                    crawl_stats.total_optional_artifact_fetch_us = total
+                }
+                Phase::SnapshotBuild => crawl_stats.total_snapshot_build_us = total,
+                Phase::PartialAuditBuild => crawl_stats.total_partial_audit_build_us = total,
+                Phase::PartialArtifactWrite => crawl_stats.total_partial_artifact_write_us = total,
+                Phase::FinalAudit => crawl_stats.total_final_audit_us = total,
+                Phase::RuleEvaluation => crawl_stats.total_rule_evaluation_us = total,
+                Phase::PolicyApply => crawl_stats.total_policy_apply_us = total,
+            }
+        }
+    }
+
     fn phase_timings(&self, crawl_stats: &CrawlStats) -> Vec<PhaseTiming> {
-        let mut phases = vec![
-            self.phase("fetch", self.total_fetch_us, "cumulative"),
-            self.phase(
-                "queue_selection",
-                self.total_queue_selection_us,
-                "cumulative",
-            ),
-            self.phase("snapshot_write", self.total_snapshot_write_us, "cumulative"),
-            self.phase("planner_update", self.total_planner_update_us, "cumulative"),
-            self.phase(
-                "link_extraction",
-                self.total_link_extraction_us,
-                "cumulative",
-            ),
-            self.phase(
-                "progress_callback",
-                self.total_progress_callback_us,
-                "cumulative",
-            ),
-            self.phase(
-                "checkpoint_write",
-                self.total_checkpoint_write_us,
-                "cumulative",
-            ),
-            self.phase(
-                "progress_artifact_write",
-                self.total_progress_artifact_write_us,
-                "cumulative",
-            ),
-            self.phase("sitemap_seed", self.total_sitemap_seed_us, "cumulative"),
-            self.phase(
-                "optional_artifact_fetch",
-                self.total_optional_artifact_fetch_us,
-                "cumulative",
-            ),
-            self.phase("snapshot_build", self.total_snapshot_build_us, "cumulative"),
-            self.phase(
-                "partial_audit_build",
-                self.total_partial_audit_build_us,
-                "cumulative",
-            ),
-            self.phase(
-                "partial_artifact_write",
-                self.total_partial_artifact_write_us,
-                "cumulative",
-            ),
-            self.phase("final_audit", self.total_final_audit_us, "cumulative"),
-            self.phase("rule_evaluation", self.total_rule_evaluation_us, "nested"),
-            self.phase("policy_apply", self.total_policy_apply_us, "nested"),
-            self.phase("overhead", crawl_stats.total_overhead_us, "cumulative"),
-            self.phase("page_process_total", self.total_page_process_us, "derived"),
-            self.phase(
-                "partial_audit_total",
-                self.total_partial_audit_us,
-                "derived",
-            ),
-        ];
+        let mut phases: Vec<PhaseTiming> = Phase::ALL
+            .iter()
+            .map(|phase| self.phase(phase.name(), self.total(*phase), phase.basis()))
+            .collect();
+        phases.push(self.phase("overhead", crawl_stats.total_overhead_us, "cumulative"));
         phases.retain(|phase| phase.elapsed_us > 0);
         phases.sort_by_key(|phase| std::cmp::Reverse(phase.elapsed_us));
         phases
@@ -1625,7 +1579,10 @@ fn materialize_runtime_site(
                     &mut visited_sitemaps,
                 );
             }
-            performance.record_sitemap_seed(sitemap_seed_started_at.elapsed().as_micros() as u64);
+            performance.record(
+                Phase::SitemapSeed,
+                sitemap_seed_started_at.elapsed().as_micros() as u64,
+            );
         }
     }
 
@@ -1644,7 +1601,10 @@ fn materialize_runtime_site(
             };
             batch.push(next_url);
         }
-        performance.record_queue_selection(queue_selection_started_at.elapsed().as_micros() as u64);
+        performance.record(
+            Phase::QueueSelection,
+            queue_selection_started_at.elapsed().as_micros() as u64,
+        );
         if batch.is_empty() {
             break;
         }
@@ -1652,7 +1612,7 @@ fn materialize_runtime_site(
         let outcomes = fetcher.fetch_batch(&batch, options.fetch_retry_budget);
         for outcome in outcomes {
             crawl_stats.fetch_retries += outcome.retries;
-            performance.record_fetch(outcome.elapsed_us);
+            performance.record(Phase::Fetch, outcome.elapsed_us);
             let FetchOutcome {
                 url: current,
                 result,
@@ -1710,8 +1670,10 @@ fn materialize_runtime_site(
             let route = route_from_urlish(&fetched.effective_url).unwrap_or_default();
             let snapshot_write_started_at = Instant::now();
             snapshot.write_page(&route, &body, &fetched.headers)?;
-            performance
-                .record_snapshot_write(snapshot_write_started_at.elapsed().as_micros() as u64);
+            performance.record(
+                Phase::SnapshotWrite,
+                snapshot_write_started_at.elapsed().as_micros() as u64,
+            );
 
             let extraction_started_at = Instant::now();
             for target in extract_internal_links(&body, planner.base_host()) {
@@ -1720,8 +1682,14 @@ fn materialize_runtime_site(
                 }
                 planner.discover_link_target(&target, &runtime);
             }
-            performance.record_link_extraction(extraction_started_at.elapsed().as_micros() as u64);
-            performance.record_planner_update(planner_started_at.elapsed().as_micros() as u64);
+            performance.record(
+                Phase::LinkExtraction,
+                extraction_started_at.elapsed().as_micros() as u64,
+            );
+            performance.record(
+                Phase::PlannerUpdate,
+                planner_started_at.elapsed().as_micros() as u64,
+            );
 
             crawl_stats.visited_pages = planner.visited_count();
             crawl_stats.discovered_internal_routes = planner.discovered_route_count();
@@ -1759,7 +1727,10 @@ fn materialize_runtime_site(
                     partial_artifacts_written: crawl_stats.partial_artifacts_written,
                 },
             );
-            performance.record_progress_callback(progress_started_at.elapsed().as_micros() as u64);
+            performance.record(
+                Phase::ProgressCallback,
+                progress_started_at.elapsed().as_micros() as u64,
+            );
         }
 
         if let Some(checkpoint_path) = options.checkpoint_path
@@ -1778,7 +1749,10 @@ fn materialize_runtime_site(
                 &crawl_findings,
                 &crawl_stats,
             )?;
-            performance.record_checkpoint_write(checkpoint_started_at.elapsed().as_micros() as u64);
+            performance.record(
+                Phase::CheckpointWrite,
+                checkpoint_started_at.elapsed().as_micros() as u64,
+            );
         }
         if performance.should_emit_progress_artifact(crawl_stats.visited_pages, options) {
             let artifact = build_progress_runtime_artifact(
@@ -1790,7 +1764,8 @@ fn materialize_runtime_site(
             );
             let progress_artifact_started_at = Instant::now();
             emit_progress_artifact(options, &artifact)?;
-            performance.record_progress_artifact_write(
+            performance.record(
+                Phase::ProgressArtifactWrite,
                 progress_artifact_started_at.elapsed().as_micros() as u64,
             );
             performance.record_progress_artifact(crawl_stats.visited_pages);
@@ -1808,11 +1783,11 @@ fn materialize_runtime_site(
                 &performance,
             )?;
             let partial_build_duration_us = partial_build_started_at.elapsed().as_micros() as u64;
-            performance.record_partial_audit_build(partial_build_duration_us);
+            performance.record(Phase::PartialAuditBuild, partial_build_duration_us);
             let partial_write_started_at = Instant::now();
             emit_partial_audit_artifact(options, &artifact)?;
             let partial_write_duration_us = partial_write_started_at.elapsed().as_micros() as u64;
-            performance.record_partial_artifact_write(partial_write_duration_us);
+            performance.record(Phase::PartialArtifactWrite, partial_write_duration_us);
             let partial_duration_us =
                 partial_build_duration_us.saturating_add(partial_write_duration_us);
             performance.record_partial_audit(crawl_stats.visited_pages, partial_duration_us);
@@ -1822,7 +1797,7 @@ fn materialize_runtime_site(
 
     let optional_fetch_us =
         snapshot.capture_optional_artifacts(planner.normalized_base(), &runtime)?;
-    performance.record_optional_artifact_fetch(optional_fetch_us);
+    performance.record(Phase::OptionalArtifactFetch, optional_fetch_us);
     // Probe well-known machine-readable artifact paths (manifest-
     // listed + canonical fallbacks). The crawler skipped non-HTML
     // responses, so without this step facts.json / llms-full.txt /
@@ -1845,7 +1820,10 @@ fn materialize_runtime_site(
             site.indexed_paths.insert(path.clone());
         }
     }
-    performance.record_snapshot_build(snapshot_started_at.elapsed().as_micros() as u64);
+    performance.record(
+        Phase::SnapshotBuild,
+        snapshot_started_at.elapsed().as_micros() as u64,
+    );
     crawl_stats.visited_pages = planner.visited_count();
     crawl_stats.discovered_internal_routes = planner.discovered_route_count();
     crawl_stats.queued_routes_remaining = planner.queued_count();
@@ -1944,15 +1922,19 @@ pub fn run_runtime_audit_with_options(
         materialize_runtime_site(base_url, max_pages, effective_engine, config, options)?;
     let final_started_at = Instant::now();
     let profiled = run_checks_for_site_profiled(&site, config);
-    performance.record_rule_evaluation(
+    performance.record(
+        Phase::RuleEvaluation,
         profiled
             .rule_timings
             .iter()
             .map(|timing| timing.elapsed_us)
             .sum(),
     );
-    performance.record_policy_apply(profiled.policy_apply_us);
-    performance.record_final_audit(final_started_at.elapsed().as_micros() as u64);
+    performance.record(Phase::PolicyApply, profiled.policy_apply_us);
+    performance.record(
+        Phase::FinalAudit,
+        final_started_at.elapsed().as_micros() as u64,
+    );
     performance.apply_to(&mut crawl_stats);
     let mut findings = crawl_findings.clone();
     findings.extend(profiled.findings.clone());
@@ -1987,7 +1969,10 @@ pub fn run_runtime_audit_with_options(
             partial_artifacts_written: crawl_stats.partial_artifacts_written,
         },
     );
-    performance.record_progress_callback(progress_started_at.elapsed().as_micros() as u64);
+    performance.record(
+        Phase::ProgressCallback,
+        progress_started_at.elapsed().as_micros() as u64,
+    );
     performance.apply_to(&mut crawl_stats);
     let performance_summary = build_audit_performance(
         crawl_stats.elapsed_us,
@@ -2123,11 +2108,161 @@ fn probe_markdown_negotiation_finding(
 #[cfg(test)]
 mod tests {
     use super::{
-        RuntimeArtifactMode, RuntimeAuditOptions, RuntimeProgressMode, diff_performance_artifacts,
-        evaluate_performance_budget, homepage_advertises_markdown_mirror_discovery,
-        render_performance_diff_text, run_runtime_audit, run_runtime_audit_with_options,
-        verify_runtime_audit,
+        Phase, RuntimeArtifactMode, RuntimeAuditOptions, RuntimePerformance, RuntimeProgressMode,
+        diff_performance_artifacts, evaluate_performance_budget,
+        homepage_advertises_markdown_mirror_discovery, render_performance_diff_text,
+        run_runtime_audit, run_runtime_audit_with_options, verify_runtime_audit,
     };
+    /// Every phase needs a unique, non-empty artifact name, and
+    /// `Phase::ALL` must list each variant exactly once. `perf diff`
+    /// compares phase names across runs, so a duplicate or blank would
+    /// silently merge or drop a phase.
+    #[test]
+    fn phase_names_are_unique_and_non_empty() {
+        let mut names: Vec<&str> = Phase::ALL.iter().map(|phase| phase.name()).collect();
+        let count = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), count, "Phase::ALL lists a phase twice");
+        for phase in Phase::ALL {
+            assert!(
+                !phase.name().trim().is_empty(),
+                "{phase:?} has no artifact name"
+            );
+            assert!(
+                phase
+                    .name()
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{} is not a snake_case artifact identifier",
+                phase.name()
+            );
+        }
+    }
+
+    /// The two `derived` phases sum time already attributed elsewhere, so
+    /// they must stay out of the cumulative tracked total — otherwise
+    /// `total_overhead_us` is understated by double-counted work. Pin the
+    /// exact membership: this is the list the `tracked_us` sum used to
+    /// spell out by hand, and forgetting an entry there was silent.
+    #[test]
+    fn derived_phases_are_excluded_from_the_tracked_total() {
+        let excluded: Vec<&str> = Phase::ALL
+            .iter()
+            .filter(|phase| !phase.counts_toward_tracked())
+            .map(|phase| phase.name())
+            .collect();
+        assert_eq!(
+            excluded,
+            vec!["page_process_total", "partial_audit_total"],
+            "the set of derived phases changed; check that CrawlStats still gets every total"
+        );
+        assert_eq!(
+            Phase::ALL.len() - excluded.len(),
+            16,
+            "tracked phase count changed"
+        );
+    }
+
+    /// `record` accumulates and samples under the phase name, and `total`
+    /// reads it back. Recording every phase must leave the report with one
+    /// entry per phase, and `phase_timings` must be driven by `Phase::ALL`
+    /// so a new variant cannot be invisible.
+    #[test]
+    fn every_phase_is_reported_and_accounted() {
+        let mut performance = RuntimePerformance::default();
+        for (index, phase) in Phase::ALL.iter().enumerate() {
+            performance.record(*phase, 1_000 + index as u64);
+        }
+        for (index, phase) in Phase::ALL.iter().enumerate() {
+            assert_eq!(
+                performance.total(*phase),
+                1_000 + index as u64,
+                "{} did not accumulate",
+                phase.name()
+            );
+        }
+
+        let mut stats = aexeo_contracts::CrawlStats {
+            visited_pages: 4,
+            ..Default::default()
+        };
+        performance.apply_to(&mut stats);
+        let reported = performance.phase_timings(&stats);
+        let reported_names: Vec<&str> = reported.iter().map(|p| p.name.as_str()).collect();
+        for phase in Phase::ALL {
+            assert!(
+                reported_names.contains(&phase.name()),
+                "{} is recorded but missing from the performance report",
+                phase.name()
+            );
+        }
+        // `overhead` is appended separately, after `apply_to` has computed
+        // it, and is subject to the same "drop zero phases" rule. With a
+        // default `started_at` the run took no measurable time, so there is
+        // no overhead to report and it is correctly absent.
+        assert_eq!(
+            reported.len(),
+            Phase::ALL.len(),
+            "the report should hold exactly one entry per phase, plus overhead when non-zero"
+        );
+    }
+
+    /// `overhead` is the difference between wall time and the tracked total.
+    /// When that is non-zero it must be reported, and it must not be
+    /// double-counted as a phase of its own.
+    #[test]
+    fn overhead_is_reported_when_there_is_untracked_time() {
+        let mut performance = RuntimePerformance::new();
+        // Backdate the start so elapsed time exceeds the tracked work, which
+        // is the only way untracked time can exist: overhead is
+        // `elapsed - tracked`, and it saturates at zero otherwise.
+        performance.started_at = Some(Instant::now() - std::time::Duration::from_millis(500));
+        performance.record(Phase::Fetch, 250_000);
+        let mut stats = aexeo_contracts::CrawlStats {
+            visited_pages: 1,
+            ..Default::default()
+        };
+        performance.apply_to(&mut stats);
+        assert!(
+            stats.total_overhead_us > 0,
+            "backdating the start should leave untracked time"
+        );
+        let reported = performance.phase_timings(&stats);
+        let names: Vec<&str> = reported.iter().map(|p| p.name.as_str()).collect();
+        assert!(
+            names.contains(&"overhead"),
+            "untracked time must surface as an overhead phase; got {names:?}"
+        );
+        assert_eq!(
+            names.iter().filter(|name| **name == "overhead").count(),
+            1,
+            "overhead must appear exactly once"
+        );
+    }
+
+    /// Averages divide by the work count and must not divide by zero. With
+    /// no pages and no partial audits, every average is 0 rather than a
+    /// panic.
+    #[test]
+    fn phase_averages_are_zero_when_there_is_nothing_to_average() {
+        let mut performance = RuntimePerformance::default();
+        for phase in Phase::ALL {
+            performance.record(*phase, 5_000);
+        }
+        let mut stats = aexeo_contracts::CrawlStats {
+            visited_pages: 0,
+            ..Default::default()
+        };
+        performance.apply_to(&mut stats);
+        assert_eq!(stats.average_fetch_us, 0);
+        assert_eq!(stats.average_fetch_ms, 0);
+        assert_eq!(stats.average_page_process_us, 0);
+        assert_eq!(stats.average_page_process_ms, 0);
+        assert_eq!(stats.average_partial_audit_us, 0);
+        assert_eq!(stats.average_partial_audit_ms, 0);
+    }
+
     use crate::config::{Config, default_rule_switches};
     use crate::site::{
         AlternateLink, DeploymentModel, Page, PageKind, SiteArtifacts, SiteBuildInput,
