@@ -483,20 +483,44 @@ fn artifact_status_lines(artifact: &AuditArtifact) -> Vec<String> {
                 .join(", ");
             lines.push(format!("- Slowest rule groups: {}", groups));
         }
+        // The observations are the narrative judgement the raw phase numbers
+        // cannot express ("fetch dominates", "rule evaluation is nested in
+        // the final audit"). They were rendered in the markdown artifact but
+        // silently dropped from the text artifact, which is the output `check`
+        // and `crawl` print to a terminal and CI reads — so the human summary
+        // was only available to whoever opened the JSON or Markdown file.
+        if !performance.observations.is_empty() {
+            lines.push(format!(
+                "- Performance observations: {}",
+                performance.observations.join("; ")
+            ));
+        }
         if !performance.bottlenecks.is_empty() {
             let bottlenecks = performance
                 .bottlenecks
                 .iter()
                 .take(5)
                 .map(|item| {
-                    format!(
+                    // The finding count and the recommendation are the
+                    // actionable half of a bottleneck. They were present in
+                    // the Markdown artifact but missing here, so the terminal
+                    // output showed *that* something was slow without saying
+                    // what to do about it.
+                    let mut entry = format!(
                         "{}:{}={}ms/share={} wall={}",
                         item.kind,
                         item.name,
                         item.elapsed_us / 1_000,
                         format_basis_points(item.share_basis_points),
                         format_basis_points(item.wall_share_basis_points)
-                    )
+                    );
+                    if let Some(findings) = item.findings {
+                        entry.push_str(&format!(" findings={findings}"));
+                    }
+                    if let Some(recommendation) = &item.recommendation {
+                        entry.push_str(&format!(" recommendation={recommendation}"));
+                    }
+                    entry
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -966,7 +990,7 @@ mod tests {
         render_markdown_artifact, render_sarif, render_text, render_text_artifact, rule_group_name,
         write_audit_artifact, write_partial_audit_artifact, write_progress_audit_artifact,
     };
-    use aexeo_contracts::{AuditStatus, CrawlStats, Finding, FindingScope};
+    use aexeo_contracts::{AuditArtifact, AuditStatus, CrawlStats, Finding, FindingScope};
 
     fn sample_finding() -> Finding {
         Finding {
@@ -1183,5 +1207,279 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// An artifact with a crawl record attached, which is what switches the
+    /// renderer from the short success form to the full report.
+    fn artifact_with_crawl(crawl: CrawlStats) -> AuditArtifact {
+        let findings = vec![sample_finding()];
+        let mut artifact =
+            build_audit_artifact("crawl", &findings, AuditStatus::Complete, Some(crawl), None);
+        artifact.findings = findings;
+        artifact
+    }
+
+    fn populated_crawl() -> CrawlStats {
+        CrawlStats {
+            visited_pages: 12,
+            discovered_internal_routes: 40,
+            queued_routes_remaining: 28,
+            elapsed_us: 5_400_000,
+            elapsed_ms: 5_400,
+            pages_per_minute: 133,
+            total_fetch_us: 2_000_000,
+            total_fetch_ms: 2_000,
+            average_fetch_us: 166_666,
+            total_overhead_us: 1_000_000,
+            total_sitemap_seed_us: 300_000,
+            slowest_paths: vec![aexeo_contracts::SlowCrawlPath {
+                url: "https://example.com/slow".to_string(),
+                fetch_us: 900_000,
+                process_us: 400_000,
+                fetch_ms: 900,
+                process_ms: 400,
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// The crawl section is what tells an operator whether a slow crawl is
+    /// fetch-bound or process-bound, and whether it was truncated rather than
+    /// finished. None of that was rendered under test.
+    #[test]
+    fn text_artifact_reports_crawl_throughput_and_truncation() {
+        let mut crawl = populated_crawl();
+        crawl.truncated = true;
+        crawl.fetch_retries = 3;
+        let artifact = artifact_with_crawl(crawl);
+        let text = render_text_artifact(&artifact, "crawl complete", None);
+
+        // The success message is only echoed on the empty-findings path; with
+        // findings present the report leads straight into the body.
+        assert!(text.contains("visited=12"), "{text}");
+        assert!(text.contains("discovered=40"), "{text}");
+        assert!(text.contains("queued=28"), "{text}");
+        assert!(text.contains("pages_per_minute=133"), "{text}");
+        assert!(text.contains("retries=3"), "{text}");
+        assert!(text.contains("elapsed_ms=5400"), "{text}");
+        // The `truncated` flag is carried in the artifact, but the text recap
+        // has no line for it; the reason, if any, is printed instead. Assert
+        // the flag itself so a future change to either is visible here.
+        assert!(artifact.crawl.as_ref().expect("crawl").truncated);
+    }
+
+    /// The slowest-path list is the first thing an operator looks at to decide
+    /// whether the budget violation is the network or the rules.
+    #[test]
+    fn text_artifact_lists_the_slowest_paths() {
+        let text = render_text_artifact(
+            &artifact_with_crawl(populated_crawl()),
+            "crawl complete",
+            None,
+        );
+        assert!(text.contains("Slowest paths:"), "{text}");
+        assert!(
+            text.contains("https://example.com/slow (fetch=900ms process=400ms)"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn text_artifact_omits_the_slow_path_section_when_there_are_none() {
+        let mut crawl = populated_crawl();
+        crawl.slowest_paths.clear();
+        let text = render_text_artifact(&artifact_with_crawl(crawl), "crawl complete", None);
+        assert!(
+            !text.contains("Slowest paths:"),
+            "an empty list should not print an empty heading: {text}"
+        );
+    }
+
+    /// The whole performance block — basis, phases, rule groups, bottlenecks,
+    /// observations, and budget — was uncovered. Each is a different question
+    /// an operator asks of a slow crawl.
+    #[test]
+    fn text_artifact_reports_the_performance_basis() {
+        let mut artifact = artifact_with_crawl(populated_crawl());
+        artifact.performance = Some(aexeo_contracts::AuditPerformance {
+            wall_clock_us: 5_400_000,
+            cumulative_tracked_us: 4_400_000,
+            ..Default::default()
+        });
+        let text = render_text_artifact(&artifact, "crawl complete", None);
+        assert!(text.contains("Performance basis"), "{text}");
+        assert!(text.contains("wall_clock=5400ms"), "{text}");
+        assert!(text.contains("cumulative_tracked=4400ms"), "{text}");
+    }
+
+    /// With no timing recorded at all, the basis line must be absent rather
+    /// than printing a misleading `0ms`.
+    #[test]
+    fn text_artifact_omits_the_performance_basis_when_nothing_was_measured() {
+        let mut artifact = artifact_with_crawl(populated_crawl());
+        artifact.performance = Some(aexeo_contracts::AuditPerformance::default());
+        let text = render_text_artifact(&artifact, "crawl complete", None);
+        assert!(
+            !text.contains("Performance basis"),
+            "an unmeasured run must not print a zero basis: {text}"
+        );
+    }
+
+    #[test]
+    fn text_artifact_reports_every_performance_phase() {
+        let mut artifact = artifact_with_crawl(populated_crawl());
+        artifact.performance = Some(aexeo_contracts::AuditPerformance {
+            elapsed_us: 5_400_000,
+            wall_clock_us: 5_400_000,
+            cumulative_tracked_us: 4_400_000,
+            phases: vec![
+                aexeo_contracts::PhaseTiming {
+                    name: "fetch".to_string(),
+                    elapsed_us: 2_000_000,
+                    basis: "cumulative".to_string(),
+                    sample_count: 12,
+                    p95_us: 400_000,
+                    max_us: 900_000,
+                    ..Default::default()
+                },
+                aexeo_contracts::PhaseTiming {
+                    name: "rule_evaluation".to_string(),
+                    elapsed_us: 900_000,
+                    basis: "nested".to_string(),
+                    sample_count: 12,
+                    ..Default::default()
+                },
+            ],
+            rule_groups: vec![aexeo_contracts::RuleTiming {
+                group: "html".to_string(),
+                elapsed_us: 500_000,
+                findings: 3,
+            }],
+            observations: vec!["fetch dominates the profile".to_string()],
+            ..Default::default()
+        });
+
+        let text = render_text_artifact(&artifact, "crawl complete", None);
+
+        assert!(text.contains("Phase timings:"), "{text}");
+        assert!(text.contains("fetch"), "{text}");
+        assert!(text.contains("rule_evaluation"), "{text}");
+        assert!(text.contains("Slowest rule groups:"), "{text}");
+        assert!(text.contains("html"), "{text}");
+        // Observations carry the narrative judgement a raw number cannot,
+        // and they must reach the terminal output, not just the Markdown
+        // artifact.
+        assert!(text.contains("Performance observations:"), "{text}");
+        assert!(text.contains("fetch dominates the profile"), "{text}");
+    }
+
+    /// Bottlenecks are ranked and carry a recommendation; dropping either
+    /// loses the actionable half of the section.
+    #[test]
+    fn text_artifact_reports_bottlenecks_with_their_recommendation() {
+        let mut artifact = artifact_with_crawl(populated_crawl());
+        artifact.performance = Some(aexeo_contracts::AuditPerformance {
+            wall_clock_us: 5_400_000,
+            cumulative_tracked_us: 4_400_000,
+            phases: vec![aexeo_contracts::PhaseTiming {
+                name: "fetch".to_string(),
+                elapsed_us: 3_000_000,
+                basis: "cumulative".to_string(),
+                ..Default::default()
+            }],
+            bottlenecks: vec![aexeo_contracts::PerformanceBottleneck {
+                kind: "phase".to_string(),
+                name: "fetch".to_string(),
+                elapsed_us: 3_000_000,
+                share_basis_points: 6_800,
+                wall_share_basis_points: 5_500,
+                cumulative_share_basis_points: 6_800,
+                findings: Some(2),
+                recommendation: Some("check origin latency".to_string()),
+            }],
+            ..Default::default()
+        });
+
+        let text = render_text_artifact(&artifact, "crawl complete", None);
+        assert!(text.contains("Performance bottlenecks:"), "{text}");
+        assert!(text.contains("check origin latency"), "{text}");
+        assert!(text.contains("findings=2"), "{text}");
+        // Shares are basis points and must not leak as raw integers.
+        assert!(!text.contains("6800"), "{text}");
+    }
+
+    /// A failing budget is the single most important line in a performance
+    /// report, and a passing one must still be stated.
+    #[test]
+    fn text_artifact_reports_the_performance_budget() {
+        let mut artifact = artifact_with_crawl(populated_crawl());
+        artifact.performance = Some(aexeo_contracts::AuditPerformance {
+            wall_clock_us: 5_400_000,
+            budget: Some(aexeo_contracts::PerformanceBudgetReport {
+                passed: false,
+                budget_path: Some("performance-budget.json".to_string()),
+                budget: aexeo_contracts::PerformanceBudget::default(),
+                violations: vec![aexeo_contracts::PerformanceBudgetViolation {
+                    metric: "average_fetch_ms".to_string(),
+                    actual: 900,
+                    budget: 50,
+                    unit: "ms".to_string(),
+                    message: "average fetch 900ms exceeds 50ms".to_string(),
+                }],
+                warnings: vec!["fetch budget is unusually strict".to_string()],
+            }),
+            ..Default::default()
+        });
+
+        let text = render_text_artifact(&artifact, "crawl complete", None);
+        assert!(text.contains("Performance budget passed: false"), "{text}");
+        assert!(text.contains("average fetch 900ms exceeds 50ms"), "{text}");
+    }
+
+    /// A passing budget with no file path and no findings must render without
+    /// inventing either.
+    #[test]
+    fn text_artifact_renders_a_clean_budget_without_padding() {
+        let mut artifact = artifact_with_crawl(populated_crawl());
+        artifact.performance = Some(aexeo_contracts::AuditPerformance {
+            wall_clock_us: 5_400_000,
+            budget: Some(aexeo_contracts::PerformanceBudgetReport {
+                passed: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let text = render_text_artifact(&artifact, "crawl complete", None);
+        assert!(text.contains("Performance budget passed: true"), "{text}");
+        assert!(!text.contains("violations:"), "{text}");
+        assert!(!text.contains("warnings:"), "{text}");
+    }
+
+    /// The success path is the most common output the tool produces, and it
+    /// must be short and must carry the artifact path.
+    #[test]
+    fn text_artifact_success_form_stays_short_and_names_the_artifact() {
+        let artifact = build_audit_artifact("check", &[], AuditStatus::Complete, None, None);
+        let text = render_text_artifact(
+            &artifact,
+            "no findings",
+            Some(std::path::Path::new("/tmp/a.json")),
+        );
+        assert_eq!(
+            text, "no findings\n\nAudit results: /tmp/a.json",
+            "a clean run should not print an empty report body"
+        );
+    }
+
+    /// A partial audit is not a success: the run was cut short, and the output
+    /// must say so rather than reporting a clean result.
+    #[test]
+    fn text_artifact_distinguishes_a_partial_run_from_success() {
+        let artifact = build_audit_artifact("crawl", &[], AuditStatus::Partial, None, None);
+        let text = render_text_artifact(&artifact, "crawl complete", None);
+        assert_ne!(
+            text, "crawl complete",
+            "a partial run must not use the success form"
+        );
     }
 }
