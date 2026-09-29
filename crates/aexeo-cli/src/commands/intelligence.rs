@@ -1355,3 +1355,457 @@ fn format_source_line(result: &SourceResult) -> String {
         label = source_label(&result.source)
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aexeo_core::{GroundingRouteAnalysis, TrustSurfaceRecord};
+
+    fn path(name: &str) -> &Path {
+        Path::new(name)
+    }
+
+    // --- status_label --------------------------------------------------
+
+    #[test]
+    fn status_label_covers_every_audit_status() {
+        assert_eq!(status_label(AuditStatus::Complete), "complete");
+        assert_eq!(status_label(AuditStatus::Partial), "partial");
+        assert_eq!(status_label(AuditStatus::Failed), "failed");
+    }
+
+    // --- report_root_for_artifact ---------------------------------------
+
+    /// Artifacts written under `.aexeo-reports/` should resolve back to the
+    /// site root, one level above the reports directory, so downstream
+    /// intelligence writes its own output next to the input rather than
+    /// nested inside it.
+    #[test]
+    fn report_root_strips_the_aexeo_reports_directory() {
+        assert_eq!(
+            report_root_for_artifact(path("/site/.aexeo-reports/crawl.json")),
+            PathBuf::from("/site")
+        );
+    }
+
+    /// A report written anywhere else keeps its containing directory as the
+    /// root; only the literal `.aexeo-reports` name triggers the strip.
+    #[test]
+    fn report_root_keeps_the_parent_for_any_other_directory() {
+        assert_eq!(
+            report_root_for_artifact(path("/site/out/crawl.json")),
+            PathBuf::from("/site/out")
+        );
+        // A near-miss name is not the sentinel.
+        assert_eq!(
+            report_root_for_artifact(path("/site/.aexeo-reports-old/crawl.json")),
+            PathBuf::from("/site/.aexeo-reports-old")
+        );
+    }
+
+    /// A bare filename has no parent, and must degrade to the current
+    /// directory rather than an empty path that would write into `""`.
+    #[test]
+    fn report_root_handles_a_bare_filename_and_a_reports_dir_at_the_root() {
+        assert_eq!(
+            report_root_for_artifact(path("crawl.json")),
+            PathBuf::from(".")
+        );
+        // `.aexeo-reports` directly under root: the grandparent is empty, so
+        // it must fall back to "." rather than producing an empty path.
+        assert_eq!(
+            report_root_for_artifact(path(".aexeo-reports/crawl.json")),
+            PathBuf::from(".")
+        );
+    }
+
+    // --- gap_label ------------------------------------------------------
+
+    #[test]
+    fn gap_label_names_every_coverage_gap() {
+        use GroundingCoverageGap::*;
+        let pairs = [
+            (MissingDirectAnswer, "missing_direct_answer"),
+            (ThinAnswerCoverage, "thin_answer_coverage"),
+            (WeakComparisonStructure, "weak_comparison_structure"),
+            (MissingPricingSignals, "missing_pricing_signals"),
+            (MissingProceduralSignals, "missing_procedural_signals"),
+        ];
+        let mut seen = std::collections::BTreeSet::new();
+        for (gap, expected) in &pairs {
+            assert_eq!(gap_label(gap), *expected);
+            seen.insert(gap_label(gap));
+        }
+        assert_eq!(seen.len(), pairs.len(), "two gaps share a label");
+    }
+
+    // --- grounding_text -------------------------------------------------
+
+    fn grounding_route(
+        route: &str,
+        topic: &str,
+        gaps: Vec<GroundingCoverageGap>,
+    ) -> GroundingRouteAnalysis {
+        serde_json::from_value(serde_json::json!({
+            "route": route,
+            "page_kind": "detail",
+            "primary_topic": topic,
+            "secondary_topics": [],
+            "primary_intent": "definition",
+            "secondary_intents": [],
+            "intents": ["definition", "procedural"],
+            "intent_matches": [],
+            "schema_types": [],
+            "signals": [],
+            "coverage_gaps": gaps,
+            "answer_blocks": 1,
+            "heading_count": 2,
+        }))
+        .expect("grounding route fixture")
+    }
+
+    /// The grounding map is the operator's view of "which pages could a model
+    /// actually answer from", so a route's topic, intents, and gaps must all
+    /// appear, and gaps must be rendered as their stable machine labels.
+    #[test]
+    fn grounding_text_reports_route_topics_intents_and_gaps() {
+        let report = GroundingSiteAnalysis {
+            pages_analyzed: 3,
+            routes_with_topics: 1,
+            intent_distribution: [("definition".to_string(), 2)].into_iter().collect(),
+            primary_intent_distribution: [("definition".to_string(), 1)].into_iter().collect(),
+            topic_clusters: [("pricing".to_string(), vec!["pricing".to_string()])]
+                .into_iter()
+                .collect(),
+            routes: vec![grounding_route(
+                "pricing",
+                "plans",
+                vec![
+                    GroundingCoverageGap::MissingPricingSignals,
+                    GroundingCoverageGap::ThinAnswerCoverage,
+                ],
+            )],
+            elapsed_us: 3_000_000,
+        };
+
+        let text = grounding_text(&report, path("/site/.aexeo-reports/grounding.json"));
+
+        assert!(text.contains("Pages analyzed: 3"), "{text}");
+        assert!(text.contains("Routes with topics: 1"), "{text}");
+        assert!(text.contains("Elapsed: 3000ms"), "{text}");
+        assert!(text.contains("grounding.json"), "{text}");
+        assert!(text.contains("/pricing"), "{text}");
+        assert!(text.contains("topic='plans'"), "{text}");
+        // Intents render lowercase, gaps as stable snake_case labels.
+        assert!(text.contains("intents=definition,procedural"), "{text}");
+        assert!(
+            text.contains("gaps=missing_pricing_signals,thin_answer_coverage"),
+            "{text}"
+        );
+        assert!(text.contains("Intent distribution:"), "{text}");
+    }
+
+    /// A route with no gaps must render an empty gap list rather than omit the
+    /// field, so the column alignment an operator scans stays stable.
+    #[test]
+    fn grounding_text_shows_an_empty_gap_list_for_a_well_covered_route() {
+        let report = GroundingSiteAnalysis {
+            pages_analyzed: 1,
+            routes_with_topics: 1,
+            intent_distribution: Default::default(),
+            primary_intent_distribution: Default::default(),
+            topic_clusters: Default::default(),
+            routes: vec![grounding_route("well-covered", "topic", vec![])],
+            elapsed_us: 0,
+        };
+        let text = grounding_text(&report, path("r.json"));
+        assert!(text.contains("gaps="), "{text}");
+        assert!(
+            !text.contains("Intent distribution:"),
+            "an empty intent distribution must not print an empty heading: {text}"
+        );
+    }
+
+    // --- surfaces_text --------------------------------------------------
+
+    fn surface_graph() -> MachineSurfaceGraph {
+        serde_json::from_value(serde_json::json!({
+            "site_root": "/site",
+            "site_url": "https://example.com",
+            "surfaces": [],
+            "coverage": {
+                "total_routes": 4,
+                "routes_with_schema": 2,
+                "routes_with_markdown_mirror": 3,
+                "routes_with_static_machine_link": 1,
+                "routes_in_sitemap": 4,
+                "llms_present": true,
+                "llms_full_present": false,
+                "facts_present": true,
+                "robots_present": true,
+                "sitemap_present": true,
+                "static_machine_links": 1,
+                "llms_index_links": 2,
+                "convention_probe_hits": 1,
+                "convention_probe_misses": 0,
+            },
+            "routes": [{
+                "route": "pricing",
+                "canonical": null,
+                "schema_types": ["Product"],
+                "markdown_mirrors": ["pricing.md.txt"],
+                "static_machine_links": [],
+                "sitemap_listed": true,
+                "issues": ["no schema on markdown mirror"],
+            }],
+            "recommendations": ["publish llms-full.txt"],
+        }))
+        .expect("surface graph fixture")
+    }
+
+    /// The surface graph is the "is my site machine-readable" report, so every
+    /// coverage ratio must be printed, and routes needing attention must carry
+    /// their issues so the operator knows what to fix.
+    #[test]
+    fn surfaces_text_reports_coverage_ratios_and_flagged_routes() {
+        let text = surfaces_text(&surface_graph(), path("/site/surfaces.json"));
+
+        assert!(text.contains("Routes analyzed: 4"), "{text}");
+        assert!(text.contains("Markdown mirror coverage: 3/4"), "{text}");
+        assert!(text.contains("Schema coverage: 2/4"), "{text}");
+        assert!(text.contains("llms.txt present: true"), "{text}");
+        assert!(text.contains("Routes needing attention:"), "{text}");
+        assert!(text.contains("/pricing"), "{text}");
+        assert!(text.contains("no schema on markdown mirror"), "{text}");
+        assert!(text.contains("publish llms-full.txt"), "{text}");
+    }
+
+    /// A missing `site_url` is common on a pre-deploy site and must render as
+    /// a placeholder rather than `None` or crashing the formatter.
+    #[test]
+    fn surfaces_text_handles_an_absent_site_url() {
+        let mut graph = surface_graph();
+        graph.site_url = None;
+        let text = surfaces_text(&graph, path("s.json"));
+        assert!(
+            text.contains("Site URL: -"),
+            "expected a placeholder for a missing site URL: {text}"
+        );
+    }
+
+    /// A clean graph with no issues and no recommendations must not print
+    /// empty "needs attention" / "recommendations" headings.
+    #[test]
+    fn surfaces_text_omits_empty_recommendation_and_issue_sections() {
+        let mut graph = surface_graph();
+        graph.recommendations.clear();
+        graph.routes.clear();
+        let text = surfaces_text(&graph, path("s.json"));
+        assert!(!text.contains("Recommendations:"), "{text}");
+        assert!(!text.contains("Routes needing attention:"), "{text}");
+    }
+
+    // --- fanout_text ----------------------------------------------------
+
+    fn fanout_query(
+        family: &str,
+        query: &str,
+        score: u8,
+        gaps: Vec<&str>,
+    ) -> aexeo_core::AnswerFanoutQuery {
+        serde_json::from_value(serde_json::json!({
+            "query": query,
+            "family": family,
+            "topic": "pricing",
+            "expected_surface": "product",
+            "coverage_score": score,
+            "matched_routes": [{
+                "route": "pricing",
+                "score": score,
+                "reasons": [],
+            }],
+            "gaps": gaps,
+        }))
+        .expect("fanout query fixture")
+    }
+
+    /// A query is "weak" if it scores below 60 **or** carries gaps, and the
+    /// report must surface both kinds — a low-scoring query with no gaps and a
+    /// high-scoring query with gaps are both actionable.
+    #[test]
+    fn fanout_text_surfaces_low_scoring_and_gapped_queries() {
+        let report = AnswerFanoutReport {
+            routes_analyzed: 2,
+            query_count: 2,
+            covered_queries: 0,
+            coverage_score: 0,
+            elapsed_us: 1_000_000,
+            queries: vec![
+                fanout_query("pricing", "how much", 30, vec![]),
+                fanout_query("definition", "what is", 90, vec!["no direct answer"]),
+            ],
+        };
+
+        let text = fanout_text(&report, path("fanout.json"));
+
+        assert!(text.contains("Routes analyzed: 2"), "{text}");
+        assert!(text.contains("Weak fan-out queries:"), "{text}");
+        // Low score (no gaps) is weak.
+        assert!(text.contains("'how much'"), "{text}");
+        // High score but with a gap is *also* weak — a gap is disqualifying
+        // on its own.
+        assert!(text.contains("'what is'"), "{text}");
+        assert!(text.contains("gaps: no direct answer"), "{text}");
+        assert!(text.contains("best=/pricing"), "{text}");
+    }
+
+    /// A fully-covered query must not be listed as weak.
+    #[test]
+    fn fanout_text_omits_a_strong_query() {
+        let report = AnswerFanoutReport {
+            routes_analyzed: 1,
+            query_count: 1,
+            covered_queries: 1,
+            coverage_score: 100,
+            elapsed_us: 0,
+            queries: vec![fanout_query("definition", "strong", 95, vec![])],
+        };
+        let text = fanout_text(&report, path("f.json"));
+        assert!(!text.contains("Weak fan-out queries:"), "{text}");
+    }
+
+    // --- score_text -----------------------------------------------------
+
+    /// The external-trust score is optional (it needs network data). When
+    /// absent it must read `n/a`, never a misleading `0`, which would look
+    /// like a failing score.
+    #[test]
+    fn score_text_prints_n_a_for_a_missing_external_trust_score() {
+        let report: SiteIntelligenceScore = serde_json::from_value(serde_json::json!({
+            "overall_score": 70,
+            "citation_readiness_score": 60,
+            "truth_consistency_score": 80,
+            "answer_pack_score": 70,
+            "external_trust_alignment_score": null,
+            "elapsed_us": 0,
+            "blockers": [],
+            "route_scores": [],
+        }))
+        .expect("score fixture");
+
+        let text = score_text(&report, path("score.json"));
+        assert!(text.contains("External trust alignment: n/a"), "{text}");
+        assert!(!text.contains("External trust alignment: 0"), "{text}");
+    }
+
+    /// Blockers are the most actionable output of the score report: a
+    /// site-wide blocker has no route and must say so rather than printing an
+    /// empty route field.
+    #[test]
+    fn score_text_marks_a_sitewide_blocker() {
+        let report: SiteIntelligenceScore = serde_json::from_value(serde_json::json!({
+            "overall_score": 40,
+            "citation_readiness_score": 30,
+            "truth_consistency_score": 50,
+            "answer_pack_score": 40,
+            "external_trust_alignment_score": 60,
+            "elapsed_us": 0,
+            "blockers": [{
+                "category": "truth",
+                "route": null,
+                "severity": 80,
+                "message": "no structured facts",
+            }],
+            "route_scores": [],
+        }))
+        .expect("score fixture");
+
+        let text = score_text(&report, path("score.json"));
+        assert!(text.contains("no structured facts"), "{text}");
+        assert!(
+            text.contains("route=(sitewide)"),
+            "a blocker with no route must be marked site-wide: {text}"
+        );
+    }
+
+    // --- presence: ordering and formatting ------------------------------
+
+    fn source_result(source: &str, status: SourceStatus) -> SourceResult {
+        serde_json::from_value(serde_json::json!({
+            "source": source,
+            "status": status,
+            "checkedAt": "2024-01-01T00:00:00Z",
+        }))
+        .expect("source result fixture")
+    }
+
+    /// The presence report is read as a checklist, so results must appear in
+    /// the canonical `SOURCE_ORDER` regardless of the order they were checked
+    /// in — the ordering is what makes two runs comparable.
+    #[test]
+    fn order_results_sorts_into_the_canonical_source_order() {
+        let results = vec![
+            source_result("github", SourceStatus::Found),
+            source_result("wikipedia", SourceStatus::Found),
+            source_result("rdap", SourceStatus::Found),
+        ];
+        let ordered = order_results(&results);
+        let names: Vec<_> = ordered.iter().map(|r| r.source.as_str()).collect();
+        assert_eq!(names, vec!["wikipedia", "github", "rdap"]);
+    }
+
+    /// An unrecognised source is not dropped — it is appended after the known
+    /// ones so a newly-added source still shows up in the report.
+    #[test]
+    fn order_results_appends_unknown_sources_rather_than_dropping_them() {
+        let results = vec![
+            source_result("brand_new_source", SourceStatus::Found),
+            source_result("wikipedia", SourceStatus::Found),
+        ];
+        let ordered = order_results(&results);
+        let names: Vec<_> = ordered.iter().map(|r| r.source.as_str()).collect();
+        assert_eq!(names, vec!["wikipedia", "brand_new_source"]);
+    }
+
+    /// `Unreachable` and `NotFound` mean very different things to a reader —
+    /// "we couldn't check" is not "it's absent" — so each status needs its
+    /// own symbol and wording.
+    #[test]
+    fn format_source_line_distinguishes_every_status() {
+        for (status, symbol, word) in [
+            (SourceStatus::Found, "[+]", "found"),
+            (SourceStatus::NotFound, "[ ]", "no record"),
+            (SourceStatus::Unreachable, "[!]", "couldn't reach"),
+            (SourceStatus::Skipped, "[-]", "skipped"),
+        ] {
+            let line = format_source_line(&source_result("wikipedia", status));
+            assert!(line.contains(symbol), "status {status:?}: {line}");
+            assert!(line.contains(word), "status {status:?}: {line}");
+            assert!(line.contains("Wikipedia"), "status {status:?}: {line}");
+        }
+    }
+
+    // --- unique_source_types -------------------------------------------
+
+    /// Trust-surface records can repeat a source type; the summary must
+    /// de-duplicate and sort so the count reflects distinct types.
+    #[test]
+    fn unique_source_types_sorts_and_dedups() {
+        let record = |source_type: &str| TrustSurfaceRecord {
+            source_type: source_type.to_string(),
+            url: "https://example.com".to_string(),
+            title: None,
+            snippet: None,
+            entity: None,
+            observed_at: None,
+            metrics: Default::default(),
+        };
+        let types = unique_source_types(&[record("github"), record("rdap"), record("github")]);
+        assert_eq!(types, vec!["github".to_string(), "rdap".to_string()]);
+    }
+
+    #[test]
+    fn unique_source_types_is_empty_for_no_records() {
+        assert!(unique_source_types(&[]).is_empty());
+    }
+}
