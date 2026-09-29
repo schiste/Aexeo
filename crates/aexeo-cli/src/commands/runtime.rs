@@ -925,3 +925,334 @@ pub fn command_doctor(submatches: &ArgMatches) -> Result<i32> {
         other => bail!("unsupported doctor target: {}", other),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aexeo_contracts::{AuditArtifact, AuditStatus, PerformanceBudget, PerformanceBudgetReport};
+
+    // --- sanitize_baseline_name ----------------------------------------
+
+    /// The baseline name becomes a filename, so it must be reduced to safe
+    /// characters: lowercase alphanumerics plus `.`, `_` and `-`.
+    #[test]
+    fn sanitize_baseline_name_lowercases_and_keeps_safe_separators() {
+        assert_eq!(sanitize_baseline_name("My_Site-1.0"), "my_site-1.0");
+        assert_eq!(sanitize_baseline_name("abc"), "abc");
+    }
+
+    /// Everything else — spaces, slashes, colons, quotes — collapses to a
+    /// single `-`. Without this a name like `site/v2` would create a
+    /// subdirectory, and `site v2` two files where one was meant.
+    #[test]
+    fn sanitize_baseline_name_collapses_unsafe_runs_into_one_dash() {
+        assert_eq!(sanitize_baseline_name("site v2"), "site-v2");
+        assert_eq!(sanitize_baseline_name("site/v2"), "site-v2");
+        assert_eq!(sanitize_baseline_name("site   v2"), "site-v2");
+        assert_eq!(sanitize_baseline_name("a/../b"), "a-b");
+        assert_eq!(sanitize_baseline_name("C:\\path\\to"), "c-path-to");
+    }
+
+    /// Path separators are the reason this function exists, so a name that
+    /// looks like a traversal must not survive as one.
+    #[test]
+    fn sanitize_baseline_name_cannot_produce_a_path_traversal() {
+        for name in ["../../etc/passwd", "..", "./..", "a/b/c"] {
+            let sanitized = sanitize_baseline_name(name);
+            assert!(
+                !sanitized.contains('/'),
+                "{name:?} produced {sanitized:?}, which is still a path"
+            );
+            assert!(
+                !sanitized.is_empty(),
+                "{name:?} must fall back rather than produce an empty name"
+            );
+        }
+    }
+
+    /// Consecutive explicit separators (`-`, `_`, `.`) are collapsed too, so
+    /// `a__b` and `a-b` do not become two different files for what the user
+    /// means as one name.
+    #[test]
+    fn sanitize_baseline_name_collapses_repeated_explicit_separators() {
+        assert_eq!(sanitize_baseline_name("a__b"), "a_b");
+        assert_eq!(sanitize_baseline_name("a--b"), "a-b");
+        assert_eq!(sanitize_baseline_name("a..b"), "a.b");
+        // The *first* separator in a run wins; later ones are dropped rather
+        // than normalised, so `a_-_b` stays `a_b`.
+        assert_eq!(sanitize_baseline_name("a_-_b"), "a_b");
+    }
+
+    /// Leading and trailing separators are trimmed, so a name like `-site-`
+    /// does not produce `-site-.json` — a file that is awkward to reference in
+    /// a shell and looks like a flag.
+    #[test]
+    fn sanitize_baseline_name_trims_leading_and_trailing_separators() {
+        assert_eq!(sanitize_baseline_name("-site-"), "site");
+        assert_eq!(sanitize_baseline_name("___site___"), "site");
+        assert_eq!(sanitize_baseline_name(".site."), "site");
+    }
+
+    /// A name that sanitises away to nothing must fall back to a usable
+    /// default rather than producing `""`, which would write `.json` and
+    /// collide with every other nameless baseline.
+    #[test]
+    fn sanitize_baseline_name_falls_back_when_nothing_survives() {
+        for name in ["", "   ", "///", "---", "..."] {
+            assert_eq!(
+                sanitize_baseline_name(name),
+                "runtime",
+                "{name:?} should fall back to the default"
+            );
+        }
+    }
+
+    // --- baseline paths --------------------------------------------------
+
+    /// Both baseline files live under `.aexeo-reports` so they are ignored by
+    /// the site's own build and never published.
+    #[test]
+    fn baseline_paths_live_under_the_reports_directory() {
+        let latest = runtime_baseline_latest_path(Path::new("/site"), "prod");
+        assert_eq!(
+            latest,
+            Path::new("/site/.aexeo-reports/prod-runtime-baseline-latest.json")
+        );
+
+        let stamped = runtime_baseline_timestamped_path(Path::new("/site"), "prod", 1234);
+        assert_eq!(
+            stamped,
+            Path::new("/site/.aexeo-reports/prod-runtime-baseline-1234.json")
+        );
+    }
+
+    // --- write_runtime_baseline_artifact --------------------------------
+
+    fn artifact(generated_at: u64) -> AuditArtifact {
+        AuditArtifact {
+            command: "crawl".to_string(),
+            status: AuditStatus::Complete,
+            generated_at,
+            ..Default::default()
+        }
+    }
+
+    /// Writing a baseline produces both files, and the timestamped name must
+    /// come from the artifact's own `generated_at` so a replayed artifact
+    /// does not overwrite a different run's baseline.
+    #[test]
+    fn write_runtime_baseline_artifact_writes_both_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let (latest, stamped) =
+            write_runtime_baseline_artifact(&artifact(999), temp.path(), "prod", true)
+                .expect("write");
+
+        assert!(latest.exists(), "latest baseline missing");
+        assert!(stamped.exists(), "timestamped baseline missing");
+        assert!(stamped.to_string_lossy().contains("999"), "{stamped:?}");
+
+        let written: AuditArtifact =
+            serde_json::from_str(&fs::read_to_string(&stamped).expect("read")).expect("parses");
+        assert_eq!(written.generated_at, 999);
+    }
+
+    /// `update_latest` is what makes `perf baseline` opt into moving the
+    /// baseline. Without it the history is appended to and `latest` must not
+    /// move.
+    #[test]
+    fn write_runtime_baseline_artifact_can_skip_updating_latest() {
+        let temp = tempfile::tempdir().unwrap();
+        let (latest, stamped) =
+            write_runtime_baseline_artifact(&artifact(1), temp.path(), "prod", false)
+                .expect("write");
+
+        assert!(stamped.exists(), "the history entry is always written");
+        assert!(
+            !latest.exists(),
+            "latest must not move when update_latest is false"
+        );
+    }
+
+    // --- load_performance_budget_path -----------------------------------
+
+    #[test]
+    fn load_performance_budget_path_reads_a_budget_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("budget.json");
+        fs::write(&path, r#"{"max_elapsed_ms": 5000, "max_errors": 0}"#).expect("write");
+
+        let (returned_path, budget) =
+            load_performance_budget_path(path.clone()).expect("budget loads");
+        assert_eq!(returned_path, path);
+        assert_eq!(budget.max_elapsed_ms, Some(5000));
+        assert_eq!(budget.max_errors, Some(0));
+    }
+
+    /// A malformed budget file must be an error, not a silently ignored one —
+    /// a typo in a CI budget would otherwise look like "no budget configured"
+    /// and every run would pass.
+    #[test]
+    fn load_performance_budget_path_rejects_a_malformed_budget() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("budget.json");
+        fs::write(&path, "{ not json").expect("write");
+        assert!(
+            load_performance_budget_path(path).is_err(),
+            "a malformed budget must not be silently treated as absent"
+        );
+    }
+
+    #[test]
+    fn load_performance_budget_path_errors_on_a_missing_file() {
+        let missing = tempfile::tempdir().unwrap().path().join("nope.json");
+        assert!(load_performance_budget_path(missing).is_err());
+    }
+
+    // --- apply / copy budget --------------------------------------------
+
+    fn artifact_with_performance(crawl_elapsed_ms: u64, errors: usize) -> AuditArtifact {
+        let mut artifact = artifact(1);
+        artifact.findings = vec![aexeo_contracts::Finding {
+            rule_id: "SEO001".to_string(),
+            message: "boom".to_string(),
+            path: "index.html".to_string(),
+            line: 1,
+            column: 1,
+            severity: "error".to_string(),
+            suggestion: None,
+            scope: aexeo_contracts::FindingScope::Page,
+        }];
+        artifact.summary.errors = errors;
+        artifact.performance = Some(aexeo_contracts::AuditPerformance {
+            elapsed_us: crawl_elapsed_ms * 1_000,
+            // `max_elapsed_ms` reads `crawl.elapsed_ms` first and falls back to
+            // `performance.wall_clock_us`; with no crawl stats attached, the
+            // fallback is the only value the budget can see.
+            wall_clock_us: crawl_elapsed_ms * 1_000,
+            ..Default::default()
+        });
+        artifact
+    }
+
+    /// The budget verdict is what turns a crawl into a CI failure, so it must
+    /// be written into the artifact *and* returned. Returning the verdict
+    /// without recording it would leave the artifact inconsistent with the
+    /// exit code.
+    #[test]
+    fn apply_performance_budget_records_the_verdict_and_returns_it() {
+        let mut artifact = artifact_with_performance(1_000, 0);
+        let budget = PerformanceBudget {
+            max_elapsed_ms: Some(500),
+            ..Default::default()
+        };
+
+        let passed =
+            apply_performance_budget(&mut artifact, Some(&(PathBuf::from("b.json"), budget)));
+
+        assert!(!passed, "1000ms exceeds a 500ms budget");
+        let report = artifact
+            .performance
+            .as_ref()
+            .and_then(|p| p.budget.as_ref())
+            .expect("budget report recorded on the artifact");
+        assert!(!report.passed);
+        assert_eq!(report.budget_path.as_deref(), Some("b.json"));
+        assert!(
+            !report.violations.is_empty(),
+            "a failing budget must record which metric failed"
+        );
+    }
+
+    /// With no budget configured there is nothing to enforce, so the run
+    /// passes and no report is invented.
+    #[test]
+    fn apply_performance_budget_passes_when_none_is_configured() {
+        let mut artifact = artifact_with_performance(999_999, 99);
+        assert!(apply_performance_budget(&mut artifact, None));
+        assert!(
+            artifact
+                .performance
+                .as_ref()
+                .and_then(|p| p.budget.as_ref())
+                .is_none(),
+            "no budget means no report"
+        );
+    }
+
+    /// Copying a budget report between artifacts is how a checkpoint gets the
+    /// verdict computed at the end of the crawl, so the source's report must
+    /// land on the target.
+    #[test]
+    fn copy_performance_budget_transfers_the_report() {
+        let mut source = artifact_with_performance(1_000, 0);
+        let budget = PerformanceBudget {
+            max_elapsed_ms: Some(500),
+            ..Default::default()
+        };
+        apply_performance_budget(&mut source, Some(&(PathBuf::from("b.json"), budget)));
+
+        let mut target = artifact_with_performance(1_000, 0);
+        copy_performance_budget(&mut target, &source);
+
+        let copied = target
+            .performance
+            .as_ref()
+            .and_then(|p| p.budget.clone())
+            .expect("budget copied onto the target");
+        assert!(!copied.passed);
+        assert_eq!(copied.budget_path.as_deref(), Some("b.json"));
+    }
+
+    /// Copying from a source with no budget is a no-op, not an error — the
+    /// checkpoint path runs with and without budgets configured.
+    #[test]
+    fn copy_performance_budget_is_a_noop_without_a_source_report() {
+        let mut target = artifact_with_performance(1_000, 0);
+        let source = artifact_with_performance(1_000, 0);
+        copy_performance_budget(&mut target, &source);
+        assert!(
+            target
+                .performance
+                .as_ref()
+                .and_then(|p| p.budget.as_ref())
+                .is_none()
+        );
+    }
+
+    // --- performance_diff_thresholds_from_cli ---------------------------
+
+    /// The defaults are 10% relative and 0ms absolute, so a purely relative
+    /// regression is caught while sub-10ms noise on a fast run is not.
+    #[test]
+    fn performance_diff_defaults_are_ten_percent_relative() {
+        let thresholds = PerformanceDiffThresholds::default();
+        assert_eq!(thresholds.relative_threshold_basis_points, 1_000);
+        assert_eq!(thresholds.absolute_threshold, 0);
+    }
+
+    // --- budget report plumbing -----------------------------------------
+
+    /// A report that passed must still be recorded with its budget path, so a
+    /// passing run can be traced back to the budget it was measured against.
+    #[test]
+    fn a_passing_budget_is_recorded_with_its_path() {
+        let mut artifact = artifact_with_performance(100, 0);
+        let budget = PerformanceBudget {
+            max_elapsed_ms: Some(500),
+            ..Default::default()
+        };
+        assert!(apply_performance_budget(
+            &mut artifact,
+            Some(&(PathBuf::from("b.json"), budget))
+        ));
+
+        let report: &PerformanceBudgetReport = artifact
+            .performance
+            .as_ref()
+            .and_then(|p| p.budget.as_ref())
+            .expect("report present even on a pass");
+        assert!(report.passed);
+        assert_eq!(report.budget_path.as_deref(), Some("b.json"));
+        assert!(report.violations.is_empty(), "{report:?}");
+    }
+}
