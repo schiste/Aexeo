@@ -159,7 +159,7 @@ jobs:
       # recompile of the workspace and would roughly double this job, which
       # is already the slowest. It gets its own timeout and its own cache.
       #
-      # COVERAGE_MIN is 86 against a measured 87.5% (2026-09-29, 48,108
+      # COVERAGE_MIN is 87 against a measured 88.8% (2026-09-29, 48,342
       # lines). The gap is deliberate headroom for platform noise; the point
       # is to stop coverage falling, not to demand a number the suite does
       # not meet today. Raise it as coverage improves.
@@ -168,14 +168,24 @@ jobs:
       # named, by testing the renderers and the untested CLI formatters:
       # `well_known_rules.rs` 72.8% -> 98.5% (the OAuth rules SRF025/SRF026
       # had no test at all), `generate.rs` 86.3% -> 94.0%, `reporting.rs`
-      # 86.2% -> 90.5%, and the three `aexeo-cli` command modules that had no
-      # test module whatsoever: `intelligence.rs` 32.3% -> 59.2%,
-      # `integrations.rs` 41.6% -> 87.2%, `runtime.rs` 74.9% -> 81.1%.
+      # 86.2% -> 90.5%, and the `aexeo-cli` command modules that had no test
+      # module at all: `intelligence.rs` 32.3% -> 70.3%, `integrations.rs`
+      # 41.6% -> 87.2%, `runtime.rs` 74.9% -> 81.1%, plus `static_site.rs`
+      # and the generate text path with its three refusal guards.
       #
-      # `intelligence.rs` is still the largest gap at 59% — what remains is
-      # the `command_*` dispatch and `load_intelligence_input`, which parse
-      # clap arguments and read audit artifacts. That wants end-to-end
-      # command tests rather than more unit tests of the formatters.
+      # Two measurement traps are worth remembering before trusting a number
+      # here. `aexeo-emdash-bridge` reports 0% for every file while a `#[cfg]`
+      # gate is wrong, because llvm-cov builds it in isolation and it then
+      # fails to compile -- that is not a coverage gap, and
+      # `check-crate-isolation` is the gate that catches that class now. And
+      # `cargo test --workspace` unifies features, so it will report green for
+      # a crate that cannot build on its own.
+      #
+      # `intelligence.rs` is still the largest single gap at 70% -- what is
+      # left is `load_intelligence_input` and the `command_*` handlers that
+      # read audit artifacts. `playwright.rs` at 71.5% is next; both want more
+      # of the fake-runner treatment that already took
+      # `presence/sources.rs` from 17.6% to 86.7%.
   coverage:
     name: coverage (llvm-cov floor)
     runs-on: ubuntu-latest
@@ -192,7 +202,7 @@ jobs:
         run: cargo install --locked cargo-llvm-cov
       - name: Measure coverage floor
         env:
-          COVERAGE_MIN: 86
+          COVERAGE_MIN: 87
         run: |
           cargo llvm-cov --workspace --all-targets --summary-only \
             --fail-under-lines "$COVERAGE_MIN"
