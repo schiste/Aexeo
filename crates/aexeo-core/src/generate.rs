@@ -108,6 +108,15 @@ fn classify_page_kind(route: &str) -> PageKind {
     PageKind::Other
 }
 
+/// Test-only view of the generator's private classifier, so the
+/// characterization test can compare it against the site's. Returns a
+/// formatted name rather than the type, because `PageKind` is private to
+/// this module and widening it just for a test would be a worse trade.
+#[cfg(test)]
+pub(crate) fn classify_page_kind_for_test(route: &str) -> String {
+    format!("{:?}", classify_page_kind(route))
+}
+
 fn page_kind_label(kind: PageKind) -> &'static str {
     match kind {
         PageKind::Home => "Home",

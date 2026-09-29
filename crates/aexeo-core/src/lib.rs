@@ -17,13 +17,15 @@ pub mod integrations;
 pub mod intelligence;
 pub mod link_rules;
 pub mod llm_rules;
+#[cfg(feature = "net")]
+#[cfg(test)]
+mod page_kind_divergence;
 pub mod plugin;
 pub mod policy;
 pub mod quality;
 pub mod registry;
 pub mod reporting;
 pub mod robots_rules;
-#[cfg(feature = "net")]
 pub mod runtime;
 pub mod schema_rules;
 pub mod site;

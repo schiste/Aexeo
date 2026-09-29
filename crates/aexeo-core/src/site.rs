@@ -310,6 +310,13 @@ fn classify_page_kind(relative: &str, route: &str) -> PageKind {
     PageKind::Generic
 }
 
+/// Test-only view of this module's private classifier, so the
+/// characterization test can compare it against the generator's.
+#[cfg(test)]
+pub(crate) fn classify_page_kind_for_test(route: &str) -> String {
+    format!("{:?}", classify_page_kind(route, route))
+}
+
 pub fn normalize_internal_href(href: &str) -> Option<String> {
     if !href.starts_with('/') || href.starts_with("//") {
         return None;
