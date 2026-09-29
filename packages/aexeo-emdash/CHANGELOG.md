@@ -4,7 +4,13 @@ All notable changes to `@aeptus/aexeo-emdash` are listed here.
 The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.8.19] - 2026-09-29
+
+Updates the EmDash integration to the current plugin and content APIs, and
+closes three security findings. Everything since 0.8.18 ships in this one
+version, since 0.8.19 had never been published.
+
+**Compatibility target:** EmDash `>=0.41.0 <0.42.0`.
 
 ### Security
 
@@ -28,17 +34,6 @@ and the project follows [Semantic Versioning](https://semver.org/).
   compares the submitted host against the `allowedHosts` list the plugin
   already computes at build time, so the form cannot store a URL the
   plugin's own allowlist would reject later.
-
-### Removed
-
-- **`src/mcp.ts` and `src/indexnow.ts`.** Both were unreachable. The host
-  reads `PluginDefinition.mcp` as a `Record` of tool definitions keyed by
-  name; the code attached a `mcpTools` array with a different container and
-  a different per-entry shape, and `configured.ts` never attached it at
-  all. No MCP tool this package offered could ever have been invoked.
-
-### Fixed
-
 - **Unauthenticated crawl-artifact routes removed from
   `packages/aexeo-crawl-worker`.** `GET /findings/latest` returned the full
   body of the customer's `aexeo-cli crawl` artifact and
@@ -48,9 +43,17 @@ and the project follows [Semantic Versioning](https://semver.org/).
   anyone who learned the worker hostname could read the whole crawl
   artifact. Both routes, the R2 binding, and the `examples/github-actions.yml`
   R2 upload workflow that existed only to feed them are gone.
-- **`/evaluate` no longer 500s when `EVAL_TOKEN` is unset.** The check read
-  `env.EVAL_TOKEN.length` without a guard, so a worker deployed without the
-  secret threw a `TypeError` on every request instead of rejecting it.
+
+### Removed
+
+- **`src/mcp.ts` and `src/indexnow.ts`.** Both were unreachable. The host
+  reads `PluginDefinition.mcp` as a `Record` of tool definitions keyed by
+  name; the code attached an `mcpTools` array with a different container and
+  a different per-entry shape, and `configured.ts` never attached it at
+  all. No MCP tool this package offered could ever have been invoked.
+
+### Fixed
+
 - **Suppressions ignored by the Block Kit Refresh button.** In configured
   mode the /findings "Refresh" button called the sweep without the
   compiled `suppressionFilter`, so it re-persisted findings the editor
@@ -65,57 +68,9 @@ and the project follows [Semantic Versioning](https://semver.org/).
   drifts. Fix: the whole block now lives once in `src/findings-view.ts`,
   and `RefreshOptions.suppressionFilter` is a **required** property, so a
   caller cannot silently omit it again.
-
-### Changed
-
-- Extract the shared Block Kit view layer (`normalizeInteraction`,
-  `BlockInteraction`, `BlockResponse`, the findings page, the score
-  widget, the document panel, and the refresh sweep) out of
-  `configured.ts` and `sandbox-entry.ts` into `src/findings-view.ts`.
-  Behaviour is unchanged apart from the suppression fix above; the two
-  entrypoints keep their own dispatch and their own copy of the three
-  strings that legitimately differ (empty-state copy, score-widget
-  empty copy, hard-refresh banner variant), passed in through
-  `AdminViewTuning`. `BlockInteraction` and `BlockResponse` are
-  re-exported from `sandbox-entry.ts`, so the `./sandbox` entry's
-  public type surface is unchanged.
-- Add regression tests for `normalizeInteraction` — the ten edge cases
-  the 0.8.17 changelog claimed to have verified but never did — plus
-  entrypoint parity tests that drive both admin routes with the same
-  malformed bodies, and a test that the configured Block Kit refresh and
-  the React `/refresh` route agree on suppressed findings.
-- Add `tsconfig.test.json` and a `typecheck:tests` script so `tests/`
-  and `vitest.config.ts` are typechecked. `tsconfig.json`'s `include`
-  covered `src/**` only, which meant the suite guarding the 0.8.17
-  production hotfix and the emdash test-host fixture plugin were both
-  unchecked. `npm run typecheck` now runs `typecheck:src` and
-  `typecheck:tests`.
-- `packages/aexeo-crawl-worker` no longer commits its build artifacts. The
-  checked-in `aexeo_emdash_bridge_bg.wasm` and its glue were several
-  releases behind the bridge the plugin actually calls — missing
-  `generateFactsPrompt`, `validateFactsManifest`, the manifest argument on
-  `scoreIntelligence`, and the `__wbg_*` bindings — and nothing in the
-  repository could regenerate them. The hand-written `.d.ts` files had been
-  updated to match the stale binary, which is why it went unnoticed. The
-  binary is now produced by `npm run build:wasm`, chained into `dev` and
-  `deploy`, and only the two declaration files remain tracked. The package
-  also gains a README, which it did not have.
-
-## [0.8.18] - 2026-09-28
-
-### Added
-
-- Include deterministic editorial-policy rules EDT001–EDT003 in the bundled Rust/WASM evaluator. Configured answer summaries, target questions, and evidence-marked claims can now be checked through the serialized Aexeo config.
-
-
-## [0.8.19] - 2026-09-28
-
-Updates the EmDash integration to the current plugin and content APIs.
-
-**Compatibility target:** EmDash `>=0.41.0 <0.42.0`.
-
-### Fixed
-
+- **`/evaluate` no longer 500s when `EVAL_TOKEN` is unset.** The check read
+  `env.EVAL_TOKEN.length` without a guard, so a worker deployed without the
+  secret threw a `TypeError` on every request instead of rejecting it.
 - **Sandbox access declaration:** replace obsolete capability strings with
   `content:read` and conditional `network:request`, scoped to the configured
   evaluator host. Remove unused schema, artifact, KV, and IndexNow host grants.
@@ -134,10 +89,52 @@ Updates the EmDash integration to the current plugin and content APIs.
 
 ### Changed
 
+- Extract the shared Block Kit view layer (`normalizeInteraction`,
+  `BlockInteraction`, `BlockResponse`, the findings page, the score
+  widget, the document panel, and the refresh sweep) out of
+  `configured.ts` and `sandbox-entry.ts` into `src/findings-view.ts`.
+  Behaviour is unchanged apart from the suppression fix above; the two
+  entrypoints keep their own dispatch and their own copy of the three
+  strings that legitimately differ (empty-state copy, score-widget
+  empty copy, hard-refresh banner variant), passed in through
+  `AdminViewTuning`. `BlockInteraction` and `BlockResponse` are
+  re-exported from `sandbox-entry.ts`, so the `./sandbox` entry's
+  public type surface is unchanged.
 - Bump the EmDash peer and development ranges to `0.41.x`; update the README
   and install guide to name the supported range and sandbox save behavior.
-- Add Vitest coverage using EmDash's official plugin runtime test host for
-  sandbox hooks, blocks extraction, resolved URLs, and translation alternates.
+- Add regression tests for `normalizeInteraction` — the ten edge cases
+  the 0.8.17 changelog claimed to have verified but never did — plus
+  entrypoint parity tests that drive both admin routes with the same
+  malformed bodies, and a test that the configured Block Kit refresh and
+  the React `/refresh` route agree on suppressed findings. Vitest coverage
+  now runs against EmDash's official plugin runtime test host for sandbox
+  hooks, blocks extraction, resolved URLs, and translation alternates.
+- Add `tsconfig.test.json` and a `typecheck:tests` script so `tests/`
+  and `vitest.config.ts` are typechecked. `tsconfig.json`'s `include`
+  covered `src/**` only, which meant the suite guarding the 0.8.17
+  production hotfix and the emdash test-host fixture plugin were both
+  unchecked. `npm run typecheck` now runs `typecheck:src` and
+  `typecheck:tests`.
+- `packages/aexeo-crawl-worker` no longer commits its build artifacts. The
+  checked-in `aexeo_emdash_bridge_bg.wasm` and its glue were several
+  releases behind the bridge the plugin actually calls — missing
+  `generateFactsPrompt`, `validateFactsManifest`, the manifest argument on
+  `scoreIntelligence`, and the `__wbg_*` bindings — and nothing in the
+  repository could regenerate them. The hand-written `.d.ts` files had been
+  updated to match the stale binary, which is why it went unnoticed. The
+  binary is now produced by `npm run build:wasm`, chained into `dev` and
+  `deploy`, and only the two declaration files remain tracked. The package
+  also gains a README, which it did not have.
+
+## [Unreleased]
+
+## [0.8.18] - 2026-09-28
+
+### Added
+
+- Include deterministic editorial-policy rules EDT001–EDT003 in the bundled Rust/WASM evaluator. Configured answer summaries, target questions, and evidence-marked claims can now be checked through the serialized Aexeo config.
+
+
 ## [0.8.17] - 2026-05-29
 
 Hotfix release. Closes the production admin-route regression
