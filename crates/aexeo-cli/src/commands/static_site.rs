@@ -392,3 +392,99 @@ pub fn command_baseline(submatches: &ArgMatches) -> Result<i32> {
     }
     Ok(EXIT_SUCCESS)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bundle() -> MachineArtifactBundle {
+        serde_json::from_value(serde_json::json!({
+            "route_count": 4,
+            "artifacts": [
+                {"path": "llms.txt", "kind": "llms", "content": "x", "bytes": 120},
+                {"path": "sitemap.xml", "kind": "sitemap", "content": "x", "bytes": 400},
+            ],
+            "markdown_pages": 2,
+            "deploy_notes": ["deploy llms.txt at the site root"],
+        }))
+        .expect("bundle fixture")
+    }
+
+    /// The generate report is what an operator reads after publishing, so the
+    /// counts, every artifact's path/kind/size, and the deploy notes all need
+    /// to be present — the notes in particular are the part that tells you
+    /// what to do next.
+    #[test]
+    fn machine_bundle_text_reports_counts_artifacts_and_deploy_notes() {
+        let written = vec!["dist/llms.txt".to_string(), "dist/sitemap.xml".to_string()];
+        let text = machine_bundle_text("machine artifacts", &bundle(), &written);
+
+        assert!(text.contains("Generated machine artifacts"), "{text}");
+        assert!(text.contains("Routes: 4"), "{text}");
+        assert!(text.contains("Markdown pages: 2"), "{text}");
+        assert!(text.contains("llms.txt kind=llms bytes=120"), "{text}");
+        assert!(
+            text.contains("sitemap.xml kind=sitemap bytes=400"),
+            "{text}"
+        );
+        assert!(text.contains("Deploy notes:"), "{text}");
+        assert!(text.contains("deploy llms.txt at the site root"), "{text}");
+        // The written list is a count *and* the individual paths; both are
+        // useful, and the paths are the actionable half.
+        assert!(text.contains("Written files: 2"), "{text}");
+        assert!(text.contains("Written paths:"), "{text}");
+        assert!(text.contains("- dist/llms.txt"), "{text}");
+    }
+
+    /// A dry run writes nothing, so there is no file list to print. The two
+    /// "written" sections must be absent rather than printing an empty
+    /// heading, while everything else still renders.
+    #[test]
+    fn machine_bundle_text_omits_the_written_sections_on_a_dry_run() {
+        let text = machine_bundle_text("machine artifacts", &bundle(), &[]);
+        assert!(!text.contains("Written files:"), "{text}");
+        assert!(!text.contains("Written paths:"), "{text}");
+        assert!(text.contains("Artifacts:"), "{text}");
+    }
+
+    /// A bundle with no deploy notes must not print an empty "Deploy notes"
+    /// heading — deploy guidance is conditional on there being any.
+    #[test]
+    fn machine_bundle_text_omits_an_empty_deploy_notes_section() {
+        let mut bundle = bundle();
+        bundle.deploy_notes.clear();
+        let text = machine_bundle_text("machine artifacts", &bundle, &[]);
+        assert!(!text.contains("Deploy notes:"), "{text}");
+    }
+
+    /// An empty artifact list is a real outcome (a site with no routes) and
+    /// must not crash the renderer or print a bare heading with nothing under
+    /// it.
+    #[test]
+    fn machine_bundle_text_handles_a_bundle_with_no_artifacts() {
+        let mut bundle = bundle();
+        bundle.artifacts.clear();
+        bundle.markdown_pages = 0;
+        bundle.deploy_notes.clear();
+        let text = machine_bundle_text("machine artifacts", &bundle, &[]);
+        assert!(text.contains("Artifacts: 0"), "{text}");
+        assert!(text.contains("Markdown pages: 0"), "{text}");
+    }
+
+    /// Every field at zero — the shape a caller gets before the bundle is
+    /// populated. The renderer must not divide or index into anything empty.
+    #[test]
+    fn machine_bundle_text_handles_an_all_zero_bundle() {
+        let empty = serde_json::from_value::<MachineArtifactBundle>(serde_json::json!({
+            "artifacts": [],
+            "route_count": 0,
+            "markdown_pages": 0,
+            "deploy_notes": [],
+        }))
+        .expect("empty bundle fixture");
+        let text = machine_bundle_text("machine artifacts", &empty, &[]);
+        assert!(text.contains("Routes: 0"), "{text}");
+        assert!(text.contains("Artifacts: 0"), "{text}");
+        assert!(!text.contains("Deploy notes:"), "{text}");
+    }
+}
