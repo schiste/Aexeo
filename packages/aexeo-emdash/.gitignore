@@ -1,8 +1,23 @@
 node_modules/
 dist/
-# wasm/ is build output. The hand-maintained _bg.d.ts is the only file
-# in there that's an authoritative source (wasm-bindgen 0.2.118 doesn't
-# emit it for the bundler target), so track that one explicitly.
+# wasm/ is build output, with two exceptions that have to exist without a
+# build:
+#
+#   aexeo_emdash_bridge_bg.d.ts  hand-maintained. wasm-bindgen 0.2.118 does
+#                                not emit it for the bundler target, so it is
+#                                an authoritative source, not generated.
+#   aexeo_emdash_bridge.d.ts     the module `src/evaluator.ts` actually
+#                                imports, so it is what `tsc` resolves. Also
+#                                generated, but the CI typecheck job
+#                                deliberately does not run `build:wasm`
+#                                (it has no Rust toolchain), so without this
+#                                tracked, `tsc --noEmit` fails with
+#                                TS2307 on a fresh checkout.
+#
+# build-wasm.sh snapshots and restores both around a wasm-bindgen run, so a
+# regeneration that changes either surface warns instead of silently drifting
+# from what the typecheck validated.
 wasm/*
 !wasm/aexeo_emdash_bridge_bg.d.ts
+!wasm/aexeo_emdash_bridge.d.ts
 *.tsbuildinfo
