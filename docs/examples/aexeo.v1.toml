@@ -76,7 +76,9 @@ baseline_file = ".aexeo-baseline.json"
 audit_log_limit = 5
 
 [quality]
-typecheck_command = "cargo check --workspace"
-coverage_threshold = 85
-complexity_threshold = 12
+# `typecheck_command`, `coverage_threshold` and `complexity_threshold` used to
+# sit here. They were read by nothing — the rules they claimed to gate were
+# never wired to them — so leaving them documented would promise a knob that
+# does not exist. The loader now rejects them outright rather than ignoring
+# them, which is why this example would fail `check-config` with them present.
 performance_budget_file = "performance-budget.json"

@@ -68,7 +68,12 @@ pub fn render_config_reference() -> String {
         "baseline_file = \".aexeo-baseline.json\"".to_string(),
         String::new(),
         "[quality]".to_string(),
-        "coverage_threshold = 85".to_string(),
+        // `coverage_threshold` used to be the only key shown here. It is inert
+        // and the loader rejects it, so advertising it meant anyone copying
+        // this example got a config that fails `config print` and
+        // `check-config`. `performance_budget_file` is the one key in this
+        // table that is actually read.
+        "performance_budget_file = \"performance-budget.json\"".to_string(),
         "```".to_string(),
         String::new(),
         "## Editor And CI Consumption".to_string(),
@@ -222,6 +227,63 @@ mod tests {
         assert!(render_rule_reference().contains("# Rule Inventory"));
         assert!(render_rule_reference().contains("## Internal Quality"));
         assert!(render_adapter_reference().contains("# Adapter Reference"));
+    }
+
+    /// The config reference embeds a full example config, and the whole point
+    /// of an example is that a reader can copy it. This one did not work: it
+    /// set `[quality] coverage_threshold = 85`, a key that is inert and that
+    /// the loader rejects outright, so anyone who pasted the documented
+    /// example into an `aexeo.toml` got a config that failed `config print`
+    /// — and the repo's own `check-config` gate, because the sibling
+    /// `docs/examples/aexeo.v1.toml` carried the same stale keys.
+    ///
+    /// Asserting the example *parses* is the only thing that catches this. The
+    /// existing `renders_reference_sections` test passes happily while the
+    /// example it renders is broken.
+    #[test]
+    fn the_documented_config_example_actually_loads() {
+        let reference = render_config_reference();
+        let example = reference
+            .split("```toml")
+            .nth(1)
+            .and_then(|rest| rest.split("```").next())
+            .expect("the config reference embeds a toml example")
+            .trim();
+        assert!(
+            !example.is_empty(),
+            "extracted an empty example from the config reference"
+        );
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("aexeo.toml");
+        std::fs::write(&path, example).expect("write example");
+
+        let loaded = crate::config::load_config_with_diagnostics(dir.path(), Some(&path))
+            .expect("the documented example must load");
+        assert!(
+            loaded.warnings.is_empty(),
+            "the documented example should not warn: {:?}",
+            loaded.warnings
+        );
+    }
+
+    /// The same example is checked in as `docs/examples/aexeo.v1.toml`, and it
+    /// drifted from the reference at the same time. Two copies of one example
+    /// is the underlying problem, so both are asserted to load.
+    #[test]
+    fn the_checked_in_config_example_actually_loads() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/examples/aexeo.v1.toml");
+        assert!(path.exists(), "missing {}", path.display());
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let loaded = crate::config::load_config_with_diagnostics(dir.path(), Some(&path))
+            .expect("the checked-in example must load");
+        assert!(
+            loaded.warnings.is_empty(),
+            "the checked-in example should not warn: {:?}",
+            loaded.warnings
+        );
     }
 
     #[test]

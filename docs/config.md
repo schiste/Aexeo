@@ -48,7 +48,7 @@ require_title_alignment = true
 baseline_file = ".aexeo-baseline.json"
 
 [quality]
-coverage_threshold = 85
+performance_budget_file = "performance-budget.json"
 ```
 
 ## Editor And CI Consumption
