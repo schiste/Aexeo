@@ -348,6 +348,20 @@ mod tests {
         fs::write(path, text).unwrap();
     }
 
+    /// A site whose single route answers with `WWW-Authenticate`, which is
+    /// the only signal the OAuth capability is inferred from.
+    fn load_site_with_authenticated_route(root: &std::path::Path) -> crate::site::Site {
+        let site = load_site(root).unwrap();
+        let mut site = site;
+        if let Some(page) = site.pages.first_mut() {
+            page.response_headers.insert(
+                "www-authenticate".to_string(),
+                "Bearer realm=\"api\"".to_string(),
+            );
+        }
+        site
+    }
+
     fn site_with_index(root: &std::path::Path) {
         write(
             &root.join("index.html"),
@@ -465,5 +479,291 @@ mod tests {
         let caps = infer_site_capabilities(&site);
         let findings = run_well_known_rules(&site, &caps);
         assert!(findings.iter().any(|f| f.rule_id == "SRF021"));
+    }
+
+    // --- OAuth (SRF025 / SRF026) --------------------------------------
+
+    /// A site that returns `WWW-Authenticate` on a route has declared, by
+    /// its own behaviour, that it serves OAuth-protected APIs. That is the
+    /// only signal these two rules trust, so they must stay silent on a
+    /// content-only site no matter what else is true of it.
+    #[test]
+    fn oauth_rules_are_silent_without_a_www_authenticate_header() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        site_with_index(root);
+        let site = load_site(root).unwrap();
+        let caps = infer_site_capabilities(&site);
+        assert!(!caps.declares_oauth, "no OAuth signal means no capability");
+        assert!(check_oauth_discovery(&site, &caps).is_empty());
+        assert!(check_oauth_protected_resource(&site, &caps).is_empty());
+    }
+
+    /// The header is the trigger, and it is read from route response
+    /// headers, so it has to reach the loaded page. Both OAuth rules fire
+    /// together: a site that authenticates but publishes neither discovery
+    /// document has told an agent how to obtain a token it clearly needs.
+    #[test]
+    fn oauth_rules_fire_when_protection_is_declared_but_nothing_is_published() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        site_with_index(root);
+        let site = load_site_with_authenticated_route(root);
+        let caps = infer_site_capabilities(&site);
+        assert!(
+            caps.declares_oauth,
+            "WWW-Authenticate must set the capability"
+        );
+
+        let discovery = check_oauth_discovery(&site, &caps);
+        assert_eq!(discovery.len(), 1, "{discovery:?}");
+        assert_eq!(discovery[0].rule_id, "SRF025");
+        assert!(
+            discovery[0].message.contains("openid-configuration"),
+            "the message must name the file to publish: {discovery:?}"
+        );
+        assert!(
+            discovery[0].suggestion.is_some(),
+            "an OAuth rule must say what to do: {discovery:?}"
+        );
+
+        let resource = check_oauth_protected_resource(&site, &caps);
+        assert_eq!(resource.len(), 1, "{resource:?}");
+        assert_eq!(resource[0].rule_id, "SRF026");
+        assert!(
+            resource[0].message.contains("oauth-protected-resource"),
+            "{resource:?}"
+        );
+    }
+
+    /// Either discovery document satisfies SRF025 — the rule accepts both
+    /// OIDC Discovery 1.0 and RFC 8414, and requiring both would be wrong.
+    #[test]
+    fn oauth_discovery_accepts_either_canonical_document() {
+        for path in [
+            ".well-known/openid-configuration",
+            ".well-known/oauth-authorization-server",
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path();
+            site_with_index(root);
+            write(&root.join(path), "{}");
+            let site = load_site_with_authenticated_route(root);
+            let caps = infer_site_capabilities(&site);
+            assert!(
+                check_oauth_discovery(&site, &caps).is_empty(),
+                "{path} alone should satisfy SRF025"
+            );
+        }
+    }
+
+    /// The protected-resource document is separate from discovery metadata,
+    /// so satisfying SRF025 must not satisfy SRF026.
+    #[test]
+    fn discovery_metadata_does_not_satisfy_the_resource_metadata_rule() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        site_with_index(root);
+        write(&root.join(".well-known/openid-configuration"), "{}");
+        let site = load_site_with_authenticated_route(root);
+        let caps = infer_site_capabilities(&site);
+
+        assert!(check_oauth_discovery(&site, &caps).is_empty());
+        let resource = check_oauth_protected_resource(&site, &caps);
+        assert_eq!(resource.len(), 1, "{resource:?}");
+        assert_eq!(resource[0].rule_id, "SRF026");
+    }
+
+    #[test]
+    fn oauth_protected_resource_is_satisfied_by_its_own_document() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        site_with_index(root);
+        write(
+            &root.join(".well-known/oauth-protected-resource"),
+            r#"{"resource":"https://api.example.com","authorization_servers":["https://auth.example.com"]}"#,
+        );
+        let site = load_site_with_authenticated_route(root);
+        let caps = infer_site_capabilities(&site);
+        assert!(check_oauth_protected_resource(&site, &caps).is_empty());
+    }
+
+    /// Both OAuth rules are `warning`, not `error`: publishing OAuth is
+    /// optional, and a site that does is not broken.
+    #[test]
+    fn oauth_findings_are_warnings_not_errors() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        site_with_index(root);
+        let site = load_site_with_authenticated_route(root);
+        let caps = infer_site_capabilities(&site);
+        for finding in run_well_known_rules(&site, &caps)
+            .into_iter()
+            .filter(|f| f.rule_id.starts_with("SRF02"))
+        {
+            assert_eq!(
+                finding.severity, "warning",
+                "{} should be a warning: {finding:?}",
+                finding.rule_id
+            );
+        }
+    }
+
+    // --- shape validators ---------------------------------------------
+
+    /// The shape validators decide whether a published file is usable. A
+    /// validator that accepts a malformed document turns the corresponding
+    /// rule into a silent no-op, so the rejection cases matter as much as the
+    /// accepted one.
+    #[test]
+    fn agent_skills_index_requires_a_well_formed_skills_array() {
+        // `$schema` is checked before `skills`, so a document without it is
+        // rejected even when the skills array is well formed.
+        assert!(
+            validate_agent_skills_index(
+                r#"{"$schema":"https://example.com/skills.json","skills":[]}"#
+            )
+            .is_ok(),
+            "an empty skills list is valid: it asserts no skills, which is not a defect"
+        );
+
+        for (body, expected) in [
+            (r#"not json"#, "invalid JSON"),
+            (r#"[]"#, "root must be a JSON object"),
+            (r#"{}"#, "missing top-level `$schema`"),
+            (r#"{"$schema":"x"}"#, "missing `skills` array"),
+            (r#"{"$schema":"x","skills":{}}"#, "missing `skills` array"),
+            (
+                r#"{"$schema":"x","skills":[1]}"#,
+                "skills[0] must be an object",
+            ),
+            (
+                r#"{"$schema":"x","skills":[{}]}"#,
+                "skills[0] missing required field `name`",
+            ),
+        ] {
+            let error = validate_agent_skills_index(body).expect_err(body);
+            assert!(
+                error.contains(expected),
+                "{body}: expected {expected:?}, got {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn agent_skills_index_reports_the_failing_entry_index() {
+        let body = r#"{"$schema":"x","skills":[
+            {"name":"a","type":"t","description":"d","url":"u","sha256":"s"},
+            {"name":"b"}
+        ]}"#;
+        let error = validate_agent_skills_index(body).expect_err("second entry is incomplete");
+        assert!(
+            error.contains("skills[1]"),
+            "the error must point at the failing entry: {error}"
+        );
+    }
+
+    #[test]
+    fn mcp_server_card_requires_name_and_version() {
+        assert!(validate_mcp_server_card(r#"{"serverInfo":{"name":"n","version":"1"}}"#).is_ok());
+        for (body, expected) in [
+            ("nope", "invalid JSON"),
+            ("[]", "root must be a JSON object"),
+            ("{}", "missing `serverInfo` object"),
+            (r#"{"serverInfo":"x"}"#, "missing `serverInfo` object"),
+            (
+                r#"{"serverInfo":{"name":"n"}}"#,
+                "missing required field `version`",
+            ),
+            (
+                r#"{"serverInfo":{"version":"1"}}"#,
+                "missing required field `name`",
+            ),
+        ] {
+            let error = validate_mcp_server_card(body).expect_err(body);
+            assert!(
+                error.contains(expected),
+                "{body}: expected {expected:?}, got {error:?}"
+            );
+        }
+    }
+
+    /// An empty `linkset` is the failure mode that matters most here: the
+    /// catalog file exists, so a naive presence check would call it
+    /// compliant, but it advertises nothing.
+    #[test]
+    fn api_catalog_rejects_an_empty_or_malformed_linkset() {
+        assert!(validate_api_catalog(r#"{"linkset":[{"anchor":"/a"}]}"#).is_ok());
+        for (body, expected) in [
+            ("nope", "invalid JSON"),
+            ("[]", "root must be a JSON object"),
+            ("{}", "missing `linkset` array"),
+            (r#"{"linkset":{}}"#, "missing `linkset` array"),
+            (r#"{"linkset":[]}"#, "`linkset` array is empty"),
+            (r#"{"linkset":["/a"]}"#, "linkset[0] must be an object"),
+            (
+                r#"{"linkset":[{}]}"#,
+                "linkset[0] missing required `anchor`",
+            ),
+        ] {
+            let error = validate_api_catalog(body).expect_err(body);
+            assert!(
+                error.contains(expected),
+                "{body}: expected {expected:?}, got {error:?}"
+            );
+        }
+    }
+
+    /// A published-but-invalid file must still be reported, because the
+    /// alternative is an agent reading it and failing silently.
+    #[test]
+    fn mcp_shape_violation_is_reported_even_when_the_file_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        site_with_index(root);
+        write(
+            &root.join(".well-known/mcp/server-card.json"),
+            r#"{"serverInfo":{"name":"no-version"}}"#,
+        );
+        let site = load_site(root).unwrap();
+        let mut caps = infer_site_capabilities(&site);
+        caps.declares_mcp = true;
+        let findings = check_mcp_server_card(&site, &caps);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(findings[0].rule_id, "SRF016");
+        assert!(
+            findings[0].message.contains("version"),
+            "the message must name the missing field: {findings:?}"
+        );
+    }
+
+    /// Every well-known rule must name the file it is about, so an editor can
+    /// act on the finding without cross-referencing the spec.
+    #[test]
+    fn every_well_known_finding_names_a_well_known_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        site_with_index(root);
+        let site = load_site_with_authenticated_route(root);
+        let mut caps = infer_site_capabilities(&site);
+        caps.declares_agent_skills = true;
+        caps.declares_mcp = true;
+        caps.declares_api = true;
+
+        let findings = run_well_known_rules(&site, &caps);
+        assert!(!findings.is_empty(), "expected findings on this fixture");
+        for finding in &findings {
+            assert!(
+                finding.path.contains(".well-known"),
+                "{} should point at a well-known path, got {}",
+                finding.rule_id,
+                finding.path
+            );
+            assert!(
+                finding.suggestion.is_some(),
+                "{} must tell the editor what to publish",
+                finding.rule_id
+            );
+        }
     }
 }
