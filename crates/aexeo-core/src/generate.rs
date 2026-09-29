@@ -218,6 +218,12 @@ fn page_related_links(page: &Page, limit: usize) -> Vec<String> {
 fn page_outline(page: &Page, limit: usize) -> Vec<String> {
     let mut outline = Vec::new();
     for block in &page.blocks {
+        // The limit bounds the output, so it is checked before the push
+        // rather than after. Checking afterwards let a limit of 0 return one
+        // entry — the one case where the caller asked for nothing at all.
+        if outline.len() >= limit {
+            break;
+        }
         let label = block.data_ui.clone().or_else(|| {
             if block.has_heading {
                 Some(block.tag.clone())
@@ -233,9 +239,6 @@ fn page_outline(page: &Page, limit: usize) -> Vec<String> {
             } else {
                 outline.push(format!("{}: {}", label, snippet));
             }
-        }
-        if outline.len() >= limit {
-            break;
         }
     }
     outline
@@ -939,9 +942,13 @@ pub fn suggest_internal_links(site: &Site, top_n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_link_suggestions, build_machine_artifact_bundle, render_llms_full_txt,
-        render_llms_txt, render_markdown_mirror, render_markdown_mirror_pages, render_sitemap_xml,
-        suggest_internal_links,
+        PageKind, build_link_suggestions, build_machine_artifact_bundle, classify_page_kind,
+        image_alt_summary, markdown_escape_heading, markdown_path_for_route, page_is_indexable,
+        page_kind_heading, page_kind_label, page_outline, page_related_links, page_summary,
+        render_llms_full_txt, render_llms_txt, render_markdown_mirror,
+        render_markdown_mirror_pages, render_page_markdown_mirror, render_page_metadata,
+        render_sitemap_xml, route_to_url, schema_types_for_page, suggest_internal_links,
+        tokenize_text, visible_text, xml_escape,
     };
     use crate::site::load_site;
     use anyhow::Result;
@@ -1195,5 +1202,406 @@ mod tests {
         );
         assert_eq!(bundle.markdown_pages, 2);
         Ok(())
+    }
+
+    // --- pure helpers --------------------------------------------------
+
+    /// Tokenizing drives the feature-count heuristic in `llms.txt`. Punctuation
+    /// and case must not create spurious tokens, and the empty string must
+    /// produce none.
+    #[test]
+    fn tokenize_splits_on_non_alphanumeric_and_folds_case() {
+        let tokens = tokenize_text("Hello, World! 42 test-case");
+        assert_eq!(
+            tokens.into_iter().collect::<Vec<_>>(),
+            vec!["42", "case", "hello", "test", "world"]
+        );
+        assert!(tokenize_text("").is_empty());
+        assert!(tokenize_text("!@#$").is_empty());
+        // A trailing word with no trailing separator must still be kept.
+        assert!(tokenize_text("trailing").contains("trailing"));
+    }
+
+    /// The sitemap URL is the most visible string the generator emits, and a
+    /// trailing slash on `site_url` must not double up.
+    #[test]
+    fn route_to_url_joins_without_doubling_slashes() {
+        assert_eq!(
+            route_to_url("https://example.com", ""),
+            "https://example.com/"
+        );
+        assert_eq!(
+            route_to_url("https://example.com/", ""),
+            "https://example.com/"
+        );
+        assert_eq!(
+            route_to_url("https://example.com/", "about"),
+            "https://example.com/about"
+        );
+        assert_eq!(
+            route_to_url("https://example.com///", "a/b"),
+            "https://example.com/a/b"
+        );
+    }
+
+    /// A malformed sitemap is worse than a missing one: it is served as
+    /// `application/xml` and makes a crawler discard the file. Every
+    /// character XML reserves must be escaped, including quote and apostrophe,
+    /// which appear in URLs more often than the angle brackets.
+    #[test]
+    fn xml_escape_covers_every_reserved_character() {
+        assert_eq!(xml_escape("plain"), "plain");
+        assert_eq!(
+            xml_escape("a&b<c>d'e\"f"),
+            "a&amp;b&lt;c&gt;d&apos;e&quot;f"
+        );
+        // Escaping is applied once, not recursively: an already-escaped
+        // ampersand must not become `&amp;amp;`.
+        assert_eq!(xml_escape("&amp;"), "&amp;amp;");
+        // Non-ASCII passes through untouched so UTF-8 routes survive.
+        assert_eq!(xml_escape("café"), "café");
+    }
+
+    #[test]
+    fn markdown_path_for_route_maps_the_home_route_to_index() {
+        assert_eq!(markdown_path_for_route(""), "index.md.txt");
+        assert_eq!(markdown_path_for_route("about"), "about.md.txt");
+        assert_eq!(markdown_path_for_route("a/b"), "a/b.md.txt");
+    }
+
+    /// A heading containing a newline would break the Markdown block
+    /// structure, so newlines collapse to spaces.
+    #[test]
+    fn markdown_escape_heading_flattens_newlines() {
+        assert_eq!(markdown_escape_heading("a\nb"), "a b");
+        assert_eq!(markdown_escape_heading("  spaced  "), "spaced");
+        assert_eq!(markdown_escape_heading(""), "");
+    }
+
+    /// Route classification drives every artifact's sectioning, so a
+    /// misclassified route lands in the wrong section of `llms.txt`.
+    ///
+    /// Routes here are normalized (`about`, not `/about`), so the prefix
+    /// matches in `classify_page_kind` are prefix matches on that form.
+    #[test]
+    fn page_kinds_are_classified_for_representative_routes() {
+        for (route, expected) in [
+            ("", PageKind::Home),
+            ("features/fast-audits", PageKind::Feature),
+            ("skill/seo", PageKind::Skill),
+            ("category/tools", PageKind::Category),
+            ("maintainer/aeptus", PageKind::Maintainer),
+            ("skills", PageKind::Listing),
+            ("maintainers", PageKind::Listing),
+            ("search", PageKind::Utility),
+            ("submit", PageKind::Utility),
+            ("legal", PageKind::Legal),
+            ("privacy", PageKind::Legal),
+            ("docs/getting-started", PageKind::Docs),
+            ("guide/setup", PageKind::Docs),
+            ("blog/post", PageKind::Detail),
+            ("about", PageKind::Other),
+        ] {
+            assert_eq!(classify_page_kind(route), expected, "route {route:?}");
+        }
+    }
+
+    /// The Legal check is deliberately wider than its two exact routes: any
+    /// route containing "legal" is treated as legal, because a misfiled legal
+    /// page must not be checked as a marketing page.
+    #[test]
+    fn page_kind_legal_matches_any_route_containing_legal() {
+        assert_eq!(classify_page_kind("legal-notice"), PageKind::Legal);
+        assert_eq!(classify_page_kind("company/legal/terms"), PageKind::Legal);
+    }
+
+    /// Every page kind needs a non-empty label and heading, and they must be
+    /// mutually distinguishable — a duplicate label silently merges two
+    /// sections in the generated artifact.
+    #[test]
+    fn every_page_kind_has_a_distinct_label_and_heading() {
+        let kinds = [
+            PageKind::Home,
+            PageKind::Feature,
+            PageKind::Skill,
+            PageKind::Category,
+            PageKind::Maintainer,
+            PageKind::Listing,
+            PageKind::Utility,
+            PageKind::Legal,
+            PageKind::Docs,
+            PageKind::Detail,
+            PageKind::Other,
+        ];
+        let mut labels = std::collections::BTreeSet::new();
+        let mut headings = std::collections::BTreeSet::new();
+        for kind in kinds {
+            let label = page_kind_label(kind);
+            let heading = page_kind_heading(kind);
+            assert!(!label.is_empty(), "{kind:?} has no label");
+            assert!(!heading.is_empty(), "{kind:?} has no heading");
+            labels.insert(label);
+            headings.insert(heading);
+        }
+        assert_eq!(labels.len(), kinds.len(), "two page kinds share a label");
+        assert_eq!(
+            headings.len(),
+            kinds.len(),
+            "two page kinds share a heading"
+        );
+    }
+
+    // --- route contract ------------------------------------------------
+
+    /// The renderers take a **bare** route (`about`, not `/about`), which is
+    /// what `Site::route_page_pairs` yields and what `classify_page_kind`
+    /// matches its prefixes against.
+    ///
+    /// Nothing enforces that, and the two helpers disagree about it if you get
+    /// it wrong: `classify_page_kind("/features/x")` returns `Detail` because
+    /// the prefix no longer matches, and `render_page_metadata` emits
+    /// `URL: //features/x`. A test that passes a leading-slash route therefore
+    /// looks fine while producing a broken URL and the wrong page kind, so the
+    /// contract is pinned here rather than left to convention.
+    #[test]
+    fn page_helpers_expect_bare_routes_without_a_leading_slash() {
+        let page =
+            page_with_html(r#"<html><head><title>t</title></head><body><h1>t</h1></body></html>"#);
+        let bare = render_page_metadata(&page, "features/fast-audits").join("\n");
+        let slashed = render_page_metadata(&page, "/features/fast-audits").join("\n");
+
+        assert!(bare.contains("URL: /features/fast-audits"), "{bare}");
+        assert!(bare.contains("Kind: Feature"), "{bare}");
+        assert!(
+            slashed.contains("URL: //features/fast-audits"),
+            "documenting the failure mode of a leading slash: {slashed}"
+        );
+        assert!(
+            slashed.contains("Kind: Detail"),
+            "a leading slash also misclassifies the page kind: {slashed}"
+        );
+    }
+
+    // --- page-level rendering -----------------------------------------
+
+    fn page_with_html(raw: &str) -> crate::site::Page {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("dist")).unwrap();
+        std::fs::write(root.join("dist/index.html"), raw).unwrap();
+        let site = load_site(root).unwrap();
+        // `relative_path` is relative to the site root, so it carries the
+        // `dist/` prefix this fixture writes.
+        site.pages
+            .into_iter()
+            .find(|page| page.relative_path.ends_with("index.html"))
+            .expect("index page")
+    }
+
+    /// The Markdown mirror is what a model is pointed at. Its per-page
+    /// metadata block and its body text must both be present, and the title
+    /// becomes the document's single `#` heading.
+    #[test]
+    fn markdown_mirror_renders_title_metadata_and_body() {
+        let page = page_with_html(
+            r#"<html><head><title>Deep Dive</title>
+               <link rel="canonical" href="https://example.com/deep-dive">
+               </head><body>
+               <h1>Deep Dive</h1><p>Body copy that matters.</p>
+               </body></html>"#,
+        );
+        let markdown = render_page_markdown_mirror("deep-dive", &page);
+
+        assert!(markdown.contains("# Deep Dive"), "{markdown}");
+        assert!(markdown.contains("Body copy that matters."), "{markdown}");
+        assert!(
+            markdown.contains("https://example.com/deep-dive"),
+            "{markdown}"
+        );
+        assert!(markdown.contains("Kind:"), "{markdown}");
+    }
+
+    /// A page whose only content is whitespace must not produce a document
+    /// full of empty sections.
+    #[test]
+    fn markdown_mirror_says_so_when_a_page_has_no_visible_text() {
+        // No <title> either: `visible_text` counts it, so a titled page is
+        // never textless.
+        let page = page_with_html(r#"<html><head></head><body></body></html>"#);
+        let markdown = render_page_markdown_mirror("empty", &page);
+        assert!(markdown.contains("_No visible text._"), "{markdown}");
+    }
+
+    /// A page with no title still needs a heading, derived from its route, so
+    /// the mirror is never a headingless document. Path separators become
+    /// spaces so the route reads as words rather than one long slug.
+    #[test]
+    fn markdown_mirror_derives_a_heading_from_the_route_without_a_title() {
+        let page = page_with_html(r#"<html><head></head><body><p>Prose.</p></body></html>"#);
+        let markdown = render_page_markdown_mirror("pricing/compare/plans", &page);
+        assert!(
+            markdown.contains("# pricing / compare / plans"),
+            "expected a route-derived heading: {markdown}"
+        );
+    }
+
+    #[test]
+    fn page_outline_respects_its_limit() {
+        let blocks: String = (1..=10)
+            .map(|i| format!("<section><h2>Section {i}</h2><p>Body {i}</p></section>"))
+            .collect();
+        let page = page_with_html(&format!(
+            r#"<html><head><title>t</title></head><body><h1>t</h1>{blocks}</body></html>"#
+        ));
+        let full = page_outline(&page, 50);
+        assert!(full.len() >= 3, "expected several blocks, got {full:?}");
+        assert_eq!(page_outline(&page, 2).len(), 2);
+        assert_eq!(page_outline(&page, 0).len(), 0);
+    }
+
+    /// Related links are internal routes, deduplicated, and bounded — they
+    /// become a site's own link graph in `llms.txt`, and an unbounded or
+    /// duplicated list makes that graph useless.
+    #[test]
+    fn page_related_links_are_deduplicated_internal_routes() {
+        let page = page_with_html(
+            r#"<html><head><title>t</title></head><body><h1>t</h1>
+               <a href="/a">A</a><a href="/a">A again</a>
+               <a href="/b">B</a><a href="/c">C</a>
+               <a href="https://external.example/">External</a>
+               </body></html>"#,
+        );
+        // Internal links arrive normalised to bare routes by the parser, so
+        // they line up with the route form the rest of the generator uses.
+        let all = page_related_links(&page, 50);
+        assert!(all.contains(&"a".to_string()), "{all:?}");
+        assert!(all.contains(&"b".to_string()), "{all:?}");
+        assert_eq!(
+            all.iter().filter(|link| *link == "a").count(),
+            1,
+            "a route linked twice must appear once: {all:?}"
+        );
+        assert!(
+            !all.iter().any(|link| link.contains("external")),
+            "an offsite link is not an internal route: {all:?}"
+        );
+        assert_eq!(page_related_links(&page, 2).len(), 2);
+    }
+
+    /// `llms.txt` tells a model what a site is about, so schema types are the
+    /// strongest available signal and must be collected from every JSON-LD
+    /// block, including nested `@graph` entries.
+    #[test]
+    fn schema_types_are_collected_from_every_json_ld_block() {
+        let page = page_with_html(
+            r#"<html><head><title>t</title>
+               <script type="application/ld+json">{"@type":"WebSite"}</script>
+               <script type="application/ld+json">{"@graph":[
+                   {"@type":"Organization"},{"@type":"WebSite"}
+               ]}</script>
+               </head><body><h1>t</h1></body></html>"#,
+        );
+        let types = schema_types_for_page(&page);
+        assert!(types.contains(&"WebSite".to_string()), "{types:?}");
+        assert!(types.contains(&"Organization".to_string()), "{types:?}");
+    }
+
+    /// A JSON-LD block that is not valid JSON is site content; the generator
+    /// must degrade rather than fail the whole artifact.
+    #[test]
+    fn malformed_json_ld_does_not_break_schema_extraction() {
+        let page = page_with_html(
+            r#"<html><head><title>t</title>
+               <script type="application/ld+json">{not json at all</script>
+               </head><body><h1>t</h1></body></html>"#,
+        );
+        let _ = schema_types_for_page(&page);
+    }
+
+    /// Absent fields must be omitted, and an absent description is
+    /// distinguishable from an empty one.
+    #[test]
+    fn page_metadata_marks_absent_fields_rather_than_blanking_them() {
+        let rich = page_with_html(
+            r#"<html><head><title>Rich</title>
+               <meta name="description" content="A described page.">
+               <link rel="canonical" href="https://example.com/rich">
+               </head><body><h1>Rich</h1></body></html>"#,
+        );
+        let metadata = render_page_metadata(&rich, "rich").join("\n");
+        assert!(metadata.contains("A described page."), "{metadata}");
+        assert!(metadata.contains("https://example.com/rich"), "{metadata}");
+
+        let bare = page_with_html(
+            r#"<html><head><title>Bare</title></head><body><h1>Bare</h1></body></html>"#,
+        );
+        let metadata = render_page_metadata(&bare, "bare").join("\n");
+        // `H1` and `Canonical` have explicit "(none)" markers, so a reader can
+        // tell "absent" from "not checked".
+        assert!(metadata.contains("H1: Bare"), "{metadata}");
+    }
+
+    /// Alt-text coverage is a summary a model can act on, so it is a ratio of
+    /// captioned images. An empty `alt` is decorative and does not count.
+    #[test]
+    fn image_alt_summary_is_a_ratio_of_decorative_excluded() {
+        let page = page_with_html(
+            r#"<html><head><title>t</title></head><body><h1>t</h1>
+               <img src="/a.png" alt="First">
+               <img src="/b.png" alt="Second">
+               <img src="/c.png" alt="">
+               <img src="/d.png">
+               </body></html>"#,
+        );
+        let summary = image_alt_summary(&page);
+        assert_eq!(summary, "2/4 images with alt text", "{summary}");
+    }
+
+    #[test]
+    fn image_alt_summary_handles_a_page_with_no_images() {
+        let page =
+            page_with_html(r#"<html><head><title>t</title></head><body><h1>t</h1></body></html>"#);
+        assert_eq!(image_alt_summary(&page), "0/0 images with alt text");
+    }
+
+    /// The summary is derived from page text and becomes prompt input, so it
+    /// must stay short.
+    #[test]
+    fn page_summary_is_bounded() {
+        let long: String = "word ".repeat(400);
+        let page = page_with_html(&format!(
+            r#"<html><head><title>t</title></head><body><h1>t</h1><p>{long}</p></body></html>"#
+        ));
+        let summary = page_summary(&page);
+        assert!(!summary.is_empty(), "{summary}");
+        assert!(
+            summary.len() < 500,
+            "a summary of {} bytes is not a summary",
+            summary.len()
+        );
+    }
+
+    #[test]
+    fn visible_text_collapses_whitespace() {
+        assert_eq!(visible_text("  a   b  "), "a b");
+        assert_eq!(visible_text(""), "");
+    }
+
+    /// `indexability` decides whether a route reaches the sitemap, so a
+    /// noindex page must be excluded even though the route exists.
+    #[test]
+    fn page_is_indexable_rejects_noindex() {
+        let noindex = page_with_html(
+            r#"<html><head><title>t</title><meta name="robots" content="noindex"></head><body><h1>t</h1></body></html>"#,
+        );
+        assert!(
+            !page_is_indexable(&noindex),
+            "a noindex page must not reach the sitemap"
+        );
+
+        let indexable = page_with_html(
+            r#"<html><head><title>t</title><meta name="robots" content="index"></head><body><h1>t</h1></body></html>"#,
+        );
+        assert!(page_is_indexable(&indexable));
     }
 }
