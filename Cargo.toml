@@ -9,7 +9,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.0.20"
+version = "0.0.21"
 edition = "2024"
 # Minimum supported Rust version. `edition = "2024"` already requires 1.85;
 # stating it explicitly turns "your toolchain is too old" into a cargo error
