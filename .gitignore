@@ -36,7 +36,8 @@ tmp/
 
 # Tooling scratch directories. These are local agent/tooling state, not
 # part of the project, and must never be committed.
-.aethyme/
+.aethyme/*
+!.aethyme/config.toml
 .chau7/
 
 # Python leftovers from before the workspace moved to Rust. The last two
