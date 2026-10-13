@@ -128,6 +128,12 @@ version, since 0.8.19 had never been published.
 
 ## [Unreleased]
 
+## [0.8.20] - 2026-10-13
+
+### Added
+
+- Include image quality rules IMG001 through IMG010 in the bundled Rust/WASM evaluator, covering alternative text, dimensions, modern formats, responsive markup and optional sitemap metadata. Findings remain non-destructive and never rewrite image assets.
+
 ## [0.8.18] - 2026-09-28
 
 ### Added
