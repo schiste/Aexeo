@@ -184,15 +184,34 @@ fn local_asset_relative_path(page: &Page, src: &str, site_url: Option<&str>) -> 
     (!normalized.as_os_str().is_empty()).then_some(normalized)
 }
 
+fn report_unavailable_image_asset(
+    findings: &mut Vec<Finding>,
+    unavailable_sources: &mut std::collections::HashSet<String>,
+    page: &Page,
+    image: &crate::site::ImageReference,
+    src: &str,
+    message: String,
+) {
+    unavailable_sources.insert(src.to_string());
+    findings.push(finding(
+        "IMG004",
+        message,
+        "Check the asset path and build output; local image sources must resolve to regular files. External and data URLs are not checked.",
+        page,
+        image.line,
+        image.column,
+    ));
+}
+
 fn collect_asset_findings(
     page: &Page,
     site: &Site,
     config: &Config,
 ) -> (Vec<Finding>, std::collections::HashSet<String>) {
     let mut findings = Vec::new();
-    let mut missing_sources = std::collections::HashSet::new();
+    let mut unavailable_sources = std::collections::HashSet::new();
     let Ok(canonical_root) = fs::canonicalize(&site.root) else {
-        return (findings, missing_sources);
+        return (findings, unavailable_sources);
     };
     for image in &page.images {
         let mut seen_sources = std::collections::HashSet::new();
@@ -213,38 +232,48 @@ fn collect_asset_findings(
                     let Ok(metadata) = fs::metadata(&canonical_asset) else {
                         continue;
                     };
-                    if metadata.is_file() && metadata.len() > config.images.max_bytes {
-                        findings.push(finding(
-                            "IMG003",
-                            format!(
-                                "local image is {} bytes, above the configured {}-byte budget: {}",
-                                metadata.len(),
-                                config.images.max_bytes,
-                                src
-                            ),
-                            "Compress or resize a copy and compare visual quality before replacing the published asset.",
+                    if metadata.is_file() {
+                        if metadata.len() > config.images.max_bytes {
+                            findings.push(finding(
+                                "IMG003",
+                                format!(
+                                    "local image is {} bytes, above the configured {}-byte budget: {}",
+                                    metadata.len(),
+                                    config.images.max_bytes,
+                                    src
+                                ),
+                                "Compress or resize a copy and compare visual quality before replacing the published asset.",
+                                page,
+                                image.line,
+                                image.column,
+                            ));
+                        }
+                    } else {
+                        report_unavailable_image_asset(
+                            &mut findings,
+                            &mut unavailable_sources,
                             page,
-                            image.line,
-                            image.column,
-                        ));
+                            image,
+                            src,
+                            format!("local image asset is not a regular file: {}", src),
+                        );
                     }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    missing_sources.insert(src.to_string());
-                    findings.push(finding(
-                        "IMG004",
-                        format!("local image asset does not exist: {}", src),
-                        "Check the asset path and the build output; external and data URLs are not checked as local files.",
+                    report_unavailable_image_asset(
+                        &mut findings,
+                        &mut unavailable_sources,
                         page,
-                        image.line,
-                        image.column,
-                    ));
+                        image,
+                        src,
+                        format!("local image asset does not exist: {}", src),
+                    );
                 }
                 _ => {}
             }
         }
     }
-    (findings, missing_sources)
+    (findings, unavailable_sources)
 }
 
 fn collect_alt_findings(page: &Page, config: &Config) -> Vec<Finding> {
@@ -329,7 +358,7 @@ fn collect_caption_findings(page: &Page, config: &Config) -> Vec<Finding> {
 fn collect_format_findings(
     page: &Page,
     config: &Config,
-    missing_sources: &std::collections::HashSet<String>,
+    unavailable_sources: &std::collections::HashSet<String>,
 ) -> Vec<Finding> {
     if !config.images.prefer_modern_formats {
         return Vec::new();
@@ -342,7 +371,7 @@ fn collect_format_findings(
                     || image
                         .modern_sources
                         .iter()
-                        .any(|source| !missing_sources.contains(source)));
+                        .any(|source| !unavailable_sources.contains(source)));
             if has_available_modern_source {
                 return None;
             }
@@ -711,9 +740,9 @@ pub fn run_image_rules(site: &Site, config: &Config) -> Vec<Finding> {
     let mut origin_unavailable = false;
     for page in site.route_pages() {
         findings.extend(collect_filename_findings(page, config));
-        let (asset_findings, missing_sources) = collect_asset_findings(page, site, config);
+        let (asset_findings, unavailable_sources) = collect_asset_findings(page, site, config);
         findings.extend(asset_findings);
-        findings.extend(collect_format_findings(page, config, &missing_sources));
+        findings.extend(collect_format_findings(page, config, &unavailable_sources));
         findings.extend(collect_alt_findings(page, config));
         findings.extend(collect_dimension_findings(page, config));
         findings.extend(collect_caption_findings(page, config));
@@ -1285,6 +1314,61 @@ mod tests {
         let findings = run_image_rules(&site, &Config::default());
 
         assert!(findings.iter().any(|finding| finding.rule_id == "IMG006"));
+    }
+
+    #[test]
+    fn recognizes_percent_encoded_modern_source_extensions_without_type() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        fs::create_dir_all(root.join("images")).unwrap();
+        fs::write(root.join("images/responsive-photo.jpg"), b"fallback").unwrap();
+        fs::write(root.join("images/responsive-photo.webp"), b"modern").unwrap();
+        fs::write(
+            root.join("index.html"),
+            "<html><body><picture><source srcset=\"/images/responsive-photo%2Ewebp?v=1\"><img src=\"/images/responsive-photo.jpg\" alt=\"A city\" width=\"640\" height=\"480\"></picture></body></html>",
+        )
+        .unwrap();
+        let site = load_site(root).unwrap();
+
+        let findings = run_image_rules(&site, &Config::default());
+
+        assert!(
+            !findings.iter().any(|finding| {
+                finding.rule_id == "IMG005" && finding.message.contains("responsive-photo.jpg")
+            }),
+            "an existing percent-encoded WebP source should satisfy IMG005"
+        );
+    }
+
+    #[test]
+    fn rejects_directory_as_an_available_modern_image_source() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        fs::create_dir_all(root.join("images/modern.webp")).unwrap();
+        fs::write(root.join("images/fallback.jpg"), b"fallback").unwrap();
+        fs::write(
+            root.join("index.html"),
+            "<html><body><picture><source srcset=\"/images/modern.webp\"><img src=\"/images/fallback.jpg\" alt=\"A landscape\" width=\"640\" height=\"480\"></picture></body></html>",
+        )
+        .unwrap();
+        let site = load_site(root).unwrap();
+
+        let findings = run_image_rules(&site, &Config::default());
+
+        assert!(
+            findings.iter().any(|finding| {
+                finding.rule_id == "IMG004"
+                    && finding.message.contains("modern.webp")
+                    && finding.message.contains("regular file")
+            }),
+            "a directory at an image candidate path should be diagnosed as a non-file asset"
+        );
+        assert!(
+            findings.iter().any(|finding| {
+                finding.rule_id == "IMG005" && finding.message.contains("fallback.jpg")
+            }),
+            "a directory must not count as an available modern image candidate"
+        );
     }
 
     #[test]

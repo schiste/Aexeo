@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use super::{
     AlternateLink, Block, DetailsBlock, ImageReference, JsonLdBlock, Link, Page, PreBlock,
-    capture_route_for_relative_path, classify_page_kind, line_column_for, normalize_internal_href,
-    strip_tags,
+    capture_route_for_relative_path, classify_page_kind, decode_url_path, line_column_for,
+    normalize_internal_href, strip_tags,
 };
 
 pub(super) fn parse_page_from_file(path: &Path, root: &Path) -> Result<Page> {
@@ -406,6 +406,9 @@ fn parse_srcset_urls(srcset: &str) -> Vec<String> {
 
 fn is_modern_image_candidate(candidate: &str) -> bool {
     let path = candidate.split(['?', '#']).next().unwrap_or_default();
+    let Some(path) = decode_url_path(path) else {
+        return false;
+    };
     let filename = path.rsplit('/').next().unwrap_or_default();
     filename.rsplit_once('.').is_some_and(|(_, extension)| {
         matches!(extension.to_ascii_lowercase().as_str(), "avif" | "webp")
