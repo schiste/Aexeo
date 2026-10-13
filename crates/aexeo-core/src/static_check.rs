@@ -10,6 +10,7 @@ use crate::config::{Config, default_rule_switches, load_config};
 use crate::content_rules::run_content_rules;
 use crate::editorial_rules::run_editorial_rules;
 use crate::html_rules::run_html_rules;
+use crate::image_rules::run_image_rules;
 use crate::link_rules::run_link_rules;
 use crate::llm_rules::run_llm_rules;
 use crate::policy::apply_policy;
@@ -160,6 +161,13 @@ pub fn run_checks_for_site_profiled(site: &crate::site::Site, config: &Config) -
         || run_content_rules(site, config),
     );
     time_rule_group(
+        rules.checks.get("images").copied().unwrap_or(true),
+        "images",
+        &mut rule_timings,
+        &mut findings,
+        || run_image_rules(site, config),
+    );
+    time_rule_group(
         rules.checks.get("editorial").copied().unwrap_or(true),
         "editorial",
         &mut rule_timings,
@@ -234,6 +242,7 @@ pub fn can_run_native_static_audit(config: &Config) -> bool {
                     | "headers"
                     | "schema"
                     | "content"
+                    | "images"
                     | "editorial"
                     | "structure"
                     | "accessibility"
@@ -348,5 +357,51 @@ mod tests {
         fs::write(root.join("_worker.js/index.js"), "export default {};").unwrap();
         let (_, findings) = run_native_static_audit(root, None).unwrap();
         assert!(findings.iter().any(|finding| finding.rule_id == "DEP001"));
+    }
+
+    #[test]
+    fn image_audit_flags_non_descriptive_filenames() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        fs::create_dir_all(root.join("images")).unwrap();
+        fs::write(root.join("images/IMG_9482.jpg"), b"image fixture").unwrap();
+        fs::write(
+            root.join("index.html"),
+            "<html><head><title>Chair setup</title></head><body><h1>Chair setup</h1><img src=\"/images/IMG_9482.jpg\" alt=\"Ergonomic chair at a desk\" width=\"640\" height=\"480\"></body></html>",
+        )
+        .unwrap();
+
+        let findings =
+            super::run_native_static_audit_with_config(root, &Config::default()).unwrap();
+
+        assert!(
+            findings.iter().any(|finding| finding.rule_id == "IMG001"),
+            "expected a filename-quality finding, got {:?}",
+            findings
+                .iter()
+                .map(|finding| &finding.rule_id)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn image_audit_flags_filenames_outside_lowercase_kebab_case() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        fs::create_dir_all(root.join("images")).unwrap();
+        fs::write(root.join("images/Office_Chair.JPG"), b"image fixture").unwrap();
+        fs::write(
+            root.join("index.html"),
+            "<html><head><title>Chair setup</title></head><body><h1>Chair setup</h1><img src=\"/images/Office_Chair.JPG\" alt=\"Ergonomic chair at a desk\" width=\"640\" height=\"480\"></body></html>",
+        )
+        .unwrap();
+
+        let findings =
+            super::run_native_static_audit_with_config(root, &Config::default()).unwrap();
+
+        assert!(
+            findings.iter().any(|finding| finding.rule_id == "IMG002"),
+            "expected a filename-style finding"
+        );
     }
 }

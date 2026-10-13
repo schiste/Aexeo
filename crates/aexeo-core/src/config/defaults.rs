@@ -127,6 +127,7 @@ pub fn default_rule_switches() -> BTreeMap<&'static str, bool> {
         ("llm", true),
         ("surfaces", true),
         ("content", true),
+        ("images", true),
         ("editorial", true),
         ("structure", true),
         ("accessibility", true),

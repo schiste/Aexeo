@@ -9,12 +9,13 @@ use crate::plugin::validate_plugin_settings;
 
 const VERSIONED_TOP_LEVEL_TABLES: &[&str] =
     &["site", "runtime", "policy", "rules", "output", "quality"];
-// `[accessibility]`, `[agent_discovery]`, and `[editorial]` live outside the
+// `[accessibility]`, `[agent_discovery]`, `[editorial]`, and `[images]` live outside the
 // versioned set because they have no flat-key counterpart — there's
 // nothing in old configs for the version=1 gate to protect against.
 // Users can adopt these settings on any config shape without needing to
 // migrate to versioned form.
-const UNVERSIONED_NEW_TABLES: &[&str] = &["accessibility", "agent_discovery", "editorial"];
+const UNVERSIONED_NEW_TABLES: &[&str] =
+    &["accessibility", "agent_discovery", "editorial", "images"];
 const FLAT_TOP_LEVEL_KEYS: &[&str] = &[
     "site_url",
     "source_dir",
@@ -467,6 +468,21 @@ fn validate_versioned_sections(root: &toml::map::Map<String, Value>) -> Result<(
             "[quality]",
         )?;
     }
+    if let Some(value) = root.get("images") {
+        validate_allowed_keys(
+            expect_table(value, "images", "config root")?,
+            &[
+                "max_bytes",
+                "max_alt_characters",
+                "prefer_modern_formats",
+                "require_dimensions",
+                "require_image_sitemap",
+                "require_image_object_metadata",
+                "recommend_figure_captions",
+            ],
+            "[images]",
+        )?;
+    }
     if let Some(value) = root.get("accessibility") {
         validate_allowed_keys(
             expect_table(value, "accessibility", "config root")?,
@@ -891,6 +907,36 @@ mod tests {
                 .unwrap_or(false)
         );
         assert_eq!(config.default_twitter_card, "summary");
+    }
+
+    #[test]
+    fn loads_image_quality_policy_options() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join("aexeo.toml"),
+            r#"
+version = 1
+[images]
+max_bytes = 140000
+max_alt_characters = 150
+prefer_modern_formats = false
+require_dimensions = false
+require_image_sitemap = true
+require_image_object_metadata = true
+recommend_figure_captions = false
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(temp_dir.path(), None).unwrap();
+
+        assert_eq!(config.images.max_bytes, 140_000);
+        assert_eq!(config.images.max_alt_characters, 150);
+        assert!(!config.images.prefer_modern_formats);
+        assert!(!config.images.require_dimensions);
+        assert!(config.images.require_image_sitemap);
+        assert!(config.images.require_image_object_metadata);
+        assert!(!config.images.recommend_figure_captions);
     }
 
     #[test]

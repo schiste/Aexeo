@@ -8,6 +8,7 @@ use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use url::Url;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AlternateLink {
@@ -111,6 +112,14 @@ pub struct ImageReference {
     /// as `role`: marks the image as not-conveying-information so
     /// strict missing-alt checks can be relaxed.
     pub aria_hidden: bool,
+    /// Intrinsic HTML attributes used to reserve layout space.
+    pub width: Option<String>,
+    pub height: Option<String>,
+    /// True when the enclosing `<picture>` has an AVIF or WebP source.
+    pub has_modern_source: bool,
+    /// Whether the image belongs to a `<figure>` and its visible caption, if any.
+    pub inside_figure: bool,
+    pub figure_caption: Option<String>,
 }
 
 impl ImageReference {
@@ -333,6 +342,48 @@ pub fn normalize_internal_href(href: &str) -> Option<String> {
     }
     let trimmed = cleaned.trim_start_matches('/').trim_end_matches('/');
     Some(trimmed.to_string())
+}
+
+pub(crate) fn decode_url_path(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut offset = 0;
+    while offset < bytes.len() {
+        if bytes[offset] == b'%' {
+            let high = hex_digit(*bytes.get(offset + 1)?)?;
+            let low = hex_digit(*bytes.get(offset + 2)?)?;
+            let byte = (high << 4) | low;
+            if byte == 0 {
+                return None;
+            }
+            decoded.push(byte);
+            offset += 3;
+        } else {
+            decoded.push(bytes[offset]);
+            offset += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+pub(crate) fn sitemap_image_urls(
+    root: &Path,
+    allowed_origin: Option<&str>,
+) -> anyhow::Result<BTreeSet<String>> {
+    sitemap::read_sitemap_image_urls(&root.join("sitemap.xml"), root, allowed_origin)
+}
+
+pub(crate) fn sitemap_image_urls_from_text(text: &str) -> Option<BTreeSet<String>> {
+    sitemap::read_sitemap_image_urls_from_text(text)
 }
 
 pub fn route_from_urlish(value: &str) -> Option<String> {
@@ -660,6 +711,24 @@ pub fn build_site_from_audit_snapshot(snapshot: &AuditSiteSnapshot) -> Result<Si
     })
 }
 
+fn page_sitemap_origin(page: &Page) -> Option<String> {
+    let value = page
+        .canonical
+        .as_deref()
+        .or_else(|| page.meta_by_property.get("og:url").map(String::as_str))?;
+    let url = Url::parse(value.trim()).ok()?;
+    matches!(url.scheme(), "http" | "https")
+        .then(|| url.origin().ascii_serialization().to_ascii_lowercase())
+}
+
+fn primary_site_sitemap_origin(pages: &[Page]) -> Option<String> {
+    pages
+        .iter()
+        .find(|page| page.route.is_empty())
+        .and_then(page_sitemap_origin)
+        .or_else(|| pages.iter().find_map(page_sitemap_origin))
+}
+
 pub fn load_site(root: &Path) -> Result<Site> {
     let mut html_files = Vec::new();
     iter_html_files(root, &mut html_files)?;
@@ -682,8 +751,9 @@ pub fn load_site(root: &Path) -> Result<Site> {
         crawl_meta: None,
     })?;
     site.indexed_paths = build_site_index(root)?;
+    let allowed_origin = primary_site_sitemap_origin(&site.pages);
     let (sitemap_routes, sitemap_error) =
-        sitemap::read_sitemap_routes(&root.join("sitemap.xml"), root);
+        sitemap::read_sitemap_routes(&root.join("sitemap.xml"), root, allowed_origin.as_deref());
     site.sitemap_routes = sitemap_routes;
     site.sitemap_error = sitemap_error;
     Ok(site)
@@ -716,6 +786,92 @@ mod tests {
     }
 
     #[test]
+    fn captures_image_dimensions_picture_formats_and_visible_figure_captions() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><body><picture><source type=\"image/avif\" srcset=\"/images/chair.avif\"><img src=\"/images/chair.jpg\" alt=\"Office chair\" width=\"640\" height=\"480\"></picture><figure><img src=\"/images/desk.jpg\" alt=\"Desk setup\"><figcaption>A desk with a chair and monitor.</figcaption></figure><IMG SRC = \"/images/alternate.png\" ALT = \"Alternate asset\" WIDTH = \"320\" HEIGHT = \"240\"><img src=\"/images/angle>asset.png\" alt=\"Angle bracket asset\" width=\"320\" height=\"240\"><!-- <img src=\"/images/commented.webp\" alt=\"Commented\"> --><script>const html = '<img src=\"/images/script.webp\" alt=\"Script\">';</script><img-widget src=\"/images/widget.webp\" alt=\"Widget\"></body></html>",
+        );
+
+        let site = load_site(root).unwrap();
+        let images = &site.page("").unwrap().images;
+
+        assert_eq!(images.len(), 4);
+        assert_eq!(images[0].width.as_deref(), Some("640"));
+        assert_eq!(images[0].height.as_deref(), Some("480"));
+        assert!(images[0].has_modern_source);
+        assert!(!images[0].inside_figure);
+        assert!(images[1].inside_figure);
+        assert_eq!(
+            images[1].figure_caption.as_deref(),
+            Some("A desk with a chair and monitor.")
+        );
+        assert_eq!(images[2].src, "/images/alternate.png");
+        assert_eq!(images[2].alt.as_deref(), Some("Alternate asset"));
+        assert_eq!(images[2].width.as_deref(), Some("320"));
+        assert_eq!(images[2].height.as_deref(), Some("240"));
+        assert_eq!(images[3].src, "/images/angle>asset.png");
+        assert_eq!(images[3].alt.as_deref(), Some("Angle bracket asset"));
+    }
+
+    #[test]
+    fn does_not_capture_template_images_after_a_rawtext_template_closer() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><body><template><script>const s = \"</template>\";</script><img src=\"/images/template-only.webp\" alt=\"Template\"></template><img src=\"/images/visible.webp\" alt=\"Visible\"></body></html>",
+        );
+
+        let site = load_site(root).unwrap();
+        let images = &site.page("").unwrap().images;
+
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].src, "/images/visible.webp");
+    }
+
+    #[test]
+    fn ignores_script_markup_and_figure_tag_prefixes_when_associating_images() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><body><script>const fake = '<picture><source type=\"image/webp\"><figure>';</script><img src=\"/images/legacy-photo.jpg\" alt=\"Legacy photo\"><figure-widget><img src=\"/images/widget-photo.jpg\" alt=\"Widget photo\"></figure-widget></body></html>",
+        );
+
+        let site = load_site(root).unwrap();
+        let images = &site.page("").unwrap().images;
+
+        assert_eq!(images.len(), 2);
+        assert!(!images[0].has_modern_source);
+        assert!(!images[1].inside_figure);
+    }
+
+    #[test]
+    fn does_not_read_nested_route_sitemaps_from_another_origin() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><link rel=\"canonical\" href=\"https://example.com/\"></head><body><h1>Home</h1></body></html>",
+        );
+        write(
+            &root.join("sitemap.xml"),
+            "<sitemapindex><sitemap><loc>https://evil.example/sitemaps/images</loc></sitemap></sitemapindex>",
+        );
+        write(
+            &root.join("sitemaps/images"),
+            "<urlset><url><loc>https://example.com/leaked-route</loc></url></urlset>",
+        );
+
+        let site = load_site(root).unwrap();
+
+        assert!(!site.sitemap_routes.contains("leaked-route"));
+        assert!(site.sitemap_error.is_some());
+    }
+
+    #[test]
     fn loads_clean_route_pages_and_nested_sitemap() {
         let temp_dir = tempfile::tempdir().unwrap();
         let root = temp_dir.path();
@@ -729,11 +885,11 @@ mod tests {
         );
         write(
             &root.join("sitemap.xml"),
-            "<sitemapindex><sitemap><loc>https://example.com/sitemap-core.xml</loc></sitemap></sitemapindex>",
+            "<s:sitemapindex xmlns:s=\"http://www.sitemaps.org/schemas/sitemap/0.9\"><s:sitemap><s:loc>https://example.com/sitemap-core.xml</s:loc></s:sitemap></s:sitemapindex>",
         );
         write(
             &root.join("sitemap-core.xml"),
-            "<urlset><url><loc>https://example.com/guide</loc></url></urlset>",
+            "<s:urlset xmlns:s=\"http://www.sitemaps.org/schemas/sitemap/0.9\" xmlns:img=\"http://www.google.com/schemas/sitemap-image/1.1\"><s:url><s:loc>https://example.com/guide</s:loc><img:image><img:loc>https://example.com/images/picture.webp</img:loc></img:image></s:url></s:urlset>",
         );
         write(&root.join("llms.txt"), "# Site\n\n## Pages\n");
         let site = load_site(root).unwrap();
@@ -741,6 +897,7 @@ mod tests {
         assert!(site.has_route("guide"));
         assert!(site.indexed_paths.contains("guide"));
         assert!(site.sitemap_routes.contains("guide"));
+        assert!(!site.sitemap_routes.contains("images/picture.webp"));
         assert!(site.llms_text.is_some());
         let home = site.page("").unwrap();
         assert_eq!(

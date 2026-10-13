@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-use super::{Config, Editorial, RoutePolicyOverride, SuppressionRule};
+use super::{Config, Editorial, ImageQuality, RoutePolicyOverride, SuppressionRule};
 
 #[derive(Debug, Clone, Serialize)]
 struct ResolvedConfigDocument {
@@ -18,6 +18,7 @@ struct ResolvedConfigDocument {
     rules: RulesSection,
     output: OutputSection,
     quality: QualitySection,
+    images: ImageQuality,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -251,6 +252,7 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
         quality: QualitySection {
             performance_budget_file: config.performance_budget_file.clone(),
         },
+        images: config.images.clone(),
     }
 }
 
@@ -282,7 +284,10 @@ mod tests {
         assert!(toml.contains("version = 1"));
         assert!(toml.contains("[rules.links]"));
         assert!(toml.contains("enabled = false"));
+        assert!(toml.contains("[images]"));
+        assert!(toml.contains("max_bytes = 100000"));
         assert!(json.contains("\"version\": 1"));
         assert!(json.contains("\"links\""));
+        assert!(json.contains("\"images\""));
     }
 }

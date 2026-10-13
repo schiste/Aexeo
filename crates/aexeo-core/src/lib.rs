@@ -12,6 +12,7 @@ pub mod fix;
 pub mod generate;
 pub mod header_rules;
 pub mod html_rules;
+pub mod image_rules;
 #[cfg(feature = "net")]
 pub mod integrations;
 pub mod intelligence;
@@ -61,6 +62,7 @@ pub use generate::{
 };
 pub use header_rules::run_header_rules;
 pub use html_rules::{run_html_rules, run_static_html_audit};
+pub use image_rules::run_image_rules;
 #[cfg(feature = "net")]
 pub use integrations::{
     BingAiImportReport, BingAiOpportunity, BingAiOpportunityReport, BingAiRecord, BingAiTrendDelta,

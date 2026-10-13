@@ -74,6 +74,16 @@ pub fn render_config_reference() -> String {
         // `check-config`. `performance_budget_file` is the one key in this
         // table that is actually read.
         "performance_budget_file = \"performance-budget.json\"".to_string(),
+        String::new(),
+        "[images]".to_string(),
+        "# Advisory budgets, not universal requirements; assets are never rewritten.".to_string(),
+        "max_bytes = 100_000".to_string(),
+        "max_alt_characters = 125".to_string(),
+        "prefer_modern_formats = true".to_string(),
+        "require_dimensions = true".to_string(),
+        "require_image_sitemap = false".to_string(),
+        "require_image_object_metadata = false".to_string(),
+        "recommend_figure_captions = true".to_string(),
         "```".to_string(),
         String::new(),
         "## Editor And CI Consumption".to_string(),

@@ -500,6 +500,11 @@ mod tests {
             column: 1,
             role: None,
             aria_hidden: false,
+            width: None,
+            height: None,
+            has_modern_source: false,
+            inside_figure: false,
+            figure_caption: None,
         }
     }
 

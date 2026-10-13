@@ -82,3 +82,13 @@ audit_log_limit = 5
 # does not exist. The loader now rejects them outright rather than ignoring
 # them, which is why this example would fail `check-config` with them present.
 performance_budget_file = "performance-budget.json"
+
+[images]
+# Advisory budgets, not universal requirements. Image files are never rewritten.
+max_bytes = 100_000
+max_alt_characters = 125
+prefer_modern_formats = true
+require_dimensions = true
+require_image_sitemap = false
+require_image_object_metadata = false
+recommend_figure_captions = true

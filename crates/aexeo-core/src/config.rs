@@ -161,6 +161,9 @@ pub struct Config {
     /// decorative-image detection).
     #[serde(default)]
     pub accessibility: Accessibility,
+    /// Advisory image-quality budgets and opt-in discovery metadata policies.
+    #[serde(default)]
+    pub images: ImageQuality,
     /// Agent-discovery audit configuration. Nested
     /// `[agent_discovery]` block in TOML; defaults to disabled
     /// because the underlying specs (RFC 9727 api-catalog,
@@ -283,6 +286,40 @@ impl Default for AgentDiscovery {
     }
 }
 
+/// Image-management budgets and optional metadata requirements.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ImageQuality {
+    /// Advisory maximum encoded size for local image assets, in bytes.
+    pub max_bytes: u64,
+    /// Preferred maximum length for informative alt text, in Unicode characters.
+    pub max_alt_characters: usize,
+    /// Recommend WebP/AVIF for JPEG and PNG assets without rewriting files.
+    pub prefer_modern_formats: bool,
+    /// Warn when an image lacks valid intrinsic width and height attributes.
+    pub require_dimensions: bool,
+    /// Require every informative local image to appear in an image sitemap.
+    pub require_image_sitemap: bool,
+    /// Opt in to requiring matching ImageObject creator and license metadata.
+    pub require_image_object_metadata: bool,
+    /// Recommend visible captions for informative images inside <figure>.
+    pub recommend_figure_captions: bool,
+}
+
+impl Default for ImageQuality {
+    fn default() -> Self {
+        Self {
+            max_bytes: 100_000,
+            max_alt_characters: 125,
+            prefer_modern_formats: true,
+            require_dimensions: true,
+            require_image_sitemap: false,
+            require_image_object_metadata: false,
+            recommend_figure_captions: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigFieldDoc {
     pub key: &'static str,
@@ -379,6 +416,7 @@ impl Default for Config {
             require_robots_sitemap: default_require_robots_sitemap(),
             weak_anchor_text: default_weak_anchor_text(),
             accessibility: Accessibility::default(),
+            images: ImageQuality::default(),
             agent_discovery: AgentDiscovery::default(),
             plugin_settings: BTreeMap::new(),
             performance_budget_file: default_performance_budget_file(),

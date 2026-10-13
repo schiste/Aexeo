@@ -231,6 +231,49 @@
       },
       "type": "array"
     },
+    "images": {
+      "additionalProperties": false,
+      "properties": {
+        "max_alt_characters": {
+          "default": 125,
+          "description": "Advisory maximum length for informative alt text, in Unicode characters.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_bytes": {
+          "default": 100000,
+          "description": "Advisory maximum encoded size for local image assets, in bytes.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "prefer_modern_formats": {
+          "default": true,
+          "description": "Recommend WebP/AVIF picture sources for JPEG/PNG without rewriting assets.",
+          "type": "boolean"
+        },
+        "recommend_figure_captions": {
+          "default": true,
+          "description": "Recommend visible captions for informative images inside figure elements.",
+          "type": "boolean"
+        },
+        "require_dimensions": {
+          "default": true,
+          "description": "Warn when an image lacks positive intrinsic width and height attributes.",
+          "type": "boolean"
+        },
+        "require_image_object_metadata": {
+          "default": false,
+          "description": "Opt in to requiring matching ImageObject contentUrl, creator, and license metadata.",
+          "type": "boolean"
+        },
+        "require_image_sitemap": {
+          "default": false,
+          "description": "Opt in to checking informative local images against image sitemap entries.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "link_suggestion_count": {
       "description": "Candidate internal-link suggestions per weakly linked page.",
       "minimum": 0,

@@ -281,6 +281,11 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
             description: "Whether robots.txt must declare the sitemap URL.",
         },
         ConfigFieldDoc {
+            key: "images",
+            default_value: "advisory budgets; optional metadata checks disabled",
+            description: "Image-quality budgets and opt-in discovery metadata checks. The 100,000-byte and 125-character defaults are configurable advisory targets, not universal requirements.",
+        },
+        ConfigFieldDoc {
             key: "weak_anchor_text",
             default_value: "`click here`, `here`, `learn more`, `more`, `read more`",
             description: "Anchor phrases treated as weak for internal-link quality checks.",
@@ -702,6 +707,22 @@ fn flat_properties() -> Map<String, Value> {
 fn nested_properties() -> Map<String, Value> {
     let mut properties = Map::new();
     properties.insert(
+        "images".to_string(),
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "max_bytes": { "type": "integer", "minimum": 0, "default": 100000, "description": "Advisory maximum encoded size for local image assets, in bytes." },
+                "max_alt_characters": { "type": "integer", "minimum": 0, "default": 125, "description": "Advisory maximum length for informative alt text, in Unicode characters." },
+                "prefer_modern_formats": { "type": "boolean", "default": true, "description": "Recommend WebP/AVIF picture sources for JPEG/PNG without rewriting assets." },
+                "require_dimensions": { "type": "boolean", "default": true, "description": "Warn when an image lacks positive intrinsic width and height attributes." },
+                "require_image_sitemap": { "type": "boolean", "default": false, "description": "Opt in to checking informative local images against image sitemap entries." },
+                "require_image_object_metadata": { "type": "boolean", "default": false, "description": "Opt in to requiring matching ImageObject contentUrl, creator, and license metadata." },
+                "recommend_figure_captions": { "type": "boolean", "default": true, "description": "Recommend visible captions for informative images inside figure elements." }
+            }
+        }),
+    );
+    properties.insert(
         "site".to_string(),
         json!({
             "type": "object",
@@ -936,4 +957,26 @@ pub fn render_config_schema() -> anyhow::Result<String> {
             }
         ]
     }))?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_config_schema;
+    use serde_json::Value;
+
+    #[test]
+    fn schema_documents_image_quality_settings() {
+        let schema: Value = serde_json::from_str(&render_config_schema().unwrap()).unwrap();
+        let image_properties = schema["properties"]["images"]["properties"]
+            .as_object()
+            .expect("images config schema");
+
+        assert_eq!(image_properties["max_bytes"]["type"], "integer");
+        assert_eq!(image_properties["max_alt_characters"]["type"], "integer");
+        assert_eq!(image_properties["require_image_sitemap"]["type"], "boolean");
+        assert_eq!(
+            image_properties["require_image_object_metadata"]["type"],
+            "boolean"
+        );
+    }
 }

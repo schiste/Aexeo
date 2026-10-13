@@ -81,6 +81,10 @@ fn explicit_metadata_for_prefix(prefix: &str) -> Option<RuleMetadata> {
             class: RuleClass::Policy,
             confidence: ConfidenceLevel::Medium,
         },
+        "IMG" => RuleMetadata {
+            class: RuleClass::Policy,
+            confidence: ConfidenceLevel::Medium,
+        },
         "EDT" => RuleMetadata {
             class: RuleClass::Policy,
             confidence: ConfidenceLevel::Medium,
@@ -207,6 +211,7 @@ fn explicit_layers_for_prefix(prefix: &str) -> Option<RuleLayers> {
         // CNT: content rules. Citability primary (whether the content
         // is structured well enough to cite); absorbability secondary.
         "CNT" => RuleLayers::with_secondaries(Layer::Citability, vec![Layer::Absorbability]),
+        "IMG" => RuleLayers::with_secondaries(Layer::Retrievability, vec![Layer::Accessibility]),
         // EDT: explicit editorial briefs and their rendered answer, question,
         // and evidence markers. These are citation-shape policy checks.
         "EDT" => RuleLayers::with_secondaries(Layer::Citability, vec![Layer::Absorbability]),
@@ -610,6 +615,63 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                     rule_id: "SOC011",
                     sitewide: false,
                     summary: "social image is larger than recommended",
+                },
+            ],
+        },
+        RuleGroupDefinition {
+            name: "images",
+            title: "Image Quality",
+            description: "Deterministic image asset checks for descriptive names, byte budgets, accessible text, layout stability, and discovery metadata.",
+            rules: &[
+                RuleDescriptor {
+                    rule_id: "IMG001",
+                    sitewide: false,
+                    summary: "image filename is generic",
+                },
+                RuleDescriptor {
+                    rule_id: "IMG002",
+                    sitewide: false,
+                    summary: "image filename is not lowercase kebab-case",
+                },
+                RuleDescriptor {
+                    rule_id: "IMG003",
+                    sitewide: false,
+                    summary: "local image exceeds its advisory byte budget",
+                },
+                RuleDescriptor {
+                    rule_id: "IMG004",
+                    sitewide: false,
+                    summary: "local image asset does not exist",
+                },
+                RuleDescriptor {
+                    rule_id: "IMG005",
+                    sitewide: false,
+                    summary: "legacy raster lacks a modern-format picture source",
+                },
+                RuleDescriptor {
+                    rule_id: "IMG006",
+                    sitewide: false,
+                    summary: "informative alt text exceeds its configured character budget",
+                },
+                RuleDescriptor {
+                    rule_id: "IMG007",
+                    sitewide: false,
+                    summary: "image is missing valid intrinsic dimensions",
+                },
+                RuleDescriptor {
+                    rule_id: "IMG008",
+                    sitewide: false,
+                    summary: "informative figure image has no visible caption",
+                },
+                RuleDescriptor {
+                    rule_id: "IMG009",
+                    sitewide: false,
+                    summary: "informative local image is absent from an opted-in image sitemap",
+                },
+                RuleDescriptor {
+                    rule_id: "IMG010",
+                    sitewide: false,
+                    summary: "informative image lacks matching ImageObject creator/license metadata",
                 },
             ],
         },
@@ -1224,6 +1286,7 @@ mod tests {
                 "sitemap",
                 "robots",
                 "social",
+                "images",
                 "schema",
                 "llm",
                 "surfaces",
