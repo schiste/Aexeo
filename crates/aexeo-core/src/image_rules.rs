@@ -245,6 +245,8 @@ fn collect_asset_findings(
             match fs::canonicalize(&asset_path) {
                 Ok(canonical_asset) => {
                     if !canonical_asset.starts_with(canonical_root) {
+                        // Do not inspect out-of-root targets or let them count as verified formats.
+                        unavailable_sources.insert(src.to_string());
                         continue;
                     }
                     let Ok(metadata) = fs::metadata(&canonical_asset) else {
@@ -1220,6 +1222,37 @@ mod tests {
         }));
         assert!(findings.iter().any(|finding| {
             finding.rule_id == "IMG005" && finding.message.contains("fallback.jpg")
+        }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn out_of_root_modern_symlink_does_not_suppress_legacy_format_finding() {
+        use std::os::unix::fs::symlink;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("site");
+        let outside_dir = temp_dir.path().join("outside");
+        fs::create_dir_all(root.join("images")).unwrap();
+        fs::create_dir_all(&outside_dir).unwrap();
+        let outside_modern_image = outside_dir.join("modern.webp");
+        fs::write(&outside_modern_image, b"image").unwrap();
+        fs::write(root.join("images/fallback.jpg"), b"image").unwrap();
+        symlink(&outside_modern_image, root.join("images/modern.webp")).unwrap();
+        fs::write(
+            root.join("index.html"),
+            "<html><body><picture><source srcset=\"/images/modern.webp\"><img src=\"/images/fallback.jpg\" alt=\"A landscape\" width=\"640\" height=\"480\"></picture></body></html>",
+        )
+        .unwrap();
+        let site = load_site(&root).unwrap();
+
+        let findings = run_image_rules(&site, &Config::default());
+
+        assert!(findings.iter().any(|finding| {
+            finding.rule_id == "IMG005" && finding.message.contains("fallback.jpg")
+        }));
+        assert!(!findings.iter().any(|finding| {
+            finding.rule_id == "IMG004" && finding.message.contains("modern.webp")
         }));
     }
 
