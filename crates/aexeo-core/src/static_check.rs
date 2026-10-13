@@ -16,7 +16,7 @@ use crate::llm_rules::run_llm_rules;
 use crate::policy::apply_policy;
 use crate::robots_rules::run_robots_rules;
 use crate::schema_rules::run_schema_rules;
-use crate::site::{DeploymentModel, load_site};
+use crate::site::{DeploymentModel, load_site_with_site_url};
 use crate::sitemap_rules::run_sitemap_rules;
 use crate::social_rules::run_social_rules;
 use crate::structure_rules::run_structure_rules;
@@ -252,7 +252,10 @@ pub fn can_run_native_static_audit(config: &Config) -> bool {
 }
 
 pub fn run_native_static_audit_with_config(root: &Path, config: &Config) -> Result<Vec<Finding>> {
-    let site = load_site(&resolve_static_site_root(root, config)?)?;
+    let site = load_site_with_site_url(
+        &resolve_static_site_root(root, config)?,
+        config.site_url.as_deref(),
+    )?;
     Ok(run_checks_for_site(&site, config))
 }
 
@@ -357,6 +360,58 @@ mod tests {
         fs::write(root.join("_worker.js/index.js"), "export default {};").unwrap();
         let (_, findings) = run_native_static_audit(root, None).unwrap();
         assert!(findings.iter().any(|finding| finding.rule_id == "DEP001"));
+    }
+
+    #[test]
+    fn configured_site_url_resolves_absolute_nested_sitemaps_without_page_canonical() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        fs::create_dir_all(root.join("about")).unwrap();
+        fs::write(
+            root.join("index.html"),
+            "<html><head><title>Home</title></head><body><h1>Home</h1></body></html>",
+        )
+        .unwrap();
+        fs::write(
+            root.join("about/index.html"),
+            "<html><head><title>About</title></head><body><h1>About</h1></body></html>",
+        )
+        .unwrap();
+        fs::write(
+            root.join("sitemap.xml"),
+            "<sitemapindex><sitemap><loc>https://example.com/sitemap-pages.xml</loc></sitemap></sitemapindex>",
+        )
+        .unwrap();
+        fs::write(
+            root.join("sitemap-pages.xml"),
+            "<urlset><url><loc>https://example.com/about</loc></url></urlset>",
+        )
+        .unwrap();
+        let config = Config {
+            site_url: Some("https://example.com/".to_string()),
+            ..Config::default()
+        };
+
+        let findings = super::run_native_static_audit_with_config(root, &config).unwrap();
+
+        assert!(
+            !findings.iter().any(|finding| finding.rule_id == "MAP002"),
+            "configured site_url should allow same-origin absolute sitemap-index entries; got {findings:?}"
+        );
+
+        fs::write(
+            root.join("sitemap.xml"),
+            "<sitemapindex><sitemap><loc>https://evil.example/sitemap-pages.xml</loc></sitemap></sitemapindex>",
+        )
+        .unwrap();
+        let cross_origin_findings =
+            super::run_native_static_audit_with_config(root, &config).unwrap();
+        assert!(
+            cross_origin_findings
+                .iter()
+                .any(|finding| finding.rule_id == "MAP002"),
+            "configured site_url must still reject cross-origin sitemap-index entries"
+        );
     }
 
     #[test]

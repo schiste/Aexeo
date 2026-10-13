@@ -725,15 +725,29 @@ fn page_sitemap_origin(page: &Page) -> Option<String> {
         .then(|| url.origin().ascii_serialization().to_ascii_lowercase())
 }
 
-fn primary_site_sitemap_origin(pages: &[Page]) -> Option<String> {
+fn primary_site_sitemap_origin(
+    pages: &[Page],
+    configured_site_url: Option<&str>,
+) -> Option<String> {
     pages
         .iter()
         .find(|page| page.route.is_empty())
         .and_then(page_sitemap_origin)
+        .or_else(|| configured_site_url.and_then(site_url_sitemap_origin))
         .or_else(|| pages.iter().find_map(page_sitemap_origin))
 }
 
+fn site_url_sitemap_origin(site_url: &str) -> Option<String> {
+    let url = Url::parse(site_url.trim()).ok()?;
+    matches!(url.scheme(), "http" | "https")
+        .then(|| url.origin().ascii_serialization().to_ascii_lowercase())
+}
+
 pub fn load_site(root: &Path) -> Result<Site> {
+    load_site_with_site_url(root, None)
+}
+
+pub(crate) fn load_site_with_site_url(root: &Path, site_url: Option<&str>) -> Result<Site> {
     let mut html_files = Vec::new();
     iter_html_files(root, &mut html_files)?;
     html_files.sort();
@@ -755,7 +769,7 @@ pub fn load_site(root: &Path) -> Result<Site> {
         crawl_meta: None,
     })?;
     site.indexed_paths = build_site_index(root)?;
-    let allowed_origin = primary_site_sitemap_origin(&site.pages);
+    let allowed_origin = primary_site_sitemap_origin(&site.pages, site_url);
     let (sitemap_routes, sitemap_error) =
         sitemap::read_sitemap_routes(&root.join("sitemap.xml"), root, allowed_origin.as_deref());
     site.sitemap_routes = sitemap_routes;

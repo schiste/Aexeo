@@ -404,22 +404,41 @@ fn parse_srcset_urls(srcset: &str) -> Vec<String> {
     candidates
 }
 
-fn is_modern_picture_source(raw: &str, tag: &HtmlTag) -> bool {
+fn is_modern_image_candidate(candidate: &str) -> bool {
+    let path = candidate.split(['?', '#']).next().unwrap_or_default();
+    let filename = path.rsplit('/').next().unwrap_or_default();
+    filename.rsplit_once('.').is_some_and(|(_, extension)| {
+        matches!(extension.to_ascii_lowercase().as_str(), "avif" | "webp")
+    })
+}
+
+fn modern_picture_source_candidates(
+    raw: &str,
+    tag: &HtmlTag,
+    candidates: &[String],
+) -> Vec<String> {
+    if candidates.is_empty() {
+        return Vec::new();
+    }
     let snippet = &raw[tag.start..=tag.end];
-    let has_srcset = attr_value(snippet, "srcset").is_some_and(|value| !value.trim().is_empty());
-    let modern_type = attr_value(snippet, "type").is_some_and(|value| {
-        matches!(
-            value
-                .split(';')
-                .next()
-                .unwrap_or_default()
-                .trim()
-                .to_ascii_lowercase()
-                .as_str(),
-            "image/avif" | "image/webp"
-        )
-    });
-    has_srcset && modern_type
+    let declared_type = attr_value(snippet, "type")
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty());
+    match declared_type {
+        Some(content_type) => {
+            let media_type = content_type.split(';').next().unwrap_or_default().trim();
+            if matches!(media_type, "image/avif" | "image/webp") {
+                candidates.to_vec()
+            } else {
+                Vec::new()
+            }
+        }
+        None => candidates
+            .iter()
+            .filter(|candidate| is_modern_image_candidate(candidate))
+            .cloned()
+            .collect(),
+    }
 }
 
 fn is_void_html_element(name: &str) -> bool {
@@ -692,9 +711,9 @@ fn capture_images(raw: &str) -> Vec<ImageReference> {
                 let candidates = attr_value(snippet, "srcset")
                     .map(|srcset| parse_srcset_urls(&srcset))
                     .unwrap_or_default();
-                if is_modern_picture_source(raw, tag) {
-                    picture.modern_sources.extend(candidates.iter().cloned());
-                }
+                picture
+                    .modern_sources
+                    .extend(modern_picture_source_candidates(raw, tag, &candidates));
                 picture.asset_sources.extend(candidates);
             }
             continue;

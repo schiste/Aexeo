@@ -119,31 +119,39 @@ fn is_lowercase_kebab_filename(stem: &str, extension: &str) -> bool {
 fn collect_filename_findings(page: &Page, config: &Config) -> Vec<Finding> {
     let mut findings = Vec::new();
     for image in &page.images {
-        let Some((stem, extension)) =
-            local_image_filename(page, &image.src, config.site_url.as_deref())
-        else {
-            continue;
-        };
-        let filename = format!("{stem}.{extension}");
-        if is_generic_filename(&stem) {
-            findings.push(finding(
-                "IMG001",
-                format!("image filename is generic: {filename}"),
-                "Rename it with a concise description of the image content.",
-                page,
-                image.line,
-                image.column,
-            ));
-        }
-        if !is_lowercase_kebab_filename(&stem, &extension) {
-            findings.push(finding(
-                "IMG002",
-                format!("image filename is not lowercase kebab-case: {filename}"),
-                "Use lowercase words separated by single hyphens; keep the existing URL stable or add a redirect when renaming.",
-                page,
-                image.line,
-                image.column,
-            ));
+        let mut seen_sources = std::collections::HashSet::new();
+        for src in std::iter::once(image.src.as_str())
+            .chain(image.asset_sources.iter().map(String::as_str))
+        {
+            if !seen_sources.insert(src) {
+                continue;
+            }
+            let Some((stem, extension)) =
+                local_image_filename(page, src, config.site_url.as_deref())
+            else {
+                continue;
+            };
+            let filename = format!("{stem}.{extension}");
+            if is_generic_filename(&stem) {
+                findings.push(finding(
+                    "IMG001",
+                    format!("image filename is generic: {filename}"),
+                    "Rename it with a concise description of the image content.",
+                    page,
+                    image.line,
+                    image.column,
+                ));
+            }
+            if !is_lowercase_kebab_filename(&stem, &extension) {
+                findings.push(finding(
+                    "IMG002",
+                    format!("image filename is not lowercase kebab-case: {filename}"),
+                    "Use lowercase words separated by single hyphens; keep the existing URL stable or add a redirect when renaming.",
+                    page,
+                    image.line,
+                    image.column,
+                ));
+            }
         }
     }
     findings
@@ -1289,7 +1297,7 @@ mod tests {
         fs::write(root.join("images/responsive-photo.webp"), b"modern").unwrap();
         fs::write(
             root.join("index.html"),
-            "<html><body><img src=\"/images/legacy-photo.jpg\" alt=\"A landscape\" width=\"640\" height=\"480\"><picture><source type=\"image/webp\" srcset=\"/images/responsive-photo.webp\"><img src=\"/images/responsive-photo.jpg\" alt=\"A city\" width=\"640\" height=\"480\"></picture></body></html>",
+            "<html><body><img src=\"/images/legacy-photo.jpg\" alt=\"A landscape\" width=\"640\" height=\"480\"><picture><source srcset=\"/images/responsive-photo.webp?v=1\"><img src=\"/images/responsive-photo.jpg\" alt=\"A city\" width=\"640\" height=\"480\"></picture></body></html>",
         )
         .unwrap();
         let site = load_site(root).unwrap();
@@ -1352,6 +1360,30 @@ mod tests {
         }));
         assert!(findings.iter().any(|finding| {
             finding.rule_id == "IMG003" && finding.message.contains("oversized.avif")
+        }));
+    }
+
+    #[test]
+    fn audits_filename_quality_for_every_responsive_image_candidate() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        fs::create_dir_all(root.join("images")).unwrap();
+        fs::write(root.join("images/hero-photo.jpg"), b"fallback").unwrap();
+        fs::write(root.join("images/IMG_1234.jpg"), b"responsive").unwrap();
+        fs::write(
+            root.join("index.html"),
+            "<html><body><img src=\"/images/hero-photo.jpg\" srcset=\"/images/IMG_1234.jpg 2x\" alt=\"A landscape\" width=\"640\" height=\"480\"></body></html>",
+        )
+        .unwrap();
+        let site = load_site(root).unwrap();
+
+        let findings = run_image_rules(&site, &Config::default());
+
+        assert!(findings.iter().any(|finding| {
+            finding.rule_id == "IMG001" && finding.message.contains("IMG_1234.jpg")
+        }));
+        assert!(findings.iter().any(|finding| {
+            finding.rule_id == "IMG002" && finding.message.contains("IMG_1234.jpg")
         }));
     }
 
