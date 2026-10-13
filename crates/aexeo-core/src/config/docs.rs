@@ -872,6 +872,13 @@ fn nested_properties() -> Map<String, Value> {
                         "required_feature_markers": { "type": "array", "items": { "type": "string" } }
                     }
                 }]},
+                "images": { "oneOf": [{ "type": "boolean" }, {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": { "type": "boolean" }
+                    }
+                }]},
                 "editorial": { "oneOf": [{ "type": "boolean" }, {
                     "type": "object",
                     "additionalProperties": false,
@@ -978,5 +985,19 @@ mod tests {
             image_properties["require_image_object_metadata"]["type"],
             "boolean"
         );
+    }
+
+    #[test]
+    fn schema_documents_images_rule_group_toggle() {
+        let schema: Value = serde_json::from_str(&render_config_schema().unwrap()).unwrap();
+        let variants = schema["properties"]["rules"]["properties"]["images"]["oneOf"]
+            .as_array()
+            .expect("images rule group schema");
+
+        assert_eq!(variants.len(), 2);
+        assert_eq!(variants[0]["type"], "boolean");
+        assert_eq!(variants[1]["type"], "object");
+        assert_eq!(variants[1]["properties"]["enabled"]["type"], "boolean");
+        assert_eq!(variants[1]["additionalProperties"], false);
     }
 }

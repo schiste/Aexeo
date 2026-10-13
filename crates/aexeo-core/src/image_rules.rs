@@ -176,53 +176,67 @@ fn local_asset_relative_path(page: &Page, src: &str, site_url: Option<&str>) -> 
     (!normalized.as_os_str().is_empty()).then_some(normalized)
 }
 
-fn collect_asset_findings(page: &Page, site: &Site, config: &Config) -> Vec<Finding> {
+fn collect_asset_findings(
+    page: &Page,
+    site: &Site,
+    config: &Config,
+) -> (Vec<Finding>, std::collections::HashSet<String>) {
     let mut findings = Vec::new();
+    let mut missing_sources = std::collections::HashSet::new();
     let Ok(canonical_root) = fs::canonicalize(&site.root) else {
-        return findings;
+        return (findings, missing_sources);
     };
     for image in &page.images {
-        let Some(relative_path) =
-            local_asset_relative_path(page, &image.src, config.site_url.as_deref())
-        else {
-            continue;
-        };
-        let asset_path = site.root.join(relative_path);
-        match fs::canonicalize(&asset_path) {
-            Ok(canonical_asset) if canonical_asset.starts_with(&canonical_root) => {
-                let Ok(metadata) = fs::metadata(&canonical_asset) else {
-                    continue;
-                };
-                if metadata.is_file() && metadata.len() > config.images.max_bytes {
+        let mut seen_sources = std::collections::HashSet::new();
+        for src in std::iter::once(image.src.as_str())
+            .chain(image.asset_sources.iter().map(String::as_str))
+        {
+            if !seen_sources.insert(src) {
+                continue;
+            }
+            let Some(relative_path) =
+                local_asset_relative_path(page, src, config.site_url.as_deref())
+            else {
+                continue;
+            };
+            let asset_path = site.root.join(relative_path);
+            match fs::canonicalize(&asset_path) {
+                Ok(canonical_asset) if canonical_asset.starts_with(&canonical_root) => {
+                    let Ok(metadata) = fs::metadata(&canonical_asset) else {
+                        continue;
+                    };
+                    if metadata.is_file() && metadata.len() > config.images.max_bytes {
+                        findings.push(finding(
+                            "IMG003",
+                            format!(
+                                "local image is {} bytes, above the configured {}-byte budget: {}",
+                                metadata.len(),
+                                config.images.max_bytes,
+                                src
+                            ),
+                            "Compress or resize a copy and compare visual quality before replacing the published asset.",
+                            page,
+                            image.line,
+                            image.column,
+                        ));
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    missing_sources.insert(src.to_string());
                     findings.push(finding(
-                        "IMG003",
-                        format!(
-                            "local image is {} bytes, above the configured {}-byte budget: {}",
-                            metadata.len(),
-                            config.images.max_bytes,
-                            image.src
-                        ),
-                        "Compress or resize a copy and compare visual quality before replacing the published asset.",
+                        "IMG004",
+                        format!("local image asset does not exist: {}", src),
+                        "Check the asset path and the build output; external and data URLs are not checked as local files.",
                         page,
                         image.line,
                         image.column,
                     ));
                 }
+                _ => {}
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                findings.push(finding(
-                    "IMG004",
-                    format!("local image asset does not exist: {}", image.src),
-                    "Check the asset path and the build output; external and data URLs are not checked as local files.",
-                    page,
-                    image.line,
-                    image.column,
-                ));
-            }
-            _ => {}
         }
     }
-    findings
+    (findings, missing_sources)
 }
 
 fn collect_alt_findings(page: &Page, config: &Config) -> Vec<Finding> {
@@ -304,14 +318,24 @@ fn collect_caption_findings(page: &Page, config: &Config) -> Vec<Finding> {
         .collect()
 }
 
-fn collect_format_findings(page: &Page, config: &Config) -> Vec<Finding> {
+fn collect_format_findings(
+    page: &Page,
+    config: &Config,
+    missing_sources: &std::collections::HashSet<String>,
+) -> Vec<Finding> {
     if !config.images.prefer_modern_formats {
         return Vec::new();
     }
     page.images
         .iter()
         .filter_map(|image| {
-            if image.has_modern_source {
+            let has_available_modern_source = image.has_modern_source
+                && (image.modern_sources.is_empty()
+                    || image
+                        .modern_sources
+                        .iter()
+                        .any(|source| !missing_sources.contains(source)));
+            if has_available_modern_source {
                 return None;
             }
             let (_, extension) =
@@ -679,8 +703,9 @@ pub fn run_image_rules(site: &Site, config: &Config) -> Vec<Finding> {
     let mut origin_unavailable = false;
     for page in site.route_pages() {
         findings.extend(collect_filename_findings(page, config));
-        findings.extend(collect_asset_findings(page, site, config));
-        findings.extend(collect_format_findings(page, config));
+        let (asset_findings, missing_sources) = collect_asset_findings(page, site, config);
+        findings.extend(asset_findings);
+        findings.extend(collect_format_findings(page, config, &missing_sources));
         findings.extend(collect_alt_findings(page, config));
         findings.extend(collect_dimension_findings(page, config));
         findings.extend(collect_caption_findings(page, config));
@@ -1261,6 +1286,7 @@ mod tests {
         fs::create_dir_all(root.join("images")).unwrap();
         fs::write(root.join("images/legacy-photo.jpg"), b"legacy").unwrap();
         fs::write(root.join("images/responsive-photo.jpg"), b"fallback").unwrap();
+        fs::write(root.join("images/responsive-photo.webp"), b"modern").unwrap();
         fs::write(
             root.join("index.html"),
             "<html><body><img src=\"/images/legacy-photo.jpg\" alt=\"A landscape\" width=\"640\" height=\"480\"><picture><source type=\"image/webp\" srcset=\"/images/responsive-photo.webp\"><img src=\"/images/responsive-photo.jpg\" alt=\"A city\" width=\"640\" height=\"480\"></picture></body></html>",
@@ -1280,6 +1306,83 @@ mod tests {
                 .message
                 .contains("legacy-photo.jpg")
         );
+    }
+
+    #[test]
+    fn recommends_modern_format_when_the_local_picture_source_is_missing() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        fs::create_dir_all(root.join("images")).unwrap();
+        fs::write(root.join("images/fallback.jpg"), b"fallback").unwrap();
+        fs::write(
+            root.join("index.html"),
+            "<html><body><picture><source type=\"image/webp\" srcset=\"/images/missing.webp 1x\"><img src=\"/images/fallback.jpg\" alt=\"Office chair\" width=\"640\" height=\"480\"></picture></body></html>",
+        )
+        .unwrap();
+        let site = load_site(root).unwrap();
+
+        let findings = run_image_rules(&site, &Config::default());
+
+        assert!(findings.iter().any(|finding| {
+            finding.rule_id == "IMG004" && finding.message.contains("missing.webp")
+        }));
+        assert!(findings.iter().any(|finding| {
+            finding.rule_id == "IMG005" && finding.message.contains("fallback.jpg")
+        }));
+    }
+
+    #[test]
+    fn audits_every_picture_source_candidate_for_missing_and_oversized_assets() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        fs::create_dir_all(root.join("images")).unwrap();
+        fs::write(root.join("images/fallback.jpg"), b"fallback").unwrap();
+        fs::write(root.join("images/oversized.avif"), vec![0_u8; 100_001]).unwrap();
+        fs::write(
+            root.join("index.html"),
+            "<html><body><picture><source type=\"image/avif\" srcset=\"/images/missing.avif 1x, /images/oversized.avif 2x\"><img src=\"/images/fallback.jpg\" alt=\"Office chair\" width=\"640\" height=\"480\"></picture></body></html>",
+        )
+        .unwrap();
+        let site = load_site(root).unwrap();
+
+        let findings = run_image_rules(&site, &Config::default());
+
+        assert!(findings.iter().any(|finding| {
+            finding.rule_id == "IMG004" && finding.message.contains("missing.avif")
+        }));
+        assert!(findings.iter().any(|finding| {
+            finding.rule_id == "IMG003" && finding.message.contains("oversized.avif")
+        }));
+    }
+
+    #[test]
+    fn audits_every_img_srcset_candidate_when_src_is_omitted() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        fs::create_dir_all(root.join("images")).unwrap();
+        fs::write(
+            root.join("images/office-chair-large.jpg"),
+            vec![0_u8; 100_001],
+        )
+        .unwrap();
+        let alt = "a".repeat(126);
+        fs::write(
+            root.join("index.html"),
+            format!("<html><body><img srcset=\"/images/office-chair.jpg 1x, /images/office-chair-large.jpg 2x\" alt=\"{alt}\" width=\"640\"></body></html>"),
+        )
+        .unwrap();
+        let site = load_site(root).unwrap();
+
+        let findings = run_image_rules(&site, &Config::default());
+
+        assert!(findings.iter().any(|finding| {
+            finding.rule_id == "IMG004" && finding.message.contains("office-chair.jpg")
+        }));
+        assert!(findings.iter().any(|finding| {
+            finding.rule_id == "IMG003" && finding.message.contains("office-chair-large.jpg")
+        }));
+        assert!(findings.iter().any(|finding| finding.rule_id == "IMG006"));
+        assert!(findings.iter().any(|finding| finding.rule_id == "IMG007"));
     }
 
     #[test]

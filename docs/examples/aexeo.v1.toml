@@ -63,6 +63,9 @@ enabled = true
 min_page_size = 500
 required_feature_markers = ["Related features"]
 
+[rules.images]
+enabled = true
+
 [rules.structure]
 enabled = true
 repeatable_data_ui = ["card", "item", "entry"]

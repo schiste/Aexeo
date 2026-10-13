@@ -593,6 +593,22 @@
             }
           ]
         },
+        "images": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
         "links": {
           "oneOf": [
             {

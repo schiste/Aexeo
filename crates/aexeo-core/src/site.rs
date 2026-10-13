@@ -100,6 +100,10 @@ pub enum PageKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageReference {
     pub src: String,
+    /// Additional `srcset` candidates associated with this image.
+    pub asset_sources: Vec<String>,
+    /// AVIF/WebP candidates supplied by a modern `<source>` inside `<picture>`.
+    pub modern_sources: Vec<String>,
     pub alt: Option<String>,
     pub line: usize,
     pub column: usize,
@@ -813,6 +817,22 @@ mod tests {
         assert_eq!(images[2].height.as_deref(), Some("240"));
         assert_eq!(images[3].src, "/images/angle>asset.png");
         assert_eq!(images[3].alt.as_deref(), Some("Angle bracket asset"));
+    }
+
+    #[test]
+    fn captures_image_when_srcset_is_the_only_img_source() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><body><img srcset=\"/images/responsive-1x.jpg 1x, /images/responsive-2x.jpg 2x\" alt=\"Responsive photo\" width=\"320\" height=\"240\"></body></html>",
+        );
+
+        let site = load_site(root).unwrap();
+        let images = &site.page("").unwrap().images;
+
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].src, "/images/responsive-1x.jpg");
     }
 
     #[test]

@@ -356,6 +356,54 @@ fn scan_html_tags(raw_lowercase: &str) -> Vec<HtmlTag> {
     tags
 }
 
+fn parse_srcset_urls(srcset: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    let mut remaining = srcset.trim();
+
+    while !remaining.is_empty() {
+        remaining = remaining.trim_start_matches(|character: char| {
+            character.is_ascii_whitespace() || character == ','
+        });
+        if remaining.is_empty() {
+            break;
+        }
+
+        let url_end = remaining
+            .find(|character: char| character.is_ascii_whitespace())
+            .unwrap_or(remaining.len());
+        let token = &remaining[..url_end];
+        let url = token.trim_end_matches(',');
+        if !url.is_empty() {
+            candidates.push(url.to_string());
+        }
+        let has_trailing_separator = url.len() < token.len();
+        remaining = &remaining[url_end..];
+        if has_trailing_separator {
+            continue;
+        }
+
+        let mut parentheses_depth = 0usize;
+        let mut next_candidate = None;
+        for (index, character) in remaining.char_indices() {
+            match character {
+                '(' => parentheses_depth += 1,
+                ')' => parentheses_depth = parentheses_depth.saturating_sub(1),
+                ',' if parentheses_depth == 0 => {
+                    next_candidate = Some(index);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let Some(next_candidate) = next_candidate else {
+            break;
+        };
+        remaining = &remaining[next_candidate + 1..];
+    }
+
+    candidates
+}
+
 fn is_modern_picture_source(raw: &str, tag: &HtmlTag) -> bool {
     let snippet = &raw[tag.start..=tag.end];
     let has_srcset = attr_value(snippet, "srcset").is_some_and(|value| !value.trim().is_empty());
@@ -608,11 +656,17 @@ fn figure_caption_for_image(
     (true, None)
 }
 
+#[derive(Default)]
+struct PictureSources {
+    asset_sources: Vec<String>,
+    modern_sources: Vec<String>,
+}
+
 fn capture_images(raw: &str) -> Vec<ImageReference> {
     let raw_lowercase = raw.to_ascii_lowercase();
     let tags = scan_html_tags(&raw_lowercase);
     let mut images = Vec::new();
-    let mut picture_stack = Vec::new();
+    let mut picture_stack: Vec<PictureSources> = Vec::new();
     let mut figure_stack = Vec::new();
     for (tag_index, tag) in tags.iter().enumerate() {
         let tag_name = tag.name(&raw_lowercase);
@@ -625,7 +679,7 @@ fn capture_images(raw: &str) -> Vec<ImageReference> {
             continue;
         }
         if tag_name == "picture" {
-            picture_stack.push(false);
+            picture_stack.push(PictureSources::default());
             continue;
         }
         if tag_name == "figure" {
@@ -633,8 +687,15 @@ fn capture_images(raw: &str) -> Vec<ImageReference> {
             continue;
         }
         if tag_name == "source" {
-            if let Some(has_modern_source) = picture_stack.last_mut() {
-                *has_modern_source |= is_modern_picture_source(raw, tag);
+            if let Some(picture) = picture_stack.last_mut() {
+                let snippet = &raw[tag.start..=tag.end];
+                let candidates = attr_value(snippet, "srcset")
+                    .map(|srcset| parse_srcset_urls(&srcset))
+                    .unwrap_or_default();
+                if is_modern_picture_source(raw, tag) {
+                    picture.modern_sources.extend(candidates.iter().cloned());
+                }
+                picture.asset_sources.extend(candidates);
             }
             continue;
         }
@@ -642,7 +703,17 @@ fn capture_images(raw: &str) -> Vec<ImageReference> {
             continue;
         }
         let snippet = &raw[tag.start..=tag.end];
-        let Some(src) = attr_value(snippet, "src") else {
+        let mut asset_sources = attr_value(snippet, "srcset")
+            .map(|srcset| parse_srcset_urls(&srcset))
+            .unwrap_or_default();
+        let src = attr_value(snippet, "src")
+            .or_else(|| asset_sources.first().cloned())
+            .or_else(|| {
+                picture_stack
+                    .last()
+                    .and_then(|picture| picture.asset_sources.first().cloned())
+            });
+        let Some(src) = src else {
             continue;
         };
         let alt = attr_value(snippet, "alt");
@@ -652,12 +723,21 @@ fn capture_images(raw: &str) -> Vec<ImageReference> {
             .unwrap_or(false);
         let width = attr_value(snippet, "width");
         let height = attr_value(snippet, "height");
-        let has_modern_source = picture_stack.last().copied().unwrap_or(false);
+        let modern_sources = picture_stack
+            .last()
+            .map(|picture| picture.modern_sources.clone())
+            .unwrap_or_default();
+        let has_modern_source = !modern_sources.is_empty();
+        if let Some(picture) = picture_stack.last() {
+            asset_sources.extend(picture.asset_sources.iter().cloned());
+        }
         let (inside_figure, figure_caption) =
             figure_caption_for_image(raw, &raw_lowercase, &tags, figure_stack.last().copied());
         let (line, column) = line_column_for(raw, tag.start);
         images.push(ImageReference {
             src,
+            asset_sources,
+            modern_sources,
             alt,
             line,
             column,

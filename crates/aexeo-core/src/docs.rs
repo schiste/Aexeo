@@ -60,6 +60,9 @@ pub fn render_config_reference() -> String {
         "enabled = true".to_string(),
         "min_inbound_links = 1".to_string(),
         String::new(),
+        "[rules.images]".to_string(),
+        "enabled = true".to_string(),
+        String::new(),
         "[rules.schema]".to_string(),
         "enabled = true".to_string(),
         "require_title_alignment = true".to_string(),
@@ -239,6 +242,11 @@ mod tests {
         assert!(render_adapter_reference().contains("# Adapter Reference"));
     }
 
+    #[test]
+    fn canonical_config_example_includes_the_images_rule_toggle() {
+        assert!(render_config_reference().contains("[rules.images]\nenabled = true"));
+    }
+
     /// The config reference embeds a full example config, and the whole point
     /// of an example is that a reader can copy it. This one did not work: it
     /// set `[quality] coverage_threshold = 85`, a key that is inert and that
@@ -285,6 +293,8 @@ mod tests {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../docs/examples/aexeo.v1.toml");
         assert!(path.exists(), "missing {}", path.display());
+        let example = std::fs::read_to_string(&path).expect("read checked-in config example");
+        assert!(example.contains("[rules.images]\nenabled = true"));
 
         let dir = tempfile::tempdir().expect("tempdir");
         let loaded = crate::config::load_config_with_diagnostics(dir.path(), Some(&path))

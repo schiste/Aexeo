@@ -40,6 +40,9 @@ enabled = true
 enabled = true
 min_inbound_links = 1
 
+[rules.images]
+enabled = true
+
 [rules.schema]
 enabled = true
 require_title_alignment = true

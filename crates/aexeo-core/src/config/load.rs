@@ -273,6 +273,7 @@ fn merge_bool_rule_toggles(
         "llm",
         "surfaces",
         "content",
+        "images",
         "editorial",
         "structure",
     ] {
@@ -320,6 +321,7 @@ fn validate_rules_table(table: &toml::map::Map<String, Value>) -> Result<()> {
             "llm",
             "surfaces",
             "content",
+            "images",
             "editorial",
             "structure",
         ],
@@ -393,7 +395,7 @@ fn validate_rules_table(table: &toml::map::Map<String, Value>) -> Result<()> {
                 ],
                 "[rules.structure]",
             )?,
-            "sitemap" | "llm" | "surfaces" | "editorial" => validate_allowed_keys(
+            "images" | "sitemap" | "llm" | "surfaces" | "editorial" => validate_allowed_keys(
                 expect_table(value, key, "[rules]")?,
                 &["enabled"],
                 &format!("[rules.{}]", key),
@@ -830,7 +832,7 @@ fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
                 "require_fact_consistency",
             );
         }
-        for key in ["sitemap", "llm", "surfaces", "editorial"] {
+        for key in ["sitemap", "llm", "surfaces", "editorial", "images"] {
             if let Some(Value::Table(mut table)) = rules_table.remove(key) {
                 move_table_field_if_absent_checks(root, &mut table, key);
             }
@@ -1087,6 +1089,44 @@ performance_budget_file = "custom-budget.json"
         assert_eq!(config.baseline_file, "baseline.json");
         assert_eq!(config.audit_log_limit, 9);
         assert_eq!(config.performance_budget_file, "custom-budget.json");
+    }
+
+    #[test]
+    fn loads_versioned_images_rule_group_toggle() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join("aexeo.toml"),
+            r#"
+version = 1
+
+[rules.images]
+enabled = false
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(temp_dir.path(), None).unwrap();
+
+        assert_eq!(config.checks.get("images").copied(), Some(false));
+    }
+
+    #[test]
+    fn loads_versioned_boolean_images_rule_group_toggle() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join("aexeo.toml"),
+            r#"
+version = 1
+
+[rules]
+images = false
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(temp_dir.path(), None).unwrap();
+
+        assert_eq!(config.checks.get("images").copied(), Some(false));
     }
 
     #[test]

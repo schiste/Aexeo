@@ -495,6 +495,8 @@ mod tests {
     fn image(src: &str, alt: Option<&str>) -> ImageReference {
         ImageReference {
             src: src.to_string(),
+            asset_sources: Vec::new(),
+            modern_sources: Vec::new(),
             alt: alt.map(str::to_string),
             line: 1,
             column: 1,
