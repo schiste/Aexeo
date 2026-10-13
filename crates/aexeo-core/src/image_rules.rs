@@ -210,9 +210,10 @@ fn collect_asset_findings(
 ) -> (Vec<Finding>, std::collections::HashSet<String>) {
     let mut findings = Vec::new();
     let mut unavailable_sources = std::collections::HashSet::new();
-    let Ok(canonical_root) = fs::canonicalize(&site.root) else {
+    if site.deployment_model == crate::site::DeploymentModel::RuntimeSnapshot {
         return (findings, unavailable_sources);
-    };
+    }
+    let canonical_root = fs::canonicalize(&site.root).ok();
     for image in &page.images {
         let mut seen_sources = std::collections::HashSet::new();
         for src in std::iter::once(image.src.as_str())
@@ -226,10 +227,24 @@ fn collect_asset_findings(
             else {
                 continue;
             };
+            let Some(canonical_root) = canonical_root.as_deref() else {
+                report_unavailable_image_asset(
+                    &mut findings,
+                    &mut unavailable_sources,
+                    page,
+                    image,
+                    src,
+                    format!(
+                        "local image asset cannot be inspected because the site root is unavailable: {}",
+                        src
+                    ),
+                );
+                continue;
+            };
             let asset_path = site.root.join(relative_path);
             match fs::canonicalize(&asset_path) {
                 Ok(canonical_asset) => {
-                    if !canonical_asset.starts_with(&canonical_root) {
+                    if !canonical_asset.starts_with(canonical_root) {
                         continue;
                     }
                     let Ok(metadata) = fs::metadata(&canonical_asset) else {
@@ -1173,6 +1188,42 @@ mod tests {
     }
 
     #[test]
+    fn reports_local_asset_candidates_when_static_site_root_is_unavailable() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("missing-static-site");
+        let page = build_page_from_source(
+            root.join("index.html"),
+            "index.html".to_string(),
+            "<html><body><picture><source srcset=\"/images/modern.webp\"><img src=\"/images/fallback.jpg\" alt=\"A landscape\" width=\"640\" height=\"480\"></picture></body></html>".to_string(),
+            BTreeMap::new(),
+        );
+        let site = build_site_from_parts(SiteBuildInput {
+            root,
+            pages: vec![page],
+            artifacts: SiteArtifacts {
+                llms_text: None,
+                robots_text: None,
+                sitemap_text: None,
+            },
+            deployment_model: DeploymentModel::StaticExport,
+            deployment_markers: Vec::new(),
+            crawl_meta: None,
+        })
+        .unwrap();
+
+        let findings = run_image_rules(&site, &Config::default());
+
+        assert!(findings.iter().any(|finding| {
+            finding.rule_id == "IMG004"
+                && finding.message.contains("site root is unavailable")
+                && finding.message.contains("modern.webp")
+        }));
+        assert!(findings.iter().any(|finding| {
+            finding.rule_id == "IMG005" && finding.message.contains("fallback.jpg")
+        }));
+    }
+
+    #[test]
     fn runtime_snapshot_uses_its_captured_image_sitemap() {
         let page = build_page_from_source(
             PathBuf::from("crawl/index.html"),
@@ -1200,6 +1251,10 @@ mod tests {
         let findings = run_image_rules(&site, &config);
 
         assert!(!findings.iter().any(|finding| finding.rule_id == "IMG009"));
+        assert!(
+            !findings.iter().any(|finding| finding.rule_id == "IMG004"),
+            "runtime snapshots do not have a local static root to inspect"
+        );
 
         let index_site = build_site_from_parts(SiteBuildInput {
             root: PathBuf::from("crawl"),
