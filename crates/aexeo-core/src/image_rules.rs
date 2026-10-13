@@ -228,8 +228,19 @@ fn collect_asset_findings(
             };
             let asset_path = site.root.join(relative_path);
             match fs::canonicalize(&asset_path) {
-                Ok(canonical_asset) if canonical_asset.starts_with(&canonical_root) => {
+                Ok(canonical_asset) => {
+                    if !canonical_asset.starts_with(&canonical_root) {
+                        continue;
+                    }
                     let Ok(metadata) = fs::metadata(&canonical_asset) else {
+                        report_unavailable_image_asset(
+                            &mut findings,
+                            &mut unavailable_sources,
+                            page,
+                            image,
+                            src,
+                            format!("local image asset could not be inspected: {}", src),
+                        );
                         continue;
                     };
                     if metadata.is_file() {
@@ -269,7 +280,16 @@ fn collect_asset_findings(
                         format!("local image asset does not exist: {}", src),
                     );
                 }
-                _ => {}
+                Err(_) => {
+                    report_unavailable_image_asset(
+                        &mut findings,
+                        &mut unavailable_sources,
+                        page,
+                        image,
+                        src,
+                        format!("local image asset could not be resolved: {}", src),
+                    );
+                }
             }
         }
     }
@@ -1368,6 +1388,38 @@ mod tests {
                 finding.rule_id == "IMG005" && finding.message.contains("fallback.jpg")
             }),
             "a directory must not count as an available modern image candidate"
+        );
+    }
+
+    #[test]
+    fn does_not_treat_candidates_with_non_directory_parent_as_available_modern_sources() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        fs::create_dir_all(root.join("images")).unwrap();
+        fs::write(root.join("images/not-a-directory"), b"not a directory").unwrap();
+        fs::write(root.join("images/fallback.jpg"), b"fallback").unwrap();
+        fs::write(
+            root.join("index.html"),
+            "<html><body><picture><source srcset=\"/images/not-a-directory/modern.webp\"><img src=\"/images/fallback.jpg\" alt=\"A landscape\" width=\"640\" height=\"480\"></picture></body></html>",
+        )
+        .unwrap();
+        let site = load_site(root).unwrap();
+
+        let findings = run_image_rules(&site, &Config::default());
+
+        assert!(
+            findings.iter().any(|finding| {
+                finding.rule_id == "IMG004"
+                    && finding.message.contains("modern.webp")
+                    && finding.message.contains("could not be resolved")
+            }),
+            "a local candidate rejected by the filesystem should be diagnosed as unavailable"
+        );
+        assert!(
+            findings.iter().any(|finding| {
+                finding.rule_id == "IMG005" && finding.message.contains("fallback.jpg")
+            }),
+            "an unresolved candidate must not suppress the modern-format recommendation"
         );
     }
 
