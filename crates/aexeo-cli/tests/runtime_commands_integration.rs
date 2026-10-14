@@ -2,10 +2,14 @@ mod runtime_support;
 mod support;
 
 use aexeo_contracts::{AuditArtifact, AuditPerformance, CrawlStats, PhaseTiming, RuleTiming};
-use runtime_support::spawn_server;
+use runtime_support::{spawn_server, spawn_server_with_explicit_shutdown};
 use std::fs;
+use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::path::Path;
 use std::process::Command;
+use std::thread;
+use std::time::Duration;
 use support::{bin, parse_json, write};
 
 #[test]
@@ -320,9 +324,33 @@ fn verify_json_contract_reports_diff_summary() {
     handle.join().unwrap();
 }
 
+fn assert_http_test_server_responds(base_url: &str) {
+    let address = base_url.strip_prefix("http://").unwrap();
+    let mut stream = TcpStream::connect(address).unwrap();
+    write!(
+        stream,
+        "GET / HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+}
+
+#[test]
+fn explicit_test_server_remains_available_after_idle_interval() {
+    let server = spawn_server_with_explicit_shutdown();
+    assert_http_test_server_responds(server.base_url());
+    // Give the former 150 ms idle cutoff ample room to expire before reconnecting.
+    thread::sleep(Duration::from_secs(1));
+    assert_http_test_server_responds(server.base_url());
+    server.shutdown();
+}
+
 #[test]
 fn crawl_checkpoint_and_resume_complete_a_partial_runtime_audit() {
-    let (base_url, handle) = spawn_server(8);
+    let server = spawn_server_with_explicit_shutdown();
+    let base_url = server.base_url().to_string();
     let temp_dir = tempfile::tempdir().unwrap();
     let checkpoint = temp_dir.path().join("crawl-checkpoint.json");
 
@@ -369,15 +397,32 @@ fn crawl_checkpoint_and_resume_complete_a_partial_runtime_audit() {
         .arg("json")
         .output()
         .unwrap();
-    let resumed_payload = parse_json(&resumed_output.stdout);
-    assert_eq!(resumed_payload["artifact"]["status"], "complete");
-    assert!(
-        resumed_payload["artifact"]["crawl"]["visited_pages"]
-            .as_u64()
-            .unwrap()
-            >= 2
+    let resumed_stdout = String::from_utf8_lossy(&resumed_output.stdout);
+    let resumed_stderr = String::from_utf8_lossy(&resumed_output.stderr);
+    let resumed_context = format!(
+        "exit code: {:?}\nstdout:\n{}\nstderr:\n{}",
+        resumed_output.status.code(),
+        resumed_stdout,
+        resumed_stderr
     );
-    handle.join().unwrap();
+    assert!(
+        matches!(resumed_output.status.code(), Some(0 | 1)),
+        "expected exit code 0 or 1\n{resumed_context}"
+    );
+    let resumed_payload = serde_json::from_slice::<serde_json::Value>(&resumed_output.stdout)
+        .unwrap_or_else(|error| {
+            panic!("failed to parse resumed payload: {error}\n{resumed_context}")
+        });
+    assert_eq!(
+        resumed_payload["artifact"]["status"], "complete",
+        "{resumed_context}"
+    );
+    let visited_pages = resumed_payload["artifact"]["crawl"]["visited_pages"].as_u64();
+    assert!(
+        visited_pages.unwrap_or_default() >= 2,
+        "expected at least two visited pages, got {visited_pages:?}\n{resumed_context}"
+    );
+    server.shutdown();
 }
 
 #[test]
