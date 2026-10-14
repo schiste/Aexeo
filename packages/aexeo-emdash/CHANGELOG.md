@@ -128,6 +128,11 @@ version, since 0.8.19 had never been published.
 
 ## [Unreleased]
 
+### Changed
+
+- Support EmDash `^1.2.0` and run the plugin-host integration coverage against
+  EmDash `1.2.0`.
+
 ## [0.8.18] - 2026-09-28
 
 ### Added
