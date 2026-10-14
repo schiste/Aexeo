@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-use super::{Config, Editorial, RoutePolicyOverride, SuppressionRule};
+use super::{Config, Editorial, ImageQuality, RoutePolicyOverride, SuppressionRule};
 
 #[derive(Debug, Clone, Serialize)]
 struct ResolvedConfigDocument {
@@ -18,6 +18,7 @@ struct ResolvedConfigDocument {
     rules: RulesSection,
     output: OutputSection,
     quality: QualitySection,
+    images: ImageQuality,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -65,6 +66,7 @@ struct RulesSection {
     schema: SchemaRulesSection,
     llm: EnabledRuleSection,
     content: ContentRulesSection,
+    images: EnabledRuleSection,
     structure: StructureRulesSection,
     editorial: EnabledRuleSection,
 }
@@ -232,6 +234,9 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
                 min_page_size: config.min_page_size,
                 required_feature_markers: config.required_feature_markers.clone(),
             },
+            images: EnabledRuleSection {
+                enabled: is_enabled(config, "images"),
+            },
             structure: StructureRulesSection {
                 enabled: is_enabled(config, "structure"),
                 repeatable_data_ui: config.repeatable_data_ui.clone(),
@@ -251,6 +256,7 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
         quality: QualitySection {
             performance_budget_file: config.performance_budget_file.clone(),
         },
+        images: config.images.clone(),
     }
 }
 
@@ -267,7 +273,26 @@ pub fn render_resolved_config_toml(config: &Config) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::{render_resolved_config_json, render_resolved_config_toml};
-    use crate::config::Config;
+    use crate::config::{Config, load_config};
+    use std::fs;
+
+    #[test]
+    fn renders_and_round_trips_the_images_rule_toggle() {
+        let mut config = Config::default();
+        config.checks.insert("images".to_string(), false);
+        let rendered = render_resolved_config_toml(&config).unwrap();
+        let document: toml::Value = toml::from_str(&rendered).unwrap();
+
+        assert_eq!(
+            document["rules"]["images"]["enabled"].as_bool(),
+            Some(false)
+        );
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("aexeo.toml"), rendered).unwrap();
+        let loaded = load_config(temp_dir.path(), None).unwrap();
+        assert_eq!(loaded.checks.get("images").copied(), Some(false));
+    }
 
     #[test]
     fn renders_canonical_resolved_config() {
@@ -282,7 +307,10 @@ mod tests {
         assert!(toml.contains("version = 1"));
         assert!(toml.contains("[rules.links]"));
         assert!(toml.contains("enabled = false"));
+        assert!(toml.contains("[images]"));
+        assert!(toml.contains("max_bytes = 100000"));
         assert!(json.contains("\"version\": 1"));
         assert!(json.contains("\"links\""));
+        assert!(json.contains("\"images\""));
     }
 }

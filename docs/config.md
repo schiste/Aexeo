@@ -40,6 +40,9 @@ enabled = true
 enabled = true
 min_inbound_links = 1
 
+[rules.images]
+enabled = true
+
 [rules.schema]
 enabled = true
 require_title_alignment = true
@@ -49,6 +52,16 @@ baseline_file = ".aexeo-baseline.json"
 
 [quality]
 performance_budget_file = "performance-budget.json"
+
+[images]
+# Advisory budgets, not universal requirements; assets are never rewritten.
+max_bytes = 100_000
+max_alt_characters = 125
+prefer_modern_formats = true
+require_dimensions = true
+require_image_sitemap = false
+require_image_object_metadata = false
+recommend_figure_captions = true
 ```
 
 ## Editor And CI Consumption
@@ -335,6 +348,11 @@ performance_budget_file = "performance-budget.json"
 - Default: `true`
 - Meaning: Whether robots.txt must declare the sitemap URL.
 
+## `images`
+
+- Default: advisory budgets; optional metadata checks disabled
+- Meaning: Image-quality budgets and opt-in discovery metadata checks. The 100,000-byte and 125-character defaults are configurable advisory targets, not universal requirements.
+
 ## `weak_anchor_text`
 
 - Default: `click here`, `here`, `learn more`, `more`, `read more`
@@ -360,6 +378,7 @@ Built-in rule-group toggles. Unknown plugin rule groups default to enabled unles
 - `editorial`: default `true`
 - `headers`: default `true`
 - `html`: default `true`
+- `images`: default `true`
 - `links`: default `true`
 - `llm`: default `true`
 - `robots`: default `true`

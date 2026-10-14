@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use super::{
     AlternateLink, Block, DetailsBlock, ImageReference, JsonLdBlock, Link, Page, PreBlock,
-    capture_route_for_relative_path, classify_page_kind, line_column_for, normalize_internal_href,
-    strip_tags,
+    capture_route_for_relative_path, classify_page_kind, decode_url_path, line_column_for,
+    normalize_internal_href, strip_tags,
 };
 
 pub(super) fn parse_page_from_file(path: &Path, root: &Path) -> Result<Page> {
@@ -198,18 +198,544 @@ fn capture_breadcrumb_nav(raw: &str) -> bool {
     raw.to_ascii_lowercase().contains("breadcrumb")
 }
 
-fn capture_images(raw: &str) -> Vec<ImageReference> {
-    let mut images = Vec::new();
+#[derive(Debug, Clone, Copy)]
+struct HtmlTag {
+    start: usize,
+    end: usize,
+    name_start: usize,
+    name_end: usize,
+    closing: bool,
+}
+
+impl HtmlTag {
+    fn name<'a>(&self, raw_lowercase: &'a str) -> &'a str {
+        &raw_lowercase[self.name_start..self.name_end]
+    }
+}
+
+fn find_raw_text_closing_tag(raw_lowercase: &str, from: usize, tag_name: &str) -> Option<usize> {
+    let needle = format!("</{tag_name}");
+    let mut offset = from;
+    while let Some(relative) = raw_lowercase[offset..].find(&needle) {
+        let start = offset + relative;
+        let boundary = raw_lowercase
+            .as_bytes()
+            .get(start + needle.len())
+            .copied()?;
+        if boundary.is_ascii_whitespace() || matches!(boundary, b'/' | b'>') {
+            return Some(start);
+        }
+        offset = start + needle.len();
+    }
+    None
+}
+
+fn scan_html_tags(raw_lowercase: &str) -> Vec<HtmlTag> {
+    let mut tags = Vec::new();
     let mut offset = 0;
-    while let Some(index) = raw[offset..].find("<img") {
-        let start = offset + index;
-        let Some(end_rel) = raw[start..].find('>') else {
+    let mut template_depth = 0usize;
+    while let Some(relative) = raw_lowercase[offset..].find('<') {
+        let start = offset + relative;
+        if raw_lowercase[start..].starts_with("<!--") {
+            let Some(close) = raw_lowercase[start + 4..].find("-->") else {
+                break;
+            };
+            offset = start + 4 + close + 3;
+            continue;
+        }
+        if raw_lowercase[start..].starts_with("<![cdata[") {
+            let Some(close) = raw_lowercase[start + 9..].find("]]>") else {
+                break;
+            };
+            offset = start + 9 + close + 3;
+            continue;
+        }
+        if raw_lowercase
+            .as_bytes()
+            .get(start + 1)
+            .is_some_and(|byte| matches!(byte, b'!' | b'?'))
+        {
+            let Some(end) = html_tag_end(raw_lowercase, start) else {
+                break;
+            };
+            offset = end + 1;
+            continue;
+        }
+        let candidate_name_start = if raw_lowercase.as_bytes().get(start + 1) == Some(&b'/') {
+            start + 2
+        } else {
+            start + 1
+        };
+        if !raw_lowercase
+            .as_bytes()
+            .get(candidate_name_start)
+            .is_some_and(u8::is_ascii_alphabetic)
+        {
+            offset = start + 1;
+            continue;
+        }
+        let Some(end) = html_tag_end(raw_lowercase, start) else {
             break;
         };
-        let end = start + end_rel;
-        let snippet = &raw[start..=end];
-        let Some(src) = attr_value(snippet, "src") else {
+        let mut name_start = start + 1;
+        let closing = raw_lowercase.as_bytes().get(name_start) == Some(&b'/');
+        if closing {
+            name_start += 1;
+        }
+        let mut name_end = name_start;
+        while raw_lowercase
+            .as_bytes()
+            .get(name_end)
+            .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b':'))
+        {
+            name_end += 1;
+        }
+        if name_end == name_start {
             offset = end + 1;
+            continue;
+        }
+        let tag_name = &raw_lowercase[name_start..name_end];
+        if closing {
+            if tag_name == "template" {
+                template_depth = template_depth.saturating_sub(1);
+            } else if template_depth == 0 {
+                tags.push(HtmlTag {
+                    start,
+                    end,
+                    name_start,
+                    name_end,
+                    closing: true,
+                });
+            }
+            offset = end + 1;
+            continue;
+        }
+        if tag_name == "template" {
+            template_depth += 1;
+            offset = end + 1;
+            continue;
+        }
+        if matches!(
+            tag_name,
+            "script"
+                | "style"
+                | "textarea"
+                | "title"
+                | "xmp"
+                | "iframe"
+                | "noembed"
+                | "noframes"
+                | "noscript"
+        ) {
+            let Some(close_start) = find_raw_text_closing_tag(raw_lowercase, end + 1, tag_name)
+            else {
+                break;
+            };
+            let Some(close_end) = html_tag_end(raw_lowercase, close_start) else {
+                break;
+            };
+            offset = close_end + 1;
+            continue;
+        }
+        if tag_name == "plaintext" {
+            break;
+        }
+        if template_depth > 0 {
+            offset = end + 1;
+            continue;
+        }
+        tags.push(HtmlTag {
+            start,
+            end,
+            name_start,
+            name_end,
+            closing: false,
+        });
+        offset = end + 1;
+    }
+    tags
+}
+
+fn parse_srcset_urls(srcset: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    let mut remaining = srcset.trim();
+
+    while !remaining.is_empty() {
+        remaining = remaining.trim_start_matches(|character: char| {
+            character.is_ascii_whitespace() || character == ','
+        });
+        if remaining.is_empty() {
+            break;
+        }
+
+        let url_end = remaining
+            .find(|character: char| character.is_ascii_whitespace())
+            .unwrap_or(remaining.len());
+        let token = &remaining[..url_end];
+        let url = token.trim_end_matches(',');
+        if !url.is_empty() {
+            candidates.push(url.to_string());
+        }
+        let has_trailing_separator = url.len() < token.len();
+        remaining = &remaining[url_end..];
+        if has_trailing_separator {
+            continue;
+        }
+
+        let mut parentheses_depth = 0usize;
+        let mut next_candidate = None;
+        for (index, character) in remaining.char_indices() {
+            match character {
+                '(' => parentheses_depth += 1,
+                ')' => parentheses_depth = parentheses_depth.saturating_sub(1),
+                ',' if parentheses_depth == 0 => {
+                    next_candidate = Some(index);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let Some(next_candidate) = next_candidate else {
+            break;
+        };
+        remaining = &remaining[next_candidate + 1..];
+    }
+
+    candidates
+}
+
+fn is_modern_image_candidate(candidate: &str) -> bool {
+    let path = candidate.split(['?', '#']).next().unwrap_or_default();
+    let Some(path) = decode_url_path(path) else {
+        return false;
+    };
+    let filename = path.rsplit('/').next().unwrap_or_default();
+    filename.rsplit_once('.').is_some_and(|(_, extension)| {
+        matches!(extension.to_ascii_lowercase().as_str(), "avif" | "webp")
+    })
+}
+
+fn modern_picture_source_candidates(
+    raw: &str,
+    tag: &HtmlTag,
+    candidates: &[String],
+) -> Vec<String> {
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+    let snippet = &raw[tag.start..=tag.end];
+    let declared_type = attr_value(snippet, "type")
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty());
+    match declared_type {
+        Some(content_type) => {
+            let media_type = content_type.split(';').next().unwrap_or_default().trim();
+            if matches!(media_type, "image/avif" | "image/webp") {
+                candidates.to_vec()
+            } else {
+                Vec::new()
+            }
+        }
+        None => candidates
+            .iter()
+            .filter(|candidate| is_modern_image_candidate(candidate))
+            .cloned()
+            .collect(),
+    }
+}
+
+fn is_void_html_element(name: &str) -> bool {
+    matches!(
+        name,
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "param"
+            | "source"
+            | "track"
+            | "wbr"
+    )
+}
+
+fn visible_html_text(raw: &str) -> String {
+    let raw_lowercase = raw.to_ascii_lowercase();
+    let mut result = String::new();
+    let mut open_elements: Vec<(String, bool)> = Vec::new();
+    let mut hidden_depth = 0usize;
+    let mut template_depth = 0usize;
+    let mut offset = 0usize;
+    while offset < raw.len() {
+        let Some(character) = raw[offset..].chars().next() else {
+            break;
+        };
+        if character != '<' {
+            if hidden_depth == 0 && template_depth == 0 {
+                result.push(character);
+            }
+            offset += character.len_utf8();
+            continue;
+        }
+        if raw_lowercase[offset..].starts_with("<!--") {
+            let Some(close) = raw_lowercase[offset + 4..].find("-->") else {
+                break;
+            };
+            offset += 4 + close + 3;
+            continue;
+        }
+        if raw_lowercase[offset..].starts_with("<![cdata[") {
+            let Some(close) = raw_lowercase[offset + 9..].find("]]>") else {
+                break;
+            };
+            offset += 9 + close + 3;
+            continue;
+        }
+        if raw_lowercase
+            .as_bytes()
+            .get(offset + 1)
+            .is_some_and(|byte| matches!(byte, b'!' | b'?'))
+        {
+            let Some(end) = html_tag_end(&raw_lowercase, offset) else {
+                break;
+            };
+            offset = end + 1;
+            continue;
+        }
+        let candidate_name_start = if raw_lowercase.as_bytes().get(offset + 1) == Some(&b'/') {
+            offset + 2
+        } else {
+            offset + 1
+        };
+        if !raw_lowercase
+            .as_bytes()
+            .get(candidate_name_start)
+            .is_some_and(u8::is_ascii_alphabetic)
+        {
+            result.push('<');
+            offset += 1;
+            continue;
+        }
+        let Some(end) = html_tag_end(&raw_lowercase, offset) else {
+            break;
+        };
+        let closing = raw_lowercase.as_bytes().get(offset + 1) == Some(&b'/');
+        let name_start = candidate_name_start;
+        let mut name_end = name_start;
+        while raw_lowercase
+            .as_bytes()
+            .get(name_end)
+            .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b':'))
+        {
+            name_end += 1;
+        }
+        let tag_name = &raw_lowercase[name_start..name_end];
+        if closing {
+            let matching_open_element = if template_depth == 0 {
+                open_elements
+                    .iter()
+                    .rposition(|(open_name, _)| open_name == tag_name)
+            } else {
+                None
+            };
+            if tag_name == "template" {
+                template_depth = template_depth.saturating_sub(1);
+            } else if let Some(open_index) = matching_open_element {
+                let removed_hidden = open_elements[open_index..]
+                    .iter()
+                    .filter(|(_, hidden)| *hidden)
+                    .count();
+                open_elements.truncate(open_index);
+                hidden_depth = hidden_depth.saturating_sub(removed_hidden);
+            }
+            offset = end + 1;
+            continue;
+        }
+        if tag_name == "template" {
+            template_depth += 1;
+            offset = end + 1;
+            continue;
+        }
+        if matches!(
+            tag_name,
+            "script"
+                | "style"
+                | "textarea"
+                | "title"
+                | "xmp"
+                | "iframe"
+                | "noembed"
+                | "noframes"
+                | "noscript"
+        ) {
+            let Some(close_start) = find_raw_text_closing_tag(&raw_lowercase, end + 1, tag_name)
+            else {
+                break;
+            };
+            let Some(close_end) = html_tag_end(&raw_lowercase, close_start) else {
+                break;
+            };
+            offset = close_end + 1;
+            continue;
+        }
+        if tag_name == "plaintext" {
+            break;
+        }
+        if template_depth == 0 && !is_void_html_element(tag_name) {
+            let snippet = &raw[offset..=end];
+            let hidden = has_html_attribute(snippet, "hidden") || has_hidden_inline_style(snippet);
+            if hidden {
+                hidden_depth += 1;
+            }
+            open_elements.push((tag_name.to_string(), hidden));
+        }
+        offset = end + 1;
+    }
+    super::collapse_whitespace(&result)
+}
+
+fn figure_caption_for_image(
+    raw: &str,
+    raw_lowercase: &str,
+    tags: &[HtmlTag],
+    figure_start: Option<usize>,
+) -> (bool, Option<String>) {
+    let Some(figure_start) = figure_start else {
+        return (false, None);
+    };
+    let figure_tag = &tags[figure_start];
+    let figure_snippet = &raw[figure_tag.start..=figure_tag.end];
+    if has_html_attribute(figure_snippet, "hidden") || has_hidden_inline_style(figure_snippet) {
+        return (true, None);
+    }
+
+    let mut nested_figures = 0usize;
+    let mut figure_end = tags.len();
+    for (index, tag) in tags.iter().enumerate().skip(figure_start + 1) {
+        if tag.name(raw_lowercase) != "figure" {
+            continue;
+        }
+        if tag.closing {
+            if nested_figures == 0 {
+                figure_end = index;
+                break;
+            }
+            nested_figures -= 1;
+        } else {
+            nested_figures += 1;
+        }
+    }
+
+    for (caption_index, tag) in tags
+        .iter()
+        .enumerate()
+        .take(figure_end)
+        .skip(figure_start + 1)
+    {
+        if tag.closing || tag.name(raw_lowercase) != "figcaption" {
+            continue;
+        }
+        let caption_snippet = &raw[tag.start..=tag.end];
+        if has_html_attribute(caption_snippet, "hidden") || has_hidden_inline_style(caption_snippet)
+        {
+            continue;
+        }
+        let mut nested_captions = 0usize;
+        let mut closing_tag = None;
+        for (close_index, candidate) in tags
+            .iter()
+            .enumerate()
+            .skip(caption_index + 1)
+            .take(figure_end.saturating_sub(caption_index + 1))
+        {
+            if candidate.name(raw_lowercase) != "figcaption" {
+                continue;
+            }
+            if candidate.closing {
+                if nested_captions == 0 {
+                    closing_tag = Some((close_index, candidate));
+                    break;
+                }
+                nested_captions -= 1;
+            } else {
+                nested_captions += 1;
+            }
+        }
+        let Some((_, closing_tag)) = closing_tag else {
+            continue;
+        };
+        let text_start = tag.end + 1;
+        let caption = visible_html_text(&raw[text_start..closing_tag.start]);
+        if !caption.trim().is_empty() {
+            return (true, Some(caption));
+        }
+    }
+    (true, None)
+}
+
+#[derive(Default)]
+struct PictureSources {
+    asset_sources: Vec<String>,
+    modern_sources: Vec<String>,
+}
+
+fn capture_images(raw: &str) -> Vec<ImageReference> {
+    let raw_lowercase = raw.to_ascii_lowercase();
+    let tags = scan_html_tags(&raw_lowercase);
+    let mut images = Vec::new();
+    let mut picture_stack: Vec<PictureSources> = Vec::new();
+    let mut figure_stack = Vec::new();
+    for (tag_index, tag) in tags.iter().enumerate() {
+        let tag_name = tag.name(&raw_lowercase);
+        if tag.closing {
+            if tag_name == "picture" {
+                picture_stack.pop();
+            } else if tag_name == "figure" {
+                figure_stack.pop();
+            }
+            continue;
+        }
+        if tag_name == "picture" {
+            picture_stack.push(PictureSources::default());
+            continue;
+        }
+        if tag_name == "figure" {
+            figure_stack.push(tag_index);
+            continue;
+        }
+        if tag_name == "source" {
+            if let Some(picture) = picture_stack.last_mut() {
+                let snippet = &raw[tag.start..=tag.end];
+                let candidates = attr_value(snippet, "srcset")
+                    .map(|srcset| parse_srcset_urls(&srcset))
+                    .unwrap_or_default();
+                picture
+                    .modern_sources
+                    .extend(modern_picture_source_candidates(raw, tag, &candidates));
+                picture.asset_sources.extend(candidates);
+            }
+            continue;
+        }
+        if tag_name != "img" {
+            continue;
+        }
+        let snippet = &raw[tag.start..=tag.end];
+        let mut asset_sources = attr_value(snippet, "srcset")
+            .map(|srcset| parse_srcset_urls(&srcset))
+            .unwrap_or_default();
+        let src = attr_value(snippet, "src")
+            .or_else(|| asset_sources.first().cloned())
+            .or_else(|| {
+                picture_stack
+                    .last()
+                    .and_then(|picture| picture.asset_sources.first().cloned())
+            });
+        let Some(src) = src else {
             continue;
         };
         let alt = attr_value(snippet, "alt");
@@ -217,16 +743,34 @@ fn capture_images(raw: &str) -> Vec<ImageReference> {
         let aria_hidden = attr_value(snippet, "aria-hidden")
             .map(|value| value.trim().eq_ignore_ascii_case("true"))
             .unwrap_or(false);
-        let (line, column) = line_column_for(raw, start);
+        let width = attr_value(snippet, "width");
+        let height = attr_value(snippet, "height");
+        let modern_sources = picture_stack
+            .last()
+            .map(|picture| picture.modern_sources.clone())
+            .unwrap_or_default();
+        let has_modern_source = !modern_sources.is_empty();
+        if let Some(picture) = picture_stack.last() {
+            asset_sources.extend(picture.asset_sources.iter().cloned());
+        }
+        let (inside_figure, figure_caption) =
+            figure_caption_for_image(raw, &raw_lowercase, &tags, figure_stack.last().copied());
+        let (line, column) = line_column_for(raw, tag.start);
         images.push(ImageReference {
             src,
+            asset_sources,
+            modern_sources,
             alt,
             line,
             column,
             role,
             aria_hidden,
+            width,
+            height,
+            has_modern_source,
+            inside_figure,
+            figure_caption,
         });
-        offset = end + 1;
     }
     images
 }
@@ -374,13 +918,127 @@ fn tag_snippets(raw: &str, tag: &str) -> Vec<String> {
     snippets
 }
 
+fn attribute_value_or_presence(snippet: &str, attr: &str) -> Option<Option<String>> {
+    let bytes = snippet.as_bytes();
+    let mut cursor = snippet.find('<')? + 1;
+    while cursor < bytes.len()
+        && !bytes[cursor].is_ascii_whitespace()
+        && !matches!(bytes[cursor], b'/' | b'>')
+    {
+        cursor += 1;
+    }
+
+    loop {
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if cursor >= bytes.len() || bytes[cursor] == b'>' {
+            return None;
+        }
+        if bytes[cursor] == b'/' {
+            cursor += 1;
+            continue;
+        }
+
+        let name_start = cursor;
+        while cursor < bytes.len()
+            && !bytes[cursor].is_ascii_whitespace()
+            && !matches!(bytes[cursor], b'=' | b'/' | b'>')
+        {
+            cursor += 1;
+        }
+        if cursor == name_start {
+            cursor += 1;
+            continue;
+        }
+        let name = &snippet[name_start..cursor];
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+
+        if cursor >= bytes.len() || bytes[cursor] != b'=' {
+            if name.eq_ignore_ascii_case(attr) {
+                return Some(None);
+            }
+            continue;
+        }
+        cursor += 1;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+
+        let (value_start, value_end) =
+            if cursor < bytes.len() && matches!(bytes[cursor], b'"' | b'\'') {
+                let quote = bytes[cursor];
+                cursor += 1;
+                let value_start = cursor;
+                while cursor < bytes.len() && bytes[cursor] != quote {
+                    cursor += 1;
+                }
+                if cursor >= bytes.len() {
+                    return None;
+                }
+                let value_end = cursor;
+                cursor += 1;
+                (value_start, value_end)
+            } else {
+                let value_start = cursor;
+                while cursor < bytes.len()
+                    && !bytes[cursor].is_ascii_whitespace()
+                    && bytes[cursor] != b'>'
+                {
+                    cursor += 1;
+                }
+                (value_start, cursor)
+            };
+        if name.eq_ignore_ascii_case(attr) {
+            return Some(Some(snippet[value_start..value_end].trim().to_string()));
+        }
+    }
+}
+
 fn attr_value(snippet: &str, attr: &str) -> Option<String> {
-    for quote in ['"', '\''] {
-        let needle = format!("{}={}", attr, quote);
-        if let Some(start) = snippet.find(&needle) {
-            let value_start = start + needle.len();
-            let end = snippet[value_start..].find(quote)? + value_start;
-            return Some(snippet[value_start..end].trim().to_string());
+    attribute_value_or_presence(snippet, attr).flatten()
+}
+
+fn has_html_attribute(snippet: &str, attr: &str) -> bool {
+    attribute_value_or_presence(snippet, attr).is_some()
+}
+
+fn has_hidden_inline_style(snippet: &str) -> bool {
+    let Some(style) = attr_value(snippet, "style") else {
+        return false;
+    };
+    style.split(';').any(|declaration| {
+        let Some((property, value)) = declaration.split_once(':') else {
+            return false;
+        };
+        let value = value
+            .split_once('!')
+            .map_or(value, |(value, _)| value)
+            .trim();
+        match property.trim().to_ascii_lowercase().as_str() {
+            "display" => value.eq_ignore_ascii_case("none"),
+            "visibility" => {
+                value.eq_ignore_ascii_case("hidden") || value.eq_ignore_ascii_case("collapse")
+            }
+            "content-visibility" => value.eq_ignore_ascii_case("hidden"),
+            _ => false,
+        }
+    })
+}
+
+fn html_tag_end(raw: &str, start: usize) -> Option<usize> {
+    let mut quote = None;
+    for (offset, character) in raw.get(start..)?.char_indices() {
+        if let Some(quote_character) = quote {
+            if character == quote_character {
+                quote = None;
+            }
+        } else if matches!(character, '\'' | '"') {
+            quote = Some(character);
+        } else if character == '>' {
+            return Some(start + offset);
         }
     }
     None
