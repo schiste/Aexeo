@@ -1,6 +1,7 @@
 use std::io::ErrorKind;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::mpsc::{self, Sender, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -16,7 +17,62 @@ fn respond(mut stream: TcpStream, status: &str, content_type: &str, body: &str) 
     stream.flush().unwrap();
 }
 
+pub struct ManagedTestServer {
+    base_url: String,
+    shutdown: Sender<()>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl ManagedTestServer {
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    pub fn shutdown(mut self) {
+        self.shutdown_inner().expect("test server thread panicked");
+    }
+
+    fn shutdown_inner(&mut self) -> thread::Result<()> {
+        let _ = self.shutdown.send(());
+        match self.handle.take() {
+            Some(handle) => handle.join(),
+            None => Ok(()),
+        }
+    }
+}
+
+impl Drop for ManagedTestServer {
+    fn drop(&mut self) {
+        let _ = self.shutdown_inner();
+    }
+}
+
 pub fn spawn_server(min_requests: usize) -> (String, thread::JoinHandle<()>) {
+    let min_requests = min_requests.max(1);
+    spawn_server_with_stop_condition(move |served, started, last_request| {
+        (served >= min_requests && last_request.elapsed() > Duration::from_millis(150))
+            || started.elapsed() > Duration::from_secs(30)
+    })
+}
+
+pub fn spawn_server_with_explicit_shutdown() -> ManagedTestServer {
+    let (shutdown, shutdown_receiver) = mpsc::channel();
+    let (base_url, handle) = spawn_server_with_stop_condition(move |_, _, _| {
+        matches!(
+            shutdown_receiver.try_recv(),
+            Ok(()) | Err(TryRecvError::Disconnected)
+        )
+    });
+    ManagedTestServer {
+        base_url,
+        shutdown,
+        handle: Some(handle),
+    }
+}
+
+fn spawn_server_with_stop_condition(
+    mut should_stop: impl FnMut(usize, Instant, Instant) -> bool + Send + 'static,
+) -> (String, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     let address = listener.local_addr().unwrap();
@@ -70,10 +126,7 @@ pub fn spawn_server(min_requests: usize) -> (String, thread::JoinHandle<()>) {
                     }
                 }
                 Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                    if (served >= min_requests.max(1)
-                        && last_request.elapsed() > Duration::from_millis(150))
-                        || started.elapsed() > Duration::from_secs(30)
-                    {
+                    if should_stop(served, started, last_request) {
                         break;
                     }
                     thread::sleep(Duration::from_millis(10));
