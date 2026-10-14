@@ -31,8 +31,8 @@ when it's actually needed.
   (`@astrojs/cloudflare` + `@emdash-cms/cloudflare`'s `sandbox()`
   runner is fine — sandboxed plugins use Worker Loader, configured
   plugins don't, but both adapters import cleanly).
-- EmDash `>=0.41.0 <0.42.0` as a peer dependency. The integration
-  coverage targets `0.41.0` with EmDash's official plugin test host.
+- EmDash `^1.2.0` as a peer dependency. The integration coverage targets
+  `1.2.0` with EmDash's official plugin test host.
 
 ### Install
 
