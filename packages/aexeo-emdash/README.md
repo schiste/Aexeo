@@ -53,8 +53,8 @@ troubleshooting list, see [INSTALL.md](./INSTALL.md).
 
 ## Compatibility
 
-- EmDash `>= 0.41.0 < 0.42.0` (peer dependency; current supported range)
-- Runtime integration coverage targets EmDash `0.41.0` via the official
+- EmDash `^1.2.0` (peer dependency; current supported range)
+- Runtime integration coverage targets EmDash `1.2.0` via the official
   `@emdash-cms/plugin-test` host.
 - Cloudflare Workers via `@astrojs/cloudflare`. The plugin uses
   Cloudflare-specific APIs and silently no-ops on the Node adapter.
