@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod content;
 pub mod document;
 pub mod evaluate;
 pub mod page;
