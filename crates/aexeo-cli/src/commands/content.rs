@@ -174,8 +174,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
 }
 
 fn toml_output(preset: &aexeo_core::content_gate::ContentPreset) -> Result<String> {
-    // JSON preserves the fully resolved structure without requiring a CLI TOML dependency.
-    Ok(serde_json::to_string_pretty(preset)?)
+    preset.to_toml()
 }
 
 // Append only after comparing the open file with the text that was evaluated.

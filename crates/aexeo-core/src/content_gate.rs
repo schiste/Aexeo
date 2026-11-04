@@ -174,6 +174,12 @@ pub struct ContentReport {
 }
 
 impl ContentPreset {
+    /// Serialize a resolved preset as portable TOML.
+    pub fn to_toml(&self) -> Result<String> {
+        self.validate()?;
+        Ok(toml::to_string_pretty(self)?)
+    }
+
     pub fn from_toml(source: &str) -> Result<Self> {
         let preset: Self = toml::from_str(source)?;
         preset.validate()?;

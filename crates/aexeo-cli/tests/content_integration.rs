@@ -252,3 +252,16 @@ fn fix_rejects_files_with_multiple_hard_links() {
     assert!(!output.status.success());
     assert_eq!(std::fs::read(&link).unwrap(), b"unchanged");
 }
+
+#[test]
+fn explain_emits_reusable_resolved_toml() {
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(["content", "--preset", "glossary-editorial", "--explain"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let source = String::from_utf8(output.stdout).unwrap();
+    let preset = aexeo_core::content_gate::ContentPreset::from_toml(&source).unwrap();
+    assert_eq!(preset.name, "Glossary editorial starter");
+    assert_eq!(preset.gates.len(), 3);
+}
