@@ -31,3 +31,13 @@ it("forwards the selected preset through the plugin descriptor", async () => {
   const preset = { name: "custom", sources: { custom: "version = 1" } };
   expect(aexeoPlugin({ contentPreset: preset }).options.contentPreset).toEqual(preset);
 });
+
+it("selects a preset per collection and falls back to the default", async () => {
+  const selected: string[] = [];
+  const evaluator = withContentPreset(base, { name: "article", byCollection: { glossary: "glossary" } }, async (_doc, name) => {
+    selected.push(name);
+    return { ...report, gates: [] };
+  });
+  await evaluator([doc, { ...doc, route: "/other" }], { collections: ["glossary", "posts"] });
+  expect(selected).toEqual(["glossary", "article"]);
+});

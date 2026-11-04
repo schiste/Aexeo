@@ -5,6 +5,7 @@ import type { EmdashDocument } from "./types.js";
 export interface ContentPresetOptions {
   name: string;
   sources?: Record<string, string>;
+  byCollection?: Record<string, string>;
 }
 
 /** Add portable content findings to an existing evaluator without hiding skipped gates. */
@@ -14,13 +15,15 @@ export function withContentPreset(
   evaluate: (document: EmdashDocument, name: string, sources?: Record<string, string>) => Promise<ContentReport>,
 ): EvaluatorFn {
   if (!preset) return base;
-  return async (documents) => {
-    const result = await base(documents);
+  return async (documents, context) => {
+    const result = await base(documents, context);
     if (!result.ok) return result;
     const findings = [...result.findings];
     try {
-      for (const document of documents) {
-        const report = await evaluate(document, preset.name, preset.sources);
+      for (const [index, document] of documents.entries()) {
+        const collection = context?.collections[index];
+        const name = (collection === undefined ? undefined : preset.byCollection?.[collection]) ?? preset.name;
+        const report = await evaluate(document, name, preset.sources);
         const incomplete = report.gates.filter((gate) => gate.status === "not_checked");
         if (incomplete.length) return {
           ok: false, reason: "content_preset_incomplete",

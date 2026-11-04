@@ -74,8 +74,8 @@ The EmDash package exposes `evaluateContent` from `@aeptus/aexeo-emdash/content`
 
 ```ts
 aexeoPlugin({
-  contentPreset: { name: "glossary" },
+  contentPreset: { name: "article", byCollection: { glossary: "glossary" } },
 })
 ```
 
-For custom presets, add `sources: { custom: "...TOML..." }` and select `name: "custom"`. The preset applies to every evaluated document; per-collection selection is not yet supported. The existing SEO findings remain enabled. A gate the document adapter cannot check causes an explicit incomplete-evaluation error rather than being silently omitted. The sandboxed plugin's sidecar workflow does not yet support this option.
+For custom presets, add `sources: { custom: "...TOML..." }` and select `name: "custom"`. `name` is the fallback preset; `byCollection` selects a named preset for a specific collection on both save and refresh. The existing SEO findings remain enabled. A gate the document adapter cannot check causes an explicit incomplete-evaluation error rather than being silently omitted. The sandboxed plugin's sidecar workflow does not yet support this option.
