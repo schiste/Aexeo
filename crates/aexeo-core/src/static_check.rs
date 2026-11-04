@@ -52,6 +52,112 @@ fn time_rule_group<F>(
     });
 }
 
+type NativeRuleRunner = fn(&crate::site::Site, &Config) -> Vec<Finding>;
+
+struct NativeRuleGroup {
+    switch: &'static str,
+    timing_group: &'static str,
+    run: NativeRuleRunner,
+}
+
+// Keep execution order and timing labels stable: audit artifacts expose them.
+// well_known is separately configurable but reports under the surfaces group.
+const NATIVE_RULE_GROUPS: &[NativeRuleGroup] = &[
+    NativeRuleGroup {
+        switch: "html",
+        timing_group: "html",
+        run: run_html_rules,
+    },
+    NativeRuleGroup {
+        switch: "social",
+        timing_group: "social",
+        run: run_social_rules,
+    },
+    NativeRuleGroup {
+        switch: "robots",
+        timing_group: "robots",
+        run: run_robots_rules,
+    },
+    NativeRuleGroup {
+        switch: "links",
+        timing_group: "links",
+        run: run_link_rules,
+    },
+    NativeRuleGroup {
+        switch: "sitemap",
+        timing_group: "sitemap",
+        run: run_sitemap_rules,
+    },
+    NativeRuleGroup {
+        switch: "llm",
+        timing_group: "llm",
+        run: run_llm_rules,
+    },
+    NativeRuleGroup {
+        switch: "surfaces",
+        timing_group: "surfaces",
+        run: run_surface_rules,
+    },
+    NativeRuleGroup {
+        switch: "well_known",
+        timing_group: "surfaces",
+        run: run_well_known_group,
+    },
+    NativeRuleGroup {
+        switch: "headers",
+        timing_group: "headers",
+        run: run_headers_group,
+    },
+    NativeRuleGroup {
+        switch: "schema",
+        timing_group: "schema",
+        run: run_schema_rules,
+    },
+    NativeRuleGroup {
+        switch: "content",
+        timing_group: "content",
+        run: run_content_rules,
+    },
+    NativeRuleGroup {
+        switch: "editorial",
+        timing_group: "editorial",
+        run: run_editorial_rules,
+    },
+    NativeRuleGroup {
+        switch: "structure",
+        timing_group: "structure",
+        run: run_structure_rules,
+    },
+    NativeRuleGroup {
+        switch: "accessibility",
+        timing_group: "accessibility",
+        run: run_accessibility_group,
+    },
+    NativeRuleGroup {
+        switch: "agent_discovery",
+        timing_group: "agent_discovery",
+        run: run_agent_discovery_rules,
+    },
+];
+
+fn run_well_known_group(site: &crate::site::Site, _: &Config) -> Vec<Finding> {
+    let capabilities = crate::capabilities::infer_site_capabilities(site);
+    crate::well_known_rules::run_well_known_rules(site, &capabilities)
+}
+
+fn run_headers_group(site: &crate::site::Site, _: &Config) -> Vec<Finding> {
+    crate::header_rules::run_header_rules(site)
+}
+
+fn run_accessibility_group(site: &crate::site::Site, config: &Config) -> Vec<Finding> {
+    run_accessibility_rules(
+        site,
+        AccessibilityOptions {
+            strict: config.accessibility.strict,
+        },
+    )
+}
+
 pub fn run_checks_for_site_profiled(site: &crate::site::Site, config: &Config) -> SiteCheckProfile {
     let mut findings = Vec::new();
     let mut rule_timings = Vec::new();
@@ -73,127 +179,15 @@ pub fn run_checks_for_site_profiled(site: &crate::site::Site, config: &Config) -
         });
     }
 
-    time_rule_group(
-        rules.checks.get("html").copied().unwrap_or(true),
-        "html",
-        &mut rule_timings,
-        &mut findings,
-        || run_html_rules(site, config),
-    );
-    time_rule_group(
-        rules.checks.get("social").copied().unwrap_or(true),
-        "social",
-        &mut rule_timings,
-        &mut findings,
-        || run_social_rules(site, config),
-    );
-    time_rule_group(
-        rules.checks.get("robots").copied().unwrap_or(true),
-        "robots",
-        &mut rule_timings,
-        &mut findings,
-        || run_robots_rules(site, config),
-    );
-    time_rule_group(
-        rules.checks.get("links").copied().unwrap_or(true),
-        "links",
-        &mut rule_timings,
-        &mut findings,
-        || run_link_rules(site, config),
-    );
-    time_rule_group(
-        rules.checks.get("sitemap").copied().unwrap_or(true),
-        "sitemap",
-        &mut rule_timings,
-        &mut findings,
-        || run_sitemap_rules(site, config),
-    );
-    time_rule_group(
-        rules.checks.get("llm").copied().unwrap_or(true),
-        "llm",
-        &mut rule_timings,
-        &mut findings,
-        || run_llm_rules(site, config),
-    );
-    time_rule_group(
-        rules.checks.get("surfaces").copied().unwrap_or(true),
-        "surfaces",
-        &mut rule_timings,
-        &mut findings,
-        || run_surface_rules(site, config),
-    );
-    // `well_known_rules` emits SRF rules, and the registry files those under
-    // the `surfaces` group. The timing label has to match, or the performance
-    // artifact grows a `well_known` bucket that `aexeo-cli rules` and
-    // `docs/rules.md` never mention. The stage still runs separately — it is
-    // a distinct execution step and a distinct `[checks] well_known` switch —
-    // it just reports under the group its findings belong to.
-    time_rule_group(
-        rules.checks.get("well_known").copied().unwrap_or(true),
-        "surfaces",
-        &mut rule_timings,
-        &mut findings,
-        || {
-            let capabilities = crate::capabilities::infer_site_capabilities(site);
-            crate::well_known_rules::run_well_known_rules(site, &capabilities)
-        },
-    );
-    time_rule_group(
-        rules.checks.get("headers").copied().unwrap_or(true),
-        "headers",
-        &mut rule_timings,
-        &mut findings,
-        || crate::header_rules::run_header_rules(site),
-    );
-    time_rule_group(
-        rules.checks.get("schema").copied().unwrap_or(true),
-        "schema",
-        &mut rule_timings,
-        &mut findings,
-        || run_schema_rules(site, config),
-    );
-    time_rule_group(
-        rules.checks.get("content").copied().unwrap_or(true),
-        "content",
-        &mut rule_timings,
-        &mut findings,
-        || run_content_rules(site, config),
-    );
-    time_rule_group(
-        rules.checks.get("editorial").copied().unwrap_or(true),
-        "editorial",
-        &mut rule_timings,
-        &mut findings,
-        || run_editorial_rules(site, config),
-    );
-    time_rule_group(
-        rules.checks.get("structure").copied().unwrap_or(true),
-        "structure",
-        &mut rule_timings,
-        &mut findings,
-        || run_structure_rules(site, config),
-    );
-    time_rule_group(
-        rules.checks.get("accessibility").copied().unwrap_or(true),
-        "accessibility",
-        &mut rule_timings,
-        &mut findings,
-        || {
-            run_accessibility_rules(
-                site,
-                AccessibilityOptions {
-                    strict: config.accessibility.strict,
-                },
-            )
-        },
-    );
-    time_rule_group(
-        rules.checks.get("agent_discovery").copied().unwrap_or(true),
-        "agent_discovery",
-        &mut rule_timings,
-        &mut findings,
-        || run_agent_discovery_rules(site, config),
-    );
+    for group in NATIVE_RULE_GROUPS {
+        time_rule_group(
+            rules.checks.get(group.switch).copied().unwrap_or(true),
+            group.timing_group,
+            &mut rule_timings,
+            &mut findings,
+            || (group.run)(site, config),
+        );
+    }
 
     let policy_started_at = Instant::now();
     let findings = apply_policy(findings, config);
@@ -220,25 +214,7 @@ pub fn can_run_native_static_audit(config: &Config) -> bool {
     let rules = config.rules();
     default_rule_switches().into_iter().all(|(name, enabled)| {
         let requested = rules.checks.get(name).copied().unwrap_or(enabled);
-        !requested
-            || matches!(
-                name,
-                "html"
-                    | "social"
-                    | "robots"
-                    | "links"
-                    | "sitemap"
-                    | "llm"
-                    | "surfaces"
-                    | "well_known"
-                    | "headers"
-                    | "schema"
-                    | "content"
-                    | "editorial"
-                    | "structure"
-                    | "accessibility"
-                    | "agent_discovery"
-            )
+        !requested || NATIVE_RULE_GROUPS.iter().any(|group| group.switch == name)
     })
 }
 
@@ -263,6 +239,24 @@ mod tests {
     use super::{can_run_native_static_audit, run_native_static_audit};
     use crate::config::Config;
     use std::fs;
+
+    #[test]
+    fn native_rule_groups_cover_default_switches_once() {
+        let mut switches = std::collections::BTreeSet::new();
+        for group in super::NATIVE_RULE_GROUPS {
+            assert!(
+                switches.insert(group.switch),
+                "duplicate rule switch: {}",
+                group.switch
+            );
+        }
+        let defaults: std::collections::BTreeSet<_> =
+            crate::config::default_rule_switches().into_keys().collect();
+        assert_eq!(
+            switches, defaults,
+            "native rule dispatch and configuration must agree"
+        );
+    }
 
     #[test]
     fn native_static_support_tracks_supported_rule_groups() {
