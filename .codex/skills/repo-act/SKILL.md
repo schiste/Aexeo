@@ -23,6 +23,7 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - Run the fastest relevant test command first.
 - Check likely entrypoints and impacted callers before finishing.
 - Re-run lint/build only after the focused validation passes.
+- Run `sh scripts/check-code.sh` for code changes before claiming the repository gate passes; it includes `scripts/clippy-strict.sh`, whose production-code lint policy is stricter than generic workspace Clippy.
 - Document any override-based maintainer note that affected the change plan.
 
 ## Useful Commands
