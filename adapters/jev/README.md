@@ -23,3 +23,19 @@ aexeo-cli content article.md --preset my-preset --preset-source my-preset=review
 ```
 
 Run the offline tests with `python3 -m unittest discover -s adapters/jev -v`. They use a mock response; they do not validate the provider's availability, calibration, accuracy, or live API behavior.
+
+## Measure against independent labels
+
+`evaluate.py` measures existing review records offline; it never calls the provider. Supply two JSON arrays. The first contains independently labeled examples with stable `id`, exact `claim`, exact `source_text`, and `label` (`supported`, `contradicted`, or `uncertain`). The second contains objects with the same `id` and the saved adapter output under `review`:
+
+```json
+[{"id":"case-1","claim":"The count is 14.","source_text":"Study observed 14 participants.","label":"supported"}]
+```
+
+```json
+[{"id":"case-1","review":{"claim":"The count is 14.","source_text":"Study observed 14 participants.","support":"supported","reliability":"uncertain","reviewer":"jev:example","provenance":{"model_choice":"supported","model_probability":"0.9","threshold":"0.8"}}}]
+```
+
+Run `python3 adapters/jev/evaluate.py labels.json reviews.json`. It reports raw choice accuracy, the mean squared error of the selected-choice probability against whether that choice was correct (`confidence_brier`), the proportion of non-uncertain decisions above threshold, accuracy among those decisions, and the count and fraction of support approvals that conflict with the labels. This is a confidence Brier score, not a multiclass Brier score. An empty decisive set has `null` accuracy. Reviews without matching examples, with changed inputs, or inconsistent with their saved thresholds are rejected.
+
+These metrics have meaning only with labels independently produced by qualified reviewers and a sufficiently large, representative held-out sample. The tool does not assess source reliability, establish empirical truth, choose a threshold, or verify that labels are independent. Keep evaluation data separate from examples used to select the threshold; re-evaluate when the model or task distribution changes. Older reviews without `model_choice` must be regenerated for this measurement.
