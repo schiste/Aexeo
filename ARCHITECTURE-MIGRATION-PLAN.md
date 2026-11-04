@@ -21,7 +21,7 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 ## Progression détaillée
 
 - Phase 2 : premier moteur de contenu indépendant des sites ; trois types de gate et résultats `passed` / `failed` / `not_checked`. Le preset `seo-website` appelle l’audit site existant comme une gate globale ; les groupes natifs sont aussi disponibles individuellement avec `site_group` ; le preset complet reste une gate globale pour conserver les diagnostics de déploiement.
-- Phase 3 : presets TOML nommés, héritage, surcharges, désactivation, détection des cycles et inspection CLI ; exemples article et glossaire minimaux.
+- Phase 3 : presets TOML nommés, héritage, surcharges, désactivation, détection des cycles et inspection CLI ; presets article et glossaire minimaux, variantes éditoriales à seuils consultatifs et fichiers TOML copiables intégrés aux builds.
 - Phase 4 : CLI texte/stdin et bridge EmDash/WASM raccordés au même moteur ; parsing Markdown et gate de titres partagés avec EmDash ; preset optionnel raccordé aux sauvegardes et refreshs EmDash configurés ; sélection par collection disponible ; mode sandbox pris en charge via configuration du sidecar et sélection par collection.
 - Phase 5 : documentation, skill et découverte CLI des presets ; benchmark local reproductible et premier correctif explicite de fin de fichier ; autres correctifs sûrs à étudier.
 
@@ -29,6 +29,8 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 - Phase 1 : dispatch statique regroupé dans un registre unique avec vérification des groupes et conservation de leur ordre et des libellés de timing.
 - Phase 1 : la PR #11 modifie aussi le dispatch pour ajouter les règles image ; resynchroniser et réconcilier après son intégration.
 - Phase 1 : inventaire des contrats CLI, crawl, WASM et EmDash et identification des coutures de migration à poursuivre.
+
+- CI : correction des `unwrap` refusés par le Clippy strict et de la dépendance verrouillée du plugin signalée par l’audit de production ; validation finale du nouveau commit en cours. La surcharge npm ne se propage pas aux consommateurs du paquet.
 
 - Validation : `cargo test --locked --offline --workspace`, build du plugin, typechecks plugin et worker et suite EmDash complète (83 tests) réussis. Le broker a vérifié les conflits sur `origin/main` mais aucune gate Aethyme n’est configurée sur cette base ; les contrôles CI et la revue restent nécessaires.
 

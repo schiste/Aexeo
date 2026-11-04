@@ -102,40 +102,23 @@ pub fn builtin_content_presets() -> BTreeMap<String, String> {
     BTreeMap::from([
         (
             "seo-website".into(),
-            r#"
-version = 1
-name = "SEO/GEO website audit"
-[[gates]]
-id = "site.seo_geo"
-kind = "site_audit"
-"#
-            .into(),
+            include_str!("../presets/seo-website.toml").into(),
         ),
         (
             "article".into(),
-            r#"
-version = 1
-name = "Article content"
-[[gates]]
-id = "content.minimum_words"
-kind = "word_count"
-min = 1
-"#
-            .into(),
+            include_str!("../presets/article.toml").into(),
         ),
         (
             "glossary".into(),
-            r#"
-version = 1
-name = "Glossary entry"
-extends = ["article"]
-[[gates]]
-id = "content.minimum_words"
-kind = "word_count"
-min = 1
-max = 500
-"#
-            .into(),
+            include_str!("../presets/glossary.toml").into(),
+        ),
+        (
+            "article-editorial".into(),
+            include_str!("../presets/article-editorial.toml").into(),
+        ),
+        (
+            "glossary-editorial".into(),
+            include_str!("../presets/glossary-editorial.toml").into(),
         ),
     ])
 }
@@ -143,6 +126,26 @@ max = 500
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn editorial_starters_are_composable_and_advisory() {
+        use crate::content_gate::{ContentInput, GateStatus};
+        for name in ["article-editorial", "glossary-editorial"] {
+            let preset = resolve_content_preset(name, &builtin_content_presets()).unwrap();
+            let report = preset
+                .evaluate(&ContentInput {
+                    id: "draft".into(),
+                    text: Some("Short draft".into()),
+                    ..Default::default()
+                })
+                .unwrap();
+            assert_eq!(report.gates[0].status, GateStatus::Passed);
+            assert_eq!(report.gates[1].status, GateStatus::Failed);
+            assert!(!report.gates[1].blocking);
+            assert_eq!(report.gates[2].status, GateStatus::NotChecked);
+            assert!(!report.gates[2].blocking);
+        }
+    }
+
     #[test]
     fn composition_overrides_in_place_and_disables() {
         let mut sources = builtin_content_presets();

@@ -23,7 +23,9 @@ group = "html"
 
 Use `aexeo-cli content --list-site-groups` for supported group names. The existing site configuration's group switches, suppressions, and severity overrides apply. A group disabled by that configuration is `not_checked`. The `seo-website` preset remains a single site audit gate, preserving its existing complete findings, including deployment diagnostics.
 
-The built-in `article` preset requires at least one whitespace-separated word. `glossary` inherits it and sets a maximum of 500 words. These deliberately minimal examples are starting points, not comprehensive editorial standards.
+The built-in `article` preset requires at least one whitespace-separated word. `glossary` inherits it and sets a maximum of 500 words. These deliberately minimal examples are starting points, not comprehensive editorial standards. `article-editorial` and `glossary-editorial` extend them with advisory word-count ranges and title/description metadata checks. Their thresholds are examples to override for your audience, language and content type; missing metadata is explicitly `not_checked`.
+
+The [built-in TOML files](../crates/aexeo-core/presets) are embedded in native and WASM builds and can also be copied into another project as a starting point.
 
 ## Custom presets
 

@@ -1,0 +1,8 @@
+version = 1
+name = "Glossary entry"
+extends = ["article"]
+[[gates]]
+id = "content.minimum_words"
+kind = "word_count"
+min = 1
+max = 500
