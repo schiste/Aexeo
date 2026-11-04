@@ -28,6 +28,7 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 
 ## Progression détaillée
 
+- Validation récente : `CARGO_NET_OFFLINE=true sh scripts/check-repo.sh` réussi sur `4004aee` ; builds WASM plugin et worker réussis ; vérifications Node/WASM des faits structurés et des revues périmées réussies. La CI du commit reste à confirmer.
 - Phase 6 : extensions Rust explicites et gates de présence littérale, de comparaison de valeurs JSON et d’intégration de jugements externes liés aux snapshots fournis ; aucun jugement sémantique, contrôle de fiabilité ou vérification factuelle générale n’est encore implémenté.
 - Phase 2 : adapter Rust pour appliquer un preset à `RuntimeAudit` en conservant statut, raison de troncature et diagnostics de crawl ; la sortie CLI historique du crawl reste inchangée ; `content --crawl-url` expose aussi ce parcours.
 - Phase 2 : premier moteur de contenu indépendant des sites ; trois types de gate et résultats `passed` / `failed` / `not_checked`. Le preset `seo-website` appelle l’audit site existant comme une gate globale ; les groupes natifs sont aussi disponibles individuellement avec `site_group` ; le preset complet reste une gate globale pour conserver les diagnostics de déploiement.
@@ -42,7 +43,7 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 
 - CI : correction des `unwrap` refusés par le Clippy strict et de la dépendance verrouillée du plugin signalée par l’audit de production ; validation finale du nouveau commit en cours. La surcharge npm ne se propage pas aux consommateurs du paquet.
 
-- Validation : `sh scripts/check-repo.sh` complet réussi (format, Clippy strict, tests, isolation, audit, deny, udeps, documentation et configuration) ; build plugin et worker WASM, typechecks et suite EmDash complète (83 tests) réussis. `cargo audit` conserve un avertissement Tokio autorisé. Le broker ne configure aucune gate sur la base ; les contrôles CI et la revue restent nécessaires.
+- Validation : `sh scripts/check-repo.sh` complet réussi (format, Clippy strict, tests, isolation, audit, deny, udeps, documentation et configuration) ; build plugin et worker WASM, typechecks et suite EmDash complète (85 tests) réussis. `cargo audit` conserve un avertissement Tokio autorisé. Le broker ne configure aucune gate sur la base ; les contrôles CI et la revue restent nécessaires.
 
 - Phase 5 : benchmark release local de 100 itérations, document synthétique 29 011 octets : évaluation p50 25 µs / p95 191 µs ; parsing Markdown + évaluation p50 9 651 µs / p95 67 894 µs (machine chargée ; sans démarrage CLI).
 
