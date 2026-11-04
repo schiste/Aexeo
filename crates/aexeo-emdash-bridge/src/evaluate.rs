@@ -68,6 +68,45 @@ mod tests {
     }
 
     #[test]
+    fn document_evaluation_respects_rule_switches_and_severity_overrides() {
+        let mut document = rich_document();
+        document.description = None;
+
+        let mut config = Config::default();
+        config
+            .severity_overrides
+            .insert("SEO002".into(), "warning".into());
+        let findings = evaluate_documents(&[document.clone()], &config).unwrap();
+        assert!(
+            findings
+                .iter()
+                .any(|finding| { finding.rule_id == "SEO002" && finding.severity == "warning" }),
+            "missing description must use the configured severity: {findings:?}"
+        );
+
+        config.checks.insert("html".into(), false);
+        let findings = evaluate_documents(&[document], &config).unwrap();
+        assert!(
+            findings.iter().all(|finding| finding.rule_id != "SEO002"),
+            "disabling the html group must disable SEO002: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn document_evaluation_applies_ignored_rules_without_suppressing_other_findings() {
+        let mut document = rich_document();
+        document.description = None;
+        let mut config = Config::default();
+        config.ignore_rules.push("SEO002".into());
+        let findings = evaluate_documents(&[document], &config).unwrap();
+        assert!(findings.iter().all(|finding| finding.rule_id != "SEO002"));
+        assert!(
+            !findings.is_empty(),
+            "ignoring one rule must retain unrelated findings"
+        );
+    }
+
+    #[test]
     fn evaluate_routes_findings_through_the_same_rule_ids_a_static_site_would_see() {
         let mut document = rich_document();
         // Drop the description; aexeo-core SEO002 fires on missing meta description.
