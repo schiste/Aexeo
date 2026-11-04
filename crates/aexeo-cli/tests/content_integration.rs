@@ -265,3 +265,22 @@ fn explain_emits_reusable_resolved_toml() {
     assert_eq!(preset.name, "Glossary editorial starter");
     assert_eq!(preset.gates.len(), 3);
 }
+
+#[test]
+fn explain_respects_json_format() {
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "--preset",
+            "article-editorial",
+            "--explain",
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let preset: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(preset["name"], "Article editorial starter");
+    assert_eq!(preset["gates"].as_array().unwrap().len(), 3);
+}

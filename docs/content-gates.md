@@ -31,6 +31,8 @@ The built-in `article` preset requires at least one whitespace-separated word. `
 
 The [built-in TOML files](../crates/aexeo-core/presets) are embedded in native and WASM builds and can also be copied into another project as a starting point.
 
+Use `--explain` to print the resolved preset as TOML, or add `--format json` for JSON.
+
 ## Custom presets
 
 ```toml

@@ -55,7 +55,11 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         .context("missing preset argument")?;
     let preset = resolve_content_preset(preset_name, &sources)?;
     if args.get_flag("explain") {
-        println!("{}", toml_output(&preset)?);
+        if args.get_one::<String>("format").map(String::as_str) == Some("json") {
+            println!("{}", serde_json::to_string_pretty(&preset)?);
+        } else {
+            println!("{}", toml_output(&preset)?);
+        }
         return Ok(EXIT_SUCCESS);
     }
     let path = args

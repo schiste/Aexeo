@@ -52,7 +52,7 @@ Options:
           List available preset names
 
       --explain
-          Print the resolved preset as TOML without reading content
+          Print the resolved preset as TOML (or JSON with --format json) without reading content
 
       --format <format>
           [default: text]
