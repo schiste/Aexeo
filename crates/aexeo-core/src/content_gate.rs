@@ -86,7 +86,6 @@ pub enum Severity {
     Error,
     #[default]
     Warning,
-    Note,
 }
 
 fn default_blocking() -> bool {
@@ -237,7 +236,6 @@ impl ContentPreset {
                     severity: match gate.severity() {
                         Severity::Error => "error",
                         Severity::Warning => "warning",
-                        Severity::Note => "note",
                     }
                     .into(),
                     suggestion: None,

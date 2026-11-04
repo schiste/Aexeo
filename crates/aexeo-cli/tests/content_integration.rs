@@ -50,7 +50,7 @@ fn missing_adapter_capability_does_not_return_success() {
 fn advisory_failures_do_not_block_the_command() {
     let dir = tempfile::tempdir().unwrap();
     let preset = dir.path().join("preset.toml");
-    std::fs::write(&preset, "version=1\nname='Advisory'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['hype']\nblocking=false\nseverity='note'\n").unwrap();
+    std::fs::write(&preset, "version=1\nname='Advisory'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['hype']\nblocking=false\nseverity='warning'\n").unwrap();
     let source = format!("custom={}", preset.display());
     let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
         .args([
@@ -72,7 +72,7 @@ fn advisory_failures_do_not_block_the_command() {
     assert_eq!(output.status.code(), Some(0));
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["gates"][0]["status"], "failed");
-    assert_eq!(report["gates"][0]["findings"][0]["severity"], "note");
+    assert_eq!(report["gates"][0]["findings"][0]["severity"], "warning");
     assert_eq!(report["gates"][0]["required_capability"], "text");
 }
 
