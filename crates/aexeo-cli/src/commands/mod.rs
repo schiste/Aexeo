@@ -1,5 +1,6 @@
 pub mod common;
 pub mod config;
+pub mod content;
 pub mod docs;
 pub mod exit_code;
 pub mod facts;

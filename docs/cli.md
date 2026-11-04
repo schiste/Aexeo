@@ -4,6 +4,40 @@
 
 ## Commands
 
+## `content`
+
+Run a portable content preset on a UTF-8 file or stdin
+
+```text
+Run a portable content preset on a UTF-8 file or stdin
+
+Usage: content [OPTIONS] [path]
+
+Arguments:
+  [path]
+          [default: -]
+
+Options:
+      --preset <preset>
+          [default: article]
+
+      --preset-source <preset-source>
+          Load a named TOML preset as NAME=PATH; may be repeated
+
+      --metadata <metadata>
+          JSON file containing string metadata fields
+
+      --explain
+          Print the resolved preset as JSON without reading content
+
+      --format <format>
+          [default: text]
+          [possible values: text, json]
+
+  -h, --help
+          Print help
+```
+
 ## `check`
 
 Run static checks against a site directory

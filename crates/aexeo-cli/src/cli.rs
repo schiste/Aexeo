@@ -5,6 +5,16 @@ pub fn build_cli() -> Command {
     Command::new("aexeo-cli")
         .about("SEO and GEO linting for static websites")
         .subcommand(
+            Command::new("content")
+                .about("Run a portable content preset on a UTF-8 file or stdin")
+                .arg(Arg::new("path").default_value("-"))
+                .arg(Arg::new("preset").long("preset").default_value("article"))
+                .arg(Arg::new("preset-source").long("preset-source").num_args(1).action(ArgAction::Append).help("Load a named TOML preset as NAME=PATH; may be repeated"))
+                .arg(Arg::new("metadata").long("metadata").num_args(1).help("JSON file containing string metadata fields"))
+                .arg(Arg::new("explain").long("explain").action(ArgAction::SetTrue).help("Print the resolved preset as JSON without reading content"))
+                .arg(Arg::new("format").long("format").value_parser(["text", "json"]).default_value("text")),
+        )
+        .subcommand(
             Command::new("check")
                 .about("Run static checks against a site directory")
                 .arg(Arg::new("path").default_value("."))
