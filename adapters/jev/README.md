@@ -41,3 +41,13 @@ Run `python3 adapters/jev/evaluate.py labels.json reviews.json`. It reports raw 
 These metrics have meaning only with labels independently produced by qualified reviewers and a sufficiently large, representative held-out sample. The tool does not assess source reliability, establish empirical truth, choose a threshold, or verify that labels are independent. Keep evaluation data separate from examples used to select the threshold; re-evaluate when the model or task distribution changes. Older reviews without `model_choice` must be regenerated for this measurement.
 
 `fixtures/source-support-smoke.json` contains twelve synthetic, manually labeled cases for a basic integration smoke test. It is deliberately small and is **not** a representative or sufficient calibration set; do not use its results to select production thresholds or claim model reliability. Review the labels and use independent real-world examples from the intended content domain for evaluation.
+
+For an explicitly approved remote run, `batch.py` can create the matching review array sequentially:
+
+```sh
+python3 adapters/jev/batch.py labels.json --model jev-1.13.0 \
+  --minimum-probability 0.9 --max-cases 12 > reviews.json
+python3 adapters/jev/evaluate.py labels.json reviews.json
+```
+
+The required `--max-cases` bounds the number of requests. The complete input is checked before the first request; labels and IDs are not sent to the provider. Claims and sources are sent and requests may be billed. Reviews are written only after the whole batch completes; if a request fails, earlier calls may already have incurred charges, and the command produces no usable partial result. The adapter makes no automatic retries. Batch reviews default to uncertain source reliability and are intended for support-evaluation measurements.

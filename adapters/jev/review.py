@@ -54,6 +54,15 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def fetch_review(claim, source, model, reliability, threshold, key):
+    payload = json.dumps(request_body(claim, source, model)).encode("utf-8")
+    request = urllib.request.Request(ENDPOINT, data=payload,
+        headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
+    with urllib.request.build_opener(NoRedirect()).open(request, timeout=30) as response:
+        result = json.load(response)
+    return review_from_response(claim, source, reliability, threshold, result)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--claim", required=True, help="Exact text to review")
@@ -74,13 +83,8 @@ def main():
     try:
         with args.source.open(encoding="utf-8", newline="") as source_file:
             source = source_file.read()
-        payload = json.dumps(request_body(args.claim, source, args.model)).encode("utf-8")
-        request = urllib.request.Request(ENDPOINT, data=payload,
-            headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
-        with urllib.request.build_opener(NoRedirect()).open(request, timeout=30) as response:
-            result = json.load(response)
-        review = review_from_response(args.claim, source, args.source_reliability,
-                                      args.minimum_probability, result)
+        review = fetch_review(args.claim, source, args.model, args.source_reliability,
+                              args.minimum_probability, key)
         print(json.dumps(review, ensure_ascii=False))
     except (OSError, KeyError, TypeError, ValueError, urllib.error.URLError) as error:
         # Avoid printing provider bodies or request headers, which may contain sensitive data.
