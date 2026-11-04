@@ -1,6 +1,6 @@
 # Aexeo : plan de migration vers les gates, presets et adapters
 
-État : session broker ouverte ; phase 1 en cours.
+État : session broker ouverte ; migration en cours, premiers composants livrés sur la branche de la PR.
 
 ## Objectif
 
@@ -19,6 +19,11 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 - [ ] Exécuter les validations pertinentes, contrôles du dépôt et vérifications natives/WASM ; documenter les changements ; livrer par le workflow broker et suivre la livraison autorisée.
 
 ## Progression détaillée
+
+- Phase 2 : premier moteur de contenu indépendant des sites ; trois types de gate et résultats `passed` / `failed` / `not_checked`. Les audits site existants ne sont pas encore orchestrés par ce moteur.
+- Phase 3 : presets TOML nommés, héritage, surcharges, désactivation, détection des cycles et inspection CLI ; exemples article et glossaire minimaux.
+- Phase 4 : CLI texte/stdin et bridge EmDash/WASM raccordés au même moteur ; un véritable parsing Markdown et le raccordement au workflow du plugin restent à faire.
+- Phase 5 : documentation et skill d'utilisation en cours ; correctifs sûrs, découverte complète et mesures de performance restent à faire.
 
 - Phase 1 : suite Rust complète, typage et 74 tests du plugin EmDash validés ; tests ajoutés pour la compatibilité des options de règles, sévérités et suppressions du pont EmDash.
 - Phase 1 : dispatch statique regroupé dans un registre unique avec vérification des groupes et conservation de leur ordre et des libellés de timing.
