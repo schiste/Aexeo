@@ -89,6 +89,23 @@ aexeoPlugin({
 
 For custom presets, add `sources: { custom: "...TOML..." }` and select `name: "custom"`. `name` is the fallback preset; `byCollection` selects a named preset for a specific collection on both save and refresh. The existing SEO findings remain enabled. A gate the document adapter cannot check causes an explicit incomplete-evaluation error rather than being silently omitted. For the sandboxed plugin, configure equivalent presets on the [sidecar worker](../packages/aexeo-crawl-worker/README.md) using its environment variables.
 
+## Host-provided custom gates
+
+A preset can declare an extension without embedding executable code:
+
+```toml
+[[gates]]
+id = "style.project_rule"
+kind = "custom"
+extension = "my_project.rule"
+severity = "warning"
+blocking = false
+[gates.parameters]
+term = "example"
+```
+
+A Rust host implements `ContentGateExtensions` and calls `evaluate_with_extensions`, providing diagnostics in projected-text coordinates. The engine supplies each finding's rule ID and severity from the preset. Returning `None`, or running in an adapter that has no extension host, reports `not_checked`. Extension code executes in the host process and must be trusted; the preset is data and cannot execute a program by itself. The CLI and existing EmDash/WASM adapters do not load external extensions; they report such gates as unavailable. Built-in gates remain portable across these adapters.
+
 ## Local latency measurement
 
 Run `cargo run --release --locked --offline -p aexeo-core --example content_bench` to measure the content gates alone and Markdown parsing plus evaluation over a synthetic 29 KB document. It reports p50 and p95 across 100 iterations; figures depend on hardware and concurrent load, exclude CLI process startup, and are not a CI threshold or a guarantee for other documents.

@@ -125,4 +125,14 @@ headings = ["Summary", "Examples"]
             from_emdash.gates[0].findings[0].message
         );
     }
+    #[test]
+    fn unknown_custom_extension_is_not_a_pass() {
+        let document: EmdashDocument =
+            serde_json::from_str(r#"{"route":"/test","title":"Test","body":[]}"#).unwrap();
+        let preset = aexeo_core::content_gate::ContentPreset::from_toml(
+            "version=1\nname='custom'\n[[gates]]\nid='custom'\nkind='custom'\nextension='host.custom'\n"
+        ).unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::NotChecked);
+    }
 }

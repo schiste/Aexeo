@@ -19,4 +19,4 @@ The standalone content report is a new contract. Advisory gate failures and miss
 
 ## Scope decisions
 
-TOML is the first portable format: adding YAML would duplicate parsing and validation paths without adding an evaluation capability, and can be added behind the same source boundary later. Custom presets compose the built-in gate types; arbitrary executable extensions require a separately designed isolation and compatibility contract. Semantic evaluation and fact/source verification remain later work, after deterministic gates, evidence and review behavior have been established.
+TOML is the first portable format: adding YAML would duplicate parsing and validation paths without adding an evaluation capability, and can be added behind the same source boundary later. Custom presets compose built-in gates and can reference typed host-provided Rust extensions. The host is responsible for trusting extension code; external process loading and JavaScript extension registration are not part of this interface. Semantic evaluation and fact/source verification remain later work, after deterministic gates, evidence and review behavior have been established.

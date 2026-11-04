@@ -74,6 +74,17 @@ pub enum ContentGate {
         #[serde(default = "default_blocking")]
         blocking: bool,
     },
+    /// A host-provided implementation, selected by a portable identifier.
+    Custom {
+        id: String,
+        extension: String,
+        #[serde(default)]
+        parameters: BTreeMap<String, String>,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+    },
     /// One existing native website rule group.
     SiteGroup {
         id: String,
@@ -108,7 +119,8 @@ impl ContentGate {
             | Self::ForbiddenTerms { severity, .. }
             | Self::RequiredMetadata { severity, .. }
             | Self::RequiredHeadings { severity, .. }
-            | Self::FinalNewline { severity, .. } => *severity,
+            | Self::FinalNewline { severity, .. }
+            | Self::Custom { severity, .. } => *severity,
             Self::SiteAudit { .. } | Self::SiteGroup { .. } => Severity::Warning,
         }
     }
@@ -119,6 +131,7 @@ impl ContentGate {
             | Self::RequiredMetadata { blocking, .. }
             | Self::RequiredHeadings { blocking, .. }
             | Self::FinalNewline { blocking, .. }
+            | Self::Custom { blocking, .. }
             | Self::SiteAudit { blocking, .. }
             | Self::SiteGroup { blocking, .. } => *blocking,
         }
@@ -129,6 +142,7 @@ impl ContentGate {
             Self::RequiredMetadata { .. } => "metadata",
             Self::RequiredHeadings { .. } => "headings",
             Self::FinalNewline { .. } => "source_text",
+            Self::Custom { .. } => "extension",
             Self::SiteAudit { .. } | Self::SiteGroup { .. } => "site",
         }
     }
@@ -139,10 +153,31 @@ impl ContentGate {
             | Self::RequiredMetadata { id, .. }
             | Self::RequiredHeadings { id, .. }
             | Self::FinalNewline { id, .. }
+            | Self::Custom { id, .. }
             | Self::SiteAudit { id, .. }
             | Self::SiteGroup { id, .. } => id,
         }
     }
+}
+
+/// A diagnostic returned by a trusted host extension. Positions refer to the
+/// input's projected text, matching the built-in content gate convention.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionDiagnostic {
+    pub message: String,
+    pub line: usize,
+    pub column: usize,
+}
+
+/// Resolve and evaluate custom gate identifiers in the host. Return `None`
+/// when no implementation is available; this becomes `not_checked`.
+pub trait ContentGateExtensions {
+    fn evaluate(
+        &self,
+        extension: &str,
+        parameters: &BTreeMap<String, String>,
+        input: &ContentInput,
+    ) -> Result<Option<Vec<ExtensionDiagnostic>>>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -220,6 +255,9 @@ impl ContentPreset {
                 {
                     bail!("required headings must not be empty for {}", gate.id())
                 }
+                ContentGate::Custom { extension, .. } if extension.trim().is_empty() => {
+                    bail!("extension name must not be empty for {}", gate.id())
+                }
                 ContentGate::SiteGroup { group, .. }
                     if !crate::static_check::has_native_site_rule_group(group) =>
                 {
@@ -241,6 +279,17 @@ impl ContentPreset {
         &self,
         input: &ContentInput,
         site: Option<(&crate::site::Site, &crate::config::Config)>,
+    ) -> Result<ContentReport> {
+        self.evaluate_with_extensions(input, site, None)
+    }
+
+    /// Evaluate with optional host extensions. Missing implementations are
+    /// never treated as successful gates.
+    pub fn evaluate_with_extensions(
+        &self,
+        input: &ContentInput,
+        site: Option<(&crate::site::Site, &crate::config::Config)>,
+        extensions: Option<&dyn ContentGateExtensions>,
     ) -> Result<ContentReport> {
         self.validate()?;
         let mut results = Vec::with_capacity(self.gates.len());
@@ -325,6 +374,24 @@ impl ContentPreset {
                     Some(_) => {}
                     None => reason = Some("source text is unavailable from this adapter".into()),
                 },
+                ContentGate::Custom {
+                    extension,
+                    parameters,
+                    ..
+                } => {
+                    match extensions
+                        .map(|host| host.evaluate(extension, parameters, input))
+                        .transpose()?
+                        .flatten()
+                    {
+                        Some(diagnostics) => {
+                            for diagnostic in diagnostics {
+                                emit(diagnostic.message, diagnostic.line, diagnostic.column);
+                            }
+                        }
+                        None => reason = Some(format!("extension is unavailable: {extension}")),
+                    }
+                }
                 ContentGate::SiteGroup { group, .. } => match site {
                     Some((site, config)) => {
                         match crate::static_check::run_native_site_rule_group(site, config, group)?
@@ -409,6 +476,82 @@ id = "title"
 kind = "required_metadata"
 fields = ["title"]
 "#;
+    #[test]
+    fn custom_extensions_are_configurable_and_missing_is_not_checked() {
+        struct Example;
+        impl ContentGateExtensions for Example {
+            fn evaluate(
+                &self,
+                extension: &str,
+                parameters: &BTreeMap<String, String>,
+                input: &ContentInput,
+            ) -> Result<Option<Vec<ExtensionDiagnostic>>> {
+                if extension != "example.contains" {
+                    return Ok(None);
+                }
+                let needle = parameters.get("term").context("missing term")?;
+                let text = input.text.as_deref().context("missing text")?;
+                Ok(Some(if text.contains(needle) {
+                    vec![ExtensionDiagnostic {
+                        message: "term found".into(),
+                        line: 2,
+                        column: 3,
+                    }]
+                } else {
+                    vec![]
+                }))
+            }
+        }
+        use anyhow::Context;
+        let preset = ContentPreset::from_toml(
+            r#"version=1
+name="custom"
+[[gates]]
+id="style.custom"
+kind="custom"
+extension="example.contains"
+severity="error"
+[gates.parameters]
+term="draft"
+"#,
+        )
+        .unwrap();
+        let input = ContentInput {
+            id: "doc".into(),
+            text: Some("draft".into()),
+            ..Default::default()
+        };
+        let absent = preset.evaluate(&input).unwrap();
+        assert_eq!(absent.gates[0].status, GateStatus::NotChecked);
+        assert_eq!(absent.gates[0].required_capability, "extension");
+        let found = preset
+            .evaluate_with_extensions(&input, None, Some(&Example))
+            .unwrap();
+        assert_eq!(found.gates[0].status, GateStatus::Failed);
+        let finding = &found.gates[0].findings[0];
+        assert_eq!(
+            (
+                &finding.rule_id,
+                &finding.severity,
+                finding.line,
+                finding.column
+            ),
+            (&"style.custom".to_string(), &"error".to_string(), 2, 3)
+        );
+        let clean = preset
+            .evaluate_with_extensions(
+                &ContentInput {
+                    text: Some("clean".into()),
+                    ..input
+                },
+                None,
+                Some(&Example),
+            )
+            .unwrap();
+        assert_eq!(clean.gates[0].status, GateStatus::Passed);
+        assert!(ContentPreset::from_toml(&preset.to_toml().unwrap()).is_ok());
+    }
+
     #[test]
     fn checks_content_and_reports_locations() {
         let p = ContentPreset::from_toml(PRESET).unwrap();
