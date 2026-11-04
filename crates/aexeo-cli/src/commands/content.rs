@@ -50,13 +50,17 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         }
         return Ok(EXIT_SUCCESS);
     }
-    let preset_name = args.get_one::<String>("preset").unwrap();
+    let preset_name = args
+        .get_one::<String>("preset")
+        .context("missing preset argument")?;
     let preset = resolve_content_preset(preset_name, &sources)?;
     if args.get_flag("explain") {
         println!("{}", toml_output(&preset)?);
         return Ok(EXIT_SUCCESS);
     }
-    let path = args.get_one::<String>("path").unwrap();
+    let path = args
+        .get_one::<String>("path")
+        .context("missing content path")?;
     if args.get_flag("fix") && (path == "-" || args.get_flag("no-text")) {
         bail!("--fix requires a local content file");
     }

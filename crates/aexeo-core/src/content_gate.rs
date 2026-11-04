@@ -261,22 +261,16 @@ impl ContentPreset {
                 ContentGate::WordCount { min, max, .. } => match &input.text {
                     Some(text) => {
                         let count = text.split_whitespace().count();
-                        if min.is_some_and(|n| count < n) {
+                        if let Some(minimum) = min.filter(|n| count < *n) {
                             emit(
-                                format!(
-                                    "Word count {count} is below the minimum of {}",
-                                    min.unwrap()
-                                ),
+                                format!("Word count {count} is below the minimum of {}", minimum),
                                 1,
                                 1,
                             );
                         }
-                        if max.is_some_and(|n| count > n) {
+                        if let Some(maximum) = max.filter(|n| count > *n) {
                             emit(
-                                format!(
-                                    "Word count {count} exceeds the maximum of {}",
-                                    max.unwrap()
-                                ),
+                                format!("Word count {count} exceeds the maximum of {}", maximum),
                                 1,
                                 1,
                             );
