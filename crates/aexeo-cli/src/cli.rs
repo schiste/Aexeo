@@ -13,6 +13,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("metadata").long("metadata").num_args(1).help("JSON file containing string metadata fields"))
                 .arg(Arg::new("site").long("site").num_args(1).help("Load a static website for site gates"))
                 .arg(Arg::new("site-config").long("site-config").num_args(1).requires("site").help("Existing site audit config file"))
+                .arg(Arg::new("input-format").long("input-format").value_parser(["text", "markdown"]).default_value("text").help("Interpret content as raw text or Markdown"))
                 .arg(Arg::new("no-text").long("no-text").action(ArgAction::SetTrue).help("Do not read a text input"))
                 .arg(Arg::new("list-presets").long("list-presets").action(ArgAction::SetTrue).help("List available preset names"))
                 .arg(Arg::new("explain").long("explain").action(ArgAction::SetTrue).help("Print the resolved preset as JSON without reading content"))

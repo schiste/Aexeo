@@ -33,6 +33,12 @@ Options:
       --site-config <site-config>
           Existing site audit config file
 
+      --input-format <input-format>
+          Interpret content as raw text or Markdown
+
+          [default: text]
+          [possible values: text, markdown]
+
       --no-text
           Do not read a text input
 

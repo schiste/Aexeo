@@ -60,8 +60,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         .map(|path| -> Result<_> {
             let input =
                 fs::read_to_string(path).with_context(|| format!("reading metadata {path}"))?;
-            Ok(serde_json::from_str(&input)
-                .context("metadata must be a JSON object of string values")?)
+            serde_json::from_str(&input).context("metadata must be a JSON object of string values")
         })
         .transpose()?;
     let site = args
@@ -76,15 +75,24 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             Ok((aexeo_core::load_site(&site_root)?, config))
         })
         .transpose()?;
-    let input = ContentInput {
-        id: if args.get_flag("no-text") {
-            args.get_one::<String>("site").unwrap_or(path).clone()
-        } else {
-            path.clone()
-        },
-        text,
-        metadata,
+    let id = if args.get_flag("no-text") {
+        args.get_one::<String>("site").unwrap_or(path).clone()
+    } else {
+        path.clone()
     };
+    let mut input = match (
+        args.get_one::<String>("input-format").map(String::as_str),
+        text,
+    ) {
+        (Some("markdown"), Some(text)) => aexeo_core::markdown_adapter::markdown_input(id, &text)?,
+        (_, text) => ContentInput {
+            id,
+            text,
+            headings: None,
+            metadata: None,
+        },
+    };
+    input.metadata = metadata;
     let report =
         preset.evaluate_with_site(&input, site.as_ref().map(|(site, config)| (site, config)))?;
     if args.get_one::<String>("format").map(String::as_str) == Some("json") {

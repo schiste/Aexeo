@@ -107,3 +107,39 @@ fn website_preset_preserves_site_audit_findings() {
     assert_eq!(findings, expected);
     assert_eq!(report["gates"][0]["required_capability"], "site");
 }
+
+#[test]
+fn markdown_mode_excludes_code_and_checks_headings() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    std::fs::write(&preset, "version=1\nname='Structure'\n[[gates]]\nid='headings'\nkind='required_headings'\nheadings=['Summary']\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['hype']\n").unwrap();
+    let source = format!("custom={}", preset.display());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "-",
+            "--input-format",
+            "markdown",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &source,
+            "--format",
+            "json",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"# Summary\n\nText\n\n```\nhype\n```\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "passed");
+    assert_eq!(report["gates"][1]["status"], "passed");
+}

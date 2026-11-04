@@ -15,6 +15,8 @@ pub struct ContentInput {
     pub id: String,
     pub text: Option<String>,
     #[serde(default)]
+    pub headings: Option<Vec<String>>,
+    #[serde(default)]
     pub metadata: Option<BTreeMap<String, String>>,
 }
 
@@ -55,6 +57,14 @@ pub enum ContentGate {
         blocking: bool,
         fields: Vec<String>,
     },
+    RequiredHeadings {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+        headings: Vec<String>,
+    },
     /// The existing SEO/GEO site evaluator, including its configured policy.
     SiteAudit {
         id: String,
@@ -81,7 +91,8 @@ impl ContentGate {
         match self {
             Self::WordCount { severity, .. }
             | Self::ForbiddenTerms { severity, .. }
-            | Self::RequiredMetadata { severity, .. } => *severity,
+            | Self::RequiredMetadata { severity, .. }
+            | Self::RequiredHeadings { severity, .. } => *severity,
             Self::SiteAudit { .. } => Severity::Warning,
         }
     }
@@ -90,6 +101,7 @@ impl ContentGate {
             Self::WordCount { blocking, .. }
             | Self::ForbiddenTerms { blocking, .. }
             | Self::RequiredMetadata { blocking, .. }
+            | Self::RequiredHeadings { blocking, .. }
             | Self::SiteAudit { blocking, .. } => *blocking,
         }
     }
@@ -97,6 +109,7 @@ impl ContentGate {
         match self {
             Self::WordCount { .. } | Self::ForbiddenTerms { .. } => "text",
             Self::RequiredMetadata { .. } => "metadata",
+            Self::RequiredHeadings { .. } => "headings",
             Self::SiteAudit { .. } => "site",
         }
     }
@@ -105,6 +118,7 @@ impl ContentGate {
             Self::WordCount { id, .. }
             | Self::ForbiddenTerms { id, .. }
             | Self::RequiredMetadata { id, .. }
+            | Self::RequiredHeadings { id, .. }
             | Self::SiteAudit { id, .. } => id,
         }
     }
@@ -171,6 +185,11 @@ impl ContentPreset {
                     if fields.is_empty() || fields.iter().any(|s| s.trim().is_empty()) =>
                 {
                     bail!("metadata fields must not be empty for {}", gate.id())
+                }
+                ContentGate::RequiredHeadings { headings, .. }
+                    if headings.is_empty() || headings.iter().any(|s| s.trim().is_empty()) =>
+                {
+                    bail!("required headings must not be empty for {}", gate.id())
                 }
                 _ => {}
             }
@@ -253,6 +272,16 @@ impl ContentPreset {
                         }
                     }
                     None => reason = Some("text is unavailable from this adapter".into()),
+                },
+                ContentGate::RequiredHeadings { headings, .. } => match &input.headings {
+                    Some(actual) => {
+                        for heading in headings {
+                            if !actual.iter().any(|item| item == heading) {
+                                emit(format!("Required heading is missing: {heading}"), 1, 1);
+                            }
+                        }
+                    }
+                    None => reason = Some("headings are unavailable from this adapter".into()),
                 },
                 ContentGate::SiteAudit { .. } => match site {
                     Some((site, config)) => {

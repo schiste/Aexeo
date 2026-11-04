@@ -6,7 +6,7 @@ export interface ContentGateResult {
   status: "passed" | "failed" | "not_checked";
   blocking: boolean;
   scope: "document" | "site";
-  required_capability: "text" | "metadata" | "site";
+  required_capability: "text" | "metadata" | "headings" | "site";
   findings: Finding[];
   reason: string | null;
 }

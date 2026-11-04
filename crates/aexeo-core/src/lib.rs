@@ -19,6 +19,7 @@ pub mod integrations;
 pub mod intelligence;
 pub mod link_rules;
 pub mod llm_rules;
+pub mod markdown_adapter;
 #[cfg(test)]
 mod page_kind_divergence;
 pub mod plugin;

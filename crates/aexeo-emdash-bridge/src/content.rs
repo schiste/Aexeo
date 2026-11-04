@@ -32,9 +32,34 @@ pub fn content_input(document: &EmdashDocument) -> ContentInput {
     if let Some(value) = &document.lang {
         metadata.insert("lang".into(), value.clone());
     }
+    let headings = document
+        .body
+        .iter()
+        .filter(|block| {
+            matches!(
+                block.style,
+                crate::BlockStyle::H1
+                    | crate::BlockStyle::H2
+                    | crate::BlockStyle::H3
+                    | crate::BlockStyle::H4
+                    | crate::BlockStyle::H5
+                    | crate::BlockStyle::H6
+            )
+        })
+        .map(|block| {
+            block
+                .children
+                .iter()
+                .map(|child| match child {
+                    PortableTextChild::Span(span) => span.text.as_str(),
+                })
+                .collect::<String>()
+        })
+        .collect();
     ContentInput {
         id: document.route.clone(),
         text: Some(text),
+        headings: Some(headings),
         metadata: Some(metadata),
     }
 }
@@ -64,10 +89,38 @@ mod tests {
             .evaluate(&ContentInput {
                 id: "test.md".into(),
                 text: Some("One two".into()),
+                headings: None,
                 metadata: None,
             })
             .unwrap();
         assert_eq!(emdash.gates[0].status, GateStatus::Passed);
         assert_eq!(emdash.gates[0].status, plain.gates[0].status);
+    }
+    #[test]
+    fn markdown_and_emdash_share_heading_gate() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"style":"h2","children":[{"_type":"span","text":"Summary"}]},{"children":[{"_type":"span","text":"A definition."}]}]}"#).unwrap();
+        let preset = aexeo_core::content_gate::ContentPreset::from_toml(
+            r#"
+version = 1
+name = "headings"
+[[gates]]
+id = "required"
+kind = "required_headings"
+headings = ["Summary", "Examples"]
+"#,
+        )
+        .unwrap();
+        let markdown = aexeo_core::markdown_adapter::markdown_input(
+            "article.md",
+            "## Summary\n\nA definition.",
+        )
+        .unwrap();
+        let from_markdown = preset.evaluate(&markdown).unwrap();
+        let from_emdash = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(from_markdown.gates[0].status, from_emdash.gates[0].status);
+        assert_eq!(
+            from_markdown.gates[0].findings[0].message,
+            from_emdash.gates[0].findings[0].message
+        );
     }
 }
