@@ -51,3 +51,15 @@ python3 adapters/jev/evaluate.py labels.json reviews.json
 ```
 
 The required `--max-cases` bounds the number of requests. The complete input is checked before the first request; labels and IDs are not sent to the provider. Claims and sources are sent and requests may be billed. Reviews are written only after the whole batch completes; if a request fails, earlier calls may already have incurred charges, and the command produces no usable partial result. The adapter makes no automatic retries. Batch reviews default to uncertain source reliability and are intended for support-evaluation measurements.
+
+## Import SciFact annotations
+
+The offline importer accepts the official [SciFact corpus and data schema](https://github.com/allenai/scifact/blob/master/doc/data.md), supplied locally as JSONL:
+
+```sh
+python3 adapters/jev/import_scifact.py data/claims_dev.jsonl data/corpus.jsonl > labeled-cases.json
+```
+
+It produces one case per annotated rationale, joining its sentence indices in their provided order and mapping `SUPPORT`/`CONTRADICT` to `supported`/`contradicted`. It rejects missing documents and invalid annotations rather than silently fabricating evidence. Claims without annotated evidence are counted and excluded: SciFact does not supply a paired negative source for them, so they cannot be treated as `uncertain` review cases. The importer does not download or redistribute the dataset; obtain it from the project and check its applicable terms before use or transmission.
+
+These cases measure a model on **already selected, gold evidence**, not source retrieval or source reliability. Multiple rationales can share a claim or paper, so cases are correlated; keep related claims and documents together when making held-out splits. SciFact is scientific-domain data and contains no imported `uncertain` cases. It is useful as one independent benchmark, not a representative substitute for labeled material from your own content or evidence that a model is production-ready. Batch submission transmits the selected claims and passages to the configured provider.
