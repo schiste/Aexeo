@@ -65,3 +65,19 @@ python3 adapters/jev/import_scifact.py data/claims_dev.jsonl data/corpus.jsonl >
 It produces one case per annotated rationale, joining its sentence indices in their provided order and mapping `SUPPORT`/`CONTRADICT` to `supported`/`contradicted`. It rejects missing documents and invalid annotations rather than silently fabricating evidence. Claims without annotated evidence are counted and excluded: SciFact does not supply a paired negative source for them, so they cannot be treated as `uncertain` review cases. The importer does not download or redistribute the dataset; obtain it from the project and check its applicable terms before use or transmission.
 
 These cases measure a model on **already selected, gold evidence**, not source retrieval or source reliability. Multiple rationales can share a claim or paper, so cases are correlated; keep related claims and documents together when making held-out splits. SciFact is scientific-domain data and contains no imported `uncertain` cases. It is public, so model-training contamination cannot be ruled out. It is useful as one independent benchmark, not a representative substitute for labeled material from your own content or evidence that a model is production-ready. Batch submission transmits the selected claims and passages to the configured provider.
+
+To keep linked cases out of both development and evaluation, split the imported
+cases by connected components of claim and document identifiers:
+
+```sh
+python3 adapters/jev/split_scifact.py labeled-cases.json --holdout-fraction 0.3 --seed 42 > partitions.json
+python3 -c 'import json; p=json.load(open("partitions.json")); json.dump(p["holdout"], open("holdout.json", "w"))'
+```
+
+The output has `development` and `holdout` arrays. Select thresholds using the
+development partition only and evaluate the frozen choice on holdout. The split
+is reproducible for the same input order and seed and keeps transitive links
+together. It targets the requested fraction approximately, does not stratify
+labels, and can be imbalanced when a connected component is large. Inspect the
+class distribution and use a representative independent dataset before drawing
+conclusions. Splitting a public dataset cannot prevent model-training contamination.
