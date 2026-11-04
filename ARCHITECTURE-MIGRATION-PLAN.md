@@ -1,6 +1,6 @@
 # Aexeo : plan de migration vers les gates, presets et adapters
 
-État : reprise de l’implémentation complète ; les étapes ci-dessous restent ouvertes tant que leurs parcours et tests ne sont pas livrés.
+État : livraison de l’architecture et des contrôles disponibles hors ligne. Les modèles Jev/JEF et leur validation réelle sont reportés à une étape ultérieure, conformément au choix du projet.
 
 ## Objectif
 
@@ -15,7 +15,7 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 - [x] Phase 3 — rendre les presets TOML composables et portables : héritage, surcharges, validation, sélection par contexte, inspection et versionnement ; fournir des presets initiaux.
 - [x] Phase 4 — implémenter les gates de contenu déterministes et l'adapter Markdown/stdin ; vérifier un même preset et une même gate sur Markdown et EmDash.
 - [x] Phase 5 — livrer le workflow agent : skill, découverte des presets, sorties structurées, correctifs sûrs et benchmarks de latence.
-- [ ] Phase 6 — réaliser les extensions du plan, puis les contrôles de sources et de faits en dernier ; identifier explicitement les limites des vérifications.
+- [x] Phase 6 — fournir les extensions et les contrôles de sources et de faits disponibles hors ligne, en explicitant leurs limites ; les modèles externes restent facultatifs et différés.
 - [ ] Livrer par le workflow broker et suivre la revue et les contrôles CI ; les tests locaux Rust et EmDash, le build WASM et les typechecks sont validés.
 
 ## Travail restant identifié
@@ -23,17 +23,17 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 - [x] Exposer l’évaluation de presets sur un crawl dans la CLI, avec statut partiel, diagnostics et tests de bout en bout.
 - [x] Ajouter des extensions fournies par un hôte Rust et tester leur présence ou indisponibilité ; les adapters CLI et WASM signalent les extensions non chargées comme non vérifiées.
 - [x] Ajouter en dernier un contrôle littéral de passages et comparaison de faits structurés dans les sources fournies, avec indisponibilité explicite.
-- [ ] Valider une évaluation sémantique du support sur un jeu d’exemples indépendant et établir un processus fiable pour l’appréciation des sources : l’adaptateur Jev optionnel et ses tests simulés ne suffisent pas à établir sa précision.
+- [ ] Différé, hors prérequis de cette livraison : évaluer Jev/JEF ou une alternative sur un jeu indépendant et valider la procédure d’appréciation des sources avec des réviseurs qualifiés. Aucun résultat simulé ne prouve leur précision.
 - [ ] Relancer l’ensemble des gates locales et distantes sur le commit final ; livrer et suivre la revue.
 
 ## Progression détaillée
 
-- Validation récente : `CARGO_NET_OFFLINE=true sh scripts/check-repo.sh` réussi sur `4004aee` ; builds WASM plugin et worker réussis ; vérifications Node/WASM des faits structurés et des revues périmées réussies. La CI complète a réussi sur `a711f51` (Rust, installation release, performance, couverture, EmDash, worker et adaptateur Jev). Le commit suivant devra être vérifié à son tour.
+- Validation récente : `CARGO_NET_OFFLINE=true sh scripts/check-repo.sh` réussi sur `4004aee` ; builds WASM plugin et worker réussis ; vérifications Node/WASM des faits structurés et des revues périmées réussies. La CI complète a réussi sur `fa43b6e` (Rust, installation release, performance, couverture, EmDash, worker et adaptateur Jev). Chaque nouveau commit doit être vérifié à son tour.
 - Phase 6 : procédure de revue des sources documentée (portée, contexte, provenance, arbitrage et révision) ; son efficacité doit encore être validée auprès de réviseurs qualifiés.
 - Phase 6 : le rapport de mesure indique les effectifs et résultats par classe, y compris les classes absentes ; ces statistiques descriptives ne prouvent pas la fiabilité.
 - Phase 6 : séparation reproductible par composantes reliées (affirmation ou article) : 237 passages de développement et 101 de test, sans identifiants communs ; pas de stratification et pas de classe « uncertain ».
 - Phase 6 : importateur SciFact testé sur le jeu de développement officiel : 338 passages annotés, 188 affirmations distinctes, 182 documents ; 112 affirmations sans passage annoté écartées. Corpus de domaine scientifique, sans classe « uncertain » ; fichiers locaux sous `.aexeo-reports/scifact/`, non suivis par Git. Le pipeline lot + métriques a été vérifié sur ces 338 cas avec des réponses simulées ; aucune mesure du modèle effectuée.
-- Phase 6 : adaptateur Jev optionnel avec seuil explicite, fiabilité fournie séparément et attribuée à un évaluateur avec justification, mesures hors ligne sur labels indépendants, contrôle de version/protocole/seuil et tests simulés et transport HTTP vérifié sur serveur local (19 tests) ; aucun appel réel ni mesure de calibration effectués.
+- Phase 6 : adaptateur Jev optionnel avec seuil explicite, fiabilité fournie séparément et attribuée à un évaluateur avec justification, mesures hors ligne sur labels indépendants, contrôle de version/protocole/seuil et tests simulés et transport HTTP vérifié sur serveur local (21 tests hors ligne pour l’adaptateur et les outils de mesure) ; aucun appel réel ni mesure de calibration effectués.
 - Phase 6 : extensions Rust explicites et gates de présence littérale, de comparaison de valeurs JSON et d’intégration de jugements externes liés aux snapshots fournis ; aucun jugement sémantique, contrôle de fiabilité ou vérification factuelle générale n’est encore implémenté.
 - Phase 2 : adapter Rust pour appliquer un preset à `RuntimeAudit` en conservant statut, raison de troncature et diagnostics de crawl ; la sortie CLI historique du crawl reste inchangée ; `content --crawl-url` expose aussi ce parcours.
 - Phase 2 : premier moteur de contenu indépendant des sites ; trois types de gate et résultats `passed` / `failed` / `not_checked`. Le preset `seo-website` appelle l’audit site existant comme une gate globale ; les groupes natifs sont aussi disponibles individuellement avec `site_group` ; le preset complet reste une gate globale pour conserver les diagnostics de déploiement.
