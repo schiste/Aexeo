@@ -42,6 +42,9 @@ Options:
       --no-text
           Do not read a text input
 
+      --list-site-groups
+          List native website groups usable in presets
+
       --list-presets
           List available preset names
 

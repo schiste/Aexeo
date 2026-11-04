@@ -65,6 +65,13 @@ pub enum ContentGate {
         blocking: bool,
         headings: Vec<String>,
     },
+    /// One existing native website rule group.
+    SiteGroup {
+        id: String,
+        group: String,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+    },
     /// The existing SEO/GEO site evaluator, including its configured policy.
     SiteAudit {
         id: String,
@@ -93,7 +100,7 @@ impl ContentGate {
             | Self::ForbiddenTerms { severity, .. }
             | Self::RequiredMetadata { severity, .. }
             | Self::RequiredHeadings { severity, .. } => *severity,
-            Self::SiteAudit { .. } => Severity::Warning,
+            Self::SiteAudit { .. } | Self::SiteGroup { .. } => Severity::Warning,
         }
     }
     pub fn blocking(&self) -> bool {
@@ -102,7 +109,8 @@ impl ContentGate {
             | Self::ForbiddenTerms { blocking, .. }
             | Self::RequiredMetadata { blocking, .. }
             | Self::RequiredHeadings { blocking, .. }
-            | Self::SiteAudit { blocking, .. } => *blocking,
+            | Self::SiteAudit { blocking, .. }
+            | Self::SiteGroup { blocking, .. } => *blocking,
         }
     }
     pub fn required_capability(&self) -> &'static str {
@@ -110,7 +118,7 @@ impl ContentGate {
             Self::WordCount { .. } | Self::ForbiddenTerms { .. } => "text",
             Self::RequiredMetadata { .. } => "metadata",
             Self::RequiredHeadings { .. } => "headings",
-            Self::SiteAudit { .. } => "site",
+            Self::SiteAudit { .. } | Self::SiteGroup { .. } => "site",
         }
     }
     pub fn id(&self) -> &str {
@@ -119,7 +127,8 @@ impl ContentGate {
             | Self::ForbiddenTerms { id, .. }
             | Self::RequiredMetadata { id, .. }
             | Self::RequiredHeadings { id, .. }
-            | Self::SiteAudit { id, .. } => id,
+            | Self::SiteAudit { id, .. }
+            | Self::SiteGroup { id, .. } => id,
         }
     }
 }
@@ -190,6 +199,11 @@ impl ContentPreset {
                     if headings.is_empty() || headings.iter().any(|s| s.trim().is_empty()) =>
                 {
                     bail!("required headings must not be empty for {}", gate.id())
+                }
+                ContentGate::SiteGroup { group, .. }
+                    if !crate::static_check::has_native_site_rule_group(group) =>
+                {
+                    bail!("unknown site rule group for {}: {group}", gate.id())
                 }
                 _ => {}
             }
@@ -283,6 +297,20 @@ impl ContentPreset {
                     }
                     None => reason = Some("headings are unavailable from this adapter".into()),
                 },
+                ContentGate::SiteGroup { group, .. } => match site {
+                    Some((site, config)) => {
+                        match crate::static_check::run_native_site_rule_group(site, config, group)?
+                        {
+                            Some(results) => findings.extend(results),
+                            None => {
+                                reason = Some(format!(
+                                    "site rule group {group} is disabled by site config"
+                                ))
+                            }
+                        }
+                    }
+                    None => reason = Some("site is unavailable from this adapter".into()),
+                },
                 ContentGate::SiteAudit { .. } => match site {
                     Some((site, config)) => {
                         findings.extend(crate::static_check::run_checks_for_site(site, config));
@@ -311,7 +339,10 @@ impl ContentPreset {
                 gate_id: gate.id().into(),
                 status,
                 blocking: gate.blocking(),
-                scope: if matches!(gate, ContentGate::SiteAudit { .. }) {
+                scope: if matches!(
+                    gate,
+                    ContentGate::SiteAudit { .. } | ContentGate::SiteGroup { .. }
+                ) {
                     "site"
                 } else {
                     "document"
@@ -386,5 +417,55 @@ fields = ["title"]
         );
         assert!(ContentPreset::from_toml(&PRESET.replace("version = 1", "version = 2")).is_err());
         assert!(ContentPreset::from_toml(&PRESET.replace("min = 3", "mn = 3")).is_err());
+    }
+    #[test]
+    fn site_groups_keep_policy_and_report_disabled_checks() {
+        let preset = ContentPreset::from_toml(
+            r#"
+version = 1
+name = "site"
+[[gates]]
+id = "html"
+kind = "site_group"
+group = "html"
+"#,
+        )
+        .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("index.html"),
+            "<html><body>Example</body></html>",
+        )
+        .unwrap();
+        let site = crate::load_site(root.path()).unwrap();
+        let mut config = crate::Config::default();
+        config.ignore_rules.push("SEO002".into());
+        let input = ContentInput::default();
+        let report = preset
+            .evaluate_with_site(&input, Some((&site, &config)))
+            .unwrap();
+        let expected = crate::static_check::run_native_site_rule_group(&site, &config, "html")
+            .unwrap()
+            .unwrap();
+        assert_eq!(report.gates[0].findings, expected);
+        assert!(
+            !report.gates[0]
+                .findings
+                .iter()
+                .any(|finding| finding.rule_id == "SEO002")
+        );
+        config.checks.insert("html".into(), false);
+        let report = preset
+            .evaluate_with_site(&input, Some((&site, &config)))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::NotChecked);
+        assert!(
+            ContentPreset::from_toml(
+                &toml::to_string(&preset)
+                    .unwrap()
+                    .replace("group = \"html\"", "group = \"typo\"")
+            )
+            .is_err()
+        );
     }
 }

@@ -12,6 +12,17 @@ use std::{
 };
 
 pub fn command_content(args: &ArgMatches) -> Result<i32> {
+    if args.get_flag("list-site-groups") {
+        let groups = aexeo_core::static_check::native_site_rule_groups();
+        if args.get_one::<String>("format").map(String::as_str) == Some("json") {
+            println!("{}", serde_json::to_string_pretty(&groups)?);
+        } else {
+            for name in groups {
+                println!("{name}");
+            }
+        }
+        return Ok(EXIT_SUCCESS);
+    }
     let mut sources = builtin_content_presets();
     if let Some(entries) = args.get_many::<String>("preset-source") {
         for entry in entries {

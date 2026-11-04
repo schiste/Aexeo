@@ -206,6 +206,36 @@ pub fn run_checks_for_site_profiled(site: &crate::site::Site, config: &Config) -
     }
 }
 
+/// Native static group names in evaluation order.
+pub fn native_site_rule_groups() -> Vec<&'static str> {
+    NATIVE_RULE_GROUPS
+        .iter()
+        .map(|group| group.switch)
+        .collect()
+}
+
+/// Whether a named static rule group can run in the native site adapter.
+pub fn has_native_site_rule_group(name: &str) -> bool {
+    NATIVE_RULE_GROUPS.iter().any(|group| group.switch == name)
+}
+
+/// Run one explicitly selected site group. A disabled group returns `None`,
+/// so callers do not report it as checked. Existing site policy is retained.
+pub fn run_native_site_rule_group(
+    site: &crate::site::Site,
+    config: &Config,
+    name: &str,
+) -> Result<Option<Vec<Finding>>> {
+    let group = NATIVE_RULE_GROUPS
+        .iter()
+        .find(|group| group.switch == name)
+        .ok_or_else(|| anyhow::anyhow!("unknown native site rule group: {name}"))?;
+    if !config.rules().checks.get(name).copied().unwrap_or(true) {
+        return Ok(None);
+    }
+    Ok(Some(apply_policy((group.run)(site, config), config)))
+}
+
 pub fn run_checks_for_site(site: &crate::site::Site, config: &Config) -> Vec<Finding> {
     run_checks_for_site_profiled(site, config).findings
 }
