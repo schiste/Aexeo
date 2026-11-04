@@ -812,3 +812,38 @@ fn runtime_doctor_reports_json_contract() {
         );
     }
 }
+
+#[test]
+fn content_preset_crawl_preserves_complete_and_partial_status() {
+    let server = spawn_server_with_explicit_shutdown();
+    let temp = tempfile::tempdir().unwrap();
+    for (limit, expected) in [("1", "partial"), ("10", "complete")] {
+        let output = Command::new(bin())
+            .current_dir(temp.path())
+            .args([
+                "content",
+                "--crawl-url",
+                server.base_url(),
+                "--crawl-max-pages",
+                limit,
+                "--preset",
+                "seo-website",
+                "--format",
+                "json",
+            ])
+            .output()
+            .unwrap();
+        let report = parse_json(&output.stdout);
+        assert_eq!(report["crawl_status"], expected);
+        assert_eq!(report["content"]["gates"][0]["gate_id"], "site.seo_geo");
+        assert!(report["audit_findings"].is_array());
+        if expected == "partial" {
+            assert_eq!(output.status.code(), Some(2));
+            assert!(report["truncation_reason"].is_string());
+        } else {
+            assert_eq!(output.status.code(), Some(1));
+            assert!(report["truncation_reason"].is_null());
+        }
+    }
+    server.shutdown();
+}

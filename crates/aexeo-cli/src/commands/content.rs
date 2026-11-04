@@ -62,6 +62,9 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         }
         return Ok(EXIT_SUCCESS);
     }
+    if let Some(url) = args.get_one::<String>("crawl-url") {
+        return evaluate_crawl(args, url, &preset);
+    }
     let path = args
         .get_one::<String>("path")
         .context("missing content path")?;
@@ -175,6 +178,84 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             EXIT_SUCCESS
         },
     )
+}
+
+fn evaluate_crawl(
+    args: &ArgMatches,
+    url: &str,
+    preset: &aexeo_core::content_gate::ContentPreset,
+) -> Result<i32> {
+    if args.value_source("path") == Some(clap::parser::ValueSource::CommandLine) {
+        bail!("--crawl-url cannot be combined with a content path");
+    }
+    if args.value_source("input-format") == Some(clap::parser::ValueSource::CommandLine) {
+        bail!("--crawl-url cannot be combined with --input-format");
+    }
+    let root = std::env::current_dir()?;
+    let config_path = args
+        .get_one::<String>("crawl-config")
+        .map(std::path::Path::new);
+    let config = aexeo_core::config::load_config(&root, config_path)?;
+    let max_pages = *args
+        .get_one::<usize>("crawl-max-pages")
+        .context("missing crawl limit")?;
+    if max_pages == 0 {
+        bail!("--crawl-max-pages must be at least 1");
+    }
+    let engine = args
+        .get_one::<String>("crawl-engine")
+        .context("missing crawl engine")?;
+    let audit = aexeo_core::run_runtime_audit(url, max_pages, engine, &config)?;
+    let report = audit.evaluate_preset(preset, &config)?;
+    if args.get_one::<String>("format").map(String::as_str) == Some("json") {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("Crawl status: {:?}", report.crawl_status);
+        if let Some(reason) = &report.truncation_reason {
+            println!("  {reason}");
+        }
+        println!("Original crawl audit findings:");
+        for finding in &report.audit_findings {
+            println!(
+                "  {}:{}:{}: {}",
+                finding.path, finding.line, finding.column, finding.message
+            );
+        }
+        for gate in &report.content.gates {
+            println!("{}: {:?}", gate.gate_id, gate.status);
+            if let Some(reason) = &gate.reason {
+                println!("  {reason}");
+            }
+            for finding in &gate.findings {
+                println!(
+                    "  {}:{}:{}: {}",
+                    finding.path, finding.line, finding.column, finding.message
+                );
+            }
+        }
+    }
+    if report.crawl_status != aexeo_contracts::AuditStatus::Complete
+        || report
+            .content
+            .gates
+            .iter()
+            .any(|gate| gate.blocking && gate.status == GateStatus::NotChecked)
+    {
+        Ok(EXIT_UNSUPPORTED)
+    } else if report
+        .audit_findings
+        .iter()
+        .any(|finding| finding.is_error())
+        || report
+            .content
+            .gates
+            .iter()
+            .any(|gate| gate.blocking && gate.status == GateStatus::Failed)
+    {
+        Ok(EXIT_FINDINGS)
+    } else {
+        Ok(EXIT_SUCCESS)
+    }
 }
 
 fn toml_output(preset: &aexeo_core::content_gate::ContentPreset) -> Result<String> {

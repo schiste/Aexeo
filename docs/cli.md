@@ -33,6 +33,23 @@ Options:
       --site-config <site-config>
           Existing site audit config file
 
+      --crawl-url <crawl-url>
+          Crawl a website and evaluate the preset against its snapshot
+
+      --crawl-config <crawl-config>
+          Existing crawl configuration file
+
+      --crawl-max-pages <crawl-max-pages>
+          Maximum pages to crawl
+
+          [default: 200]
+
+      --crawl-engine <crawl-engine>
+          Crawl engine
+
+          [default: http]
+          [possible values: http, playwright]
+
       --input-format <input-format>
           Interpret content as raw text or Markdown
 

@@ -20,14 +20,14 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 
 ## Travail restant identifié
 
-- [ ] Exposer l’évaluation de presets sur un crawl dans la CLI, avec statut partiel, diagnostics et tests de bout en bout.
+- [x] Exposer l’évaluation de presets sur un crawl dans la CLI, avec statut partiel, diagnostics et tests de bout en bout.
 - [ ] Compléter les possibilités d’extension et la composition selon les besoins du plan, puis tester les parcours natif et WASM.
 - [ ] Ajouter en dernier une première vérification des sources, avec incertitude explicite et sans prétendre démontrer la vérité empirique.
 - [ ] Relancer l’ensemble des gates locales et distantes sur le commit final ; livrer et suivre la revue.
 
 ## Progression détaillée
 
-- Phase 2 : adapter Rust pour appliquer un preset à `RuntimeAudit` en conservant statut, raison de troncature et diagnostics de crawl ; la sortie CLI historique du crawl reste inchangée.
+- Phase 2 : adapter Rust pour appliquer un preset à `RuntimeAudit` en conservant statut, raison de troncature et diagnostics de crawl ; la sortie CLI historique du crawl reste inchangée ; `content --crawl-url` expose aussi ce parcours.
 - Phase 2 : premier moteur de contenu indépendant des sites ; trois types de gate et résultats `passed` / `failed` / `not_checked`. Le preset `seo-website` appelle l’audit site existant comme une gate globale ; les groupes natifs sont aussi disponibles individuellement avec `site_group` ; le preset complet reste une gate globale pour conserver les diagnostics de déploiement.
 - Phase 3 : presets TOML nommés, héritage, surcharges, désactivation, détection des cycles et inspection CLI ; presets article et glossaire minimaux, variantes éditoriales à seuils consultatifs et fichiers TOML copiables intégrés aux builds.
 - Phase 4 : CLI texte/stdin et bridge EmDash/WASM raccordés au même moteur ; parsing Markdown et gate de titres partagés avec EmDash ; preset optionnel raccordé aux sauvegardes et refreshs EmDash configurés ; sélection par collection disponible ; mode sandbox pris en charge via configuration du sidecar et sélection par collection.
