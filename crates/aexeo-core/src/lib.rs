@@ -6,6 +6,7 @@ pub mod agent_discovery_rules;
 pub mod capabilities;
 pub mod config;
 pub mod content_gate;
+pub mod content_presets;
 pub mod content_rules;
 pub mod docs;
 pub mod editorial_rules;
