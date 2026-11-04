@@ -18,6 +18,11 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 - [ ] Phase 6 — étendre selon les besoins ; envisager YAML, extensions personnalisées et évaluations sémantiques ; réserver la vérification de sources/faits pour la fin.
 - [ ] Exécuter les validations pertinentes, contrôles du dépôt et vérifications natives/WASM ; documenter les changements ; livrer par le workflow broker et suivre la livraison autorisée.
 
+## Progression détaillée
+
+- Phase 1 : suite Rust complète, typage et 74 tests du plugin EmDash validés ; tests ajoutés pour la compatibilité des options de règles, sévérités et suppressions du pont EmDash.
+- Phase 1 : inventaire des contrats CLI, crawl, WASM et EmDash et identification des coutures de migration à poursuivre.
+
 ## Invariants
 
 - Les usages existants et leurs paramètres par défaut continuent de fonctionner sans configuration supplémentaire.
