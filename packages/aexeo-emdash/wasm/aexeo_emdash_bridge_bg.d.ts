@@ -15,6 +15,7 @@ export const evaluateContent: (
   document_json: string,
   preset_name: string,
   sources_json?: string | null,
+  evidence_json?: string | null,
 ) => string;
 export const evaluateDocuments: (
   documents_json: string,

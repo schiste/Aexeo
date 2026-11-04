@@ -20,6 +20,9 @@ pub struct ContentInput {
     pub headings: Option<Vec<String>>,
     #[serde(default)]
     pub metadata: Option<BTreeMap<String, String>>,
+    /// Caller-supplied source snapshots keyed by a stable local name.
+    #[serde(default)]
+    pub evidence_sources: Option<BTreeMap<String, String>>,
 }
 
 /// A portable preset. Rules are evaluated in their declared order.
@@ -74,6 +77,17 @@ pub enum ContentGate {
         #[serde(default = "default_blocking")]
         blocking: bool,
     },
+    /// Checks literal anchors only; it does not assess entailment or truth.
+    EvidenceAnchors {
+        id: String,
+        source: String,
+        claim: String,
+        quote: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+    },
     /// A host-provided implementation, selected by a portable identifier.
     Custom {
         id: String,
@@ -120,7 +134,8 @@ impl ContentGate {
             | Self::RequiredMetadata { severity, .. }
             | Self::RequiredHeadings { severity, .. }
             | Self::FinalNewline { severity, .. }
-            | Self::Custom { severity, .. } => *severity,
+            | Self::Custom { severity, .. }
+            | Self::EvidenceAnchors { severity, .. } => *severity,
             Self::SiteAudit { .. } | Self::SiteGroup { .. } => Severity::Warning,
         }
     }
@@ -132,6 +147,7 @@ impl ContentGate {
             | Self::RequiredHeadings { blocking, .. }
             | Self::FinalNewline { blocking, .. }
             | Self::Custom { blocking, .. }
+            | Self::EvidenceAnchors { blocking, .. }
             | Self::SiteAudit { blocking, .. }
             | Self::SiteGroup { blocking, .. } => *blocking,
         }
@@ -143,6 +159,7 @@ impl ContentGate {
             Self::RequiredHeadings { .. } => "headings",
             Self::FinalNewline { .. } => "source_text",
             Self::Custom { .. } => "extension",
+            Self::EvidenceAnchors { .. } => "text_and_evidence",
             Self::SiteAudit { .. } | Self::SiteGroup { .. } => "site",
         }
     }
@@ -154,6 +171,7 @@ impl ContentGate {
             | Self::RequiredHeadings { id, .. }
             | Self::FinalNewline { id, .. }
             | Self::Custom { id, .. }
+            | Self::EvidenceAnchors { id, .. }
             | Self::SiteAudit { id, .. }
             | Self::SiteGroup { id, .. } => id,
         }
@@ -254,6 +272,20 @@ impl ContentPreset {
                     if headings.is_empty() || headings.iter().any(|s| s.trim().is_empty()) =>
                 {
                     bail!("required headings must not be empty for {}", gate.id())
+                }
+                ContentGate::EvidenceAnchors {
+                    source,
+                    claim,
+                    quote,
+                    ..
+                } if source.trim().is_empty()
+                    || claim.trim().is_empty()
+                    || quote.trim().is_empty() =>
+                {
+                    bail!(
+                        "evidence source, claim and quote must not be empty for {}",
+                        gate.id()
+                    )
                 }
                 ContentGate::Custom { extension, .. } if extension.trim().is_empty() => {
                     bail!("extension name must not be empty for {}", gate.id())
@@ -373,6 +405,25 @@ impl ContentPreset {
                     }
                     Some(_) => {}
                     None => reason = Some("source text is unavailable from this adapter".into()),
+                },
+                ContentGate::EvidenceAnchors {
+                    source,
+                    claim,
+                    quote,
+                    ..
+                } => match (&input.text, &input.evidence_sources) {
+                    (Some(text), Some(sources)) => match sources.get(source) {
+                        Some(snapshot) => {
+                            if !text.contains(claim) {
+                                emit("Claim anchor is absent from content".into(), 1, 1);
+                            }
+                            if !snapshot.contains(quote) {
+                                emit(format!("Quote anchor is absent from source {source}"), 1, 1);
+                            }
+                        }
+                        None => reason = Some(format!("evidence source is unavailable: {source}")),
+                    },
+                    _ => reason = Some("content text or evidence sources are unavailable".into()),
                 },
                 ContentGate::Custom {
                     extension,

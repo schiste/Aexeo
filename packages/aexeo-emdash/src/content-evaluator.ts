@@ -5,6 +5,7 @@ import type { EmdashDocument } from "./types.js";
 export interface ContentPresetOptions {
   name: string;
   sources?: Record<string, string>;
+  evidenceSources?: Record<string, string>;
   byCollection?: Record<string, string>;
 }
 
@@ -12,7 +13,7 @@ export interface ContentPresetOptions {
 export function withContentPreset(
   base: EvaluatorFn,
   preset: ContentPresetOptions | undefined,
-  evaluate: (document: EmdashDocument, name: string, sources?: Record<string, string>) => Promise<ContentReport>,
+  evaluate: (document: EmdashDocument, name: string, sources?: Record<string, string>, evidenceSources?: Record<string, string>) => Promise<ContentReport>,
 ): EvaluatorFn {
   if (!preset) return base;
   return async (documents, context) => {
@@ -26,7 +27,9 @@ export function withContentPreset(
           ? preset.byCollection[collection] : undefined;
         const name = selected ?? preset.name;
         if (!name) throw new Error(`empty preset name for collection ${collection}`);
-        const report = await evaluate(document, name, preset.sources);
+        const report = preset.evidenceSources === undefined
+          ? await evaluate(document, name, preset.sources)
+          : await evaluate(document, name, preset.sources, preset.evidenceSources);
         const incomplete = report.gates.filter((gate) => gate.status === "not_checked");
         if (incomplete.length) return {
           ok: false, reason: "content_preset_incomplete",

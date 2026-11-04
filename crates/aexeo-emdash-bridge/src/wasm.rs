@@ -156,6 +156,7 @@ pub fn evaluate_content_js(
     document_json: &str,
     preset_name: &str,
     sources_json: Option<String>,
+    evidence_json: Option<String>,
 ) -> Result<String, JsError> {
     install_panic_hook();
     let document: EmdashDocument = serde_json::from_str(document_json)
@@ -168,7 +169,16 @@ pub fn evaluate_content_js(
     }
     let preset = aexeo_core::content_presets::resolve_content_preset(preset_name, &sources)
         .map_err(|error| JsError::new(&format!("failed to resolve preset: {error:#}")))?;
-    let report = crate::content::evaluate_content(&document, &preset)
+    let evidence = evidence_json
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .map(|json| {
+            serde_json::from_str(json).map_err(|error| {
+                JsError::new(&format!("failed to parse evidence sources: {error}"))
+            })
+        })
+        .transpose()?;
+    let report = crate::content::evaluate_content_with_evidence(&document, &preset, evidence)
         .map_err(|error| JsError::new(&format!("content evaluation failed: {error:#}")))?;
     serde_json::to_string(&report)
         .map_err(|error| JsError::new(&format!("failed to serialize report: {error}")))

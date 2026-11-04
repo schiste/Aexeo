@@ -12,6 +12,11 @@ describe("sandbox content presets", () => {
     expect(() => contentPresetFindings([{}], undefined, { CONTENT_PRESET_BY_COLLECTION_JSON: '{"posts":"article"}' }, () => "{}")).toThrow("collection names");
     expect(() => contentPresetFindings([{}], undefined, { CONTENT_PRESET: "article" }, () => JSON.stringify({ gates: [{ gate_id: "site", status: "not_checked", reason: "missing", findings: [] }] }))).toThrow("incomplete");
   });
+  it("passes configured evidence snapshots to the bridge", () => {
+    const evaluate = vi.fn((_doc: string, _name: string, _sources?: string | null, _evidence?: string | null) => JSON.stringify({ gates: [] }));
+    contentPresetFindings([{}], undefined, { CONTENT_PRESET: "article", CONTENT_EVIDENCE_SOURCES_JSON: '{"study":"14 participants"}' }, evaluate);
+    expect(evaluate).toHaveBeenCalledWith("{}", "article", "{}", '{"study":"14 participants"}');
+  });
   it("passes collection context to the sidecar", async () => {
     const fetch = vi.fn(async () => ({ ok: true, status: 200, text: async () => "[]" }));
     await evaluateViaSidecar({ fetch }, { url: "https://example.test", authToken: "secret" }, [], ["posts"]);

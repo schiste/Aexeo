@@ -11,7 +11,7 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 - [x] Mettre à niveau Aethyme et ouvrir une session broker.
 - [x] Copier ce plan dans le worktree de session et maintenir son avancement au fil des livraisons.
 - [x] Phase 1 — caractériser les contrats et usages existants ; ajouter les tests de compatibilité nécessaires ; isoler les points de couplage et nettoyer sans modifier le comportement.
-- [ ] Phase 2 — définir les contrats d'évaluation, capacités, scopes, gates et résultats ; construire le moteur et le preset SEO/GEO existant ; adapter les parcours site, crawl, CLI et EmDash/WASM ; vérifier la parité.
+- [x] Phase 2 — définir les contrats d'évaluation, capacités, scopes, gates et résultats ; construire le moteur et le preset SEO/GEO existant ; adapter les parcours site, crawl, CLI et EmDash/WASM ; vérifier la parité.
 - [x] Phase 3 — rendre les presets TOML composables et portables : héritage, surcharges, validation, sélection par contexte, inspection et versionnement ; fournir des presets initiaux.
 - [x] Phase 4 — implémenter les gates de contenu déterministes et l'adapter Markdown/stdin ; vérifier un même preset et une même gate sur Markdown et EmDash.
 - [x] Phase 5 — livrer le workflow agent : skill, découverte des presets, sorties structurées, correctifs sûrs et benchmarks de latence.
@@ -21,12 +21,14 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 ## Travail restant identifié
 
 - [x] Exposer l’évaluation de presets sur un crawl dans la CLI, avec statut partiel, diagnostics et tests de bout en bout.
-- [ ] Compléter les possibilités d’extension et la composition selon les besoins du plan, puis tester les parcours natif et WASM.
-- [ ] Ajouter en dernier une première vérification des sources, avec incertitude explicite et sans prétendre démontrer la vérité empirique.
+- [x] Ajouter des extensions fournies par un hôte Rust et tester leur présence ou indisponibilité ; les adapters CLI et WASM signalent les extensions non chargées comme non vérifiées.
+- [x] Ajouter en dernier un contrôle littéral de passages dans les sources fournies, avec indisponibilité explicite.
+- [ ] Concevoir et livrer une véritable évaluation du support d’une affirmation par une source et de la fiabilité de celle-ci : la présence littérale ne constitue pas une vérification factuelle.
 - [ ] Relancer l’ensemble des gates locales et distantes sur le commit final ; livrer et suivre la revue.
 
 ## Progression détaillée
 
+- Phase 6 : extensions Rust explicites et gate de présence littérale avec snapshots fournis par l’appelant ; aucun jugement sémantique, contrôle de fiabilité ou vérification factuelle générale n’est encore implémenté.
 - Phase 2 : adapter Rust pour appliquer un preset à `RuntimeAudit` en conservant statut, raison de troncature et diagnostics de crawl ; la sortie CLI historique du crawl reste inchangée ; `content --crawl-url` expose aussi ce parcours.
 - Phase 2 : premier moteur de contenu indépendant des sites ; trois types de gate et résultats `passed` / `failed` / `not_checked`. Le preset `seo-website` appelle l’audit site existant comme une gate globale ; les groupes natifs sont aussi disponibles individuellement avec `site_group` ; le preset complet reste une gate globale pour conserver les diagnostics de déploiement.
 - Phase 3 : presets TOML nommés, héritage, surcharges, désactivation, détection des cycles et inspection CLI ; presets article et glossaire minimaux, variantes éditoriales à seuils consultatifs et fichiers TOML copiables intégrés aux builds.

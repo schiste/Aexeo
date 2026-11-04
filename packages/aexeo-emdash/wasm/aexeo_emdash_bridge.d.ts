@@ -5,7 +5,7 @@
  * Evaluate one EmDash document using named TOML preset sources. The source map
  * is JSON: {"preset-name": "TOML text"}; built-ins are available by default.
  */
-export function evaluateContent(document_json: string, preset_name: string, sources_json?: string | null): string;
+export function evaluateContent(document_json: string, preset_name: string, sources_json?: string | null, evidence_json?: string | null): string;
 
 export function evaluateDocuments(documents_json: string, config_json?: string | null): string;
 

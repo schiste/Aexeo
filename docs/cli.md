@@ -27,6 +27,9 @@ Options:
       --metadata <metadata>
           JSON file containing string metadata fields
 
+      --evidence-source <evidence-source>
+          Load a named UTF-8 source snapshot as NAME=PATH; may be repeated
+
       --site <site>
           Load a static website for site gates
 

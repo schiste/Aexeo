@@ -88,6 +88,26 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             serde_json::from_str(&input).context("metadata must be a JSON object of string values")
         })
         .transpose()?;
+    let evidence_sources = args
+        .get_many::<String>("evidence-source")
+        .map(|entries| -> Result<BTreeMap<String, String>> {
+            let mut sources = BTreeMap::new();
+            for entry in entries {
+                let (name, path) = entry
+                    .split_once('=')
+                    .context("--evidence-source requires NAME=PATH")?;
+                if name.is_empty() || path.is_empty() {
+                    bail!("--evidence-source requires NAME=PATH");
+                }
+                let snapshot = fs::read_to_string(path)
+                    .with_context(|| format!("reading evidence source {path}"))?;
+                if sources.insert(name.to_owned(), snapshot).is_some() {
+                    bail!("duplicate evidence source: {name}");
+                }
+            }
+            Ok(sources)
+        })
+        .transpose()?;
     let site = args
         .get_one::<String>("site")
         .map(|path| -> Result<_> {
@@ -136,9 +156,11 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             text,
             headings: None,
             metadata: None,
+            evidence_sources: None,
         },
     };
     input.metadata = metadata;
+    input.evidence_sources = evidence_sources;
     let mut report =
         preset.evaluate_with_site(&input, site.as_ref().map(|(site, config)| (site, config)))?;
     report.applied_fixes = applied_fixes;

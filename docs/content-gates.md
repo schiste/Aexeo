@@ -113,3 +113,20 @@ Run `cargo run --release --locked --offline -p aexeo-core --example content_benc
 ## Explicit safe fix
 
 The `final_newline` gate requires the original source text and reports a non-empty file without a final newline. Add `[[gates]]`, an `id`, and `kind = "final_newline"` to a preset to enable it. Run `aexeo-cli content article.md --preset custom --preset-source custom=rules.toml --fix` to append a newline when needed. The fix preserves existing CRLF line endings, reports its gate ID in `applied_fixes`, and is idempotent. It requires a local regular file, rejects symlinks and, on Unix, files with multiple hard links, and compares the open file with the version read before appending. It does not change prose. The EmDash adapter has no original file source, so this gate is `not_checked` there.
+
+## Literal evidence anchors
+
+An optional `evidence_anchors` gate checks that a literal claim appears in the projected content and a literal quote appears in a named, caller-supplied source snapshot:
+
+```toml
+[[gates]]
+id = "citation.anchor"
+kind = "evidence_anchors"
+source = "study"
+claim = "The count is 14."
+quote = "14 participants"
+```
+
+For the CLI, supply the UTF-8 snapshot with `--evidence-source study=./snapshot.txt`. The EmDash API accepts an optional fourth argument: `evaluateContent(document, preset, sources, { study: sourceText })`. The configured plugin accepts `evidenceSources` in its content preset options; the crawl worker accepts a JSON string map in `CONTENT_EVIDENCE_SOURCES_JSON`. Inputs are explicit: no source is fetched automatically. Missing source data yields `not_checked`, while missing literal text yields a finding. Matching is exact and case-sensitive.
+
+A pass establishes only that both strings are present: it does **not** establish that the quote supports the claim, that the source is reliable, or that the claim is true. Callers must version their snapshots and use independent review or a suitable external verifier for those judgments. Trusted Rust hosts can implement additional checks through `ContentGateExtensions`; unavailable extensions remain `not_checked`.

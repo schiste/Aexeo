@@ -284,3 +284,44 @@ fn explain_respects_json_format() {
     assert_eq!(preset["name"], "Article editorial starter");
     assert_eq!(preset["gates"].as_array().unwrap().len(), 3);
 }
+
+#[test]
+fn literal_evidence_checks_are_explicit_about_missing_and_mismatched_sources() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("evidence.toml");
+    let content = dir.path().join("article.txt");
+    let source = dir.path().join("snapshot.txt");
+    std::fs::write(&preset, "version=1\nname='anchors'\n[[gates]]\nid='anchors'\nkind='evidence_anchors'\nsource='study'\nclaim='The count is 14.'\nquote='14 participants'\n").unwrap();
+    std::fs::write(&content, "The count is 14.").unwrap();
+    std::fs::write(&source, "Study observed 14 participants.").unwrap();
+    let preset_arg = format!("custom={}", preset.display());
+    let source_arg = format!("study={}", source.display());
+    let invoke = |source_args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .arg("content")
+            .arg(&content)
+            .args([
+                "--preset",
+                "custom",
+                "--preset-source",
+                &preset_arg,
+                "--format",
+                "json",
+            ])
+            .args(source_args)
+            .output()
+            .unwrap();
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        (output.status.code().unwrap(), report)
+    };
+    let (code, missing) = invoke(&[]);
+    assert_eq!(code, 2);
+    assert_eq!(missing["gates"][0]["status"], "not_checked");
+    let (code, matched) = invoke(&["--evidence-source", &source_arg]);
+    assert_eq!(code, 0);
+    assert_eq!(matched["gates"][0]["status"], "passed");
+    std::fs::write(&source, "Study observed 12 participants.").unwrap();
+    let (code, mismatch) = invoke(&["--evidence-source", &source_arg]);
+    assert_eq!(code, 1);
+    assert_eq!(mismatch["gates"][0]["status"], "failed");
+}

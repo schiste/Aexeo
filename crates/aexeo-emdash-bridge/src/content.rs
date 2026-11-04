@@ -62,6 +62,7 @@ pub fn content_input(document: &EmdashDocument) -> ContentInput {
         source_text: None,
         headings: Some(headings),
         metadata: Some(metadata),
+        evidence_sources: None,
     }
 }
 
@@ -69,7 +70,18 @@ pub fn evaluate_content(
     document: &EmdashDocument,
     preset: &ContentPreset,
 ) -> Result<ContentReport> {
-    preset.evaluate(&content_input(document))
+    evaluate_content_with_evidence(document, preset, None)
+}
+
+/// Evaluate with caller-supplied source snapshots; no source is fetched here.
+pub fn evaluate_content_with_evidence(
+    document: &EmdashDocument,
+    preset: &ContentPreset,
+    evidence_sources: Option<BTreeMap<String, String>>,
+) -> anyhow::Result<ContentReport> {
+    let mut input = content_input(document);
+    input.evidence_sources = evidence_sources;
+    preset.evaluate(&input)
 }
 
 #[cfg(test)]
@@ -93,6 +105,7 @@ mod tests {
                 source_text: None,
                 headings: None,
                 metadata: None,
+                evidence_sources: None,
             })
             .unwrap();
         assert_eq!(emdash.gates[0].status, GateStatus::Passed);
@@ -123,6 +136,35 @@ headings = ["Summary", "Examples"]
         assert_eq!(
             from_markdown.gates[0].findings[0].message,
             from_emdash.gates[0].findings[0].message
+        );
+    }
+    #[test]
+    fn evidence_anchors_require_caller_supplied_sources() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"children":[{"_type":"span","text":"The count is 14."}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml(
+            r#"
+version = 1
+name = "evidence"
+[[gates]]
+id = "anchor"
+kind = "evidence_anchors"
+source = "study"
+claim = "The count is 14."
+quote = "14 participants"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            evaluate_content(&document, &preset).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+        let sources = BTreeMap::from([("study".into(), "There were 14 participants.".into())]);
+        assert_eq!(
+            evaluate_content_with_evidence(&document, &preset, Some(sources))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::Passed
         );
     }
     #[test]

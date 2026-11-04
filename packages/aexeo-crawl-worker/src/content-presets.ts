@@ -3,6 +3,7 @@ export interface ContentPresetEnv {
   CONTENT_PRESET?: string;
   CONTENT_PRESET_BY_COLLECTION_JSON?: string;
   CONTENT_PRESET_SOURCES_JSON?: string;
+  CONTENT_EVIDENCE_SOURCES_JSON?: string;
 }
 
 function stringMap(raw: string | undefined, name: string): Record<string, string> {
@@ -18,10 +19,11 @@ export function contentPresetFindings(
   documents: unknown[],
   collections: unknown,
   env: ContentPresetEnv,
-  evaluate: (documentJson: string, name: string, sourcesJson?: string | null) => string,
+  evaluate: (documentJson: string, name: string, sourcesJson?: string | null, evidenceJson?: string | null) => string,
 ): unknown[] {
   const byCollection = stringMap(env.CONTENT_PRESET_BY_COLLECTION_JSON, "CONTENT_PRESET_BY_COLLECTION_JSON");
   const sources = stringMap(env.CONTENT_PRESET_SOURCES_JSON, "CONTENT_PRESET_SOURCES_JSON");
+  const evidence = env.CONTENT_EVIDENCE_SOURCES_JSON === undefined ? undefined : stringMap(env.CONTENT_EVIDENCE_SOURCES_JSON, "CONTENT_EVIDENCE_SOURCES_JSON");
   const needsCollections = Object.keys(byCollection).length > 0;
   if (needsCollections && (!Array.isArray(collections) || collections.length !== documents.length || collections.some((item) => typeof item !== "string"))) {
     throw new Error("collection names are required for every document when collection presets are configured");
@@ -33,7 +35,7 @@ export function contentPresetFindings(
     const name = selected ?? env.CONTENT_PRESET;
     if (selected === "") throw new Error(`empty preset name for collection ${collection}`);
     if (!name) continue;
-    const report = JSON.parse(evaluate(JSON.stringify(document), name, JSON.stringify(sources))) as {
+    const report = JSON.parse(evaluate(JSON.stringify(document), name, JSON.stringify(sources), evidence === undefined ? undefined : JSON.stringify(evidence))) as {
       gates: Array<{ gate_id: string; status: string; reason: string | null; findings: unknown[] }>;
     };
     for (const gate of report.gates) {

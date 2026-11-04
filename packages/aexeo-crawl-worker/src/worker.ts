@@ -32,6 +32,7 @@ export interface Env {
   CONTENT_PRESET?: string;
   CONTENT_PRESET_BY_COLLECTION_JSON?: string;
   CONTENT_PRESET_SOURCES_JSON?: string;
+  CONTENT_EVIDENCE_SOURCES_JSON?: string;
 }
 
 export default {

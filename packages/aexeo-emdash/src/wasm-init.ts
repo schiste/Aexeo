@@ -145,7 +145,8 @@ export async function evaluateContent(
   documentJson: string,
   presetName: string,
   sourcesJson?: string | null,
+  evidenceJson?: string | null,
 ): Promise<string> {
   await ensureInitialized();
-  return glue.evaluateContent(documentJson, presetName, sourcesJson);
+  return glue.evaluateContent(documentJson, presetName, sourcesJson, evidenceJson);
 }

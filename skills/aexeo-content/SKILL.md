@@ -14,3 +14,5 @@ Read each gate's status and findings. `passed` means only that gate passed; `not
 Revise the affected content where appropriate, rerun the same preset, and report unresolved findings or unavailable checks. Raw-text mode includes Markdown syntax. Markdown mode checks extracted prose and reports positions in that projection, rather than source line positions; inspect the original before editing.
 
 Use `--fix` only when an explicit file edit is intended. Currently the only supported content fix adds a missing final newline for a configured `final_newline` gate; inspect `applied_fixes` and rerun the checks.
+
+For presets using `evidence_anchors`, supply each named UTF-8 snapshot with `--evidence-source name=path`. An anchor pass checks literal presence only; it does not prove entailment, source reliability, or factual truth. Missing sources are `not_checked`.
