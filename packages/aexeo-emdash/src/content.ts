@@ -6,7 +6,7 @@ export interface ContentGateResult {
   status: "passed" | "failed" | "not_checked";
   blocking: boolean;
   scope: "document" | "site";
-  required_capability: "text" | "metadata" | "headings" | "site";
+  required_capability: "text" | "source_text" | "metadata" | "headings" | "site";
   findings: Finding[];
   reason: string | null;
 }
@@ -15,6 +15,7 @@ export interface ContentReport {
   preset: string;
   input_id: string;
   gates: ContentGateResult[];
+  applied_fixes: string[];
 }
 
 /** Evaluate a document locally using the built-in or supplied named TOML presets. */

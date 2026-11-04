@@ -5,7 +5,7 @@ import type { EmdashDocument } from "../src/types.js";
 
 const doc: EmdashDocument = { route: "/test", title: "Test", body: [] };
 const base = async () => ({ ok: true as const, findings: [] });
-const report: ContentReport = { preset: "custom", input_id: "/test", gates: [{
+const report: ContentReport = { preset: "custom", input_id: "/test", applied_fixes: [], gates: [{
   gate_id: "heading", status: "failed", blocking: true, scope: "document", required_capability: "headings",
   findings: [{ rule_id: "heading", path: "/test", message: "Missing heading", line: 1, column: 1, severity: "warning", suggestion: null, scope: "page" }], reason: null,
 }] };

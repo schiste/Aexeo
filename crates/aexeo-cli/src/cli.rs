@@ -14,6 +14,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("site").long("site").num_args(1).help("Load a static website for site gates"))
                 .arg(Arg::new("site-config").long("site-config").num_args(1).requires("site").help("Existing site audit config file"))
                 .arg(Arg::new("input-format").long("input-format").value_parser(["text", "markdown"]).default_value("text").help("Interpret content as raw text or Markdown"))
+                .arg(Arg::new("fix").long("fix").action(ArgAction::SetTrue).help("Apply supported safe fixes to a local file"))
                 .arg(Arg::new("no-text").long("no-text").action(ArgAction::SetTrue).help("Do not read a text input"))
                 .arg(Arg::new("list-site-groups").long("list-site-groups").action(ArgAction::SetTrue).help("List native website groups usable in presets"))
                 .arg(Arg::new("list-presets").long("list-presets").action(ArgAction::SetTrue).help("List available preset names"))

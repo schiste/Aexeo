@@ -15,6 +15,8 @@ pub struct ContentInput {
     pub id: String,
     pub text: Option<String>,
     #[serde(default)]
+    pub source_text: Option<String>,
+    #[serde(default)]
     pub headings: Option<Vec<String>>,
     #[serde(default)]
     pub metadata: Option<BTreeMap<String, String>>,
@@ -65,6 +67,13 @@ pub enum ContentGate {
         blocking: bool,
         headings: Vec<String>,
     },
+    FinalNewline {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+    },
     /// One existing native website rule group.
     SiteGroup {
         id: String,
@@ -98,7 +107,8 @@ impl ContentGate {
             Self::WordCount { severity, .. }
             | Self::ForbiddenTerms { severity, .. }
             | Self::RequiredMetadata { severity, .. }
-            | Self::RequiredHeadings { severity, .. } => *severity,
+            | Self::RequiredHeadings { severity, .. }
+            | Self::FinalNewline { severity, .. } => *severity,
             Self::SiteAudit { .. } | Self::SiteGroup { .. } => Severity::Warning,
         }
     }
@@ -108,6 +118,7 @@ impl ContentGate {
             | Self::ForbiddenTerms { blocking, .. }
             | Self::RequiredMetadata { blocking, .. }
             | Self::RequiredHeadings { blocking, .. }
+            | Self::FinalNewline { blocking, .. }
             | Self::SiteAudit { blocking, .. }
             | Self::SiteGroup { blocking, .. } => *blocking,
         }
@@ -117,6 +128,7 @@ impl ContentGate {
             Self::WordCount { .. } | Self::ForbiddenTerms { .. } => "text",
             Self::RequiredMetadata { .. } => "metadata",
             Self::RequiredHeadings { .. } => "headings",
+            Self::FinalNewline { .. } => "source_text",
             Self::SiteAudit { .. } | Self::SiteGroup { .. } => "site",
         }
     }
@@ -126,6 +138,7 @@ impl ContentGate {
             | Self::ForbiddenTerms { id, .. }
             | Self::RequiredMetadata { id, .. }
             | Self::RequiredHeadings { id, .. }
+            | Self::FinalNewline { id, .. }
             | Self::SiteAudit { id, .. }
             | Self::SiteGroup { id, .. } => id,
         }
@@ -156,6 +169,8 @@ pub struct ContentReport {
     pub preset: String,
     pub input_id: String,
     pub gates: Vec<ContentGateResult>,
+    #[serde(default)]
+    pub applied_fixes: Vec<String>,
 }
 
 impl ContentPreset {
@@ -299,6 +314,17 @@ impl ContentPreset {
                     }
                     None => reason = Some("headings are unavailable from this adapter".into()),
                 },
+                ContentGate::FinalNewline { .. } => match &input.source_text {
+                    Some(source) if !source.is_empty() && !source.ends_with('\n') => {
+                        emit(
+                            "Source has no final newline".into(),
+                            source.lines().count().max(1),
+                            1,
+                        );
+                    }
+                    Some(_) => {}
+                    None => reason = Some("source text is unavailable from this adapter".into()),
+                },
                 ContentGate::SiteGroup { group, .. } => match site {
                     Some((site, config)) => {
                         match crate::static_check::run_native_site_rule_group(site, config, group)?
@@ -359,6 +385,7 @@ impl ContentPreset {
             preset: self.name.clone(),
             input_id: input.id.clone(),
             gates: results,
+            applied_fixes: Vec::new(),
         })
     }
 }

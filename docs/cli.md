@@ -39,6 +39,9 @@ Options:
           [default: text]
           [possible values: text, markdown]
 
+      --fix
+          Apply supported safe fixes to a local file
+
       --no-text
           Do not read a text input
 

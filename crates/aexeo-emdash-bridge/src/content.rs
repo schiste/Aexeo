@@ -59,6 +59,7 @@ pub fn content_input(document: &EmdashDocument) -> ContentInput {
     ContentInput {
         id: document.route.clone(),
         text: Some(text),
+        source_text: None,
         headings: Some(headings),
         metadata: Some(metadata),
     }
@@ -89,6 +90,7 @@ mod tests {
             .evaluate(&ContentInput {
                 id: "test.md".into(),
                 text: Some("One two".into()),
+                source_text: None,
                 headings: None,
                 metadata: None,
             })

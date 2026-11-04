@@ -48,6 +48,7 @@ pub fn markdown_input(id: impl Into<String>, source: &str) -> Result<ContentInpu
     Ok(ContentInput {
         id: id.into(),
         text: Some(text),
+        source_text: Some(source.into()),
         headings: Some(headings),
         metadata: None,
     })

@@ -143,3 +143,112 @@ fn markdown_mode_excludes_code_and_checks_headings() {
     assert_eq!(report["gates"][0]["status"], "passed");
     assert_eq!(report["gates"][1]["status"], "passed");
 }
+
+#[test]
+fn explicit_fix_adds_only_the_configured_final_newline_and_is_idempotent() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    let article = dir.path().join("article.md");
+    std::fs::write(
+        &preset,
+        "version=1\nname='Format'\n[[gates]]\nid='newline'\nkind='final_newline'\n",
+    )
+    .unwrap();
+    std::fs::write(&article, "First line\r\nLast line").unwrap();
+    let source = format!("custom={}", preset.display());
+    let invoke = || {
+        Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                article.to_str().unwrap(),
+                "--preset",
+                "custom",
+                "--preset-source",
+                &source,
+                "--input-format",
+                "markdown",
+                "--format",
+                "json",
+                "--fix",
+            ])
+            .output()
+            .unwrap()
+    };
+    let output = invoke();
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        std::fs::read(&article).unwrap(),
+        b"First line\r\nLast line\r\n"
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["applied_fixes"], serde_json::json!(["newline"]));
+    let output = invoke();
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["applied_fixes"], serde_json::json!([]));
+    assert_eq!(
+        std::fs::read(&article).unwrap(),
+        b"First line\r\nLast line\r\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn fix_rejects_symlinks() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    let article = dir.path().join("article.md");
+    let link = dir.path().join("link.md");
+    std::fs::write(
+        &preset,
+        "version=1\nname='Format'\n[[gates]]\nid='newline'\nkind='final_newline'\n",
+    )
+    .unwrap();
+    std::fs::write(&article, "unchanged").unwrap();
+    std::os::unix::fs::symlink(&article, &link).unwrap();
+    let source = format!("custom={}", preset.display());
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            link.to_str().unwrap(),
+            "--preset",
+            "custom",
+            "--preset-source",
+            &source,
+            "--fix",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(std::fs::read(&article).unwrap(), b"unchanged");
+}
+
+#[cfg(unix)]
+#[test]
+fn fix_rejects_files_with_multiple_hard_links() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    let article = dir.path().join("article.md");
+    let link = dir.path().join("other.md");
+    std::fs::write(
+        &preset,
+        "version=1\nname='Format'\n[[gates]]\nid='newline'\nkind='final_newline'\n",
+    )
+    .unwrap();
+    std::fs::write(&article, "unchanged").unwrap();
+    std::fs::hard_link(&article, &link).unwrap();
+    let source = format!("custom={}", preset.display());
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            article.to_str().unwrap(),
+            "--preset",
+            "custom",
+            "--preset-source",
+            &source,
+            "--fix",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(std::fs::read(&link).unwrap(), b"unchanged");
+}

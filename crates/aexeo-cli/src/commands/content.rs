@@ -1,6 +1,6 @@
 use super::exit_code::{EXIT_FINDINGS, EXIT_SUCCESS, EXIT_UNSUPPORTED};
 use aexeo_core::{
-    content_gate::{ContentInput, GateStatus},
+    content_gate::{ContentGate, ContentInput, GateStatus},
     content_presets::{builtin_content_presets, resolve_content_preset},
 };
 use anyhow::{Context, Result, bail};
@@ -8,7 +8,7 @@ use clap::ArgMatches;
 use std::{
     collections::BTreeMap,
     fs,
-    io::{self, Read},
+    io::{self, Read, Write},
 };
 
 pub fn command_content(args: &ArgMatches) -> Result<i32> {
@@ -57,7 +57,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         return Ok(EXIT_SUCCESS);
     }
     let path = args.get_one::<String>("path").unwrap();
-    let text = if args.get_flag("no-text") {
+    if args.get_flag("fix") && (path == "-" || args.get_flag("no-text")) {
+        bail!("--fix requires a local content file");
+    }
+    let mut text = if args.get_flag("no-text") {
         None
     } else if path == "-" {
         let mut text = String::new();
@@ -86,6 +89,26 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             Ok((aexeo_core::load_site(&site_root)?, config))
         })
         .transpose()?;
+    let mut applied_fixes = Vec::new();
+    let fix_gate = preset
+        .gates
+        .iter()
+        .find(|gate| matches!(gate, ContentGate::FinalNewline { .. }));
+    match (args.get_flag("fix"), text.as_mut(), fix_gate) {
+        (true, Some(source), Some(gate)) if !source.is_empty() && !source.ends_with('\n') => {
+            let suffix = if source.ends_with('\r') {
+                "\n"
+            } else if source.contains("\r\n") {
+                "\r\n"
+            } else {
+                "\n"
+            };
+            append_final_newline(std::path::Path::new(path), source, suffix)?;
+            source.push_str(suffix);
+            applied_fixes.push(gate.id().to_owned());
+        }
+        _ => {}
+    }
     let id = if args.get_flag("no-text") {
         args.get_one::<String>("site").unwrap_or(path).clone()
     } else {
@@ -98,17 +121,22 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         (Some("markdown"), Some(text)) => aexeo_core::markdown_adapter::markdown_input(id, &text)?,
         (_, text) => ContentInput {
             id,
+            source_text: text.clone(),
             text,
             headings: None,
             metadata: None,
         },
     };
     input.metadata = metadata;
-    let report =
+    let mut report =
         preset.evaluate_with_site(&input, site.as_ref().map(|(site, config)| (site, config)))?;
+    report.applied_fixes = applied_fixes;
     if args.get_one::<String>("format").map(String::as_str) == Some("json") {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
+        for fix in &report.applied_fixes {
+            println!("Applied fix: {fix}");
+        }
         for gate in &report.gates {
             println!("{}: {:?}", gate.gate_id, gate.status);
             if let Some(reason) = &gate.reason {
@@ -144,4 +172,28 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
 fn toml_output(preset: &aexeo_core::content_gate::ContentPreset) -> Result<String> {
     // JSON preserves the fully resolved structure without requiring a CLI TOML dependency.
     Ok(serde_json::to_string_pretty(preset)?)
+}
+
+// Append only after comparing the open file with the text that was evaluated.
+// Avoid replacing the file so permissions and extended attributes are retained.
+fn append_final_newline(path: &std::path::Path, original: &str, suffix: &str) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_file() {
+        bail!("--fix requires a regular file, not a symlink");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.nlink() > 1 {
+            bail!("--fix refuses a file with multiple hard links");
+        }
+    }
+    let mut file = fs::OpenOptions::new().read(true).append(true).open(path)?;
+    let mut current = String::new();
+    file.read_to_string(&mut current)?;
+    if current != original {
+        bail!("file changed while evaluating; no fix applied");
+    }
+    file.write_all(suffix.as_bytes())?;
+    Ok(())
 }
