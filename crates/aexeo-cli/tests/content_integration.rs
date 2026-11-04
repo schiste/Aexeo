@@ -325,3 +325,45 @@ fn literal_evidence_checks_are_explicit_about_missing_and_mismatched_sources() {
     assert_eq!(code, 1);
     assert_eq!(mismatch["gates"][0]["status"], "failed");
 }
+
+#[test]
+fn structured_facts_compare_values_and_report_missing_evidence() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("facts.toml");
+    let content = dir.path().join("article.txt");
+    let source = dir.path().join("snapshot.json");
+    std::fs::write(&preset, "version=1\nname='facts'\n[[gates]]\nid='count'\nkind='structured_fact'\nsource='study'\nclaim='The study had 14 participants.'\npointer='/sample/count'\nexpected=14\n").unwrap();
+    std::fs::write(&content, "The study had 14 participants.").unwrap();
+    let preset_arg = format!("custom={}", preset.display());
+    let source_arg = format!("study={}", source.display());
+    let invoke = || {
+        let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .arg("content")
+            .arg(&content)
+            .args([
+                "--preset",
+                "custom",
+                "--preset-source",
+                &preset_arg,
+                "--format",
+                "json",
+                "--evidence-source",
+                &source_arg,
+            ])
+            .output()
+            .unwrap();
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        (
+            output.status.code().unwrap(),
+            report["gates"][0]["status"].as_str().unwrap().to_owned(),
+        )
+    };
+    std::fs::write(&source, r#"{"sample":{"count":14}}"#).unwrap();
+    assert_eq!(invoke(), (0, "passed".into()));
+    std::fs::write(&source, r#"{"sample":{"count":12}}"#).unwrap();
+    assert_eq!(invoke(), (1, "failed".into()));
+    std::fs::write(&source, r#"{"sample":{}}"#).unwrap();
+    assert_eq!(invoke(), (2, "not_checked".into()));
+    std::fs::write(&source, "not json").unwrap();
+    assert_eq!(invoke(), (2, "not_checked".into()));
+}

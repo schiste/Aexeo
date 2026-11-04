@@ -168,6 +168,19 @@ quote = "14 participants"
         );
     }
     #[test]
+    fn structured_fact_uses_the_same_source_data_in_emdash() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"children":[{"_type":"span","text":"The study had 14 participants."}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='facts'\n[[gates]]\nid='count'\nkind='structured_fact'\nsource='study'\nclaim='The study had 14 participants.'\npointer='/count'\nexpected=14\n").unwrap();
+        let sources = BTreeMap::from([("study".into(), "{\"count\":12}".into())]);
+        assert_eq!(
+            evaluate_content_with_evidence(&document, &preset, Some(sources))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::Failed
+        );
+    }
+    #[test]
     fn unknown_custom_extension_is_not_a_pass() {
         let document: EmdashDocument =
             serde_json::from_str(r#"{"route":"/test","title":"Test","body":[]}"#).unwrap();

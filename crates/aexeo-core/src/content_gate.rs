@@ -88,6 +88,18 @@ pub enum ContentGate {
         #[serde(default = "default_blocking")]
         blocking: bool,
     },
+    /// Compare an explicitly mapped claim with a field in a JSON snapshot.
+    StructuredFact {
+        id: String,
+        source: String,
+        claim: String,
+        pointer: String,
+        expected: serde_json::Value,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+    },
     /// A host-provided implementation, selected by a portable identifier.
     Custom {
         id: String,
@@ -135,7 +147,8 @@ impl ContentGate {
             | Self::RequiredHeadings { severity, .. }
             | Self::FinalNewline { severity, .. }
             | Self::Custom { severity, .. }
-            | Self::EvidenceAnchors { severity, .. } => *severity,
+            | Self::EvidenceAnchors { severity, .. }
+            | Self::StructuredFact { severity, .. } => *severity,
             Self::SiteAudit { .. } | Self::SiteGroup { .. } => Severity::Warning,
         }
     }
@@ -148,6 +161,7 @@ impl ContentGate {
             | Self::FinalNewline { blocking, .. }
             | Self::Custom { blocking, .. }
             | Self::EvidenceAnchors { blocking, .. }
+            | Self::StructuredFact { blocking, .. }
             | Self::SiteAudit { blocking, .. }
             | Self::SiteGroup { blocking, .. } => *blocking,
         }
@@ -159,7 +173,7 @@ impl ContentGate {
             Self::RequiredHeadings { .. } => "headings",
             Self::FinalNewline { .. } => "source_text",
             Self::Custom { .. } => "extension",
-            Self::EvidenceAnchors { .. } => "text_and_evidence",
+            Self::EvidenceAnchors { .. } | Self::StructuredFact { .. } => "text_and_evidence",
             Self::SiteAudit { .. } | Self::SiteGroup { .. } => "site",
         }
     }
@@ -172,6 +186,7 @@ impl ContentGate {
             | Self::FinalNewline { id, .. }
             | Self::Custom { id, .. }
             | Self::EvidenceAnchors { id, .. }
+            | Self::StructuredFact { id, .. }
             | Self::SiteAudit { id, .. }
             | Self::SiteGroup { id, .. } => id,
         }
@@ -284,6 +299,20 @@ impl ContentPreset {
                 {
                     bail!(
                         "evidence source, claim and quote must not be empty for {}",
+                        gate.id()
+                    )
+                }
+                ContentGate::StructuredFact {
+                    source,
+                    claim,
+                    pointer,
+                    ..
+                } if source.trim().is_empty()
+                    || claim.trim().is_empty()
+                    || (!pointer.is_empty() && !pointer.starts_with('/')) =>
+                {
+                    bail!(
+                        "structured fact needs a source, claim and valid JSON pointer for {}",
                         gate.id()
                     )
                 }
@@ -425,6 +454,54 @@ impl ContentPreset {
                     },
                     _ => reason = Some("content text or evidence sources are unavailable".into()),
                 },
+                ContentGate::StructuredFact {
+                    source,
+                    claim,
+                    pointer,
+                    expected,
+                    ..
+                } => {
+                    match (
+                        &input.text,
+                        input.evidence_sources.as_ref().and_then(|s| s.get(source)),
+                    ) {
+                        (Some(text), Some(snapshot)) => match serde_json::from_str::<
+                            serde_json::Value,
+                        >(snapshot)
+                        {
+                            Ok(value) => match value.pointer(pointer) {
+                                Some(actual) => {
+                                    if !text.contains(claim) {
+                                        emit("Claim anchor is absent from content".into(), 1, 1);
+                                    }
+                                    if actual != expected {
+                                        emit(
+                                            format!(
+                                                "Structured source value differs from expected at {pointer}"
+                                            ),
+                                            1,
+                                            1,
+                                        );
+                                    }
+                                }
+                                None => {
+                                    reason = Some(format!(
+                                        "JSON pointer is unavailable in evidence source {source}: {pointer}"
+                                    ))
+                                }
+                            },
+                            Err(_) => {
+                                reason =
+                                    Some(format!("evidence source is not valid JSON: {source}"))
+                            }
+                        },
+                        _ => {
+                            reason = Some(format!(
+                                "content text or evidence source is unavailable: {source}"
+                            ))
+                        }
+                    }
+                }
                 ContentGate::Custom {
                     extension,
                     parameters,
