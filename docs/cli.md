@@ -27,6 +27,18 @@ Options:
       --metadata <metadata>
           JSON file containing string metadata fields
 
+      --site <site>
+          Load a static website for site gates
+
+      --site-config <site-config>
+          Existing site audit config file
+
+      --no-text
+          Do not read a text input
+
+      --list-presets
+          List available preset names
+
       --explain
           Print the resolved preset as JSON without reading content
 

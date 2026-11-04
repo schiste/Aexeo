@@ -11,6 +11,10 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("preset").long("preset").default_value("article"))
                 .arg(Arg::new("preset-source").long("preset-source").num_args(1).action(ArgAction::Append).help("Load a named TOML preset as NAME=PATH; may be repeated"))
                 .arg(Arg::new("metadata").long("metadata").num_args(1).help("JSON file containing string metadata fields"))
+                .arg(Arg::new("site").long("site").num_args(1).help("Load a static website for site gates"))
+                .arg(Arg::new("site-config").long("site-config").num_args(1).requires("site").help("Existing site audit config file"))
+                .arg(Arg::new("no-text").long("no-text").action(ArgAction::SetTrue).help("Do not read a text input"))
+                .arg(Arg::new("list-presets").long("list-presets").action(ArgAction::SetTrue).help("List available preset names"))
                 .arg(Arg::new("explain").long("explain").action(ArgAction::SetTrue).help("Print the resolved preset as JSON without reading content"))
                 .arg(Arg::new("format").long("format").value_parser(["text", "json"]).default_value("text")),
         )

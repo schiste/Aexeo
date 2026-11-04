@@ -20,10 +20,10 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 
 ## Progression détaillée
 
-- Phase 2 : premier moteur de contenu indépendant des sites ; trois types de gate et résultats `passed` / `failed` / `not_checked`. Les audits site existants ne sont pas encore orchestrés par ce moteur.
+- Phase 2 : premier moteur de contenu indépendant des sites ; trois types de gate et résultats `passed` / `failed` / `not_checked`. Le preset `seo-website` appelle l’audit site existant comme une gate globale ; la décomposition de ses groupes en gates indépendantes reste à faire.
 - Phase 3 : presets TOML nommés, héritage, surcharges, désactivation, détection des cycles et inspection CLI ; exemples article et glossaire minimaux.
 - Phase 4 : CLI texte/stdin et bridge EmDash/WASM raccordés au même moteur ; un véritable parsing Markdown et le raccordement au workflow du plugin restent à faire.
-- Phase 5 : documentation et skill d'utilisation en cours ; correctifs sûrs, découverte complète et mesures de performance restent à faire.
+- Phase 5 : documentation, skill et découverte CLI des presets ; correctifs sûrs et mesures de performance restent à faire.
 
 - Phase 1 : suite Rust complète, typage et 74 tests du plugin EmDash validés ; tests ajoutés pour la compatibilité des options de règles, sévérités et suppressions du pont EmDash.
 - Phase 1 : dispatch statique regroupé dans un registre unique avec vérification des groupes et conservation de leur ordre et des libellés de timing.

@@ -26,6 +26,19 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             sources.insert(name.to_owned(), source);
         }
     }
+    if args.get_flag("list-presets") {
+        if args.get_one::<String>("format").map(String::as_str) == Some("json") {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&sources.keys().collect::<Vec<_>>())?
+            );
+        } else {
+            for name in sources.keys() {
+                println!("{name}");
+            }
+        }
+        return Ok(EXIT_SUCCESS);
+    }
     let preset_name = args.get_one::<String>("preset").unwrap();
     let preset = resolve_content_preset(preset_name, &sources)?;
     if args.get_flag("explain") {
@@ -33,12 +46,14 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         return Ok(EXIT_SUCCESS);
     }
     let path = args.get_one::<String>("path").unwrap();
-    let text = if path == "-" {
+    let text = if args.get_flag("no-text") {
+        None
+    } else if path == "-" {
         let mut text = String::new();
         io::stdin().read_to_string(&mut text)?;
-        text
+        Some(text)
     } else {
-        fs::read_to_string(path).with_context(|| format!("reading content {path}"))?
+        Some(fs::read_to_string(path).with_context(|| format!("reading content {path}"))?)
     };
     let metadata: Option<BTreeMap<String, String>> = args
         .get_one::<String>("metadata")
@@ -49,11 +64,29 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 .context("metadata must be a JSON object of string values")?)
         })
         .transpose()?;
-    let report = preset.evaluate(&ContentInput {
-        id: path.clone(),
-        text: Some(text),
+    let site = args
+        .get_one::<String>("site")
+        .map(|path| -> Result<_> {
+            let root = std::path::Path::new(path);
+            let explicit = args
+                .get_one::<String>("site-config")
+                .map(std::path::Path::new);
+            let config = aexeo_core::config::load_config(root, explicit)?;
+            let site_root = aexeo_core::adapter::resolve_static_site_root(root, &config)?;
+            Ok((aexeo_core::load_site(&site_root)?, config))
+        })
+        .transpose()?;
+    let input = ContentInput {
+        id: if args.get_flag("no-text") {
+            args.get_one::<String>("site").unwrap_or(path).clone()
+        } else {
+            path.clone()
+        },
+        text,
         metadata,
-    })?;
+    };
+    let report =
+        preset.evaluate_with_site(&input, site.as_ref().map(|(site, config)| (site, config)))?;
     if args.get_one::<String>("format").map(String::as_str) == Some("json") {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {

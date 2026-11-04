@@ -55,6 +55,12 @@ pub enum ContentGate {
         blocking: bool,
         fields: Vec<String>,
     },
+    /// The existing SEO/GEO site evaluator, including its configured policy.
+    SiteAudit {
+        id: String,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -76,26 +82,30 @@ impl ContentGate {
             Self::WordCount { severity, .. }
             | Self::ForbiddenTerms { severity, .. }
             | Self::RequiredMetadata { severity, .. } => *severity,
+            Self::SiteAudit { .. } => Severity::Warning,
         }
     }
     pub fn blocking(&self) -> bool {
         match self {
             Self::WordCount { blocking, .. }
             | Self::ForbiddenTerms { blocking, .. }
-            | Self::RequiredMetadata { blocking, .. } => *blocking,
+            | Self::RequiredMetadata { blocking, .. }
+            | Self::SiteAudit { blocking, .. } => *blocking,
         }
     }
     pub fn required_capability(&self) -> &'static str {
         match self {
             Self::WordCount { .. } | Self::ForbiddenTerms { .. } => "text",
             Self::RequiredMetadata { .. } => "metadata",
+            Self::SiteAudit { .. } => "site",
         }
     }
     pub fn id(&self) -> &str {
         match self {
             Self::WordCount { id, .. }
             | Self::ForbiddenTerms { id, .. }
-            | Self::RequiredMetadata { id, .. } => id,
+            | Self::RequiredMetadata { id, .. }
+            | Self::SiteAudit { id, .. } => id,
         }
     }
 }
@@ -169,6 +179,16 @@ impl ContentPreset {
     }
 
     pub fn evaluate(&self, input: &ContentInput) -> Result<ContentReport> {
+        self.evaluate_with_site(input, None)
+    }
+
+    /// A site adapter can provide the existing site and its resolved config.
+    /// Without this capability site gates are reported as not checked.
+    pub fn evaluate_with_site(
+        &self,
+        input: &ContentInput,
+        site: Option<(&crate::site::Site, &crate::config::Config)>,
+    ) -> Result<ContentReport> {
         self.validate()?;
         let mut results = Vec::with_capacity(self.gates.len());
         for gate in &self.gates {
@@ -234,6 +254,12 @@ impl ContentPreset {
                     }
                     None => reason = Some("text is unavailable from this adapter".into()),
                 },
+                ContentGate::SiteAudit { .. } => match site {
+                    Some((site, config)) => {
+                        findings.extend(crate::static_check::run_checks_for_site(site, config));
+                    }
+                    None => reason = Some("site is unavailable from this adapter".into()),
+                },
                 ContentGate::RequiredMetadata { fields, .. } => match &input.metadata {
                     Some(metadata) => {
                         for field in fields {
@@ -256,7 +282,12 @@ impl ContentPreset {
                 gate_id: gate.id().into(),
                 status,
                 blocking: gate.blocking(),
-                scope: "document".into(),
+                scope: if matches!(gate, ContentGate::SiteAudit { .. }) {
+                    "site"
+                } else {
+                    "document"
+                }
+                .into(),
                 required_capability: gate.required_capability().into(),
                 findings,
                 reason,

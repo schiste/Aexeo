@@ -5,7 +5,7 @@ description: Run Aexeo's local content gates while drafting or reviewing a text 
 
 # Check content with Aexeo
 
-Choose the preset required by the project or content task. The built-in `article` and `glossary` presets are minimal starting points, not comprehensive quality assessments. See `docs/content-gates.md` in the Aexeo repository for the current gate types and configuration.
+Choose the preset required by the project or content task. List available presets with `aexeo-cli content --list-presets`. The built-in `article` and `glossary` presets are minimal starting points, not comprehensive quality assessments. `seo-website` wraps the existing static SEO/GEO audit. See `docs/content-gates.md` in the Aexeo repository for the current gate types and configuration.
 
 Run `aexeo-cli content path/to/file --preset article --format json`. For an unsaved draft, pipe UTF-8 text to `aexeo-cli content - --preset article --format json`. Add `--preset-source custom=path/to/preset.toml --preset custom` for a custom preset, and repeat `--preset-source` for any custom parents. Use `--explain` to inspect the resolved preset before running it.
 

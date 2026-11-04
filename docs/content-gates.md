@@ -1,14 +1,18 @@
 # Portable content gates
 
-The content evaluator runs locally without a network or model. It is separate from the existing site audit and does not assess source support or factual correctness. A report records each gate as `passed`, `failed`, or `not_checked`; the last means an adapter could not supply a required capability.
+The content evaluator runs locally without a network or model. It can include the existing site audit through a site gate. It does not assess source support or factual correctness. A report records each gate as `passed`, `failed`, or `not_checked`; the last means an adapter could not supply a required capability.
 
 ```sh
 aexeo-cli content article.md --preset article --format json
 printf 'Draft text' | aexeo-cli content - --preset glossary
 aexeo-cli content --preset glossary --explain
+aexeo-cli content --list-presets
+aexeo-cli content --preset seo-website --site ./dist --no-text --format json
 ```
 
 The CLI reads the supplied UTF-8 bytes as text. It does not parse Markdown or exclude front matter, markup, links or code blocks from word counts or term searches. Word counts split on whitespace, and forbidden terms are exact, case-sensitive substrings. Locations refer to the supplied text. EmDash projects blocks and spans to plain text; its locations refer to that projection, not the original structured document.
+
+The built-in `seo-website` preset wraps the existing static SEO/GEO audit as one site-scoped gate and uses its existing configuration and policy. Pass `--site-config` to select a site config. It preserves the audit findings and their severities. The gate fails if the audit produces any findings, including warnings. A text-only adapter reports it as `not_checked`. This wrapper does not yet expose each website rule group as an individually configurable gate.
 
 The built-in `article` preset requires at least one whitespace-separated word. `glossary` inherits it and sets a maximum of 500 words. These deliberately minimal examples are starting points, not comprehensive editorial standards.
 
@@ -50,4 +54,4 @@ Metadata must be a JSON object with string values. Without `--metadata`, metadat
 
 Each gate may set `severity` to `error`, `warning` (default) or `note`, and `blocking` to true (default) or false. Status always reports the gate result; the CLI exits 1 for a failed blocking gate, 2 if a blocking gate was not checked (even if another blocking gate failed), and 0 otherwise. Non-blocking gates still appear in the report, including when they could not be checked. Invalid configuration or I/O errors use the CLI's internal-error path. No content is automatically changed.
 
-The EmDash Rust bridge and `evaluateContent` WASM export accept the same named source map and preset, while retaining the existing site-audit APIs. Enabling those gates in the EmDash plugin's existing save workflow requires a separate integration.
+The EmDash package exposes `evaluateContent` from `@aeptus/aexeo-emdash/content`; the Rust bridge and WASM API accept the same named source map and preset. The document adapter has no site capability, so site gates are `not_checked`. Enabling those gates in the existing save workflow requires a separate integration.

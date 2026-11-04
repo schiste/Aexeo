@@ -75,3 +75,35 @@ fn advisory_failures_do_not_block_the_command() {
     assert_eq!(report["gates"][0]["findings"][0]["severity"], "note");
     assert_eq!(report["gates"][0]["required_capability"], "text");
 }
+
+#[test]
+fn website_preset_preserves_site_audit_findings() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("index.html"),
+        "<html><head><title>Example</title></head><body>Welcome</body></html>",
+    )
+    .unwrap();
+    let config = aexeo_core::Config::default();
+    let root = dir.path().canonicalize().unwrap();
+    let site = aexeo_core::load_site(&root).unwrap();
+    let expected = aexeo_core::run_checks_for_site(&site, &config);
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "--no-text",
+            "--site",
+            dir.path().to_str().unwrap(),
+            "--preset",
+            "seo-website",
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let findings: Vec<aexeo_contracts::Finding> =
+        serde_json::from_value(report["gates"][0]["findings"].clone()).unwrap();
+    assert_eq!(findings, expected);
+    assert_eq!(report["gates"][0]["required_capability"], "site");
+}

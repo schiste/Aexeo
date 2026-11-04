@@ -101,6 +101,17 @@ fn merge_gate(gates: &mut Vec<ContentGate>, gate: ContentGate) {
 pub fn builtin_content_presets() -> BTreeMap<String, String> {
     BTreeMap::from([
         (
+            "seo-website".into(),
+            r#"
+version = 1
+name = "SEO/GEO website audit"
+[[gates]]
+id = "site.seo_geo"
+kind = "site_audit"
+"#
+            .into(),
+        ),
+        (
             "article".into(),
             r#"
 version = 1
