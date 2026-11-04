@@ -12,8 +12,8 @@ class EvaluationTests(unittest.TestCase):
             {"id": "two", "claim": "claim two", "source_text": "source two", "label": "contradicted"},
         ]
         reviews = [
-            {"id": "one", "review": {"claim": "claim one", "source_text": "source one", "support": "supported", "provenance": {"model_choice": "supported", "model_probability": "0.9", "threshold": "0.8"}}},
-            {"id": "two", "review": {"claim": "claim two", "source_text": "source two", "support": "uncertain", "provenance": {"model_choice": "supported", "model_probability": "0.6", "threshold": "0.8"}}},
+            {"id": "one", "review": {"claim": "claim one", "source_text": "source one", "support": "supported", "reviewer": "jev:pinned", "provenance": {"protocol": "aexeo-jev-support-v1", "model_choice": "supported", "model_probability": "0.9", "threshold": "0.8"}}},
+            {"id": "two", "review": {"claim": "claim two", "source_text": "source two", "support": "uncertain", "reviewer": "jev:pinned", "provenance": {"protocol": "aexeo-jev-support-v1", "model_choice": "supported", "model_probability": "0.6", "threshold": "0.8"}}},
         ]
         return examples, reviews
 
@@ -26,6 +26,8 @@ class EvaluationTests(unittest.TestCase):
     def test_metrics_measure_abstention_and_confidence_error(self):
         report = evaluate.evaluate(*self.inputs())
         self.assertEqual(report["examples"], 2)
+        self.assertEqual(report["reviewer"], "jev:pinned")
+        self.assertEqual(report["threshold"], 0.8)
         self.assertEqual(report["raw_choice_accuracy"], 0.5)
         self.assertEqual(report["decisive_coverage"], 0.5)
         self.assertEqual(report["decisive_accuracy"], 1.0)
@@ -42,6 +44,17 @@ class EvaluationTests(unittest.TestCase):
         reviews.append(reviews[0])
         with self.assertRaises(ValueError):
             evaluate.evaluate(examples, reviews)
+
+    def test_mixed_models_thresholds_and_protocols_are_rejected(self):
+        for field, value in (("reviewer", "jev:other"), ("threshold", "0.95"), ("protocol", "other")):
+            examples, reviews = self.inputs()
+            record = reviews[1]["review"]
+            if field == "reviewer":
+                record[field] = value
+            else:
+                record["provenance"][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                evaluate.evaluate(examples, reviews)
 
     def test_tampered_threshold_result_is_rejected(self):
         examples, reviews = self.inputs()

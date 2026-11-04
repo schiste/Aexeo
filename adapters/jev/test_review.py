@@ -21,6 +21,7 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(result["reliability"], "uncertain")
         self.assertEqual(result["source_text"], "source")
         self.assertEqual(result["provenance"]["threshold"], "0.95")
+        self.assertEqual(result["provenance"]["protocol"], "aexeo-jev-support-v1")
         result = review.review_from_response("claim", "source", "reliable", 0.8, self.response("contradicted"))
         self.assertEqual(result["support"], "contradicted")
 

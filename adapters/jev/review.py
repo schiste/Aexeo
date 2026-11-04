@@ -46,7 +46,7 @@ def review_from_response(claim, source, reliability, threshold, response):
     return {"claim": claim, "source_text": source,
             "support": choice if probability >= threshold else "uncertain",
             "reliability": reliability, "reviewer": "jev:" + actual_model,
-            "provenance": {"model_choice": choice, "model_probability": str(probability), "threshold": str(threshold)}}
+            "provenance": {"protocol": "aexeo-jev-support-v1", "model_choice": choice, "model_probability": str(probability), "threshold": str(threshold)}}
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

@@ -20,6 +20,8 @@ def evaluate(examples, reviews):
     matched = set()
     correct = accepted = accepted_correct = approvals = false_approvals = 0
     brier = 0.0
+    evaluation_model = None
+    evaluation_threshold = None
     for example in examples:
         key = example["id"]
         if key in matched or key not in by_id or example["label"] not in LABELS:
@@ -28,7 +30,12 @@ def evaluate(examples, reviews):
         review = by_id[key]["review"]
         if review["claim"] != example["claim"] or review["source_text"] != example["source_text"]:
             raise ValueError("review does not match labeled example")
+        reviewer = review["reviewer"]
+        if not isinstance(reviewer, str) or not reviewer.startswith("jev:") or not reviewer[4:].strip():
+            raise ValueError("invalid Jev reviewer")
         provenance = review["provenance"]
+        if provenance["protocol"] != "aexeo-jev-support-v1":
+            raise ValueError("unsupported review protocol")
         choice = provenance["model_choice"]
         if not isinstance(provenance["model_probability"], str) or not isinstance(provenance["threshold"], str):
             raise ValueError("probability and threshold must be strings")
@@ -36,6 +43,10 @@ def evaluate(examples, reviews):
         threshold = float(provenance["threshold"])
         if choice not in LABELS or not math.isfinite(probability) or not 0 <= probability <= 1 or not math.isfinite(threshold) or not 0 <= threshold <= 1:
             raise ValueError("invalid model decision or probability")
+        if evaluation_model is None:
+            evaluation_model, evaluation_threshold = reviewer, threshold
+        elif reviewer != evaluation_model or threshold != evaluation_threshold:
+            raise ValueError("reviews must use one model version and threshold")
         expected_output = choice if probability >= threshold else "uncertain"
         if review["support"] != expected_output:
             raise ValueError("review does not match model decision and threshold")
@@ -51,7 +62,8 @@ def evaluate(examples, reviews):
     if len(matched) != len(by_id):
         raise ValueError("unmatched reviews")
     count = len(examples)
-    return {"examples": count, "raw_choice_accuracy": correct / count,
+    return {"examples": count, "reviewer": evaluation_model, "threshold": evaluation_threshold,
+            "protocol": "aexeo-jev-support-v1", "raw_choice_accuracy": correct / count,
             "confidence_brier": brier / count, "decisive_coverage": accepted / count,
             "decisive_accuracy": accepted_correct / accepted if accepted else None,
             "support_approvals": approvals, "false_approvals": false_approvals,
