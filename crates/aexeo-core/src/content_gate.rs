@@ -218,6 +218,8 @@ struct EvidenceReviewRecord {
     support: SupportVerdict,
     reliability: ReliabilityVerdict,
     reviewer: String,
+    #[serde(default, rename = "provenance")]
+    _provenance: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -867,7 +869,7 @@ group = "html"
     fn external_review_is_bound_to_claim_and_source_and_preserves_uncertainty() {
         let preset = ContentPreset::from_toml("version=1\nname='review'\n[[gates]]\nid='review'\nkind='evidence_review'\nsource='study'\nreview='assessment'\nclaim='The count is 14.'\n").unwrap();
         let check = |support: &str, reliability: &str, snapshot: &str, reviewed_source: &str| {
-            let review = serde_json::json!({"claim": "The count is 14.", "source_text": reviewed_source, "support": support, "reliability": reliability, "reviewer": "reviewer-1"});
+            let review = serde_json::json!({"claim": "The count is 14.", "source_text": reviewed_source, "support": support, "reliability": reliability, "reviewer": "reviewer-1", "provenance": {"threshold":"0.9"}});
             let input = ContentInput {
                 text: Some("The count is 14.".into()),
                 evidence_sources: Some(BTreeMap::from([

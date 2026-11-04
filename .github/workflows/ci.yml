@@ -99,6 +99,15 @@ jobs:
       - name: Audit crawl worker published dependency surface
         run: npm audit --omit=dev --audit-level=high --prefix packages/aexeo-crawl-worker
 
+  jev-adapter:
+    name: Jev adapter (offline tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test optional adapter without network
+        run: python3 -m unittest discover -s adapters/jev -v
+
   validate:
     name: validate (rust gate, install smoke, perf budget)
     runs-on: ubuntu-latest

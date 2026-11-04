@@ -23,12 +23,13 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 - [x] Exposer l’évaluation de presets sur un crawl dans la CLI, avec statut partiel, diagnostics et tests de bout en bout.
 - [x] Ajouter des extensions fournies par un hôte Rust et tester leur présence ou indisponibilité ; les adapters CLI et WASM signalent les extensions non chargées comme non vérifiées.
 - [x] Ajouter en dernier un contrôle littéral de passages et comparaison de faits structurés dans les sources fournies, avec indisponibilité explicite.
-- [ ] Concevoir et livrer une véritable évaluation du support d’une affirmation par une source et de la fiabilité de celle-ci : la présence littérale ne constitue pas une vérification factuelle.
+- [ ] Valider une évaluation sémantique du support sur un jeu d’exemples indépendant et établir un processus fiable pour l’appréciation des sources : l’adaptateur Jev optionnel et ses tests simulés ne suffisent pas à établir sa précision.
 - [ ] Relancer l’ensemble des gates locales et distantes sur le commit final ; livrer et suivre la revue.
 
 ## Progression détaillée
 
 - Validation récente : `CARGO_NET_OFFLINE=true sh scripts/check-repo.sh` réussi sur `4004aee` ; builds WASM plugin et worker réussis ; vérifications Node/WASM des faits structurés et des revues périmées réussies. La CI du commit reste à confirmer.
+- Phase 6 : adaptateur Jev optionnel avec seuil explicite, fiabilité fournie séparément et tests simulés hors ligne ; aucun appel réel ni mesure de calibration effectués.
 - Phase 6 : extensions Rust explicites et gates de présence littérale, de comparaison de valeurs JSON et d’intégration de jugements externes liés aux snapshots fournis ; aucun jugement sémantique, contrôle de fiabilité ou vérification factuelle générale n’est encore implémenté.
 - Phase 2 : adapter Rust pour appliquer un preset à `RuntimeAudit` en conservant statut, raison de troncature et diagnostics de crawl ; la sortie CLI historique du crawl reste inchangée ; `content --crawl-url` expose aussi ce parcours.
 - Phase 2 : premier moteur de contenu indépendant des sites ; trois types de gate et résultats `passed` / `failed` / `not_checked`. Le preset `seo-website` appelle l’audit site existant comme une gate globale ; les groupes natifs sont aussi disponibles individuellement avec `site_group` ; le preset complet reste une gate globale pour conserver les diagnostics de déploiement.
