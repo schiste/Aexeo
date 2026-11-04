@@ -100,6 +100,17 @@ pub enum ContentGate {
         #[serde(default = "default_blocking")]
         blocking: bool,
     },
+    /// Consume a caller-supplied review bound to the exact claim and snapshot.
+    EvidenceReview {
+        id: String,
+        source: String,
+        review: String,
+        claim: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+    },
     /// A host-provided implementation, selected by a portable identifier.
     Custom {
         id: String,
@@ -148,7 +159,8 @@ impl ContentGate {
             | Self::FinalNewline { severity, .. }
             | Self::Custom { severity, .. }
             | Self::EvidenceAnchors { severity, .. }
-            | Self::StructuredFact { severity, .. } => *severity,
+            | Self::StructuredFact { severity, .. }
+            | Self::EvidenceReview { severity, .. } => *severity,
             Self::SiteAudit { .. } | Self::SiteGroup { .. } => Severity::Warning,
         }
     }
@@ -162,6 +174,7 @@ impl ContentGate {
             | Self::Custom { blocking, .. }
             | Self::EvidenceAnchors { blocking, .. }
             | Self::StructuredFact { blocking, .. }
+            | Self::EvidenceReview { blocking, .. }
             | Self::SiteAudit { blocking, .. }
             | Self::SiteGroup { blocking, .. } => *blocking,
         }
@@ -173,7 +186,9 @@ impl ContentGate {
             Self::RequiredHeadings { .. } => "headings",
             Self::FinalNewline { .. } => "source_text",
             Self::Custom { .. } => "extension",
-            Self::EvidenceAnchors { .. } | Self::StructuredFact { .. } => "text_and_evidence",
+            Self::EvidenceAnchors { .. }
+            | Self::StructuredFact { .. }
+            | Self::EvidenceReview { .. } => "text_and_evidence",
             Self::SiteAudit { .. } | Self::SiteGroup { .. } => "site",
         }
     }
@@ -187,10 +202,38 @@ impl ContentGate {
             | Self::Custom { id, .. }
             | Self::EvidenceAnchors { id, .. }
             | Self::StructuredFact { id, .. }
+            | Self::EvidenceReview { id, .. }
             | Self::SiteAudit { id, .. }
             | Self::SiteGroup { id, .. } => id,
         }
     }
+}
+
+/// An assessment produced by an external reviewer; it is not verified by Aexeo.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EvidenceReviewRecord {
+    claim: String,
+    source_text: String,
+    support: SupportVerdict,
+    reliability: ReliabilityVerdict,
+    reviewer: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SupportVerdict {
+    Supported,
+    Contradicted,
+    Uncertain,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ReliabilityVerdict {
+    Reliable,
+    Unreliable,
+    Uncertain,
 }
 
 /// A diagnostic returned by a trusted host extension. Positions refer to the
@@ -313,6 +356,21 @@ impl ContentPreset {
                 {
                     bail!(
                         "structured fact needs a source, claim and valid JSON pointer for {}",
+                        gate.id()
+                    )
+                }
+                ContentGate::EvidenceReview {
+                    source,
+                    review,
+                    claim,
+                    ..
+                } if source.trim().is_empty()
+                    || review.trim().is_empty()
+                    || claim.trim().is_empty()
+                    || source == review =>
+                {
+                    bail!(
+                        "evidence review requires distinct source and review names and a claim for {}",
                         gate.id()
                     )
                 }
@@ -502,6 +560,43 @@ impl ContentPreset {
                         }
                     }
                 }
+                ContentGate::EvidenceReview {
+                    source,
+                    review,
+                    claim,
+                    ..
+                } => match (&input.text, &input.evidence_sources) {
+                    (Some(text), Some(sources)) => match (sources.get(source), sources.get(review))
+                    {
+                        (Some(snapshot), Some(record)) => {
+                            match serde_json::from_str::<EvidenceReviewRecord>(record) {
+                                Ok(record)
+                                    if record.claim == *claim
+                                        && record.source_text == *snapshot
+                                        && !record.reviewer.trim().is_empty() =>
+                                {
+                                    if !text.contains(claim) {
+                                        emit("Claim anchor is absent from content".into(), 1, 1);
+                                    }
+                                    match (&record.support, &record.reliability) {
+                                        (SupportVerdict::Contradicted, _) => emit("External review reports that the source contradicts the claim".into(), 1, 1),
+                                        (_, ReliabilityVerdict::Unreliable) => emit("External review reports that the source is unreliable".into(), 1, 1),
+                                        (SupportVerdict::Supported, ReliabilityVerdict::Reliable) => {},
+                                        _ => reason = Some("external review is uncertain".into()),
+                                    }
+                                }
+                                Ok(_) => {
+                                    reason = Some(
+                                        "external review is stale or missing a reviewer".into(),
+                                    )
+                                }
+                                Err(_) => reason = Some("external review is invalid".into()),
+                            }
+                        }
+                        _ => reason = Some("evidence source or review is unavailable".into()),
+                    },
+                    _ => reason = Some("content text or evidence sources are unavailable".into()),
+                },
                 ContentGate::Custom {
                     extension,
                     parameters,
@@ -766,6 +861,46 @@ group = "html"
                     .replace("group = \"html\"", "group = \"typo\"")
             )
             .is_err()
+        );
+    }
+    #[test]
+    fn external_review_is_bound_to_claim_and_source_and_preserves_uncertainty() {
+        let preset = ContentPreset::from_toml("version=1\nname='review'\n[[gates]]\nid='review'\nkind='evidence_review'\nsource='study'\nreview='assessment'\nclaim='The count is 14.'\n").unwrap();
+        let check = |support: &str, reliability: &str, snapshot: &str, reviewed_source: &str| {
+            let review = serde_json::json!({"claim": "The count is 14.", "source_text": reviewed_source, "support": support, "reliability": reliability, "reviewer": "reviewer-1"});
+            let input = ContentInput {
+                text: Some("The count is 14.".into()),
+                evidence_sources: Some(BTreeMap::from([
+                    ("study".into(), snapshot.into()),
+                    ("assessment".into(), review.to_string()),
+                ])),
+                ..Default::default()
+            };
+            preset.evaluate(&input).unwrap().gates[0].status
+        };
+        assert_eq!(
+            check("supported", "reliable", "source", "source"),
+            GateStatus::Passed
+        );
+        assert_eq!(
+            check("contradicted", "reliable", "source", "source"),
+            GateStatus::Failed
+        );
+        assert_eq!(
+            check("supported", "unreliable", "source", "source"),
+            GateStatus::Failed
+        );
+        assert_eq!(
+            check("uncertain", "reliable", "source", "source"),
+            GateStatus::NotChecked
+        );
+        assert_eq!(
+            check("supported", "uncertain", "source", "source"),
+            GateStatus::NotChecked
+        );
+        assert_eq!(
+            check("supported", "reliable", "updated", "source"),
+            GateStatus::NotChecked
         );
     }
     #[test]

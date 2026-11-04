@@ -146,3 +146,24 @@ expected = 14
 ```
 
 Supply the source using the same evidence snapshot interfaces described above. A missing source, invalid JSON or missing pointer is `not_checked`; a different value or absent claim is a failure. Comparison is typed JSON equality, not numerical inference. The preset author is responsible for mapping the claim to the correct field and value; the engine does not understand the claim, assess source reliability, or verify reality. Version and review both the preset and source.
+
+## External source reviews
+
+`evidence_review` consumes a caller-supplied semantic and reliability assessment. The assessment is a separate JSON snapshot, bound to the exact claim and source text. This allows an editor or an external decision model to contribute a verdict without embedding a provider in the portable engine:
+
+```toml
+[[gates]]
+id = "study.review"
+kind = "evidence_review"
+source = "study"
+review = "study-review"
+claim = "The count is 14."
+```
+
+```json
+{"claim":"The count is 14.","source_text":"Study observed 14 participants.","support":"supported","reliability":"reliable","reviewer":"editor-123"}
+```
+
+Supply both named snapshots, for example `--evidence-source study=source.txt --evidence-source study-review=review.json`. `support` accepts `supported`, `contradicted` or `uncertain`; `reliability` accepts `reliable`, `unreliable` or `uncertain`. Only supported plus reliable passes. Contradiction or unreliable source fails; uncertainty, missing inputs, malformed records and reviews of a different claim or source yield `not_checked`. The reviewer identifier must be nonempty. A changed source requires a new review.
+
+The review itself is **trusted input**: Aexeo does not authenticate the reviewer, run an NLI model, calibrate its confidence, or independently verify the stated judgments. Applications must choose and evaluate their reviewer, protect the assessment's provenance, and decide when a human should review it. Exact text binding prevents accidental reuse against different input, but does not prevent a forged review.
