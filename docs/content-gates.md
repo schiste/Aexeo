@@ -61,4 +61,12 @@ Metadata must be a JSON object with string values. Without `--metadata`, metadat
 
 Each gate may set `severity` to `error`, `warning` (default) or `note`, and `blocking` to true (default) or false. Status always reports the gate result; the CLI exits 1 for a failed blocking gate, 2 if a blocking gate was not checked (even if another blocking gate failed), and 0 otherwise. Non-blocking gates still appear in the report, including when they could not be checked. Invalid configuration or I/O errors use the CLI's internal-error path. No content is automatically changed.
 
-The EmDash package exposes `evaluateContent` from `@aeptus/aexeo-emdash/content`; the Rust bridge and WASM API accept the same named source map and preset. The document adapter has no site capability, so site gates are `not_checked`. Enabling those gates in the existing save workflow requires a separate integration.
+The EmDash package exposes `evaluateContent` from `@aeptus/aexeo-emdash/content`; the Rust bridge and WASM API accept the same named source map and preset. The document adapter has no site capability, so site gates are `not_checked`. Configured-mode plugins can opt into a document preset for both save hooks and refreshes:
+
+```ts
+aexeoPlugin({
+  contentPreset: { name: "glossary" },
+})
+```
+
+For custom presets, add `sources: { custom: "...TOML..." }` and select `name: "custom"`. The preset applies to every evaluated document; per-collection selection is not yet supported. The existing SEO findings remain enabled. A gate the document adapter cannot check causes an explicit incomplete-evaluation error rather than being silently omitted. The sandboxed plugin's sidecar workflow does not yet support this option.

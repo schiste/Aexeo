@@ -38,6 +38,9 @@ import { compileSuppressions } from "./suppressions.js";
 import type { Suppression, SuppressionFilter } from "./suppressions.js";
 import { PACKAGE_VERSION } from "./version.js";
 import { evaluateDocuments, scoreIntelligence } from "./wasm-init.js";
+import { evaluateContent } from "./content.js";
+import { withContentPreset } from "./content-evaluator.js";
+import type { ContentPresetOptions } from "./content-evaluator.js";
 import type { EmdashContentItem } from "./adapter.js";
 import type { Finding, SiteIntelligenceScore } from "./types.js";
 
@@ -158,6 +161,8 @@ const inProcessEvaluator: EvaluatorFn = async (documents) => {
 // runtime module the host imports separately.
 
 export interface ConfiguredPluginOptions {
+  /** Optional portable preset evaluated in addition to the existing site checks. */
+  contentPreset?: ContentPresetOptions;
   /**
    * Full override of the swept collections. See `aexeoPlugin` in
    * src/index.ts for the full precedence story.
@@ -211,6 +216,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
   // throws on empty rules ({} with neither routePattern nor ruleIds);
   // that error surfaces clearly in the host's startup logs.
   const suppressionFilter = compileSuppressions(options.suppressions);
+  const evaluator = withContentPreset(inProcessEvaluator, options.contentPreset, evaluateContent);
 
   // Capability enforcement for configured plugins is informational;
   // emdash's host plugins (formsPlugin, etc.) declare what they need
@@ -228,7 +234,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
         handleAfterSaveConfigured(
           event,
           ctx,
-          inProcessEvaluator,
+          evaluator,
           suppressionFilter,
         ),
     } as never,
@@ -238,7 +244,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
       // every request handles the same set without re-reading options.
       admin: {
         handler: (ctx: RouteContext) =>
-          handleAdminRoute(ctx, collections, suppressionFilter),
+          handleAdminRoute(ctx, collections, suppressionFilter, evaluator),
       },
       // JSON data endpoint for the React adminEntry. Two routes:
       //   POST /_emdash/api/plugins/aexeo-emdash/data    — read current findings
@@ -251,7 +257,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
         handler: async (ctx: SandboxCtx) =>
           (await handleDataRoute(ctx, {
             collections,
-            evaluator: inProcessEvaluator,
+            evaluator,
             refresh: false,
             suppressionFilter,
           })).payload,
@@ -260,7 +266,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
         handler: (ctx: SandboxCtx) =>
           handleDataRoute(ctx, {
             collections,
-            evaluator: inProcessEvaluator,
+            evaluator,
             refresh: true,
             suppressionFilter,
           }),
@@ -351,6 +357,7 @@ async function handleAdminRoute(
   ctx: RouteContext,
   collections: readonly string[],
   suppressionFilter: SuppressionFilter,
+  evaluator: EvaluatorFn,
 ): Promise<BlockResponse> {
   const body = normalizeInteraction(ctx.input);
   if (body.type === "page_load") {
@@ -367,7 +374,7 @@ async function handleAdminRoute(
       return handleRefresh({
         ctx,
         collections,
-        evaluator: inProcessEvaluator,
+        evaluator,
         suppressionFilter,
         tuning: adminViewTuning,
       });
