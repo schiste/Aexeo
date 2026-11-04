@@ -10,10 +10,12 @@ python3 adapters/jev/review.py \
   --source study.txt \
   --model jev-1.13.0 \
   --minimum-probability 0.9 \
-  --source-reliability reliable > study-review.json
+  --source-reliability reliable \
+  --source-reviewer editor-123 \
+  --source-review-reason "Reviewed the publication and study methods" > study-review.json
 ```
 
-`--source-reliability` records **your own independent assessment**; it defaults to `uncertain`. Do not mark a source reliable based on this adapter's output: the model is only asked about support. An uncertain reliability prevents the Aexeo gate from passing. The output records the model version reported by the API, selected probability, threshold and the exact claim and source text; keep the source and assessment together and protect their provenance. The helper rejects HTTP redirects to avoid forwarding the API key to another host and has a 30-second timeout. It does not retry or authenticate the review record.
+`--source-reliability` records **your own independent assessment**; it defaults to `uncertain`. Choosing `reliable` or `unreliable` requires `--source-reviewer` and `--source-review-reason`, which are saved in the review provenance and are not sent to the model. Do not mark a source reliable based on this adapter's output: the model is only asked about support. An uncertain reliability prevents the Aexeo gate from passing. The output records the model version reported by the API, selected probability, threshold and the exact claim and source text; keep the source and assessment together and protect their provenance. Neither the reviewer identifier nor the stated reason is authenticated; your review process must validate them. The helper rejects HTTP redirects to avoid forwarding the API key to another host and has a 30-second timeout. It does not retry or authenticate the review record.
 
 Use the output with a preset as described in [content gates](../../docs/content-gates.md):
 

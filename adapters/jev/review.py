@@ -72,11 +72,19 @@ def main():
                         help="Threshold selected and calibrated for your evaluation data")
     parser.add_argument("--source-reliability", choices=("reliable", "unreliable", "uncertain"), default="uncertain",
                         help="Your independent assessment; defaults to uncertain")
+    parser.add_argument("--source-reviewer", help="Identifier of the independent source reviewer")
+    parser.add_argument("--source-review-reason", help="Basis for the independent source assessment")
     args = parser.parse_args()
     if not args.claim.strip() or not args.model.strip():
         parser.error("claim and model must be nonempty")
     if not math.isfinite(args.minimum_probability) or not 0 <= args.minimum_probability <= 1:
         parser.error("minimum probability must be between 0 and 1")
+    if args.source_reliability != "uncertain" and not all(
+        value and value.strip() for value in (args.source_reviewer, args.source_review_reason)
+    ):
+        parser.error("a source reviewer and reason are required for a reliable or unreliable assessment")
+    if args.source_reliability == "uncertain" and (args.source_reviewer or args.source_review_reason):
+        parser.error("source reviewer and reason require a reliable or unreliable assessment")
     key = os.environ.get("TYPESAFE_API_KEY")
     if not key:
         parser.error("TYPESAFE_API_KEY is required")
@@ -85,6 +93,9 @@ def main():
             source = source_file.read()
         review = fetch_review(args.claim, source, args.model, args.source_reliability,
                               args.minimum_probability, key)
+        if args.source_reliability != "uncertain":
+            review["provenance"]["source_reliability_reviewer"] = args.source_reviewer
+            review["provenance"]["source_reliability_reason"] = args.source_review_reason
         print(json.dumps(review, ensure_ascii=False))
     except (OSError, KeyError, TypeError, ValueError, urllib.error.URLError) as error:
         # Avoid printing provider bodies or request headers, which may contain sensitive data.

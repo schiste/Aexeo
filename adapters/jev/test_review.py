@@ -30,6 +30,34 @@ class ReviewTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 review.review_from_response("c", "s", "uncertain", 0.8, self.response(probability=probability))
 
+    def test_explicit_source_assessment_requires_provenance_before_network(self):
+        args = ["review.py", "--claim", "claim", "--source", "source.txt", "--model", "jev-pinned",
+                "--minimum-probability", "0.9", "--source-reliability", "reliable"]
+        with patch("sys.argv", args), patch("urllib.request.build_opener") as opener, \
+                contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as exit_status:
+            review.main()
+        self.assertEqual(exit_status.exception.code, 2)
+        opener.assert_not_called()
+
+    def test_source_assessment_provenance_stays_out_of_request(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "source.txt"
+            source.write_text("source passage", encoding="utf-8")
+            args = ["review.py", "--claim", "claim", "--source", str(source), "--model", "jev-pinned",
+                    "--minimum-probability", "0.8", "--source-reliability", "reliable",
+                    "--source-reviewer", "editor-123", "--source-review-reason", "reviewed methods"]
+            response = io.BytesIO(json.dumps(self.response()).encode())
+            with patch.dict(os.environ, {"TYPESAFE_API_KEY": "test-key"}), patch("sys.argv", args), \
+                    patch("urllib.request.build_opener") as opener, contextlib.redirect_stdout(io.StringIO()) as stdout:
+                opener.return_value.open.return_value = response
+                self.assertEqual(review.main(), 0)
+            record = json.loads(stdout.getvalue())
+            self.assertEqual(record["provenance"]["source_reliability_reviewer"], "editor-123")
+            self.assertEqual(record["provenance"]["source_reliability_reason"], "reviewed methods")
+            payload = json.loads(opener.return_value.open.call_args.args[0].data)
+            self.assertNotIn("editor-123", json.dumps(payload))
+            self.assertNotIn("reviewed methods", json.dumps(payload))
+
     def test_cli_request_and_output_without_network(self):
         class FakeResponse(io.BytesIO):
             pass
