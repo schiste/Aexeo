@@ -16,7 +16,7 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 - [x] Phase 4 — implémenter les gates de contenu déterministes et l'adapter Markdown/stdin ; vérifier un même preset et une même gate sur Markdown et EmDash.
 - [x] Phase 5 — livrer le workflow agent : skill, découverte des presets, sorties structurées, correctifs sûrs et benchmarks de latence.
 - [ ] Phase 6 — étendre selon les besoins ; envisager YAML, extensions personnalisées et évaluations sémantiques ; réserver la vérification de sources/faits pour la fin.
-- [ ] Exécuter les validations pertinentes, contrôles du dépôt et vérifications natives/WASM ; documenter les changements ; livrer par le workflow broker et suivre la livraison autorisée.
+- [ ] Livrer par le workflow broker et suivre la revue et les contrôles CI ; les tests locaux Rust et EmDash, le build WASM et les typechecks sont validés.
 
 ## Progression détaillée
 
@@ -29,6 +29,8 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 - Phase 1 : dispatch statique regroupé dans un registre unique avec vérification des groupes et conservation de leur ordre et des libellés de timing.
 - Phase 1 : la PR #11 modifie aussi le dispatch pour ajouter les règles image ; resynchroniser et réconcilier après son intégration.
 - Phase 1 : inventaire des contrats CLI, crawl, WASM et EmDash et identification des coutures de migration à poursuivre.
+
+- Validation : `cargo test --locked --offline --workspace`, build du plugin, typechecks plugin et worker et suite EmDash complète (83 tests) réussis. Le broker a vérifié les conflits sur `origin/main` mais aucune gate Aethyme n’est configurée sur cette base ; les contrôles CI et la revue restent nécessaires.
 
 - Phase 5 : benchmark release local de 100 itérations, document synthétique 29 011 octets : évaluation p50 25 µs / p95 191 µs ; parsing Markdown + évaluation p50 9 651 µs / p95 67 894 µs (machine chargée ; sans démarrage CLI).
 
