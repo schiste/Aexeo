@@ -11,6 +11,11 @@
 // to ../../aexeo-emdash/wasm/aexeo_emdash_bridge_bg.d.ts; copy that
 // file here whenever the bridge grows or drops an export.
 export const __wbg_set_wasm: (wasm: WebAssembly.Exports) => void;
+export const evaluateContent: (
+  document_json: string,
+  preset_name: string,
+  sources_json?: string | null,
+) => string;
 export const evaluateDocuments: (
   documents_json: string,
   config_json?: string | null,

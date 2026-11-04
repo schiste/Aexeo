@@ -22,7 +22,10 @@ export function withContentPreset(
     try {
       for (const [index, document] of documents.entries()) {
         const collection = context?.collections[index];
-        const name = (collection === undefined ? undefined : preset.byCollection?.[collection]) ?? preset.name;
+        const selected = collection !== undefined && preset.byCollection !== undefined && Object.hasOwn(preset.byCollection, collection)
+          ? preset.byCollection[collection] : undefined;
+        const name = selected ?? preset.name;
+        if (!name) throw new Error(`empty preset name for collection ${collection}`);
         const report = await evaluate(document, name, preset.sources);
         const incomplete = report.gates.filter((gate) => gate.status === "not_checked");
         if (incomplete.length) return {

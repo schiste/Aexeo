@@ -53,10 +53,12 @@ export async function evaluateViaSidecar(
   http: SidecarHttp,
   config: SidecarConfig,
   documents: readonly EmdashDocument[],
+  collections?: readonly string[],
 ): Promise<SidecarResult> {
-  const body: { documents: readonly EmdashDocument[]; configJson?: string } = {
+  const body: { documents: readonly EmdashDocument[]; configJson?: string; collections?: readonly string[] } = {
     documents,
   };
+  if (collections !== undefined) body.collections = collections;
   if (config.configJson !== undefined) {
     body.configJson = config.configJson;
   }

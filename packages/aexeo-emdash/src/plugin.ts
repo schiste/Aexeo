@@ -316,11 +316,12 @@ export async function handleAfterSave(
     );
     return;
   }
-  await handleAfterSaveConfigured(event, ctx, (documents) =>
+  await handleAfterSaveConfigured(event, ctx, (documents, context) =>
     evaluateViaSidecar(
       ctx.http,
       { url: runtime.url, authToken: runtime.token },
       documents,
+      context?.collections,
     ),
   );
 }
