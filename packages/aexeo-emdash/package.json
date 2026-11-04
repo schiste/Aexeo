@@ -31,6 +31,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./content": {
+      "types": "./dist/content.d.ts",
+      "import": "./dist/content.js",
+      "default": "./dist/content.js"
+    },
     "./configured": {
       "types": "./dist/configured.d.ts",
       "import": "./dist/configured.js",

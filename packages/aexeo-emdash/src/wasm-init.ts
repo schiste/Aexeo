@@ -139,3 +139,13 @@ export async function validateFactsManifest(
   await ensureInitialized();
   return glue.validateFactsManifest(manifestJson, documentsJson);
 }
+
+/** Run a portable content preset on an EmDash document. */
+export async function evaluateContent(
+  documentJson: string,
+  presetName: string,
+  sourcesJson?: string | null,
+): Promise<string> {
+  await ensureInitialized();
+  return glue.evaluateContent(documentJson, presetName, sourcesJson);
+}

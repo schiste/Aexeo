@@ -224,6 +224,19 @@ if (configuredResult.errors.length > 0) {
   process.exit(1);
 }
 
+// Portable content API; uses the same lazy WASM loader as configured mode.
+await build({
+  entryPoints: [resolve(root, "src/content.ts")],
+  outfile: resolve(root, "dist/content.js"),
+  bundle: true,
+  format: "esm",
+  platform: "neutral",
+  target: "es2022",
+  external: ["node:*", "*.wasm"],
+  legalComments: "none",
+  logLevel: "info",
+});
+
 // 3. React adminEntry bundle. Imported by emdash's admin-registry
 //    codegen at build time and rendered by the consumer's admin SPA.
 //    React, react-dom, and @cloudflare/kumo are peer-installed by
