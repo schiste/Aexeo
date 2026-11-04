@@ -1,5 +1,7 @@
 # Portable content gates
 
+See [architecture and compatibility](content-architecture.md) for adapter boundaries and crawl completeness.
+
 The content evaluator runs locally without a network or model. It can include the existing site audit through a site gate. It does not assess source support or factual correctness. A report records each gate as `passed`, `failed`, or `not_checked`; the last means an adapter could not supply a required capability.
 
 ```sh
@@ -11,6 +13,8 @@ aexeo-cli content --preset seo-website --site ./dist --no-text --format json
 ```
 
 By default the CLI reads the supplied UTF-8 bytes as raw text, including Markdown syntax. With `--input-format markdown`, it parses CommonMark with GFM extensions and projects text and headings while excluding front matter, code and HTML; link labels and image alt text are included. Word counts split on whitespace, and forbidden terms are exact, case-sensitive substrings. Locations in raw-text mode refer to the supplied text. Markdown and EmDash findings refer to their extracted plain-text projection, not source line positions.
+
+Rust callers can evaluate a preset against a completed or partial `RuntimeAudit` with `evaluate_preset`. Its report retains the crawl status, truncation reason crawl-specific findings and the original full audit findings separately; inspect the crawl status before treating a site review as complete. The existing `crawl` CLI output is unchanged.
 
 The built-in `seo-website` preset wraps the existing static SEO/GEO audit as one site-scoped gate and uses its existing configuration and policy. Pass `--site-config` to select a site config. It preserves the audit findings and their severities. The gate fails if the audit produces any findings, including warnings. A text-only adapter reports it as `not_checked`. For custom presets, `site_group` composes individual native website rule groups, for example:
 

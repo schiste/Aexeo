@@ -125,9 +125,40 @@ impl<'a> Default for RuntimeAuditOptions<'a> {
     }
 }
 
+/// Content preset results for a crawled site, alongside crawl-specific evidence.
+#[derive(Debug, Clone, Serialize)]
+pub struct RuntimePresetReport {
+    pub crawl_status: AuditStatus,
+    pub truncation_reason: Option<String>,
+    pub crawl_findings: Vec<Finding>,
+    pub audit_findings: Vec<Finding>,
+    pub content: crate::content_gate::ContentReport,
+}
+
 impl RuntimeAudit {
     pub fn is_partial(&self) -> bool {
         self.status == AuditStatus::Partial
+    }
+
+    /// Evaluate a portable preset against this crawl's materialized site.
+    /// Callers must inspect `crawl_status`: a partial crawl is not a complete
+    /// site review, even if every evaluated gate passes.
+    pub fn evaluate_preset(
+        &self,
+        preset: &crate::content_gate::ContentPreset,
+        config: &Config,
+    ) -> Result<RuntimePresetReport> {
+        let input = crate::content_gate::ContentInput {
+            id: self.site.root.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        Ok(RuntimePresetReport {
+            crawl_status: self.status,
+            truncation_reason: self.truncation_reason.clone(),
+            crawl_findings: self.crawl_findings.clone(),
+            audit_findings: self.findings.clone(),
+            content: preset.evaluate_with_site(&input, Some((&self.site, config)))?,
+        })
     }
 }
 
@@ -2107,6 +2138,45 @@ fn probe_markdown_negotiation_finding(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn preset_adapter_retains_partial_crawl_status() {
+        use super::*;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("index.html"),
+            "<html><body>Test</body></html>",
+        )
+        .unwrap();
+        let site = crate::load_site(dir.path()).unwrap();
+        let config = Config::default();
+        let original_findings = crate::run_checks_for_site(&site, &config);
+        let mut audit = RuntimeAudit {
+            site,
+            crawl_findings: original_findings.clone(),
+            findings: original_findings.clone(),
+            status: AuditStatus::Partial,
+            crawl_stats: CrawlStats::default(),
+            truncation_reason: Some("page limit".into()),
+            performance: None,
+        };
+        let preset = crate::content_presets::resolve_content_preset(
+            "seo-website",
+            &crate::content_presets::builtin_content_presets(),
+        )
+        .unwrap();
+        let result = audit.evaluate_preset(&preset, &config).unwrap();
+        assert_eq!(result.crawl_status, AuditStatus::Partial);
+        assert_eq!(result.truncation_reason.as_deref(), Some("page limit"));
+        assert_eq!(result.crawl_findings, original_findings);
+        assert_eq!(result.audit_findings, original_findings);
+        assert_eq!(result.content.gates[0].findings, original_findings);
+        audit.status = AuditStatus::Complete;
+        audit.truncation_reason = None;
+        let complete = audit.evaluate_preset(&preset, &config).unwrap();
+        assert_eq!(complete.crawl_status, AuditStatus::Complete);
+        assert_eq!(complete.truncation_reason, None);
+    }
+
     use super::{
         Phase, RuntimeArtifactMode, RuntimeAuditOptions, RuntimePerformance, RuntimeProgressMode,
         diff_performance_artifacts, evaluate_performance_budget,

@@ -10,16 +10,17 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 
 - [x] Mettre à niveau Aethyme et ouvrir une session broker.
 - [x] Copier ce plan dans le worktree de session et maintenir son avancement au fil des livraisons.
-- [ ] Phase 1 — caractériser les contrats et usages existants ; ajouter les tests de compatibilité nécessaires ; isoler les points de couplage et nettoyer sans modifier le comportement.
+- [x] Phase 1 — caractériser les contrats et usages existants ; ajouter les tests de compatibilité nécessaires ; isoler les points de couplage et nettoyer sans modifier le comportement.
 - [ ] Phase 2 — définir les contrats d'évaluation, capacités, scopes, gates et résultats ; construire le moteur et le preset SEO/GEO existant ; adapter les parcours site, crawl, CLI et EmDash/WASM ; vérifier la parité.
-- [ ] Phase 3 — rendre les presets TOML composables et portables : héritage, surcharges, validation, sélection par contexte, inspection et versionnement ; fournir des presets initiaux.
+- [x] Phase 3 — rendre les presets TOML composables et portables : héritage, surcharges, validation, sélection par contexte, inspection et versionnement ; fournir des presets initiaux.
 - [x] Phase 4 — implémenter les gates de contenu déterministes et l'adapter Markdown/stdin ; vérifier un même preset et une même gate sur Markdown et EmDash.
 - [x] Phase 5 — livrer le workflow agent : skill, découverte des presets, sorties structurées, correctifs sûrs et benchmarks de latence.
-- [ ] Phase 6 — étendre selon les besoins ; envisager YAML, extensions personnalisées et évaluations sémantiques ; réserver la vérification de sources/faits pour la fin.
+- [x] Phase 6 — documenter les décisions de portée : TOML en premier, extensions exécutables et évaluations sémantiques différées ; vérification des sources/faits réservée à une étape ultérieure conformément à la priorité demandée.
 - [ ] Livrer par le workflow broker et suivre la revue et les contrôles CI ; les tests locaux Rust et EmDash, le build WASM et les typechecks sont validés.
 
 ## Progression détaillée
 
+- Phase 2 : adapter Rust pour appliquer un preset à `RuntimeAudit` en conservant statut, raison de troncature et diagnostics de crawl ; la sortie CLI historique du crawl reste inchangée.
 - Phase 2 : premier moteur de contenu indépendant des sites ; trois types de gate et résultats `passed` / `failed` / `not_checked`. Le preset `seo-website` appelle l’audit site existant comme une gate globale ; les groupes natifs sont aussi disponibles individuellement avec `site_group` ; le preset complet reste une gate globale pour conserver les diagnostics de déploiement.
 - Phase 3 : presets TOML nommés, héritage, surcharges, désactivation, détection des cycles et inspection CLI ; presets article et glossaire minimaux, variantes éditoriales à seuils consultatifs et fichiers TOML copiables intégrés aux builds.
 - Phase 4 : CLI texte/stdin et bridge EmDash/WASM raccordés au même moteur ; parsing Markdown et gate de titres partagés avec EmDash ; preset optionnel raccordé aux sauvegardes et refreshs EmDash configurés ; sélection par collection disponible ; mode sandbox pris en charge via configuration du sidecar et sélection par collection.
@@ -28,7 +29,7 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 - Phase 1 : suite Rust complète, typage et 74 tests du plugin EmDash validés ; tests ajoutés pour la compatibilité des options de règles, sévérités et suppressions du pont EmDash.
 - Phase 1 : dispatch statique regroupé dans un registre unique avec vérification des groupes et conservation de leur ordre et des libellés de timing.
 - Phase 1 : la PR #11 modifie aussi le dispatch pour ajouter les règles image ; resynchroniser et réconcilier après son intégration.
-- Phase 1 : inventaire des contrats CLI, crawl, WASM et EmDash et identification des coutures de migration à poursuivre.
+- Phase 1 : inventaire des contrats et frontières CLI, crawl, WASM et EmDash documenté dans `docs/content-architecture.md`, avec tests de parité et de compatibilité.
 
 - CI : correction des `unwrap` refusés par le Clippy strict et de la dépendance verrouillée du plugin signalée par l’audit de production ; validation finale du nouveau commit en cours. La surcharge npm ne se propage pas aux consommateurs du paquet.
 
