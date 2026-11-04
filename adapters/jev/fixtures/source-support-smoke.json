@@ -1,0 +1,14 @@
+[
+  {"id":"support-count","claim":"Fourteen people joined the study.","source_text":"The study enrolled fourteen participants.","label":"supported"},
+  {"id":"support-date","claim":"The bridge opened in 2005.","source_text":"The bridge opened to traffic in 2005.","label":"supported"},
+  {"id":"support-association","claim":"The survey found an association between exercise and sleep.","source_text":"In this survey, exercise was associated with better sleep.","label":"supported"},
+  {"id":"support-negation","claim":"The proposal was not approved.","source_text":"The council rejected the proposal.","label":"supported"},
+  {"id":"contradict-count","claim":"The survey had 14 participants.","source_text":"The survey had 12 participants.","label":"contradicted"},
+  {"id":"contradict-date","claim":"The bridge opened in 2005.","source_text":"The bridge first opened in 2007, not 2005.","label":"contradicted"},
+  {"id":"contradict-negation","claim":"The council approved the proposal.","source_text":"The council did not approve the proposal.","label":"contradicted"},
+  {"id":"contradict-scope","claim":"Every tested device failed.","source_text":"At least one tested device passed.","label":"contradicted"},
+  {"id":"uncertain-causation","claim":"Exercise caused better sleep.","source_text":"The survey found an association between exercise and sleep, but did not establish causation.","label":"uncertain"},
+  {"id":"uncertain-missing","claim":"The survey had 14 participants.","source_text":"The survey asked participants about their sleep.","label":"uncertain"},
+  {"id":"uncertain-generalization","claim":"All bridges in the region opened in 2005.","source_text":"One bridge in the region opened in 2005.","label":"uncertain"},
+  {"id":"uncertain-unrelated","claim":"The river is 20 kilometres long.","source_text":"The town has a nineteenth-century bridge.","label":"uncertain"}
+]

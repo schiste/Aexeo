@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 import unittest
 
 import evaluate
@@ -14,6 +16,12 @@ class EvaluationTests(unittest.TestCase):
             {"id": "two", "review": {"claim": "claim two", "source_text": "source two", "support": "uncertain", "provenance": {"model_choice": "supported", "model_probability": "0.6", "threshold": "0.8"}}},
         ]
         return examples, reviews
+
+    def test_synthetic_fixture_has_unique_ids_and_all_labels(self):
+        examples = json.loads((Path(__file__).parent / "fixtures/source-support-smoke.json").read_text())
+        self.assertEqual(len({item["id"] for item in examples}), len(examples))
+        self.assertEqual({item["label"] for item in examples}, evaluate.LABELS)
+        self.assertTrue(all(item["claim"] and item["source_text"] for item in examples))
 
     def test_metrics_measure_abstention_and_confidence_error(self):
         report = evaluate.evaluate(*self.inputs())
