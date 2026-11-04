@@ -29,6 +29,8 @@ max = 1200
 id = "style.forbidden_terms"
 kind = "forbidden_terms"
 terms = ["revolutionary", "guaranteed"]
+severity = "warning"
+blocking = false
 
 [[gates]]
 id = "metadata.required"
@@ -46,6 +48,6 @@ Metadata must be a JSON object with string values. Without `--metadata`, metadat
 
 `extends` is a list of named presets. Parents are applied left to right; gates with an existing ID replace the earlier definition in place, and new gates append. `disable = ["gate.id"]` removes inherited gates and rejects unknown IDs. Supply each custom parent with a separate `--preset-source name=path`; built-ins are already available. Cycles, unknown parents, duplicate local IDs, unknown fields, invalid bounds and unsupported versions fail resolution. A preset's `name` is its report label, while its source name is the key used in `extends` and `--preset`.
 
-The CLI exits 0 if every gate passed, 1 if at least one failed, and 2 if at least one was not checked (even if another failed). Invalid configuration or I/O errors use the CLI's internal-error path. No content is automatically changed.
+Each gate may set `severity` to `error`, `warning` (default) or `note`, and `blocking` to true (default) or false. Status always reports the gate result; the CLI exits 1 for a failed blocking gate, 2 if a blocking gate was not checked (even if another blocking gate failed), and 0 otherwise. Non-blocking gates still appear in the report, including when they could not be checked. Invalid configuration or I/O errors use the CLI's internal-error path. No content is automatically changed.
 
 The EmDash Rust bridge and `evaluateContent` WASM export accept the same named source map and preset, while retaining the existing site-audit APIs. Enabling those gates in the EmDash plugin's existing save workflow requires a separate integration.

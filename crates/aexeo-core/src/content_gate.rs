@@ -32,20 +32,65 @@ pub struct ContentPreset {
 pub enum ContentGate {
     WordCount {
         id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
         min: Option<usize>,
         max: Option<usize>,
     },
     ForbiddenTerms {
         id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
         terms: Vec<String>,
     },
     RequiredMetadata {
         id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
         fields: Vec<String>,
     },
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    Error,
+    #[default]
+    Warning,
+    Note,
+}
+
+fn default_blocking() -> bool {
+    true
+}
+
 impl ContentGate {
+    pub fn severity(&self) -> Severity {
+        match self {
+            Self::WordCount { severity, .. }
+            | Self::ForbiddenTerms { severity, .. }
+            | Self::RequiredMetadata { severity, .. } => *severity,
+        }
+    }
+    pub fn blocking(&self) -> bool {
+        match self {
+            Self::WordCount { blocking, .. }
+            | Self::ForbiddenTerms { blocking, .. }
+            | Self::RequiredMetadata { blocking, .. } => *blocking,
+        }
+    }
+    pub fn required_capability(&self) -> &'static str {
+        match self {
+            Self::WordCount { .. } | Self::ForbiddenTerms { .. } => "text",
+            Self::RequiredMetadata { .. } => "metadata",
+        }
+    }
     pub fn id(&self) -> &str {
         match self {
             Self::WordCount { id, .. }
@@ -67,6 +112,9 @@ pub enum GateStatus {
 pub struct ContentGateResult {
     pub gate_id: String,
     pub status: GateStatus,
+    pub blocking: bool,
+    pub scope: String,
+    pub required_capability: String,
     pub findings: Vec<aexeo_contracts::Finding>,
     pub reason: Option<String>,
 }
@@ -133,7 +181,12 @@ impl ContentPreset {
                     path: input.id.clone(),
                     line,
                     column,
-                    severity: "warning".into(),
+                    severity: match gate.severity() {
+                        Severity::Error => "error",
+                        Severity::Warning => "warning",
+                        Severity::Note => "note",
+                    }
+                    .into(),
                     suggestion: None,
                     scope: aexeo_contracts::FindingScope::Page,
                 })
@@ -167,13 +220,15 @@ impl ContentPreset {
                 },
                 ContentGate::ForbiddenTerms { terms, .. } => match &input.text {
                     Some(text) => {
+                        let mut line_starts = vec![0];
+                        line_starts.extend(text.match_indices('\n').map(|(i, _)| i + 1));
                         for term in terms {
                             for (offset, _) in text.match_indices(term) {
-                                let before = &text[..offset];
-                                let line = before.bytes().filter(|b| *b == b'\n').count() + 1;
+                                let line_index =
+                                    line_starts.partition_point(|start| *start <= offset) - 1;
                                 let column =
-                                    before.rsplit('\n').next().unwrap_or("").chars().count() + 1;
-                                emit(format!("Forbidden term: {term}"), line, column);
+                                    text[line_starts[line_index]..offset].chars().count() + 1;
+                                emit(format!("Forbidden term: {term}"), line_index + 1, column);
                             }
                         }
                     }
@@ -200,6 +255,9 @@ impl ContentPreset {
             results.push(ContentGateResult {
                 gate_id: gate.id().into(),
                 status,
+                blocking: gate.blocking(),
+                scope: "document".into(),
+                required_capability: gate.required_capability().into(),
                 findings,
                 reason,
             });

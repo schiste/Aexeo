@@ -74,13 +74,13 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         if report
             .gates
             .iter()
-            .any(|gate| gate.status == GateStatus::NotChecked)
+            .any(|gate| gate.blocking && gate.status == GateStatus::NotChecked)
         {
             EXIT_UNSUPPORTED
         } else if report
             .gates
             .iter()
-            .any(|gate| gate.status == GateStatus::Failed)
+            .any(|gate| gate.blocking && gate.status == GateStatus::Failed)
         {
             EXIT_FINDINGS
         } else {
