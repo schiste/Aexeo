@@ -1,6 +1,6 @@
 # Aexeo : plan de migration vers les gates, presets et adapters
 
-État : session broker ouverte ; migration en cours, premiers composants livrés sur la branche de la PR.
+État : implémentation et validations locales terminées ; branche publiée en PR, revue et CI distantes en attente.
 
 ## Objectif
 
@@ -11,7 +11,7 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 - [x] Mettre à niveau Aethyme et ouvrir une session broker.
 - [x] Copier ce plan dans le worktree de session et maintenir son avancement au fil des livraisons.
 - [x] Phase 1 — caractériser les contrats et usages existants ; ajouter les tests de compatibilité nécessaires ; isoler les points de couplage et nettoyer sans modifier le comportement.
-- [ ] Phase 2 — définir les contrats d'évaluation, capacités, scopes, gates et résultats ; construire le moteur et le preset SEO/GEO existant ; adapter les parcours site, crawl, CLI et EmDash/WASM ; vérifier la parité.
+- [x] Phase 2 — définir les contrats d'évaluation, capacités, scopes, gates et résultats ; construire le moteur et le preset SEO/GEO existant ; adapter les parcours site, crawl, CLI et EmDash/WASM ; vérifier la parité.
 - [x] Phase 3 — rendre les presets TOML composables et portables : héritage, surcharges, validation, sélection par contexte, inspection et versionnement ; fournir des presets initiaux.
 - [x] Phase 4 — implémenter les gates de contenu déterministes et l'adapter Markdown/stdin ; vérifier un même preset et une même gate sur Markdown et EmDash.
 - [x] Phase 5 — livrer le workflow agent : skill, découverte des presets, sorties structurées, correctifs sûrs et benchmarks de latence.
@@ -33,7 +33,7 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 
 - CI : correction des `unwrap` refusés par le Clippy strict et de la dépendance verrouillée du plugin signalée par l’audit de production ; validation finale du nouveau commit en cours. La surcharge npm ne se propage pas aux consommateurs du paquet.
 
-- Validation : `cargo test --locked --offline --workspace`, build du plugin, typechecks plugin et worker et suite EmDash complète (83 tests) réussis. Le broker a vérifié les conflits sur `origin/main` mais aucune gate Aethyme n’est configurée sur cette base ; les contrôles CI et la revue restent nécessaires.
+- Validation : `sh scripts/check-repo.sh` complet réussi (format, Clippy strict, tests, isolation, audit, deny, udeps, documentation et configuration) ; build plugin et worker WASM, typechecks et suite EmDash complète (83 tests) réussis. `cargo audit` conserve un avertissement Tokio autorisé. Le broker ne configure aucune gate sur la base ; les contrôles CI et la revue restent nécessaires.
 
 - Phase 5 : benchmark release local de 100 itérations, document synthétique 29 011 octets : évaluation p50 25 µs / p95 191 µs ; parsing Markdown + évaluation p50 9 651 µs / p95 67 894 µs (machine chargée ; sans démarrage CLI).
 
