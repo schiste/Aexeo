@@ -79,3 +79,7 @@ aexeoPlugin({
 ```
 
 For custom presets, add `sources: { custom: "...TOML..." }` and select `name: "custom"`. `name` is the fallback preset; `byCollection` selects a named preset for a specific collection on both save and refresh. The existing SEO findings remain enabled. A gate the document adapter cannot check causes an explicit incomplete-evaluation error rather than being silently omitted. The sandboxed plugin's sidecar workflow does not yet support this option.
+
+## Local latency measurement
+
+Run `cargo run --release --locked --offline -p aexeo-core --example content_bench` to measure the content gates alone and Markdown parsing plus evaluation over a synthetic 29 KB document. It reports p50 and p95 across 100 iterations; figures depend on hardware and concurrent load, exclude CLI process startup, and are not a CI threshold or a guarantee for other documents.

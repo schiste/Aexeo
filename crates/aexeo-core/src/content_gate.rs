@@ -273,15 +273,19 @@ impl ContentPreset {
                 },
                 ContentGate::ForbiddenTerms { terms, .. } => match &input.text {
                     Some(text) => {
-                        let mut line_starts = vec![0];
-                        line_starts.extend(text.match_indices('\n').map(|(i, _)| i + 1));
                         for term in terms {
+                            let (mut cursor, mut line, mut column) = (0, 1, 1);
                             for (offset, _) in text.match_indices(term) {
-                                let line_index =
-                                    line_starts.partition_point(|start| *start <= offset) - 1;
-                                let column =
-                                    text[line_starts[line_index]..offset].chars().count() + 1;
-                                emit(format!("Forbidden term: {term}"), line_index + 1, column);
+                                for ch in text[cursor..offset].chars() {
+                                    if ch == '\n' {
+                                        line += 1;
+                                        column = 1;
+                                    } else {
+                                        column += 1;
+                                    }
+                                }
+                                emit(format!("Forbidden term: {term}"), line, column);
+                                cursor = offset;
                             }
                         }
                     }
@@ -467,5 +471,30 @@ group = "html"
             )
             .is_err()
         );
+    }
+    #[test]
+    fn repeated_terms_keep_unicode_line_and_column_positions() {
+        let preset = ContentPreset::from_toml(
+            r#"
+version = 1
+name = "terms"
+[[gates]]
+id = "terms"
+kind = "forbidden_terms"
+terms = ["bad"]
+"#,
+        )
+        .unwrap();
+        let input = ContentInput {
+            text: Some("é bad bad\n🦀 bad".into()),
+            ..Default::default()
+        };
+        let result = preset.evaluate(&input).unwrap();
+        let positions = result.gates[0]
+            .findings
+            .iter()
+            .map(|f| (f.line, f.column))
+            .collect::<Vec<_>>();
+        assert_eq!(positions, [(1, 3), (1, 7), (2, 3)]);
     }
 }
