@@ -20,6 +20,9 @@ def evaluate(examples, reviews):
     matched = set()
     correct = accepted = accepted_correct = approvals = false_approvals = 0
     brier = 0.0
+    label_counts = {label: 0 for label in sorted(LABELS)}
+    label_correct = {label: 0 for label in sorted(LABELS)}
+    label_decisive = {label: 0 for label in sorted(LABELS)}
     evaluation_model = None
     evaluation_threshold = None
     for example in examples:
@@ -50,11 +53,15 @@ def evaluate(examples, reviews):
         expected_output = choice if probability >= threshold else "uncertain"
         if review["support"] != expected_output:
             raise ValueError("review does not match model decision and threshold")
-        is_correct = choice == example["label"]
+        label = example["label"]
+        is_correct = choice == label
+        label_counts[label] += 1
+        label_correct[label] += is_correct
         correct += is_correct
         brier += (probability - int(is_correct)) ** 2
         if probability >= threshold and choice != "uncertain":
             accepted += 1
+            label_decisive[label] += 1
             accepted_correct += is_correct
             if choice == "supported":
                 approvals += 1
@@ -64,6 +71,10 @@ def evaluate(examples, reviews):
     count = len(examples)
     return {"examples": count, "reviewer": evaluation_model, "threshold": evaluation_threshold,
             "protocol": "aexeo-jev-support-v1", "raw_choice_accuracy": correct / count,
+            "by_label": {label: {"examples": label_counts[label],
+                                  "raw_choice_accuracy": label_correct[label] / label_counts[label] if label_counts[label] else None,
+                                  "decisive_coverage": label_decisive[label] / label_counts[label] if label_counts[label] else None}
+                         for label in sorted(LABELS)},
             "confidence_brier": brier / count, "decisive_coverage": accepted / count,
             "decisive_accuracy": accepted_correct / accepted if accepted else None,
             "support_approvals": approvals, "false_approvals": false_approvals,

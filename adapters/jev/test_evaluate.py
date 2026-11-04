@@ -34,6 +34,9 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(report["support_approvals"], 1)
         self.assertEqual(report["false_approvals"], 0)
         self.assertAlmostEqual(report["confidence_brier"], 0.185)
+        self.assertEqual(report["by_label"]["supported"], {"examples": 1, "raw_choice_accuracy": 1.0, "decisive_coverage": 1.0})
+        self.assertEqual(report["by_label"]["contradicted"], {"examples": 1, "raw_choice_accuracy": 0.0, "decisive_coverage": 0.0})
+        self.assertEqual(report["by_label"]["uncertain"], {"examples": 0, "raw_choice_accuracy": None, "decisive_coverage": None})
 
     def test_stale_or_unmatched_review_is_rejected(self):
         examples, reviews = self.inputs()
