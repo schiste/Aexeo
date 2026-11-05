@@ -148,11 +148,11 @@ pub fn run_link_rules(site: &Site, config: &Config) -> Vec<Finding> {
         if inbound.is_empty() {
             findings.push(finding(
                 "LNK002",
-                format!("orphan page: /{}", page.route),
+                format!("no inbound links observed in the analyzed pages: /{}", page.route),
                 &page.path,
                 1,
                 1,
-                Some("add an internal link from an indexable page"),
+                Some("check crawl and inventory coverage, link forms, indexing and redirects before treating this as an orphan"),
             ));
             continue;
         }
@@ -206,7 +206,16 @@ mod tests {
             "<html><head><title>x</title><meta name=\"description\" content=\"y\"><link rel=\"canonical\" href=\"https://example.com/orphan\"></head><body><h1>x</h1></body></html>",
         );
         let findings = run_link_rules(&load_site(root).unwrap(), &Config::default());
-        assert!(findings.iter().any(|finding| finding.rule_id == "LNK002"));
+        let orphan = findings
+            .iter()
+            .find(|finding| finding.rule_id == "LNK002")
+            .unwrap();
+        assert!(
+            orphan
+                .message
+                .contains("no inbound links observed in the analyzed pages")
+        );
+        assert!(orphan.suggestion.as_ref().unwrap().contains("coverage"));
         assert!(findings.iter().any(|finding| finding.rule_id == "LNK003"));
     }
 
