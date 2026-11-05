@@ -84,9 +84,25 @@ fn spawn_server_with_stop_condition(
             match listener.accept() {
                 Ok((mut stream, _)) => {
                     stream.set_nonblocking(false).unwrap();
+                    // A TCP read may return only a fragment of the request. Closing
+                    // with unread request bytes can reset the response on Linux.
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    let mut request_bytes = Vec::new();
                     let mut buffer = [0_u8; 4096];
-                    let size = stream.read(&mut buffer).unwrap();
-                    let request = String::from_utf8_lossy(&buffer[..size]);
+                    while !request_bytes.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                        let size = stream.read(&mut buffer).unwrap();
+                        if size == 0 {
+                            break;
+                        }
+                        request_bytes.extend_from_slice(&buffer[..size]);
+                        assert!(
+                            request_bytes.len() <= 65_536,
+                            "test request headers too large"
+                        );
+                    }
+                    let request = String::from_utf8_lossy(&request_bytes);
                     let path = request
                         .lines()
                         .next()
