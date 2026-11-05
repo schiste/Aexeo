@@ -222,17 +222,35 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     input.evidence_sources = evidence_sources;
     let adapter_ms = adapter_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
     let started = std::time::Instant::now();
-    let mut report = preset.evaluate_with_destinations(
-        &input,
-        &ContentEvaluationContext {
-            site: site.as_ref().map(|(site, config)| (site, config)),
-            adapter: context.as_ref(),
-            link_count,
-            collection: collection.as_deref(),
-            ..Default::default()
-        },
-        destinations.as_deref(),
-    )?;
+    let capabilities = ContentEvaluationContext {
+        site: site.as_ref().map(|(site, config)| (site, config)),
+        adapter: context.as_ref(),
+        link_count,
+        collection: collection.as_deref(),
+        ..Default::default()
+    };
+    let mut gate_timings_ms = Vec::new();
+    let mut report = if measuring {
+        let mut gate_started = None;
+        let mut observer = |event| match event {
+            aexeo_core::content_gate::GateObservation::Started => {
+                gate_started = Some(std::time::Instant::now())
+            }
+            aexeo_core::content_gate::GateObservation::Finished => {
+                if let Some(started) = gate_started.take() {
+                    gate_timings_ms.push(started.elapsed().as_secs_f64() * 1000.0);
+                }
+            }
+        };
+        preset.evaluate_with_gate_observer(
+            &input,
+            &capabilities,
+            destinations.as_deref(),
+            &mut observer,
+        )?
+    } else {
+        preset.evaluate_with_destinations(&input, &capabilities, destinations.as_deref())?
+    };
     let evaluation_ms = started.elapsed().as_secs_f64() * 1000.0;
     report.applied_fixes = applied_fixes;
     let mapping_started = measuring.then(std::time::Instant::now);
@@ -314,6 +332,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             evaluation_ms,
             input_load_ms.zip(adapter_ms),
             mapping,
+            Some(&gate_timings_ms),
         )?;
     }
     if args.get_one::<String>("format").map(String::as_str) == Some("json") {
@@ -402,6 +421,7 @@ fn evaluate_crawl(
             started.elapsed().as_secs_f64() * 1000.0,
             None,
             None,
+            None,
         )?;
     }
     if args.get_one::<String>("format").map(String::as_str) == Some("json") {
@@ -473,6 +493,7 @@ fn print_telemetry(
     evaluation_ms: f64,
     stages: Option<(f64, f64)>,
     source_mapping: Option<(usize, usize, f64)>,
+    gate_timings_ms: Option<&[f64]>,
 ) -> Result<()> {
     let mut event = serde_json::json!({"schema_version": 1, "event": "content_evaluation", "evaluation_ms": evaluation_ms, "summary": report.summary});
     if let Some((input_load_ms, adapter_ms)) = stages {
@@ -482,6 +503,9 @@ fn print_telemetry(
     if let Some((mapped, unmapped, duration_ms)) = source_mapping {
         event["source_mapping"] =
             serde_json::json!({"mapped": mapped, "unmapped": unmapped, "duration_ms": duration_ms});
+    }
+    if let Some(timings) = gate_timings_ms {
+        event["gate_timings_ms"] = serde_json::json!(timings);
     }
     eprintln!("{}", serde_json::to_string(&event)?);
     Ok(())

@@ -23,7 +23,7 @@ Inspect `summary`, each gate’s `blocking` flag, `measurements`, findings and r
 
 For EmDash content reports, `source_locations` instead identifies the zero-based block and span indices and a UTF-16 offset within the span; these coordinates apply only to the exact evaluated snapshot. Re-evaluate after editing.
 
-For performance diagnostics, add `--telemetry` to write one local JSON event to stderr; it records aggregate outcomes and evaluation time, not draft text. For local content, optional stage timings separate loading and adaptation, including Markdown parsing, from evaluation. Crawl events omit those stage timings and evaluation time excludes crawling. Redirect stderr only when a local record is useful.
+For performance diagnostics, add `--telemetry` to write one local JSON event to stderr; it records aggregate outcomes and evaluation time, not draft text. For local content, optional stage timings separate loading and adaptation, including Markdown parsing, from evaluation. The `gate_timings_ms` array follows resolved preset order without including gate IDs; it is diagnostic and includes measurement overhead. Crawl events omit those stage timings and evaluation time excludes crawling. Redirect stderr only when a local record is useful.
 
 Use `--fix` only when an explicit file edit is intended. Currently the only supported content fix adds a missing final newline for a configured `final_newline` gate; inspect `applied_fixes` and rerun the checks.
 

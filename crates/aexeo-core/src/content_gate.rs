@@ -246,6 +246,13 @@ fn default_case_sensitive() -> bool {
     true
 }
 
+/// Lifecycle events for an optional, host-provided gate observer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GateObservation {
+    Started,
+    Finished,
+}
+
 impl ContentGate {
     pub fn severity(&self) -> Severity {
         match self {
@@ -705,6 +712,28 @@ impl ContentPreset {
         capabilities: &ContentEvaluationContext<'_>,
         destinations: Option<&[String]>,
     ) -> Result<ContentReport> {
+        self.evaluate_with_observer_inner(input, capabilities, destinations, None)
+    }
+
+    /// Evaluate while notifying the host before and after each gate, in preset order.
+    /// An evaluation error can terminate before a matching `Finished` event.
+    pub fn evaluate_with_gate_observer(
+        &self,
+        input: &ContentInput,
+        capabilities: &ContentEvaluationContext<'_>,
+        destinations: Option<&[String]>,
+        observer: &mut dyn FnMut(GateObservation),
+    ) -> Result<ContentReport> {
+        self.evaluate_with_observer_inner(input, capabilities, destinations, Some(observer))
+    }
+
+    fn evaluate_with_observer_inner(
+        &self,
+        input: &ContentInput,
+        capabilities: &ContentEvaluationContext<'_>,
+        destinations: Option<&[String]>,
+        mut observer: Option<&mut dyn FnMut(GateObservation)>,
+    ) -> Result<ContentReport> {
         let site = capabilities.site;
         let extensions = capabilities.extensions;
         let context = capabilities.adapter;
@@ -714,6 +743,9 @@ impl ContentPreset {
         let mut results = Vec::with_capacity(self.gates.len());
         let mut word_count = None;
         for gate in &self.gates {
+            if let Some(observe) = observer.as_deref_mut() {
+                observe(GateObservation::Started);
+            }
             let mut findings = Vec::new();
             let mut reason = None;
             let mut measurements = std::collections::BTreeMap::new();
@@ -1268,6 +1300,9 @@ impl ContentPreset {
                 reason,
                 measurements,
             });
+            if let Some(observe) = observer.as_deref_mut() {
+                observe(GateObservation::Finished);
+            }
         }
         let mut summary = ContentSummary::default();
         for gate in &results {
@@ -1564,6 +1599,46 @@ field = "slug"
                 .gates[0]
                 .status,
             GateStatus::Passed
+        );
+    }
+
+    #[test]
+    fn gate_observer_preserves_report_and_reports_each_gate_in_order() {
+        let preset = ContentPreset::from_toml("version=1\nname='observer'\n[[gates]]\nid='one'\nkind='word_count'\nmin=1\n[[gates]]\nid='two'\nkind='required_headings'\nheadings=['Intro']\n").unwrap();
+        let input = ContentInput {
+            text: Some("content".into()),
+            ..Default::default()
+        };
+        let capabilities = ContentEvaluationContext::default();
+        let baseline = preset
+            .evaluate_with_destinations(&input, &capabilities, None)
+            .unwrap();
+        let mut events = Vec::new();
+        let measured = preset
+            .evaluate_with_gate_observer(&input, &capabilities, None, &mut |event| {
+                events.push(event)
+            })
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(baseline).unwrap(),
+            serde_json::to_value(&measured).unwrap()
+        );
+        assert_eq!(
+            events,
+            [
+                GateObservation::Started,
+                GateObservation::Finished,
+                GateObservation::Started,
+                GateObservation::Finished
+            ]
+        );
+        assert_eq!(
+            measured
+                .gates
+                .iter()
+                .map(|gate| gate.status)
+                .collect::<Vec<_>>(),
+            [GateStatus::Passed, GateStatus::NotChecked]
         );
     }
 
