@@ -300,5 +300,7 @@ their effective scheme depends on the page context. A pass does not establish re
 or content accuracy. Markdown direct and ASCII reference links and used EmDash
 link marks provide destinations. If Markdown references cannot be resolved
 conservatively, or an adapter lacks destinations, the gate is `not_checked`.
-Counters report checked and invalid destinations without recording addresses in
-telemetry. Image destinations and raw HTML are outside this gate's scope.
+Markdown reports can provide the source location of an invalid link occurrence,
+including a reference link usage; locations point to the beginning of the link,
+not necessarily its destination definition. Counters report checked and invalid
+destinations without recording addresses in telemetry. Image destinations and raw HTML are outside this gate's scope.

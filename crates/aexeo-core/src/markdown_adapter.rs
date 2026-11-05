@@ -11,9 +11,20 @@ pub struct MarkdownSourceMap {
     spans: Vec<(usize, usize, usize)>,
     source_lines: Vec<usize>,
     projected_lines: Vec<usize>,
+    link_starts: Vec<Option<usize>>,
 }
 
 impl MarkdownSourceMap {
+    /// Resolve a zero-based extracted link index to its original Markdown start.
+    /// Pass the unchanged source used to create this map.
+    pub fn link_source_position(&self, source: &str, index: usize) -> Option<(usize, usize)> {
+        let offset = (*self.link_starts.get(index)?)?;
+        let line = self.source_lines.partition_point(|&start| start <= offset);
+        let start = *self.source_lines.get(line.checked_sub(1)?)?;
+        let column = source.get(start..offset)?.chars().count() + 1;
+        Some((line, column))
+    }
+
     /// Resolve one-based Unicode-character coordinates. Returns `None` when
     /// the projection does not correspond exactly to a source text span. Pass
     /// the same source and extracted text used to create this map, unchanged.
@@ -52,7 +63,8 @@ impl MarkdownSourceMap {
 /// Extract complete Markdown link destinations without fetching them. Returns
 /// `None` when a reference cannot be resolved conservatively.
 pub fn markdown_link_destinations(source: &str) -> Result<Option<Vec<String>>> {
-    Ok(link_destinations_from_root(&parse_markdown(source)?))
+    Ok(link_destinations_from_root(&parse_markdown(source)?)
+        .map(|links| links.into_iter().map(|link| link.url).collect()))
 }
 
 fn parse_markdown(source: &str) -> Result<Node> {
@@ -61,7 +73,12 @@ fn parse_markdown(source: &str) -> Result<Node> {
     markdown::to_mdast(source, &options).map_err(|err| anyhow!("Markdown parse error: {err}"))
 }
 
-fn link_destinations_from_root(root: &Node) -> Option<Vec<String>> {
+struct ExtractedLink {
+    url: String,
+    start: Option<usize>,
+}
+
+fn link_destinations_from_root(root: &Node) -> Option<Vec<ExtractedLink>> {
     fn normalize(value: &str) -> Option<String> {
         value.is_ascii().then(|| {
             value
@@ -86,13 +103,17 @@ fn link_destinations_from_root(root: &Node) -> Option<Vec<String>> {
     fn collect_links(
         node: &Node,
         defs: &std::collections::BTreeMap<String, String>,
-        links: &mut Vec<String>,
+        links: &mut Vec<ExtractedLink>,
     ) -> Option<()> {
         match node {
-            Node::Link(link) => links.push(link.url.clone()),
-            Node::LinkReference(link) => {
-                links.push(defs.get(&normalize(&link.identifier)?)?.clone())
-            }
+            Node::Link(link) => links.push(ExtractedLink {
+                url: link.url.clone(),
+                start: link.position.as_ref().map(|pos| pos.start.offset),
+            }),
+            Node::LinkReference(link) => links.push(ExtractedLink {
+                url: defs.get(&normalize(&link.identifier)?)?.clone(),
+                start: link.position.as_ref().map(|pos| pos.start.offset),
+            }),
             _ => {}
         }
         if let Some(children) = node.children() {
@@ -163,8 +184,12 @@ pub fn markdown_input_with_source_map_and_destinations(
     source: &str,
 ) -> Result<MarkdownContentWithDestinations> {
     let root = parse_markdown(source)?;
-    let destinations = link_destinations_from_root(&root);
-    let (input, context, count, map) = extract_markdown_from_root(id, source, true, &root)?;
+    let links = link_destinations_from_root(&root);
+    let (input, context, count, mut map) = extract_markdown_from_root(id, source, true, &root)?;
+    let destinations = links.map(|links| {
+        map.link_starts = links.iter().map(|link| link.start).collect();
+        links.into_iter().map(|link| link.url).collect()
+    });
     Ok(MarkdownContentWithDestinations {
         input,
         context,
