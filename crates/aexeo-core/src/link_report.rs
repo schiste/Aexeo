@@ -158,11 +158,10 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
             }
             _ => {}
         }
-        let robots_header = headers.and_then(|headers| {
-            headers
-                .iter()
-                .find(|(name, _)| name.eq_ignore_ascii_case("x-robots-tag"))
-                .map(|(_, value)| value.as_str())
+        let header_noindex = headers.is_some_and(|headers| {
+            headers.iter().any(|(name, value)| {
+                name.eq_ignore_ascii_case("x-robots-tag") && has_noindex(value)
+            })
         });
         let redirect_target = headers.and_then(|headers| {
             headers
@@ -174,7 +173,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
             .robots_directives
             .iter()
             .any(|value| has_noindex(value))
-            || robots_header.is_some_and(has_noindex);
+            || header_noindex;
         if noindex {
             issues.push("noindex_observed".to_string());
             if input.inventory.as_ref().is_some_and(|inventory| {

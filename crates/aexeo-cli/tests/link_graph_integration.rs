@@ -113,7 +113,7 @@ fn redirect_and_header_noindex_are_explicit() {
     let input = serde_json::json!({
         "version":1, "identity":{"origin":"https://example.org","release":"r1","surface":"public","snapshot":"s1"},
         "snapshot_date":"2026-11-05T00:00:00Z", "crawl_complete":false,
-        "pages":[{"url":"https://example.org/a", "status_code":302, "response_headers":{"Location":"/b","X-Robots-Tag":"noindex"}, "html":""}], "inventory":null
+        "pages":[{"url":"https://example.org/a", "status_code":302, "response_headers":{"Location":"/b","X-Robots-Tag":"index","x-robots-tag":"noindex"}, "html":""}], "inventory":null
     });
     fs::write(&path, serde_json::to_vec(&input).unwrap()).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
