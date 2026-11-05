@@ -30,3 +30,4 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - `fast_test`: `cargo test --workspace`
 - `build`: `cargo build --workspace`
 - `dev`: `cargo run`
+- `module_format_check`: `cargo fmt --all -- --check` after adding or moving modules; this also checks parent declarations.
