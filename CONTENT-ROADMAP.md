@@ -14,6 +14,24 @@ Metadata must be supplied when evaluating an exported Markdown file. An SEO
 preset without a site adapter is not assessed. Use this case as a regression
 scenario, not as a representative benchmark or an assessment of Aeptus overall.
 
+## Delivery tracker
+
+- [x] Aggregate gate coverage and measurements for word count, required metadata,
+  required headings and forbidden terms. Unavailable measurements remain absent.
+- [x] CI benchmarks and conservative budgets for evaluation, Markdown adaptation,
+  50-item batches and fresh-process CLI runs, with p50/p95 telemetry. Fresh
+  processes do not imply cold operating-system caches.
+- [ ] Configurable sentence-length heuristic and opt-in composed preset ([PR #29](https://github.com/schiste/Aexeo/pull/29)).
+- [ ] Bounded agent lint-and-revise workflow and local telemetry guidance ([PR #30](https://github.com/schiste/Aexeo/pull/30)).
+- [ ] Additional editorial gates, including paragraph length and link checks.
+- [ ] Collection scopes and adapter capabilities, with cross-adapter source mapping.
+- [ ] Independently reviewed, diverse evaluation corpus and held-out metrics.
+- [ ] Source and factuality evaluation after the basic gates are validated.
+
+An open PR is not yet delivered. Update this tracker when each change lands and
+when its acceptance criteria are met, rather than inferring completion from a
+partial implementation.
+
 ## Priorities and acceptance criteria
 
 1. **Explain the result.** Show configured-gate coverage, missing capabilities,
