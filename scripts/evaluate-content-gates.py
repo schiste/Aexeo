@@ -70,13 +70,36 @@ def aggregate_review_events(corpus, split, review_log):
             "override_rate": (counts["overrides_to_pass"] + counts["overrides_to_fail"]) / decisions if decisions else None}
 
 
+def empty_counts():
+    return {"true_positive": 0, "false_positive": 0, "true_negative": 0, "false_negative": 0, "not_checked": 0}
+
+
+def record_result(counts, actual, expected):
+    if actual == "not_checked":
+        counts["not_checked"] += 1
+    elif actual == "failed":
+        counts["true_positive" if expected == "failed" else "false_positive"] += 1
+    else:
+        counts["false_negative" if expected == "failed" else "true_negative"] += 1
+
+
+def classification_metrics(counts, examples):
+    tp, fp, fn = counts["true_positive"], counts["false_positive"], counts["false_negative"]
+    return {"examples": examples, "counts": counts,
+            "precision": tp / (tp + fp) if tp + fp else None,
+            "recall": tp / (tp + fn) if tp + fn else None,
+            "unchecked_rate": counts["not_checked"] / examples if examples else None}
+
+
 def evaluate(binary, corpus, split, review_log=None):
     validate_corpus(corpus)
     review_metrics = aggregate_review_events(corpus, split, review_log) if review_log is not None else None
     examples = [item for item in corpus["examples"] if item["split"] == split]
     if not examples:
         raise ValueError("split must contain examples")
-    counts = {"true_positive": 0, "false_positive": 0, "true_negative": 0, "false_negative": 0, "not_checked": 0}
+    counts = empty_counts()
+    reviewed_counts = empty_counts()
+    reviewed_examples = 0
     durations = []
     input_format = corpus.get("input_format")
     if input_format not in (None, "text", "markdown"):
@@ -100,15 +123,15 @@ def evaluate(binary, corpus, split, review_log=None):
             if len(gates) != 1 or gates[0]["status"] not in {"passed", "failed", "not_checked"}:
                 raise ValueError(f"missing or invalid gate for {item['id']}")
             actual, expected = gates[0]["status"], item["expected"]
-            if actual == "not_checked":
-                counts["not_checked"] += 1
-            elif actual == "failed":
-                counts["true_positive" if expected == "failed" else "false_positive"] += 1
-            else:
-                counts["false_negative" if expected == "failed" else "true_negative"] += 1
-    tp, fp, fn = counts["true_positive"], counts["false_positive"], counts["false_negative"]
+            record_result(counts, actual, expected)
+            if item.get("review_status") == "reviewed":
+                reviewed_examples += 1
+                record_result(reviewed_counts, actual, expected)
     durations.sort()
-    result = {"version": 1, "metric_scope": "checked_examples_only", "split": split, "examples": len(examples), "reviewed_examples": sum(item.get("review_status") == "reviewed" for item in examples), "counts": counts, "precision": tp / (tp + fp) if tp + fp else None, "recall": tp / (tp + fn) if tp + fn else None, "unchecked_rate": counts["not_checked"] / len(examples), "fresh_process_p95_ms": durations[math.ceil(len(durations) * .95) - 1]}
+    result = {"version": 1, "metric_scope": "checked_examples_only", "split": split,
+              **classification_metrics(counts, len(examples)), "reviewed_examples": reviewed_examples,
+              "reviewed_metrics": classification_metrics(reviewed_counts, reviewed_examples),
+              "fresh_process_p95_ms": durations[math.ceil(len(durations) * .95) - 1]}
     if review_metrics is not None:
         result["historical_review_events"] = review_metrics
     return result
