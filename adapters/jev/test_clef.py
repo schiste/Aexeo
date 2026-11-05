@@ -110,6 +110,8 @@ class ClefTests(unittest.TestCase):
             changed[0]["source_text"] = "different"
             with self.assertRaises(ValueError):
                 clef.read_checkpoint(checkpoint, changed, 0.8)
+            with self.assertRaises(ValueError):
+                batch.run_cases(changed, clef.MODEL, 0.8, 2, "", fetch=retry, existing=saved)
 
     def test_cli_rejects_checkpoint_as_input_before_network(self):
         with tempfile.TemporaryDirectory() as folder:

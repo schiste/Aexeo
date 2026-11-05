@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 import urllib.error
 
-from evaluate import LABELS
+from evaluate import LABELS, evaluate
 from review import fetch_review
 
 
@@ -26,7 +26,13 @@ def run_cases(examples, model, threshold, maximum, key, fetch=fetch_review, exis
                 or not isinstance(example["source_text"], str) or not example["source_text"].strip()):
             raise ValueError("invalid or duplicated case")
         ids.add(key_id)
-    completed = {item["id"]: item for item in (existing or [])}
+    saved = existing or []
+    if saved:
+        by_id = {example["id"]: example for example in examples}
+        report = evaluate([by_id[item["id"]] for item in saved], saved)
+        if report["threshold"] != threshold or any(item["review"]["reliability"] != "uncertain" for item in saved):
+            raise ValueError("saved reviews have a different threshold or source assessment")
+    completed = {item["id"]: item for item in saved}
     results = []
     for example in examples:
         item = completed.get(example["id"])

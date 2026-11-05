@@ -33,7 +33,6 @@ def fetch_review(claim, source, model, reliability, threshold, _key):
     return review_from_response(claim, source, reliability, threshold, result, provider="clef")
 
 
-
 def read_checkpoint(path, cases, threshold):
     if not path.exists():
         return []
