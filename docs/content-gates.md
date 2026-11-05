@@ -264,3 +264,17 @@ source position was found; escaped or transformed Markdown may be unmappable.
 These locations apply only to positional prose gates, not metadata, site or
 collection findings. The map is local; opt-in telemetry includes only mapped and
 unmapped counts and mapping duration, without positions or content.
+
+### EmDash source locations and telemetry
+
+The EmDash `evaluateContent` result includes `source_locations` for positional
+prose findings. Each entry identifies a `gate_id`, zero-based `finding_index`,
+`block_index`, `span_index`, and `utf16_offset` within that span. Coordinates
+refer only to the exact Portable Text snapshot evaluated; recompute after edits.
+A missing entry means there is no usable location. Other finding types are not
+mapped. Existing projected finding coordinates remain unchanged.
+
+A host may supply the optional `onTelemetry` callback to `evaluateContent` to
+receive aggregate `evaluation_ms` and `source_locations_mapped`. Duration covers
+the complete JavaScript wrapper, including serialization and WASM initialization.
+No text, paths or identifiers are included; Aexeo does not transmit the event.
