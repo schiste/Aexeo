@@ -1,0 +1,3 @@
+version = 1
+name = "Glossary readability starter"
+extends = ["glossary-editorial", "readability"]

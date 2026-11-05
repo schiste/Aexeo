@@ -1,0 +1,8 @@
+version = 1
+name = "Shared readability starter"
+
+[[gates]]
+id = "editorial.sentence_length"
+kind = "sentence_length"
+max_words = 30
+blocking = false
