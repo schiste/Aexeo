@@ -23,8 +23,8 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
   processes do not imply cold operating-system caches.
 - [x] Single-parse Markdown link validation and a p50/p95 comparison against the
   two-parse baseline ([PR #47](https://github.com/schiste/Aexeo/pull/47)).
-- [x] Opt-in local per-gate timing telemetry in resolved preset order; the event
-  excludes gate IDs and content. Crawl evaluation does not yet expose gate timings.
+- [x] Opt-in per-gate timing telemetry for local content and crawls in resolved preset
+  order; the event excludes gate IDs and content.
 - [x] Configurable sentence-length heuristic and opt-in composed preset ([PR #29](https://github.com/schiste/Aexeo/pull/29)).
 - [x] Bounded agent lint-and-revise workflow and local telemetry guidance ([PR #30](https://github.com/schiste/Aexeo/pull/30)).
 - [x] Configurable paragraph-length gate with Markdown and EmDash adapter
@@ -95,7 +95,7 @@ partial implementation.
 6. **Measure operational performance.** Maintain separate cold-start,
    single-item, batch and site benchmarks with repeatable inputs, p50/p95 and
    resource budgets in CI. Separate parsing, evaluation and adapter overhead.
-   Current opt-in events include stage and per-gate timings for local content;
+   Current opt-in events include local stage timings and per-gate timings for local content and crawls;
    extend coverage to other adapters when useful and preserve privacy.
 7. **Validate improvements independently.** Maintain a versioned, diverse,
    human-reviewed evaluation set and track precision, recall, unchecked rates,

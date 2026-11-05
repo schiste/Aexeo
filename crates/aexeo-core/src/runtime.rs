@@ -148,16 +148,46 @@ impl RuntimeAudit {
         preset: &crate::content_gate::ContentPreset,
         config: &Config,
     ) -> Result<RuntimePresetReport> {
-        let input = crate::content_gate::ContentInput {
+        self.evaluate_preset_inner(preset, config, None)
+    }
+
+    /// Evaluate a crawl while notifying the host before and after each gate.
+    pub fn evaluate_preset_with_gate_observer(
+        &self,
+        preset: &crate::content_gate::ContentPreset,
+        config: &Config,
+        observer: &mut dyn FnMut(crate::content_gate::GateObservation),
+    ) -> Result<RuntimePresetReport> {
+        self.evaluate_preset_inner(preset, config, Some(observer))
+    }
+
+    fn evaluate_preset_inner(
+        &self,
+        preset: &crate::content_gate::ContentPreset,
+        config: &Config,
+        observer: Option<&mut dyn FnMut(crate::content_gate::GateObservation)>,
+    ) -> Result<RuntimePresetReport> {
+        use crate::content_gate::{ContentEvaluationContext, ContentInput};
+        let input = ContentInput {
             id: self.site.root.to_string_lossy().into_owned(),
             ..Default::default()
+        };
+        let capabilities = ContentEvaluationContext {
+            site: Some((&self.site, config)),
+            ..Default::default()
+        };
+        let content = match observer {
+            Some(observer) => {
+                preset.evaluate_with_gate_observer(&input, &capabilities, None, observer)?
+            }
+            None => preset.evaluate_with_capabilities(&input, &capabilities)?,
         };
         Ok(RuntimePresetReport {
             crawl_status: self.status,
             truncation_reason: self.truncation_reason.clone(),
             crawl_findings: self.crawl_findings.clone(),
             audit_findings: self.findings.clone(),
-            content: preset.evaluate_with_site(&input, Some((&self.site, config)))?,
+            content,
         })
     }
 }
@@ -2170,6 +2200,25 @@ mod tests {
         assert_eq!(result.crawl_findings, original_findings);
         assert_eq!(result.audit_findings, original_findings);
         assert_eq!(result.content.gates[0].findings, original_findings);
+        let mut events = Vec::new();
+        let observed = audit
+            .evaluate_preset_with_gate_observer(&preset, &config, &mut |event| events.push(event))
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&observed).unwrap(),
+            serde_json::to_value(&result).unwrap()
+        );
+        assert_eq!(events.len(), preset.gates.len() * 2);
+        for pair in events.as_chunks::<2>().0 {
+            assert!(matches!(
+                pair[0],
+                crate::content_gate::GateObservation::Started
+            ));
+            assert!(matches!(
+                pair[1],
+                crate::content_gate::GateObservation::Finished
+            ));
+        }
         audit.status = AuditStatus::Complete;
         audit.truncation_reason = None;
         let complete = audit.evaluate_preset(&preset, &config).unwrap();

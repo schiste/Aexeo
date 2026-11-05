@@ -11,6 +11,28 @@ use std::{
     io::{self, Read, Write},
 };
 
+#[derive(Default)]
+struct GateTimer {
+    started: Option<std::time::Instant>,
+    timings_ms: Vec<f64>,
+}
+
+impl GateTimer {
+    fn observe(&mut self, event: aexeo_core::content_gate::GateObservation) {
+        match event {
+            aexeo_core::content_gate::GateObservation::Started => {
+                self.started = Some(std::time::Instant::now())
+            }
+            aexeo_core::content_gate::GateObservation::Finished => {
+                if let Some(started) = self.started.take() {
+                    self.timings_ms
+                        .push(started.elapsed().as_secs_f64() * 1000.0);
+                }
+            }
+        }
+    }
+}
+
 #[derive(serde::Serialize)]
 struct SourceLocation<'a> {
     gate_id: &'a str,
@@ -229,24 +251,13 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         collection: collection.as_deref(),
         ..Default::default()
     };
-    let mut gate_timings_ms = Vec::new();
+    let mut gate_timer = GateTimer::default();
     let mut report = if measuring {
-        let mut gate_started = None;
-        let mut observer = |event| match event {
-            aexeo_core::content_gate::GateObservation::Started => {
-                gate_started = Some(std::time::Instant::now())
-            }
-            aexeo_core::content_gate::GateObservation::Finished => {
-                if let Some(started) = gate_started.take() {
-                    gate_timings_ms.push(started.elapsed().as_secs_f64() * 1000.0);
-                }
-            }
-        };
         preset.evaluate_with_gate_observer(
             &input,
             &capabilities,
             destinations.as_deref(),
-            &mut observer,
+            &mut |event| gate_timer.observe(event),
         )?
     } else {
         preset.evaluate_with_destinations(&input, &capabilities, destinations.as_deref())?
@@ -332,7 +343,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             evaluation_ms,
             input_load_ms.zip(adapter_ms),
             mapping,
-            Some(&gate_timings_ms),
+            Some(&gate_timer.timings_ms),
         )?;
     }
     if args.get_one::<String>("format").map(String::as_str) == Some("json") {
@@ -414,14 +425,21 @@ fn evaluate_crawl(
         .context("missing crawl engine")?;
     let audit = aexeo_core::run_runtime_audit(url, max_pages, engine, &config)?;
     let started = std::time::Instant::now();
-    let report = audit.evaluate_preset(preset, &config)?;
+    let mut gate_timer = GateTimer::default();
+    let report = if args.get_flag("telemetry") {
+        audit.evaluate_preset_with_gate_observer(preset, &config, &mut |event| {
+            gate_timer.observe(event)
+        })?
+    } else {
+        audit.evaluate_preset(preset, &config)?
+    };
     if args.get_flag("telemetry") {
         print_telemetry(
             &report.content,
             started.elapsed().as_secs_f64() * 1000.0,
             None,
             None,
-            None,
+            Some(&gate_timer.timings_ms),
         )?;
     }
     if args.get_one::<String>("format").map(String::as_str) == Some("json") {
