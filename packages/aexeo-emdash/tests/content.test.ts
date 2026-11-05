@@ -21,6 +21,16 @@ describe("portable content API", () => {
     expect(report.gates[0]?.status).toBe("failed");
     expect(report.source_locations?.[0]?.utf16_offset).toBe(2);
   });
+  it("emits only aggregate telemetry when explicitly requested", async () => {
+    const onTelemetry = vi.fn();
+    await evaluateContent({ route: "/private", title: "Private text", body: [] }, "custom", {}, undefined, onTelemetry);
+    expect(onTelemetry).toHaveBeenCalledOnce();
+    const event = onTelemetry.mock.calls[0]?.[0];
+    expect(event.source_locations_mapped).toBe(1);
+    expect(event.evaluation_ms).toBeGreaterThanOrEqual(0);
+    expect(JSON.stringify(event)).not.toContain("Private");
+    expect(JSON.stringify(event)).not.toContain("/private");
+  });
   it("passes the complete collection to the bridge", async () => {
     const documents = [{ route: "/a", title: "Same", body: [] }, { route: "/b", title: "Same", body: [] }];
     const report = await evaluateContentCollection(documents, "custom", { custom: "version = 1" });
