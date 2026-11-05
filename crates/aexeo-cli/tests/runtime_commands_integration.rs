@@ -46,7 +46,13 @@ fn crawl_and_verify_commands_work_end_to_end() {
         .arg("text")
         .output()
         .unwrap();
-    assert!(verify_output.status.success());
+    assert!(
+        verify_output.status.success(),
+        "verify failed: status={} stdout={} stderr={}",
+        verify_output.status,
+        String::from_utf8_lossy(&verify_output.stdout),
+        String::from_utf8_lossy(&verify_output.stderr)
+    );
     let verify_stdout = String::from_utf8_lossy(&verify_output.stdout);
     assert!(verify_stdout.contains("New findings: 0"));
     handle.join().unwrap();
