@@ -6,6 +6,7 @@ pub mod exit_code;
 pub mod facts;
 pub mod integrations;
 pub mod intelligence;
+pub mod link_graph;
 pub mod listings;
 pub mod runtime;
 pub mod static_site;

@@ -11,6 +11,7 @@ use crate::commands::{
         command_snippet,
     },
     intelligence::command_intelligence,
+    link_graph::command_link_graph,
     listings::{command_adapters, command_plugin_check, command_rules},
     runtime::{
         command_crawl, command_doctor, command_perf_baseline, command_perf_diff,
@@ -21,6 +22,7 @@ use crate::commands::{
 
 pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
     match matches.subcommand() {
+        Some(("link-graph", submatches)) => command_link_graph(submatches),
         Some(("content", submatches)) => command_content(submatches),
         Some(("rules", submatches)) => command_rules(submatches),
         Some(("adapters", submatches)) => command_adapters(submatches),

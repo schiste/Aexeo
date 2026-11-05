@@ -20,6 +20,7 @@ pub mod intelligence;
 pub mod link_counts;
 pub mod link_evidence;
 pub mod link_graph;
+pub mod link_report;
 pub mod link_rules;
 pub mod llm_rules;
 pub mod markdown_adapter;

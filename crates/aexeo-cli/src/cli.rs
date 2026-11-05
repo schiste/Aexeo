@@ -5,6 +5,12 @@ pub fn build_cli() -> Command {
     Command::new("aexeo-cli")
         .about("SEO and GEO linting for static websites")
         .subcommand(
+            Command::new("link-graph")
+                .about("Analyze explicitly identified rendered pages and inventory")
+                .arg(Arg::new("input").required(true).help("Versioned JSON input file"))
+                .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate timings and counts as JSON on stderr")),
+        )
+        .subcommand(
             Command::new("content")
                 .about("Run a portable content preset on a UTF-8 file or stdin")
                 .arg(Arg::new("path").default_value("-"))
