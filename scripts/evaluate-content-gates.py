@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Evaluate local content gates against a versioned labeled corpus, without network access."""
 import argparse
+import hashlib
 import json
 import math
 import subprocess
@@ -35,8 +36,43 @@ def validate_corpus(corpus):
                 raise ValueError("reviewed examples require reviewer and method provenance")
 
 
-def evaluate(binary, corpus, split):
+def aggregate_review_events(corpus, split, review_log):
+    """Summarize supplied historical reviews without exposing IDs or text."""
+    if review_log.get("version") != 1 or review_log.get("gate_id") != corpus["gate_id"]:
+        raise ValueError("review log version or gate does not match corpus")
+    by_id = {item["id"]: item for item in corpus["examples"]}
+    seen = set()
+    counts = {"agreed": 0, "overrides_to_pass": 0, "overrides_to_fail": 0, "resolved_unchecked": 0}
+    for event in review_log["events"]:
+        identifier = event["example_id"]
+        if identifier not in by_id or identifier in seen:
+            raise ValueError("review log references an unknown or duplicate example")
+        seen.add(identifier)
+        item = by_id[identifier]
+        digest = hashlib.sha256(item["text"].encode("utf-8")).hexdigest()
+        if event.get("text_sha256") != digest:
+            raise ValueError("review event does not match the current example text")
+        model, reviewer = event["model_status"], event["reviewer_status"]
+        if model not in {"passed", "failed", "not_checked"} or reviewer not in {"passed", "failed"}:
+            raise ValueError("invalid review event status")
+        if any(not isinstance(event.get(key), str) or not event[key].strip() for key in ("reviewer", "method")):
+            raise ValueError("review event requires reviewer and method provenance")
+        if item["split"] != split:
+            continue
+        if model == "not_checked":
+            counts["resolved_unchecked"] += 1
+        elif model == reviewer:
+            counts["agreed"] += 1
+        else:
+            counts["overrides_to_pass" if reviewer == "passed" else "overrides_to_fail"] += 1
+    decisions = counts["agreed"] + counts["overrides_to_pass"] + counts["overrides_to_fail"]
+    return {"events": sum(counts.values()), "counts": counts,
+            "override_rate": (counts["overrides_to_pass"] + counts["overrides_to_fail"]) / decisions if decisions else None}
+
+
+def evaluate(binary, corpus, split, review_log=None):
     validate_corpus(corpus)
+    review_metrics = aggregate_review_events(corpus, split, review_log) if review_log is not None else None
     examples = [item for item in corpus["examples"] if item["split"] == split]
     if not examples:
         raise ValueError("split must contain examples")
@@ -72,7 +108,10 @@ def evaluate(binary, corpus, split):
                 counts["false_negative" if expected == "failed" else "true_negative"] += 1
     tp, fp, fn = counts["true_positive"], counts["false_positive"], counts["false_negative"]
     durations.sort()
-    return {"version": 1, "metric_scope": "checked_examples_only", "split": split, "examples": len(examples), "reviewed_examples": sum(item.get("review_status") == "reviewed" for item in examples), "counts": counts, "precision": tp / (tp + fp) if tp + fp else None, "recall": tp / (tp + fn) if tp + fn else None, "unchecked_rate": counts["not_checked"] / len(examples), "fresh_process_p95_ms": durations[math.ceil(len(durations) * .95) - 1]}
+    result = {"version": 1, "metric_scope": "checked_examples_only", "split": split, "examples": len(examples), "reviewed_examples": sum(item.get("review_status") == "reviewed" for item in examples), "counts": counts, "precision": tp / (tp + fp) if tp + fp else None, "recall": tp / (tp + fn) if tp + fn else None, "unchecked_rate": counts["not_checked"] / len(examples), "fresh_process_p95_ms": durations[math.ceil(len(durations) * .95) - 1]}
+    if review_metrics is not None:
+        result["historical_review_events"] = review_metrics
+    return result
 
 
 def main():
@@ -80,9 +119,13 @@ def main():
     parser.add_argument("corpus", type=Path)
     parser.add_argument("--binary", required=True)
     parser.add_argument("--split", choices=["development", "holdout"], default="holdout")
+    parser.add_argument("--review-events", type=Path, help="Optional local historical review log")
     args = parser.parse_args()
     try:
-        print(json.dumps(evaluate(args.binary, json.loads(args.corpus.read_text(encoding="utf-8")), args.split), indent=2))
+        corpus = json.loads(args.corpus.read_text(encoding="utf-8"))
+        review_log = json.loads(args.review_events.read_text(encoding="utf-8")) if args.review_events else None
+        result = evaluate(args.binary, corpus, args.split, review_log)
+        print(json.dumps(result, indent=2))
     except (OSError, KeyError, ValueError, TypeError) as error:
         parser.exit(2, f"evaluation failed: {error}\n")
 
