@@ -185,15 +185,20 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         text,
     ) {
         (Some("markdown"), Some(text)) => {
-            if preset
+            let (input, capabilities, links, map) = if preset
                 .gates
                 .iter()
                 .any(|gate| matches!(gate, ContentGate::LinkDestinations { .. }))
             {
-                destinations = aexeo_core::markdown_adapter::markdown_link_destinations(&text)?;
-            }
-            let (input, capabilities, links, map) =
-                aexeo_core::markdown_adapter::markdown_input_with_source_map(id, &text)?;
+                let (input, capabilities, links, map, extracted) =
+                    aexeo_core::markdown_adapter::markdown_input_with_source_map_and_destinations(
+                        id, &text,
+                    )?;
+                destinations = extracted;
+                (input, capabilities, links, map)
+            } else {
+                aexeo_core::markdown_adapter::markdown_input_with_source_map(id, &text)?
+            };
             source_map = Some(map);
             context = Some(capabilities);
             link_count = Some(links);

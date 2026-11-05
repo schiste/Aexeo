@@ -52,10 +52,16 @@ impl MarkdownSourceMap {
 /// Extract complete Markdown link destinations without fetching them. Returns
 /// `None` when a reference cannot be resolved conservatively.
 pub fn markdown_link_destinations(source: &str) -> Result<Option<Vec<String>>> {
+    Ok(link_destinations_from_root(&parse_markdown(source)?))
+}
+
+fn parse_markdown(source: &str) -> Result<Node> {
     let mut options = ParseOptions::gfm();
     options.constructs.frontmatter = true;
-    let root = markdown::to_mdast(source, &options)
-        .map_err(|err| anyhow!("Markdown parse error: {err}"))?;
+    markdown::to_mdast(source, &options).map_err(|err| anyhow!("Markdown parse error: {err}"))
+}
+
+fn link_destinations_from_root(root: &Node) -> Option<Vec<String>> {
     fn normalize(value: &str) -> Option<String> {
         value.is_ascii().then(|| {
             value
@@ -97,9 +103,9 @@ pub fn markdown_link_destinations(source: &str) -> Result<Option<Vec<String>>> {
         Some(())
     }
     let mut definitions = std::collections::BTreeMap::new();
-    collect_definitions(&root, &mut definitions);
+    collect_definitions(root, &mut definitions);
     let mut links = Vec::new();
-    Ok(collect_links(&root, &definitions, &mut links).map(|_| links))
+    collect_links(root, &definitions, &mut links).map(|_| links)
 }
 
 /// Extract prose and headings from Markdown, excluding code, HTML, and front matter.
@@ -138,10 +144,33 @@ fn extract_markdown(
     source: &str,
     map_source: bool,
 ) -> Result<(ContentInput, ContentContext, usize, MarkdownSourceMap)> {
-    let mut options = ParseOptions::gfm();
-    options.constructs.frontmatter = true;
-    let root = markdown::to_mdast(source, &options)
-        .map_err(|err| anyhow!("Markdown parse error: {err}"))?;
+    let root = parse_markdown(source)?;
+    extract_markdown_from_root(id, source, map_source, &root)
+}
+
+/// Extract source-mapped content and link destinations from one Markdown parse.
+pub fn markdown_input_with_source_map_and_destinations(
+    id: impl Into<String>,
+    source: &str,
+) -> Result<(
+    ContentInput,
+    ContentContext,
+    usize,
+    MarkdownSourceMap,
+    Option<Vec<String>>,
+)> {
+    let root = parse_markdown(source)?;
+    let destinations = link_destinations_from_root(&root);
+    let (input, context, count, map) = extract_markdown_from_root(id, source, true, &root)?;
+    Ok((input, context, count, map, destinations))
+}
+
+fn extract_markdown_from_root(
+    id: impl Into<String>,
+    source: &str,
+    map_source: bool,
+    root: &Node,
+) -> Result<(ContentInput, ContentContext, usize, MarkdownSourceMap)> {
     let mut text = String::new();
     let mut headings = Vec::new();
     let mut ranges = Vec::new();
@@ -214,7 +243,7 @@ fn extract_markdown(
         }
     }
     visit(
-        &root,
+        root,
         &mut text,
         &mut headings,
         &mut ranges,
@@ -270,6 +299,29 @@ fn extract_markdown(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn combined_adapter_matches_independent_extraction() {
+        for source in [
+            "# Heading\n\n[direct](https://example.org) and [ref][ref].\n\n[ref]: /relative",
+            "[réf][réf]\n\n[réf]: https://example.org",
+        ] {
+            let (input, _, count, map, destinations) =
+                markdown_input_with_source_map_and_destinations("test.md", source).unwrap();
+            let (baseline, _, baseline_count, baseline_map) =
+                markdown_input_with_source_map("test.md", source).unwrap();
+            assert_eq!(input.text, baseline.text);
+            assert_eq!(input.headings, baseline.headings);
+            assert_eq!(count, baseline_count);
+            assert_eq!(destinations, markdown_link_destinations(source).unwrap());
+            if let Some(text) = &input.text {
+                assert_eq!(
+                    map.source_position(source, text, 1, 1),
+                    baseline_map.source_position(source, text, 1, 1)
+                );
+            }
+        }
+    }
+
     #[test]
     fn maps_only_exact_markdown_text_spans() {
         let source = "---\ntitle: value\n---\n# Héllo *world*\n\nA [link](https://example.org).\n\nEscaped \\*star\\*.\n";
