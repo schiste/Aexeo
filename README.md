@@ -120,9 +120,13 @@ field counts when metadata is available. Supply metadata explicitly with
 
 Use `aexeo-cli content article.md --preset article-editorial --input-format markdown
 --format json --telemetry` to emit one JSON telemetry event to stderr. It contains
-only the evaluation duration and aggregate gate counts, not the input text,
-metadata, paths, or findings. The duration covers preset evaluation only, not
-file loading, Markdown parsing, or website crawling. Telemetry is opt-in and is
+aggregate gate counts and durations, not input text, metadata, paths, or findings.
+`evaluation_ms` covers preset evaluation only. For local content, optional
+`stages.input_load_ms` covers content, metadata, evidence and site loading and
+any requested fix; `stages.adapter_ms` covers input adaptation including Markdown
+parsing. These stages exclude preset resolution, output and process startup.
+Crawl events omit stage timings and `evaluation_ms` excludes crawling. The
+additive `stages` field is optional in schema version 1. Telemetry is opt-in and is
 not transmitted or retained by Aexeo; redirect stderr to retain it locally.
 
 The optional `article-readable` and `glossary-readable` presets combine their respective editorial starter with the shared `readability` preset, which adds an advisory 30-word sentence limit. Projects can inherit and override these gates independently. A custom content preset can configure the heuristic sentence-length gate:
