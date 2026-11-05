@@ -9,12 +9,37 @@ import time
 from pathlib import Path
 
 
-def evaluate(binary, corpus, split):
+def validate_corpus(corpus):
     if corpus.get("version") != 1:
         raise ValueError("unsupported corpus version")
+    ids = set()
+    text_splits = {}
+    for item in corpus["examples"]:
+        identifier, split, text = item["id"], item["split"], item["text"]
+        if not isinstance(identifier, str) or not identifier or identifier in ids:
+            raise ValueError("example IDs must be nonempty and unique across the corpus")
+        ids.add(identifier)
+        if split not in {"development", "holdout"} or not isinstance(text, str):
+            raise ValueError("invalid example split or text")
+        if text in text_splits and text_splits[text] != split:
+            raise ValueError("identical example text appears in multiple splits")
+        text_splits[text] = split
+        if item["expected"] not in {"passed", "failed"}:
+            raise ValueError("expected status must be passed or failed")
+        status = item.get("review_status", "not_reviewed")
+        if status not in {"reviewed", "not_reviewed"}:
+            raise ValueError("invalid review status")
+        if status == "reviewed":
+            review = item.get("review")
+            if not isinstance(review, dict) or any(not isinstance(review.get(key), str) or not review[key].strip() for key in ("reviewer", "method")):
+                raise ValueError("reviewed examples require reviewer and method provenance")
+
+
+def evaluate(binary, corpus, split):
+    validate_corpus(corpus)
     examples = [item for item in corpus["examples"] if item["split"] == split]
-    if not examples or len({item["id"] for item in examples}) != len(examples):
-        raise ValueError("split must contain unique examples")
+    if not examples:
+        raise ValueError("split must contain examples")
     counts = {"true_positive": 0, "false_positive": 0, "true_negative": 0, "false_negative": 0, "not_checked": 0}
     durations = []
     input_format = corpus.get("input_format")
@@ -29,8 +54,6 @@ def evaluate(binary, corpus, split):
             preset_path.write_text(corpus["preset_toml"], encoding="utf-8")
             arguments.extend(["--preset-source", f"{corpus['preset']}={preset_path}"])
         for item in examples:
-            if item["expected"] not in {"passed", "failed"}:
-                raise ValueError("expected status must be passed or failed")
             started = time.perf_counter()
             result = subprocess.run(arguments, input=item["text"], text=True, capture_output=True, check=False)
             durations.append((time.perf_counter() - started) * 1000)
