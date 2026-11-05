@@ -8,6 +8,7 @@ pub fn build_cli() -> Command {
             Command::new("link-graph")
                 .about("Analyze explicitly identified rendered pages and inventory")
                 .arg(Arg::new("input").required(true).help("Versioned JSON input file"))
+                .arg(Arg::new("audit").long("audit").action(ArgAction::SetTrue).help("Read an Aexeo audit artifact instead of a link graph input"))
                 .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate timings and counts as JSON on stderr")),
         )
         .subcommand(

@@ -189,3 +189,68 @@ fn missing_inventory_never_becomes_a_confirmed_orphan() {
     assert!(issues.contains(&serde_json::json!("crawl_incomplete")));
     assert!(report.get("confirmed_orphans").is_none());
 }
+
+#[test]
+fn audit_adapter_preserves_observed_urls_and_reports_missing_provenance() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("audit.json");
+    let input = serde_json::json!({
+        "command": "crawl",
+        "site": {
+            "site_url": "https://example.org/",
+            "root": "crawl", "deployment_model": "runtime_snapshot",
+            "pages": [
+                {"path":"crawl/a/index.html", "relative_path":"a/index.html", "route":"a", "raw_html":"<main><p><a href='/b'>B</a></p></main>", "response_headers":{}, "crawl_response":{"requested_url":"https://example.org/old", "observed_url":"https://example.org/a", "status_code":200, "headers_observed":true}},
+                {"path":"crawl/b/index.html", "relative_path":"b/index.html", "route":"b", "raw_html":"<main>B</main>", "response_headers":{}}
+            ]
+        }
+    });
+    fs::write(&path, serde_json::to_vec(&input).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .arg("link-graph")
+        .arg(&path)
+        .arg("--audit")
+        .arg("--telemetry")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["pages"].as_array().unwrap().len(), 1);
+    assert_eq!(report["pages"][0]["url"], "https://example.org/a");
+    assert_eq!(report["crawl_complete"], false);
+    for issue in [
+        "inventory_missing",
+        "audit_page_response_provenance_missing",
+        "audit_redirect_chain_unavailable",
+    ] {
+        assert!(
+            report["issues"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == issue)
+        );
+    }
+    let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["page_count"], 1);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("example.org"));
+}
+
+#[test]
+fn audit_adapter_rejects_artifacts_without_a_site_snapshot() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("audit.json");
+    fs::write(&path, r#"{"command":"crawl"}"#).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .arg("link-graph")
+        .arg(path)
+        .arg("--audit")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no site snapshot"));
+}
