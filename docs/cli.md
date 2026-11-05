@@ -4,6 +4,27 @@
 
 ## Commands
 
+## `link-graph`
+
+Analyze explicitly identified rendered pages and inventory
+
+```text
+Analyze explicitly identified rendered pages and inventory
+
+Usage: link-graph [OPTIONS] <input>
+
+Arguments:
+  <input>
+          Versioned JSON input file
+
+Options:
+      --telemetry
+          Emit aggregate timings and counts as JSON on stderr
+
+  -h, --help
+          Print help
+```
+
 ## `content`
 
 Run a portable content preset on a UTF-8 file or stdin

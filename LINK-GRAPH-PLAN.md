@@ -36,4 +36,11 @@ it does not yet change the existing link graph or orphan results.
   where the DOM parser cannot preserve them. Explicit context markers support
   otherwise ambiguous components. It is not yet wired to audits or adapters.
 - Distinct source-page counts by context and separate same-document jumps are
-  in progress; coverage-aware decisions, CLI reports and telemetry remain open.
+  merged (#64). A JSON input/report and aggregate local telemetry are in progress.
+  Existing crawls, EmDash inventories and editorial orphan decisions are not yet
+  wired to this report; coverage-aware reconciliation and real-site tests remain open.
+
+A live EmDash schema inspection showed that one CMS can contain multiple
+publications and non-page collections even when a collection is marked
+routable. The EmDash inventory adapter must use an explicit publication/surface
+mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
