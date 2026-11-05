@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../src/wasm-init.js", () => ({
   evaluateContentCollection: vi.fn(async () => JSON.stringify({ preset: "custom", input_id: "collection", gates: [{ gate_id: "unique", status: "failed", findings: [], reason: null }] })),
   evaluateContent: vi.fn(async () => JSON.stringify({
-    preset: "custom", input_id: "/sample", gates: [{
+    preset: "custom", input_id: "/sample", source_locations: [{ gate_id: "forbidden", finding_index: 0, block_index: 0, span_index: 1, utf16_offset: 2 }], gates: [{
       gate_id: "forbidden", status: "failed", findings: [], reason: null,
     }],
   })),
@@ -19,6 +19,17 @@ describe("portable content API", () => {
     const report = await evaluateContent(document, "custom", sources);
     expect(evaluateWasm).toHaveBeenCalledWith(JSON.stringify(document), "custom", JSON.stringify(sources));
     expect(report.gates[0]?.status).toBe("failed");
+    expect(report.source_locations?.[0]?.utf16_offset).toBe(2);
+  });
+  it("emits only aggregate telemetry when explicitly requested", async () => {
+    const onTelemetry = vi.fn();
+    await evaluateContent({ route: "/private", title: "Private text", body: [] }, "custom", {}, undefined, onTelemetry);
+    expect(onTelemetry).toHaveBeenCalledOnce();
+    const event = onTelemetry.mock.calls[0]?.[0];
+    expect(event.source_locations_mapped).toBe(1);
+    expect(event.evaluation_ms).toBeGreaterThanOrEqual(0);
+    expect(JSON.stringify(event)).not.toContain("Private");
+    expect(JSON.stringify(event)).not.toContain("/private");
   });
   it("passes the complete collection to the bridge", async () => {
     const documents = [{ route: "/a", title: "Same", body: [] }, { route: "/b", title: "Same", body: [] }];

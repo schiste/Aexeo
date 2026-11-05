@@ -17,6 +17,8 @@ Read each gate's status and findings. `passed` means only that gate passed; `not
 
 Inspect `summary`, each gate’s `blocking` flag, `measurements`, findings and reasons; a zero exit code does not mean every advisory gate passed. Treat heuristic warnings as review prompts, not automatic proof of an error. Revise only the relevant passage where appropriate, then rerun the same preset. Stop after at most three lint-and-revise attempts unless the user specifies another budget; report unresolved findings, unavailable checks, and any uncertainty instead of repeatedly rewriting. Raw-text mode includes Markdown syntax. Markdown mode reports finding positions in extracted prose. When `source_locations` contains an entry for the gate and zero-based finding index, use its exact original-file coordinates; missing entries mean no reliable source position was found. Inspect the original before editing.
 
+For EmDash content reports, `source_locations` instead identifies the zero-based block and span indices and a UTF-16 offset within the span; these coordinates apply only to the exact evaluated snapshot. Re-evaluate after editing.
+
 For performance diagnostics, add `--telemetry` to write one local JSON event to stderr; it records aggregate outcomes and evaluation time, not draft text. For local content, optional stage timings separate loading and adaptation, including Markdown parsing, from evaluation. Crawl events omit those stage timings and evaluation time excludes crawling. Redirect stderr only when a local record is useful.
 
 Use `--fix` only when an explicit file edit is intended. Currently the only supported content fix adds a missing final newline for a configured `final_newline` gate; inspect `applied_fixes` and rerun the checks.

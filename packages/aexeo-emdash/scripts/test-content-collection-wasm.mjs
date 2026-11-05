@@ -1,6 +1,6 @@
 // Run after the plugin build: this exercises the real WASM, not the mock bridge.
 import assert from "node:assert/strict";
-import { evaluateContentCollection } from "../dist/content.js";
+import { evaluateContent, evaluateContentCollection } from "../dist/content.js";
 
 const preset = `version=1
 name="collection"
@@ -19,3 +19,14 @@ assert.equal(report.gates[0].measurements.collection_items, 2);
 assert.equal(report.gates[0].measurements.duplicate_items, 1);
 assert.equal(report.gates[0].findings[0].path, "/b");
 console.log("WASM collection smoke test passed");
+
+const positionalPreset = `version=1
+name="positions"
+[[gates]]
+id="terms"
+kind="forbidden_terms"
+terms=["target"]
+`;
+const positionalReport = await evaluateContent({ route: "/test", title: "Test", body: [{ children: [{ _type: "span", text: "😀 target" }] }] }, "test", { test: positionalPreset });
+assert.deepEqual(positionalReport.source_locations, [{ gate_id: "terms", finding_index: 0, block_index: 0, span_index: 0, utf16_offset: 3 }]);
+console.log("WASM source location smoke test passed");

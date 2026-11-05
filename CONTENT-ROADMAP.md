@@ -32,6 +32,9 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [x] Explicit collection metadata uniqueness gate in core, CLI and EmDash/WASM
   ([PR #40](https://github.com/schiste/Aexeo/pull/40)); callers must supply the
   complete collection and missing metadata remains `not_checked`.
+- [x] Exact Markdown source locations and aggregate local mapping telemetry
+  ([PR #42](https://github.com/schiste/Aexeo/pull/42)); transformed spans can
+  remain unmapped, and projected finding coordinates are preserved.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
 - [ ] Independently reviewed, diverse evaluation corpus and held-out metrics.
   A synthetic, explicitly unreviewed starter and evaluator were delivered in

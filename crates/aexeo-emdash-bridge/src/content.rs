@@ -1,8 +1,8 @@
 //! Adapt EmDash portable text to the same content gates used by the CLI.
 use crate::{EmdashDocument, PortableTextChild};
 use aexeo_core::content_gate::{
-    ContentContext, ContentEvaluationContext, ContentInput, ContentParagraph, ContentPreset,
-    ContentReport,
+    ContentContext, ContentEvaluationContext, ContentGate, ContentInput, ContentParagraph,
+    ContentPreset, ContentReport,
 };
 use anyhow::Result;
 use std::collections::BTreeMap;
@@ -122,6 +122,117 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
     )
 }
 
+/// Location inside the exact Portable Text snapshot passed to evaluation.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EmdashSourceLocation {
+    pub gate_id: String,
+    pub finding_index: usize,
+    pub block_index: usize,
+    pub span_index: usize,
+    /// Zero-based UTF-16 code units, matching JavaScript string indexing.
+    pub utf16_offset: usize,
+}
+
+fn positional_gate(gate: &ContentGate) -> bool {
+    matches!(
+        gate,
+        ContentGate::ForbiddenTerms { .. }
+            | ContentGate::RepeatedTerms { .. }
+            | ContentGate::SentenceLength { .. }
+            | ContentGate::ParagraphLength { .. }
+    )
+}
+
+/// Map positional prose findings to spans. Synthetic block separators have no
+/// location. Indices apply only to this exact document snapshot.
+pub fn source_locations(
+    document: &EmdashDocument,
+    preset: &ContentPreset,
+    report: &ContentReport,
+) -> Vec<EmdashSourceLocation> {
+    if !preset
+        .gates
+        .iter()
+        .zip(&report.gates)
+        .any(|(gate, result)| positional_gate(gate) && !result.findings.is_empty())
+    {
+        return Vec::new();
+    }
+    let mut projection = String::new();
+    let mut spans = Vec::new();
+    for (block_index, block) in document.body.iter().enumerate() {
+        if block_index > 0 {
+            projection.push('\n');
+        }
+        for (span_index, child) in block.children.iter().enumerate() {
+            let PortableTextChild::Span(span) = child;
+            let start = projection.len();
+            projection.push_str(&span.text);
+            if !span.text.is_empty() {
+                spans.push((
+                    start,
+                    projection.len(),
+                    block_index,
+                    span_index,
+                    span.text.as_str(),
+                ));
+            }
+        }
+    }
+    let mut line_starts = vec![0];
+    line_starts.extend(projection.match_indices('\n').map(|(i, _)| i + 1));
+    let mut result = Vec::new();
+    for (gate, evaluated) in preset.gates.iter().zip(&report.gates) {
+        if !positional_gate(gate) {
+            continue;
+        }
+        for (finding_index, finding) in evaluated.findings.iter().enumerate() {
+            let Some(line_start) = finding
+                .line
+                .checked_sub(1)
+                .and_then(|i| line_starts.get(i))
+                .copied()
+            else {
+                continue;
+            };
+            let Some(column) = finding.column.checked_sub(1) else {
+                continue;
+            };
+            let Some(line) = projection
+                .get(line_start..)
+                .and_then(|s| s.split('\n').next())
+            else {
+                continue;
+            };
+            let Some((within_line, _)) = line.char_indices().nth(column) else {
+                continue;
+            };
+            let offset = line_start + within_line;
+            let Some(index) = spans
+                .partition_point(|&(start, _, _, _, _)| start <= offset)
+                .checked_sub(1)
+            else {
+                continue;
+            };
+            let (start, end, block_index, span_index, text) = spans[index];
+            if offset >= end {
+                continue;
+            }
+            let Some(prefix) = text.get(..offset - start) else {
+                continue;
+            };
+            result.push(EmdashSourceLocation {
+                gate_id: evaluated.gate_id.clone(),
+                finding_index,
+                block_index,
+                span_index,
+                utf16_offset: prefix.encode_utf16().count(),
+            });
+        }
+    }
+    result
+}
+
 pub fn evaluate_content(
     document: &EmdashDocument,
     preset: &ContentPreset,
@@ -174,6 +285,33 @@ mod tests {
         content_gate::GateStatus,
         content_presets::{builtin_content_presets, resolve_content_preset},
     };
+    #[test]
+    fn findings_map_to_their_portable_text_span_and_utf16_offset() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"children":[{"_type":"span","text":"Heading"}]},{"children":[{"_type":"span","text":"😀 "},{"_type":"span","text":"pré target"}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['target']\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        let positions = source_locations(&document, &preset, &report);
+        assert_eq!(positions.len(), 1);
+        assert_eq!(
+            (
+                positions[0].block_index,
+                positions[0].span_index,
+                positions[0].utf16_offset
+            ),
+            (1, 1, 4)
+        );
+    }
+    #[test]
+    fn source_mapping_counts_utf16_surrogate_pairs() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"children":[{"_type":"span","text":"😀 target"}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['target']\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(
+            source_locations(&document, &preset, &report)[0].utf16_offset,
+            3
+        );
+    }
+
     #[test]
     fn link_count_coalesces_adjacent_spans_and_ignores_unused_marks() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"markDefs":[{"_key":"a","_type":"link","href":"https://example.org"},{"_key":"unused","_type":"link","href":"https://example.net"}],"children":[{"_type":"span","text":"One ","marks":["a"]},{"_type":"span","text":"link","marks":["a","strong"]},{"_type":"span","text":" then "},{"_type":"span","text":"again","marks":["a"]}]}]}"#).unwrap();
