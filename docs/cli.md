@@ -18,6 +18,9 @@ Arguments:
           Versioned JSON input file
 
 Options:
+      --audit
+          Read an Aexeo audit artifact instead of a link graph input
+
       --telemetry
           Emit aggregate timings and counts as JSON on stderr
 

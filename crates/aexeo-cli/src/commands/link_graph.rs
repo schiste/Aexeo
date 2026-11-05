@@ -1,7 +1,7 @@
 use std::fs;
 use std::time::Instant;
 
-use aexeo_core::link_report::{LinkReportInput, build_link_report};
+use aexeo_core::link_report::{LinkReportInput, build_link_report, build_link_report_from_audit};
 use anyhow::{Context, Result};
 use clap::ArgMatches;
 
@@ -11,9 +11,14 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
     let started = Instant::now();
     let path = required_arg(matches, "input")?;
     let data = fs::read(path).with_context(|| format!("cannot read link graph input: {path}"))?;
-    let input: LinkReportInput =
-        serde_json::from_slice(&data).context("invalid link graph input JSON")?;
-    let report = build_link_report(&input)?;
+    let report = if matches.get_flag("audit") {
+        let artifact = serde_json::from_slice(&data).context("invalid audit artifact JSON")?;
+        build_link_report_from_audit(&artifact)?
+    } else {
+        let input: LinkReportInput =
+            serde_json::from_slice(&data).context("invalid link graph input JSON")?;
+        build_link_report(&input)?
+    };
     if matches.get_flag("telemetry") {
         let observed = report
             .links
@@ -29,7 +34,7 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
             "event": "link_graph_analysis",
             "version": 1,
             "elapsed_us": started.elapsed().as_micros(),
-            "page_count": input.pages.len(),
+            "page_count": report.pages.len(),
             "link_count": observed,
             "indeterminate_count": report.links.indeterminate.len(),
             "issue_count": report.issues.len(),
