@@ -150,3 +150,13 @@ export async function evaluateContent(
   await ensureInitialized();
   return glue.evaluateContent(documentJson, presetName, sourcesJson, evidenceJson);
 }
+
+/** Run a portable content preset over a complete EmDash collection. */
+export async function evaluateContentCollection(
+  documentsJson: string,
+  presetName: string,
+  sourcesJson?: string | null,
+): Promise<string> {
+  await ensureInitialized();
+  return glue.evaluateContentCollection(documentsJson, presetName, sourcesJson);
+}

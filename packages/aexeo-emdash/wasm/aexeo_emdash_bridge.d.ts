@@ -7,6 +7,11 @@
  */
 export function evaluateContent(document_json: string, preset_name: string, sources_json?: string | null, evidence_json?: string | null): string;
 
+/**
+ * Evaluate collection-scoped gates on a complete set of EmDash documents.
+ */
+export function evaluateContentCollection(documents_json: string, preset_name: string, sources_json?: string | null): string;
+
 export function evaluateDocuments(documents_json: string, config_json?: string | null): string;
 
 /**

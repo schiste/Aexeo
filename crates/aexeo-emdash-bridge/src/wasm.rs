@@ -149,6 +149,37 @@ pub fn validate_facts_manifest_js(
         .map_err(|error| JsError::new(&format!("failed to serialize result: {error}")))
 }
 
+fn resolve_content_preset_js(
+    preset_name: &str,
+    sources_json: Option<&str>,
+) -> Result<aexeo_core::content_gate::ContentPreset, JsError> {
+    let mut sources = aexeo_core::content_presets::builtin_content_presets();
+    if let Some(json) = sources_json.filter(|value| !value.is_empty()) {
+        let custom: std::collections::BTreeMap<String, String> = serde_json::from_str(json)
+            .map_err(|error| JsError::new(&format!("failed to parse preset sources: {error}")))?;
+        sources.extend(custom);
+    }
+    aexeo_core::content_presets::resolve_content_preset(preset_name, &sources)
+        .map_err(|error| JsError::new(&format!("failed to resolve preset: {error:#}")))
+}
+
+/// Evaluate collection-scoped gates on a complete set of EmDash documents.
+#[wasm_bindgen(js_name = "evaluateContentCollection")]
+pub fn evaluate_content_collection_js(
+    documents_json: &str,
+    preset_name: &str,
+    sources_json: Option<String>,
+) -> Result<String, JsError> {
+    install_panic_hook();
+    let documents: Vec<EmdashDocument> = serde_json::from_str(documents_json)
+        .map_err(|error| JsError::new(&format!("failed to parse documents: {error}")))?;
+    let preset = resolve_content_preset_js(preset_name, sources_json.as_deref())?;
+    let report = crate::content::evaluate_collection(&documents, &preset)
+        .map_err(|error| JsError::new(&format!("collection evaluation failed: {error:#}")))?;
+    serde_json::to_string(&report)
+        .map_err(|error| JsError::new(&format!("failed to serialize report: {error}")))
+}
+
 /// Evaluate one EmDash document using named TOML preset sources. The source map
 /// is JSON: {"preset-name": "TOML text"}; built-ins are available by default.
 #[wasm_bindgen(js_name = "evaluateContent")]
@@ -161,14 +192,7 @@ pub fn evaluate_content_js(
     install_panic_hook();
     let document: EmdashDocument = serde_json::from_str(document_json)
         .map_err(|error| JsError::new(&format!("failed to parse document: {error}")))?;
-    let mut sources = aexeo_core::content_presets::builtin_content_presets();
-    if let Some(json) = sources_json.as_deref().filter(|value| !value.is_empty()) {
-        let custom: std::collections::BTreeMap<String, String> = serde_json::from_str(json)
-            .map_err(|error| JsError::new(&format!("failed to parse preset sources: {error}")))?;
-        sources.extend(custom);
-    }
-    let preset = aexeo_core::content_presets::resolve_content_preset(preset_name, &sources)
-        .map_err(|error| JsError::new(&format!("failed to resolve preset: {error:#}")))?;
+    let preset = resolve_content_preset_js(preset_name, sources_json.as_deref())?;
     let evidence = evidence_json
         .as_deref()
         .filter(|value| !value.is_empty())

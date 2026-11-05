@@ -246,4 +246,7 @@ or blank metadata in any item also yields `not_checked`; detected duplicates
 remain visible as findings. The host is responsible for collection completeness.
 Rust EmDash hosts can use `content::evaluate_collection` to adapt a complete
 slice of documents; document and site gates without their inputs remain
-`not_checked`. Collection input is not yet exposed by the CLI or WASM API.
+`not_checked`. JavaScript hosts can use `evaluateContentCollection` from the
+EmDash content API. The CLI does not yet accept collection input. To check the
+real WASM boundary locally, build the plugin and run `npm run test:wasm` in
+`packages/aexeo-emdash`; the ordinary TypeScript unit test uses a mock.
