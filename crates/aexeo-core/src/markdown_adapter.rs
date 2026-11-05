@@ -148,21 +148,30 @@ fn extract_markdown(
     extract_markdown_from_root(id, source, map_source, &root)
 }
 
+/// The result of adapting Markdown and extracting link destinations together.
+pub struct MarkdownContentWithDestinations {
+    pub input: ContentInput,
+    pub context: ContentContext,
+    pub link_count: usize,
+    pub source_map: MarkdownSourceMap,
+    pub destinations: Option<Vec<String>>,
+}
+
 /// Extract source-mapped content and link destinations from one Markdown parse.
 pub fn markdown_input_with_source_map_and_destinations(
     id: impl Into<String>,
     source: &str,
-) -> Result<(
-    ContentInput,
-    ContentContext,
-    usize,
-    MarkdownSourceMap,
-    Option<Vec<String>>,
-)> {
+) -> Result<MarkdownContentWithDestinations> {
     let root = parse_markdown(source)?;
     let destinations = link_destinations_from_root(&root);
     let (input, context, count, map) = extract_markdown_from_root(id, source, true, &root)?;
-    Ok((input, context, count, map, destinations))
+    Ok(MarkdownContentWithDestinations {
+        input,
+        context,
+        link_count: count,
+        source_map: map,
+        destinations,
+    })
 }
 
 fn extract_markdown_from_root(
@@ -305,8 +314,13 @@ mod tests {
             "# Heading\n\n[direct](https://example.org) and [ref][ref].\n\n[ref]: /relative",
             "[réf][réf]\n\n[réf]: https://example.org",
         ] {
-            let (input, _, count, map, destinations) =
-                markdown_input_with_source_map_and_destinations("test.md", source).unwrap();
+            let MarkdownContentWithDestinations {
+                input,
+                link_count: count,
+                source_map: map,
+                destinations,
+                ..
+            } = markdown_input_with_source_map_and_destinations("test.md", source).unwrap();
             let (baseline, _, baseline_count, baseline_map) =
                 markdown_input_with_source_map("test.md", source).unwrap();
             assert_eq!(input.text, baseline.text);

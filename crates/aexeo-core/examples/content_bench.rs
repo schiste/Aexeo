@@ -69,8 +69,12 @@ headings = ["Summary"]
         black_box(preset.evaluate(&parsed)?);
         parse_and_eval.push(start.elapsed().as_micros());
         let start = Instant::now();
-        let (input, context, count, _map, destinations) =
+        let adapted =
             markdown_input_with_source_map_and_destinations("links.md", black_box(&link_source))?;
+        let input = adapted.input;
+        let context = adapted.context;
+        let count = adapted.link_count;
+        let destinations = adapted.destinations;
         let capabilities = aexeo_core::content_gate::ContentEvaluationContext {
             adapter: Some(&context),
             link_count: Some(count),

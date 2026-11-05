@@ -190,12 +190,17 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 .iter()
                 .any(|gate| matches!(gate, ContentGate::LinkDestinations { .. }))
             {
-                let (input, capabilities, links, map, extracted) =
+                let adapted =
                     aexeo_core::markdown_adapter::markdown_input_with_source_map_and_destinations(
                         id, &text,
                     )?;
-                destinations = extracted;
-                (input, capabilities, links, map)
+                destinations = adapted.destinations;
+                (
+                    adapted.input,
+                    adapted.context,
+                    adapted.link_count,
+                    adapted.source_map,
+                )
             } else {
                 aexeo_core::markdown_adapter::markdown_input_with_source_map(id, &text)?
             };
