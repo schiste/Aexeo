@@ -41,12 +41,14 @@ it does not yet change the existing link graph or orphan results.
   an orphan from an observation alone.
 - Runtime captures preserve optional requested/final URLs, response status and
   response-header availability across checkpoints and audit artifacts (#66).
-  Redirect chains remain unavailable. An adapter for audit artifacts is in review
-  (#67); a qualified legacy LNK002 message with compatible fingerprints is in
-  review (#68). An open PR is not a completed delivery.
+  Redirect chains remain unavailable. An audit artifact adapter is merged (#67);
+  the qualified legacy LNK002 message preserves baseline fingerprints (#68).
+  The audit adapter intentionally withholds coverage completeness without a
+  matching inventory and surface identity.
 - A live Aeptus URL returned a generic noindex holding page, not the article
-  visible in the CMS preview. That sample confirms uncertainty handling, not
-  that the live site and CMS inventories describe the same publication.
+  visible in the CMS preview. An end-to-end HTTP crawl and audit adapter report
+  captured the URL and noindex and flagged incomplete coverage. This sample does
+  not establish that the live site and CMS describe the same publication.
 
 A live EmDash schema inspection showed that one CMS can contain multiple
 publications and non-page collections even when a collection is marked
