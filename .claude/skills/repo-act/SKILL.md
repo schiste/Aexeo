@@ -31,3 +31,5 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - `build`: `cargo build --workspace`
 - `dev`: `cargo run`
 - `module_format_check`: `cargo fmt --all -- --check` after adding or moving modules; this also checks parent declarations.
+
+- For a broker-coordinated `gh pr merge --match-head-commit`, use the full `headRefOid` from `gh pr view --json headRefOid`; an abbreviated SHA is rejected.
