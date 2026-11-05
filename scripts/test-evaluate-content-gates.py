@@ -1,6 +1,9 @@
 import importlib.util
 import hashlib
 import json
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -82,6 +85,23 @@ class EvaluateTests(unittest.TestCase):
         log["events"].append(log["events"][0])
         with self.assertRaisesRegex(ValueError, "duplicate"):
             eval_module.aggregate_review_events(corpus, "holdout", log)
+
+    def test_cli_accepts_review_log_and_outputs_aggregate_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            item = {"id": "private-id", "split": "holdout", "text": "private text", "expected": "passed"}
+            corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": [item]}
+            event = {"example_id": item["id"], "text_sha256": hashlib.sha256(item["text"].encode()).hexdigest(), "model_status": "failed", "reviewer_status": "passed", "reviewer": "private reviewer", "method": "manual"}
+            (root / "corpus.json").write_text(json.dumps(corpus))
+            (root / "reviews.json").write_text(json.dumps({"version": 1, "gate_id": "g", "events": [event]}))
+            binary = root / "cli"
+            binary.write_text("#!/bin/sh\nprintf '%s\\n' '{\"gates\":[{\"gate_id\":\"g\",\"status\":\"passed\"}]}'\n")
+            binary.chmod(0o700)
+            output = subprocess.run([sys.executable, str(Path(eval_module.__file__)), str(root / "corpus.json"), "--binary", str(binary), "--review-events", str(root / "reviews.json")], text=True, capture_output=True, check=True)
+            report = json.loads(output.stdout)
+            self.assertEqual(report["historical_review_events"]["counts"]["overrides_to_pass"], 1)
+            self.assertNotIn("private", output.stdout)
+            self.assertEqual(output.stderr, "")
 
     def test_rejects_duplicate_ids_and_invalid_gates(self):
         case = {"id": "a", "split": "holdout", "text": "a", "expected": "passed"}
