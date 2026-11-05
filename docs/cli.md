@@ -33,6 +33,9 @@ Options:
       --site <site>
           Load a static website for site gates
 
+      --collection <collection>
+          Load a complete JSON array of content items for collection gates
+
       --site-config <site-config>
           Existing site audit config file
 
