@@ -535,7 +535,16 @@ impl ContentPreset {
                                 .map(|(offset, ch)| (offset, Some(ch)))
                                 .chain(std::iter::once((text.len(), None)))
                             {
-                                if ch.is_none_or(|ch| delimiters.contains(ch)) {
+                                let decimal_point = ch == Some('.')
+                                    && text[..offset]
+                                        .chars()
+                                        .next_back()
+                                        .is_some_and(|c| c.is_ascii_digit())
+                                    && text[offset + 1..]
+                                        .chars()
+                                        .next()
+                                        .is_some_and(|c| c.is_ascii_digit());
+                                if !decimal_point && ch.is_none_or(|ch| delimiters.contains(ch)) {
                                     let count =
                                         text[segment_start..offset].split_whitespace().count();
                                     if count > 0 {

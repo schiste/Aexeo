@@ -137,8 +137,7 @@ blocking = false
 ```
 
 It splits at the configured characters and counts whitespace-separated words;
-this is a simple heuristic, not linguistic sentence segmentation. Abbreviations,
-decimals and languages without whitespace-separated words need tailored rules.
+this is a simple heuristic, not linguistic sentence segmentation. Abbreviations and languages without whitespace-separated words need tailored rules. Decimal points between ASCII digits do not end a sentence.
 Locations refer to the adapter's projected text. Delimiters default to `. ! ?`
 (without spaces), and the gate reports its limit, sentence count and longest
 sentence; absent text is `not_checked`.

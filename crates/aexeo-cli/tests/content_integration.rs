@@ -610,3 +610,36 @@ fn sentence_length_rejects_zero_limit_and_empty_delimiters() {
         assert!(aexeo_core::content_gate::ContentPreset::from_toml(&source).is_err());
     }
 }
+
+#[test]
+fn sentence_gate_keeps_decimal_numbers_inside_sentences() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "-",
+            "--preset",
+            "article-readable",
+            "--format",
+            "json",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"Rates fell from 45.1 to 34.5 percent. Next sentence.")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let gate = report["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|gate| gate["gate_id"] == "editorial.sentence_length")
+        .unwrap();
+    assert_eq!(gate["measurements"]["sentence_count"], 2);
+    assert_eq!(gate["measurements"]["longest_sentence_words"], 7);
+}
