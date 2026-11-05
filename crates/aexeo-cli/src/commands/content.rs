@@ -71,6 +71,8 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     if args.get_flag("fix") && (path == "-" || args.get_flag("no-text")) {
         bail!("--fix requires a local content file");
     }
+    let measuring = args.get_flag("telemetry");
+    let input_started = measuring.then(std::time::Instant::now);
     let mut text = if args.get_flag("no-text") {
         None
     } else if path == "-" {
@@ -145,6 +147,8 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     } else {
         path.clone()
     };
+    let input_load_ms = input_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
+    let adapter_started = measuring.then(std::time::Instant::now);
     let mut context = None;
     let mut link_count = None;
     let mut input = match (
@@ -169,6 +173,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     };
     input.metadata = metadata;
     input.evidence_sources = evidence_sources;
+    let adapter_ms = adapter_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
     let started = std::time::Instant::now();
     let mut report = preset.evaluate_with_links(
         &input,
@@ -180,7 +185,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     let evaluation_ms = started.elapsed().as_secs_f64() * 1000.0;
     report.applied_fixes = applied_fixes;
     if args.get_flag("telemetry") {
-        print_telemetry(&report, evaluation_ms)?;
+        print_telemetry(&report, evaluation_ms, input_load_ms.zip(adapter_ms))?;
     }
     if args.get_one::<String>("format").map(String::as_str) == Some("json") {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -253,7 +258,11 @@ fn evaluate_crawl(
     let started = std::time::Instant::now();
     let report = audit.evaluate_preset(preset, &config)?;
     if args.get_flag("telemetry") {
-        print_telemetry(&report.content, started.elapsed().as_secs_f64() * 1000.0)?;
+        print_telemetry(
+            &report.content,
+            started.elapsed().as_secs_f64() * 1000.0,
+            None,
+        )?;
     }
     if args.get_one::<String>("format").map(String::as_str) == Some("json") {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -322,8 +331,13 @@ fn print_summary(report: &aexeo_core::content_gate::ContentReport) {
 fn print_telemetry(
     report: &aexeo_core::content_gate::ContentReport,
     evaluation_ms: f64,
+    stages: Option<(f64, f64)>,
 ) -> Result<()> {
-    let event = serde_json::json!({"schema_version": 1, "event": "content_evaluation", "evaluation_ms": evaluation_ms, "summary": report.summary});
+    let mut event = serde_json::json!({"schema_version": 1, "event": "content_evaluation", "evaluation_ms": evaluation_ms, "summary": report.summary});
+    if let Some((input_load_ms, adapter_ms)) = stages {
+        event["stages"] =
+            serde_json::json!({"input_load_ms": input_load_ms, "adapter_ms": adapter_ms});
+    }
     eprintln!("{}", serde_json::to_string(&event)?);
     Ok(())
 }
