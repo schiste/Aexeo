@@ -81,3 +81,13 @@ the inventory object uses the same schema as above. Identity and date are
 caller-supplied, not independently established by the audit. Even when the
 identities match, audit-based reports retain incomplete crawl coverage until
 it can be attested from a complete, equivalent surface.
+
+## Benchmark
+
+Run `cargo run --release -p aexeo-core --example link_graph_bench` to measure
+in-process graph construction on a synthetic fixture of 50 pages and 500 links.
+The JSON output reports average, p50 and p95 over 30 warmed iterations; fixture
+construction, process startup and I/O are excluded. The fixture first verifies
+that every page has ten distinct incoming sources. Results depend on hardware
+and load; no CI budget is claimed until release-mode measurements are calibrated
+on CI runners.
