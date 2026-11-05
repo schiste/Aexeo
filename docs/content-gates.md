@@ -108,6 +108,13 @@ A Rust host implements `ContentGateExtensions` and calls `evaluate_with_extensio
 
 ## Local latency measurement
 
+For local content evaluation, `--telemetry` also emits `gate_timings_ms`, an
+array in resolved preset order. Values measure the execution of each gate,
+including result construction, and omit preset validation, source mapping and
+output rendering. The event contains no gate IDs or content. Instrumentation
+adds clock and observer overhead; timings are diagnostic rather than a benchmark.
+The crawl path does not currently provide individual gate timings.
+
 Run `cargo run --release --locked --offline -p aexeo-core --example content_bench` to measure the content gates alone and Markdown parsing plus evaluation over a synthetic 29 KB document. It reports p50 and p95 across 100 iterations; figures depend on hardware and concurrent load and exclude CLI process startup. With `--json` it also emits machine-readable p50, p95 and average measurements for individual evaluation, Markdown parsing plus evaluation, and batches of 50. `scripts/check-performance.sh` enforces generous average-time and p95 regression ceilings; these are not latency guarantees for other workloads. The fresh-process CLI benchmark includes startup and evaluation of a tiny text input, but does not flush operating-system caches and is not a cold-cache measurement.
 
 ## Explicit safe fix
