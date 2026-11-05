@@ -5,7 +5,7 @@ description: Run Aexeo's local content gates while drafting or reviewing a text 
 
 # Check content with Aexeo
 
-Choose the preset required by the project or content task. List available presets with `aexeo-cli content --list-presets`. The built-in `article` and `glossary` presets are minimal starting points; `article-editorial` and `glossary-editorial` add advisory length and metadata checks. None is a comprehensive quality assessment. `seo-website` wraps the existing static SEO/GEO audit. See `docs/content-gates.md` in the Aexeo repository for the current gate types and configuration.
+Choose the preset required by the project or content task. List available presets with `aexeo-cli content --list-presets`. The built-in `article` and `glossary` presets are minimal starting points; `article-editorial` and `glossary-editorial` add advisory length and metadata checks. `article-readable` and `glossary-readable` also add an advisory sentence-length heuristic. None is a comprehensive quality assessment. `seo-website` wraps the existing static SEO/GEO audit. See `docs/content-gates.md` in the Aexeo repository for the current gate types and configuration.
 
 Run `aexeo-cli content path/to/file --input-format markdown --preset article --format json`. For an unsaved draft, pipe UTF-8 text to `aexeo-cli content - --preset article --format json`. Add `--preset-source custom=path/to/preset.toml --preset custom` for a custom preset, and repeat `--preset-source` for any custom parents. Use `--explain` to inspect the resolved preset before running it. For a live website, use `aexeo-cli content --crawl-url https://example.org --preset seo-website --format json`; inspect `crawl_status`, `truncation_reason`, and the original audit findings as well as the gate results. A partial crawl is not a complete review.
 
@@ -15,7 +15,7 @@ Read each gate's status and findings. `passed` means only that gate passed; `not
 
 Inspect `summary`, each gate’s `blocking` flag, `measurements`, findings and reasons; a zero exit code does not mean every advisory gate passed. Treat heuristic warnings as review prompts, not automatic proof of an error. Revise only the relevant passage where appropriate, then rerun the same preset. Stop after at most three lint-and-revise attempts unless the user specifies another budget; report unresolved findings, unavailable checks, and any uncertainty instead of repeatedly rewriting. Raw-text mode includes Markdown syntax. Markdown mode checks extracted prose and reports positions in that projection, rather than source line positions; inspect the original before editing.
 
-For performance diagnostics, add `--telemetry` to write one local JSON event to stderr; it records aggregate outcomes and evaluation time, not draft text. It excludes file loading and Markdown parsing. Redirect stderr only when a local record is useful.
+For performance diagnostics, add `--telemetry` to write one local JSON event to stderr; it records aggregate outcomes and evaluation time, not draft text. For local content, optional stage timings separate loading and adaptation, including Markdown parsing, from evaluation. Crawl events omit those stage timings and evaluation time excludes crawling. Redirect stderr only when a local record is useful.
 
 Use `--fix` only when an explicit file edit is intended. Currently the only supported content fix adds a missing final newline for a configured `final_newline` gate; inspect `applied_fixes` and rerun the checks.
 
