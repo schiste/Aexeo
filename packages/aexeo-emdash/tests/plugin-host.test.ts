@@ -284,9 +284,15 @@ describe("sandbox afterSave", () => {
     });
     expect(await host.inspect.kv.get("document:/journal/previous/")).not.toBeNull();
 
+    // A distinctive finding proves that this second hook has completed its
+    // final write before the test host and its database are disposed.
+    const movedFinding = {
+      rule_id: "moved", path: "/journal/hello/", message: "Moved",
+      line: 1, column: 1, severity: "warning", suggestion: null, scope: "page",
+    };
     await host.http.respond(
       "https://evaluator.test/evaluate",
-      new Response("[]", { status: 200 }),
+      new Response(JSON.stringify([movedFinding]), { status: 200 }),
     );
     const moved = await host.actions.content.update("posts", english.id, {
       data: { title: "Hello moved", body: body("Hello moved") },
@@ -300,6 +306,10 @@ describe("sandbox afterSave", () => {
       ).toBeNull();
       expect(await host?.inspect.kv.get(documentKey)).not.toBeNull();
       expect(host?.http.requests()).toHaveLength(2);
+      expect(await host?.inspect.kv.get("findings:/journal/hello/")).toMatchObject({
+        route: "/journal/hello/",
+        findings: [movedFinding],
+      });
     });
     // The entry keeps serving its own current route; only the orphaned
     // keys for the route it left behind are removed.
