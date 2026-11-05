@@ -109,6 +109,12 @@ cargo run -p aexeo-cli -- adapters
 
 `cargo run -p aexeo-cli -- docs generate .` refreshes generated docs from the Rust codebase. `cargo run -p aexeo-cli -- docs check .` fails when those docs are stale.
 
+### Agent content skill
+
+The repository ships the [Aexeo content skill](skills/aexeo-content/SKILL.md)
+for agent-driven lint, revision, and interpretation of reports. Load or install
+it using your agent runtime's skill mechanism; it is not installed automatically.
+
 ### Content report and local telemetry
 
 Content reports count configured gates by outcome, including blocking failures and
