@@ -22,12 +22,18 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
   50-item batches and fresh-process CLI runs, with p50/p95 telemetry. Fresh
   processes do not imply cold operating-system caches.
 - [x] Configurable sentence-length heuristic and opt-in composed preset ([PR #29](https://github.com/schiste/Aexeo/pull/29)).
-- [ ] Bounded agent lint-and-revise workflow and local telemetry guidance ([PR #30](https://github.com/schiste/Aexeo/pull/30)).
-- [ ] Additional editorial gates, including paragraph length and link checks.
+- [x] Bounded agent lint-and-revise workflow and local telemetry guidance ([PR #30](https://github.com/schiste/Aexeo/pull/30)).
+- [x] Configurable paragraph-length gate with Markdown and EmDash adapter
+  capabilities ([PR #33](https://github.com/schiste/Aexeo/pull/33)).
+- [ ] Additional editorial gates: link presence is proposed in [PR #35](https://github.com/schiste/Aexeo/pull/35);
+  repeated-term checks and destination validation remain open.
 - [ ] Collection scopes and adapter capabilities, with cross-adapter source mapping.
 - [ ] Independently reviewed, diverse evaluation corpus and held-out metrics.
-  A synthetic, explicitly unreviewed starter and evaluator are proposed in
-  [PR #32](https://github.com/schiste/Aexeo/pull/32).
+  A synthetic, explicitly unreviewed starter and evaluator were delivered in
+  [PR #32](https://github.com/schiste/Aexeo/pull/32); they do not establish
+  production accuracy or substitute for independent review.
+- [x] Shared article/glossary readability preset delivered in
+  [PR #34](https://github.com/schiste/Aexeo/pull/34).
 - [ ] Source and factuality evaluation after the basic gates are validated.
 
 An open PR is not yet delivered. Update this tracker when each change lands and
