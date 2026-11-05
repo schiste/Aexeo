@@ -1,10 +1,26 @@
 //! Adapt EmDash portable text to the same content gates used by the CLI.
 use crate::{EmdashDocument, PortableTextChild};
 use aexeo_core::content_gate::{
-    ContentContext, ContentInput, ContentParagraph, ContentPreset, ContentReport,
+    ContentContext, ContentEvaluationContext, ContentInput, ContentParagraph, ContentPreset,
+    ContentReport,
 };
 use anyhow::Result;
 use std::collections::BTreeMap;
+
+fn content_metadata(document: &EmdashDocument) -> BTreeMap<String, String> {
+    let mut metadata: BTreeMap<String, String> = document.meta.clone();
+    metadata.insert("title".into(), document.title.clone());
+    if let Some(value) = &document.description {
+        metadata.insert("description".into(), value.clone());
+    }
+    if let Some(value) = &document.canonical {
+        metadata.insert("canonical".into(), value.clone());
+    }
+    if let Some(value) = &document.lang {
+        metadata.insert("lang".into(), value.clone());
+    }
+    metadata
+}
 
 /// Positions in findings refer to this adapter's projected plain text: spans
 /// are concatenated within each block, and blocks are separated by newlines.
@@ -27,17 +43,7 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let mut metadata: BTreeMap<String, String> = document.meta.clone();
-    metadata.insert("title".into(), document.title.clone());
-    if let Some(value) = &document.description {
-        metadata.insert("description".into(), value.clone());
-    }
-    if let Some(value) = &document.canonical {
-        metadata.insert("canonical".into(), value.clone());
-    }
-    if let Some(value) = &document.lang {
-        metadata.insert("lang".into(), value.clone());
-    }
+    let metadata = content_metadata(document);
     let headings = document
         .body
         .iter()
@@ -123,6 +129,33 @@ pub fn evaluate_content(
     evaluate_content_with_evidence(document, preset, None)
 }
 
+/// Evaluate collection-scoped gates over a caller-supplied complete collection.
+/// Document and site gates without corresponding inputs remain `not_checked`.
+pub fn evaluate_collection(
+    documents: &[EmdashDocument],
+    preset: &ContentPreset,
+) -> Result<ContentReport> {
+    let items: Vec<_> = documents
+        .iter()
+        .map(|document| ContentInput {
+            id: document.route.clone(),
+            metadata: Some(content_metadata(document)),
+            ..Default::default()
+        })
+        .collect();
+    let root = ContentInput {
+        id: "collection".into(),
+        ..Default::default()
+    };
+    preset.evaluate_with_capabilities(
+        &root,
+        &ContentEvaluationContext {
+            collection: Some(&items),
+            ..Default::default()
+        },
+    )
+}
+
 /// Evaluate with caller-supplied source snapshots; no source is fetched here.
 pub fn evaluate_content_with_evidence(
     document: &EmdashDocument,
@@ -159,6 +192,29 @@ min = 2
         assert_eq!(result.gates[0].status, GateStatus::Passed);
         assert_eq!(result.gates[0].measurements["link_count"], 2);
     }
+    #[test]
+    fn collection_adapter_checks_duplicate_document_titles() {
+        let documents: Vec<EmdashDocument> = serde_json::from_str(
+            r#"[{"route":"/a","title":"Same","body":[]},{"route":"/b","title":"Same","body":[]}]"#,
+        )
+        .unwrap();
+        let preset = ContentPreset::from_toml(
+            r#"
+version = 1
+name = "collection"
+[[gates]]
+id = "unique"
+kind = "unique_collection_metadata"
+field = "title"
+"#,
+        )
+        .unwrap();
+        let report = evaluate_collection(&documents, &preset).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[0].measurements["collection_items"], 2);
+        assert_eq!(report.gates[0].findings[0].path, "/b");
+    }
+
     #[test]
     fn collection_gate_is_explicitly_unavailable_for_single_emdash_document() {
         let document: EmdashDocument =

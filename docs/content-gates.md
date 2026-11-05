@@ -244,4 +244,6 @@ Rust hosts provide a complete collection in `ContentEvaluationContext` with `eva
 The ordinary single-item interface reports this gate as `not_checked`. Missing
 or blank metadata in any item also yields `not_checked`; detected duplicates
 remain visible as findings. The host is responsible for collection completeness.
-This API does not yet provide a collection input option in the CLI or EmDash.
+Rust EmDash hosts can use `content::evaluate_collection` to adapt a complete
+slice of documents; document and site gates without their inputs remain
+`not_checked`. Collection input is not yet exposed by the CLI or WASM API.
