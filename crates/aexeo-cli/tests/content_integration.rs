@@ -643,3 +643,71 @@ fn sentence_gate_keeps_decimal_numbers_inside_sentences() {
     assert_eq!(gate["measurements"]["sentence_count"], 2);
     assert_eq!(gate["measurements"]["longest_sentence_words"], 7);
 }
+
+#[test]
+fn paragraph_gate_uses_adapter_structure_and_does_not_count_headings() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    std::fs::write(&preset, "version=1\nname='Paragraphs'\n[[gates]]\nid='paragraphs'\nkind='paragraph_length'\nmax_words=3\nblocking=false\n").unwrap();
+    let source = format!("custom={}", preset.display());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "-",
+            "--input-format",
+            "markdown",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &source,
+            "--format",
+            "json",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"# A very long heading ignored\n\nOne two.\n\nOne two three four.\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let gate = &report["gates"][0];
+    assert_eq!(gate["status"], "failed");
+    assert_eq!(gate["required_capability"], "paragraphs");
+    assert_eq!(gate["measurements"]["paragraph_count"], 2);
+    assert_eq!(gate["measurements"]["longest_paragraph_words"], 4);
+    assert_eq!(gate["findings"][0]["line"], 3);
+    let mut raw = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "-",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &source,
+            "--format",
+            "json",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    raw.stdin
+        .take()
+        .unwrap()
+        .write_all(b"One two three four.")
+        .unwrap();
+    let report: serde_json::Value =
+        serde_json::from_slice(&raw.wait_with_output().unwrap().stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "not_checked");
+}
+
+#[test]
+fn paragraph_gate_rejects_zero_word_limit() {
+    let source = "version=1\nname='Invalid'\n[[gates]]\nid='paragraphs'\nkind='paragraph_length'\nmax_words=0\n";
+    assert!(aexeo_core::content_gate::ContentPreset::from_toml(source).is_err());
+}
