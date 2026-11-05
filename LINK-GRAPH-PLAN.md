@@ -36,11 +36,37 @@ it does not yet change the existing link graph or orphan results.
   where the DOM parser cannot preserve them. Explicit context markers support
   otherwise ambiguous components. It is not yet wired to audits or adapters.
 - Distinct source-page counts by context and separate same-document jumps are
-  merged (#64). A JSON input/report and aggregate local telemetry are in progress.
-  Existing crawls, EmDash inventories and editorial orphan decisions are not yet
-  wired to this report; coverage-aware reconciliation and real-site tests remain open.
+  merged (#64). A versioned JSON report with optional aggregate-only telemetry,
+  noindex, redirect and canonical uncertainty is merged (#65). It never declares
+  an orphan from an observation alone.
+- Runtime captures preserve optional requested/final URLs, response status and
+  response-header availability across checkpoints and audit artifacts (#66).
+  Redirect chains remain unavailable. An audit artifact adapter is merged (#67);
+  the qualified legacy LNK002 message preserves baseline fingerprints (#68).
+  The audit adapter intentionally withholds coverage completeness without a
+  matching inventory and surface identity.
+- A live Aeptus URL returned a generic noindex holding page, not the article
+  visible in the CMS preview. An end-to-end HTTP crawl and audit adapter report
+  captured the URL and noindex and flagged incomplete coverage. This sample does
+  not establish that the live site and CMS describe the same publication.
 
 A live EmDash schema inspection showed that one CMS can contain multiple
 publications and non-page collections even when a collection is marked
 routable. The EmDash inventory adapter must use an explicit publication/surface
 mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
+
+## Remaining integration and validation
+
+- [ ] Produce an EmDash inventory from an explicit publication, route, locale,
+  status and surface mapping; do not infer completeness from `routable`.
+- [ ] Capture matching release and snapshot identity, reliable crawl completeness,
+  redirect chains and explicit noindex/canonical/locale-fallback treatment.
+- [ ] Integrate coverage-aware graph observations into existing site reports;
+  validate legacy rule semantics and preserve contracts and baseline compatibility.
+- [ ] Run end-to-end fixtures and real-site comparisons for static and runtime
+  sources, multiple locales, incomplete crawls, redirects and cross-origin URLs.
+- [ ] Benchmark graph parsing independently and retain opt-in, aggregate-only
+  operational telemetry.
+- [ ] Finish the independent, diverse human-reviewed evaluation corpus and the
+  outstanding broader content-quality roadmap. Fact/source verification remains
+  later in that roadmap and must not be presented as already validated.
