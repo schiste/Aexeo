@@ -1312,7 +1312,12 @@ impl ContentPreset {
                     Some((site, config)) => {
                         match crate::static_check::run_native_site_rule_group(site, config, group)?
                         {
-                            Some(results) => findings.extend(results),
+                            Some(results) => {
+                                findings.extend(results);
+                                if site.crawl_meta.as_ref().is_some_and(|meta| meta.truncated) {
+                                    reason = Some("site crawl is incomplete; findings cover only visited pages".into());
+                                }
+                            }
                             None => {
                                 reason = Some(format!(
                                     "site rule group {group} is disabled by site config"
@@ -1325,6 +1330,12 @@ impl ContentPreset {
                 ContentGate::SiteAudit { .. } => match site {
                     Some((site, config)) => {
                         findings.extend(crate::static_check::run_checks_for_site(site, config));
+                        if site.crawl_meta.as_ref().is_some_and(|meta| meta.truncated) {
+                            reason = Some(
+                                "site crawl is incomplete; findings cover only visited pages"
+                                    .into(),
+                            );
+                        }
                     }
                     None => reason = Some("site is unavailable from this adapter".into()),
                 },
@@ -1868,6 +1879,48 @@ field = "slug"
         assert!(ContentPreset::from_toml(&PRESET.replace("version = 1", "version = 2")).is_err());
         assert!(ContentPreset::from_toml(&PRESET.replace("min = 3", "mn = 3")).is_err());
     }
+    #[test]
+    fn partial_site_gates_report_incomplete_coverage_and_keep_findings() {
+        let preset = ContentPreset::from_toml("version=1\nname='site'\n[[gates]]\nid='links'\nkind='site_group'\ngroup='links'\n[[gates]]\nid='audit'\nkind='site_audit'\n").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("index.html"),
+            "<html><body><a href='/missing'>missing</a></body></html>",
+        )
+        .unwrap();
+        let mut site = crate::load_site(root.path()).unwrap();
+        let config = crate::Config::default();
+        let input = ContentInput::default();
+        let complete = preset
+            .evaluate_with_site(&input, Some((&site, &config)))
+            .unwrap();
+        assert!(
+            complete.gates[0]
+                .findings
+                .iter()
+                .any(|f| f.rule_id == "LNK001")
+        );
+        site.crawl_meta = Some(crate::site::CrawlMeta {
+            truncated: true,
+            ..Default::default()
+        });
+        let report = preset
+            .evaluate_with_site(&input, Some((&site, &config)))
+            .unwrap();
+        for gate in &report.gates {
+            assert_eq!(gate.status, GateStatus::NotChecked);
+            assert!(gate.reason.as_deref().unwrap().contains("incomplete"));
+        }
+        assert!(
+            !report.gates[0]
+                .findings
+                .iter()
+                .any(|f| f.rule_id == "LNK001")
+        );
+        assert!(!report.gates[1].findings.is_empty());
+        assert_eq!(report.summary.blocking_not_checked, 2);
+    }
+
     #[test]
     fn site_groups_keep_policy_and_report_disabled_checks() {
         let preset = ContentPreset::from_toml(

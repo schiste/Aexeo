@@ -840,7 +840,15 @@ fn content_preset_crawl_preserves_complete_and_partial_status() {
         assert_eq!(report["content"]["gates"][0]["gate_id"], "site.seo_geo");
         assert!(report["audit_findings"].is_array());
         if expected == "partial" {
+            assert_eq!(report["content"]["gates"][0]["status"], "not_checked");
+            assert!(
+                report["content"]["gates"][0]["reason"]
+                    .as_str()
+                    .unwrap()
+                    .contains("incomplete")
+            );
             let telemetry = parse_json(&output.stderr);
+            assert_eq!(telemetry["summary"]["not_checked"], 1);
             let timings = telemetry["gate_timings_ms"].as_array().unwrap();
             assert_eq!(
                 timings.len(),
