@@ -818,29 +818,42 @@ fn content_preset_crawl_preserves_complete_and_partial_status() {
     let server = spawn_server_with_explicit_shutdown();
     let temp = tempfile::tempdir().unwrap();
     for (limit, expected) in [("1", "partial"), ("10", "complete")] {
-        let output = Command::new(bin())
-            .current_dir(temp.path())
-            .args([
-                "content",
-                "--crawl-url",
-                server.base_url(),
-                "--crawl-max-pages",
-                limit,
-                "--preset",
-                "seo-website",
-                "--format",
-                "json",
-            ])
-            .output()
-            .unwrap();
+        let mut command = Command::new(bin());
+        command.current_dir(temp.path());
+        command.args([
+            "content",
+            "--crawl-url",
+            server.base_url(),
+            "--crawl-max-pages",
+            limit,
+            "--preset",
+            "seo-website",
+            "--format",
+            "json",
+        ]);
+        if expected == "partial" {
+            command.arg("--telemetry");
+        }
+        let output = command.output().unwrap();
         let report = parse_json(&output.stdout);
         assert_eq!(report["crawl_status"], expected);
         assert_eq!(report["content"]["gates"][0]["gate_id"], "site.seo_geo");
         assert!(report["audit_findings"].is_array());
         if expected == "partial" {
+            let telemetry = parse_json(&output.stderr);
+            let timings = telemetry["gate_timings_ms"].as_array().unwrap();
+            assert_eq!(
+                timings.len(),
+                report["content"]["gates"].as_array().unwrap().len()
+            );
+            assert!(timings.iter().all(|t| t.as_f64().is_some_and(|n| n >= 0.0)));
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(!stderr.contains(server.base_url()));
+            assert!(!stderr.contains("site.seo_geo"));
             assert_eq!(output.status.code(), Some(2));
             assert!(report["truncation_reason"].is_string());
         } else {
+            assert!(output.stderr.is_empty());
             assert_eq!(output.status.code(), Some(1));
             assert!(report["truncation_reason"].is_null());
         }
