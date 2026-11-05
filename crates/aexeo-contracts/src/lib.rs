@@ -555,7 +555,16 @@ impl Finding {
             path: self.path.clone(),
             line: self.line,
             column: self.column,
-            message: self.message.clone(),
+            // Preserve the historic LNK002 baseline fingerprint while making
+            // the displayed diagnostic explicit about observation limits.
+            message: if self.rule_id == "LNK002" {
+                self.message
+                    .strip_prefix("no inbound links observed in the analyzed pages: ")
+                    .map(|route| format!("orphan page: {route}"))
+                    .unwrap_or_else(|| self.message.clone())
+            } else {
+                self.message.clone()
+            },
         }
     }
 }
@@ -643,6 +652,25 @@ mod tests {
         };
         assert_eq!(artifact.status, AuditStatus::Complete);
         assert_eq!(artifact.version, 2);
+    }
+
+    #[test]
+    fn orphan_observation_keeps_legacy_baseline_fingerprint() {
+        let old = Finding {
+            rule_id: "LNK002".into(),
+            message: "orphan page: /guide".into(),
+            path: "guide.html".into(),
+            line: 1,
+            column: 1,
+            severity: "warning".into(),
+            suggestion: None,
+            scope: FindingScope::Page,
+        };
+        let mut current = old.clone();
+        current.message = "no inbound links observed in the analyzed pages: /guide".into();
+        assert_eq!(old.fingerprint(), current.fingerprint());
+        current.rule_id = "OTHER".into();
+        assert_ne!(old.fingerprint(), current.fingerprint());
     }
 
     #[test]
