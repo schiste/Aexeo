@@ -1,0 +1,21 @@
+# Content gate evaluation
+
+Run the evaluator with a CLI built from a revision containing the corpus preset:
+
+```sh
+python3 scripts/evaluate-content-gates.py eval/content/sentence-length.json \
+  --binary target/release/aexeo-cli --split holdout
+python3 scripts/test-evaluate-content-gates.py
+```
+
+The runner invokes the local CLI once per example and does not contact a remote
+service. Its precision and recall use checked examples only; `unchecked_rate`
+is reported separately. `fresh_process_p95_ms` includes process startup and
+is not a cold-cache measurement. Results contain counts and timings, not text.
+
+This initial corpus is a tiny synthetic regression fixture. None of its labels
+has been independently reviewed; its results do not estimate production accuracy.
+The development and holdout partitions are fixed to prevent accidental mixing,
+but both were created together, so they are not independent validation. Replace
+or supplement them with diverse, independently human-reviewed examples, record
+review provenance and licensing, and keep held-out labels separate from tuning.
