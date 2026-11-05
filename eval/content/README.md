@@ -25,3 +25,11 @@ The development and holdout partitions are fixed to prevent accidental mixing,
 but both were created together, so they are not independent validation. Replace
 or supplement them with diverse, independently human-reviewed examples, record
 review provenance and licensing, and keep held-out labels separate from tuning.
+
+All example IDs must be unique across the corpus, and identical text cannot
+appear in both development and holdout partitions. This catches exact leakage,
+not paraphrases, related examples, or other forms of dependence. Examples marked
+`reviewed` must include a `review` object with nonempty `reviewer` and `method`
+strings. These fields record supplied provenance; the runner cannot verify the
+reviewer, independence, or label quality. Report only aggregate counts, and do
+not include private reviewer information in published corpora.

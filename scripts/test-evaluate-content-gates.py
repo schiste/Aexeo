@@ -13,7 +13,7 @@ spec.loader.exec_module(eval_module)
 class EvaluateTests(unittest.TestCase):
     def test_metrics_include_unchecked_without_counting_it_as_a_pass(self):
         corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": [
-            {"id": "a", "split": "holdout", "text": "a", "expected": "failed", "review_status": "reviewed"},
+            {"id": "a", "split": "holdout", "text": "a", "expected": "failed", "review_status": "reviewed", "review": {"reviewer": "reviewer-1", "method": "manual"}},
             {"id": "b", "split": "holdout", "text": "b", "expected": "passed"},
             {"id": "c", "split": "holdout", "text": "c", "expected": "failed"},
         ]}
@@ -41,6 +41,23 @@ class EvaluateTests(unittest.TestCase):
             return SimpleNamespace(returncode=0, stdout='{"gates":[{"gate_id":"g","status":"passed"}]}')
         with patch.object(eval_module.subprocess, "run", side_effect=run):
             self.assertEqual(eval_module.evaluate("cli", corpus, "holdout")["counts"]["true_negative"], 1)
+
+    def test_rejects_split_leakage_and_unsubstantiated_review_status(self):
+        base = {"id": "dev", "split": "development", "text": "same text", "expected": "passed"}
+        holdout = {"id": "test", "split": "holdout", "text": "same text", "expected": "passed"}
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": [base, holdout]}
+        with self.assertRaisesRegex(ValueError, "multiple splits"):
+            eval_module.evaluate("cli", corpus, "holdout")
+        holdout["text"] = "different text"
+        holdout["id"] = "dev"
+        with self.assertRaisesRegex(ValueError, "unique across"):
+            eval_module.evaluate("cli", corpus, "holdout")
+        holdout["id"] = "test"
+        holdout["review_status"] = "reviewed"
+        with self.assertRaisesRegex(ValueError, "provenance"):
+            eval_module.evaluate("cli", corpus, "holdout")
+        holdout["review"] = {"reviewer": "reviewer-1", "method": "manual"}
+        eval_module.validate_corpus(corpus)
 
     def test_rejects_duplicate_ids_and_invalid_gates(self):
         case = {"id": "a", "split": "holdout", "text": "a", "expected": "passed"}
