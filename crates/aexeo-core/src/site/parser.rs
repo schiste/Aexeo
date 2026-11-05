@@ -63,6 +63,7 @@ pub(super) fn build_page_from_source(
         h1_texts,
         has_breadcrumb_nav,
         response_headers,
+        crawl_response: None,
         links,
         internal_links,
         alternate_links,

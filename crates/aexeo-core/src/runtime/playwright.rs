@@ -754,6 +754,12 @@ fn fetch_result_from_payload(url: &str, payload: &serde_json::Value) -> FetchRes
             .as_str()
             .map(str::to_string)
             .unwrap_or_else(|| url.to_string()),
+        effective_url_observed: payload["effectiveUrl"]
+            .as_str()
+            .is_some_and(|url| !url.is_empty()),
+        headers_observed: payload["headers"]
+            .as_object()
+            .is_some_and(|headers| headers.values().all(serde_json::Value::is_string)),
     }
 }
 
@@ -768,6 +774,18 @@ mod tests {
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn missing_browser_response_metadata_is_not_treated_as_observed() {
+        let fetched = super::fetch_result_from_payload(
+            "https://example.com",
+            &serde_json::json!({"headers": {"x-robots-tag": null}}),
+        );
+        assert_eq!(fetched.effective_url, "https://example.com");
+        assert!(!fetched.effective_url_observed);
+        assert!(!fetched.headers_observed);
+        assert_eq!(fetched.status_code, None);
+    }
 
     #[test]
     fn playwright_availability_honors_explicit_runner() {

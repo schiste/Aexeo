@@ -481,6 +481,7 @@ mod tests {
             h1_texts: Vec::new(),
             has_breadcrumb_nav: false,
             response_headers: BTreeMap::new(),
+            crawl_response: None,
             links: Vec::new(),
             internal_links: Vec::new(),
             alternate_links: Vec::new(),

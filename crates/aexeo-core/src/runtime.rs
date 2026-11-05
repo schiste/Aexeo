@@ -1730,7 +1730,19 @@ fn materialize_runtime_site(
             planner.align_with_effective_url(&fetched.effective_url);
             let route = route_from_urlish(&fetched.effective_url).unwrap_or_default();
             let snapshot_write_started_at = Instant::now();
-            snapshot.write_page(&route, &body, &fetched.headers)?;
+            snapshot.write_page(
+                &route,
+                &body,
+                &fetched.headers,
+                Some(aexeo_contracts::CrawlResponseProvenance {
+                    requested_url: current.clone(),
+                    observed_url: fetched
+                        .effective_url_observed
+                        .then(|| fetched.effective_url.clone()),
+                    status_code: fetched.status_code,
+                    headers_observed: fetched.headers_observed,
+                }),
+            )?;
             performance.record(
                 Phase::SnapshotWrite,
                 snapshot_write_started_at.elapsed().as_micros() as u64,
@@ -3068,6 +3080,7 @@ mod tests {
             h1_texts: vec!["Home".to_string()],
             has_breadcrumb_nav: false,
             response_headers: BTreeMap::new(),
+            crawl_response: None,
             links: Vec::new(),
             internal_links: Vec::new(),
             alternate_links: alternates,
