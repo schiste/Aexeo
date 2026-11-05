@@ -58,10 +58,9 @@ fn text_content(root: &Handle) -> String {
     let mut result = String::new();
     let mut stack = vec![root.clone()];
     while let Some(node) = stack.pop() {
-        if let NodeData::Element { name, .. } = &node.data {
-            if matches!(name.local.as_ref(), "script" | "style") {
-                continue;
-            }
+        if matches!(&node.data, NodeData::Element { name, .. } if matches!(name.local.as_ref(), "script" | "style"))
+        {
+            continue;
         }
         if let NodeData::Text { contents } = &node.data {
             result.push_str(&contents.borrow());
@@ -96,10 +95,10 @@ pub fn extract_links(
     let mut base = None;
     let mut nodes = vec![dom.document.clone()];
     while let Some(node) = nodes.pop() {
-        if let NodeData::Element { name, .. } = &node.data {
-            if name.local.as_ref() == "base" && base.is_none() {
-                base = attribute(&node, "href");
-            }
+        if base.is_none()
+            && matches!(&node.data, NodeData::Element { name, .. } if name.local.as_ref() == "base")
+        {
+            base = attribute(&node, "href");
         }
         nodes.extend(node.children.borrow().iter().rev().cloned());
     }
@@ -153,23 +152,26 @@ pub fn extract_links(
             if tag == "p" {
                 scope.paragraph = Some(text_content(&node));
             }
-            if tag == "a" {
-                if let Some(href) = attribute(&node, "href") {
-                    let resolution = resolve_link(&href, source_url, site_origin, base.as_deref());
-                    links.push(LinkEvidence {
-                        source: source_url.to_string(),
-                        href,
-                        anchor: text_content(&node),
-                        locale: scope.locale.clone(),
-                        snapshot_date: snapshot_date.map(str::to_string),
-                        context: scope.context,
-                        component: scope.component.clone(),
-                        paragraph: scope.paragraph.clone(),
-                        line: None,
-                        column: None,
-                        resolution,
-                    });
-                }
+            let href = if tag == "a" {
+                attribute(&node, "href")
+            } else {
+                None
+            };
+            if let Some(href) = href {
+                let resolution = resolve_link(&href, source_url, site_origin, base.as_deref());
+                links.push(LinkEvidence {
+                    source: source_url.to_string(),
+                    href,
+                    anchor: text_content(&node),
+                    locale: scope.locale.clone(),
+                    snapshot_date: snapshot_date.map(str::to_string),
+                    context: scope.context,
+                    component: scope.component.clone(),
+                    paragraph: scope.paragraph.clone(),
+                    line: None,
+                    column: None,
+                    resolution,
+                });
             }
         }
         stack.extend(
