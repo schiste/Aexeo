@@ -78,6 +78,17 @@ pub enum ContentGate {
         blocking: bool,
         min: usize,
     },
+    /// Checks destination syntax and permitted schemes without network access.
+    LinkDestinations {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+        allowed_schemes: Vec<String>,
+        #[serde(default = "default_blocking")]
+        allow_relative: bool,
+    },
     /// Heuristic sentence length using configured punctuation and whitespace words.
     SentenceLength {
         id: String,
@@ -226,6 +237,7 @@ impl ContentGate {
         match self {
             Self::WordCount { severity, .. }
             | Self::LinkCount { severity, .. }
+            | Self::LinkDestinations { severity, .. }
             | Self::SentenceLength { severity, .. }
             | Self::ParagraphLength { severity, .. }
             | Self::RepeatedTerms { severity, .. }
@@ -245,6 +257,7 @@ impl ContentGate {
         match self {
             Self::WordCount { blocking, .. }
             | Self::LinkCount { blocking, .. }
+            | Self::LinkDestinations { blocking, .. }
             | Self::SentenceLength { blocking, .. }
             | Self::ParagraphLength { blocking, .. }
             | Self::RepeatedTerms { blocking, .. }
@@ -268,6 +281,7 @@ impl ContentGate {
             | Self::RepeatedTerms { .. }
             | Self::ForbiddenTerms { .. } => "text",
             Self::LinkCount { .. } => "links",
+            Self::LinkDestinations { .. } => "link_destinations",
             Self::RequiredMetadata { .. } => "metadata",
             Self::ParagraphLength { .. } => "paragraphs",
             Self::RequiredHeadings { .. } => "headings",
@@ -284,6 +298,7 @@ impl ContentGate {
         match self {
             Self::WordCount { id, .. }
             | Self::LinkCount { id, .. }
+            | Self::LinkDestinations { id, .. }
             | Self::SentenceLength { id, .. }
             | Self::ParagraphLength { id, .. }
             | Self::RepeatedTerms { id, .. }
@@ -299,6 +314,22 @@ impl ContentGate {
             | Self::SiteAudit { id, .. }
             | Self::SiteGroup { id, .. } => id,
         }
+    }
+}
+
+fn valid_link_destination(destination: &str, schemes: &[String], allow_relative: bool) -> bool {
+    if destination.is_empty()
+        || destination.chars().any(char::is_whitespace)
+        || destination.chars().any(char::is_control)
+    {
+        return false;
+    }
+    match url::Url::parse(destination) {
+        Ok(parsed) => schemes.iter().any(|allowed| allowed == parsed.scheme()),
+        Err(url::ParseError::RelativeUrlWithoutBase) if allow_relative => {
+            !destination.starts_with("//")
+        }
+        Err(_) => false,
     }
 }
 
@@ -461,6 +492,26 @@ impl ContentPreset {
                         || matches!((min, max), (Some(a), Some(b)) if a > b) =>
                 {
                     bail!("invalid word count bounds for {}", gate.id())
+                }
+                ContentGate::LinkDestinations {
+                    allowed_schemes, ..
+                } if allowed_schemes.is_empty()
+                    || allowed_schemes.iter().any(|scheme| {
+                        let mut bytes = scheme.bytes();
+                        !bytes.next().is_some_and(|b| b.is_ascii_lowercase())
+                            || !bytes.all(|b| {
+                                b.is_ascii_lowercase()
+                                    || b.is_ascii_digit()
+                                    || matches!(b, b'+' | b'-' | b'.')
+                            })
+                    })
+                    || allowed_schemes.iter().collect::<BTreeSet<_>>().len()
+                        != allowed_schemes.len() =>
+                {
+                    bail!(
+                        "link destination schemes must be unique lowercase URI schemes for {}",
+                        gate.id()
+                    )
                 }
                 ContentGate::ParagraphLength { max_words, .. } if *max_words == 0 => {
                     bail!("paragraph length needs a positive limit for {}", gate.id())
@@ -626,6 +677,16 @@ impl ContentPreset {
         input: &ContentInput,
         capabilities: &ContentEvaluationContext<'_>,
     ) -> Result<ContentReport> {
+        self.evaluate_with_destinations(input, capabilities, None)
+    }
+
+    /// Evaluate with an optional complete list of adapter-supplied link destinations.
+    pub fn evaluate_with_destinations(
+        &self,
+        input: &ContentInput,
+        capabilities: &ContentEvaluationContext<'_>,
+        destinations: Option<&[String]>,
+    ) -> Result<ContentReport> {
         let site = capabilities.site;
         let extensions = capabilities.extensions;
         let context = capabilities.adapter;
@@ -750,6 +811,37 @@ impl ContentPreset {
                         None => reason = Some("links are unavailable from this adapter".into()),
                     }
                 }
+                ContentGate::LinkDestinations {
+                    allowed_schemes,
+                    allow_relative,
+                    ..
+                } => match destinations {
+                    Some(values) => {
+                        let mut invalid = 0;
+                        for (index, destination) in values.iter().enumerate() {
+                            if !valid_link_destination(
+                                destination,
+                                allowed_schemes,
+                                *allow_relative,
+                            ) {
+                                invalid += 1;
+                                emit(
+                                    format!(
+                                        "Link destination #{} is invalid or has a disallowed scheme",
+                                        index + 1
+                                    ),
+                                    1,
+                                    1,
+                                );
+                            }
+                        }
+                        measurements.insert("checked_destinations".into(), values.len());
+                        measurements.insert("invalid_destinations".into(), invalid);
+                    }
+                    None => {
+                        reason = Some("link destinations are unavailable from this adapter".into())
+                    }
+                },
                 ContentGate::ParagraphLength { max_words, .. } => {
                     measurements.insert("max_words".into(), *max_words);
                     match context.and_then(|c| c.paragraphs.as_ref()) {
@@ -1427,6 +1519,59 @@ field = "slug"
                 .status,
             GateStatus::Passed
         );
+    }
+
+    #[test]
+    fn destination_gate_checks_schemes_and_requires_capability() {
+        let preset = ContentPreset::from_toml("version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https','mailto']\n").unwrap();
+        let input = ContentInput::default();
+        assert_eq!(
+            preset.evaluate(&input).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+        let valid = vec![
+            "https://example.org/a".into(),
+            "/local".into(),
+            "#fragment".into(),
+            "mailto:a@example.org".into(),
+        ];
+        let passed = preset
+            .evaluate_with_destinations(&input, &ContentEvaluationContext::default(), Some(&valid))
+            .unwrap();
+        assert_eq!(passed.gates[0].status, GateStatus::Passed);
+        assert_eq!(passed.gates[0].measurements["checked_destinations"], 4);
+        let invalid = vec![
+            "javascript:alert(1)".into(),
+            "https://".into(),
+            "".into(),
+            "https://example.org/has space".into(),
+            "//example.org/path".into(),
+        ];
+        let failed = preset
+            .evaluate_with_destinations(
+                &input,
+                &ContentEvaluationContext::default(),
+                Some(&invalid),
+            )
+            .unwrap();
+        assert_eq!(failed.gates[0].status, GateStatus::Failed);
+        assert_eq!(failed.gates[0].measurements["invalid_destinations"], 5);
+        assert!(failed.gates[0].findings[0].message.contains("#1"));
+        assert!(failed.gates[0].findings[4].message.contains("#5"));
+        let absolute = ContentPreset::from_toml("version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\nallow_relative=false\n").unwrap();
+        assert_eq!(
+            absolute
+                .evaluate_with_destinations(
+                    &input,
+                    &ContentEvaluationContext::default(),
+                    Some(&valid)
+                )
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::Failed
+        );
+        assert!(ContentPreset::from_toml("version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['HTTPS']\n").is_err());
     }
 
     #[test]

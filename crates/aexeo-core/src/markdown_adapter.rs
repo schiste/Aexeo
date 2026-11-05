@@ -49,6 +49,59 @@ impl MarkdownSourceMap {
     }
 }
 
+/// Extract complete Markdown link destinations without fetching them. Returns
+/// `None` when a reference cannot be resolved conservatively.
+pub fn markdown_link_destinations(source: &str) -> Result<Option<Vec<String>>> {
+    let mut options = ParseOptions::gfm();
+    options.constructs.frontmatter = true;
+    let root = markdown::to_mdast(source, &options)
+        .map_err(|err| anyhow!("Markdown parse error: {err}"))?;
+    fn normalize(value: &str) -> Option<String> {
+        value.is_ascii().then(|| {
+            value
+                .split_ascii_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_ascii_lowercase()
+        })
+    }
+    fn collect_definitions(node: &Node, defs: &mut std::collections::BTreeMap<String, String>) {
+        if let Node::Definition(def) = node
+            && let Some(key) = normalize(&def.identifier)
+        {
+            defs.entry(key).or_insert_with(|| def.url.clone());
+        }
+        if let Some(children) = node.children() {
+            for child in children {
+                collect_definitions(child, defs);
+            }
+        }
+    }
+    fn collect_links(
+        node: &Node,
+        defs: &std::collections::BTreeMap<String, String>,
+        links: &mut Vec<String>,
+    ) -> Option<()> {
+        match node {
+            Node::Link(link) => links.push(link.url.clone()),
+            Node::LinkReference(link) => {
+                links.push(defs.get(&normalize(&link.identifier)?)?.clone())
+            }
+            _ => {}
+        }
+        if let Some(children) = node.children() {
+            for child in children {
+                collect_links(child, defs, links)?;
+            }
+        }
+        Some(())
+    }
+    let mut definitions = std::collections::BTreeMap::new();
+    collect_definitions(&root, &mut definitions);
+    let mut links = Vec::new();
+    Ok(collect_links(&root, &definitions, &mut links).map(|_| links))
+}
+
 /// Extract prose and headings from Markdown, excluding code, HTML, and front matter.
 pub fn markdown_input(id: impl Into<String>, source: &str) -> Result<ContentInput> {
     Ok(markdown_input_with_context(id, source)?.0)
@@ -227,6 +280,21 @@ mod tests {
         assert_eq!(map.source_position(source, &text, 2, 3), Some((6, 4)));
         assert_eq!(map.source_position(source, &text, 3, 9), None);
         assert_eq!(map.source_position(source, &text, 0, 1), None);
+    }
+
+    #[test]
+    fn extracts_direct_and_reference_destinations_without_images() {
+        let links = markdown_link_destinations(
+            "[one](https://example.org) [two][REF] ![image](img.png)\n\n[ref]: /local",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(links, ["https://example.org", "/local"]);
+        assert!(
+            markdown_link_destinations("[two][é]\n\n[é]: /local")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

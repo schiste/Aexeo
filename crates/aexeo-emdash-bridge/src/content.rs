@@ -267,6 +267,32 @@ pub fn evaluate_collection(
     )
 }
 
+fn content_link_destinations(document: &EmdashDocument) -> Vec<String> {
+    let mut links = Vec::new();
+    for block in &document.body {
+        let used: std::collections::BTreeSet<_> = block
+            .children
+            .iter()
+            .flat_map(|child| match child {
+                PortableTextChild::Span(span) => span.marks.iter().map(String::as_str),
+            })
+            .collect();
+        for definition in &block.mark_defs {
+            if definition.mark_type == "link" && used.contains(definition.key.as_str()) {
+                links.push(
+                    definition
+                        .data
+                        .get("href")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("")
+                        .to_owned(),
+                );
+            }
+        }
+    }
+    links
+}
+
 /// Evaluate with caller-supplied source snapshots; no source is fetched here.
 pub fn evaluate_content_with_evidence(
     document: &EmdashDocument,
@@ -275,7 +301,20 @@ pub fn evaluate_content_with_evidence(
 ) -> anyhow::Result<ContentReport> {
     let (mut input, context, link_count) = content_input_with_context(document);
     input.evidence_sources = evidence_sources;
-    preset.evaluate_with_links(&input, None, None, Some(&context), Some(link_count))
+    let destinations = preset
+        .gates
+        .iter()
+        .any(|gate| matches!(gate, ContentGate::LinkDestinations { .. }))
+        .then(|| content_link_destinations(document));
+    preset.evaluate_with_destinations(
+        &input,
+        &ContentEvaluationContext {
+            adapter: Some(&context),
+            link_count: Some(link_count),
+            ..Default::default()
+        },
+        destinations.as_deref(),
+    )
 }
 
 #[cfg(test)]
@@ -310,6 +349,15 @@ mod tests {
             source_locations(&document, &preset, &report)[0].utf16_offset,
             3
         );
+    }
+
+    #[test]
+    fn destination_gate_checks_only_used_emdash_link_definitions() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"markDefs":[{"_key":"a","_type":"link","href":"javascript:alert(1)"},{"_key":"unused","_type":"link","href":"https://example.org"}],"children":[{"_type":"span","text":"link","marks":["a"]}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[0].measurements["checked_destinations"], 1);
     }
 
     #[test]

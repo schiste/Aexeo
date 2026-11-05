@@ -278,3 +278,27 @@ A host may supply the optional `onTelemetry` callback to `evaluateContent` to
 receive aggregate `evaluation_ms` and `source_locations_mapped`. Duration covers
 the complete JavaScript wrapper, including serialization and WASM initialization.
 No text, paths or identifiers are included; Aexeo does not transmit the event.
+
+### Offline link destination rules
+
+A `link_destinations` gate checks syntax and configured URI schemes without
+making network requests:
+
+```toml
+[[gates]]
+id = "editorial.links"
+kind = "link_destinations"
+allowed_schemes = ["https", "mailto"]
+allow_relative = true
+blocking = false
+```
+
+The default for `allow_relative` is true; schemes must be unique lowercase URI
+schemes. Empty, whitespace-containing, malformed and disallowed destinations
+produce findings. Scheme-relative URLs beginning with `//` are rejected because
+their effective scheme depends on the page context. A pass does not establish reachability, safety, source support,
+or content accuracy. Markdown direct and ASCII reference links and used EmDash
+link marks provide destinations. If Markdown references cannot be resolved
+conservatively, or an adapter lacks destinations, the gate is `not_checked`.
+Counters report checked and invalid destinations without recording addresses in
+telemetry. Image destinations and raw HTML are outside this gate's scope.

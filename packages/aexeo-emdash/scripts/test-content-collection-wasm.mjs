@@ -30,3 +30,16 @@ terms=["target"]
 const positionalReport = await evaluateContent({ route: "/test", title: "Test", body: [{ children: [{ _type: "span", text: "😀 target" }] }] }, "test", { test: positionalPreset });
 assert.deepEqual(positionalReport.source_locations, [{ gate_id: "terms", finding_index: 0, block_index: 0, span_index: 0, utf16_offset: 3 }]);
 console.log("WASM source location smoke test passed");
+
+const linkPreset = `version=1
+name="links"
+[[gates]]
+id="destinations"
+kind="link_destinations"
+allowed_schemes=["https"]
+`;
+const linkReport = await evaluateContent({ route: "/links", title: "Links", body: [{ markDefs: [{ _key: "bad", _type: "link", href: "javascript:alert(1)" }, { _key: "unused", _type: "link", href: "https://example.org" }], children: [{ _type: "span", text: "link", marks: ["bad"] }] }] }, "test", { test: linkPreset });
+assert.equal(linkReport.gates[0].status, "failed");
+assert.equal(linkReport.gates[0].measurements.checked_destinations, 1);
+assert.equal(linkReport.gates[0].measurements.invalid_destinations, 1);
+console.log("WASM link destination smoke test passed");
