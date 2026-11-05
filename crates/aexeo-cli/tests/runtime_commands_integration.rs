@@ -348,6 +348,34 @@ fn explicit_test_server_remains_available_after_idle_interval() {
 }
 
 #[test]
+fn test_server_waits_for_fragmented_request_headers() {
+    let server = spawn_server_with_explicit_shutdown();
+    let address = server.base_url().strip_prefix("http://").unwrap();
+    let mut stream = TcpStream::connect(address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_millis(100)))
+        .unwrap();
+    stream.write_all(b"GET /about HTTP/1.1\r\n").unwrap();
+    let mut byte = [0_u8; 1];
+    let error = stream.read(&mut byte).unwrap_err();
+    assert!(matches!(
+        error.kind(),
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+    ));
+    stream
+        .write_all(b"Host: localhost\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+    assert!(response.contains("About page"), "{response}");
+    server.shutdown();
+}
+
+#[test]
 fn crawl_checkpoint_and_resume_complete_a_partial_runtime_audit() {
     let server = spawn_server_with_explicit_shutdown();
     let base_url = server.base_url().to_string();
