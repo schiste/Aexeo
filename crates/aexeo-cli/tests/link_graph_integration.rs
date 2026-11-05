@@ -254,3 +254,46 @@ fn audit_adapter_rejects_artifacts_without_a_site_snapshot() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("no site snapshot"));
 }
+
+#[test]
+fn audit_context_compares_inventory_without_claiming_crawl_completeness() {
+    let temp = tempfile::tempdir().unwrap();
+    let audit_path = temp.path().join("audit.json");
+    let context_path = temp.path().join("context.json");
+    let identity = serde_json::json!({"origin":"https://example.org", "release":"r1", "surface":"public", "snapshot":"s1"});
+    let audit = serde_json::json!({"command":"crawl", "site":{"site_url":"https://example.org", "root":"crawl", "deployment_model":"runtime_snapshot", "pages":[
+        {"path":"crawl/a/index.html", "relative_path":"a/index.html", "route":"a", "raw_html":"<main>A</main>", "response_headers":{}, "crawl_response":{"requested_url":"https://example.org/a", "observed_url":"https://example.org/a", "status_code":200, "headers_observed":true}}
+    ]}});
+    let context = serde_json::json!({"identity":identity, "snapshot_date":"2026-01-01", "inventory":{"identity":identity, "complete":true, "pages":[
+        {"url":"https://example.org/a", "disposition":"published", "target":null, "locale":"en"},
+        {"url":"https://example.org/b", "disposition":"published", "target":null, "locale":"en"}
+    ]}});
+    fs::write(&audit_path, serde_json::to_vec(&audit).unwrap()).unwrap();
+    fs::write(&context_path, serde_json::to_vec(&context).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .arg("link-graph")
+        .arg(audit_path)
+        .arg("--audit")
+        .arg("--context")
+        .arg(context_path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["reconciliation"]["comparable"], false);
+    assert_eq!(
+        report["reconciliation"]["inventory_only"],
+        serde_json::json!(["https://example.org/b"])
+    );
+    assert!(
+        report["reconciliation"]["eligible_pages"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(report["crawl_complete"], false);
+}
