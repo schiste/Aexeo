@@ -24,6 +24,9 @@ Options:
       --context <context>
           JSON audit identity and inventory context
 
+      --static-url-map <static-url-map>
+          JSON map of static relative paths to public URLs
+
       --telemetry
           Emit aggregate timings and counts as JSON on stderr
 
