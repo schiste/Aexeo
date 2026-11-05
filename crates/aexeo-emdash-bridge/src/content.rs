@@ -12,7 +12,7 @@ pub fn content_input(document: &EmdashDocument) -> ContentInput {
     content_input_with_context(document).0
 }
 
-fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, ContentContext) {
+fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, ContentContext, usize) {
     let text = document
         .body
         .iter()
@@ -64,7 +64,26 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
         .collect();
     let mut line = 1;
     let mut paragraphs = Vec::new();
+    let mut link_count = 0;
     for block in &document.body {
+        let link_keys: std::collections::BTreeSet<_> = block
+            .mark_defs
+            .iter()
+            .filter(|def| def.mark_type == "link")
+            .map(|def| def.key.as_str())
+            .collect();
+        let mut previous = std::collections::BTreeSet::new();
+        for child in &block.children {
+            let PortableTextChild::Span(span) = child;
+            let current: std::collections::BTreeSet<_> = span
+                .marks
+                .iter()
+                .map(String::as_str)
+                .filter(|key| link_keys.contains(key))
+                .collect();
+            link_count += current.difference(&previous).count();
+            previous = current;
+        }
         let block_text = block
             .children
             .iter()
@@ -93,6 +112,7 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
         ContentContext {
             paragraphs: Some(paragraphs),
         },
+        link_count,
     )
 }
 
@@ -109,9 +129,9 @@ pub fn evaluate_content_with_evidence(
     preset: &ContentPreset,
     evidence_sources: Option<BTreeMap<String, String>>,
 ) -> anyhow::Result<ContentReport> {
-    let (mut input, context) = content_input_with_context(document);
+    let (mut input, context, link_count) = content_input_with_context(document);
     input.evidence_sources = evidence_sources;
-    preset.evaluate_with_context(&input, None, None, Some(&context))
+    preset.evaluate_with_links(&input, None, None, Some(&context), Some(link_count))
 }
 
 #[cfg(test)]
@@ -122,9 +142,27 @@ mod tests {
         content_presets::{builtin_content_presets, resolve_content_preset},
     };
     #[test]
+    fn link_count_coalesces_adjacent_spans_and_ignores_unused_marks() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"markDefs":[{"_key":"a","_type":"link","href":"https://example.org"},{"_key":"unused","_type":"link","href":"https://example.net"}],"children":[{"_type":"span","text":"One ","marks":["a"]},{"_type":"span","text":"link","marks":["a","strong"]},{"_type":"span","text":" then "},{"_type":"span","text":"again","marks":["a"]}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml(
+            r#"
+version = 1
+name = "links"
+[[gates]]
+id = "links"
+kind = "link_count"
+min = 2
+"#,
+        )
+        .unwrap();
+        let result = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(result.gates[0].status, GateStatus::Passed);
+        assert_eq!(result.gates[0].measurements["link_count"], 2);
+    }
+    #[test]
     fn paragraphs_have_projected_positions_and_exclude_headings() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"style":"h2","children":[{"_type":"span","text":"Heading"}]},{"children":[{"_type":"span","text":"First\nline"}]},{"children":[{"_type":"span","text":"Second"}]}]}"#).unwrap();
-        let (_, context) = content_input_with_context(&document);
+        let (_, context, _) = content_input_with_context(&document);
         let paragraphs = context.paragraphs.unwrap();
         assert_eq!(paragraphs.len(), 2);
         assert_eq!(paragraphs[0].line, 2);

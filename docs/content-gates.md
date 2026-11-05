@@ -188,3 +188,20 @@ kind = "paragraph_length"
 max_words = 100
 blocking = false
 ```
+
+### Link count
+
+The `link_count` gate requires a configured minimum number of hyperlinks:
+
+```toml
+[[gates]]
+id = "editorial.minimum_links"
+kind = "link_count"
+min = 1
+blocking = false
+```
+
+Markdown links and EmDash link marks are counted, including links split across
+adjacent spans. Images are not counted. This is a presence check only: it does
+not validate destinations, check network availability, or assess sources.
+When an adapter cannot supply link data, the gate reports `not_checked`.
