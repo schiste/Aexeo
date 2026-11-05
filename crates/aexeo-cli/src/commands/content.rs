@@ -11,6 +11,14 @@ use std::{
     io::{self, Read, Write},
 };
 
+#[derive(serde::Serialize)]
+struct SourceLocation<'a> {
+    gate_id: &'a str,
+    finding_index: usize,
+    line: usize,
+    column: usize,
+}
+
 pub fn command_content(args: &ArgMatches) -> Result<i32> {
     if args.get_flag("list-site-groups") {
         let groups = aexeo_core::static_check::native_site_rule_groups();
@@ -170,13 +178,15 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     let adapter_started = measuring.then(std::time::Instant::now);
     let mut context = None;
     let mut link_count = None;
+    let mut source_map = None;
     let mut input = match (
         args.get_one::<String>("input-format").map(String::as_str),
         text,
     ) {
         (Some("markdown"), Some(text)) => {
-            let (input, capabilities, links) =
-                aexeo_core::markdown_adapter::markdown_input_with_links(id, &text)?;
+            let (input, capabilities, links, map) =
+                aexeo_core::markdown_adapter::markdown_input_with_source_map(id, &text)?;
+            source_map = Some(map);
             context = Some(capabilities);
             link_count = Some(links);
             input
@@ -206,15 +216,75 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     )?;
     let evaluation_ms = started.elapsed().as_secs_f64() * 1000.0;
     report.applied_fixes = applied_fixes;
-    if args.get_flag("telemetry") {
-        print_telemetry(&report, evaluation_ms, input_load_ms.zip(adapter_ms))?;
+    let mapping_started = measuring.then(std::time::Instant::now);
+    let mut positional_findings = 0;
+    // Keep the established projected finding coordinates unchanged. Supply
+    // separately indexed source coordinates only for positional prose gates.
+    let mut source_locations = Vec::new();
+    if let (Some(map), Some(source), Some(projected)) = (
+        source_map.as_ref(),
+        input.source_text.as_deref(),
+        input.text.as_deref(),
+    ) {
+        for (gate, result) in preset.gates.iter().zip(&report.gates) {
+            if matches!(
+                gate,
+                ContentGate::ForbiddenTerms { .. }
+                    | ContentGate::RepeatedTerms { .. }
+                    | ContentGate::SentenceLength { .. }
+                    | ContentGate::ParagraphLength { .. }
+            ) {
+                for (finding_index, finding) in result.findings.iter().enumerate() {
+                    positional_findings += 1;
+                    if let Some((line, column)) =
+                        map.source_position(source, projected, finding.line, finding.column)
+                    {
+                        source_locations.push(SourceLocation {
+                            gate_id: &result.gate_id,
+                            finding_index,
+                            line,
+                            column,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    if measuring {
+        let mapping = source_map.as_ref().map(|_| {
+            (
+                source_locations.len(),
+                positional_findings - source_locations.len(),
+                mapping_started
+                    .expect("timer exists when telemetry is enabled")
+                    .elapsed()
+                    .as_secs_f64()
+                    * 1000.0,
+            )
+        });
+        print_telemetry(
+            &report,
+            evaluation_ms,
+            input_load_ms.zip(adapter_ms),
+            mapping,
+        )?;
     }
     if args.get_one::<String>("format").map(String::as_str) == Some("json") {
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        let mut output = serde_json::to_value(&report)?;
+        if source_map.is_some() {
+            output["source_locations"] = serde_json::to_value(&source_locations)?;
+        }
+        println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         print_summary(&report);
         for fix in &report.applied_fixes {
             println!("Applied fix: {fix}");
+        }
+        for location in &source_locations {
+            println!(
+                "Source location: gate {} finding {} at {}:{}",
+                location.gate_id, location.finding_index, location.line, location.column
+            );
         }
         for gate in &report.gates {
             println!("{}: {:?}", gate.gate_id, gate.status);
@@ -283,6 +353,7 @@ fn evaluate_crawl(
         print_telemetry(
             &report.content,
             started.elapsed().as_secs_f64() * 1000.0,
+            None,
             None,
         )?;
     }
@@ -354,11 +425,16 @@ fn print_telemetry(
     report: &aexeo_core::content_gate::ContentReport,
     evaluation_ms: f64,
     stages: Option<(f64, f64)>,
+    source_mapping: Option<(usize, usize, f64)>,
 ) -> Result<()> {
     let mut event = serde_json::json!({"schema_version": 1, "event": "content_evaluation", "evaluation_ms": evaluation_ms, "summary": report.summary});
     if let Some((input_load_ms, adapter_ms)) = stages {
         event["stages"] =
             serde_json::json!({"input_load_ms": input_load_ms, "adapter_ms": adapter_ms});
+    }
+    if let Some((mapped, unmapped, duration_ms)) = source_mapping {
+        event["source_mapping"] =
+            serde_json::json!({"mapped": mapped, "unmapped": unmapped, "duration_ms": duration_ms});
     }
     eprintln!("{}", serde_json::to_string(&event)?);
     Ok(())

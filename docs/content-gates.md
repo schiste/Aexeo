@@ -253,3 +253,14 @@ IDs must be unique and nonempty; provide the complete collection. Other gates
 that need an individual document still report `not_checked`. To check the
 real WASM boundary locally, build the plugin and run `npm run test:wasm` in
 `packages/aexeo-emdash`; the ordinary TypeScript unit test uses a mock.
+
+### Markdown source locations
+
+For Markdown CLI reports, finding `line` and `column` retain their existing
+coordinates in extracted prose. The additive `source_locations` array supplies
+original-file coordinates for exact, untransformed text spans, indexed by
+`gate_id` and zero-based `finding_index`. An absent entry means no reliable
+source position was found; escaped or transformed Markdown may be unmappable.
+These locations apply only to positional prose gates, not metadata, site or
+collection findings. The map is local; opt-in telemetry includes only mapped and
+unmapped counts and mapping duration, without positions or content.
