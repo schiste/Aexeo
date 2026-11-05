@@ -275,6 +275,18 @@ pub struct ContentGateResult {
     pub required_capability: String,
     pub findings: Vec<aexeo_contracts::Finding>,
     pub reason: Option<String>,
+    /// Non-sensitive measurements and configured limits for this gate.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub measurements: std::collections::BTreeMap<String, usize>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ContentSummary {
+    pub passed: usize,
+    pub failed: usize,
+    pub not_checked: usize,
+    pub blocking_failed: usize,
+    pub blocking_not_checked: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -282,6 +294,8 @@ pub struct ContentReport {
     pub preset: String,
     pub input_id: String,
     pub gates: Vec<ContentGateResult>,
+    #[serde(default)]
+    pub summary: ContentSummary,
     #[serde(default)]
     pub applied_fixes: Vec<String>,
 }
@@ -418,6 +432,7 @@ impl ContentPreset {
         for gate in &self.gates {
             let mut findings = Vec::new();
             let mut reason = None;
+            let mut measurements = std::collections::BTreeMap::new();
             let mut emit = |message: String, line: usize, column: usize| {
                 findings.push(aexeo_contracts::Finding {
                     rule_id: gate.id().to_owned(),
@@ -435,27 +450,42 @@ impl ContentPreset {
                 })
             };
             match gate {
-                ContentGate::WordCount { min, max, .. } => match &input.text {
-                    Some(text) => {
-                        let count =
-                            *word_count.get_or_insert_with(|| text.split_whitespace().count());
-                        if let Some(minimum) = min.filter(|n| count < *n) {
-                            emit(
-                                format!("Word count {count} is below the minimum of {}", minimum),
-                                1,
-                                1,
-                            );
-                        }
-                        if let Some(maximum) = max.filter(|n| count > *n) {
-                            emit(
-                                format!("Word count {count} exceeds the maximum of {}", maximum),
-                                1,
-                                1,
-                            );
-                        }
+                ContentGate::WordCount { min, max, .. } => {
+                    if let Some(min) = min {
+                        measurements.insert("min_words".into(), *min);
                     }
-                    None => reason = Some("text is unavailable from this adapter".into()),
-                },
+                    if let Some(max) = max {
+                        measurements.insert("max_words".into(), *max);
+                    }
+                    match &input.text {
+                        Some(text) => {
+                            let count =
+                                *word_count.get_or_insert_with(|| text.split_whitespace().count());
+                            measurements.insert("word_count".into(), count);
+                            if let Some(minimum) = min.filter(|n| count < *n) {
+                                emit(
+                                    format!(
+                                        "Word count {count} is below the minimum of {}",
+                                        minimum
+                                    ),
+                                    1,
+                                    1,
+                                );
+                            }
+                            if let Some(maximum) = max.filter(|n| count > *n) {
+                                emit(
+                                    format!(
+                                        "Word count {count} exceeds the maximum of {}",
+                                        maximum
+                                    ),
+                                    1,
+                                    1,
+                                );
+                            }
+                        }
+                        None => reason = Some("text is unavailable from this adapter".into()),
+                    }
+                }
                 ContentGate::ForbiddenTerms { terms, .. } => match &input.text {
                     Some(text) => {
                         for term in terms {
@@ -639,16 +669,28 @@ impl ContentPreset {
                     }
                     None => reason = Some("site is unavailable from this adapter".into()),
                 },
-                ContentGate::RequiredMetadata { fields, .. } => match &input.metadata {
-                    Some(metadata) => {
-                        for field in fields {
-                            if metadata.get(field).is_none_or(|v| v.trim().is_empty()) {
-                                emit(format!("Required metadata is missing: {field}"), 1, 1);
+                ContentGate::RequiredMetadata { fields, .. } => {
+                    measurements.insert("required_fields".into(), fields.len());
+                    match &input.metadata {
+                        Some(metadata) => {
+                            measurements.insert(
+                                "present_fields".into(),
+                                fields
+                                    .iter()
+                                    .filter(|field| {
+                                        metadata.get(*field).is_some_and(|v| !v.trim().is_empty())
+                                    })
+                                    .count(),
+                            );
+                            for field in fields {
+                                if metadata.get(field).is_none_or(|v| v.trim().is_empty()) {
+                                    emit(format!("Required metadata is missing: {field}"), 1, 1);
+                                }
                             }
                         }
+                        None => reason = Some("metadata is unavailable from this adapter".into()),
                     }
-                    None => reason = Some("metadata is unavailable from this adapter".into()),
-                },
+                }
             }
             let status = if reason.is_some() {
                 GateStatus::NotChecked
@@ -673,9 +715,29 @@ impl ContentPreset {
                 required_capability: gate.required_capability().into(),
                 findings,
                 reason,
+                measurements,
             });
         }
+        let mut summary = ContentSummary::default();
+        for gate in &results {
+            match gate.status {
+                GateStatus::Passed => summary.passed += 1,
+                GateStatus::Failed => {
+                    summary.failed += 1;
+                    if gate.blocking {
+                        summary.blocking_failed += 1;
+                    }
+                }
+                GateStatus::NotChecked => {
+                    summary.not_checked += 1;
+                    if gate.blocking {
+                        summary.blocking_not_checked += 1;
+                    }
+                }
+            }
+        }
         Ok(ContentReport {
+            summary,
             preset: self.name.clone(),
             input_id: input.id.clone(),
             gates: results,

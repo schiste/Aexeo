@@ -367,3 +367,84 @@ fn structured_facts_compare_values_and_report_missing_evidence() {
     std::fs::write(&source, "not json").unwrap();
     assert_eq!(invoke(), (2, "not_checked".into()));
 }
+
+#[test]
+fn report_explains_measurements_and_unchecked_capabilities() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "-",
+            "--preset",
+            "article-editorial",
+            "--format",
+            "json",
+            "--telemetry",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"private words here")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["summary"]["passed"], 1);
+    assert_eq!(report["summary"]["failed"], 1);
+    assert_eq!(report["summary"]["not_checked"], 1);
+    assert_eq!(report["gates"][1]["measurements"]["word_count"], 3);
+    assert_eq!(report["gates"][1]["measurements"]["min_words"], 50);
+    assert_eq!(report["gates"][2]["measurements"]["required_fields"], 2);
+    assert!(
+        report["gates"][2]["measurements"]
+            .get("present_fields")
+            .is_none()
+    );
+    let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["event"], "content_evaluation");
+    assert_eq!(telemetry["summary"], report["summary"]);
+    assert!(telemetry["evaluation_ms"].as_f64().unwrap() >= 0.0);
+    assert!(
+        !String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("private words")
+    );
+}
+
+#[test]
+fn telemetry_is_opt_in_and_reports_metadata_presence() {
+    let dir = tempfile::tempdir().unwrap();
+    let metadata = dir.path().join("metadata.json");
+    std::fs::write(&metadata, r#"{"title":"Example","description":"Summary"}"#).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "-",
+            "--preset",
+            "article-editorial",
+            "--metadata",
+            metadata.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"some words")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.stderr.is_empty());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][2]["measurements"]["present_fields"], 2);
+}
