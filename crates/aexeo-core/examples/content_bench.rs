@@ -25,13 +25,24 @@ kind = "required_headings"
 headings = ["Summary"]
 "#,
     )?;
+    let mut repeated_config = String::from("version = 1\nname = \"repeated\"\n");
+    for i in 0..20 {
+        repeated_config.push_str(&format!(
+            "[[gates]]\nid = \"count-{i}\"\nkind = \"word_count\"\nmin = 10\n"
+        ));
+    }
+    let repeated_preset = ContentPreset::from_toml(&repeated_config)?;
     let input = markdown_input("benchmark.md", &source)?;
     let mut eval = Vec::new();
     let mut parse_and_eval = Vec::new();
+    let mut repeated_eval = Vec::new();
     for _ in 0..100 {
         let start = Instant::now();
         black_box(preset.evaluate(black_box(&input))?);
         eval.push(start.elapsed().as_micros());
+        let start = Instant::now();
+        black_box(repeated_preset.evaluate(black_box(&input))?);
+        repeated_eval.push(start.elapsed().as_micros());
         let start = Instant::now();
         let parsed = markdown_input("benchmark.md", black_box(&source))?;
         black_box(preset.evaluate(&parsed)?);
@@ -39,8 +50,13 @@ headings = ["Summary"]
     }
     eval.sort_unstable();
     parse_and_eval.sort_unstable();
+    repeated_eval.sort_unstable();
     println!("input_bytes={} iterations=100", source.len());
     println!("evaluation_us p50={} p95={}", eval[50], eval[95]);
+    println!(
+        "20_word_gates_us p50={} p95={}",
+        repeated_eval[50], repeated_eval[95]
+    );
     println!(
         "markdown_and_evaluation_us p50={} p95={}",
         parse_and_eval[50], parse_and_eval[95]
