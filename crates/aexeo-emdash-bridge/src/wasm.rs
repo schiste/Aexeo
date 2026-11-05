@@ -204,6 +204,11 @@ pub fn evaluate_content_js(
         .transpose()?;
     let report = crate::content::evaluate_content_with_evidence(&document, &preset, evidence)
         .map_err(|error| JsError::new(&format!("content evaluation failed: {error:#}")))?;
-    serde_json::to_string(&report)
+    let locations = crate::content::source_locations(&document, &preset, &report);
+    let mut output = serde_json::to_value(&report)
+        .map_err(|error| JsError::new(&format!("failed to serialize report: {error}")))?;
+    output["source_locations"] = serde_json::to_value(locations)
+        .map_err(|error| JsError::new(&format!("failed to serialize locations: {error}")))?;
+    serde_json::to_string(&output)
         .map_err(|error| JsError::new(&format!("failed to serialize report: {error}")))
 }

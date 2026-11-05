@@ -12,12 +12,24 @@ export interface ContentGateResult {
   measurements?: Record<string, number>;
 }
 
+/** Coordinates inside the exact Portable Text snapshot sent for evaluation. */
+export interface EmdashSourceLocation {
+  gate_id: string;
+  finding_index: number;
+  block_index: number;
+  span_index: number;
+  /** Zero-based UTF-16 code unit offset in the span text. */
+  utf16_offset: number;
+}
+
 export interface ContentReport {
   preset: string;
   input_id: string;
   gates: ContentGateResult[];
   summary?: { passed: number; failed: number; not_checked: number; blocking_failed: number; blocking_not_checked: number };
   applied_fixes: string[];
+  /** Omitted for collection reports; only reliable positional findings are mapped. */
+  source_locations?: EmdashSourceLocation[];
 }
 
 /** Evaluate a document locally using the built-in or supplied named TOML presets. */
