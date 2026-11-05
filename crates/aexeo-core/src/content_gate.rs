@@ -355,6 +355,44 @@ impl ContentGate {
     }
 }
 
+/// Return offending heading indices for heading gates, in finding order.
+/// Other gate types return `None`.
+pub fn heading_finding_indices(gate: &ContentGate, headings: &[String]) -> Option<Vec<usize>> {
+    match gate {
+        ContentGate::HeadingLength { max_chars, .. } => Some(
+            headings
+                .iter()
+                .enumerate()
+                .filter_map(|(index, heading)| {
+                    (heading.trim().chars().count() > *max_chars).then_some(index)
+                })
+                .collect(),
+        ),
+        ContentGate::DuplicateHeadings { case_sensitive, .. } => {
+            let mut seen = std::collections::HashSet::new();
+            Some(
+                headings
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, heading)| {
+                        let trimmed = heading.trim();
+                        if trimmed.is_empty() {
+                            return None;
+                        }
+                        let key = if *case_sensitive {
+                            trimmed.to_owned()
+                        } else {
+                            trimmed.to_lowercase()
+                        };
+                        (!seen.insert(key)).then_some(index)
+                    })
+                    .collect(),
+            )
+        }
+        _ => None,
+    }
+}
+
 /// Check a destination against a configured offline scheme policy.
 pub fn valid_link_destination(destination: &str, schemes: &[String], allow_relative: bool) -> bool {
     if destination.is_empty()
@@ -1095,55 +1133,45 @@ impl ContentPreset {
                     measurements.insert("max_chars".into(), *max_chars);
                     match &input.headings {
                         Some(headings) => {
-                            let mut longest = 0;
-                            let mut exceeded = 0;
+                            let indices =
+                                heading_finding_indices(gate, headings).unwrap_or_default();
                             measurements.insert("heading_count".into(), headings.len());
-                            for (index, heading) in headings.iter().enumerate() {
-                                let length = heading.trim().chars().count();
-                                longest = longest.max(length);
-                                if length > *max_chars {
-                                    exceeded += 1;
-                                    emit(
-                                        format!(
-                                            "Heading #{} has {length} characters; maximum is {max_chars}",
-                                            index + 1
-                                        ),
-                                        1,
-                                        1,
-                                    );
-                                }
-                            }
-                            measurements.insert("longest_heading_chars".into(), longest);
-                            measurements.insert("headings_exceeding_limit".into(), exceeded);
-                        }
-                        None => reason = Some("headings are unavailable from this adapter".into()),
-                    }
-                }
-                ContentGate::DuplicateHeadings { case_sensitive, .. } => match &input.headings {
-                    Some(headings) => {
-                        let mut seen = std::collections::HashSet::new();
-                        let mut duplicates = 0;
-                        measurements.insert("heading_count".into(), headings.len());
-                        for (index, heading) in headings.iter().enumerate() {
-                            let trimmed = heading.trim();
-                            if trimmed.is_empty() {
-                                continue;
-                            }
-                            let key = if *case_sensitive {
-                                trimmed.to_owned()
-                            } else {
-                                trimmed.to_lowercase()
-                            };
-                            if !seen.insert(key) {
-                                duplicates += 1;
+                            measurements.insert(
+                                "longest_heading_chars".into(),
+                                headings
+                                    .iter()
+                                    .map(|h| h.trim().chars().count())
+                                    .max()
+                                    .unwrap_or(0),
+                            );
+                            measurements.insert("headings_exceeding_limit".into(), indices.len());
+                            for index in indices {
+                                let length = headings[index].trim().chars().count();
                                 emit(
-                                    format!("Heading #{} repeats an earlier heading", index + 1),
+                                    format!(
+                                        "Heading #{} has {length} characters; maximum is {max_chars}",
+                                        index + 1
+                                    ),
                                     1,
                                     1,
                                 );
                             }
                         }
-                        measurements.insert("duplicate_headings".into(), duplicates);
+                        None => reason = Some("headings are unavailable from this adapter".into()),
+                    }
+                }
+                ContentGate::DuplicateHeadings { .. } => match &input.headings {
+                    Some(headings) => {
+                        let indices = heading_finding_indices(gate, headings).unwrap_or_default();
+                        measurements.insert("heading_count".into(), headings.len());
+                        measurements.insert("duplicate_headings".into(), indices.len());
+                        for index in indices {
+                            emit(
+                                format!("Heading #{} repeats an earlier heading", index + 1),
+                                1,
+                                1,
+                            );
+                        }
                     }
                     None => reason = Some("headings are unavailable from this adapter".into()),
                 },

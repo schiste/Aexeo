@@ -6,7 +6,7 @@ fn markdown_heading_length_uses_portable_policy_and_private_telemetry() {
     let preset = dir.path().join("preset.toml");
     let article = dir.path().join("article.md");
     fs::write(&preset, "version=1\nname='headings'\n[[gates]]\nid='length'\nkind='heading_length'\nmax_chars=3\nblocking=false\n").unwrap();
-    fs::write(&article, "# é😀abcd\n").unwrap();
+    fs::write(&article, "# ok\n\n## é😀abcd\n").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
         .args([
             "content",
@@ -34,5 +34,9 @@ fn markdown_heading_length_uses_portable_policy_and_private_telemetry() {
         report["gates"][0]["measurements"]["headings_exceeding_limit"],
         1
     );
+    assert_eq!(report["source_locations"][0]["line"], 3);
+    assert_eq!(report["source_locations"][0]["column"], 1);
+    let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["source_mapping"]["mapped"], 1);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("é😀abcd"));
 }

@@ -28,5 +28,7 @@ fn markdown_duplicate_headings_use_custom_policy_and_aggregate_telemetry() {
     assert_eq!(report["gates"][0]["status"], "failed");
     assert_eq!(report["gates"][0]["measurements"]["heading_count"], 2);
     assert_eq!(report["gates"][0]["measurements"]["duplicate_headings"], 1);
+    assert_eq!(report["source_locations"][0]["line"], 3);
+    assert_eq!(report["source_locations"][0]["column"], 1);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("Private heading"));
 }
