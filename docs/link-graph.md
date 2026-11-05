@@ -73,3 +73,11 @@ flagged because the intermediate redirect chain is unavailable. This adapter
 cannot establish the CMS inventory, release, publication surface or snapshot
 date, and therefore always reports incomplete coverage; it does not confirm
 orphans. `--telemetry` retains the same opt-in, aggregate-only behavior.
+
+To compare an audit with an explicitly captured inventory, pass
+`--audit --context context.json`. The context has the shape
+`{"identity": {"origin":"https://example.org", "release":"r", "surface":"public", "snapshot":"s"}, "snapshot_date":"2026-01-01T00:00:00Z", "inventory": { ... }}`;
+the inventory object uses the same schema as above. Identity and date are
+caller-supplied, not independently established by the audit. Even when the
+identities match, audit-based reports retain incomplete crawl coverage until
+it can be attested from a complete, equivalent surface.
