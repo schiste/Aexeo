@@ -59,6 +59,9 @@ Options:
           [default: text]
           [possible values: text, markdown]
 
+      --telemetry
+          Write local evaluation timing and aggregate counts as JSON to stderr
+
       --fix
           Apply supported safe fixes to a local file
 
