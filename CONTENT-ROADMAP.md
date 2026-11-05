@@ -21,6 +21,8 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [x] CI benchmarks and conservative budgets for evaluation, Markdown adaptation,
   50-item batches and fresh-process CLI runs, with p50/p95 telemetry. Fresh
   processes do not imply cold operating-system caches.
+- [x] Single-parse Markdown link validation and a p50/p95 comparison against the
+  two-parse baseline ([PR #47](https://github.com/schiste/Aexeo/pull/47)).
 - [x] Configurable sentence-length heuristic and opt-in composed preset ([PR #29](https://github.com/schiste/Aexeo/pull/29)).
 - [x] Bounded agent lint-and-revise workflow and local telemetry guidance ([PR #30](https://github.com/schiste/Aexeo/pull/30)).
 - [x] Configurable paragraph-length gate with Markdown and EmDash adapter
