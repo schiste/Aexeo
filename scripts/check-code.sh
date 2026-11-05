@@ -12,7 +12,7 @@ aexeo_run_timed "${prefix}cargo-clippy-workspace" "cache-sensitive" cargo clippy
 aexeo_run_timed "${prefix}cargo-test-workspace" "cache-sensitive" cargo test --workspace --all-targets
 # Synthetic integration fixtures are regression checks, not accuracy estimates.
 aexeo_run_timed "${prefix}content-corpus-cli" "cache-sensitive" cargo build -p aexeo-cli
-for fixture in duplicate-headings link-destinations; do
+for fixture in duplicate-headings heading-length link-destinations; do
     for split in development holdout; do
         aexeo_run_timed "${prefix}content-corpus-${fixture}-${split}" "cache-light" \
             python3 scripts/evaluate-content-gates.py "eval/content/${fixture}.json" \

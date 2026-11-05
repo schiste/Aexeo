@@ -11,6 +11,8 @@ python3 scripts/evaluate-content-gates.py eval/content/link-count.json \
   --binary target/release/aexeo-cli --split holdout
 python3 scripts/evaluate-content-gates.py eval/content/duplicate-headings.json \
   --binary target/release/aexeo-cli --split holdout
+python3 scripts/evaluate-content-gates.py eval/content/heading-length.json \
+  --binary target/release/aexeo-cli --split holdout
 python3 scripts/evaluate-content-gates.py eval/content/link-destinations.json \
   --binary target/release/aexeo-cli --split holdout
 python3 scripts/test-evaluate-content-gates.py
