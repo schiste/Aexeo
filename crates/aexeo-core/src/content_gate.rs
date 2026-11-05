@@ -819,7 +819,7 @@ impl ContentPreset {
                 } => match destinations {
                     Some(values) => {
                         let mut invalid = 0;
-                        for destination in values {
+                        for (index, destination) in values.iter().enumerate() {
                             if !valid_link_destination(
                                 destination,
                                 allowed_schemes,
@@ -827,7 +827,10 @@ impl ContentPreset {
                             ) {
                                 invalid += 1;
                                 emit(
-                                    "Link destination is invalid or has a disallowed scheme".into(),
+                                    format!(
+                                        "Link destination #{} is invalid or has a disallowed scheme",
+                                        index + 1
+                                    ),
                                     1,
                                     1,
                                 );
@@ -1553,6 +1556,8 @@ field = "slug"
             .unwrap();
         assert_eq!(failed.gates[0].status, GateStatus::Failed);
         assert_eq!(failed.gates[0].measurements["invalid_destinations"], 4);
+        assert!(failed.gates[0].findings[0].message.contains("#1"));
+        assert!(failed.gates[0].findings[3].message.contains("#4"));
         let absolute = ContentPreset::from_toml("version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\nallow_relative=false\n").unwrap();
         assert_eq!(
             absolute

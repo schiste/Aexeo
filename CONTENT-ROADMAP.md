@@ -28,7 +28,8 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [x] Configurable link-count gate for Markdown and EmDash ([PR #35](https://github.com/schiste/Aexeo/pull/35)); this does not validate destinations.
 - [x] Configurable exact repeated-term check, with whole-word and substring modes
   ([PR #38](https://github.com/schiste/Aexeo/pull/38)).
-- [ ] Additional editorial gates and destination validation.
+- [x] Offline link destination syntax and configurable scheme validation; this does not check reachability or link safety ([PR #46](https://github.com/schiste/Aexeo/pull/46)).
+- [ ] Additional editorial gates and destination reachability validation.
 - [x] Explicit collection metadata uniqueness gate in core, CLI and EmDash/WASM
   ([PR #40](https://github.com/schiste/Aexeo/pull/40)); callers must supply the
   complete collection and missing metadata remains `not_checked`.
@@ -46,7 +47,8 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
   accepts custom TOML and Markdown fixtures ([PR #37](https://github.com/schiste/Aexeo/pull/37)). The
   evaluator rejects exact cross-split duplicates and requires declared review
   provenance ([PR #43](https://github.com/schiste/Aexeo/pull/43)); it cannot
-  establish reviewer independence or detect paraphrased leakage.
+  establish reviewer independence or detect paraphrased leakage. Local review-event
+  logs can aggregate historical overrides without storing draft text ([PR #45](https://github.com/schiste/Aexeo/pull/45)).
 - [x] Shared article/glossary readability preset delivered in
   [PR #34](https://github.com/schiste/Aexeo/pull/34).
 - [ ] Source and factuality evaluation after the basic gates are validated.
