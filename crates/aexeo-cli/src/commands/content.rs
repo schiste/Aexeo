@@ -146,14 +146,16 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         path.clone()
     };
     let mut context = None;
+    let mut link_count = None;
     let mut input = match (
         args.get_one::<String>("input-format").map(String::as_str),
         text,
     ) {
         (Some("markdown"), Some(text)) => {
-            let (input, capabilities) =
-                aexeo_core::markdown_adapter::markdown_input_with_context(id, &text)?;
+            let (input, capabilities, links) =
+                aexeo_core::markdown_adapter::markdown_input_with_links(id, &text)?;
             context = Some(capabilities);
+            link_count = Some(links);
             input
         }
         (_, text) => ContentInput {
@@ -168,11 +170,12 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     input.metadata = metadata;
     input.evidence_sources = evidence_sources;
     let started = std::time::Instant::now();
-    let mut report = preset.evaluate_with_context(
+    let mut report = preset.evaluate_with_links(
         &input,
         site.as_ref().map(|(site, config)| (site, config)),
         None,
         context.as_ref(),
+        link_count,
     )?;
     let evaluation_ms = started.elapsed().as_secs_f64() * 1000.0;
     report.applied_fixes = applied_fixes;

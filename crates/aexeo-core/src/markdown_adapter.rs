@@ -13,6 +13,15 @@ pub fn markdown_input_with_context(
     id: impl Into<String>,
     source: &str,
 ) -> Result<(ContentInput, ContentContext)> {
+    let (input, context, _) = markdown_input_with_links(id, source)?;
+    Ok((input, context))
+}
+
+/// Extract structural context and the number of hyperlinks without network access.
+pub fn markdown_input_with_links(
+    id: impl Into<String>,
+    source: &str,
+) -> Result<(ContentInput, ContentContext, usize)> {
     let mut options = ParseOptions::gfm();
     options.constructs.frontmatter = true;
     let root = markdown::to_mdast(source, &options)
@@ -20,11 +29,13 @@ pub fn markdown_input_with_context(
     let mut text = String::new();
     let mut headings = Vec::new();
     let mut ranges = Vec::new();
+    let mut link_count = 0;
     fn visit(
         node: &Node,
         text: &mut String,
         headings: &mut Vec<String>,
         ranges: &mut Vec<(usize, usize)>,
+        link_count: &mut usize,
     ) {
         match node {
             Node::Text(item) => text.push_str(&item.value),
@@ -35,7 +46,7 @@ pub fn markdown_input_with_context(
                 let start = text.len();
                 if let Some(children) = node.children() {
                     for child in children {
-                        visit(child, text, headings, ranges);
+                        visit(child, text, headings, ranges, link_count);
                     }
                 }
                 headings.push(text[start..].to_owned());
@@ -45,7 +56,7 @@ pub fn markdown_input_with_context(
                 let start = text.len();
                 if let Some(children) = node.children() {
                     for child in children {
-                        visit(child, text, headings, ranges);
+                        visit(child, text, headings, ranges, link_count);
                     }
                 }
                 if matches!(node, Node::Paragraph(_)) {
@@ -54,15 +65,24 @@ pub fn markdown_input_with_context(
                 text.push('\n');
             }
             _ => {
+                if matches!(node, Node::Link(_) | Node::LinkReference(_)) {
+                    *link_count += 1;
+                }
                 if let Some(children) = node.children() {
                     for child in children {
-                        visit(child, text, headings, ranges);
+                        visit(child, text, headings, ranges, link_count);
                     }
                 }
             }
         }
     }
-    visit(&root, &mut text, &mut headings, &mut ranges);
+    visit(
+        &root,
+        &mut text,
+        &mut headings,
+        &mut ranges,
+        &mut link_count,
+    );
     let (mut cursor, mut line, mut column) = (0, 1, 1);
     let mut paragraphs = Vec::with_capacity(ranges.len());
     for (start, end) in ranges {
@@ -93,12 +113,46 @@ pub fn markdown_input_with_context(
         ContentContext {
             paragraphs: Some(paragraphs),
         },
+        link_count,
     ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn link_gate_distinguishes_absent_capability_from_zero() {
+        use crate::content_gate::{ContentPreset, GateStatus};
+        let preset = ContentPreset::from_toml(
+            r#"
+version = 1
+name = "links"
+[[gates]]
+id = "links"
+kind = "link_count"
+min = 2
+"#,
+        )
+        .unwrap();
+        let (input, context, link_count) = markdown_input_with_links("test.md", "[one](https://example.org) and [two][ref] and ![image](img.png)\n\n[ref]: https://example.com").unwrap();
+        assert_eq!(link_count, 2);
+        let evaluated = preset
+            .evaluate_with_links(&input, None, None, Some(&context), Some(link_count))
+            .unwrap();
+        assert_eq!(evaluated.gates[0].status, GateStatus::Passed);
+        assert_eq!(evaluated.gates[0].measurements["link_count"], 2);
+        assert_eq!(
+            preset.evaluate(&input).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+        let (plain, empty, zero) = markdown_input_with_links("plain.md", "No hyperlinks.").unwrap();
+        let failed = preset
+            .evaluate_with_links(&plain, None, None, Some(&empty), Some(zero))
+            .unwrap();
+        assert_eq!(failed.gates[0].status, GateStatus::Failed);
+        assert_eq!(failed.gates[0].measurements["link_count"], 0);
+    }
+
     #[test]
     fn extracts_readable_text_without_frontmatter_code_or_destinations() {
         let input = markdown_input("test.md", "---\ntitle: hidden\n---\n# Hello *world*\n\nSee [link](https://hidden.example) and `code`.\n\n```rust\nsecret()\n```\n").unwrap();
