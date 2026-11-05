@@ -59,7 +59,7 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
   evaluator rejects exact cross-split duplicates and requires declared review
   provenance ([PR #43](https://github.com/schiste/Aexeo/pull/43)); it cannot
   establish reviewer independence or detect paraphrased leakage. Synthetic
-  duplicate-heading and link-destination fixtures also run as CI regressions;
+  duplicate-heading, heading-length and link-destination fixtures also run as CI regressions;
   their unreviewed labels are not independent accuracy evidence. Local review-event
   logs can aggregate historical overrides without storing draft text ([PR #45](https://github.com/schiste/Aexeo/pull/45)).
 - [x] Shared article/glossary readability preset delivered in

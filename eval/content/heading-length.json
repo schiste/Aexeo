@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "description": "Synthetic examples, labels not independently reviewed.",
+  "preset": "heading-length",
+  "preset_toml": "version=1\nname='heading length evaluation'\n[[gates]]\nid='length'\nkind='heading_length'\nmax_chars=5\nblocking=false\n",
+  "input_format": "markdown",
+  "gate_id": "length",
+  "examples": [
+    {
+      "id": "dev-boundary",
+      "split": "development",
+      "text": "# abcde",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "dev-over",
+      "split": "development",
+      "text": "## abcdef",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "dev-empty",
+      "split": "development",
+      "text": "#\n\nprose",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "dev-formatted",
+      "split": "development",
+      "text": "## **abcdef**",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "holdout-unicode-boundary",
+      "split": "holdout",
+      "text": "# é😀abc",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "holdout-unicode-over",
+      "split": "holdout",
+      "text": "## é😀abcd",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "holdout-prose",
+      "split": "holdout",
+      "text": "# ok\n\nThis long paragraph is not a heading.",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "holdout-setext",
+      "split": "holdout",
+      "text": "abcdef\n======",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    }
+  ]
+}
