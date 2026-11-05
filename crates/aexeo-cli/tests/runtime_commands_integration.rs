@@ -896,3 +896,48 @@ fn content_preset_crawl_preserves_complete_and_partial_status() {
     }
     server.shutdown();
 }
+
+#[test]
+fn crawl_can_write_observational_link_graph_with_private_telemetry() {
+    let (base_url, handle) = spawn_server(8);
+    let temp_dir = tempfile::tempdir().unwrap();
+    let graph_path = temp_dir.path().join("graph.json");
+    let output = Command::new(bin())
+        .current_dir(temp_dir.path())
+        .arg("crawl")
+        .arg(&base_url)
+        .arg("--engine")
+        .arg("http")
+        .arg("--max-pages")
+        .arg("10")
+        .arg("--progress")
+        .arg("off")
+        .arg("--format")
+        .arg("json")
+        .arg("--link-graph-output")
+        .arg(&graph_path)
+        .arg("--link-graph-telemetry")
+        .output()
+        .unwrap();
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["command"], "crawl");
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(&graph_path).unwrap()).unwrap();
+    assert_eq!(report["crawl_complete"], false);
+    assert!(!report["pages"].as_array().unwrap().is_empty());
+    assert!(
+        report["issues"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("inventory_missing"))
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let telemetry = stderr
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|event| event["event"] == "link_graph_analysis")
+        .expect("graph telemetry");
+    assert!(telemetry["page_count"].as_u64().unwrap() > 0);
+    assert!(!telemetry.to_string().contains(&base_url));
+    handle.join().unwrap();
+}

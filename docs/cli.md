@@ -181,6 +181,12 @@ Options:
       --max-pages <max-pages>
           [default: 200]
 
+      --link-graph-output <link-graph-output>
+          Write an observational link graph report to this JSON file
+
+      --link-graph-telemetry
+          Emit aggregate link graph timing and counts to stderr
+
       --checkpoint <checkpoint>
 
 

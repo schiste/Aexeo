@@ -82,6 +82,13 @@ caller-supplied, not independently established by the audit. Even when the
 identities match, audit-based reports retain incomplete crawl coverage until
 it can be attested from a complete, equivalent surface.
 
+To write a graph alongside a runtime crawl in one command, pass
+`--link-graph-output graph.json` to `aexeo-cli crawl URL`. The normal audit
+output and exit status remain unchanged. Add `--link-graph-telemetry` to emit
+the same aggregate-only event to stderr. This is opt-in; graph evidence in the
+output file can include URLs and page text. The result retains incomplete
+coverage because the crawl does not independently attest a matching inventory.
+
 ## Static audit artifacts
 
 For a `static_export` audit artifact, `--audit --static-url-map urls.json`
