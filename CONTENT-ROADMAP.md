@@ -35,6 +35,7 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [x] Offline link destination syntax and configurable scheme validation; this does not check reachability or link safety ([PR #46](https://github.com/schiste/Aexeo/pull/46)).
 - [x] Configurable duplicate-heading gate with heading capability and aggregate
   counts ([PR #49](https://github.com/schiste/Aexeo/pull/49)).
+- [x] Configurable opt-in heading length gate with Unicode scalar counting.
 - [ ] Additional editorial gates and destination reachability validation.
 - [x] Explicit collection metadata uniqueness gate in core, CLI and EmDash/WASM
   ([PR #40](https://github.com/schiste/Aexeo/pull/40)); callers must supply the

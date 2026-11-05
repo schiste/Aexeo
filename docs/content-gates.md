@@ -330,3 +330,22 @@ case folding. Empty headings are ignored. Repeated headings can be intentional,
 so tune this opt-in rule to the content type. An adapter without headings reports
 `not_checked`. The report includes heading and duplicate counts; a finding uses
 the heading ordinal and does not claim an exact source position.
+
+## Heading length
+
+The opt-in `heading_length` gate counts Unicode scalar values in each heading
+after trimming outer whitespace. Configure a positive `max_chars`, for example:
+
+```toml
+[[gates]]
+id = "heading.length"
+kind = "heading_length"
+max_chars = 80
+blocking = false
+```
+
+It reports heading ordinal and count, the longest heading and the number over
+the limit; a missing heading capability is `not_checked`. Unicode scalar values
+are not grapheme clusters or display width, so combining marks and emoji can
+count as multiple values. The limit is a project-specific heuristic, not a
+universal SEO rule. Findings currently use placeholder coordinates (1:1).
