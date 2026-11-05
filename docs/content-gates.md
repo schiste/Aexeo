@@ -247,6 +247,9 @@ remain visible as findings. The host is responsible for collection completeness.
 Rust EmDash hosts can use `content::evaluate_collection` to adapt a complete
 slice of documents; document and site gates without their inputs remain
 `not_checked`. JavaScript hosts can use `evaluateContentCollection` from the
-EmDash content API. The CLI does not yet accept collection input. To check the
+EmDash content API. The CLI accepts a JSON array of content inputs with
+`--collection items.json --no-text`, for example `[{"id":"/a","metadata":{"slug":"a"}}]`.
+IDs must be unique and nonempty; provide the complete collection. Other gates
+that need an individual document still report `not_checked`. To check the
 real WASM boundary locally, build the plugin and run `npm run test:wasm` in
 `packages/aexeo-emdash`; the ordinary TypeScript unit test uses a mock.

@@ -122,7 +122,7 @@ Use `aexeo-cli content article.md --preset article-editorial --input-format mark
 --format json --telemetry` to emit one JSON telemetry event to stderr. It contains
 aggregate gate counts and durations, not input text, metadata, paths, or findings.
 `evaluation_ms` covers preset evaluation only. For local content, optional
-`stages.input_load_ms` covers content, metadata, evidence and site loading and
+`stages.input_load_ms` covers content, metadata, evidence, collection and site loading and
 any requested fix; `stages.adapter_ms` covers input adaptation including Markdown
 parsing. These stages exclude preset resolution, output and process startup.
 Crawl events omit stage timings and `evaluation_ms` excludes crawling. The
