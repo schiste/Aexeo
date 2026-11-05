@@ -414,6 +414,7 @@ impl ContentPreset {
     ) -> Result<ContentReport> {
         self.validate()?;
         let mut results = Vec::with_capacity(self.gates.len());
+        let mut word_count = None;
         for gate in &self.gates {
             let mut findings = Vec::new();
             let mut reason = None;
@@ -436,7 +437,8 @@ impl ContentPreset {
             match gate {
                 ContentGate::WordCount { min, max, .. } => match &input.text {
                     Some(text) => {
-                        let count = text.split_whitespace().count();
+                        let count =
+                            *word_count.get_or_insert_with(|| text.split_whitespace().count());
                         if let Some(minimum) = min.filter(|n| count < *n) {
                             emit(
                                 format!("Word count {count} is below the minimum of {}", minimum),
@@ -775,6 +777,46 @@ term="draft"
             .unwrap();
         assert_eq!(clean.gates[0].status, GateStatus::Passed);
         assert!(ContentPreset::from_toml(&preset.to_toml().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn multiple_word_count_gates_share_the_same_count_and_handle_missing_text() {
+        let preset = ContentPreset::from_toml(
+            r#"version = 1
+name = "counts"
+[[gates]]
+id = "lower"
+kind = "word_count"
+min = 3
+[[gates]]
+id = "upper"
+kind = "word_count"
+max = 1
+"#,
+        )
+        .unwrap();
+        let input = ContentInput {
+            id: "example".into(),
+            text: Some("é\n deux".into()),
+            ..Default::default()
+        };
+        let report = preset.evaluate(&input).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[1].status, GateStatus::Failed);
+        assert!(report.gates[0].findings[0].message.contains("Word count 2"));
+        assert!(report.gates[1].findings[0].message.contains("Word count 2"));
+        let missing = preset
+            .evaluate(&ContentInput {
+                text: None,
+                ..input
+            })
+            .unwrap();
+        assert!(
+            missing
+                .gates
+                .iter()
+                .all(|gate| gate.status == GateStatus::NotChecked)
+        );
     }
 
     #[test]

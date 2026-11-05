@@ -81,3 +81,21 @@ together. It targets the requested fraction approximately, does not stratify
 labels, and can be imbalanced when a connected component is large. Inspect the
 class distribution and use a representative independent dataset before drawing
 conclusions. Splitting a public dataset cannot prevent model-training contamination.
+
+## Optional CLEF-Flash on Wikimedia Lift Wing
+
+`clef.py` uses the same support question and review format as the Jev adapter, but sends requests to Wikimedia's public `llm-clef-flash:predict` endpoint without a key. It defaults reliability to `uncertain`; an independent source assessment is still required before an Aexeo evidence-review gate can pass. For a single review, the same `--source-reliability`, `--source-reviewer` and `--source-review-reason` options documented above record that assessment without sending it to CLEF. Batch reviews always use uncertain reliability. It is opt-in and sends the full claim and source passage to the remote service. Only send data you are authorized to share. Wikimedia's public service can change its model without changing its service name; the response records that name, not an immutable weights revision. Do not compare runs as if they were from a pinned model unless the provider supplies a version.
+
+```sh
+python3 adapters/jev/clef.py --claim 'The study included 14 participants.' \
+  --source study.txt --minimum-probability 0.9 > review.json
+python3 adapters/jev/clef.py --cases labeled-cases.json --max-cases 12 \
+  --minimum-probability 0.9 > reviews.json
+python3 adapters/jev/evaluate.py labeled-cases.json reviews.json
+```
+
+The threshold above illustrates the interface and is **not** a validated recommendation. Batch mode prevalidates all examples, runs sequentially, sends neither labels nor IDs, and emits the array only after the whole batch succeeds. A failure can occur after earlier requests were sent. There is no automatic retry. Optionally supply `--checkpoint progress.json` to atomically save each completed review and resume an interrupted batch with the same input and threshold. The checkpoint contains full claims and sources; protect it like the input and do not use it concurrently. Existing reviews are checked against their exact claims, sources, protocol, model name and threshold before reuse. The service name is not an immutable version, so restarting after a provider update may still mix model revisions. Without a checkpoint, failures leave no usable partial result. Use small, explicitly bounded batches and respect [Wikimedia's current rate limits](https://wikitech.wikimedia.org/wiki/Machine_Learning/LiftWing/Large_Language_Models). Low probability becomes `uncertain`. An unavailable model or malformed response is an error, not a passed gate. The evaluator accepts either Jev or CLEF records but rejects mixed providers, protocols, thresholds and models. Model confidence is not guaranteed calibrated for your data.
+
+An exploratory run of the integrated adapter against 35 annotated SciFact dev rationales (25 supported, 10 contradicted), distinct by claim and document within the sample and not repeated from the preceding 30-case smoke test, had 23/35 correct raw choices. At an illustrative 0.9 threshold, 13/35 decisions were decisive, 12/13 of those matched their labels, and 0/11 support approvals conflicted with the labels. This tiny, science-only sample contains no `uncertain` labels, is from a publicly available dataset potentially present in training, and does not measure retrieval or source reliability. Its holdout had already been inspected during exploration. One transient 503 needed a bounded manual retry in the experiment; the CLI itself does not retry. These results do not validate the threshold or justify automatic approvals.
+
+A separate three-case synthetic CLI smoke test exercised supported, contradicted and uncertain responses and verified that a completed checkpoint could be resumed without another request. This is an integration check, not an accuracy estimate.
