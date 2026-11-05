@@ -37,7 +37,8 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
   counts ([PR #49](https://github.com/schiste/Aexeo/pull/49)).
 - [x] Configurable opt-in heading length gate with Unicode scalar counting.
 - [x] Markdown heading-node and EmDash heading-block locations for duplicate and length findings.
-- [ ] Additional editorial gates and destination reachability validation.
+- [x] Truncated site crawls mark site-scoped gates `not_checked` while retaining partial findings; native link rules suppress incomplete graph conclusions.
+- [ ] Additional editorial gates and external destination reachability validation.
 - [x] Explicit collection metadata uniqueness gate in core, CLI and EmDash/WASM
   ([PR #40](https://github.com/schiste/Aexeo/pull/40)); callers must supply the
   complete collection and missing metadata remains `not_checked`.

@@ -40,3 +40,7 @@ outer whitespace; this differs from visual character width. Its ordinal finding
 uses placeholder finding coordinates; Markdown JSON reports supply source locations
 at the heading node; EmDash reports identify the first non-empty span of the
 heading block. Review whether the limit suits the content and language.
+
+For a truncated site crawl, site gates are `not_checked` and may still include
+findings from visited pages. Review those findings and the crawl status; a
+partial crawl cannot establish complete site coverage.
