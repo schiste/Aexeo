@@ -3,9 +3,11 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::link_counts::{LinkCounts, count_links};
-use crate::link_evidence::{LinkContext, extract_links};
+use crate::link_evidence::{HtmlLinkMetadata, LinkContext, extract_document};
+use crate::link_graph::{LinkResolution, resolve_link};
 use crate::link_inventory::{
-    CrawlSurface, InventoryReconciliation, InventorySnapshot, SurfaceIdentity, reconcile,
+    CrawlSurface, InventoryDisposition, InventoryReconciliation, InventorySnapshot,
+    SurfaceIdentity, reconcile,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,6 +15,9 @@ pub struct RenderedPage {
     /// The observed absolute URL, including a query when it identifies the page.
     pub url: String,
     pub html: String,
+    pub status_code: Option<u16>,
+    /// None means response headers were not captured; an empty map means they were.
+    pub response_headers: Option<std::collections::BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,9 +37,20 @@ pub struct LinkReportInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObservedPageLinks {
     pub url: String,
+    pub status_code: Option<u16>,
+    pub response_headers_captured: bool,
+    pub noindex_observed: bool,
+    pub canonical_hrefs: Vec<String>,
+    pub redirect_target: Option<String>,
     /// Observed counts only; zero does not establish orphanhood.
     pub distinct_source_pages: usize,
     pub source_pages_by_context: std::collections::BTreeMap<LinkContext, usize>,
+}
+
+fn has_noindex(value: &str) -> bool {
+    value
+        .split(|ch: char| ch.is_ascii_whitespace() || matches!(ch, ',' | ';' | ':'))
+        .any(|part| part.eq_ignore_ascii_case("noindex") || part.eq_ignore_ascii_case("none"))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,6 +90,13 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
     if origin_url.is_none() {
         issues.push("origin_missing_or_invalid".to_string());
     }
+    if input.identity.as_ref().is_none_or(|identity| {
+        [&identity.release, &identity.surface, &identity.snapshot]
+            .iter()
+            .any(|value| value.trim().is_empty())
+    }) {
+        issues.push("surface_identity_missing".to_string());
+    }
     if !input.crawl_complete {
         issues.push("crawl_incomplete".to_string());
     }
@@ -86,6 +109,15 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
     }
     let mut seen = std::collections::BTreeSet::new();
     let mut evidence = Vec::new();
+    let mut observations = Vec::<(HtmlLinkMetadata, bool, Option<String>)>::new();
+    let mut coverage_issues = std::collections::BTreeSet::new();
+    if input
+        .snapshot_date
+        .as_deref()
+        .is_none_or(|date| date.trim().is_empty())
+    {
+        coverage_issues.insert("snapshot_date_missing");
+    }
     for page in &input.pages {
         if !seen.insert(&page.url) {
             issues.push("duplicate_crawl_url".to_string());
@@ -103,12 +135,67 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
         if !valid {
             issues.push("invalid_or_foreign_crawl_url".to_string());
         }
-        evidence.extend(extract_links(
+        let (links, metadata) = extract_document(
             &page.html,
             &page.url,
             origin,
             input.snapshot_date.as_deref(),
-        ));
+        );
+        evidence.extend(links);
+        let headers = page.response_headers.as_ref();
+        if headers.is_none() {
+            coverage_issues.insert("response_headers_missing");
+        }
+        match page.status_code {
+            None => {
+                coverage_issues.insert("response_status_missing");
+            }
+            Some(status) if (300..400).contains(&status) => {
+                coverage_issues.insert("redirect_observed");
+            }
+            Some(status) if !(200..300).contains(&status) => {
+                coverage_issues.insert("non_success_response");
+            }
+            _ => {}
+        }
+        let robots_header = headers.and_then(|headers| {
+            headers
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("x-robots-tag"))
+                .map(|(_, value)| value.as_str())
+        });
+        let redirect_target = headers.and_then(|headers| {
+            headers
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("location"))
+                .map(|(_, value)| value.clone())
+        });
+        let noindex = metadata
+            .robots_directives
+            .iter()
+            .any(|value| has_noindex(value))
+            || robots_header.is_some_and(has_noindex);
+        if noindex {
+            issues.push("noindex_observed".to_string());
+            if input.inventory.as_ref().is_some_and(|inventory| {
+                inventory.pages.iter().any(|entry| {
+                    entry.url == page.url && entry.disposition == InventoryDisposition::Published
+                })
+            }) {
+                coverage_issues.insert("inventory_indexability_mismatch");
+            }
+        }
+        if metadata.canonical_hrefs.len() > 1
+            || metadata.canonical_hrefs.iter().any(|href| {
+                !matches!(
+                    resolve_link(href, &page.url, origin, metadata.base_href.as_deref()),
+                    LinkResolution::SameDocument { .. }
+                )
+            })
+        {
+            coverage_issues.insert("canonical_target_unresolved");
+        }
+        observations.push((metadata, noindex, redirect_target));
     }
     if evidence
         .iter()
@@ -120,7 +207,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
     if !links.indeterminate.is_empty() {
         issues.push("indeterminate_links".to_string());
     }
-    let reconciliation = input.inventory.as_ref().map(|inventory| {
+    let mut reconciliation = input.inventory.as_ref().map(|inventory| {
         reconcile(
             inventory,
             &CrawlSurface {
@@ -130,6 +217,19 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
             },
         )
     });
+    issues.extend(coverage_issues.iter().map(|issue| (*issue).to_string()));
+    match reconciliation.as_mut() {
+        Some(result) if !coverage_issues.is_empty() => {
+            result.comparable = false;
+            result.eligible_pages.clear();
+            result
+                .issues
+                .extend(coverage_issues.iter().map(|issue| (*issue).to_string()));
+            result.issues.sort();
+            result.issues.dedup();
+        }
+        _ => {}
+    }
     match &reconciliation {
         None => issues.push("inventory_missing".to_string()),
         Some(result) if !result.comparable => issues.push("inventory_not_comparable".to_string()),
@@ -145,7 +245,8 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
     let pages = input
         .pages
         .iter()
-        .map(|page| {
+        .zip(observations)
+        .map(|(page, (metadata, noindex, redirect_target))| {
             let inbound = by_destination.get(page.url.as_str());
             let mut contexts = [
                 LinkContext::Body,
@@ -169,6 +270,11 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
             }
             ObservedPageLinks {
                 url: page.url.clone(),
+                status_code: page.status_code,
+                response_headers_captured: page.response_headers.is_some(),
+                noindex_observed: noindex,
+                canonical_hrefs: metadata.canonical_hrefs,
+                redirect_target,
                 distinct_source_pages: inbound
                     .map_or(0, |destination| destination.distinct_source_pages),
                 source_pages_by_context: contexts,

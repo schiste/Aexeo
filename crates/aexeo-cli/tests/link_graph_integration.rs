@@ -11,8 +11,8 @@ fn graph_report_exposes_evidence_and_private_opt_in_telemetry() {
         "snapshot_date": "2026-11-05T00:00:00Z",
         "crawl_complete": true,
         "pages": [
-            {"url":"https://example.org/a", "html":"<html lang='fr'><nav><a href='/b'>menu</a></nav><main><p>private phrase <a href='/b'>link</a><a href='#part'>jump</a></p></main></html>"},
-            {"url":"https://example.org/b", "html":"<main>destination</main>"}
+            {"url":"https://example.org/a", "status_code":200, "response_headers":{}, "html":"<html lang='fr'><nav><a href='/b'>menu</a></nav><main><p>private phrase <a href='/b'>link</a><a href='#part'>jump</a></p></main></html>"},
+            {"url":"https://example.org/b", "status_code":200, "response_headers":{}, "html":"<main>destination</main>"}
         ],
         "inventory": {"identity": identity, "complete":true, "pages":[
             {"url":"https://example.org/a", "disposition":"published", "target":null, "locale":"fr"},
@@ -63,6 +63,113 @@ fn graph_report_exposes_evidence_and_private_opt_in_telemetry() {
             assert!(output.stderr.is_empty());
         }
     }
+}
+
+#[test]
+fn observed_noindex_and_canonical_disagreement_block_eligibility() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("input.json");
+    let identity = serde_json::json!({"origin":"https://example.org","release":"r1","surface":"public","snapshot":"s1"});
+    let input = serde_json::json!({
+        "version":1, "identity":identity, "snapshot_date":"2026-11-05T00:00:00Z", "crawl_complete":true,
+        "pages":[{"url":"https://example.org/a", "status_code":200, "response_headers":{}, "html":"<head><meta name='robots' content='noindex,follow'><link rel='canonical' href='/b'></head><main>A</main>"}],
+        "inventory":{"identity":identity,"complete":true,"pages":[{"url":"https://example.org/a","disposition":"published","target":null,"locale":"en"}]}
+    });
+    fs::write(&path, serde_json::to_vec(&input).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .arg("link-graph")
+        .arg(path)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["pages"][0]["noindex_observed"], true);
+    assert_eq!(report["pages"][0]["canonical_hrefs"][0], "/b");
+    assert_eq!(report["reconciliation"]["comparable"], false);
+    assert!(
+        report["reconciliation"]["eligible_pages"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        report["issues"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("inventory_indexability_mismatch"))
+    );
+    assert!(
+        report["issues"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("canonical_target_unresolved"))
+    );
+}
+
+#[test]
+fn redirect_and_header_noindex_are_explicit() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("input.json");
+    let input = serde_json::json!({
+        "version":1, "identity":{"origin":"https://example.org","release":"r1","surface":"public","snapshot":"s1"},
+        "snapshot_date":"2026-11-05T00:00:00Z", "crawl_complete":false,
+        "pages":[{"url":"https://example.org/a", "status_code":302, "response_headers":{"Location":"/b","X-Robots-Tag":"noindex"}, "html":""}], "inventory":null
+    });
+    fs::write(&path, serde_json::to_vec(&input).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .arg("link-graph")
+        .arg(path)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["pages"][0]["noindex_observed"], true);
+    assert_eq!(report["pages"][0]["redirect_target"], "/b");
+    assert!(
+        report["issues"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("redirect_observed"))
+    );
+}
+
+#[test]
+fn missing_response_metadata_blocks_coverage_eligibility() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("input.json");
+    let identity = serde_json::json!({"origin":"https://example.org","release":"r1","surface":"public","snapshot":"s1"});
+    let input = serde_json::json!({
+        "version":1, "identity":identity, "snapshot_date":"2026-11-05T00:00:00Z", "crawl_complete":true,
+        "pages":[{"url":"https://example.org/a", "html":"<main>A</main>"}],
+        "inventory":{"identity":identity,"complete":true,"pages":[{"url":"https://example.org/a","disposition":"published","target":null,"locale":"en"}]}
+    });
+    fs::write(&path, serde_json::to_vec(&input).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .arg("link-graph")
+        .arg(path)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["reconciliation"]["comparable"], false);
+    assert!(
+        report["reconciliation"]["eligible_pages"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        report["issues"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("response_status_missing"))
+    );
+    assert!(
+        report["issues"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("response_headers_missing"))
+    );
 }
 
 #[test]

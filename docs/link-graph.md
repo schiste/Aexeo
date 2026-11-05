@@ -18,8 +18,8 @@ corresponding `complete` flag to `false`.
   "snapshot_date": "2026-01-01T00:00:00Z",
   "crawl_complete": true,
   "pages": [
-    {"url": "https://example.org/a", "html": "<main><p><a href='/b'>Read B</a></p></main>"},
-    {"url": "https://example.org/b", "html": "<main>B</main>"}
+    {"url": "https://example.org/a", "status_code": 200, "response_headers": {}, "html": "<main><p><a href='/b'>Read B</a></p></main>"},
+    {"url": "https://example.org/b", "status_code": 200, "response_headers": {}, "html": "<main>B</main>"}
   ],
   "inventory": {
     "identity": {"origin":"https://example.org", "release":"release-123", "surface":"public", "snapshot":"snapshot-456"},
@@ -32,11 +32,15 @@ corresponding `complete` flag to `false`.
 }
 ```
 
-Identity and snapshot date can be `null` when unavailable. The report flags
+Identity and snapshot date can be `null` when unavailable. Page `status_code`
+and `response_headers` can also be `null` when not captured; an empty headers
+object means the headers were captured and none were present. The report flags
 missing information and inventory mismatches. Inventory dispositions are
 `published`, `draft`, `noindex`, `redirect`, `canonical_alias`,
 `locale_fallback` and `unknown`. Alias records require an explicit target;
-any unresolved alias prevents coverage eligibility. Matching caller-provided
+any unresolved alias prevents coverage eligibility. Observed robots noindex
+directives, redirects and canonical targets are reported; missing response
+metadata or unresolved targets also withhold eligibility. Matching caller-provided
 identities and completeness attestations cannot independently prove that a
 snapshot is correct.
 
