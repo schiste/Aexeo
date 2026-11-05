@@ -28,6 +28,20 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(report["unchecked_rate"], 1 / 3)
         self.assertEqual(report["reviewed_examples"], 1)
 
+    def test_markdown_and_embedded_preset_reach_cli(self):
+        corpus = {"version": 1, "preset": "custom", "preset_toml": "name='example'", "input_format": "markdown", "gate_id": "g", "examples": [
+            {"id": "a", "split": "holdout", "text": "# heading", "expected": "passed"},
+        ]}
+        def run(arguments, **kwargs):
+            self.assertEqual(arguments[arguments.index("--input-format") + 1], "markdown")
+            source = arguments[arguments.index("--preset-source") + 1]
+            name, filename = source.split("=", 1)
+            self.assertEqual(name, "custom")
+            self.assertEqual(Path(filename).read_text(), "name='example'")
+            return SimpleNamespace(returncode=0, stdout='{"gates":[{"gate_id":"g","status":"passed"}]}')
+        with patch.object(eval_module.subprocess, "run", side_effect=run):
+            self.assertEqual(eval_module.evaluate("cli", corpus, "holdout")["counts"]["true_negative"], 1)
+
     def test_rejects_duplicate_ids_and_invalid_gates(self):
         case = {"id": "a", "split": "holdout", "text": "a", "expected": "passed"}
         corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": [case, case]}
