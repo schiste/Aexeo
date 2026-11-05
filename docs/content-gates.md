@@ -205,3 +205,23 @@ Markdown links and EmDash link marks are counted, including links split across
 adjacent spans. Images are not counted. This is a presence check only: it does
 not validate destinations, check network availability, or assess sources.
 When an adapter cannot supply link data, the gate reports `not_checked`.
+
+### Repeated terms
+
+The opt-in `repeated_terms` gate checks configured literal terms:
+
+```toml
+[[gates]]
+id = "editorial.repetition"
+kind = "repeated_terms"
+terms = ["very", "really"]
+max_occurrences = 2
+whole_words = true
+blocking = false
+```
+
+Matching is case-sensitive and non-overlapping. By default Unicode alphanumeric
+characters and underscores define word boundaries; set `whole_words = false`
+for substring matches. It does not infer synonyms, grammar, or editorial intent.
+Each finding points to the first occurrence beyond the configured maximum,
+and measurements count configured and exceeded terms and matched occurrences.
