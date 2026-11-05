@@ -69,6 +69,15 @@ pub enum ContentGate {
         blocking: bool,
         max_words: usize,
     },
+    /// Requires a minimum number of hyperlinks; does not validate destinations.
+    LinkCount {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+        min: usize,
+    },
     /// Heuristic sentence length using configured punctuation and whitespace words.
     SentenceLength {
         id: String,
@@ -191,6 +200,7 @@ impl ContentGate {
     pub fn severity(&self) -> Severity {
         match self {
             Self::WordCount { severity, .. }
+            | Self::LinkCount { severity, .. }
             | Self::SentenceLength { severity, .. }
             | Self::ParagraphLength { severity, .. }
             | Self::ForbiddenTerms { severity, .. }
@@ -207,6 +217,7 @@ impl ContentGate {
     pub fn blocking(&self) -> bool {
         match self {
             Self::WordCount { blocking, .. }
+            | Self::LinkCount { blocking, .. }
             | Self::SentenceLength { blocking, .. }
             | Self::ParagraphLength { blocking, .. }
             | Self::ForbiddenTerms { blocking, .. }
@@ -226,6 +237,7 @@ impl ContentGate {
             Self::WordCount { .. } | Self::SentenceLength { .. } | Self::ForbiddenTerms { .. } => {
                 "text"
             }
+            Self::LinkCount { .. } => "links",
             Self::RequiredMetadata { .. } => "metadata",
             Self::ParagraphLength { .. } => "paragraphs",
             Self::RequiredHeadings { .. } => "headings",
@@ -240,6 +252,7 @@ impl ContentGate {
     pub fn id(&self) -> &str {
         match self {
             Self::WordCount { id, .. }
+            | Self::LinkCount { id, .. }
             | Self::SentenceLength { id, .. }
             | Self::ParagraphLength { id, .. }
             | Self::ForbiddenTerms { id, .. }
@@ -497,6 +510,18 @@ impl ContentPreset {
         extensions: Option<&dyn ContentGateExtensions>,
         context: Option<&ContentContext>,
     ) -> Result<ContentReport> {
+        self.evaluate_with_links(input, site, extensions, context, None)
+    }
+
+    /// Evaluate with an optional adapter-supplied hyperlink count.
+    pub fn evaluate_with_links(
+        &self,
+        input: &ContentInput,
+        site: Option<(&crate::site::Site, &crate::config::Config)>,
+        extensions: Option<&dyn ContentGateExtensions>,
+        context: Option<&ContentContext>,
+        link_count: Option<usize>,
+    ) -> Result<ContentReport> {
         self.validate()?;
         let mut results = Vec::with_capacity(self.gates.len());
         let mut word_count = None;
@@ -555,6 +580,22 @@ impl ContentPreset {
                             }
                         }
                         None => reason = Some("text is unavailable from this adapter".into()),
+                    }
+                }
+                ContentGate::LinkCount { min, .. } => {
+                    measurements.insert("min_links".into(), *min);
+                    match link_count {
+                        Some(count) => {
+                            measurements.insert("link_count".into(), count);
+                            if count < *min {
+                                emit(
+                                    format!("Link count {count} is below the minimum of {min}"),
+                                    1,
+                                    1,
+                                );
+                            }
+                        }
+                        None => reason = Some("links are unavailable from this adapter".into()),
                     }
                 }
                 ContentGate::ParagraphLength { max_words, .. } => {

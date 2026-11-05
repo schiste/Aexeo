@@ -711,3 +711,48 @@ fn paragraph_gate_rejects_zero_word_limit() {
     let source = "version=1\nname='Invalid'\n[[gates]]\nid='paragraphs'\nkind='paragraph_length'\nmax_words=0\n";
     assert!(aexeo_core::content_gate::ContentPreset::from_toml(source).is_err());
 }
+
+#[test]
+fn markdown_link_gate_reports_measurements_and_opt_in_telemetry() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    std::fs::write(&preset, "version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_count'\nmin=2\nblocking=false\n").unwrap();
+    let source = format!("custom={}", preset.display());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "-",
+            "--input-format",
+            "markdown",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &source,
+            "--format",
+            "json",
+            "--telemetry",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"[one](https://example.org)")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "failed");
+    assert_eq!(report["gates"][0]["measurements"]["link_count"], 1);
+    let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["summary"], report["summary"]);
+    assert!(
+        !String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("example.org")
+    );
+}
