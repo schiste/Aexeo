@@ -448,3 +448,62 @@ fn telemetry_is_opt_in_and_reports_metadata_presence() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["gates"][2]["measurements"]["present_fields"], 2);
 }
+
+#[test]
+fn heading_and_term_measurements_distinguish_absent_inputs() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    std::fs::write(&preset, "version=1\nname='Measures'\n[[gates]]\nid='headings'\nkind='required_headings'\nheadings=['Intro','Summary']\nblocking=false\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['hype','buzz']\nblocking=false\n").unwrap();
+    let source = format!("custom={}", preset.display());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "-",
+            "--input-format",
+            "markdown",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &source,
+            "--format",
+            "json",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"# Intro\n\nhype hype\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["measurements"]["required_headings"], 2);
+    assert_eq!(report["gates"][0]["measurements"]["present_headings"], 1);
+    assert_eq!(report["gates"][1]["measurements"]["configured_terms"], 2);
+    assert_eq!(report["gates"][1]["measurements"]["matches"], 2);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "--no-text",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &source,
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["summary"]["not_checked"], 2);
+    assert!(
+        report["gates"][0]["measurements"]
+            .get("present_headings")
+            .is_none()
+    );
+    assert!(report["gates"][1]["measurements"].get("matches").is_none());
+}
