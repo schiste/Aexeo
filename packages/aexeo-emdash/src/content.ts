@@ -9,12 +9,14 @@ export interface ContentGateResult {
   required_capability: "text" | "source_text" | "metadata" | "headings" | "site" | "extension" | "text_and_evidence";
   findings: Finding[];
   reason: string | null;
+  measurements?: Record<string, number>;
 }
 
 export interface ContentReport {
   preset: string;
   input_id: string;
   gates: ContentGateResult[];
+  summary?: { passed: number; failed: number; not_checked: number; blocking_failed: number; blocking_not_checked: number };
   applied_fixes: string[];
 }
 

@@ -161,17 +161,26 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     };
     input.metadata = metadata;
     input.evidence_sources = evidence_sources;
+    let started = std::time::Instant::now();
     let mut report =
         preset.evaluate_with_site(&input, site.as_ref().map(|(site, config)| (site, config)))?;
+    let evaluation_ms = started.elapsed().as_secs_f64() * 1000.0;
     report.applied_fixes = applied_fixes;
+    if args.get_flag("telemetry") {
+        print_telemetry(&report, evaluation_ms)?;
+    }
     if args.get_one::<String>("format").map(String::as_str) == Some("json") {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
+        print_summary(&report);
         for fix in &report.applied_fixes {
             println!("Applied fix: {fix}");
         }
         for gate in &report.gates {
             println!("{}: {:?}", gate.gate_id, gate.status);
+            for (name, value) in &gate.measurements {
+                println!("  {name}: {value}");
+            }
             if let Some(reason) = &gate.reason {
                 println!("  {reason}");
             }
@@ -228,10 +237,15 @@ fn evaluate_crawl(
         .get_one::<String>("crawl-engine")
         .context("missing crawl engine")?;
     let audit = aexeo_core::run_runtime_audit(url, max_pages, engine, &config)?;
+    let started = std::time::Instant::now();
     let report = audit.evaluate_preset(preset, &config)?;
+    if args.get_flag("telemetry") {
+        print_telemetry(&report.content, started.elapsed().as_secs_f64() * 1000.0)?;
+    }
     if args.get_one::<String>("format").map(String::as_str) == Some("json") {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
+        print_summary(&report.content);
         println!("Crawl status: {:?}", report.crawl_status);
         if let Some(reason) = &report.truncation_reason {
             println!("  {reason}");
@@ -245,6 +259,9 @@ fn evaluate_crawl(
         }
         for gate in &report.content.gates {
             println!("{}: {:?}", gate.gate_id, gate.status);
+            for (name, value) in &gate.measurements {
+                println!("  {name}: {value}");
+            }
             if let Some(reason) = &gate.reason {
                 println!("  {reason}");
             }
@@ -278,6 +295,24 @@ fn evaluate_crawl(
     } else {
         Ok(EXIT_SUCCESS)
     }
+}
+
+fn print_summary(report: &aexeo_core::content_gate::ContentReport) {
+    let s = &report.summary;
+    println!(
+        "Configured gates: {} passed, {} failed, {} not checked ({} blocking failures, {} blocking not checked)",
+        s.passed, s.failed, s.not_checked, s.blocking_failed, s.blocking_not_checked
+    );
+    println!("Only configured gates were assessed.");
+}
+
+fn print_telemetry(
+    report: &aexeo_core::content_gate::ContentReport,
+    evaluation_ms: f64,
+) -> Result<()> {
+    let event = serde_json::json!({"schema_version": 1, "event": "content_evaluation", "evaluation_ms": evaluation_ms, "summary": report.summary});
+    eprintln!("{}", serde_json::to_string(&event)?);
+    Ok(())
 }
 
 fn toml_output(preset: &aexeo_core::content_gate::ContentPreset) -> Result<String> {

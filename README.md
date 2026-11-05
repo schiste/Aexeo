@@ -108,3 +108,19 @@ cargo run -p aexeo-cli -- adapters
 ## Notes
 
 `cargo run -p aexeo-cli -- docs generate .` refreshes generated docs from the Rust codebase. `cargo run -p aexeo-cli -- docs check .` fails when those docs are stale.
+
+### Content report and local telemetry
+
+Content reports count configured gates by outcome, including blocking failures and
+checks that could not run. A passing report covers only its configured gates; it
+is not a general quality or factuality assessment. Word-count gates report the
+observed count and configured bounds; metadata gates report required and present
+field counts when metadata is available. Supply metadata explicitly with
+`--metadata metadata.json` when evaluating an exported Markdown article.
+
+Use `aexeo-cli content article.md --preset article-editorial --input-format markdown
+--format json --telemetry` to emit one JSON telemetry event to stderr. It contains
+only the evaluation duration and aggregate gate counts, not the input text,
+metadata, paths, or findings. The duration covers preset evaluation only, not
+file loading, Markdown parsing, or website crawling. Telemetry is opt-in and is
+not transmitted or retained by Aexeo; redirect stderr to retain it locally.
