@@ -32,6 +32,8 @@ it does not yet change the existing link graph or orphan results.
 - Inventory/crawl identity reconciliation is merged as an internal building
   block (#60). Unresolved aliases and missing or mismatched coverage prevent
   eligibility; actual adapters and reports still need integration.
-- HTML link evidence extraction is in progress. Source positions are unknown
+- HTML link evidence extraction is merged (#62). Source positions are unknown
   where the DOM parser cannot preserve them. Explicit context markers support
-  otherwise ambiguous components.
+  otherwise ambiguous components. It is not yet wired to audits or adapters.
+- Distinct source-page counts by context and separate same-document jumps are
+  in progress; coverage-aware decisions, CLI reports and telemetry remain open.
