@@ -89,6 +89,18 @@ pub enum ContentGate {
         #[serde(default = "default_sentence_delimiters")]
         delimiters: String,
     },
+    /// Limits exact occurrences of user-configured terms.
+    RepeatedTerms {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+        terms: Vec<String>,
+        max_occurrences: usize,
+        #[serde(default = "default_whole_words")]
+        whole_words: bool,
+    },
     ForbiddenTerms {
         id: String,
         #[serde(default)]
@@ -196,6 +208,10 @@ fn default_blocking() -> bool {
     true
 }
 
+fn default_whole_words() -> bool {
+    true
+}
+
 impl ContentGate {
     pub fn severity(&self) -> Severity {
         match self {
@@ -203,6 +219,7 @@ impl ContentGate {
             | Self::LinkCount { severity, .. }
             | Self::SentenceLength { severity, .. }
             | Self::ParagraphLength { severity, .. }
+            | Self::RepeatedTerms { severity, .. }
             | Self::ForbiddenTerms { severity, .. }
             | Self::RequiredMetadata { severity, .. }
             | Self::RequiredHeadings { severity, .. }
@@ -220,6 +237,7 @@ impl ContentGate {
             | Self::LinkCount { blocking, .. }
             | Self::SentenceLength { blocking, .. }
             | Self::ParagraphLength { blocking, .. }
+            | Self::RepeatedTerms { blocking, .. }
             | Self::ForbiddenTerms { blocking, .. }
             | Self::RequiredMetadata { blocking, .. }
             | Self::RequiredHeadings { blocking, .. }
@@ -234,9 +252,10 @@ impl ContentGate {
     }
     pub fn required_capability(&self) -> &'static str {
         match self {
-            Self::WordCount { .. } | Self::SentenceLength { .. } | Self::ForbiddenTerms { .. } => {
-                "text"
-            }
+            Self::WordCount { .. }
+            | Self::SentenceLength { .. }
+            | Self::RepeatedTerms { .. }
+            | Self::ForbiddenTerms { .. } => "text",
             Self::LinkCount { .. } => "links",
             Self::RequiredMetadata { .. } => "metadata",
             Self::ParagraphLength { .. } => "paragraphs",
@@ -255,6 +274,7 @@ impl ContentGate {
             | Self::LinkCount { id, .. }
             | Self::SentenceLength { id, .. }
             | Self::ParagraphLength { id, .. }
+            | Self::RepeatedTerms { id, .. }
             | Self::ForbiddenTerms { id, .. }
             | Self::RequiredMetadata { id, .. }
             | Self::RequiredHeadings { id, .. }
@@ -267,6 +287,31 @@ impl ContentGate {
             | Self::SiteGroup { id, .. } => id,
         }
     }
+}
+
+// Matching is literal and case-sensitive. Word boundaries use Unicode
+// alphanumeric characters and underscore; positions remain in the original text.
+fn term_matches<'a>(
+    text: &'a str,
+    term: &'a str,
+    whole_words: bool,
+) -> impl Iterator<Item = (usize, &'a str)> + 'a {
+    fn word(ch: char) -> bool {
+        ch.is_alphanumeric() || ch == '_'
+    }
+    text.match_indices(term).filter(move |(offset, _)| {
+        !whole_words
+            || ((!term.chars().next().is_some_and(word)
+                || text[..*offset]
+                    .chars()
+                    .next_back()
+                    .is_none_or(|ch| !word(ch)))
+                && (!term.chars().next_back().is_some_and(word)
+                    || text[*offset + term.len()..]
+                        .chars()
+                        .next()
+                        .is_none_or(|ch| !word(ch))))
+    })
 }
 
 /// An assessment produced by an external reviewer; it is not verified by Aexeo.
@@ -402,6 +447,16 @@ impl ContentPreset {
                 } if *max_words == 0 || delimiters.is_empty() => {
                     bail!(
                         "sentence length needs a positive limit and delimiters for {}",
+                        gate.id()
+                    )
+                }
+                ContentGate::RepeatedTerms { terms, .. }
+                    if terms.is_empty()
+                        || terms.iter().any(|s| s.trim().is_empty())
+                        || terms.iter().collect::<BTreeSet<_>>().len() != terms.len() =>
+                {
+                    bail!(
+                        "repeated terms must be nonempty and unique for {}",
                         gate.id()
                     )
                 }
@@ -690,6 +745,50 @@ impl ContentPreset {
                         None => reason = Some("text is unavailable from this adapter".into()),
                     }
                 }
+                ContentGate::RepeatedTerms {
+                    terms,
+                    max_occurrences,
+                    whole_words,
+                    ..
+                } => {
+                    measurements.insert("configured_terms".into(), terms.len());
+                    measurements.insert("max_occurrences".into(), *max_occurrences);
+                    match &input.text {
+                        Some(text) => {
+                            let mut total = 0;
+                            let mut exceeded = 0;
+                            for term in terms {
+                                let mut first_excess = None;
+                                let mut count = 0;
+                                for (offset, _) in term_matches(text, term, *whole_words) {
+                                    count += 1;
+                                    if count > *max_occurrences && first_excess.is_none() {
+                                        first_excess = Some(offset);
+                                    }
+                                }
+                                total += count;
+                                if let Some(offset) = first_excess {
+                                    exceeded += 1;
+                                    let before = &text[..offset];
+                                    let line = before.chars().filter(|ch| *ch == '\n').count() + 1;
+                                    let column =
+                                        before.rsplit('\n').next().unwrap_or("").chars().count()
+                                            + 1;
+                                    emit(
+                                        format!(
+                                            "Term {term:?} occurs {count} times; maximum is {max_occurrences}"
+                                        ),
+                                        line,
+                                        column,
+                                    );
+                                }
+                            }
+                            measurements.insert("matching_occurrences".into(), total);
+                            measurements.insert("exceeded_terms".into(), exceeded);
+                        }
+                        None => reason = Some("text is unavailable from this adapter".into()),
+                    }
+                }
                 ContentGate::ForbiddenTerms { terms, .. } => {
                     measurements.insert("configured_terms".into(), terms.len());
                     match &input.text {
@@ -697,7 +796,7 @@ impl ContentPreset {
                             let mut matches = 0;
                             for term in terms {
                                 let (mut cursor, mut line, mut column) = (0, 1, 1);
-                                for (offset, _) in text.match_indices(term) {
+                                for (offset, _) in term_matches(text, term, false) {
                                     matches += 1;
                                     for ch in text[cursor..offset].chars() {
                                         if ch == '\n' {
@@ -1098,6 +1197,68 @@ max = 1
                 .gates
                 .iter()
                 .all(|gate| gate.status == GateStatus::NotChecked)
+        );
+    }
+
+    #[test]
+    fn repeated_terms_use_unicode_boundaries_and_report_extra_occurrence() {
+        let preset = ContentPreset::from_toml(
+            r#"
+version = 1
+name = "repetition"
+[[gates]]
+id = "repeat"
+kind = "repeated_terms"
+terms = ["café", "cat"]
+max_occurrences = 1
+blocking = false
+"#,
+        )
+        .unwrap();
+        let input = ContentInput {
+            id: "draft".into(),
+            text: Some("café cats caféine\ncat café".into()),
+            ..Default::default()
+        };
+        let gate = &preset.evaluate(&input).unwrap().gates[0];
+        assert_eq!(gate.status, GateStatus::Failed);
+        assert_eq!(gate.measurements["matching_occurrences"], 3);
+        assert_eq!(gate.measurements["exceeded_terms"], 1);
+        assert_eq!((gate.findings[0].line, gate.findings[0].column), (2, 5));
+        assert_eq!(
+            preset.evaluate(&ContentInput::default()).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+        let substrings = ContentPreset::from_toml(
+            r#"
+version = 1
+name = "substrings"
+[[gates]]
+id = "repeat"
+kind = "repeated_terms"
+terms = ["cat"]
+max_occurrences = 1
+whole_words = false
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            substrings.evaluate(&input).unwrap().gates[0].status,
+            GateStatus::Failed
+        );
+        assert!(
+            ContentPreset::from_toml(
+                r#"
+version = 1
+name = "duplicates"
+[[gates]]
+id = "repeat"
+kind = "repeated_terms"
+terms = ["cat", "cat"]
+max_occurrences = 1
+"#
+            )
+            .is_err()
         );
     }
 
