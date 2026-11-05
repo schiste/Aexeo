@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "description": "Synthetic examples, labels not independently reviewed.",
+  "preset": "paragraph-eval",
+  "preset_toml": "version=1\nname=\"Paragraph evaluation\"\n[[gates]]\nid=\"paragraph\"\nkind=\"paragraph_length\"\nmax_words=5\nblocking=false\n",
+  "input_format": "markdown",
+  "gate_id": "paragraph",
+  "examples": [
+    {
+      "id": "short-en",
+      "split": "development",
+      "text": "A short paragraph.",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "long-en",
+      "split": "development",
+      "text": "one two three four five six.",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "heading-only",
+      "split": "development",
+      "text": "# one two three four five six",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "exact-fr",
+      "split": "holdout",
+      "text": "un deux trois quatre cinq.",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "two-short",
+      "split": "holdout",
+      "text": "one two three.\n\nfour five six.",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "long-fr",
+      "split": "holdout",
+      "text": "un deux trois quatre cinq six.",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "code-excluded",
+      "split": "holdout",
+      "text": "```\none two three four five six\n```",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    }
+  ]
+}
