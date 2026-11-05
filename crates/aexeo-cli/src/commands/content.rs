@@ -250,16 +250,12 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             }
         }
     }
-    if measuring {
+    if let Some(started) = mapping_started {
         let mapping = source_map.as_ref().map(|_| {
             (
                 source_locations.len(),
                 positional_findings - source_locations.len(),
-                mapping_started
-                    .expect("timer exists when telemetry is enabled")
-                    .elapsed()
-                    .as_secs_f64()
-                    * 1000.0,
+                started.elapsed().as_secs_f64() * 1000.0,
             )
         });
         print_telemetry(
