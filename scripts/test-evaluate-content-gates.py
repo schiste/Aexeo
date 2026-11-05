@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import unittest
 from pathlib import Path
@@ -58,6 +59,29 @@ class EvaluateTests(unittest.TestCase):
             eval_module.evaluate("cli", corpus, "holdout")
         holdout["review"] = {"reviewer": "reviewer-1", "method": "manual"}
         eval_module.validate_corpus(corpus)
+
+    def test_review_events_track_overrides_and_resolved_unchecked(self):
+        items = [{"id": ident, "split": "holdout", "text": text, "expected": "passed"} for ident, text in [("a", "one"), ("b", "two"), ("c", "three")]]
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": items}
+        def event(item, model, reviewer):
+            return {"example_id": item["id"], "text_sha256": hashlib.sha256(item["text"].encode()).hexdigest(), "model_status": model, "reviewer_status": reviewer, "reviewer": "editor", "method": "manual"}
+        log = {"version": 1, "gate_id": "g", "events": [event(items[0], "failed", "passed"), event(items[1], "not_checked", "failed"), event(items[2], "passed", "passed")]}
+        result = eval_module.aggregate_review_events(corpus, "holdout", log)
+        self.assertEqual(result["counts"], {"agreed": 1, "overrides_to_pass": 1, "overrides_to_fail": 0, "resolved_unchecked": 1})
+        self.assertEqual(result["override_rate"], 0.5)
+        self.assertNotIn("editor", json.dumps(result))
+        self.assertNotIn("one", json.dumps(result))
+        response = SimpleNamespace(returncode=0, stdout='{"gates":[{"gate_id":"g","status":"passed"}]}')
+        with patch.object(eval_module.subprocess, "run", return_value=response):
+            report = eval_module.evaluate("cli", corpus, "holdout", log)
+        self.assertEqual(report["historical_review_events"], result)
+        log["events"][0]["text_sha256"] = "stale"
+        with self.assertRaisesRegex(ValueError, "current example text"):
+            eval_module.aggregate_review_events(corpus, "holdout", log)
+        log["events"][0] = event(items[0], "failed", "passed")
+        log["events"].append(log["events"][0])
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            eval_module.aggregate_review_events(corpus, "holdout", log)
 
     def test_rejects_duplicate_ids_and_invalid_gates(self):
         case = {"id": "a", "split": "holdout", "text": "a", "expected": "passed"}
