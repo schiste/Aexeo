@@ -23,6 +23,7 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - Run the fastest relevant test command first.
 - Check likely entrypoints and impacted callers before finishing.
 - Re-run lint/build only after the focused validation passes.
+- After adding or moving Rust modules, run `cargo fmt --all -- --check` so module declarations in parent files are checked too.
 - Document any override-based maintainer note that affected the change plan.
 
 ## Useful Commands
