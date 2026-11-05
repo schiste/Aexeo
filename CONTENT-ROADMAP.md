@@ -26,12 +26,18 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [x] Configurable paragraph-length gate with Markdown and EmDash adapter
   capabilities ([PR #33](https://github.com/schiste/Aexeo/pull/33)).
 - [x] Configurable link-count gate for Markdown and EmDash ([PR #35](https://github.com/schiste/Aexeo/pull/35)); this does not validate destinations.
-- [ ] Additional editorial gates, including repeated-term checks and destination validation.
-- [ ] Collection scopes and adapter capabilities, with cross-adapter source mapping.
+- [x] Configurable exact repeated-term check, with whole-word and substring modes
+  ([PR #38](https://github.com/schiste/Aexeo/pull/38)).
+- [ ] Additional editorial gates and destination validation.
+- [x] Explicit collection metadata uniqueness gate in core, CLI and EmDash/WASM
+  ([PR #40](https://github.com/schiste/Aexeo/pull/40)); callers must supply the
+  complete collection and missing metadata remains `not_checked`.
+- [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
 - [ ] Independently reviewed, diverse evaluation corpus and held-out metrics.
   A synthetic, explicitly unreviewed starter and evaluator were delivered in
   [PR #32](https://github.com/schiste/Aexeo/pull/32); they do not establish
-  production accuracy or substitute for independent review.
+  production accuracy or substitute for independent review. The evaluator also
+  accepts custom TOML and Markdown fixtures ([PR #37](https://github.com/schiste/Aexeo/pull/37)).
 - [x] Shared article/glossary readability preset delivered in
   [PR #34](https://github.com/schiste/Aexeo/pull/34).
 - [ ] Source and factuality evaluation after the basic gates are validated.
