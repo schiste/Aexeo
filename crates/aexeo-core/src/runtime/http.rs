@@ -17,6 +17,8 @@ pub(crate) struct FetchResult {
     pub(crate) body: Option<String>,
     pub(crate) headers: BTreeMap<String, String>,
     pub(crate) effective_url: String,
+    pub(crate) effective_url_observed: bool,
+    pub(crate) headers_observed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -137,6 +139,10 @@ impl HttpFetcher {
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .map(str::to_string);
+        let headers_observed = response
+            .headers()
+            .values()
+            .all(|value| value.to_str().is_ok());
         let headers = response_headers(response.headers());
         let body = response.text().ok();
         Ok(FetchResult {
@@ -145,6 +151,8 @@ impl HttpFetcher {
             body,
             headers,
             effective_url,
+            effective_url_observed: true,
+            headers_observed,
         })
     }
 
@@ -213,15 +221,23 @@ fn apply_runtime_credentials(
 }
 
 fn response_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
-    headers
-        .iter()
-        .filter_map(|(key, value)| {
-            Some((
-                key.as_str().to_ascii_lowercase(),
-                value.to_str().ok()?.to_string(),
-            ))
-        })
-        .collect()
+    let mut captured = BTreeMap::<String, String>::new();
+    for (key, value) in headers {
+        let Ok(value) = value.to_str() else { continue };
+        let key = key.as_str().to_ascii_lowercase();
+        if key == "x-robots-tag" {
+            captured
+                .entry(key)
+                .and_modify(|existing| {
+                    existing.push_str(", ");
+                    existing.push_str(value);
+                })
+                .or_insert_with(|| value.to_string());
+        } else {
+            captured.insert(key, value.to_string());
+        }
+    }
+    captured
 }
 
 pub(crate) fn is_html_content_type(content_type: Option<&str>) -> bool {
@@ -270,6 +286,15 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
+
+    #[test]
+    fn preserves_multiple_robots_headers() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.append("x-robots-tag", "noindex".parse().unwrap());
+        headers.append("x-robots-tag", "nofollow".parse().unwrap());
+        let captured = super::response_headers(&headers);
+        assert_eq!(captured.get("x-robots-tag").unwrap(), "noindex, nofollow");
+    }
 
     #[test]
     fn compares_bare_and_www_hosts_as_same_site() {

@@ -361,12 +361,26 @@ pub struct AuditCrawlMeta {
     pub probed_artifact_paths: Vec<String>,
 }
 
+/// Response provenance recorded by a live crawl. Missing fields are unknown, not inferred.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct CrawlResponseProvenance {
+    pub requested_url: String,
+    #[serde(default)]
+    pub observed_url: Option<String>,
+    #[serde(default)]
+    pub status_code: Option<u16>,
+    #[serde(default)]
+    pub headers_observed: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct AuditPageSnapshot {
     pub path: String,
     pub relative_path: String,
     pub route: String,
     pub raw_html: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crawl_response: Option<CrawlResponseProvenance>,
     #[serde(default)]
     pub response_headers: std::collections::BTreeMap<String, String>,
 }

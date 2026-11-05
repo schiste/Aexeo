@@ -17,6 +17,8 @@ use crate::site::{
 struct CapturedPage {
     body: String,
     headers: BTreeMap<String, String>,
+    #[serde(default)]
+    crawl_response: Option<aexeo_contracts::CrawlResponseProvenance>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -67,12 +69,14 @@ impl RuntimeSnapshotBuilder {
         route: &str,
         body: &str,
         headers: &BTreeMap<String, String>,
+        crawl_response: Option<aexeo_contracts::CrawlResponseProvenance>,
     ) -> Result<()> {
         self.pages.insert(
             route.to_string(),
             CapturedPage {
                 body: body.to_string(),
                 headers: headers.clone(),
+                crawl_response,
             },
         );
         Ok(())
@@ -167,12 +171,14 @@ fn build_runtime_site_from_owned_pages(
     let built_pages = routes
         .into_iter()
         .map(|(route, captured)| {
-            build_page_from_source(
+            let mut page = build_page_from_source(
                 PathBuf::from(response_report_path(&route)),
                 relative_html_path(&route),
                 captured.body,
                 captured.headers,
-            )
+            );
+            page.crawl_response = captured.crawl_response;
+            page
         })
         .collect::<Vec<_>>();
     build_runtime_site_from_pages(built_pages, artifacts, crawl_meta)
@@ -192,12 +198,14 @@ fn build_runtime_site_from_borrowed_pages(
                 .get(route)
                 .ok_or_else(|| anyhow::anyhow!("missing captured page for route '{route}'"))?;
             let relative_path = relative_html_path(route);
-            Ok(build_page_from_source(
+            let mut page = build_page_from_source(
                 PathBuf::from(response_report_path(route)),
                 relative_path,
                 captured.body.clone(),
                 captured.headers.clone(),
-            ))
+            );
+            page.crawl_response = captured.crawl_response.clone();
+            Ok(page)
         })
         .collect::<Result<Vec<_>>>()?;
     build_runtime_site_from_pages(built_pages, artifacts, crawl_meta)
@@ -256,6 +264,7 @@ mod tests {
                 "about",
                 "<html><head><title>About</title><meta name=\"description\" content=\"About\"></head><body><h1>About</h1></body></html>",
                 &std::collections::BTreeMap::new(),
+                None,
             )
             .unwrap();
 
@@ -269,6 +278,45 @@ mod tests {
     }
 
     #[test]
+    fn response_provenance_survives_checkpoints_and_audit_snapshots() {
+        let provenance = aexeo_contracts::CrawlResponseProvenance {
+            requested_url: "https://example.test/old".into(),
+            observed_url: Some("https://example.test/new".into()),
+            status_code: Some(200),
+            headers_observed: true,
+        };
+        let mut builder = RuntimeSnapshotBuilder::new();
+        builder
+            .write_page(
+                "new",
+                "<html></html>",
+                &Default::default(),
+                Some(provenance.clone()),
+            )
+            .unwrap();
+        let restored = RuntimeSnapshotBuilder::from_state(builder.checkpoint_state());
+        let (site, _) = restored.finalize(1, 10, 1, false).unwrap();
+        let artifact = crate::site::audit_site_snapshot(&site, Some("https://example.test"));
+        assert_eq!(artifact.pages[0].crawl_response.as_ref(), Some(&provenance));
+        let serialized = serde_json::to_string(&artifact).unwrap();
+        let parsed = serde_json::from_str(&serialized).unwrap();
+        let restored_site = crate::site::build_site_from_audit_snapshot(&parsed).unwrap();
+        assert_eq!(
+            restored_site.pages[0].crawl_response.as_ref(),
+            Some(&provenance)
+        );
+    }
+
+    #[test]
+    fn old_checkpoint_has_unknown_response_provenance() {
+        let state: RuntimeSnapshotState = serde_json::from_str(r#"{"pages":{"a":{"body":"<html></html>","headers":{}}},"robots_text":null,"llms_text":null,"sitemap_text":null}"#).unwrap();
+        let (site, _) = RuntimeSnapshotBuilder::from_state(state)
+            .finalize(1, 10, 1, false)
+            .unwrap();
+        assert!(site.pages[0].crawl_response.is_none());
+    }
+
+    #[test]
     fn snapshot_builder_round_trips_checkpoint_state() {
         let mut builder = RuntimeSnapshotBuilder::new();
         builder
@@ -276,6 +324,7 @@ mod tests {
                 "docs",
                 "<html><head><title>Docs</title><meta name=\"description\" content=\"Docs\"></head><body><h1>Docs</h1></body></html>",
                 &std::collections::BTreeMap::new(),
+                None,
             )
             .unwrap();
         let state = builder.checkpoint_state();

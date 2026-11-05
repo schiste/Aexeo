@@ -150,6 +150,7 @@ pub struct Page {
     pub h1_texts: Vec<String>,
     pub has_breadcrumb_nav: bool,
     pub response_headers: BTreeMap<String, String>,
+    pub crawl_response: Option<aexeo_contracts::CrawlResponseProvenance>,
     pub links: Vec<Link>,
     pub internal_links: Vec<String>,
     pub alternate_links: Vec<AlternateLink>,
@@ -622,6 +623,7 @@ pub fn audit_site_snapshot(site: &Site, site_url: Option<&str>) -> AuditSiteSnap
                 route: page.route.clone(),
                 raw_html: page.raw_text.clone(),
                 response_headers: page.response_headers.clone(),
+                crawl_response: page.crawl_response.clone(),
             })
             .collect(),
     }
@@ -632,12 +634,14 @@ pub fn build_site_from_audit_snapshot(snapshot: &AuditSiteSnapshot) -> Result<Si
         .pages
         .iter()
         .map(|page| {
-            build_page_from_source(
+            let mut built = build_page_from_source(
                 PathBuf::from(&page.path),
                 page.relative_path.clone(),
                 page.raw_html.clone(),
                 page.response_headers.clone(),
-            )
+            );
+            built.crawl_response = page.crawl_response.clone();
+            built
         })
         .collect::<Vec<_>>();
     build_site_from_parts(SiteBuildInput {

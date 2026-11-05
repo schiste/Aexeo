@@ -339,6 +339,7 @@ mod tests {
             h1_texts: vec!["x".to_string()],
             has_breadcrumb_nav: false,
             response_headers,
+            crawl_response: None,
             links: Vec::new(),
             internal_links: Vec::new(),
             alternate_links: Vec::new(),
