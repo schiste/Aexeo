@@ -43,3 +43,14 @@ assert.equal(linkReport.gates[0].status, "failed");
 assert.equal(linkReport.gates[0].measurements.checked_destinations, 1);
 assert.equal(linkReport.gates[0].measurements.invalid_destinations, 1);
 console.log("WASM link destination smoke test passed");
+
+const headingPreset = `version=1
+name="headings"
+[[gates]]
+id="length"
+kind="heading_length"
+max_chars=3
+`;
+const headingReport = await evaluateContent({ route: "/heading", title: "Heading", body: [{ style: "h2", children: [{ _type: "span", text: "long title" }] }] }, "test", { test: headingPreset });
+assert.deepEqual(headingReport.source_locations, [{ gate_id: "length", finding_index: 0, block_index: 0, span_index: 0, utf16_offset: 0 }]);
+console.log("WASM heading location smoke test passed");

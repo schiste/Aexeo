@@ -36,7 +36,7 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [x] Configurable duplicate-heading gate with heading capability and aggregate
   counts ([PR #49](https://github.com/schiste/Aexeo/pull/49)).
 - [x] Configurable opt-in heading length gate with Unicode scalar counting.
-- [x] Markdown heading-node source locations for duplicate and length findings.
+- [x] Markdown heading-node and EmDash heading-block locations for duplicate and length findings.
 - [ ] Additional editorial gates and destination reachability validation.
 - [x] Explicit collection metadata uniqueness gate in core, CLI and EmDash/WASM
   ([PR #40](https://github.com/schiste/Aexeo/pull/40)); callers must supply the
