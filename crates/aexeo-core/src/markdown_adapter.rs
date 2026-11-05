@@ -12,9 +12,18 @@ pub struct MarkdownSourceMap {
     source_lines: Vec<usize>,
     projected_lines: Vec<usize>,
     link_starts: Vec<Option<usize>>,
+    heading_starts: Vec<Option<usize>>,
 }
 
 impl MarkdownSourceMap {
+    /// Resolve a zero-based heading index to the start of its Markdown node.
+    pub fn heading_source_position(&self, source: &str, index: usize) -> Option<(usize, usize)> {
+        let offset = (*self.heading_starts.get(index)?)?;
+        let line = self.source_lines.partition_point(|&start| start <= offset);
+        let start = *self.source_lines.get(line.checked_sub(1)?)?;
+        Some((line, source.get(start..offset)?.chars().count() + 1))
+    }
+
     /// Resolve a zero-based extracted link index to its original Markdown start.
     /// Pass the unchanged source used to create this map.
     pub fn link_source_position(&self, source: &str, index: usize) -> Option<(usize, usize)> {
@@ -236,7 +245,12 @@ fn extract_markdown_from_root(
             Node::Image(item) => text.push_str(&item.alt),
             Node::ImageReference(item) => text.push_str(&item.alt),
             Node::Break(_) => text.push('\n'),
-            Node::Heading(_) => {
+            Node::Heading(heading) => {
+                if source_map.enabled {
+                    source_map
+                        .heading_starts
+                        .push(heading.position.as_ref().map(|pos| pos.start.offset));
+                }
                 let start = text.len();
                 if let Some(children) = node.children() {
                     for child in children {

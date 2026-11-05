@@ -307,6 +307,23 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                         }
                     }
                 }
+            } else if let Some(headings) = input.headings.as_deref()
+                && let Some(indices) =
+                    aexeo_core::content_gate::heading_finding_indices(gate, headings)
+            {
+                positional_findings += result.findings.len();
+                if indices.len() == result.findings.len() {
+                    for (finding_index, index) in indices.into_iter().enumerate() {
+                        if let Some((line, column)) = map.heading_source_position(source, index) {
+                            source_locations.push(SourceLocation {
+                                gate_id: &result.gate_id,
+                                finding_index,
+                                line,
+                                column,
+                            });
+                        }
+                    }
+                }
             } else if matches!(
                 gate,
                 ContentGate::ForbiddenTerms { .. }

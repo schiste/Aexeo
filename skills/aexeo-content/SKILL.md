@@ -37,5 +37,5 @@ For an explicitly authorized remote semantic assessment, the optional `adapters/
 
 A configured `heading_length` gate counts Unicode scalar values after trimming
 outer whitespace; this differs from visual character width. Its ordinal finding
-uses placeholder coordinates, so locate the heading by its number and review
-whether the configured limit is appropriate for the content and language.
+uses placeholder finding coordinates; Markdown JSON reports supply source locations
+at the heading node. Review whether the limit suits the content and language.
