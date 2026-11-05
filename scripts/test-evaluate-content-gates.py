@@ -1,4 +1,6 @@
 import importlib.util
+import contextlib
+import io
 import hashlib
 import json
 import subprocess
@@ -102,6 +104,20 @@ class EvaluateTests(unittest.TestCase):
             self.assertEqual(report["historical_review_events"]["counts"]["overrides_to_pass"], 1)
             self.assertNotIn("private", output.stdout)
             self.assertEqual(output.stderr, "")
+
+    def test_assert_regression_exits_on_unchecked_and_mismatches(self):
+        for key in ("false_positive", "false_negative", "not_checked"):
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "corpus.json"
+                path.write_text("{}")
+                counts = {"false_positive": 0, "false_negative": 0, "not_checked": 0}
+                counts[key] = 1
+                with patch.object(sys, "argv", ["evaluate", str(path), "--binary", "cli", "--assert-regression"]), \
+                     patch.object(eval_module, "evaluate", return_value={"counts": counts}), \
+                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as result:
+                        eval_module.main()
+                    self.assertEqual(result.exception.code, 1)
 
     def test_rejects_duplicate_ids_and_invalid_gates(self):
         case = {"id": "a", "split": "holdout", "text": "a", "expected": "passed"}

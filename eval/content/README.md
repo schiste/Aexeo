@@ -9,6 +9,10 @@ python3 scripts/evaluate-content-gates.py eval/content/paragraph-length.json \
   --binary target/release/aexeo-cli --split holdout
 python3 scripts/evaluate-content-gates.py eval/content/link-count.json \
   --binary target/release/aexeo-cli --split holdout
+python3 scripts/evaluate-content-gates.py eval/content/duplicate-headings.json \
+  --binary target/release/aexeo-cli --split holdout
+python3 scripts/evaluate-content-gates.py eval/content/link-destinations.json \
+  --binary target/release/aexeo-cli --split holdout
 python3 scripts/test-evaluate-content-gates.py
 ```
 
@@ -18,6 +22,9 @@ The runner invokes the local CLI once per example and does not contact a remote
 service. Its precision and recall use checked examples only; `unchecked_rate`
 is reported separately. `fresh_process_p95_ms` includes process startup and
 is not a cold-cache measurement. Results contain counts and timings, not text.
+`--assert-regression` returns a nonzero exit status if any example is
+misclassified or not checked. This is suitable for deterministic synthetic
+regression fixtures; it does not establish accuracy on real editorial work.
 
 This initial corpus is a tiny synthetic regression fixture. None of its labels
 has been independently reviewed; its results do not estimate production accuracy.

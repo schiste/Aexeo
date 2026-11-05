@@ -120,12 +120,15 @@ def main():
     parser.add_argument("--binary", required=True)
     parser.add_argument("--split", choices=["development", "holdout"], default="holdout")
     parser.add_argument("--review-events", type=Path, help="Optional local historical review log")
+    parser.add_argument("--assert-regression", action="store_true", help="Exit nonzero on mismatches or unchecked examples")
     args = parser.parse_args()
     try:
         corpus = json.loads(args.corpus.read_text(encoding="utf-8"))
         review_log = json.loads(args.review_events.read_text(encoding="utf-8")) if args.review_events else None
         result = evaluate(args.binary, corpus, args.split, review_log)
         print(json.dumps(result, indent=2))
+        if args.assert_regression and any(result["counts"][key] for key in ("false_positive", "false_negative", "not_checked")):
+            parser.exit(1, "regression check failed: mismatches or unchecked examples\n")
     except (OSError, KeyError, ValueError, TypeError) as error:
         parser.exit(2, f"evaluation failed: {error}\n")
 
