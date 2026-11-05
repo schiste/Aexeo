@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure saved Jev reviews against independently labeled examples, offline."""
+"""Measure saved model reviews against independently labeled examples, offline."""
 import argparse
 import json
 import math
@@ -25,6 +25,7 @@ def evaluate(examples, reviews):
     label_decisive = {label: 0 for label in sorted(LABELS)}
     evaluation_model = None
     evaluation_threshold = None
+    evaluation_protocol = None
     for example in examples:
         key = example["id"]
         if key in matched or key not in by_id or example["label"] not in LABELS:
@@ -34,11 +35,12 @@ def evaluate(examples, reviews):
         if review["claim"] != example["claim"] or review["source_text"] != example["source_text"]:
             raise ValueError("review does not match labeled example")
         reviewer = review["reviewer"]
-        if not isinstance(reviewer, str) or not reviewer.startswith("jev:") or not reviewer[4:].strip():
-            raise ValueError("invalid Jev reviewer")
         provenance = review["provenance"]
-        if provenance["protocol"] != "aexeo-jev-support-v1":
-            raise ValueError("unsupported review protocol")
+        protocol = provenance["protocol"]
+        prefixes = {"aexeo-jev-support-v1": "jev:", "aexeo-clef-support-v1": "clef:"}
+        prefix = prefixes.get(protocol)
+        if not prefix or not isinstance(reviewer, str) or not reviewer.startswith(prefix) or not reviewer[len(prefix):].strip():
+            raise ValueError("unsupported reviewer or protocol")
         choice = provenance["model_choice"]
         if not isinstance(provenance["model_probability"], str) or not isinstance(provenance["threshold"], str):
             raise ValueError("probability and threshold must be strings")
@@ -47,8 +49,8 @@ def evaluate(examples, reviews):
         if choice not in LABELS or not math.isfinite(probability) or not 0 <= probability <= 1 or not math.isfinite(threshold) or not 0 <= threshold <= 1:
             raise ValueError("invalid model decision or probability")
         if evaluation_model is None:
-            evaluation_model, evaluation_threshold = reviewer, threshold
-        elif reviewer != evaluation_model or threshold != evaluation_threshold:
+            evaluation_model, evaluation_threshold, evaluation_protocol = reviewer, threshold, protocol
+        elif reviewer != evaluation_model or threshold != evaluation_threshold or protocol != evaluation_protocol:
             raise ValueError("reviews must use one model version and threshold")
         expected_output = choice if probability >= threshold else "uncertain"
         if review["support"] != expected_output:
@@ -70,7 +72,7 @@ def evaluate(examples, reviews):
         raise ValueError("unmatched reviews")
     count = len(examples)
     return {"examples": count, "reviewer": evaluation_model, "threshold": evaluation_threshold,
-            "protocol": "aexeo-jev-support-v1", "raw_choice_accuracy": correct / count,
+            "protocol": evaluation_protocol, "raw_choice_accuracy": correct / count,
             "by_label": {label: {"examples": label_counts[label],
                                   "raw_choice_accuracy": label_correct[label] / label_counts[label] if label_counts[label] else None,
                                   "decisive_coverage": label_decisive[label] / label_counts[label] if label_counts[label] else None}

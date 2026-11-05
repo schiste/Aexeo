@@ -30,7 +30,9 @@ def request_body(claim, source, model):
     }
 
 
-def review_from_response(claim, source, reliability, threshold, response):
+def review_from_response(claim, source, reliability, threshold, response, provider="jev"):
+    if provider not in ("jev", "clef"):
+        raise ValueError("unsupported provider")
     if not 0.0 <= threshold <= 1.0 or not math.isfinite(threshold):
         raise ValueError("threshold must be a finite probability between 0 and 1")
     actual_model = response["model"]
@@ -45,8 +47,8 @@ def review_from_response(claim, source, reliability, threshold, response):
         raise ValueError("invalid choice probability")
     return {"claim": claim, "source_text": source,
             "support": choice if probability >= threshold else "uncertain",
-            "reliability": reliability, "reviewer": "jev:" + actual_model,
-            "provenance": {"protocol": "aexeo-jev-support-v1", "model_choice": choice, "model_probability": str(probability), "threshold": str(threshold)}}
+            "reliability": reliability, "reviewer": provider + ":" + actual_model,
+            "provenance": {"protocol": "aexeo-" + provider + "-support-v1", "model_choice": choice, "model_probability": str(probability), "threshold": str(threshold)}}
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -63,6 +65,28 @@ def fetch_review(claim, source, model, reliability, threshold, key):
     return review_from_response(claim, source, reliability, threshold, result)
 
 
+def add_source_assessment_arguments(parser):
+    parser.add_argument("--source-reliability", choices=("reliable", "unreliable", "uncertain"), default="uncertain",
+                        help="Your independent assessment; defaults to uncertain")
+    parser.add_argument("--source-reviewer", help="Identifier of the independent source reviewer")
+    parser.add_argument("--source-review-reason", help="Basis for the independent source assessment")
+
+
+def validate_source_assessment(parser, args):
+    if args.source_reliability != "uncertain" and not all(
+        value and value.strip() for value in (args.source_reviewer, args.source_review_reason)
+    ):
+        parser.error("a source reviewer and reason are required for a reliable or unreliable assessment")
+    if args.source_reliability == "uncertain" and (args.source_reviewer or args.source_review_reason):
+        parser.error("source reviewer and reason require a reliable or unreliable assessment")
+
+
+def add_source_assessment(review, args):
+    if args.source_reliability != "uncertain":
+        review["provenance"]["source_reliability_reviewer"] = args.source_reviewer
+        review["provenance"]["source_reliability_reason"] = args.source_review_reason
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--claim", required=True, help="Exact text to review")
@@ -70,21 +94,13 @@ def main():
     parser.add_argument("--model", required=True, help="Explicit Jev model version")
     parser.add_argument("--minimum-probability", required=True, type=float,
                         help="Threshold selected and calibrated for your evaluation data")
-    parser.add_argument("--source-reliability", choices=("reliable", "unreliable", "uncertain"), default="uncertain",
-                        help="Your independent assessment; defaults to uncertain")
-    parser.add_argument("--source-reviewer", help="Identifier of the independent source reviewer")
-    parser.add_argument("--source-review-reason", help="Basis for the independent source assessment")
+    add_source_assessment_arguments(parser)
     args = parser.parse_args()
     if not args.claim.strip() or not args.model.strip():
         parser.error("claim and model must be nonempty")
     if not math.isfinite(args.minimum_probability) or not 0 <= args.minimum_probability <= 1:
         parser.error("minimum probability must be between 0 and 1")
-    if args.source_reliability != "uncertain" and not all(
-        value and value.strip() for value in (args.source_reviewer, args.source_review_reason)
-    ):
-        parser.error("a source reviewer and reason are required for a reliable or unreliable assessment")
-    if args.source_reliability == "uncertain" and (args.source_reviewer or args.source_review_reason):
-        parser.error("source reviewer and reason require a reliable or unreliable assessment")
+    validate_source_assessment(parser, args)
     key = os.environ.get("TYPESAFE_API_KEY")
     if not key:
         parser.error("TYPESAFE_API_KEY is required")
@@ -93,9 +109,7 @@ def main():
             source = source_file.read()
         review = fetch_review(args.claim, source, args.model, args.source_reliability,
                               args.minimum_probability, key)
-        if args.source_reliability != "uncertain":
-            review["provenance"]["source_reliability_reviewer"] = args.source_reviewer
-            review["provenance"]["source_reliability_reason"] = args.source_review_reason
+        add_source_assessment(review, args)
         print(json.dumps(review, ensure_ascii=False))
     except (OSError, KeyError, TypeError, ValueError, urllib.error.URLError) as error:
         # Avoid printing provider bodies or request headers, which may contain sensitive data.
