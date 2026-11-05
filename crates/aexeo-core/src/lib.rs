@@ -138,3 +138,5 @@ pub use verification::{
     load_site_from_audit_artifact, render_diff_text, site_from_audit_artifact, write_baseline_file,
 };
 pub use well_known_rules::run_well_known_rules;
+
+pub mod link_inventory;
