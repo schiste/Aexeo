@@ -91,3 +91,13 @@ Only mapped pages are analyzed. Mappings are supplied by the caller, not HTTP
 observations; missing mappings, response status and headers are reported, and
 coverage remains incomplete. The map is rejected for other deployment models.
 It does not establish routing, redirects, indexing or publication equivalence.
+
+## Benchmark
+
+Run `cargo run --release -p aexeo-core --example link_graph_bench` to measure
+in-process graph construction on a synthetic fixture of 50 pages and 500 links.
+The JSON output reports average, p50 and p95 over 30 warmed iterations; fixture
+construction, process startup and I/O are excluded. The fixture first verifies
+that every page has ten distinct incoming sources. Results depend on hardware
+and load; no CI budget is claimed until release-mode measurements are calibrated
+on CI runners.

@@ -22,8 +22,8 @@ open PR or an unchecked item is not complete.
   review misleading classifications before using results to drive editorial work.
 
 Independent real-world annotations and source/fact checking in the broader
-content plan remain outstanding. The resolver is an initial building block;
-it does not yet change the existing link graph or orphan results.
+content plan remain outstanding. The new link report is separate from the legacy site graph rules; it does
+not change their counts or assert confirmed orphans.
 
 ## Progress
 
@@ -45,6 +45,14 @@ it does not yet change the existing link graph or orphan results.
   the qualified legacy LNK002 message preserves baseline fingerprints (#68).
   The audit adapter intentionally withholds coverage completeness without a
   matching inventory and surface identity.
+- An EmDash inventory exporter (#70) accepts explicit collections and caller
+  classification, uses CMS public URLs, reports aggregate telemetry only when
+  requested, and marks its non-transactional inventory incomplete. It has not
+  been exercised against a matching live publication.
+- The audit adapter accepts a separately supplied surface identity, snapshot
+  date and inventory (#72). It reports differences, but cannot attest that the
+  inputs share a release or that the audit crawl is complete; no pages become
+  eligible on this basis alone.
 - A live Aeptus URL returned a generic noindex holding page, not the article
   visible in the CMS preview. An end-to-end HTTP crawl and audit adapter report
   captured the URL and noindex and flagged incomplete coverage. This sample does
@@ -57,8 +65,9 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
 
 ## Remaining integration and validation
 
-- [ ] Produce an EmDash inventory from an explicit publication, route, locale,
-  status and surface mapping; do not infer completeness from `routable`.
+- [ ] Validate the EmDash inventory exporter with an explicit publication, route,
+  locale, status and surface mapping on a real matching site; do not infer
+  completeness from `routable` or from a non-transactional export.
 - [ ] Capture matching release and snapshot identity, reliable crawl completeness,
   redirect chains and explicit noindex/canonical/locale-fallback treatment.
 - [ ] Integrate coverage-aware graph observations into existing site reports;
