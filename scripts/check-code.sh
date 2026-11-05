@@ -10,6 +10,15 @@ aexeo_run_timed "${prefix}cargo-fmt-check" "cache-light" cargo fmt --check
 aexeo_run_timed "${prefix}clippy-strict" "cache-sensitive" sh scripts/clippy-strict.sh
 aexeo_run_timed "${prefix}cargo-clippy-workspace" "cache-sensitive" cargo clippy --workspace --all-targets -- -D warnings
 aexeo_run_timed "${prefix}cargo-test-workspace" "cache-sensitive" cargo test --workspace --all-targets
+# Synthetic integration fixtures are regression checks, not accuracy estimates.
+aexeo_run_timed "${prefix}content-corpus-cli" "cache-sensitive" cargo build -p aexeo-cli
+for fixture in duplicate-headings link-destinations; do
+    for split in development holdout; do
+        aexeo_run_timed "${prefix}content-corpus-${fixture}-${split}" "cache-light" \
+            python3 scripts/evaluate-content-gates.py "eval/content/${fixture}.json" \
+                --binary "${CARGO_TARGET_DIR:-target}/debug/aexeo-cli" --split "$split" --assert-regression
+done
+done
 # The workspace build above unifies features across members, which hides a
 # crate that only compiles because a sibling enabled a feature it declared off.
 # Verified to catch a real regression the workspace run reported as green.

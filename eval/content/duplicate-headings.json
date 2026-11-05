@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "description": "Synthetic examples, labels not independently reviewed.",
+  "preset": "duplicate-headings",
+  "preset_toml": "version=1\nname='headings evaluation'\n[[gates]]\nid='unique'\nkind='duplicate_headings'\ncase_sensitive=false\nblocking=false\n",
+  "input_format": "markdown",
+  "gate_id": "unique",
+  "examples": [
+    {
+      "id": "dev-repeat",
+      "split": "development",
+      "text": "# Overview\n\n## OVERVIEW",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "dev-distinct",
+      "split": "development",
+      "text": "# Intro\n\n## Details",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "dev-prose",
+      "split": "development",
+      "text": "# Topic\n\nTopic appears again in a paragraph.",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "dev-empty",
+      "split": "development",
+      "text": "#\n\n##",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "holdout-different-levels",
+      "split": "holdout",
+      "text": "## Résumé\n\n### résumé",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "holdout-unique",
+      "split": "holdout",
+      "text": "# Context\n\n## Results\n\n### Method",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "holdout-code",
+      "split": "holdout",
+      "text": "# Example\n\n```\n# Example\n```",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "holdout-later",
+      "split": "holdout",
+      "text": "## One\n\n## Two\n\n## one",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    }
+  ]
+}
