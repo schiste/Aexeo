@@ -133,6 +133,16 @@ pub struct EmdashSourceLocation {
     pub utf16_offset: usize,
 }
 
+fn positional_gate(gate: &ContentGate) -> bool {
+    matches!(
+        gate,
+        ContentGate::ForbiddenTerms { .. }
+            | ContentGate::RepeatedTerms { .. }
+            | ContentGate::SentenceLength { .. }
+            | ContentGate::ParagraphLength { .. }
+    )
+}
+
 /// Map positional prose findings to spans. Synthetic block separators have no
 /// location. Indices apply only to this exact document snapshot.
 pub fn source_locations(
@@ -140,6 +150,14 @@ pub fn source_locations(
     preset: &ContentPreset,
     report: &ContentReport,
 ) -> Vec<EmdashSourceLocation> {
+    if !preset
+        .gates
+        .iter()
+        .zip(&report.gates)
+        .any(|(gate, result)| positional_gate(gate) && !result.findings.is_empty())
+    {
+        return Vec::new();
+    }
     let mut projection = String::new();
     let mut spans = Vec::new();
     for (block_index, block) in document.body.iter().enumerate() {
@@ -165,13 +183,7 @@ pub fn source_locations(
     line_starts.extend(projection.match_indices('\n').map(|(i, _)| i + 1));
     let mut result = Vec::new();
     for (gate, evaluated) in preset.gates.iter().zip(&report.gates) {
-        if !matches!(
-            gate,
-            ContentGate::ForbiddenTerms { .. }
-                | ContentGate::RepeatedTerms { .. }
-                | ContentGate::SentenceLength { .. }
-                | ContentGate::ParagraphLength { .. }
-        ) {
+        if !positional_gate(gate) {
             continue;
         }
         for (finding_index, finding) in evaluated.findings.iter().enumerate() {
