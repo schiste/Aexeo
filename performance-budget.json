@@ -4,5 +4,21 @@
   },
   "runtime_audit/http_fixture_20_pages": {
     "max_avg_ms": 1500
+  },
+  "content/evaluation": {
+    "max_avg_ms": 100,
+    "max_p95_ms": 200
+  },
+  "content/markdown_and_evaluation": {
+    "max_avg_ms": 500,
+    "max_p95_ms": 1000
+  },
+  "content/batch_50": {
+    "max_avg_ms": 5000,
+    "max_p95_ms": 10000
+  },
+  "content/fresh_process": {
+    "max_avg_ms": 2000,
+    "max_p95_ms": 4000
   }
 }
