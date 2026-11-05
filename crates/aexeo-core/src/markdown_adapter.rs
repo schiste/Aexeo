@@ -66,10 +66,10 @@ pub fn markdown_link_destinations(source: &str) -> Result<Option<Vec<String>>> {
         })
     }
     fn collect_definitions(node: &Node, defs: &mut std::collections::BTreeMap<String, String>) {
-        if let Node::Definition(def) = node {
-            if let Some(key) = normalize(&def.identifier) {
-                defs.entry(key).or_insert_with(|| def.url.clone());
-            }
+        if let Node::Definition(def) = node
+            && let Some(key) = normalize(&def.identifier)
+        {
+            defs.entry(key).or_insert_with(|| def.url.clone());
         }
         if let Some(children) = node.children() {
             for child in children {
