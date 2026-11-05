@@ -132,20 +132,21 @@ pub fn build_link_report_from_audit_with_static_urls(
         .pages
         .iter()
         .filter_map(|page| {
+            if let Some(urls) = static_urls {
+                let Some(url) = urls.get(&page.relative_path) else {
+                    issues.insert("static_url_mapping_missing");
+                    return None;
+                };
+                issues.insert("static_url_caller_supplied");
+                return Some(RenderedPage {
+                    url: url.clone(),
+                    html: page.raw_html.clone(),
+                    status_code: None,
+                    response_headers: None,
+                });
+            }
             let Some(response) = &page.crawl_response else {
                 issues.insert("audit_page_response_provenance_missing");
-                if let Some(url) = static_urls.and_then(|urls| urls.get(&page.relative_path)) {
-                    issues.insert("static_url_caller_supplied");
-                    return Some(RenderedPage {
-                        url: url.clone(),
-                        html: page.raw_html.clone(),
-                        status_code: None,
-                        response_headers: None,
-                    });
-                }
-                if static_urls.is_some() {
-                    issues.insert("static_url_mapping_missing");
-                }
                 return None;
             };
             let Some(url) = response.observed_url.as_ref().filter(|url| !url.is_empty()) else {

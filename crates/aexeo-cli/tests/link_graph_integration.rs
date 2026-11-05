@@ -338,7 +338,7 @@ fn static_audit_uses_only_explicit_mappings_and_never_claims_coverage() {
     let audit = serde_json::json!({"command":"audit", "site":{"site_url":"https://example.org", "root":"dist", "deployment_model":"static_export", "pages":[
         {"path":"dist/en/index.html", "relative_path":"en/index.html", "route":"en", "raw_html":"<html lang='en'><main><p><a href='/fr/'>Bonjour</a></p></main></html>", "response_headers":{}},
         {"path":"dist/fr/index.html", "relative_path":"fr/index.html", "route":"fr", "raw_html":"<html lang='fr'><main>Bonjour</main></html>", "response_headers":{}},
-        {"path":"dist/unknown.html", "relative_path":"unknown.html", "route":"unknown", "raw_html":"<main>Unknown</main>", "response_headers":{}}
+        {"path":"dist/unknown.html", "relative_path":"unknown.html", "route":"unknown", "raw_html":"<main>Unknown</main>", "response_headers":{}, "crawl_response":{"requested_url":"https://example.org/unknown", "observed_url":"https://example.org/unknown", "status_code":200, "headers_observed":true}}
     ]}});
     let urls = serde_json::json!({"en/index.html":"https://example.org/en/", "fr/index.html":"https://example.org/fr/"});
     fs::write(&audit_path, serde_json::to_vec(&audit).unwrap()).unwrap();
