@@ -229,3 +229,6 @@ export function aexeoPlugin(
     ],
   };
 }
+
+export { exportLinkInventory } from "./inventory.js";
+export type { LinkInventoryDisposition, LinkInventoryExport, LinkInventoryIdentity, LinkInventoryPage } from "./inventory.js";
