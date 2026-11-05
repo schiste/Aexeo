@@ -486,36 +486,52 @@ impl ContentPreset {
                         None => reason = Some("text is unavailable from this adapter".into()),
                     }
                 }
-                ContentGate::ForbiddenTerms { terms, .. } => match &input.text {
-                    Some(text) => {
-                        for term in terms {
-                            let (mut cursor, mut line, mut column) = (0, 1, 1);
-                            for (offset, _) in text.match_indices(term) {
-                                for ch in text[cursor..offset].chars() {
-                                    if ch == '\n' {
-                                        line += 1;
-                                        column = 1;
-                                    } else {
-                                        column += 1;
+                ContentGate::ForbiddenTerms { terms, .. } => {
+                    measurements.insert("configured_terms".into(), terms.len());
+                    match &input.text {
+                        Some(text) => {
+                            let mut matches = 0;
+                            for term in terms {
+                                let (mut cursor, mut line, mut column) = (0, 1, 1);
+                                for (offset, _) in text.match_indices(term) {
+                                    matches += 1;
+                                    for ch in text[cursor..offset].chars() {
+                                        if ch == '\n' {
+                                            line += 1;
+                                            column = 1;
+                                        } else {
+                                            column += 1;
+                                        }
                                     }
+                                    emit(format!("Forbidden term: {term}"), line, column);
+                                    cursor = offset;
                                 }
-                                emit(format!("Forbidden term: {term}"), line, column);
-                                cursor = offset;
+                            }
+                            measurements.insert("matches".into(), matches);
+                        }
+                        None => reason = Some("text is unavailable from this adapter".into()),
+                    }
+                }
+                ContentGate::RequiredHeadings { headings, .. } => {
+                    measurements.insert("required_headings".into(), headings.len());
+                    match &input.headings {
+                        Some(actual) => {
+                            measurements.insert(
+                                "present_headings".into(),
+                                headings
+                                    .iter()
+                                    .filter(|heading| actual.contains(*heading))
+                                    .count(),
+                            );
+                            for heading in headings {
+                                if !actual.iter().any(|item| item == heading) {
+                                    emit(format!("Required heading is missing: {heading}"), 1, 1);
+                                }
                             }
                         }
+                        None => reason = Some("headings are unavailable from this adapter".into()),
                     }
-                    None => reason = Some("text is unavailable from this adapter".into()),
-                },
-                ContentGate::RequiredHeadings { headings, .. } => match &input.headings {
-                    Some(actual) => {
-                        for heading in headings {
-                            if !actual.iter().any(|item| item == heading) {
-                                emit(format!("Required heading is missing: {heading}"), 1, 1);
-                            }
-                        }
-                    }
-                    None => reason = Some("headings are unavailable from this adapter".into()),
-                },
+                }
                 ContentGate::FinalNewline { .. } => match &input.source_text {
                     Some(source) if !source.is_empty() && !source.ends_with('\n') => {
                         emit(
