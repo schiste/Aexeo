@@ -297,3 +297,35 @@ fn audit_context_compares_inventory_without_claiming_crawl_completeness() {
     );
     assert_eq!(report["crawl_complete"], false);
 }
+
+#[test]
+fn audit_context_reports_origin_mismatch_even_without_pages() {
+    let temp = tempfile::tempdir().unwrap();
+    let audit_path = temp.path().join("audit.json");
+    let context_path = temp.path().join("context.json");
+    let audit = serde_json::json!({"command":"crawl", "site":{"site_url":"https://example.org", "root":"crawl", "deployment_model":"runtime_snapshot", "pages":[]}});
+    let context = serde_json::json!({"identity":{"origin":"https://other.example", "release":"r1", "surface":"public", "snapshot":"s1"}, "snapshot_date":"2026-01-01", "inventory":null});
+    fs::write(&audit_path, serde_json::to_vec(&audit).unwrap()).unwrap();
+    fs::write(&context_path, serde_json::to_vec(&context).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .arg("link-graph")
+        .arg(audit_path)
+        .arg("--audit")
+        .arg("--context")
+        .arg(context_path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        report["issues"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("audit_origin_mismatch"))
+    );
+    assert_eq!(report["crawl_complete"], false);
+}
