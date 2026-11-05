@@ -69,6 +69,7 @@
     "typecheck:src": "tsc --noEmit",
     "typecheck:tests": "tsc -p tsconfig.test.json",
     "test": "vitest run",
+    "test:wasm": "node scripts/test-content-collection-wasm.mjs",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {

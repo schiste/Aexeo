@@ -1,6 +1,6 @@
 use super::exit_code::{EXIT_FINDINGS, EXIT_SUCCESS, EXIT_UNSUPPORTED};
 use aexeo_core::{
-    content_gate::{ContentGate, ContentInput, GateStatus},
+    content_gate::{ContentEvaluationContext, ContentGate, ContentInput, GateStatus},
     content_presets::{builtin_content_presets, resolve_content_preset},
 };
 use anyhow::{Context, Result, bail};
@@ -110,6 +110,22 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             Ok(sources)
         })
         .transpose()?;
+    let collection: Option<Vec<ContentInput>> = args
+        .get_one::<String>("collection")
+        .map(|path| -> Result<_> {
+            let data =
+                fs::read_to_string(path).with_context(|| format!("reading collection {path}"))?;
+            let items: Vec<ContentInput> = serde_json::from_str(&data)
+                .context("collection must be a JSON array of content inputs")?;
+            let mut ids = std::collections::BTreeSet::new();
+            for item in &items {
+                if item.id.trim().is_empty() || !ids.insert(&item.id) {
+                    bail!("collection item IDs must be nonempty and unique");
+                }
+            }
+            Ok(items)
+        })
+        .transpose()?;
     let site = args
         .get_one::<String>("site")
         .map(|path| -> Result<_> {
@@ -143,7 +159,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         _ => {}
     }
     let id = if args.get_flag("no-text") {
-        args.get_one::<String>("site").unwrap_or(path).clone()
+        args.get_one::<String>("site")
+            .or_else(|| args.get_one::<String>("collection"))
+            .unwrap_or(path)
+            .clone()
     } else {
         path.clone()
     };
@@ -175,12 +194,15 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     input.evidence_sources = evidence_sources;
     let adapter_ms = adapter_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
     let started = std::time::Instant::now();
-    let mut report = preset.evaluate_with_links(
+    let mut report = preset.evaluate_with_capabilities(
         &input,
-        site.as_ref().map(|(site, config)| (site, config)),
-        None,
-        context.as_ref(),
-        link_count,
+        &ContentEvaluationContext {
+            site: site.as_ref().map(|(site, config)| (site, config)),
+            adapter: context.as_ref(),
+            link_count,
+            collection: collection.as_deref(),
+            ..Default::default()
+        },
     )?;
     let evaluation_ms = started.elapsed().as_secs_f64() * 1000.0;
     report.applied_fixes = applied_fixes;

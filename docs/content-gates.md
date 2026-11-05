@@ -225,3 +225,31 @@ characters and underscores define word boundaries; set `whole_words = false`
 for substring matches. It does not infer synonyms, grammar, or editorial intent.
 Each finding points to the first occurrence beyond the configured maximum,
 and measurements count configured and exceeded terms and matched occurrences.
+
+### Collection metadata uniqueness
+
+`unique_collection_metadata` compares one metadata field across an explicitly
+supplied collection. It reports duplicate items and their first matching item,
+without echoing metadata values. Matching is case-sensitive and exact.
+
+```toml
+[[gates]]
+id = "collection.unique_slug"
+kind = "unique_collection_metadata"
+field = "slug"
+blocking = true
+```
+
+Rust hosts provide a complete collection in `ContentEvaluationContext` with `evaluate_with_capabilities`.
+The ordinary single-item interface reports this gate as `not_checked`. Missing
+or blank metadata in any item also yields `not_checked`; detected duplicates
+remain visible as findings. The host is responsible for collection completeness.
+Rust EmDash hosts can use `content::evaluate_collection` to adapt a complete
+slice of documents; document and site gates without their inputs remain
+`not_checked`. JavaScript hosts can use `evaluateContentCollection` from the
+EmDash content API. The CLI accepts a JSON array of content inputs with
+`--collection items.json --no-text`, for example `[{"id":"/a","metadata":{"slug":"a"}}]`.
+IDs must be unique and nonempty; provide the complete collection. Other gates
+that need an individual document still report `not_checked`. To check the
+real WASM boundary locally, build the plugin and run `npm run test:wasm` in
+`packages/aexeo-emdash`; the ordinary TypeScript unit test uses a mock.

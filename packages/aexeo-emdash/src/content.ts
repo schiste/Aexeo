@@ -1,12 +1,12 @@
-import { evaluateContent as evaluateContentWasm } from "./wasm-init.js";
+import { evaluateContent as evaluateContentWasm, evaluateContentCollection as evaluateCollectionWasm } from "./wasm-init.js";
 import type { EmdashDocument, Finding } from "./types.js";
 
 export interface ContentGateResult {
   gate_id: string;
   status: "passed" | "failed" | "not_checked";
   blocking: boolean;
-  scope: "document" | "site";
-  required_capability: "text" | "source_text" | "metadata" | "headings" | "paragraphs" | "links" | "site" | "extension" | "text_and_evidence";
+  scope: "document" | "collection" | "site";
+  required_capability: "text" | "source_text" | "metadata" | "headings" | "paragraphs" | "links" | "collection_metadata" | "site" | "extension" | "text_and_evidence";
   findings: Finding[];
   reason: string | null;
   measurements?: Record<string, number>;
@@ -33,4 +33,13 @@ export async function evaluateContent(
     ? await evaluateContentWasm(documentJson, preset, sourcesJson)
     : await evaluateContentWasm(documentJson, preset, sourcesJson, JSON.stringify(evidenceSources));
   return JSON.parse(result) as ContentReport;
+}
+
+/** Evaluate collection gates; callers must provide the complete collection. */
+export async function evaluateContentCollection(
+  documents: EmdashDocument[],
+  preset: string,
+  sources: Record<string, string> = {},
+): Promise<ContentReport> {
+  return JSON.parse(await evaluateCollectionWasm(JSON.stringify(documents), preset, JSON.stringify(sources))) as ContentReport;
 }
