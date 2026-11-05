@@ -44,5 +44,8 @@ fn markdown_destinations_are_checked_without_leaking_them_in_telemetry() {
     assert_eq!(report["source_locations"][1]["finding_index"], 1);
     assert_eq!(report["source_locations"][1]["line"], 2);
     assert_eq!(report["source_locations"][1]["column"], 1);
+    let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["source_mapping"]["mapped"], 2);
+    assert_eq!(telemetry["source_mapping"]["unmapped"], 0);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("private"));
 }

@@ -238,7 +238,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     let mapping_started = measuring.then(std::time::Instant::now);
     let mut positional_findings = 0;
     // Keep the established projected finding coordinates unchanged. Supply
-    // separately indexed source coordinates only for positional prose gates.
+    // separately indexed source coordinates for positional prose and link gates.
     let mut source_locations = Vec::new();
     if let (Some(map), Some(source), Some(projected)) = (
         source_map.as_ref(),
