@@ -7,6 +7,8 @@ python3 scripts/evaluate-content-gates.py eval/content/sentence-length.json \
   --binary target/release/aexeo-cli --split holdout
 python3 scripts/evaluate-content-gates.py eval/content/paragraph-length.json \
   --binary target/release/aexeo-cli --split holdout
+python3 scripts/evaluate-content-gates.py eval/content/link-count.json \
+  --binary target/release/aexeo-cli --split holdout
 python3 scripts/test-evaluate-content-gates.py
 ```
 
