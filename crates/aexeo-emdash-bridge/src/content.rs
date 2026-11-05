@@ -7,6 +7,18 @@ use aexeo_core::content_gate::{
 use anyhow::Result;
 use std::collections::BTreeMap;
 
+fn is_heading(style: &crate::BlockStyle) -> bool {
+    matches!(
+        style,
+        crate::BlockStyle::H1
+            | crate::BlockStyle::H2
+            | crate::BlockStyle::H3
+            | crate::BlockStyle::H4
+            | crate::BlockStyle::H5
+            | crate::BlockStyle::H6
+    )
+}
+
 fn content_metadata(document: &EmdashDocument) -> BTreeMap<String, String> {
     let mut metadata: BTreeMap<String, String> = document.meta.clone();
     metadata.insert("title".into(), document.title.clone());
@@ -47,17 +59,7 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
     let headings = document
         .body
         .iter()
-        .filter(|block| {
-            matches!(
-                block.style,
-                crate::BlockStyle::H1
-                    | crate::BlockStyle::H2
-                    | crate::BlockStyle::H3
-                    | crate::BlockStyle::H4
-                    | crate::BlockStyle::H5
-                    | crate::BlockStyle::H6
-            )
-        })
+        .filter(|block| is_heading(&block.style))
         .map(|block| {
             block
                 .children
@@ -143,24 +145,35 @@ fn positional_gate(gate: &ContentGate) -> bool {
     )
 }
 
-/// Map positional prose findings to spans. Synthetic block separators have no
-/// location. Indices apply only to this exact document snapshot.
+/// Map prose and heading findings to spans. Synthetic block separators have no
+/// location. Heading locations identify the first non-empty span of the block.
+/// Indices apply only to this exact document snapshot.
 pub fn source_locations(
     document: &EmdashDocument,
     preset: &ContentPreset,
     report: &ContentReport,
 ) -> Vec<EmdashSourceLocation> {
-    if !preset
+    let needs_prose = preset
         .gates
         .iter()
         .zip(&report.gates)
-        .any(|(gate, result)| positional_gate(gate) && !result.findings.is_empty())
-    {
+        .any(|(gate, result)| positional_gate(gate) && !result.findings.is_empty());
+    let needs_headings = preset
+        .gates
+        .iter()
+        .zip(&report.gates)
+        .any(|(gate, result)| {
+            matches!(
+                gate,
+                ContentGate::HeadingLength { .. } | ContentGate::DuplicateHeadings { .. }
+            ) && !result.findings.is_empty()
+        });
+    if !needs_prose && !needs_headings {
         return Vec::new();
     }
     let mut projection = String::new();
     let mut spans = Vec::new();
-    for (block_index, block) in document.body.iter().enumerate() {
+    for (block_index, block) in document.body.iter().enumerate().filter(|_| needs_prose) {
         if block_index > 0 {
             projection.push('\n');
         }
@@ -181,8 +194,45 @@ pub fn source_locations(
     }
     let mut line_starts = vec![0];
     line_starts.extend(projection.match_indices('\n').map(|(i, _)| i + 1));
+    let heading_blocks: Vec<_> = document
+        .body
+        .iter()
+        .enumerate()
+        .filter(|(_, block)| needs_headings && is_heading(&block.style))
+        .collect();
+    let headings: Vec<String> = heading_blocks
+        .iter()
+        .map(|(_, block)| {
+            block
+                .children
+                .iter()
+                .map(|child| match child {
+                    PortableTextChild::Span(span) => span.text.as_str(),
+                })
+                .collect()
+        })
+        .collect();
     let mut result = Vec::new();
     for (gate, evaluated) in preset.gates.iter().zip(&report.gates) {
+        if let Some(indices) = aexeo_core::content_gate::heading_finding_indices(gate, &headings) {
+            if indices.len() == evaluated.findings.len() {
+                for (finding_index, index) in indices.into_iter().enumerate() {
+                    let (block_index, block) = heading_blocks[index];
+                    if let Some(span_index) = block.children.iter().position(|child| match child {
+                        PortableTextChild::Span(span) => !span.text.is_empty(),
+                    }) {
+                        result.push(EmdashSourceLocation {
+                            gate_id: evaluated.gate_id.clone(),
+                            finding_index,
+                            block_index,
+                            span_index,
+                            utf16_offset: 0,
+                        });
+                    }
+                }
+            }
+            continue;
+        }
         if !positional_gate(gate) {
             continue;
         }
@@ -340,6 +390,34 @@ mod tests {
             (1, 1, 4)
         );
     }
+    #[test]
+    fn heading_findings_map_to_their_emdash_blocks() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"children":[{"_type":"span","text":"prose"}]},{"style":"h2","children":[{"_type":"span","text":"é😀abc"}]},{"style":"h3","children":[{"_type":"span","text":""},{"_type":"span","text":"É😀abc"}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='length'\nkind='heading_length'\nmax_chars=4\n[[gates]]\nid='duplicate'\nkind='duplicate_headings'\ncase_sensitive=false\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        let locations = source_locations(&document, &preset, &report);
+        let actual: Vec<_> = locations
+            .iter()
+            .map(|l| {
+                (
+                    l.gate_id.as_str(),
+                    l.finding_index,
+                    l.block_index,
+                    l.span_index,
+                    l.utf16_offset,
+                )
+            })
+            .collect();
+        assert_eq!(
+            actual,
+            vec![
+                ("length", 0, 1, 0, 0),
+                ("length", 1, 2, 1, 0),
+                ("duplicate", 0, 2, 1, 0)
+            ]
+        );
+    }
+
     #[test]
     fn source_mapping_counts_utf16_surrogate_pairs() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"children":[{"_type":"span","text":"😀 target"}]}]}"#).unwrap();

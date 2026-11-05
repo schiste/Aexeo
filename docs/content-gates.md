@@ -350,3 +350,5 @@ are not grapheme clusters or display width, so combining marks and emoji can
 count as multiple values. The limit is a project-specific heuristic, not a
 universal SEO rule. Finding coordinates remain placeholders (1:1); Markdown
 JSON reports include a separate source location at the start of the heading node.
+EmDash reports map heading findings to the first non-empty span of the matching
+heading block (offset zero), in the evaluated Portable Text snapshot.
