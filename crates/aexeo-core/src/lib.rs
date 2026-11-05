@@ -17,8 +17,8 @@ pub mod html_rules;
 #[cfg(feature = "net")]
 pub mod integrations;
 pub mod intelligence;
-pub mod link_graph;
 pub mod link_evidence;
+pub mod link_graph;
 pub mod link_rules;
 pub mod llm_rules;
 pub mod markdown_adapter;
