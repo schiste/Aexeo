@@ -37,7 +37,10 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
   A synthetic, explicitly unreviewed starter and evaluator were delivered in
   [PR #32](https://github.com/schiste/Aexeo/pull/32); they do not establish
   production accuracy or substitute for independent review. The evaluator also
-  accepts custom TOML and Markdown fixtures ([PR #37](https://github.com/schiste/Aexeo/pull/37)).
+  accepts custom TOML and Markdown fixtures ([PR #37](https://github.com/schiste/Aexeo/pull/37)). The
+  evaluator rejects exact cross-split duplicates and requires declared review
+  provenance ([PR #43](https://github.com/schiste/Aexeo/pull/43)); it cannot
+  establish reviewer independence or detect paraphrased leakage.
 - [x] Shared article/glossary readability preset delivered in
   [PR #34](https://github.com/schiste/Aexeo/pull/34).
 - [ ] Source and factuality evaluation after the basic gates are validated.
