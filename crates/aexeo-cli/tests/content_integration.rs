@@ -507,3 +507,106 @@ fn heading_and_term_measurements_distinguish_absent_inputs() {
     );
     assert!(report["gates"][1]["measurements"].get("matches").is_none());
 }
+
+#[test]
+fn sentence_length_gate_uses_configured_delimiters_and_reports_position() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    std::fs::write(&preset, "version=1\nname='Sentences'\n[[gates]]\nid='sentence'\nkind='sentence_length'\nmax_words=3\ndelimiters='。!?'\nblocking=false\n").unwrap();
+    let source = format!("custom={}", preset.display());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "-",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &source,
+            "--format",
+            "json",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all("Court。\n  Un deux trois quatre!\nFin".as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let gate = &report["gates"][0];
+    assert_eq!(gate["status"], "failed");
+    assert_eq!(gate["measurements"]["sentence_count"], 3);
+    assert_eq!(gate["measurements"]["longest_sentence_words"], 4);
+    assert_eq!(gate["findings"][0]["line"], 2);
+    assert_eq!(gate["findings"][0]["column"], 3);
+    let missing = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "--no-text",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &source,
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&missing.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "not_checked");
+    assert!(
+        report["gates"][0]["measurements"]
+            .get("sentence_count")
+            .is_none()
+    );
+}
+
+#[test]
+fn readable_article_preset_composes_advisory_sentence_length() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "-",
+            "--preset",
+            "article-readable",
+            "--format",
+            "json",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(format!("{}.", "word ".repeat(31)).as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let gate = report["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|gate| gate["gate_id"] == "editorial.sentence_length")
+        .unwrap();
+    assert_eq!(gate["status"], "failed");
+    assert_eq!(gate["blocking"], false);
+    assert_eq!(gate["measurements"]["longest_sentence_words"], 31);
+}
+
+#[test]
+fn sentence_length_rejects_zero_limit_and_empty_delimiters() {
+    for settings in ["max_words=0", "max_words=10\ndelimiters='' "] {
+        let source = format!(
+            "version=1\nname='Invalid'\n[[gates]]\nid='sentence'\nkind='sentence_length'\n{settings}\n"
+        );
+        assert!(aexeo_core::content_gate::ContentPreset::from_toml(&source).is_err());
+    }
+}

@@ -1,0 +1,9 @@
+version = 1
+name = "Article readability starter"
+extends = ["article-editorial"]
+
+[[gates]]
+id = "editorial.sentence_length"
+kind = "sentence_length"
+max_words = 30
+blocking = false

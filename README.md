@@ -124,3 +124,21 @@ only the evaluation duration and aggregate gate counts, not the input text,
 metadata, paths, or findings. The duration covers preset evaluation only, not
 file loading, Markdown parsing, or website crawling. Telemetry is opt-in and is
 not transmitted or retained by Aexeo; redirect stderr to retain it locally.
+
+The optional `article-readable` preset extends `article-editorial` with an advisory 30-word sentence limit. A custom content preset can configure the heuristic sentence-length gate:
+
+```toml
+[[gates]]
+id = "editorial.sentence_length"
+kind = "sentence_length"
+max_words = 30
+delimiters = ".!?。！？"
+blocking = false
+```
+
+It splits at the configured characters and counts whitespace-separated words;
+this is a simple heuristic, not linguistic sentence segmentation. Abbreviations,
+decimals and languages without whitespace-separated words need tailored rules.
+Locations refer to the adapter's projected text. Delimiters default to `. ! ?`
+(without spaces), and the gate reports its limit, sentence count and longest
+sentence; absent text is `not_checked`.
