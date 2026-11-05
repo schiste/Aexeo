@@ -117,6 +117,14 @@ pub fn builtin_content_presets() -> BTreeMap<String, String> {
             include_str!("../presets/article-editorial.toml").into(),
         ),
         (
+            "readability".into(),
+            include_str!("../presets/readability.toml").into(),
+        ),
+        (
+            "glossary-readable".into(),
+            include_str!("../presets/glossary-readable.toml").into(),
+        ),
+        (
             "article-readable".into(),
             include_str!("../presets/article-readable.toml").into(),
         ),
@@ -148,6 +156,45 @@ mod tests {
             assert_eq!(report.gates[2].status, GateStatus::NotChecked);
             assert!(!report.gates[2].blocking);
         }
+    }
+
+    #[test]
+    fn readable_starters_compose_shared_gate_and_allow_overrides() {
+        let mut sources = builtin_content_presets();
+        for name in ["article-readable", "glossary-readable"] {
+            let preset = resolve_content_preset(name, &sources).unwrap();
+            let matches: Vec<_> = preset
+                .gates
+                .iter()
+                .filter(|g| g.id() == "editorial.sentence_length")
+                .collect();
+            assert_eq!(matches.len(), 1);
+            assert!(matches!(
+                matches[0],
+                ContentGate::SentenceLength { max_words: 30, .. }
+            ));
+        }
+        sources.insert(
+            "custom-readable".into(),
+            r#"
+version = 1
+name = "Customized glossary"
+extends = ["glossary-readable"]
+[[gates]]
+id = "editorial.sentence_length"
+kind = "sentence_length"
+max_words = 20
+blocking = false
+"#
+            .into(),
+        );
+        let custom = resolve_content_preset("custom-readable", &sources).unwrap();
+        assert!(
+            custom
+                .gates
+                .iter()
+                .any(|gate| matches!(gate, ContentGate::SentenceLength { max_words: 20, .. }))
+        );
     }
 
     #[test]

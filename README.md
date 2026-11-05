@@ -125,7 +125,7 @@ metadata, paths, or findings. The duration covers preset evaluation only, not
 file loading, Markdown parsing, or website crawling. Telemetry is opt-in and is
 not transmitted or retained by Aexeo; redirect stderr to retain it locally.
 
-The optional `article-readable` preset extends `article-editorial` with an advisory 30-word sentence limit. A custom content preset can configure the heuristic sentence-length gate:
+The optional `article-readable` and `glossary-readable` presets combine their respective editorial starter with the shared `readability` preset, which adds an advisory 30-word sentence limit. Projects can inherit and override these gates independently. A custom content preset can configure the heuristic sentence-length gate:
 
 ```toml
 [[gates]]
