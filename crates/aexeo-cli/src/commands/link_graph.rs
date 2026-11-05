@@ -2,7 +2,8 @@ use std::fs;
 use std::time::Instant;
 
 use aexeo_core::link_report::{
-    AuditLinkContext, LinkReportInput, build_link_report, build_link_report_from_audit_with_context,
+    AuditLinkContext, LinkReportInput, build_link_report,
+    build_link_report_from_audit_with_static_urls,
 };
 use anyhow::{Context, Result};
 use clap::ArgMatches;
@@ -23,7 +24,21 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
                 serde_json::from_slice(&data).context("invalid audit link context JSON")
             })
             .transpose()?;
-        build_link_report_from_audit_with_context(&artifact, context.as_ref())?
+        let static_urls = matches
+            .get_one::<String>("static-url-map")
+            .map(
+                |path| -> Result<std::collections::BTreeMap<String, String>> {
+                    let data = fs::read(path)
+                        .with_context(|| format!("cannot read static URL map: {path}"))?;
+                    serde_json::from_slice(&data).context("invalid static URL map JSON")
+                },
+            )
+            .transpose()?;
+        build_link_report_from_audit_with_static_urls(
+            &artifact,
+            context.as_ref(),
+            static_urls.as_ref(),
+        )?
     } else {
         let input: LinkReportInput =
             serde_json::from_slice(&data).context("invalid link graph input JSON")?;

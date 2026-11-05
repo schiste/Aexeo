@@ -88,10 +88,24 @@ pub fn build_link_report_from_audit_with_context(
     artifact: &aexeo_contracts::AuditArtifact,
     context: Option<&AuditLinkContext>,
 ) -> anyhow::Result<LinkReport> {
+    build_link_report_from_audit_with_static_urls(artifact, context, None)
+}
+
+/// Analyze a static export using caller-provided relative-path to public-URL mappings.
+/// The mappings are not observed HTTP responses and never establish coverage.
+pub fn build_link_report_from_audit_with_static_urls(
+    artifact: &aexeo_contracts::AuditArtifact,
+    context: Option<&AuditLinkContext>,
+    static_urls: Option<&std::collections::BTreeMap<String, String>>,
+) -> anyhow::Result<LinkReport> {
     let site = artifact
         .site
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("audit artifact has no site snapshot"))?;
+    anyhow::ensure!(
+        static_urls.is_none() || site.deployment_model == "static_export",
+        "static URL mapping requires a static_export audit artifact"
+    );
     let origin = site
         .site_url
         .as_deref()
@@ -118,6 +132,19 @@ pub fn build_link_report_from_audit_with_context(
         .pages
         .iter()
         .filter_map(|page| {
+            if let Some(urls) = static_urls {
+                let Some(url) = urls.get(&page.relative_path) else {
+                    issues.insert("static_url_mapping_missing");
+                    return None;
+                };
+                issues.insert("static_url_caller_supplied");
+                return Some(RenderedPage {
+                    url: url.clone(),
+                    html: page.raw_html.clone(),
+                    status_code: None,
+                    response_headers: None,
+                });
+            }
             let Some(response) = &page.crawl_response else {
                 issues.insert("audit_page_response_provenance_missing");
                 return None;

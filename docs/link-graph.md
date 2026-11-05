@@ -82,6 +82,16 @@ caller-supplied, not independently established by the audit. Even when the
 identities match, audit-based reports retain incomplete crawl coverage until
 it can be attested from a complete, equivalent surface.
 
+## Static audit artifacts
+
+For a `static_export` audit artifact, `--audit --static-url-map urls.json`
+accepts a JSON object mapping exact audit `relative_path` values to absolute
+public URLs, for example `{"en/index.html":"https://example.org/en/"}`.
+Only mapped pages are analyzed. Mappings are supplied by the caller, not HTTP
+observations; missing mappings, response status and headers are reported, and
+coverage remains incomplete. The map is rejected for other deployment models.
+It does not establish routing, redirects, indexing or publication equivalence.
+
 ## Benchmark
 
 Run `cargo run --release -p aexeo-core --example link_graph_bench` to measure

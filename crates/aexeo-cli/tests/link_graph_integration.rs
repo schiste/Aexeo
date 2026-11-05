@@ -329,3 +329,61 @@ fn audit_context_reports_origin_mismatch_even_without_pages() {
     );
     assert_eq!(report["crawl_complete"], false);
 }
+
+#[test]
+fn static_audit_uses_only_explicit_mappings_and_never_claims_coverage() {
+    let temp = tempfile::tempdir().unwrap();
+    let audit_path = temp.path().join("audit.json");
+    let map_path = temp.path().join("urls.json");
+    let audit = serde_json::json!({"command":"audit", "site":{"site_url":"https://example.org", "root":"dist", "deployment_model":"static_export", "pages":[
+        {"path":"dist/en/index.html", "relative_path":"en/index.html", "route":"en", "raw_html":"<html lang='en'><main><p><a href='/fr/'>Bonjour</a></p></main></html>", "response_headers":{}},
+        {"path":"dist/fr/index.html", "relative_path":"fr/index.html", "route":"fr", "raw_html":"<html lang='fr'><main>Bonjour</main></html>", "response_headers":{}},
+        {"path":"dist/unknown.html", "relative_path":"unknown.html", "route":"unknown", "raw_html":"<main>Unknown</main>", "response_headers":{}, "crawl_response":{"requested_url":"https://example.org/unknown", "observed_url":"https://example.org/unknown", "status_code":200, "headers_observed":true}}
+    ]}});
+    let urls = serde_json::json!({"en/index.html":"https://example.org/en/", "fr/index.html":"https://example.org/fr/"});
+    fs::write(&audit_path, serde_json::to_vec(&audit).unwrap()).unwrap();
+    fs::write(&map_path, serde_json::to_vec(&urls).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .arg("link-graph")
+        .arg(&audit_path)
+        .arg("--audit")
+        .arg("--static-url-map")
+        .arg(&map_path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["pages"].as_array().unwrap().len(), 2);
+    assert_eq!(report["pages"][1]["distinct_source_pages"], 1);
+    assert_eq!(report["crawl_complete"], false);
+    for issue in [
+        "static_url_caller_supplied",
+        "static_url_mapping_missing",
+        "response_headers_missing",
+        "response_status_missing",
+    ] {
+        assert!(
+            report["issues"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!(issue)),
+            "missing {issue}"
+        );
+    }
+    let mut runtime = audit;
+    runtime["site"]["deployment_model"] = "runtime_snapshot".into();
+    fs::write(&audit_path, serde_json::to_vec(&runtime).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .arg("link-graph")
+        .arg(audit_path)
+        .arg("--audit")
+        .arg("--static-url-map")
+        .arg(map_path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+}
