@@ -136,6 +136,15 @@ pub enum ContentGate {
         blocking: bool,
         headings: Vec<String>,
     },
+    /// Limit heading length in Unicode scalar values after trimming whitespace.
+    HeadingLength {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+        max_chars: usize,
+    },
     /// Detect repeated non-empty headings within one content item.
     DuplicateHeadings {
         id: String,
@@ -266,6 +275,7 @@ impl ContentGate {
             | Self::RequiredMetadata { severity, .. }
             | Self::RequiredHeadings { severity, .. }
             | Self::DuplicateHeadings { severity, .. }
+            | Self::HeadingLength { severity, .. }
             | Self::FinalNewline { severity, .. }
             | Self::UniqueCollectionMetadata { severity, .. }
             | Self::Custom { severity, .. }
@@ -287,6 +297,7 @@ impl ContentGate {
             | Self::RequiredMetadata { blocking, .. }
             | Self::RequiredHeadings { blocking, .. }
             | Self::DuplicateHeadings { blocking, .. }
+            | Self::HeadingLength { blocking, .. }
             | Self::FinalNewline { blocking, .. }
             | Self::UniqueCollectionMetadata { blocking, .. }
             | Self::Custom { blocking, .. }
@@ -307,7 +318,9 @@ impl ContentGate {
             Self::LinkDestinations { .. } => "link_destinations",
             Self::RequiredMetadata { .. } => "metadata",
             Self::ParagraphLength { .. } => "paragraphs",
-            Self::RequiredHeadings { .. } | Self::DuplicateHeadings { .. } => "headings",
+            Self::RequiredHeadings { .. }
+            | Self::DuplicateHeadings { .. }
+            | Self::HeadingLength { .. } => "headings",
             Self::FinalNewline { .. } => "source_text",
             Self::UniqueCollectionMetadata { .. } => "collection_metadata",
             Self::Custom { .. } => "extension",
@@ -329,6 +342,7 @@ impl ContentGate {
             | Self::RequiredMetadata { id, .. }
             | Self::RequiredHeadings { id, .. }
             | Self::DuplicateHeadings { id, .. }
+            | Self::HeadingLength { id, .. }
             | Self::FinalNewline { id, .. }
             | Self::UniqueCollectionMetadata { id, .. }
             | Self::Custom { id, .. }
@@ -537,6 +551,9 @@ impl ContentPreset {
                         "link destination schemes must be unique lowercase URI schemes for {}",
                         gate.id()
                     )
+                }
+                ContentGate::HeadingLength { max_chars, .. } if *max_chars == 0 => {
+                    bail!("heading length max_chars must be greater than zero");
                 }
                 ContentGate::ParagraphLength { max_words, .. } if *max_words == 0 => {
                     bail!("paragraph length needs a positive limit for {}", gate.id())
@@ -1070,6 +1087,34 @@ impl ContentPreset {
                                     emit(format!("Required heading is missing: {heading}"), 1, 1);
                                 }
                             }
+                        }
+                        None => reason = Some("headings are unavailable from this adapter".into()),
+                    }
+                }
+                ContentGate::HeadingLength { max_chars, .. } => {
+                    measurements.insert("max_chars".into(), *max_chars);
+                    match &input.headings {
+                        Some(headings) => {
+                            let mut longest = 0;
+                            let mut exceeded = 0;
+                            measurements.insert("heading_count".into(), headings.len());
+                            for (index, heading) in headings.iter().enumerate() {
+                                let length = heading.trim().chars().count();
+                                longest = longest.max(length);
+                                if length > *max_chars {
+                                    exceeded += 1;
+                                    emit(
+                                        format!(
+                                            "Heading #{} has {length} characters; maximum is {max_chars}",
+                                            index + 1
+                                        ),
+                                        1,
+                                        1,
+                                    );
+                                }
+                            }
+                            measurements.insert("longest_heading_chars".into(), longest);
+                            measurements.insert("headings_exceeding_limit".into(), exceeded);
                         }
                         None => reason = Some("headings are unavailable from this adapter".into()),
                     }
@@ -1640,6 +1685,35 @@ field = "slug"
                 .collect::<Vec<_>>(),
             [GateStatus::Passed, GateStatus::NotChecked]
         );
+    }
+
+    #[test]
+    fn heading_length_counts_unicode_scalars_and_requires_headings() {
+        let preset = ContentPreset::from_toml("version=1\nname='headings'\n[[gates]]\nid='length'\nkind='heading_length'\nmax_chars=3\nblocking=false\n").unwrap();
+        let input = ContentInput {
+            headings: Some(vec![" é😀a ".into(), "abcd".into(), "".into()]),
+            ..Default::default()
+        };
+        let result = preset.evaluate(&input).unwrap();
+        let gate = &result.gates[0];
+        assert_eq!(gate.status, GateStatus::Failed);
+        assert!(!gate.blocking);
+        assert_eq!(gate.measurements["heading_count"], 3);
+        assert_eq!(gate.measurements["longest_heading_chars"], 4);
+        assert_eq!(gate.measurements["headings_exceeding_limit"], 1);
+        assert!(gate.findings[0].message.contains("Heading #2"));
+        let absent = preset.evaluate(&ContentInput::default()).unwrap();
+        assert_eq!(absent.gates[0].status, GateStatus::NotChecked);
+        assert!(!absent.gates[0].measurements.contains_key("heading_count"));
+        let empty = preset
+            .evaluate(&ContentInput {
+                headings: Some(vec![]),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(empty.gates[0].status, GateStatus::Passed);
+        assert_eq!(empty.gates[0].measurements["longest_heading_chars"], 0);
+        assert!(ContentPreset::from_toml("version=1\nname='headings'\n[[gates]]\nid='length'\nkind='heading_length'\nmax_chars=0\n").is_err());
     }
 
     #[test]
