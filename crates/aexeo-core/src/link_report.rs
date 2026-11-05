@@ -104,6 +104,16 @@ pub fn build_link_report_from_audit_with_context(
         .map(|url| url.origin().ascii_serialization())
         .unwrap_or_default();
     let mut issues = std::collections::BTreeSet::new();
+    if let Some(identity) = context.and_then(|value| value.identity.as_ref()) {
+        if origin.is_empty() {
+            issues.insert("audit_origin_missing_or_invalid");
+        } else if Url::parse(&identity.origin)
+            .ok()
+            .is_some_and(|declared| declared.origin().ascii_serialization() != origin)
+        {
+            issues.insert("audit_origin_mismatch");
+        }
+    }
     let pages = site
         .pages
         .iter()
