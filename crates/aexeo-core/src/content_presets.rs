@@ -117,6 +117,10 @@ pub fn builtin_content_presets() -> BTreeMap<String, String> {
             include_str!("../presets/article-editorial.toml").into(),
         ),
         (
+            "article-readable".into(),
+            include_str!("../presets/article-readable.toml").into(),
+        ),
+        (
             "glossary-editorial".into(),
             include_str!("../presets/glossary-editorial.toml").into(),
         ),

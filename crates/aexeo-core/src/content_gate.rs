@@ -46,6 +46,17 @@ pub enum ContentGate {
         min: Option<usize>,
         max: Option<usize>,
     },
+    /// Heuristic sentence length using configured punctuation and whitespace words.
+    SentenceLength {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+        max_words: usize,
+        #[serde(default = "default_sentence_delimiters")]
+        delimiters: String,
+    },
     ForbiddenTerms {
         id: String,
         #[serde(default)]
@@ -145,6 +156,10 @@ pub enum Severity {
     Warning,
 }
 
+fn default_sentence_delimiters() -> String {
+    ".!?".into()
+}
+
 fn default_blocking() -> bool {
     true
 }
@@ -153,6 +168,7 @@ impl ContentGate {
     pub fn severity(&self) -> Severity {
         match self {
             Self::WordCount { severity, .. }
+            | Self::SentenceLength { severity, .. }
             | Self::ForbiddenTerms { severity, .. }
             | Self::RequiredMetadata { severity, .. }
             | Self::RequiredHeadings { severity, .. }
@@ -167,6 +183,7 @@ impl ContentGate {
     pub fn blocking(&self) -> bool {
         match self {
             Self::WordCount { blocking, .. }
+            | Self::SentenceLength { blocking, .. }
             | Self::ForbiddenTerms { blocking, .. }
             | Self::RequiredMetadata { blocking, .. }
             | Self::RequiredHeadings { blocking, .. }
@@ -181,7 +198,9 @@ impl ContentGate {
     }
     pub fn required_capability(&self) -> &'static str {
         match self {
-            Self::WordCount { .. } | Self::ForbiddenTerms { .. } => "text",
+            Self::WordCount { .. } | Self::SentenceLength { .. } | Self::ForbiddenTerms { .. } => {
+                "text"
+            }
             Self::RequiredMetadata { .. } => "metadata",
             Self::RequiredHeadings { .. } => "headings",
             Self::FinalNewline { .. } => "source_text",
@@ -195,6 +214,7 @@ impl ContentGate {
     pub fn id(&self) -> &str {
         match self {
             Self::WordCount { id, .. }
+            | Self::SentenceLength { id, .. }
             | Self::ForbiddenTerms { id, .. }
             | Self::RequiredMetadata { id, .. }
             | Self::RequiredHeadings { id, .. }
@@ -331,6 +351,16 @@ impl ContentPreset {
                         || matches!((min, max), (Some(a), Some(b)) if a > b) =>
                 {
                     bail!("invalid word count bounds for {}", gate.id())
+                }
+                ContentGate::SentenceLength {
+                    max_words,
+                    delimiters,
+                    ..
+                } if *max_words == 0 || delimiters.is_empty() => {
+                    bail!(
+                        "sentence length needs a positive limit and delimiters for {}",
+                        gate.id()
+                    )
                 }
                 ContentGate::ForbiddenTerms { terms, .. }
                     if terms.is_empty() || terms.iter().any(|s| s.trim().is_empty()) =>
@@ -482,6 +512,72 @@ impl ContentPreset {
                                     1,
                                 );
                             }
+                        }
+                        None => reason = Some("text is unavailable from this adapter".into()),
+                    }
+                }
+                ContentGate::SentenceLength {
+                    max_words,
+                    delimiters,
+                    ..
+                } => {
+                    measurements.insert("max_words".into(), *max_words);
+                    match &input.text {
+                        Some(text) => {
+                            let mut segment_start = 0;
+                            let mut sentence_count = 0;
+                            let mut longest = 0;
+                            let mut line = 1;
+                            let mut column = 1;
+                            let mut first_position = None;
+                            for (offset, ch) in text
+                                .char_indices()
+                                .map(|(offset, ch)| (offset, Some(ch)))
+                                .chain(std::iter::once((text.len(), None)))
+                            {
+                                let decimal_point = ch == Some('.')
+                                    && text[..offset]
+                                        .chars()
+                                        .next_back()
+                                        .is_some_and(|c| c.is_ascii_digit())
+                                    && text[offset + 1..]
+                                        .chars()
+                                        .next()
+                                        .is_some_and(|c| c.is_ascii_digit());
+                                if !decimal_point && ch.is_none_or(|ch| delimiters.contains(ch)) {
+                                    let count =
+                                        text[segment_start..offset].split_whitespace().count();
+                                    if count > 0 {
+                                        sentence_count += 1;
+                                        longest = longest.max(count);
+                                        if count > *max_words {
+                                            let (start_line, start_column) =
+                                                first_position.unwrap_or((line, column));
+                                            emit(
+                                                format!(
+                                                    "Sentence has {count} words; maximum is {max_words}"
+                                                ),
+                                                start_line,
+                                                start_column,
+                                            );
+                                        }
+                                    }
+                                    segment_start = offset + ch.map_or(0, char::len_utf8);
+                                    first_position = None;
+                                } else if ch.is_some_and(|ch| !ch.is_whitespace())
+                                    && first_position.is_none()
+                                {
+                                    first_position = Some((line, column));
+                                }
+                                if ch == Some('\n') {
+                                    line += 1;
+                                    column = 1;
+                                } else {
+                                    column += 1;
+                                }
+                            }
+                            measurements.insert("sentence_count".into(), sentence_count);
+                            measurements.insert("longest_sentence_words".into(), longest);
                         }
                         None => reason = Some("text is unavailable from this adapter".into()),
                     }
