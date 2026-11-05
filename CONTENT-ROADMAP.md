@@ -25,8 +25,8 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [x] Bounded agent lint-and-revise workflow and local telemetry guidance ([PR #30](https://github.com/schiste/Aexeo/pull/30)).
 - [x] Configurable paragraph-length gate with Markdown and EmDash adapter
   capabilities ([PR #33](https://github.com/schiste/Aexeo/pull/33)).
-- [ ] Additional editorial gates: link presence is proposed in [PR #35](https://github.com/schiste/Aexeo/pull/35);
-  repeated-term checks and destination validation remain open.
+- [x] Configurable link-count gate for Markdown and EmDash ([PR #35](https://github.com/schiste/Aexeo/pull/35)); this does not validate destinations.
+- [ ] Additional editorial gates, including repeated-term checks and destination validation.
 - [ ] Collection scopes and adapter capabilities, with cross-adapter source mapping.
 - [ ] Independently reviewed, diverse evaluation corpus and held-out metrics.
   A synthetic, explicitly unreviewed starter and evaluator were delivered in
