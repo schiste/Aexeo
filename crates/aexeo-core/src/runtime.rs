@@ -2209,7 +2209,7 @@ mod tests {
             serde_json::to_value(&result).unwrap()
         );
         assert_eq!(events.len(), preset.gates.len() * 2);
-        for pair in events.chunks_exact(2) {
+        for pair in events.as_chunks::<2>().0 {
             assert!(matches!(
                 pair[0],
                 crate::content_gate::GateObservation::Started
