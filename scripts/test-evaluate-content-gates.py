@@ -33,6 +33,24 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(report["recall"], 1)
         self.assertEqual(report["unchecked_rate"], 1 / 3)
         self.assertEqual(report["reviewed_examples"], 1)
+        self.assertEqual(report["reviewed_metrics"]["examples"], 1)
+        self.assertEqual(report["reviewed_metrics"]["counts"]["true_positive"], 1)
+        self.assertEqual(report["reviewed_metrics"]["counts"]["false_positive"], 0)
+        self.assertEqual(report["reviewed_metrics"]["precision"], 1)
+        self.assertEqual(report["reviewed_metrics"]["recall"], 1)
+        self.assertEqual(report["reviewed_metrics"]["unchecked_rate"], 0)
+
+    def test_reviewed_metrics_are_null_without_reviewed_examples(self):
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": [
+            {"id": "a", "split": "holdout", "text": "a", "expected": "passed"},
+        ]}
+        result = SimpleNamespace(returncode=0, stdout='{"gates":[{"gate_id":"g","status":"passed"}]}')
+        with patch.object(eval_module.subprocess, "run", return_value=result):
+            metrics = eval_module.evaluate("cli", corpus, "holdout")["reviewed_metrics"]
+        self.assertEqual(metrics["examples"], 0)
+        self.assertIsNone(metrics["precision"])
+        self.assertIsNone(metrics["recall"])
+        self.assertIsNone(metrics["unchecked_rate"])
 
     def test_markdown_and_embedded_preset_reach_cli(self):
         corpus = {"version": 1, "preset": "custom", "preset_toml": "name='example'", "input_format": "markdown", "gate_id": "g", "examples": [
