@@ -328,7 +328,6 @@ fn valid_link_destination(destination: &str, schemes: &[String], allow_relative:
         Ok(parsed) => schemes.iter().any(|allowed| allowed == parsed.scheme()),
         Err(url::ParseError::RelativeUrlWithoutBase) if allow_relative => {
             !destination.starts_with("//")
-                || url::Url::parse(&format!("https:{destination}")).is_ok()
         }
         Err(_) => false,
     }
@@ -1546,6 +1545,7 @@ field = "slug"
             "https://".into(),
             "".into(),
             "https://example.org/has space".into(),
+            "//example.org/path".into(),
         ];
         let failed = preset
             .evaluate_with_destinations(
@@ -1555,9 +1555,9 @@ field = "slug"
             )
             .unwrap();
         assert_eq!(failed.gates[0].status, GateStatus::Failed);
-        assert_eq!(failed.gates[0].measurements["invalid_destinations"], 4);
+        assert_eq!(failed.gates[0].measurements["invalid_destinations"], 5);
         assert!(failed.gates[0].findings[0].message.contains("#1"));
-        assert!(failed.gates[0].findings[3].message.contains("#4"));
+        assert!(failed.gates[0].findings[4].message.contains("#5"));
         let absolute = ContentPreset::from_toml("version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\nallow_relative=false\n").unwrap();
         assert_eq!(
             absolute

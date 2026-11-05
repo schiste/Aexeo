@@ -295,7 +295,8 @@ blocking = false
 
 The default for `allow_relative` is true; schemes must be unique lowercase URI
 schemes. Empty, whitespace-containing, malformed and disallowed destinations
-produce findings. A pass does not establish reachability, safety, source support,
+produce findings. Scheme-relative URLs beginning with `//` are rejected because
+their effective scheme depends on the page context. A pass does not establish reachability, safety, source support,
 or content accuracy. Markdown direct and ASCII reference links and used EmDash
 link marks provide destinations. If Markdown references cannot be resolved
 conservatively, or an adapter lacks destinations, the gate is `not_checked`.
