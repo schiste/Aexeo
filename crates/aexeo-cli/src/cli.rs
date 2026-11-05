@@ -13,6 +13,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("metadata").long("metadata").num_args(1).help("JSON file containing string metadata fields"))
                 .arg(Arg::new("evidence-source").long("evidence-source").num_args(1).action(ArgAction::Append).conflicts_with("crawl-url").help("Load a named UTF-8 source snapshot as NAME=PATH; may be repeated"))
                 .arg(Arg::new("site").long("site").num_args(1).help("Load a static website for site gates"))
+                .arg(Arg::new("collection").long("collection").num_args(1).conflicts_with("crawl-url").help("Load a complete JSON array of content items for collection gates"))
                 .arg(Arg::new("site-config").long("site-config").num_args(1).requires("site").help("Existing site audit config file"))
                 .arg(Arg::new("crawl-url").long("crawl-url").num_args(1).conflicts_with_all(["site", "fix", "metadata"]).help("Crawl a website and evaluate the preset against its snapshot"))
                 .arg(Arg::new("crawl-config").long("crawl-config").num_args(1).requires("crawl-url").help("Existing crawl configuration file"))

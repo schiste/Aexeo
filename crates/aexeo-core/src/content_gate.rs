@@ -166,6 +166,15 @@ pub enum ContentGate {
         #[serde(default = "default_blocking")]
         blocking: bool,
     },
+    /// Require a metadata field to be unique across a supplied collection.
+    UniqueCollectionMetadata {
+        id: String,
+        field: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+    },
     /// A host-provided implementation, selected by a portable identifier.
     Custom {
         id: String,
@@ -224,6 +233,7 @@ impl ContentGate {
             | Self::RequiredMetadata { severity, .. }
             | Self::RequiredHeadings { severity, .. }
             | Self::FinalNewline { severity, .. }
+            | Self::UniqueCollectionMetadata { severity, .. }
             | Self::Custom { severity, .. }
             | Self::EvidenceAnchors { severity, .. }
             | Self::StructuredFact { severity, .. }
@@ -242,6 +252,7 @@ impl ContentGate {
             | Self::RequiredMetadata { blocking, .. }
             | Self::RequiredHeadings { blocking, .. }
             | Self::FinalNewline { blocking, .. }
+            | Self::UniqueCollectionMetadata { blocking, .. }
             | Self::Custom { blocking, .. }
             | Self::EvidenceAnchors { blocking, .. }
             | Self::StructuredFact { blocking, .. }
@@ -261,6 +272,7 @@ impl ContentGate {
             Self::ParagraphLength { .. } => "paragraphs",
             Self::RequiredHeadings { .. } => "headings",
             Self::FinalNewline { .. } => "source_text",
+            Self::UniqueCollectionMetadata { .. } => "collection_metadata",
             Self::Custom { .. } => "extension",
             Self::EvidenceAnchors { .. }
             | Self::StructuredFact { .. }
@@ -279,6 +291,7 @@ impl ContentGate {
             | Self::RequiredMetadata { id, .. }
             | Self::RequiredHeadings { id, .. }
             | Self::FinalNewline { id, .. }
+            | Self::UniqueCollectionMetadata { id, .. }
             | Self::Custom { id, .. }
             | Self::EvidenceAnchors { id, .. }
             | Self::StructuredFact { id, .. }
@@ -361,6 +374,18 @@ pub trait ContentGateExtensions {
         parameters: &BTreeMap<String, String>,
         input: &ContentInput,
     ) -> Result<Option<Vec<ExtensionDiagnostic>>>;
+}
+
+/// Capabilities supplied by an adapter to a content evaluation.
+/// Absent capabilities produce `not_checked` for the corresponding gates.
+#[derive(Default)]
+pub struct ContentEvaluationContext<'a> {
+    pub site: Option<(&'a crate::site::Site, &'a crate::config::Config)>,
+    pub extensions: Option<&'a dyn ContentGateExtensions>,
+    pub adapter: Option<&'a ContentContext>,
+    pub link_count: Option<usize>,
+    /// The host is responsible for supplying a complete collection.
+    pub collection: Option<&'a [ContentInput]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -475,6 +500,12 @@ impl ContentPreset {
                 {
                     bail!("required headings must not be empty for {}", gate.id())
                 }
+                ContentGate::UniqueCollectionMetadata { field, .. } if field.trim().is_empty() => {
+                    bail!(
+                        "collection metadata field must not be empty for {}",
+                        gate.id()
+                    )
+                }
                 ContentGate::EvidenceAnchors {
                     source,
                     claim,
@@ -577,6 +608,29 @@ impl ContentPreset {
         context: Option<&ContentContext>,
         link_count: Option<usize>,
     ) -> Result<ContentReport> {
+        self.evaluate_with_capabilities(
+            input,
+            &ContentEvaluationContext {
+                site,
+                extensions,
+                adapter: context,
+                link_count,
+                collection: None,
+            },
+        )
+    }
+
+    /// Evaluate using caller-supplied, optional adapter capabilities.
+    pub fn evaluate_with_capabilities(
+        &self,
+        input: &ContentInput,
+        capabilities: &ContentEvaluationContext<'_>,
+    ) -> Result<ContentReport> {
+        let site = capabilities.site;
+        let extensions = capabilities.extensions;
+        let context = capabilities.adapter;
+        let link_count = capabilities.link_count;
+        let collection = capabilities.collection;
         self.validate()?;
         let mut results = Vec::with_capacity(self.gates.len());
         let mut word_count = None;
@@ -637,6 +691,49 @@ impl ContentPreset {
                         None => reason = Some("text is unavailable from this adapter".into()),
                     }
                 }
+                ContentGate::UniqueCollectionMetadata { field, .. } => match collection {
+                    Some(items) => {
+                        measurements.insert("collection_items".into(), items.len());
+                        let mut first_by_value = BTreeMap::new();
+                        let mut missing = 0;
+                        let mut duplicates = 0;
+                        for item in items {
+                            let value = item
+                                .metadata
+                                .as_ref()
+                                .and_then(|m| m.get(field))
+                                .filter(|v| !v.trim().is_empty());
+                            match value {
+                                Some(value) => {
+                                    if let Some(first_id) = first_by_value.get(value) {
+                                        duplicates += 1;
+                                        findings.push(aexeo_contracts::Finding {
+                                                rule_id: gate.id().to_owned(),
+                                                message: format!("Metadata field {field:?} duplicates the value in {first_id:?}"),
+                                                path: item.id.clone(),
+                                                line: 1,
+                                                column: 1,
+                                                severity: match gate.severity() { Severity::Error => "error", Severity::Warning => "warning" }.into(),
+                                                suggestion: None,
+                                                scope: aexeo_contracts::FindingScope::Page,
+                                            });
+                                    } else {
+                                        first_by_value.insert(value, &item.id);
+                                    }
+                                }
+                                None => missing += 1,
+                            }
+                        }
+                        measurements.insert("items_missing_field".into(), missing);
+                        measurements.insert("duplicate_items".into(), duplicates);
+                        if missing > 0 {
+                            reason = Some(format!(
+                                "metadata field {field:?} is unavailable for {missing} collection item(s)"
+                            ));
+                        }
+                    }
+                    None => reason = Some("collection is unavailable from this adapter".into()),
+                },
                 ContentGate::LinkCount { min, .. } => {
                     measurements.insert("min_links".into(), *min);
                     match link_count {
@@ -1022,13 +1119,10 @@ impl ContentPreset {
                 gate_id: gate.id().into(),
                 status,
                 blocking: gate.blocking(),
-                scope: if matches!(
-                    gate,
-                    ContentGate::SiteAudit { .. } | ContentGate::SiteGroup { .. }
-                ) {
-                    "site"
-                } else {
-                    "document"
+                scope: match gate {
+                    ContentGate::SiteAudit { .. } | ContentGate::SiteGroup { .. } => "site",
+                    ContentGate::UniqueCollectionMetadata { .. } => "collection",
+                    _ => "document",
                 }
                 .into(),
                 required_capability: gate.required_capability().into(),
@@ -1259,6 +1353,79 @@ max_occurrences = 1
 "#
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn collection_metadata_gate_exposes_scope_duplicates_and_missing_data() {
+        let preset = ContentPreset::from_toml(
+            r#"
+version = 1
+name = "collection"
+[[gates]]
+id = "unique"
+kind = "unique_collection_metadata"
+field = "slug"
+"#,
+        )
+        .unwrap();
+        let input = ContentInput {
+            id: "collection".into(),
+            ..Default::default()
+        };
+        let single = preset.evaluate(&input).unwrap();
+        assert_eq!(single.gates[0].status, GateStatus::NotChecked);
+        assert_eq!(single.gates[0].scope, "collection");
+        assert_eq!(single.gates[0].required_capability, "collection_metadata");
+        let item = |id: &str, value: Option<&str>| ContentInput {
+            id: id.into(),
+            metadata: value.map(|v| BTreeMap::from([("slug".into(), v.into())])),
+            ..Default::default()
+        };
+        let items = vec![
+            item("one", Some("same")),
+            item("two", Some("same")),
+            item("three", Some("other")),
+        ];
+        let report = preset
+            .evaluate_with_capabilities(
+                &input,
+                &ContentEvaluationContext {
+                    collection: Some(&items),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[0].measurements["duplicate_items"], 1);
+        assert_eq!(report.gates[0].findings[0].path, "two");
+        let partial = vec![items[0].clone(), items[1].clone(), item("three", None)];
+        let report = preset
+            .evaluate_with_capabilities(
+                &input,
+                &ContentEvaluationContext {
+                    collection: Some(&partial),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::NotChecked);
+        assert_eq!(report.gates[0].measurements["items_missing_field"], 1);
+        assert_eq!(report.gates[0].findings.len(), 1);
+        let unique = vec![items[0].clone(), items[2].clone()];
+        assert_eq!(
+            preset
+                .evaluate_with_capabilities(
+                    &input,
+                    &ContentEvaluationContext {
+                        collection: Some(&unique),
+                        ..Default::default()
+                    }
+                )
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::Passed
         );
     }
 
