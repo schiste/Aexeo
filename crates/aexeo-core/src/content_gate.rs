@@ -136,6 +136,16 @@ pub enum ContentGate {
         blocking: bool,
         headings: Vec<String>,
     },
+    /// Detect repeated non-empty headings within one content item.
+    DuplicateHeadings {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+        #[serde(default = "default_case_sensitive")]
+        case_sensitive: bool,
+    },
     FinalNewline {
         id: String,
         #[serde(default)]
@@ -232,6 +242,10 @@ fn default_whole_words() -> bool {
     true
 }
 
+fn default_case_sensitive() -> bool {
+    true
+}
+
 impl ContentGate {
     pub fn severity(&self) -> Severity {
         match self {
@@ -244,6 +258,7 @@ impl ContentGate {
             | Self::ForbiddenTerms { severity, .. }
             | Self::RequiredMetadata { severity, .. }
             | Self::RequiredHeadings { severity, .. }
+            | Self::DuplicateHeadings { severity, .. }
             | Self::FinalNewline { severity, .. }
             | Self::UniqueCollectionMetadata { severity, .. }
             | Self::Custom { severity, .. }
@@ -264,6 +279,7 @@ impl ContentGate {
             | Self::ForbiddenTerms { blocking, .. }
             | Self::RequiredMetadata { blocking, .. }
             | Self::RequiredHeadings { blocking, .. }
+            | Self::DuplicateHeadings { blocking, .. }
             | Self::FinalNewline { blocking, .. }
             | Self::UniqueCollectionMetadata { blocking, .. }
             | Self::Custom { blocking, .. }
@@ -284,7 +300,7 @@ impl ContentGate {
             Self::LinkDestinations { .. } => "link_destinations",
             Self::RequiredMetadata { .. } => "metadata",
             Self::ParagraphLength { .. } => "paragraphs",
-            Self::RequiredHeadings { .. } => "headings",
+            Self::RequiredHeadings { .. } | Self::DuplicateHeadings { .. } => "headings",
             Self::FinalNewline { .. } => "source_text",
             Self::UniqueCollectionMetadata { .. } => "collection_metadata",
             Self::Custom { .. } => "extension",
@@ -305,6 +321,7 @@ impl ContentGate {
             | Self::ForbiddenTerms { id, .. }
             | Self::RequiredMetadata { id, .. }
             | Self::RequiredHeadings { id, .. }
+            | Self::DuplicateHeadings { id, .. }
             | Self::FinalNewline { id, .. }
             | Self::UniqueCollectionMetadata { id, .. }
             | Self::Custom { id, .. }
@@ -1025,6 +1042,34 @@ impl ContentPreset {
                         None => reason = Some("headings are unavailable from this adapter".into()),
                     }
                 }
+                ContentGate::DuplicateHeadings { case_sensitive, .. } => match &input.headings {
+                    Some(headings) => {
+                        let mut seen = std::collections::HashSet::new();
+                        let mut duplicates = 0;
+                        measurements.insert("heading_count".into(), headings.len());
+                        for (index, heading) in headings.iter().enumerate() {
+                            let trimmed = heading.trim();
+                            if trimmed.is_empty() {
+                                continue;
+                            }
+                            let key = if *case_sensitive {
+                                trimmed.to_owned()
+                            } else {
+                                trimmed.to_lowercase()
+                            };
+                            if !seen.insert(key) {
+                                duplicates += 1;
+                                emit(
+                                    format!("Heading #{} repeats an earlier heading", index + 1),
+                                    1,
+                                    1,
+                                );
+                            }
+                        }
+                        measurements.insert("duplicate_headings".into(), duplicates);
+                    }
+                    None => reason = Some("headings are unavailable from this adapter".into()),
+                },
                 ContentGate::FinalNewline { .. } => match &input.source_text {
                     Some(source) if !source.is_empty() && !source.ends_with('\n') => {
                         emit(
@@ -1518,6 +1563,39 @@ field = "slug"
                 .unwrap()
                 .gates[0]
                 .status,
+            GateStatus::Passed
+        );
+    }
+
+    #[test]
+    fn duplicate_headings_respect_capability_and_case_policy() {
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='headings'\n[[gates]]\nid='unique'\nkind='duplicate_headings'\n",
+        )
+        .unwrap();
+        let mut input = ContentInput::default();
+        assert_eq!(
+            preset.evaluate(&input).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+        input.headings = Some(vec![
+            " Heading ".into(),
+            "heading".into(),
+            "Heading".into(),
+            " ".into(),
+        ]);
+        let exact = preset.evaluate(&input).unwrap();
+        assert_eq!(exact.gates[0].status, GateStatus::Failed);
+        assert_eq!(exact.gates[0].measurements["heading_count"], 4);
+        assert_eq!(exact.gates[0].measurements["duplicate_headings"], 1);
+        assert!(exact.gates[0].findings[0].message.contains("#3"));
+        let folded = ContentPreset::from_toml("version=1\nname='headings'\n[[gates]]\nid='unique'\nkind='duplicate_headings'\ncase_sensitive=false\nblocking=false\n").unwrap();
+        let result = folded.evaluate(&input).unwrap();
+        assert_eq!(result.gates[0].measurements["duplicate_headings"], 2);
+        assert!(!result.gates[0].blocking);
+        input.headings = Some(vec![]);
+        assert_eq!(
+            folded.evaluate(&input).unwrap().gates[0].status,
             GateStatus::Passed
         );
     }

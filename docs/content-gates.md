@@ -304,3 +304,22 @@ Markdown reports can provide the source location of an invalid link occurrence,
 including a reference link usage; locations point to the beginning of the link,
 not necessarily its destination definition. Counters report checked and invalid
 destinations without recording addresses in telemetry. Image destinations and raw HTML are outside this gate's scope.
+
+### Duplicate headings
+
+Use `duplicate_headings` to flag repeated non-empty heading text within an item:
+
+```toml
+[[gates]]
+id = "editorial.unique-headings"
+kind = "duplicate_headings"
+case_sensitive = false
+blocking = false
+```
+
+Matching trims leading and trailing whitespace. It is case-sensitive by default;
+when disabled, it uses Unicode lowercase conversion rather than locale-specific
+case folding. Empty headings are ignored. Repeated headings can be intentional,
+so tune this opt-in rule to the content type. An adapter without headings reports
+`not_checked`. The report includes heading and duplicate counts; a finding uses
+the heading ordinal and does not claim an exact source position.
