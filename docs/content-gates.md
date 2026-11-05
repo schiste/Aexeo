@@ -171,3 +171,20 @@ The [source review process](source-review-process.md) describes how an applicati
 The review itself is **trusted input**: Aexeo does not authenticate the reviewer, run an NLI model, calibrate its confidence, or independently verify the stated judgments. Applications must choose and evaluate their reviewer, protect the assessment's provenance, and decide when a human should review it. Exact text binding prevents accidental reuse against different input, but does not prevent a forged review.
 
 An optional [Jev adapter](../adapters/jev/README.md) produces this review format from an explicit remote model call and a separately supplied source-reliability judgment. It is not part of the default offline engine.
+
+### Paragraph length
+
+`paragraph_length` counts whitespace-separated words in each paragraph supplied
+by the adapter. Markdown paragraphs and EmDash normal blocks are supported;
+headings are excluded. Plain text does not provide paragraph structure and
+therefore produces `not_checked`, not an inferred pass. Locations refer to the
+adapter's projected text, not necessarily the original source. The gate reports
+`paragraph_count`, `longest_paragraph_words`, and the configured `max_words`.
+
+```toml
+[[gates]]
+id = "editorial.paragraph_length"
+kind = "paragraph_length"
+max_words = 100
+blocking = false
+```

@@ -1,12 +1,18 @@
 //! Adapt EmDash portable text to the same content gates used by the CLI.
 use crate::{EmdashDocument, PortableTextChild};
-use aexeo_core::content_gate::{ContentInput, ContentPreset, ContentReport};
+use aexeo_core::content_gate::{
+    ContentContext, ContentInput, ContentParagraph, ContentPreset, ContentReport,
+};
 use anyhow::Result;
 use std::collections::BTreeMap;
 
 /// Positions in findings refer to this adapter's projected plain text: spans
 /// are concatenated within each block, and blocks are separated by newlines.
 pub fn content_input(document: &EmdashDocument) -> ContentInput {
+    content_input_with_context(document).0
+}
+
+fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, ContentContext) {
     let text = document
         .body
         .iter()
@@ -56,14 +62,38 @@ pub fn content_input(document: &EmdashDocument) -> ContentInput {
                 .collect::<String>()
         })
         .collect();
-    ContentInput {
-        id: document.route.clone(),
-        text: Some(text),
-        source_text: None,
-        headings: Some(headings),
-        metadata: Some(metadata),
-        evidence_sources: None,
+    let mut line = 1;
+    let mut paragraphs = Vec::new();
+    for block in &document.body {
+        let block_text = block
+            .children
+            .iter()
+            .map(|child| match child {
+                PortableTextChild::Span(span) => span.text.as_str(),
+            })
+            .collect::<String>();
+        if matches!(block.style, crate::BlockStyle::Normal) {
+            paragraphs.push(ContentParagraph {
+                text: block_text.clone(),
+                line,
+                column: 1,
+            });
+        }
+        line += block_text.chars().filter(|ch| *ch == '\n').count() + 1;
     }
+    (
+        ContentInput {
+            id: document.route.clone(),
+            text: Some(text),
+            source_text: None,
+            headings: Some(headings),
+            metadata: Some(metadata),
+            evidence_sources: None,
+        },
+        ContentContext {
+            paragraphs: Some(paragraphs),
+        },
+    )
 }
 
 pub fn evaluate_content(
@@ -79,9 +109,9 @@ pub fn evaluate_content_with_evidence(
     preset: &ContentPreset,
     evidence_sources: Option<BTreeMap<String, String>>,
 ) -> anyhow::Result<ContentReport> {
-    let mut input = content_input(document);
+    let (mut input, context) = content_input_with_context(document);
     input.evidence_sources = evidence_sources;
-    preset.evaluate(&input)
+    preset.evaluate_with_context(&input, None, None, Some(&context))
 }
 
 #[cfg(test)]
@@ -91,6 +121,16 @@ mod tests {
         content_gate::GateStatus,
         content_presets::{builtin_content_presets, resolve_content_preset},
     };
+    #[test]
+    fn paragraphs_have_projected_positions_and_exclude_headings() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"style":"h2","children":[{"_type":"span","text":"Heading"}]},{"children":[{"_type":"span","text":"First\nline"}]},{"children":[{"_type":"span","text":"Second"}]}]}"#).unwrap();
+        let (_, context) = content_input_with_context(&document);
+        let paragraphs = context.paragraphs.unwrap();
+        assert_eq!(paragraphs.len(), 2);
+        assert_eq!(paragraphs[0].line, 2);
+        assert_eq!(paragraphs[1].line, 4);
+        assert_eq!(paragraphs[1].text, "Second");
+    }
     #[test]
     fn portable_text_and_plain_text_share_gate_results() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"children":[{"_type":"span","text":"One "},{"_type":"span","text":"two"}]}]}"#).unwrap();

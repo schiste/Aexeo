@@ -145,11 +145,17 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     } else {
         path.clone()
     };
+    let mut context = None;
     let mut input = match (
         args.get_one::<String>("input-format").map(String::as_str),
         text,
     ) {
-        (Some("markdown"), Some(text)) => aexeo_core::markdown_adapter::markdown_input(id, &text)?,
+        (Some("markdown"), Some(text)) => {
+            let (input, capabilities) =
+                aexeo_core::markdown_adapter::markdown_input_with_context(id, &text)?;
+            context = Some(capabilities);
+            input
+        }
         (_, text) => ContentInput {
             id,
             source_text: text.clone(),
@@ -162,8 +168,12 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     input.metadata = metadata;
     input.evidence_sources = evidence_sources;
     let started = std::time::Instant::now();
-    let mut report =
-        preset.evaluate_with_site(&input, site.as_ref().map(|(site, config)| (site, config)))?;
+    let mut report = preset.evaluate_with_context(
+        &input,
+        site.as_ref().map(|(site, config)| (site, config)),
+        None,
+        context.as_ref(),
+    )?;
     let evaluation_ms = started.elapsed().as_secs_f64() * 1000.0;
     report.applied_fixes = applied_fixes;
     if args.get_flag("telemetry") {

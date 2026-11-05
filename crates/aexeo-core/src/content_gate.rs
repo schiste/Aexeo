@@ -25,6 +25,20 @@ pub struct ContentInput {
     pub evidence_sources: Option<BTreeMap<String, String>>,
 }
 
+/// Paragraph text and its position in the adapter's projected text.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentParagraph {
+    pub text: String,
+    pub line: usize,
+    pub column: usize,
+}
+
+/// Optional adapter capabilities beyond the stable content input contract.
+#[derive(Debug, Clone, Default)]
+pub struct ContentContext {
+    pub paragraphs: Option<Vec<ContentParagraph>>,
+}
+
 /// A portable preset. Rules are evaluated in their declared order.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -45,6 +59,15 @@ pub enum ContentGate {
         blocking: bool,
         min: Option<usize>,
         max: Option<usize>,
+    },
+    /// Limits whitespace-separated words in adapter-supplied paragraphs.
+    ParagraphLength {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+        max_words: usize,
     },
     /// Heuristic sentence length using configured punctuation and whitespace words.
     SentenceLength {
@@ -169,6 +192,7 @@ impl ContentGate {
         match self {
             Self::WordCount { severity, .. }
             | Self::SentenceLength { severity, .. }
+            | Self::ParagraphLength { severity, .. }
             | Self::ForbiddenTerms { severity, .. }
             | Self::RequiredMetadata { severity, .. }
             | Self::RequiredHeadings { severity, .. }
@@ -184,6 +208,7 @@ impl ContentGate {
         match self {
             Self::WordCount { blocking, .. }
             | Self::SentenceLength { blocking, .. }
+            | Self::ParagraphLength { blocking, .. }
             | Self::ForbiddenTerms { blocking, .. }
             | Self::RequiredMetadata { blocking, .. }
             | Self::RequiredHeadings { blocking, .. }
@@ -202,6 +227,7 @@ impl ContentGate {
                 "text"
             }
             Self::RequiredMetadata { .. } => "metadata",
+            Self::ParagraphLength { .. } => "paragraphs",
             Self::RequiredHeadings { .. } => "headings",
             Self::FinalNewline { .. } => "source_text",
             Self::Custom { .. } => "extension",
@@ -215,6 +241,7 @@ impl ContentGate {
         match self {
             Self::WordCount { id, .. }
             | Self::SentenceLength { id, .. }
+            | Self::ParagraphLength { id, .. }
             | Self::ForbiddenTerms { id, .. }
             | Self::RequiredMetadata { id, .. }
             | Self::RequiredHeadings { id, .. }
@@ -352,6 +379,9 @@ impl ContentPreset {
                 {
                     bail!("invalid word count bounds for {}", gate.id())
                 }
+                ContentGate::ParagraphLength { max_words, .. } if *max_words == 0 => {
+                    bail!("paragraph length needs a positive limit for {}", gate.id())
+                }
                 ContentGate::SentenceLength {
                     max_words,
                     delimiters,
@@ -456,6 +486,17 @@ impl ContentPreset {
         site: Option<(&crate::site::Site, &crate::config::Config)>,
         extensions: Option<&dyn ContentGateExtensions>,
     ) -> Result<ContentReport> {
+        self.evaluate_with_context(input, site, extensions, None)
+    }
+
+    /// Evaluate optional adapter capabilities while preserving the original input API.
+    pub fn evaluate_with_context(
+        &self,
+        input: &ContentInput,
+        site: Option<(&crate::site::Site, &crate::config::Config)>,
+        extensions: Option<&dyn ContentGateExtensions>,
+        context: Option<&ContentContext>,
+    ) -> Result<ContentReport> {
         self.validate()?;
         let mut results = Vec::with_capacity(self.gates.len());
         let mut word_count = None;
@@ -514,6 +555,32 @@ impl ContentPreset {
                             }
                         }
                         None => reason = Some("text is unavailable from this adapter".into()),
+                    }
+                }
+                ContentGate::ParagraphLength { max_words, .. } => {
+                    measurements.insert("max_words".into(), *max_words);
+                    match context.and_then(|c| c.paragraphs.as_ref()) {
+                        Some(paragraphs) => {
+                            let mut longest = 0;
+                            for paragraph in paragraphs {
+                                let count = paragraph.text.split_whitespace().count();
+                                longest = longest.max(count);
+                                if count > *max_words {
+                                    emit(
+                                        format!(
+                                            "Paragraph has {count} words; maximum is {max_words}"
+                                        ),
+                                        paragraph.line,
+                                        paragraph.column,
+                                    );
+                                }
+                            }
+                            measurements.insert("paragraph_count".into(), paragraphs.len());
+                            measurements.insert("longest_paragraph_words".into(), longest);
+                        }
+                        None => {
+                            reason = Some("paragraphs are unavailable from this adapter".into())
+                        }
                     }
                 }
                 ContentGate::SentenceLength {
