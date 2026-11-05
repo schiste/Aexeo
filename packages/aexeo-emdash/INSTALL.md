@@ -386,3 +386,32 @@ itself is the same `aexeo-emdash-bridge` Rust crate that powers the
 Aexeo CLI; it's compiled to WebAssembly via wasm-pack and imported
 by the host's bundler (Vite + `vite-plugin-wasm`). No separate
 service, no sidecar, no auth token.
+
+### Exporting a conservative link inventory
+
+For host code with access to EmDash's content API, the package exports
+`exportLinkInventory(content, options)`. Select the collections belonging to
+one publication explicitly and supply the observed site identity:
+
+```ts
+import { exportLinkInventory } from "@aeptus/aexeo-emdash";
+
+const result = await exportLinkInventory(ctx.content, {
+  collections: ["blog_posts", "pages"],
+  identity: { origin: "https://example.org", release: "release-id", surface: "public", snapshot: "snapshot-id" },
+});
+// result.inventory matches the link-graph input's inventory shape.
+// Inspect result.issues and result.omitted before using it.
+```
+
+The export resolves public URLs through EmDash and paginates each selected
+collection. Entries without public URLs are reported as omitted, and entries
+with URLs default to `unknown` disposition. A host may supply `classify` when
+it has authoritative indexability and alias information. Repeated or missing
+cursors, failures, and page limits are reported. The inventory is always marked
+incomplete because pagination alone cannot establish a transactional snapshot or
+include routes outside the chosen collections. No HTTP endpoint is installed by
+this API. It cannot by itself establish that a crawl and CMS view describe the
+same publication, release and point in time.
+
+An optional `onTelemetry` callback receives only elapsed milliseconds and aggregate counts. It is disabled by default and does not receive URLs or content.
