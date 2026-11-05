@@ -21,6 +21,9 @@ Options:
       --audit
           Read an Aexeo audit artifact instead of a link graph input
 
+      --context <context>
+          JSON audit identity and inventory context
+
       --telemetry
           Emit aggregate timings and counts as JSON on stderr
 

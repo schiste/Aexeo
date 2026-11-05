@@ -65,11 +65,28 @@ pub struct LinkReport {
     pub links: LinkCounts,
 }
 
+/// Caller-supplied identity and inventory for comparison with an audit.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditLinkContext {
+    pub identity: Option<SurfaceIdentity>,
+    pub snapshot_date: Option<String>,
+    pub inventory: Option<InventorySnapshot>,
+}
+
 /// Analyze only pages whose effective URL was actually captured in an audit.
 /// Audit artifacts do not attest the publication surface or CMS inventory, so
 /// this adapter deliberately never claims complete graph coverage.
 pub fn build_link_report_from_audit(
     artifact: &aexeo_contracts::AuditArtifact,
+) -> anyhow::Result<LinkReport> {
+    build_link_report_from_audit_with_context(artifact, None)
+}
+
+/// Compare an audit with an explicitly supplied inventory. The caller's
+/// identity does not prove a complete crawl or a coherent snapshot.
+pub fn build_link_report_from_audit_with_context(
+    artifact: &aexeo_contracts::AuditArtifact,
+    context: Option<&AuditLinkContext>,
 ) -> anyhow::Result<LinkReport> {
     let site = artifact
         .site
@@ -114,16 +131,18 @@ pub fn build_link_report_from_audit(
         .collect();
     let input = LinkReportInput {
         version: 1,
-        identity: Some(SurfaceIdentity {
-            origin,
-            release: String::new(),
-            surface: String::new(),
-            snapshot: String::new(),
-        }),
-        snapshot_date: None,
+        identity: context
+            .and_then(|value| value.identity.clone())
+            .or(Some(SurfaceIdentity {
+                origin,
+                release: String::new(),
+                surface: String::new(),
+                snapshot: String::new(),
+            })),
+        snapshot_date: context.and_then(|value| value.snapshot_date.clone()),
         crawl_complete: false,
         pages,
-        inventory: None,
+        inventory: context.and_then(|value| value.inventory.clone()),
     };
     let mut report = build_link_report(&input)?;
     report.issues.extend(issues.into_iter().map(str::to_string));
