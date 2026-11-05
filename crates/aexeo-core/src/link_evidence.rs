@@ -33,6 +33,13 @@ pub struct LinkEvidence {
     pub resolution: LinkResolution,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HtmlLinkMetadata {
+    pub base_href: Option<String>,
+    pub robots_directives: Vec<String>,
+    pub canonical_hrefs: Vec<String>,
+}
+
 #[derive(Clone)]
 struct Scope {
     context: LinkContext,
@@ -91,14 +98,47 @@ pub fn extract_links(
     site_origin: &str,
     snapshot_date: Option<&str>,
 ) -> Vec<LinkEvidence> {
+    extract_document(html, source_url, site_origin, snapshot_date).0
+}
+
+/// Extract link evidence and document-level metadata in the same DOM parse.
+pub fn extract_document(
+    html: &str,
+    source_url: &str,
+    site_origin: &str,
+    snapshot_date: Option<&str>,
+) -> (Vec<LinkEvidence>, HtmlLinkMetadata) {
     let dom = parse_document(RcDom::default(), Default::default()).one(html);
     let mut base = None;
+    let mut metadata = HtmlLinkMetadata::default();
     let mut nodes = vec![dom.document.clone()];
     while let Some(node) = nodes.pop() {
         if base.is_none()
             && matches!(&node.data, NodeData::Element { name, .. } if name.local.as_ref() == "base")
         {
             base = attribute(&node, "href");
+        }
+        let robots_content = if matches!(&node.data, NodeData::Element { name, .. } if name.local.as_ref() == "meta")
+            && attribute(&node, "name").is_some_and(|name| name.eq_ignore_ascii_case("robots"))
+        {
+            attribute(&node, "content")
+        } else {
+            None
+        };
+        if let Some(content) = robots_content {
+            metadata.robots_directives.push(content);
+        }
+        let canonical = if matches!(&node.data, NodeData::Element { name, .. } if name.local.as_ref() == "link")
+            && attribute(&node, "rel").is_some_and(|rel| {
+                rel.split_ascii_whitespace()
+                    .any(|part| part.eq_ignore_ascii_case("canonical"))
+            }) {
+            attribute(&node, "href")
+        } else {
+            None
+        };
+        if let Some(href) = canonical {
+            metadata.canonical_hrefs.push(href);
         }
         nodes.extend(node.children.borrow().iter().rev().cloned());
     }
@@ -183,7 +223,8 @@ pub fn extract_links(
                 .map(|child| (child, scope.clone())),
         );
     }
-    links
+    metadata.base_href = base;
+    (links, metadata)
 }
 
 #[cfg(test)]
