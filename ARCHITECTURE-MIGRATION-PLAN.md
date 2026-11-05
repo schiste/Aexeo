@@ -16,7 +16,7 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 - [x] Phase 4 — implémenter les gates de contenu déterministes et l'adapter Markdown/stdin ; vérifier un même preset et une même gate sur Markdown et EmDash.
 - [x] Phase 5 — livrer le workflow agent : skill, découverte des presets, sorties structurées, correctifs sûrs et benchmarks de latence.
 - [x] Phase 6 — fournir les extensions et les contrôles de sources et de faits disponibles hors ligne, en explicitant leurs limites ; les modèles externes restent facultatifs et différés.
-- [ ] Livrer par le workflow broker et suivre la revue et les contrôles CI ; les tests locaux Rust et EmDash, le build WASM et les typechecks sont validés.
+- [x] Livrer par le workflow broker : PR #20 fusionnée dans `main` au commit `92413c5`, session 1 clôturée ; tests locaux et CI de la PR validés. La CI du commit de fusion est suivie séparément.
 
 ## Travail restant identifié
 
@@ -24,7 +24,8 @@ Faire évoluer Aexeo vers un moteur agnostique composé de gates configurables, 
 - [x] Ajouter des extensions fournies par un hôte Rust et tester leur présence ou indisponibilité ; les adapters CLI et WASM signalent les extensions non chargées comme non vérifiées.
 - [x] Ajouter en dernier un contrôle littéral de passages et comparaison de faits structurés dans les sources fournies, avec indisponibilité explicite.
 - [ ] Différé, hors prérequis de cette livraison : évaluer Jev/JEF ou une alternative sur un jeu indépendant et valider la procédure d’appréciation des sources avec des réviseurs qualifiés. Aucun résultat simulé ne prouve leur précision.
-- [ ] Relancer l’ensemble des gates locales et distantes sur le commit final ; livrer et suivre la revue.
+- [x] Relancer les contrôles locaux et distants avant intégration : suite complète locale, 21 tests d’adaptateur et CI de la PR réussis. Le broker a vérifié les conflits ; aucune gate Aethyme n’était configurée sur la base.
+- [ ] Suivre le résultat de la CI sur le commit de fusion `92413c5` dans `main`.
 
 ## Progression détaillée
 
