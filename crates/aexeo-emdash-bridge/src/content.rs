@@ -160,6 +160,26 @@ min = 2
         assert_eq!(result.gates[0].measurements["link_count"], 2);
     }
     #[test]
+    fn collection_gate_is_explicitly_unavailable_for_single_emdash_document() {
+        let document: EmdashDocument =
+            serde_json::from_str(r#"{"route":"/test","title":"Test","body":[]}"#).unwrap();
+        let preset = ContentPreset::from_toml(
+            r#"
+version = 1
+name = "collection"
+[[gates]]
+id = "unique"
+kind = "unique_collection_metadata"
+field = "slug"
+"#,
+        )
+        .unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].scope, "collection");
+        assert_eq!(report.gates[0].status, GateStatus::NotChecked);
+    }
+
+    #[test]
     fn paragraphs_have_projected_positions_and_exclude_headings() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"style":"h2","children":[{"_type":"span","text":"Heading"}]},{"children":[{"_type":"span","text":"First\nline"}]},{"children":[{"_type":"span","text":"Second"}]}]}"#).unwrap();
         let (_, context, _) = content_input_with_context(&document);

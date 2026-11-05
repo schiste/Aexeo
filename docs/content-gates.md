@@ -225,3 +225,23 @@ characters and underscores define word boundaries; set `whole_words = false`
 for substring matches. It does not infer synonyms, grammar, or editorial intent.
 Each finding points to the first occurrence beyond the configured maximum,
 and measurements count configured and exceeded terms and matched occurrences.
+
+### Collection metadata uniqueness
+
+`unique_collection_metadata` compares one metadata field across an explicitly
+supplied collection. It reports duplicate items and their first matching item,
+without echoing metadata values. Matching is case-sensitive and exact.
+
+```toml
+[[gates]]
+id = "collection.unique_slug"
+kind = "unique_collection_metadata"
+field = "slug"
+blocking = true
+```
+
+Rust hosts provide a complete collection in `ContentEvaluationContext` with `evaluate_with_capabilities`.
+The ordinary single-item interface reports this gate as `not_checked`. Missing
+or blank metadata in any item also yields `not_checked`; detected duplicates
+remain visible as findings. The host is responsible for collection completeness.
+This API does not yet provide a collection input option in the CLI or EmDash.

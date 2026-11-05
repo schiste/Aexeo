@@ -5,8 +5,8 @@ export interface ContentGateResult {
   gate_id: string;
   status: "passed" | "failed" | "not_checked";
   blocking: boolean;
-  scope: "document" | "site";
-  required_capability: "text" | "source_text" | "metadata" | "headings" | "paragraphs" | "links" | "site" | "extension" | "text_and_evidence";
+  scope: "document" | "collection" | "site";
+  required_capability: "text" | "source_text" | "metadata" | "headings" | "paragraphs" | "links" | "collection_metadata" | "site" | "extension" | "text_and_evidence";
   findings: Finding[];
   reason: string | null;
   measurements?: Record<string, number>;
