@@ -3,12 +3,15 @@
 import argparse
 import json
 import math
+import os
 from pathlib import Path
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 
 from batch import run_cases
+from evaluate import evaluate
 from review import (NoRedirect, add_source_assessment, add_source_assessment_arguments,
                     request_body, review_from_response, validate_source_assessment)
 
@@ -30,12 +33,44 @@ def fetch_review(claim, source, model, reliability, threshold, _key):
     return review_from_response(claim, source, reliability, threshold, result, provider="clef")
 
 
+
+def read_checkpoint(path, cases, threshold):
+    if not path.exists():
+        return []
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(saved, list):
+        raise ValueError("invalid checkpoint")
+    if not saved:
+        return saved
+    by_id = {case["id"]: case for case in cases}
+    selected = [by_id[item["id"]] for item in saved]
+    report = evaluate(selected, saved)
+    if (report["reviewer"] != "clef:" + MODEL or report["threshold"] != threshold
+            or any(item["review"]["reliability"] != "uncertain" for item in saved)):
+        raise ValueError("checkpoint model or threshold differs")
+    return saved
+
+
+def write_checkpoint(path, reviews):
+    fd, name = tempfile.mkstemp(prefix=".aexeo-clef-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(reviews, handle, ensure_ascii=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(name, path)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--claim", help="Exact claim to review")
     parser.add_argument("--source", type=Path, help="UTF-8 source snapshot")
     parser.add_argument("--cases", type=Path, help="JSON array of labeled examples")
-    parser.add_argument("--max-cases", type=int, help="Maximum requests for a batch")
+    parser.add_argument("--max-cases", type=int, help="Maximum number of cases for a batch")
+    parser.add_argument("--checkpoint", type=Path, help="Save and resume batch progress at this private file")
     parser.add_argument("--minimum-probability", type=float, required=True)
     add_source_assessment_arguments(parser)
     args = parser.parse_args()
@@ -45,13 +80,18 @@ def main():
     if args.cases:
         if (args.claim is not None or args.source is not None or args.max_cases is None
                 or args.max_cases < 1 or args.source_reliability != "uncertain"):
-            parser.error("--cases requires --max-cases and excludes --claim/--source")
-    elif not args.claim or not args.claim.strip() or args.source is None or args.max_cases is not None:
+            parser.error("--cases requires --max-cases and excludes --claim/--source and source assessments")
+        if args.checkpoint and args.cases.resolve() == args.checkpoint.resolve():
+            parser.error("checkpoint must differ from the input cases")
+    elif not args.claim or not args.claim.strip() or args.source is None or args.max_cases is not None or args.checkpoint is not None:
         parser.error("provide --claim and --source, or --cases and --max-cases")
     try:
         if args.cases:
             cases = json.loads(args.cases.read_text(encoding="utf-8"))
-            result = run_cases(cases, MODEL, args.minimum_probability, args.max_cases, "", fetch=fetch_review)
+            saved = read_checkpoint(args.checkpoint, cases, args.minimum_probability) if args.checkpoint else []
+            save = (lambda reviews: write_checkpoint(args.checkpoint, reviews)) if args.checkpoint else None
+            result = run_cases(cases, MODEL, args.minimum_probability, args.max_cases, "", fetch=fetch_review,
+                               existing=saved, on_review=save)
         else:
             with args.source.open(encoding="utf-8", newline="") as source:
                 result = fetch_review(args.claim, source.read(), MODEL, args.source_reliability, args.minimum_probability, "")

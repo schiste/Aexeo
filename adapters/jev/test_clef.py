@@ -78,6 +78,50 @@ class ClefTests(unittest.TestCase):
                 clef.main()
         fetch.assert_not_called()
 
+    def test_checkpoint_preserves_progress_and_reuses_only_matching_reviews(self):
+        cases = [{"id": str(i), "claim": "claim" + str(i), "source_text": "source", "label": "supported"} for i in range(2)]
+        def valid(claim, source, model, reliability, threshold, key):
+            return review.review_from_response(claim, source, reliability, threshold, self.response(), provider="clef")
+        with tempfile.TemporaryDirectory() as folder:
+            checkpoint = Path(folder) / "progress.json"
+            calls = []
+            def interrupted(*args):
+                calls.append(args[0])
+                if len(calls) == 2:
+                    raise OSError("offline")
+                return valid(*args)
+            with self.assertRaises(OSError):
+                batch.run_cases(cases, clef.MODEL, 0.8, 2, "", fetch=interrupted,
+                                on_review=lambda saved: clef.write_checkpoint(checkpoint, saved))
+            saved = clef.read_checkpoint(checkpoint, cases, 0.8)
+            self.assertEqual(len(saved), 1)
+            resumed = []
+            def retry(*args):
+                resumed.append(args[0])
+                return valid(*args)
+            result = batch.run_cases(cases, clef.MODEL, 0.8, 2, "", fetch=retry, existing=saved,
+                                     on_review=lambda items: clef.write_checkpoint(checkpoint, items))
+            self.assertEqual(resumed, ["claim1"])
+            self.assertEqual(len(result), 2)
+            self.assertEqual(len(clef.read_checkpoint(checkpoint, cases, 0.8)), 2)
+            with self.assertRaises(ValueError):
+                clef.read_checkpoint(checkpoint, cases, 0.9)
+            changed = [dict(case) for case in cases]
+            changed[0]["source_text"] = "different"
+            with self.assertRaises(ValueError):
+                clef.read_checkpoint(checkpoint, changed, 0.8)
+
+    def test_cli_rejects_checkpoint_as_input_before_network(self):
+        with tempfile.TemporaryDirectory() as folder:
+            cases = Path(folder) / "cases.json"
+            cases.write_text("[]", encoding="utf-8")
+            args = ["clef.py", "--cases", str(cases), "--checkpoint", str(cases), "--max-cases", "1", "--minimum-probability", "0.8"]
+            with patch("sys.argv", args), patch("clef.fetch_review") as fetch, contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    clef.main()
+            fetch.assert_not_called()
+            self.assertEqual(cases.read_text(encoding="utf-8"), "[]")
+
     def test_http_error_reports_status_without_response_body(self):
         with tempfile.TemporaryDirectory() as folder:
             source = Path(folder) / "source.txt"

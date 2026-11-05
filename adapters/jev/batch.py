@@ -12,7 +12,7 @@ from evaluate import LABELS
 from review import fetch_review
 
 
-def run_cases(examples, model, threshold, maximum, key, fetch=fetch_review):
+def run_cases(examples, model, threshold, maximum, key, fetch=fetch_review, existing=None, on_review=None):
     if not isinstance(examples, list) or not examples or len(examples) > maximum:
         raise ValueError("case count is empty or exceeds --max-cases")
     if maximum < 1 or not math.isfinite(threshold) or not 0 <= threshold <= 1 or not model.strip():
@@ -26,8 +26,18 @@ def run_cases(examples, model, threshold, maximum, key, fetch=fetch_review):
                 or not isinstance(example["source_text"], str) or not example["source_text"].strip()):
             raise ValueError("invalid or duplicated case")
         ids.add(key_id)
-    return [{"id": example["id"], "review": fetch(example["claim"], example["source_text"],
-            model, "uncertain", threshold, key)} for example in examples]
+    completed = {item["id"]: item for item in (existing or [])}
+    results = []
+    for example in examples:
+        item = completed.get(example["id"])
+        if item is None:
+            item = {"id": example["id"], "review": fetch(example["claim"], example["source_text"],
+                    model, "uncertain", threshold, key)}
+            completed[example["id"]] = item
+            if on_review:
+                on_review(list(completed.values()))
+        results.append(item)
+    return results
 
 
 def main():
