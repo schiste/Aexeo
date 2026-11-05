@@ -3,6 +3,7 @@ use anyhow::{Result, bail};
 use crate::commands::{
     common::required_arg,
     config::command_config,
+    content::command_content,
     docs::{command_diff, command_docs, command_quality, command_report_render, command_trend},
     facts::command_facts,
     integrations::{
@@ -20,6 +21,7 @@ use crate::commands::{
 
 pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
     match matches.subcommand() {
+        Some(("content", submatches)) => command_content(submatches),
         Some(("rules", submatches)) => command_rules(submatches),
         Some(("adapters", submatches)) => command_adapters(submatches),
         Some(("config", submatches)) => command_config(submatches),

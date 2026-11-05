@@ -5,6 +5,8 @@ pub mod adapter;
 pub mod agent_discovery_rules;
 pub mod capabilities;
 pub mod config;
+pub mod content_gate;
+pub mod content_presets;
 pub mod content_rules;
 pub mod docs;
 pub mod editorial_rules;
@@ -17,6 +19,7 @@ pub mod integrations;
 pub mod intelligence;
 pub mod link_rules;
 pub mod llm_rules;
+pub mod markdown_adapter;
 #[cfg(test)]
 mod page_kind_divergence;
 pub mod plugin;

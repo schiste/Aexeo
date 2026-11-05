@@ -23,11 +23,16 @@
 // different one. Every response carries Access-Control-Allow-Origin
 // matching the SITE_URL var so the browser admits the response.
 
-import { ensureInitialized, evaluateDocuments } from "./wasm/init.js";
+import { ensureInitialized, evaluateContent, evaluateDocuments } from "./wasm/init.js";
+import { contentPresetFindings } from "./content-presets.js";
 
 export interface Env {
   SITE_URL: string;
   EVAL_TOKEN: string;
+  CONTENT_PRESET?: string;
+  CONTENT_PRESET_BY_COLLECTION_JSON?: string;
+  CONTENT_PRESET_SOURCES_JSON?: string;
+  CONTENT_EVIDENCE_SOURCES_JSON?: string;
 }
 
 export default {
@@ -75,6 +80,7 @@ function authorized(request: Request, env: Env): boolean {
 interface EvaluateRequest {
   documents: unknown;
   configJson?: string;
+  collections?: unknown;
 }
 
 async function evaluateRoute(request: Request, env: Env): Promise<Response> {
@@ -94,6 +100,10 @@ async function evaluateRoute(request: Request, env: Env): Promise<Response> {
   let raw: string;
   try {
     raw = evaluateDocuments(JSON.stringify(body.documents), body.configJson);
+    const existing: unknown = JSON.parse(raw);
+    if (!Array.isArray(existing)) throw new Error("invalid website findings returned by bridge");
+    const additional = contentPresetFindings(body.documents, body.collections, env, evaluateContent);
+    raw = JSON.stringify([...existing, ...additional]);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return jsonResponse(env, { error: `evaluation failed: ${message}` }, 500);

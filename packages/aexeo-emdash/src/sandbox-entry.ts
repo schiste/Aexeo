@@ -187,7 +187,7 @@ async function handleBlockAction(
 async function handleRefresh(ctx: DispatchCtx): Promise<BlockResponse> {
   // The route handler runs in a live request context. Refresh remains
   // the full-site evaluation path; afterSave updates the changed entry.
-  const sandboxEvaluator: EvaluatorFn = async (documents) => {
+  const sandboxEvaluator: EvaluatorFn = async (documents, context) => {
     const runtime = await readSidecarConfig(ctx.ctx);
     if (runtime === null) {
       return {
@@ -201,6 +201,7 @@ async function handleRefresh(ctx: DispatchCtx): Promise<BlockResponse> {
       ctx.ctx.http,
       { url: runtime.url, authToken: runtime.token },
       documents,
+      context?.collections,
     );
   };
   return refreshSweep({

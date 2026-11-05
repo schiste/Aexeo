@@ -56,6 +56,8 @@ export interface ConfiguredPluginDescriptor {
 }
 
 export interface AexeoPluginOptions {
+  /** Add a portable content preset to configured-mode evaluation. */
+  contentPreset?: { name: string; sources?: Record<string, string>; byCollection?: Record<string, string> };
   /**
    * emdash collections the plugin sweeps when an admin clicks
    * Refresh on the findings page. Order doesn't matter; the sweep
@@ -171,6 +173,19 @@ export function aexeoPlugin(
     // receives. Spread to a plain object so readonly arrays survive
     // the structured-clone semantics of that codegen.
     options: {
+      ...(options.contentPreset === undefined
+        ? {}
+        : {
+            contentPreset: {
+              ...options.contentPreset,
+              ...(options.contentPreset.sources === undefined
+                ? {}
+                : { sources: { ...options.contentPreset.sources } }),
+              ...(options.contentPreset.byCollection === undefined
+                ? {}
+                : { byCollection: { ...options.contentPreset.byCollection } }),
+            },
+          }),
       ...(options.collections === undefined
         ? {}
         : { collections: [...options.collections] }),

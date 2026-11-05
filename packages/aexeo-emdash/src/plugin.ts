@@ -316,11 +316,12 @@ export async function handleAfterSave(
     );
     return;
   }
-  await handleAfterSaveConfigured(event, ctx, (documents) =>
+  await handleAfterSaveConfigured(event, ctx, (documents, context) =>
     evaluateViaSidecar(
       ctx.http,
       { url: runtime.url, authToken: runtime.token },
       documents,
+      context?.collections,
     ),
   );
 }
@@ -354,7 +355,7 @@ export async function handleAfterSaveConfigured(
   const stored: StoredDocument = { document, meta: adapted.meta };
   await persistDocument(ctx, stored);
 
-  const result = await evaluator([document]);
+  const result = await evaluator([document], { collections: [adapted.meta.collection] });
   if (!result.ok) {
     log?.error?.(`afterSave evaluator failure (${result.reason})`, {
       detail: result.detail,
@@ -421,6 +422,7 @@ export type EvaluationOutcome =
 // function differs.
 export type EvaluatorFn = (
   documents: readonly EmdashDocument[],
+  context?: { collections: readonly string[] },
 ) => Promise<EvaluationOutcome>;
 
 // Walks the content collections, evaluates the full set via the
@@ -455,6 +457,7 @@ export async function evaluateAndPersistAll(
   //    set is collected even on larger sites. Empty collections (or
   //    permissions errors) are tolerated — they accrue to summary.errors.
   const documents: EmdashDocument[] = [];
+  const documentCollections: string[] = [];
   const adaptedByRoute = new Map<string, StoredDocument>();
   const documentRoutes = new Set<string>();
   for (const collection of collections) {
@@ -472,6 +475,7 @@ export async function evaluateAndPersistAll(
             ctx.site?.locale,
           );
           documents.push(adapted.document);
+          documentCollections.push(adapted.meta.collection);
           documentRoutes.add(adapted.document.route);
           adaptedByRoute.set(adapted.document.route, {
             document: adapted.document,
@@ -498,7 +502,7 @@ export async function evaluateAndPersistAll(
   // 3. Evaluate via the supplied evaluator and group findings by
   //    route. The evaluator strategy (in-process WASM vs sidecar
   //    fetch) is the only configured-vs-sandboxed difference.
-  const result = await options.evaluator(documents);
+  const result = await options.evaluator(documents, { collections: documentCollections });
   if (!result.ok) {
     log?.error?.(`aexeo evaluator failure (${result.reason})`, {
       detail: result.detail,

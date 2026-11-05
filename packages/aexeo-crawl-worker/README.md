@@ -72,6 +72,22 @@ unauthenticated `GET` routes back.**
 4. Edit `SITE_URL` in `wrangler.toml` to your emdash site's origin. It is used
    as the `Access-Control-Allow-Origin` value.
 
+5. Optionally configure content gates under `[vars]` in `wrangler.toml`:
+
+   ```toml
+   CONTENT_PRESET = "article"
+   CONTENT_PRESET_BY_COLLECTION_JSON = '{"glossary":"glossary"}'
+   # CONTENT_PRESET_SOURCES_JSON = '{"custom":"version = 1\n..."}'
+   ```
+
+   `CONTENT_PRESET` is the fallback; the collection map overrides it. Both
+   maps must be JSON objects with string values; custom sources contain TOML
+   preset text and can be selected by name. With neither a matching collection
+   nor a fallback, content evaluation is skipped. The SEO evaluation remains
+   active. Collection overrides require the updated plugin to send collection
+   names; incomplete evaluations return an error instead of silently passing.
+   See [content gates](../../docs/content-gates.md) for preset syntax.
+
 For local work, `wrangler dev` does not fetch secrets — put the value in
 `.dev.vars` (gitignored) instead:
 

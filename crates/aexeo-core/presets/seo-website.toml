@@ -1,0 +1,5 @@
+version = 1
+name = "SEO/GEO website audit"
+[[gates]]
+id = "site.seo_geo"
+kind = "site_audit"

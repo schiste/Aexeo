@@ -148,3 +148,38 @@ pub fn validate_facts_manifest_js(
     serde_json::to_string(&payload)
         .map_err(|error| JsError::new(&format!("failed to serialize result: {error}")))
 }
+
+/// Evaluate one EmDash document using named TOML preset sources. The source map
+/// is JSON: {"preset-name": "TOML text"}; built-ins are available by default.
+#[wasm_bindgen(js_name = "evaluateContent")]
+pub fn evaluate_content_js(
+    document_json: &str,
+    preset_name: &str,
+    sources_json: Option<String>,
+    evidence_json: Option<String>,
+) -> Result<String, JsError> {
+    install_panic_hook();
+    let document: EmdashDocument = serde_json::from_str(document_json)
+        .map_err(|error| JsError::new(&format!("failed to parse document: {error}")))?;
+    let mut sources = aexeo_core::content_presets::builtin_content_presets();
+    if let Some(json) = sources_json.as_deref().filter(|value| !value.is_empty()) {
+        let custom: std::collections::BTreeMap<String, String> = serde_json::from_str(json)
+            .map_err(|error| JsError::new(&format!("failed to parse preset sources: {error}")))?;
+        sources.extend(custom);
+    }
+    let preset = aexeo_core::content_presets::resolve_content_preset(preset_name, &sources)
+        .map_err(|error| JsError::new(&format!("failed to resolve preset: {error:#}")))?;
+    let evidence = evidence_json
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .map(|json| {
+            serde_json::from_str(json).map_err(|error| {
+                JsError::new(&format!("failed to parse evidence sources: {error}"))
+            })
+        })
+        .transpose()?;
+    let report = crate::content::evaluate_content_with_evidence(&document, &preset, evidence)
+        .map_err(|error| JsError::new(&format!("content evaluation failed: {error:#}")))?;
+    serde_json::to_string(&report)
+        .map_err(|error| JsError::new(&format!("failed to serialize report: {error}")))
+}

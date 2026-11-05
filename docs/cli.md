@@ -4,6 +4,84 @@
 
 ## Commands
 
+## `content`
+
+Run a portable content preset on a UTF-8 file or stdin
+
+```text
+Run a portable content preset on a UTF-8 file or stdin
+
+Usage: content [OPTIONS] [path]
+
+Arguments:
+  [path]
+          [default: -]
+
+Options:
+      --preset <preset>
+          [default: article]
+
+      --preset-source <preset-source>
+          Load a named TOML preset as NAME=PATH; may be repeated
+
+      --metadata <metadata>
+          JSON file containing string metadata fields
+
+      --evidence-source <evidence-source>
+          Load a named UTF-8 source snapshot as NAME=PATH; may be repeated
+
+      --site <site>
+          Load a static website for site gates
+
+      --site-config <site-config>
+          Existing site audit config file
+
+      --crawl-url <crawl-url>
+          Crawl a website and evaluate the preset against its snapshot
+
+      --crawl-config <crawl-config>
+          Existing crawl configuration file
+
+      --crawl-max-pages <crawl-max-pages>
+          Maximum pages to crawl
+
+          [default: 200]
+
+      --crawl-engine <crawl-engine>
+          Crawl engine
+
+          [default: http]
+          [possible values: http, playwright]
+
+      --input-format <input-format>
+          Interpret content as raw text or Markdown
+
+          [default: text]
+          [possible values: text, markdown]
+
+      --fix
+          Apply supported safe fixes to a local file
+
+      --no-text
+          Do not read a text input
+
+      --list-site-groups
+          List native website groups usable in presets
+
+      --list-presets
+          List available preset names
+
+      --explain
+          Print the resolved preset as TOML (or JSON with --format json) without reading content
+
+      --format <format>
+          [default: text]
+          [possible values: text, json]
+
+  -h, --help
+          Print help
+```
+
 ## `check`
 
 Run static checks against a site directory
