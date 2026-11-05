@@ -1,4 +1,4 @@
-//! Reproducible local benchmark, not a CI pass/fail threshold.
+//! Reproducible content evaluation and Markdown adapter benchmark.
 use aexeo_core::{content_gate::ContentPreset, markdown_adapter::markdown_input};
 use std::{hint::black_box, time::Instant};
 
@@ -36,10 +36,16 @@ headings = ["Summary"]
     let mut eval = Vec::new();
     let mut parse_and_eval = Vec::new();
     let mut repeated_eval = Vec::new();
+    let mut batch_eval = Vec::new();
     for _ in 0..100 {
         let start = Instant::now();
         black_box(preset.evaluate(black_box(&input))?);
         eval.push(start.elapsed().as_micros());
+        let start = Instant::now();
+        for _ in 0..50 {
+            black_box(preset.evaluate(black_box(&input))?);
+        }
+        batch_eval.push(start.elapsed().as_micros());
         let start = Instant::now();
         black_box(repeated_preset.evaluate(black_box(&input))?);
         repeated_eval.push(start.elapsed().as_micros());
@@ -51,15 +57,31 @@ headings = ["Summary"]
     eval.sort_unstable();
     parse_and_eval.sort_unstable();
     repeated_eval.sort_unstable();
+    batch_eval.sort_unstable();
+    if std::env::args().any(|arg| arg == "--json") {
+        for (name, samples) in [
+            ("content/evaluation", &eval),
+            ("content/markdown_and_evaluation", &parse_and_eval),
+            ("content/batch_50", &batch_eval),
+        ] {
+            let avg_ms = samples.iter().sum::<u128>() as f64 / samples.len() as f64 / 1000.0;
+            println!(
+                "{}",
+                serde_json::json!({"name": name, "avg_ms": avg_ms, "p50_ms": samples[49] as f64 / 1000.0, "p95_ms": samples[94] as f64 / 1000.0, "iterations": samples.len(), "input_bytes": source.len()})
+            );
+        }
+        return Ok(());
+    }
     println!("input_bytes={} iterations=100", source.len());
-    println!("evaluation_us p50={} p95={}", eval[50], eval[95]);
+    println!("evaluation_us p50={} p95={}", eval[49], eval[94]);
+    println!("batch_50_us p50={} p95={}", batch_eval[49], batch_eval[94]);
     println!(
         "20_word_gates_us p50={} p95={}",
-        repeated_eval[50], repeated_eval[95]
+        repeated_eval[49], repeated_eval[94]
     );
     println!(
         "markdown_and_evaluation_us p50={} p95={}",
-        parse_and_eval[50], parse_and_eval[95]
+        parse_and_eval[49], parse_and_eval[94]
     );
     Ok(())
 }
