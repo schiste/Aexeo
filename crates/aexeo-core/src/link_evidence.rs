@@ -110,7 +110,9 @@ pub fn extract_links(
         locale: None,
         explicit: false,
     };
-    let mut stack = vec![(dom.document, initial)];
+    // Keep the document alive while traversing: RcDom drains descendants when
+    // the last handle to a node is dropped, even if descendants were cloned.
+    let mut stack = vec![(dom.document.clone(), initial)];
     let mut links = Vec::new();
     while let Some((node, mut scope)) = stack.pop() {
         if let NodeData::Element { name, .. } = &node.data {
