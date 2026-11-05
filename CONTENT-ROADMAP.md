@@ -38,6 +38,9 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [x] Exact Markdown source locations and aggregate local mapping telemetry
   ([PR #42](https://github.com/schiste/Aexeo/pull/42)); transformed spans can
   remain unmapped, and projected finding coordinates are preserved.
+- [x] Markdown invalid-link source locations and aggregate mapping telemetry
+  ([PR #48](https://github.com/schiste/Aexeo/pull/48)); locations identify link
+  occurrences, including reference uses.
 - [x] EmDash block/span coordinates and opt-in local aggregate telemetry
   ([PR #44](https://github.com/schiste/Aexeo/pull/44)); coordinates refer to the
   evaluated snapshot and use UTF-16 offsets.

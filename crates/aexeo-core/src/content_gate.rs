@@ -317,7 +317,8 @@ impl ContentGate {
     }
 }
 
-fn valid_link_destination(destination: &str, schemes: &[String], allow_relative: bool) -> bool {
+/// Check a destination against a configured offline scheme policy.
+pub fn valid_link_destination(destination: &str, schemes: &[String], allow_relative: bool) -> bool {
     if destination.is_empty()
         || destination.chars().any(char::is_whitespace)
         || destination.chars().any(char::is_control)

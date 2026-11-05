@@ -238,7 +238,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     let mapping_started = measuring.then(std::time::Instant::now);
     let mut positional_findings = 0;
     // Keep the established projected finding coordinates unchanged. Supply
-    // separately indexed source coordinates only for positional prose gates.
+    // separately indexed source coordinates for positional prose and link gates.
     let mut source_locations = Vec::new();
     if let (Some(map), Some(source), Some(projected)) = (
         source_map.as_ref(),
@@ -246,7 +246,39 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         input.text.as_deref(),
     ) {
         for (gate, result) in preset.gates.iter().zip(&report.gates) {
-            if matches!(
+            if let ContentGate::LinkDestinations {
+                allowed_schemes,
+                allow_relative,
+                ..
+            } = gate
+                && let Some(values) = destinations.as_deref()
+            {
+                let indices: Vec<_> = values
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, value)| {
+                        (!aexeo_core::content_gate::valid_link_destination(
+                            value,
+                            allowed_schemes,
+                            *allow_relative,
+                        ))
+                        .then_some(index)
+                    })
+                    .collect();
+                positional_findings += result.findings.len();
+                if indices.len() == result.findings.len() {
+                    for (finding_index, index) in indices.into_iter().enumerate() {
+                        if let Some((line, column)) = map.link_source_position(source, index) {
+                            source_locations.push(SourceLocation {
+                                gate_id: &result.gate_id,
+                                finding_index,
+                                line,
+                                column,
+                            });
+                        }
+                    }
+                }
+            } else if matches!(
                 gate,
                 ContentGate::ForbiddenTerms { .. }
                     | ContentGate::RepeatedTerms { .. }
