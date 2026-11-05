@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import urllib.error
 from unittest.mock import patch
 
 import batch
@@ -76,6 +77,16 @@ class ClefTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 clef.main()
         fetch.assert_not_called()
+
+    def test_http_error_reports_status_without_response_body(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "source.txt"
+            source.write_text("source", encoding="utf-8")
+            args = ["clef.py", "--claim", "claim", "--source", str(source), "--minimum-probability", "0.8"]
+            failure = urllib.error.HTTPError(clef.ENDPOINT, 503, "secret details", {}, None)
+            with patch("sys.argv", args), patch("clef.fetch_review", side_effect=failure), contextlib.redirect_stderr(io.StringIO()) as output:
+                self.assertEqual(clef.main(), 2)
+            self.assertEqual(output.getvalue().strip(), "review failed: HTTP 503")
 
     def test_mismatched_protocol_and_reviewer_are_rejected(self):
         examples = [{"id": "1", "claim": "c", "source_text": "s", "label": "supported"}]

@@ -57,6 +57,10 @@ def main():
                 result = fetch_review(args.claim, source.read(), MODEL, args.source_reliability, args.minimum_probability, "")
             add_source_assessment(result, args)
         print(json.dumps(result, ensure_ascii=False))
+    except urllib.error.HTTPError as error:
+        print("review failed: HTTP " + str(error.code), file=sys.stderr)
+        error.close()
+        return 2
     except (OSError, KeyError, TypeError, ValueError, urllib.error.URLError) as error:
         print("review failed: " + type(error).__name__, file=sys.stderr)
         return 2
