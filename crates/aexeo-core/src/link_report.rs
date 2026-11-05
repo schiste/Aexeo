@@ -65,6 +65,71 @@ pub struct LinkReport {
     pub links: LinkCounts,
 }
 
+/// Analyze only pages whose effective URL was actually captured in an audit.
+/// Audit artifacts do not attest the publication surface or CMS inventory, so
+/// this adapter deliberately never claims complete graph coverage.
+pub fn build_link_report_from_audit(
+    artifact: &aexeo_contracts::AuditArtifact,
+) -> anyhow::Result<LinkReport> {
+    let site = artifact
+        .site
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("audit artifact has no site snapshot"))?;
+    let origin = site
+        .site_url
+        .as_deref()
+        .and_then(|value| Url::parse(value).ok())
+        .filter(|url| {
+            matches!(url.scheme(), "http" | "https")
+                && url.username().is_empty()
+                && url.password().is_none()
+        })
+        .map(|url| url.origin().ascii_serialization())
+        .unwrap_or_default();
+    let mut issues = std::collections::BTreeSet::new();
+    let pages = site
+        .pages
+        .iter()
+        .filter_map(|page| {
+            let Some(response) = &page.crawl_response else {
+                issues.insert("audit_page_response_provenance_missing");
+                return None;
+            };
+            let Some(url) = response.observed_url.as_ref().filter(|url| !url.is_empty()) else {
+                issues.insert("audit_page_observed_url_missing");
+                return None;
+            };
+            if response.requested_url != *url {
+                issues.insert("audit_redirect_chain_unavailable");
+            }
+            Some(RenderedPage {
+                url: url.clone(),
+                html: page.raw_html.clone(),
+                status_code: response.status_code,
+                response_headers: response
+                    .headers_observed
+                    .then(|| page.response_headers.clone()),
+            })
+        })
+        .collect();
+    let input = LinkReportInput {
+        version: 1,
+        identity: Some(SurfaceIdentity {
+            origin,
+            release: String::new(),
+            surface: String::new(),
+            snapshot: String::new(),
+        }),
+        snapshot_date: None,
+        crawl_complete: false,
+        pages,
+        inventory: None,
+    };
+    let mut report = build_link_report(&input)?;
+    report.issues.extend(issues.into_iter().map(str::to_string));
+    Ok(report)
+}
+
 /// This report lists observations and coverage issues. It never declares an
 /// orphan: completeness and semantic classification must be assessed first.
 pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> {

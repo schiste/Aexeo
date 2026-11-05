@@ -62,3 +62,14 @@ Add `--telemetry` to write a single JSON event containing only duration, page,
 link and issue counts to standard error. It is opt-in and does not include page
 URLs or content. The normal report contains the evidence and should be handled
 accordingly.
+
+## Runtime audit artifacts
+
+Run `aexeo-cli link-graph audit.json --audit` to analyze pages in an Aexeo
+crawl artifact. Only pages with a captured effective URL are included. Older
+artifacts and pages without response provenance are reported as missing rather
+than assigned an inferred URL. Requested and effective URLs that differ are
+flagged because the intermediate redirect chain is unavailable. This adapter
+cannot establish the CMS inventory, release, publication surface or snapshot
+date, and therefore always reports incomplete coverage; it does not confirm
+orphans. `--telemetry` retains the same opt-in, aggregate-only behavior.
