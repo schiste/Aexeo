@@ -179,11 +179,19 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     let mut context = None;
     let mut link_count = None;
     let mut source_map = None;
+    let mut destinations = None;
     let mut input = match (
         args.get_one::<String>("input-format").map(String::as_str),
         text,
     ) {
         (Some("markdown"), Some(text)) => {
+            if preset
+                .gates
+                .iter()
+                .any(|gate| matches!(gate, ContentGate::LinkDestinations { .. }))
+            {
+                destinations = aexeo_core::markdown_adapter::markdown_link_destinations(&text)?;
+            }
             let (input, capabilities, links, map) =
                 aexeo_core::markdown_adapter::markdown_input_with_source_map(id, &text)?;
             source_map = Some(map);
@@ -204,7 +212,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     input.evidence_sources = evidence_sources;
     let adapter_ms = adapter_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
     let started = std::time::Instant::now();
-    let mut report = preset.evaluate_with_capabilities(
+    let mut report = preset.evaluate_with_destinations(
         &input,
         &ContentEvaluationContext {
             site: site.as_ref().map(|(site, config)| (site, config)),
@@ -213,6 +221,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             collection: collection.as_deref(),
             ..Default::default()
         },
+        destinations.as_deref(),
     )?;
     let evaluation_ms = started.elapsed().as_secs_f64() * 1000.0;
     report.applied_fixes = applied_fixes;
