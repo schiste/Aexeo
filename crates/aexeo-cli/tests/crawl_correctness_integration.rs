@@ -5,6 +5,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::io::{ErrorKind, Read, Write};
 use std::net::TcpListener;
+use std::path::Path;
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -602,4 +603,138 @@ fn url_credentials_never_reach_findings_or_artifacts() {
         .unwrap();
     let text = all_crawl_output(&format!("http://user:s3cret-password@{closed}/"));
     assert!(!text.contains("s3cret-password"), "password leaked: {text}");
+}
+
+/// Crawl with `--max-pages 1`, leaving a checkpoint with `/next` still queued.
+fn interrupted_crawl(site: &Site, checkpoint: &Path) {
+    let (_, payload) = crawl(
+        site,
+        &[
+            "--max-pages",
+            "1",
+            "--checkpoint",
+            checkpoint.to_str().unwrap(),
+            "--checkpoint-every",
+            "1",
+        ],
+    );
+    assert_eq!(payload["artifact"]["status"], "partial");
+    assert!(checkpoint.exists());
+}
+
+fn resumable_site() -> Site {
+    Site::start(vec![
+        ("/", html(r#"<a href="/next">next</a>"#)),
+        ("/next", html("")),
+    ])
+}
+
+fn resume(url: &str, checkpoint: &Path) -> Output {
+    Command::new(bin())
+        .args(["crawl", url, "--engine", "http", "--progress", "off"])
+        .args(["--format", "json", "--resume", checkpoint.to_str().unwrap()])
+        .current_dir(checkpoint.parent().unwrap())
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn resume_refuses_a_checkpoint_for_another_site_without_contacting_it() {
+    let (original, other) = (resumable_site(), resumable_site());
+    let temp = tempfile::tempdir().unwrap();
+    let checkpoint = temp.path().join("checkpoint.json");
+    interrupted_crawl(&original, &checkpoint);
+    let requests_before = original.requests.lock().unwrap().len();
+
+    let output = resume(&other.base_url, &checkpoint);
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_ne!(output.status.code(), Some(0), "{text}");
+    assert!(text.contains("checkpoint belongs to"), "{text}");
+    assert_eq!(original.requests.lock().unwrap().len(), requests_before);
+    assert!(other.requests.lock().unwrap().is_empty());
+}
+
+#[test]
+fn resume_refuses_a_foreign_planner_host_version_or_engine() {
+    let site = resumable_site();
+    let temp = tempfile::tempdir().unwrap();
+    let checkpoint = temp.path().join("checkpoint.json");
+    interrupted_crawl(&site, &checkpoint);
+    let original: Value = serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
+    for (pointer, value, message) in [
+        ("/version", serde_json::json!(99), "version 99"),
+        (
+            "/engine",
+            serde_json::json!("playwright"),
+            "engine 'playwright'",
+        ),
+        (
+            "/planner/base_host",
+            serde_json::json!("evil.test"),
+            "checkpoint belongs to",
+        ),
+    ] {
+        let mut tampered = original.clone();
+        *tampered.pointer_mut(pointer).unwrap() = value;
+        std::fs::write(&checkpoint, tampered.to_string()).unwrap();
+        let output = resume(&site.base_url, &checkpoint);
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_ne!(output.status.code(), Some(0), "{pointer}: {text}");
+        assert!(text.contains(message), "{pointer}: {text}");
+    }
+}
+
+#[test]
+fn resume_crawls_the_route_that_did_not_fit_before() {
+    let site = resumable_site();
+    let temp = tempfile::tempdir().unwrap();
+    let checkpoint = temp.path().join("checkpoint.json");
+    interrupted_crawl(&site, &checkpoint);
+    assert!(!site.requested("/next"));
+
+    let output = resume(&site.base_url, &checkpoint);
+    assert!(site.requested("/next"));
+    assert_eq!(parse_json(&output.stdout)["artifact"]["status"], "complete");
+}
+
+#[test]
+fn checkpoints_follow_a_page_threshold_whatever_the_batch_size() {
+    // Four workers visit 1, 5, 9, 13, 17, 21, 25 pages. Multiples of 5 would hit
+    // only 5 and 25; a threshold of 5 pages since the last checkpoint hits 5, 13, 21.
+    let paths = (0..24)
+        .map(|index| &*Box::leak(format!("/p{index}").into_boxed_str()))
+        .collect::<Vec<&'static str>>();
+    let links = paths
+        .iter()
+        .map(|path| format!(r#"<a href="{path}">x</a>"#))
+        .collect::<String>();
+    let mut routes = vec![("/", html(&links))];
+    routes.extend(paths.iter().map(|path| (*path, html(""))));
+    let site = Site::start(routes);
+    let temp = tempfile::tempdir().unwrap();
+    let checkpoint = temp.path().join("checkpoint.json");
+    let (_, payload) = crawl(
+        &site,
+        &[
+            "--checkpoint",
+            checkpoint.to_str().unwrap(),
+            "--checkpoint-every",
+            "5",
+        ],
+    );
+    assert_eq!(payload["artifact"]["crawl"]["visited_pages"], 25);
+    assert_eq!(payload["artifact"]["crawl"]["checkpoints_written"], 3);
+    let leftovers = std::fs::read_dir(temp.path()).unwrap().count();
+    assert_eq!(
+        leftovers, 0,
+        "a finished crawl leaves no checkpoint or temp file"
+    );
 }

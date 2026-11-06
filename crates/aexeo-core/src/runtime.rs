@@ -33,7 +33,10 @@ use fetcher::{
 pub(crate) use graph::CrawlLink;
 pub(crate) use graph::crawl_links;
 use graph::{read_loc_values, response_report_path, should_enqueue_link};
-use http::{fetch_with_http, host_for_url, is_html_content_type, origin_for_url, same_site_host};
+use http::{
+    fetch_with_http, host_for_url, is_html_content_type, normalize_base_url, origin_for_url,
+    same_site_host,
+};
 use planner::{CrawlPlanner, CrawlPlannerState};
 pub use playwright::PlaywrightDoctor;
 use playwright::{playwright_is_available, probe_playwright_runtime};
@@ -50,6 +53,8 @@ pub struct RuntimeAudit {
     pub truncation_reason: Option<String>,
     pub performance: Option<AuditPerformance>,
 }
+
+const CHECKPOINT_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeCheckpoint {
@@ -1653,7 +1658,7 @@ fn checkpoint_state(
     crawl_stats: &CrawlStats,
 ) -> Result<()> {
     let checkpoint = RuntimeCheckpoint {
-        version: 1,
+        version: CHECKPOINT_VERSION,
         base_url: base_url.to_string(),
         engine: engine.to_string(),
         planner: planner.checkpoint_state(),
@@ -1661,16 +1666,59 @@ fn checkpoint_state(
         crawl_findings: crawl_findings.to_vec(),
         crawl_stats: crawl_stats.clone(),
     };
-    fs::write(checkpoint_path, serde_json::to_string_pretty(&checkpoint)?)?;
+    write_atomically(checkpoint_path, &serde_json::to_vec_pretty(&checkpoint)?)
+}
+
+/// Replace `path` in one step, so a crash mid-write leaves the previous checkpoint.
+fn write_atomically(path: &Path, contents: &[u8]) -> Result<()> {
+    let mut temporary = path.as_os_str().to_owned();
+    temporary.push(format!(".tmp.{}", std::process::id()));
+    let temporary = Path::new(&temporary);
+    fs::write(temporary, contents)?;
+    fs::rename(temporary, path).inspect_err(|_| {
+        let _ = fs::remove_file(temporary);
+    })?;
     Ok(())
 }
 
-fn load_checkpoint(checkpoint_path: &Path, max_pages: usize) -> Result<RuntimeCheckpoint> {
+fn load_checkpoint(
+    checkpoint_path: &Path,
+    base_url: &str,
+    engine: &str,
+    max_pages: usize,
+) -> Result<RuntimeCheckpoint> {
     let text = fs::read_to_string(checkpoint_path)?;
     let mut checkpoint = serde_json::from_str::<RuntimeCheckpoint>(&text)?;
+    // In the message itself: failure output renders only the outermost error.
+    validate_checkpoint(&checkpoint, base_url, engine).map_err(|reason| {
+        anyhow::anyhow!("cannot resume from {}: {reason}", checkpoint_path.display())
+    })?;
     checkpoint.planner.max_pages = max_pages;
     checkpoint.crawl_stats.max_pages = max_pages;
     Ok(checkpoint)
+}
+
+/// A checkpoint decides which host the crawl talks to, and the current run supplies
+/// the credentials, so resuming a different crawl could send them to the wrong site.
+fn validate_checkpoint(checkpoint: &RuntimeCheckpoint, base_url: &str, engine: &str) -> Result<()> {
+    anyhow::ensure!(
+        checkpoint.version == CHECKPOINT_VERSION,
+        "checkpoint version {} is not supported (expected {CHECKPOINT_VERSION}); start a new crawl",
+        checkpoint.version
+    );
+    anyhow::ensure!(
+        normalize_base_url(&checkpoint.base_url) == normalize_base_url(base_url)
+            && same_site_host(&checkpoint.planner.base_host, &host_for_url(base_url)),
+        "checkpoint belongs to {} but this crawl targets {}; pass the same URL or start a new crawl",
+        redact_url(&checkpoint.base_url),
+        redact_url(base_url)
+    );
+    anyhow::ensure!(
+        checkpoint.engine == engine,
+        "checkpoint was made with engine '{}' but this crawl uses '{engine}'; pass the same engine or start a new crawl",
+        checkpoint.engine
+    );
+    Ok(())
 }
 
 fn materialize_runtime_site(
@@ -1688,7 +1736,7 @@ fn materialize_runtime_site(
     };
     let (mut planner, mut snapshot, mut crawl_findings, mut crawl_stats, mut performance) =
         if let Some(resume_from) = options.resume_from {
-            let checkpoint = load_checkpoint(resume_from, max_pages)?;
+            let checkpoint = load_checkpoint(resume_from, base_url, engine, max_pages)?;
             let resumed_elapsed_us = checkpoint.crawl_stats.elapsed_us;
             (
                 CrawlPlanner::from_checkpoint(checkpoint.planner, max_pages),
@@ -1755,6 +1803,7 @@ fn materialize_runtime_site(
     }
 
     let mut fetcher = RuntimeFetcher::new(engine, &runtime)?;
+    let mut last_checkpoint_visited = planner.visited_count();
     let effective_workers = if engine == "http" {
         runtime.max_workers.max(1)
     } else {
@@ -1933,10 +1982,13 @@ fn materialize_runtime_site(
             );
         }
 
+        // A threshold, not a multiple: a batch advances by up to `max_workers`,
+        // which can step over multiples of `checkpoint_every`.
+        crawl_stats.visited_pages = planner.visited_count();
         if let Some(checkpoint_path) = options.checkpoint_path
-            && crawl_stats.visited_pages > 0
-            && crawl_stats.visited_pages % options.checkpoint_every.max(1) == 0
+            && planner.visited_count() - last_checkpoint_visited >= options.checkpoint_every.max(1)
         {
+            last_checkpoint_visited = planner.visited_count();
             performance.record_checkpoint();
             performance.apply_to(&mut crawl_stats);
             let checkpoint_started_at = Instant::now();
@@ -3263,6 +3315,23 @@ mod tests {
             type_attr: Some("application/atom+xml".to_string()),
         }]);
         assert!(!homepage_advertises_markdown_mirror_discovery(&site));
+    }
+
+    #[test]
+    fn a_failed_checkpoint_write_keeps_the_previous_checkpoint() {
+        use super::write_atomically;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("checkpoint.json");
+        write_atomically(&path, b"previous").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"previous");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+
+        let temporary = dir
+            .path()
+            .join(format!("checkpoint.json.tmp.{}", std::process::id()));
+        std::fs::create_dir(&temporary).unwrap();
+        assert!(write_atomically(&path, b"next").is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"previous");
     }
 
     #[test]
