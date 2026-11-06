@@ -753,8 +753,10 @@ mod tests {
     }
 
     fn capped_fetcher(origin: &str, max_response_bytes: u64) -> HttpFetcher {
-        let mut config = Config::default();
-        config.crawl_max_response_bytes = max_response_bytes;
+        let config = Config {
+            crawl_max_response_bytes: max_response_bytes,
+            ..Config::default()
+        };
         fetcher(&config, origin, true)
     }
 

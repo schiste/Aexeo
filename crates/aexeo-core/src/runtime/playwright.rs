@@ -1125,8 +1125,10 @@ mod tests {
             ("username".to_string(), "user".to_string()),
             ("password".to_string(), "hunter2".to_string()),
         ]);
-        let mut config = Config::default();
-        config.crawl_basic_auth = basic_auth;
+        let config = Config {
+            crawl_basic_auth: basic_auth,
+            ..Config::default()
+        };
         fetch_with_playwright_using(Some(runner), "https://example.com", &config.runtime())
             .expect("runner succeeds");
 
