@@ -24,10 +24,16 @@ class FeedbackTests(unittest.TestCase):
         note = module.capture(self.text, self.report, "length", "e1", "passed", "reviewer-1", "manual")
         self.assertEqual(note["text_sha256"], hashlib.sha256(self.text.encode()).hexdigest())
         self.assertNotIn(self.text, json.dumps(note))
-        self.assertEqual(module.export_review(self.corpus, note)["events"][0]["reviewer_status"], "passed")
+        note["reason"] = "private justification"
+        exported = module.export_review(self.corpus, note)
+        self.assertEqual(exported["events"][0]["reviewer_status"], "passed")
+        self.assertNotIn("private justification", json.dumps(exported))
 
     def test_unresolved_stale_wrong_gate_and_missing_provenance_are_rejected(self):
         note = module.capture(self.text, self.report, "length", "e1")
+        with self.assertRaisesRegex(ValueError, "explicit human"):
+            module.export_review(self.corpus, note)
+        note["human_status"] = "uncertain"
         with self.assertRaisesRegex(ValueError, "explicit human"):
             module.export_review(self.corpus, note)
         note["human_status"] = "passed"
@@ -49,6 +55,12 @@ class FeedbackTests(unittest.TestCase):
             module.export_review(self.corpus, note)
         with self.assertRaisesRegex(ValueError, "exactly one"):
             module.capture(self.text, {"gates": []}, "length", "e1")
+
+    def test_export_rejects_cross_split_duplicate_text(self):
+        self.corpus["examples"].append({"id": "other", "split": "holdout", "text": self.text, "expected": "passed"})
+        note = module.capture(self.text, self.report, "length", "e1", "passed", "r", "manual")
+        with self.assertRaisesRegex(ValueError, "multiple splits"):
+            module.export_review(self.corpus, note)
 
     def test_cli_preserves_crlf_and_does_not_overwrite(self):
         with tempfile.TemporaryDirectory() as directory:
