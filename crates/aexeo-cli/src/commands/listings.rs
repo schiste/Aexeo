@@ -1,3 +1,4 @@
+use aexeo_core::error::UserContext;
 use aexeo_core::{list_adapter_names, list_rule_group_names, validate_python_plugin_module};
 use anyhow::Result;
 use clap::ArgMatches;
@@ -41,7 +42,9 @@ pub fn command_adapters(submatches: &ArgMatches) -> Result<i32> {
 }
 
 pub fn command_plugin_check(submatches: &ArgMatches) -> Result<i32> {
-    let manifest = validate_python_plugin_module(required_arg(submatches, "module_name")?)?;
+    let module_name = required_arg(submatches, "module_name")?;
+    let manifest = validate_python_plugin_module(module_name)
+        .user_context(format!("invalid plugin module {module_name}"))?;
     match submatches
         .get_one::<String>("format")
         .map(String::as_str)

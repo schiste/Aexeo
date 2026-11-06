@@ -11,6 +11,13 @@ pub struct DestinationLinks {
     pub destination: String,
     pub distinct_source_pages: usize,
     pub source_pages_by_context: BTreeMap<LinkContext, usize>,
+    /// Source pages with at least one link carrying no `nofollow`, `ugc` or
+    /// `sponsored` token. Zero with sources present means every link is qualified.
+    #[serde(default)]
+    pub followed_source_pages: usize,
+    /// Source pages with at least one link carrying each `rel` token.
+    #[serde(default)]
+    pub source_pages_by_rel: BTreeMap<String, usize>,
     /// Individual observations retain anchor, source, component and locale.
     pub evidence: Vec<LinkEvidence>,
 }
@@ -28,6 +35,8 @@ pub struct LinkCounts {
 struct Accumulator {
     sources: BTreeSet<String>,
     contexts: BTreeMap<LinkContext, BTreeSet<String>>,
+    followed: BTreeSet<String>,
+    rel: BTreeMap<String, BTreeSet<String>>,
     evidence: Vec<LinkEvidence>,
 }
 
@@ -50,6 +59,16 @@ pub fn count_links(evidence: Vec<LinkEvidence>) -> LinkCounts {
                     .entry(link.context)
                     .or_default()
                     .insert(link.source.clone());
+                if link.rel.is_empty() {
+                    destination.followed.insert(link.source.clone());
+                }
+                for token in &link.rel {
+                    destination
+                        .rel
+                        .entry(token.clone())
+                        .or_default()
+                        .insert(link.source.clone());
+                }
                 destination.evidence.push(link);
             }
             LinkResolution::SameDocument { .. } => same_document.push(link),
@@ -68,6 +87,12 @@ pub fn count_links(evidence: Vec<LinkEvidence>) -> LinkCounts {
                     .contexts
                     .into_iter()
                     .map(|(context, sources)| (context, sources.len()))
+                    .collect(),
+                followed_source_pages: accumulator.followed.len(),
+                source_pages_by_rel: accumulator
+                    .rel
+                    .into_iter()
+                    .map(|(token, sources)| (token, sources.len()))
                     .collect(),
                 evidence: accumulator.evidence,
             })

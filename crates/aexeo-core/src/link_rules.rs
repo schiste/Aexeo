@@ -33,6 +33,7 @@ fn finding(
         .to_string(),
         suggestion: suggestion.map(str::to_string),
         scope: FindingScope::Page,
+        subject: None,
     }
 }
 
@@ -98,33 +99,39 @@ pub fn run_link_rules(site: &Site, config: &Config) -> Vec<Finding> {
                 && is_graph_validated_target(target)
                 && !site.indexed_paths.contains(target)
             {
-                findings.push(finding(
-                    "LNK001",
-                    format!("broken internal link: /{}", target),
-                    &page.path,
-                    link.line,
-                    link.column,
-                    None,
-                ));
+                findings.push(
+                    finding(
+                        "LNK001",
+                        format!("broken internal link: /{}", target),
+                        &page.path,
+                        link.line,
+                        link.column,
+                        None,
+                    )
+                    .with_subject(target),
+                );
                 continue;
             }
             if is_weak_internal_anchor(link, site, config) {
-                findings.push(finding(
-                    "LNK003",
-                    format!(
-                        "weak internal anchor text '{}' for /{}",
-                        if link.text.is_empty() {
-                            "(empty)"
-                        } else {
-                            &link.text
-                        },
-                        target
-                    ),
-                    &page.path,
-                    link.line,
-                    link.column,
-                    None,
-                ));
+                findings.push(
+                    finding(
+                        "LNK003",
+                        format!(
+                            "weak internal anchor text '{}' for /{}",
+                            if link.text.is_empty() {
+                                "(empty)"
+                            } else {
+                                &link.text
+                            },
+                            target
+                        ),
+                        &page.path,
+                        link.line,
+                        link.column,
+                        None,
+                    )
+                    .with_subject(target),
+                );
             }
         }
     }

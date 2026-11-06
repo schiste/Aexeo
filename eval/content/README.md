@@ -18,6 +18,26 @@ python3 scripts/evaluate-content-gates.py eval/content/link-destinations.json \
 python3 scripts/test-evaluate-content-gates.py
 ```
 
+## Markdown regression fixtures
+
+`eval/content/markdown-*.json` run through `--input-format markdown` and are
+gated by `scripts/check-code.sh`. They cover lists, tables, headings with inline
+code, soft wraps, CJK, www and email autolinks, term options, wrapped evidence
+claims and input limits. They are **regression fixtures only**: synthetic text,
+written with the behaviour they pin, marked `fixture_kind: "synthetic_regression"`
+and `review_status: "not_reviewed"`. Each example has a `why`. Their labels
+state expected tool behaviour, not an editorial judgement by a human reviewer,
+and the runner rejects a declared review on them. Passing them says nothing
+about accuracy on real content.
+
+A real, independently reviewed corpus remains open: see item 7 of
+[the content roadmap](../../CONTENT-ROADMAP.md). These fixtures do not advance it.
+
+An example may expect `not_checked`, reported as `expected_not_checked`.
+`--assert-regression` fails on `missed_not_checked`, when such an example was
+assessed, as well as on mismatches and unexpected `not_checked` results. A corpus
+may also embed `evidence_sources`, materialized as temporary local files.
+
 A corpus may specify an input format and an embedded TOML preset; the runner
 materializes the preset in a temporary directory and removes it afterward.
 The runner invokes the local CLI once per example and does not contact a remote
@@ -89,3 +109,35 @@ fresh independent examples for stronger validation. Run the evaluator for both
 splits and its unit tests; report sample sizes and unchecked cases with any
 metrics. Contributions and review discussions remain subject to the repository's
 normal review and privacy policies.
+
+## Local human-feedback notes
+
+A human can provide feedback while an agent drafts or reviews content. To capture
+it, use a saved UTF-8 content snapshot and the corresponding Aexeo JSON report:
+
+```sh
+python3 scripts/content-review-note.py capture --text draft.md --report report.json \
+  --gate editorial.sentence_length --example example-1 --human-status failed \
+  --reviewer reviewer-1 --method manual --output feedback.json
+python3 scripts/content-review-note.py export-review --note feedback.json \
+  --corpus corpus.json --output review-events.json
+```
+
+Use the actual gate ID from the report. `--human-status`, `--reviewer` and
+`--method` may be omitted during capture; use `uncertain` or omit the verdict
+when no pass/fail was given. Optional `--language`, `--content-type`, `--preset`,
+`--config-version` and `--tool-version` record supplied context. The note stores
+the exact UTF-8 text hash, not the text; no data is sent. The tool cannot verify
+that the supplied report was produced from that snapshot, so the operator must
+ensure the two match. A hash, example ID and provenance can still be sensitive.
+An explicitly supplied `--reason-file` includes its text in the local note and
+may contain sensitive information. Choose an appropriate private output path.
+
+Export is a separate explicit action and requires an unambiguous human verdict,
+reviewer and method. It validates the corpus and matches the gate, example and
+text hash before writing the existing historical review-log format. It never
+changes the corpus, its review status, or its split, and does not export the
+optional reason or context. Output files are created only if absent. A reported
+verdict and supplied provenance do not prove independent review. Keep unresolved
+feedback out of reviewed metrics and follow the contribution and holdout policy
+above before sharing or adding examples.

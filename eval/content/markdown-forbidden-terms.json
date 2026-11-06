@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "fixture_kind": "synthetic_regression",
+  "description": "Synthetic Markdown regression fixture, written to pin specific adapter and gate behaviour. Labels are the expected tool behaviour, not human-reviewed editorial judgements, and results do not estimate production accuracy.",
+  "preset": "fixture",
+  "preset_toml": "version=1\nname='fixture'\n[[gates]]\nid='g'\nkind='forbidden_terms'\nterms=['best price','free','価格']\n",
+  "gate_id": "g",
+  "input_format": "markdown",
+  "examples": [
+    {
+      "id": "soft-wrap",
+      "split": "development",
+      "text": "Our best\nprice wins.\n",
+      "expected": "failed",
+      "why": "A soft wrap does not hide a multi-word term.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "substring",
+      "split": "development",
+      "text": "Freedom and carefree freedom.\n",
+      "expected": "passed",
+      "why": "Whole words by default: free does not match freedom.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "across-bullets",
+      "split": "development",
+      "text": "- our best\n- price wins\n",
+      "expected": "passed",
+      "why": "A term does not match across list items.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "inline-code",
+      "split": "development",
+      "text": "Try `free` today.\n",
+      "expected": "failed",
+      "why": "Inline code text is prose, matching EmDash.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "cjk-running-text",
+      "split": "holdout",
+      "text": "この価格は安い。\n",
+      "expected": "failed",
+      "why": "Whole words still match in text without word spacing.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "across-table-cells",
+      "split": "holdout",
+      "text": "| best | price |\n| --- | --- |\n",
+      "expected": "passed",
+      "why": "A term does not match across table cells.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "case-sensitive-default",
+      "split": "holdout",
+      "text": "A FREE trial.\n",
+      "expected": "passed",
+      "why": "Matching is case-sensitive by default.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "across-heading",
+      "split": "holdout",
+      "text": "# best\n\nprice\n",
+      "expected": "passed",
+      "why": "A term does not match across a heading.",
+      "review_status": "not_reviewed"
+    }
+  ]
+}
