@@ -2,7 +2,7 @@ use std::fs;
 use std::time::Instant;
 
 use aexeo_core::link_report::{
-    AuditLinkContext, LinkReportInput, build_link_report,
+    AuditLinkContext, LinkReport, LinkReportInput, build_link_report,
     build_link_report_from_audit_with_static_urls,
 };
 use anyhow::{Context, Result};
@@ -45,27 +45,31 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
         build_link_report(&input)?
     };
     if matches.get_flag("telemetry") {
-        let observed = report
-            .links
-            .destinations
-            .iter()
-            .map(|destination| destination.evidence.len())
-            .sum::<usize>()
-            + report.links.same_document.len()
-            + report.links.external.len()
-            + report.links.unsupported.len()
-            + report.links.indeterminate.len();
-        let telemetry = serde_json::json!({
-            "event": "link_graph_analysis",
-            "version": 1,
-            "elapsed_us": started.elapsed().as_micros(),
-            "page_count": report.pages.len(),
-            "link_count": observed,
-            "indeterminate_count": report.links.indeterminate.len(),
-            "issue_count": report.issues.len(),
-        });
-        eprintln!("{telemetry}");
+        emit_link_graph_telemetry(&report, started);
     }
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(0)
+}
+
+pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
+    let observed = report
+        .links
+        .destinations
+        .iter()
+        .map(|destination| destination.evidence.len())
+        .sum::<usize>()
+        + report.links.same_document.len()
+        + report.links.external.len()
+        + report.links.unsupported.len()
+        + report.links.indeterminate.len();
+    let telemetry = serde_json::json!({
+        "event": "link_graph_analysis",
+        "version": 1,
+        "elapsed_us": started.elapsed().as_micros(),
+        "page_count": report.pages.len(),
+        "link_count": observed,
+        "indeterminate_count": report.links.indeterminate.len(),
+        "issue_count": report.issues.len(),
+    });
+    eprintln!("{telemetry}");
 }

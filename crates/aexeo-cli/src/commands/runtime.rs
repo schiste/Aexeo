@@ -10,7 +10,7 @@ use aexeo_core::{
     run_runtime_audit_with_options, runtime_doctor, verify_runtime_audit, write_audit_artifact,
     write_partial_audit_artifact, write_progress_audit_artifact,
 };
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -417,6 +417,16 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
         "crawl",
         config.output().audit_log_limit,
     )?;
+    if let Some(path) = submatches.get_one::<String>("link-graph-output") {
+        let started = std::time::Instant::now();
+        let graph = aexeo_core::link_report::build_link_report_from_audit(&full_audit_artifact)?;
+        let bytes = serde_json::to_vec_pretty(&graph)?;
+        fs::write(path, bytes)
+            .with_context(|| format!("cannot write link graph report: {path}"))?;
+        if submatches.get_flag("link-graph-telemetry") {
+            super::link_graph::emit_link_graph_telemetry(&graph, started);
+        }
+    }
     let findings_to_render = if let Some(baseline_path) = baseline_path {
         let baseline_findings = load_findings_from_audit(Path::new(baseline_path))?;
         let diff = diff_finding_sets(&baseline_findings, &audit.findings);
