@@ -34,7 +34,8 @@ not change their counts or assert confirmed orphans.
   eligibility; actual adapters and reports still need integration.
 - HTML link evidence extraction is merged (#62). Source positions are unknown
   where the DOM parser cannot preserve them. Explicit context markers support
-  otherwise ambiguous components. It is not yet wired to audits or adapters.
+  otherwise ambiguous components. The link report uses this evidence for its
+  rendered-page, audit and static URL-map inputs; legacy site rules remain separate.
 - Distinct source-page counts by context and separate same-document jumps are
   merged (#64). A versioned JSON report with optional aggregate-only telemetry,
   noindex, redirect and canonical uncertainty is merged (#65). It never declares
@@ -53,6 +54,14 @@ not change their counts or assert confirmed orphans.
   date and inventory (#72). It reports differences, but cannot attest that the
   inputs share a release or that the audit crawl is complete; no pages become
   eligible on this basis alone.
+- A static URL map can associate static audit paths with explicitly supplied public
+  URLs (#77); unmapped pages and missing response provenance remain visible, and
+  the mapping cannot establish coverage or routing equivalence.
+- Runtime crawls can write a separate link report and opt-in aggregate telemetry
+  directly (#78). The audit schema and normal crawl result stay unchanged; the
+  report still cannot attest a matching complete inventory or snapshot.
+- A synthetic in-process benchmark covers 50 pages and 500 links (#76). No CI
+  performance budget has been established for this graph benchmark.
 - A live Aeptus URL returned a generic noindex holding page, not the article
   visible in the CMS preview. An end-to-end HTTP crawl and audit adapter report
   captured the URL and noindex and flagged incomplete coverage. This sample does
@@ -74,8 +83,8 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
   validate legacy rule semantics and preserve contracts and baseline compatibility.
 - [ ] Run end-to-end fixtures and real-site comparisons for static and runtime
   sources, multiple locales, incomplete crawls, redirects and cross-origin URLs.
-- [ ] Benchmark graph parsing independently and retain opt-in, aggregate-only
-  operational telemetry.
+- [x] Benchmark graph parsing independently and retain opt-in, aggregate-only
+  operational telemetry. A calibrated CI budget remains outstanding.
 - [ ] Finish the independent, diverse human-reviewed evaluation corpus and the
   outstanding broader content-quality roadmap. Fact/source verification remains
   later in that roadmap and must not be presented as already validated.
