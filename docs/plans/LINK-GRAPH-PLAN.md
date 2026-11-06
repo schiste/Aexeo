@@ -68,6 +68,11 @@ not change their counts or assert confirmed orphans.
 - Normalized URL serialization now matches observed pages to link destinations
   and equivalent URL duplicates prevent inventory/crawl coverage (#80). Query
   variants remain distinct and aliases are not inferred.
+- Near-variant destinations and draft or noindex inventory pages served indexable
+  now withhold eligibility. Audit origins follow observed URLs, `aside` and `header`
+  links inside body content are unknown, and `rel` qualifiers, `googlebot` noindex
+  and links to a page's requested URL are reported. Redirect chains remain
+  unavailable, and these links are still not credited to the redirected page.
 - A synthetic in-process benchmark covers 50 pages and 500 links (#76). No CI
   performance budget has been established for this graph benchmark.
 - A live Aeptus URL returned a generic noindex holding page, not the article

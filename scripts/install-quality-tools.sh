@@ -1,6 +1,16 @@
 #!/bin/sh
 set -eu
 
+# --skip-ripgrep is for CI, which has no use for rg and no root to install it.
+skip_ripgrep=0
+case "${1:-}" in
+    --skip-ripgrep) skip_ripgrep=1 ;;
+    "") ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+esac
+
+. scripts/quality-tool-versions.sh
+
 # ripgrep is a hard requirement of scripts/guard-staged.sh. It is a system
 # package rather than a cargo binary, so it is installed separately from the
 # cargo tools below. This step is deliberately non-fatal: a machine with no
@@ -47,11 +57,16 @@ install_ripgrep() {
     fi
 }
 
-install_ripgrep
+if [ "$skip_ripgrep" -eq 0 ]; then
+    install_ripgrep
+fi
 
-cargo install cargo-audit cargo-deny cargo-udeps
-rustup toolchain install nightly
-rustup component add --toolchain nightly rust-src llvm-tools-preview
+cargo install --locked \
+    "cargo-audit@$AEXEO_CARGO_AUDIT_VERSION" \
+    "cargo-deny@$AEXEO_CARGO_DENY_VERSION" \
+    "cargo-udeps@$AEXEO_CARGO_UDEPS_VERSION"
+rustup toolchain install "$AEXEO_NIGHTLY_TOOLCHAIN" --profile minimal --component rust-src --component llvm-tools-preview
 
-printf 'quality tools: cargo-audit, cargo-deny, cargo-udeps installed; nightly toolchain with rust-src and llvm-tools-preview installed\n'
+printf 'quality tools: cargo-audit %s, cargo-deny %s, cargo-udeps %s installed; %s with rust-src and llvm-tools-preview installed\n' \
+    "$AEXEO_CARGO_AUDIT_VERSION" "$AEXEO_CARGO_DENY_VERSION" "$AEXEO_CARGO_UDEPS_VERSION" "$AEXEO_NIGHTLY_TOOLCHAIN"
 printf 'ripgrep (rg, required by scripts/guard-staged.sh): %s\n' "$ripgrep_status"

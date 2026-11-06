@@ -71,6 +71,10 @@ pub struct Config {
     #[serde(default = "default_crawl_use_sitemap")]
     pub crawl_use_sitemap: bool,
     #[serde(default)]
+    pub crawl_ignore_robots: bool,
+    #[serde(default)]
+    pub crawl_delay_ms: u64,
+    #[serde(default)]
     pub crawl_capture_trace: bool,
     #[serde(default)]
     pub crawl_capture_screenshot: bool,
@@ -341,6 +345,8 @@ impl Default for Config {
             crawl_include_patterns: Vec::new(),
             crawl_exclude_patterns: Vec::new(),
             crawl_use_sitemap: default_crawl_use_sitemap(),
+            crawl_ignore_robots: false,
+            crawl_delay_ms: 0,
             crawl_capture_trace: false,
             crawl_capture_screenshot: false,
             crawl_capture_console: false,

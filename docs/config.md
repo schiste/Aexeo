@@ -184,6 +184,16 @@ Keys are listed by their flat name. In a `version = 1` config, set them at the v
 - Versioned location: `use_sitemap` under `[runtime]`
 - Meaning: Whether runtime crawl should seed additional routes from sitemap.xml when available.
 
+## `crawl_ignore_robots`
+
+- Default: `false`
+- Meaning: Crawl URLs that robots.txt disallows. Only for auditing a site you own, such as staging.
+
+## `crawl_delay_ms`
+
+- Default: `0`
+- Meaning: Milliseconds to wait between batches of crawl requests. A batch holds up to `max_workers` requests.
+
 ## `crawl_capture_screenshot`
 
 - Default: `false`

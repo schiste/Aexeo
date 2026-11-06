@@ -21,10 +21,14 @@ import type { Finding, SiteIntelligenceScore } from "../src/types.js";
 // transform; with it, milliseconds.
 const { NEUTRAL_SCORE, engineFindings } = vi.hoisted(() => {
   const score = {
-    overall_score: 0,
-    citation_readiness_score: 0,
-    truth_consistency_score: 0,
-    answer_pack_score: 0,
+    citation_readiness_score: null,
+    truth_consistency_score: null,
+    answer_pack: {
+      routes_analyzed: 0,
+      routes_with_answer_blocks: 0,
+      routes_with_coverage_gaps: 0,
+      answer_blocks: 0,
+    },
     external_trust_alignment_score: null,
     route_scores: [],
     blockers: [],
@@ -182,7 +186,7 @@ function configuredPlugin(
     };
   };
   return {
-    admin: (input) => (ctx) => plugin.routes.admin.handler({ ...ctx, input }),
+    admin: (input) => (ctx) => plugin.routes.admin.handler({ ...ctx, input, user: { role: 50 } }),
     refresh: (ctx) => plugin.routes.refresh.handler(ctx),
   };
 }
@@ -477,6 +481,33 @@ describe("Refresh applies suppressions on every path", () => {
 // is written. These drive the real `save_setup` route rather than the helpers
 // it calls, so the form's own validation and copy are covered too.
 
+describe("Refresh through the Block Kit route", () => {
+  const refreshAs = (kv: KvNamespace, user?: { role: number }) => {
+    const plugin = createPlugin() as unknown as {
+      routes: { admin: { handler: (ctx: unknown) => Promise<BlockResponse> } };
+    };
+    return plugin.routes.admin.handler({
+      ...fakeCtx(kv),
+      ...(user === undefined ? {} : { user }),
+      input: { type: "block_action", action_id: "refresh_findings" },
+    });
+  };
+
+  // Editors reach this route to read findings, so it has to refuse the one
+  // action in it that writes.
+  it.each([[{ role: 40 }], [undefined]])("is refused for %o", async (user) => {
+    const kv = fakeKv();
+    const response = await refreshAs(kv, user);
+    expect(JSON.stringify(response.blocks[0])).toMatch(/Only administrators/);
+    expect(kv.store.size).toBe(0);
+  });
+
+  it("runs for an administrator", async () => {
+    const response = await refreshAs(fakeKv(), { role: 50 });
+    expect(JSON.stringify(response.blocks)).not.toMatch(/Only administrators/);
+  });
+});
+
 describe("sandboxed Setup form", () => {
   const save = (
     kv: KvNamespace,
@@ -598,16 +629,32 @@ describe("sandboxed Setup form", () => {
     expect(settings.get("eval_token")).toBe("first-token");
   });
 
-  it("falls back to KV on a host with no settings accessor", async () => {
+  it("shows an error and stores nothing on a host with no settings accessor", async () => {
     const kv = fakeKv();
     const response = await save(kv, {
       evaluator_url: SIDECAR_URL,
       eval_token: "super-secret-token",
     });
 
-    expect(banner(response).variant).toBe("default");
-    expect(kv.store.get("config:eval_token")).toBe("super-secret-token");
+    expect(banner(response)).toMatchObject({ type: "banner", variant: "error" });
+    expect(kv.store.size).toBe(0);
   });
+
+  it("shows the truth when the stored token is still in plaintext KV", async () => {
+    const kv = fakeKv({
+      "config:evaluator_url": SIDECAR_URL,
+      "config:eval_token": "legacy-token",
+    });
+    const response = await sandboxAdmin()(
+      { input: { type: "page_load", page: "/setup" } },
+      fakeCtx(kv, new Map()),
+    );
+
+    expect(banner(response).title).toMatch(/unencrypted/);
+    expect(JSON.stringify(response)).toMatch(/Token stored unencrypted/);
+    expect(JSON.stringify(response)).not.toContain("legacy-token");
+  });
+
 
   it("never echoes the submitted token back into the page", async () => {
     const kv = fakeKv();

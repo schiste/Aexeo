@@ -2,7 +2,7 @@
 use crate::{EmdashDocument, PortableTextChild};
 use aexeo_core::content_gate::{
     ContentContext, ContentEvaluationContext, ContentGate, ContentInput, ContentParagraph,
-    ContentPreset, ContentReport,
+    ContentPreset, ContentReport, collapse_whitespace,
 };
 use anyhow::Result;
 use std::collections::BTreeMap;
@@ -36,6 +36,7 @@ fn content_metadata(document: &EmdashDocument) -> BTreeMap<String, String> {
 
 /// Positions in findings refer to this adapter's projected plain text: spans
 /// are concatenated within each block, and blocks are separated by newlines.
+/// Each block end is reported as a structural boundary, like the Markdown adapter.
 pub fn content_input(document: &EmdashDocument) -> ContentInput {
     content_input_with_context(document).0
 }
@@ -61,18 +62,22 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
         .iter()
         .filter(|block| is_heading(&block.style))
         .map(|block| {
-            block
-                .children
-                .iter()
-                .map(|child| match child {
-                    PortableTextChild::Span(span) => span.text.as_str(),
-                })
-                .collect::<String>()
+            collapse_whitespace(
+                &block
+                    .children
+                    .iter()
+                    .map(|child| match child {
+                        PortableTextChild::Span(span) => span.text.as_str(),
+                    })
+                    .collect::<String>(),
+            )
         })
         .collect();
     let mut line = 1;
     let mut paragraphs = Vec::new();
     let mut link_count = 0;
+    let mut block_ends = Vec::with_capacity(document.body.len());
+    let mut offset = 0;
     for block in &document.body {
         let link_keys: std::collections::BTreeSet<_> = block
             .mark_defs
@@ -107,6 +112,9 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
             });
         }
         line += block_text.chars().filter(|ch| *ch == '\n').count() + 1;
+        offset += block_text.len();
+        block_ends.push(offset);
+        offset += 1;
     }
     (
         ContentInput {
@@ -119,6 +127,8 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
         },
         ContentContext {
             paragraphs: Some(paragraphs),
+            block_ends: Some(block_ends),
+            ..Default::default()
         },
         link_count,
     )
@@ -192,8 +202,7 @@ pub fn source_locations(
             }
         }
     }
-    let mut line_starts = vec![0];
-    line_starts.extend(projection.match_indices('\n').map(|(i, _)| i + 1));
+    let line_index = aexeo_core::text_index::LineIndex::new(&projection);
     let heading_blocks: Vec<_> = document
         .body
         .iter()
@@ -209,14 +218,19 @@ pub fn source_locations(
                 .map(|child| match child {
                     PortableTextChild::Span(span) => span.text.as_str(),
                 })
-                .collect()
+                .collect::<String>()
         })
+        .map(|heading| collapse_whitespace(&heading))
         .collect();
     let mut result = Vec::new();
     for (gate, evaluated) in preset.gates.iter().zip(&report.gates) {
         if let Some(indices) = aexeo_core::content_gate::heading_finding_indices(gate, &headings) {
-            if indices.len() == evaluated.findings.len() {
-                for (finding_index, index) in indices.into_iter().enumerate() {
+            if indices.len() == evaluated.total_findings() {
+                for (finding_index, index) in indices
+                    .into_iter()
+                    .take(evaluated.findings.len())
+                    .enumerate()
+                {
                     let (block_index, block) = heading_blocks[index];
                     if let Some(span_index) = block.children.iter().position(|child| match child {
                         PortableTextChild::Span(span) => !span.text.is_empty(),
@@ -237,27 +251,9 @@ pub fn source_locations(
             continue;
         }
         for (finding_index, finding) in evaluated.findings.iter().enumerate() {
-            let Some(line_start) = finding
-                .line
-                .checked_sub(1)
-                .and_then(|i| line_starts.get(i))
-                .copied()
-            else {
+            let Some(offset) = line_index.offset(&projection, finding.line, finding.column) else {
                 continue;
             };
-            let Some(column) = finding.column.checked_sub(1) else {
-                continue;
-            };
-            let Some(line) = projection
-                .get(line_start..)
-                .and_then(|s| s.split('\n').next())
-            else {
-                continue;
-            };
-            let Some((within_line, _)) = line.char_indices().nth(column) else {
-                continue;
-            };
-            let offset = line_start + within_line;
             let Some(index) = spans
                 .partition_point(|&(start, _, _, _, _)| start <= offset)
                 .checked_sub(1)
@@ -371,9 +367,48 @@ pub fn evaluate_content_with_evidence(
 mod tests {
     use super::*;
     use aexeo_core::{
-        content_gate::GateStatus,
+        content_gate::{ContentEvaluationContext, GateStatus},
         content_presets::{builtin_content_presets, resolve_content_preset},
+        markdown_adapter::markdown_input_with_links,
     };
+
+    #[test]
+    fn markdown_and_portable_text_agree_on_blocks_code_and_wrapped_terms() {
+        let source = "## Option `a`\n\n- one two three four\n- five six seven eight\n\nThe best\nprice `wins`\n";
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/t","title":"T","body":[
+            {"style":"h2","children":[{"_type":"span","text":"Option "},{"_type":"span","text":"a","marks":["code"]}]},
+            {"listItem":"bullet","children":[{"_type":"span","text":"one two three four"}]},
+            {"listItem":"bullet","children":[{"_type":"span","text":"five six seven eight"}]},
+            {"children":[{"_type":"span","text":"The best\nprice "},{"_type":"span","text":"wins","marks":["code"]}]}
+        ]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='s'\nkind='sentence_length'\nmax_words=6\n[[gates]]\nid='h'\nkind='required_headings'\nheadings=['Option a']\n[[gates]]\nid='t'\nkind='forbidden_terms'\nterms=['best price','four five']\n[[gates]]\nid='w'\nkind='word_count'\nmin=1\n").unwrap();
+        let (input, context, links) = markdown_input_with_links("t.md", source).unwrap();
+        let markdown = preset
+            .evaluate_with_capabilities(
+                &input,
+                &ContentEvaluationContext {
+                    adapter: Some(&context),
+                    link_count: Some(links),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let emdash = evaluate_content(&document, &preset).unwrap();
+        for (left, right) in markdown.gates.iter().zip(&emdash.gates) {
+            assert_eq!(left.status, right.status, "{}", left.gate_id);
+            assert_eq!(left.measurements, right.measurements, "{}", left.gate_id);
+            let positions = |gate: &aexeo_core::content_gate::ContentGateResult| {
+                gate.findings
+                    .iter()
+                    .map(|finding| (finding.message.clone(), finding.line, finding.column))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(positions(left), positions(right), "{}", left.gate_id);
+        }
+        assert_eq!(emdash.gates[0].status, GateStatus::Passed);
+        assert_eq!(emdash.gates[0].measurements["sentence_count"], 4);
+        assert_eq!(emdash.gates[2].findings.len(), 1);
+    }
     #[test]
     fn findings_map_to_their_portable_text_span_and_utf16_offset() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"children":[{"_type":"span","text":"Heading"}]},{"children":[{"_type":"span","text":"😀 "},{"_type":"span","text":"pré target"}]}]}"#).unwrap();

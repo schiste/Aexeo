@@ -3,6 +3,7 @@ mod parser;
 #[path = "site/sitemap.rs"]
 mod sitemap;
 
+use crate::error::UserContext;
 use aexeo_contracts::{AuditCrawlMeta, AuditPageSnapshot, AuditSiteSnapshot};
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
@@ -72,6 +73,10 @@ pub struct CrawlMeta {
     /// discovery sees them as present even when they're not
     /// reachable from the HTML link graph.
     pub probed_artifact_paths: Vec<String>,
+    /// Requests answered with a non-2xx status. These are not pages.
+    pub failed_responses: Vec<aexeo_contracts::CrawlResponseProvenance>,
+    /// URLs the crawler did not request because robots.txt disallows them.
+    pub robots_skipped_urls: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -450,7 +455,9 @@ fn build_inbound_link_map(pages: &[Page]) -> BTreeMap<String, BTreeSet<String>> 
 }
 
 fn read_optional_text(path: &Path) -> Option<String> {
-    fs::read_to_string(path).ok()
+    fs::read(path)
+        .ok()
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
 }
 
 fn detect_deployment_model(root: &Path) -> (DeploymentModel, Vec<String>) {
@@ -527,15 +534,58 @@ pub struct SiteBuildInput {
     pub crawl_meta: Option<CrawlMeta>,
 }
 
+/// Give a crawled page the link targets its observed URL makes resolvable.
+///
+/// The source parser only knows root-relative hrefs, because a static file has
+/// no URL. A crawled page does, so the links the crawl followed must also count
+/// for inbound and broken-link analysis, or a page reached through a relative
+/// link would look orphaned. Links the parser already located keep their line.
+fn apply_crawled_links(page: &mut Page) {
+    let Some(url) = page
+        .crawl_response
+        .as_ref()
+        .and_then(|response| response.observed_url.as_deref())
+    else {
+        return;
+    };
+    for crate::link_evidence::CrawlLink {
+        href,
+        anchor,
+        route,
+    } in crate::link_evidence::crawl_links(&page.raw_text, url)
+    {
+        let mut located = false;
+        for link in page.links.iter_mut().filter(|link| link.href == href) {
+            located = true;
+            link.target.get_or_insert_with(|| route.clone());
+        }
+        if !located {
+            page.links.push(Link {
+                href,
+                target: Some(route),
+                text: anchor,
+                line: 1,
+                column: 1,
+            });
+        }
+    }
+    page.internal_links = page
+        .links
+        .iter()
+        .filter_map(|link| link.target.clone())
+        .collect();
+}
+
 pub fn build_site_from_parts(input: SiteBuildInput) -> Result<Site> {
     let SiteBuildInput {
         root,
-        pages,
+        mut pages,
         artifacts,
         deployment_model,
         deployment_markers,
         crawl_meta,
     } = input;
+    pages.iter_mut().for_each(apply_crawled_links);
     let mut route_page_indices = BTreeMap::new();
     for (index, page) in pages.iter().enumerate() {
         let current = route_page_indices
@@ -563,6 +613,19 @@ pub fn build_site_from_parts(input: SiteBuildInput) -> Result<Site> {
         for path in &meta.probed_artifact_paths {
             indexed_paths.insert(path.clone());
         }
+        // A route the crawler was told not to request or denied access to is
+        // unknown, not broken.
+        let denied = meta
+            .failed_responses
+            .iter()
+            .filter(|response| matches!(response.status_code, Some(401 | 403)))
+            .map(|response| &response.requested_url);
+        indexed_paths.extend(
+            meta.robots_skipped_urls
+                .iter()
+                .chain(denied)
+                .filter_map(|url| route_from_urlish(url)),
+        );
     }
     Ok(Site {
         root,
@@ -600,7 +663,7 @@ fn deployment_model_from_label(label: &str) -> DeploymentModel {
 pub fn audit_site_snapshot(site: &Site, site_url: Option<&str>) -> AuditSiteSnapshot {
     AuditSiteSnapshot {
         version: 1,
-        site_url: site_url.map(str::to_string),
+        site_url: site_url.map(crate::link_graph::redact_url),
         root: site.root.to_string_lossy().to_string(),
         deployment_model: deployment_model_label(&site.deployment_model).to_string(),
         deployment_markers: site.deployment_markers.clone(),
@@ -610,6 +673,8 @@ pub fn audit_site_snapshot(site: &Site, site_url: Option<&str>) -> AuditSiteSnap
             discovered_internal_routes: meta.discovered_internal_routes,
             truncated: meta.truncated,
             probed_artifact_paths: meta.probed_artifact_paths.clone(),
+            failed_responses: meta.failed_responses.clone(),
+            robots_skipped_urls: meta.robots_skipped_urls.clone(),
         }),
         llms_text: site.llms_text.clone(),
         robots_text: site.robots_text.clone(),
@@ -660,11 +725,17 @@ pub fn build_site_from_audit_snapshot(snapshot: &AuditSiteSnapshot) -> Result<Si
             discovered_internal_routes: meta.discovered_internal_routes,
             truncated: meta.truncated,
             probed_artifact_paths: meta.probed_artifact_paths.clone(),
+            failed_responses: meta.failed_responses.clone(),
+            robots_skipped_urls: meta.robots_skipped_urls.clone(),
         }),
     })
 }
 
 pub fn load_site(root: &Path) -> Result<Site> {
+    read_site(root).user_context(format!("cannot load site at {}", root.display()))
+}
+
+fn read_site(root: &Path) -> Result<Site> {
     let mut html_files = Vec::new();
     iter_html_files(root, &mut html_files)?;
     html_files.sort();
@@ -801,5 +872,93 @@ mod tests {
         let site = load_site(root).unwrap();
         assert_eq!(site.deployment_model, DeploymentModel::SsrWorker);
         assert!(!site.deployment_markers.is_empty());
+    }
+
+    fn only_page(html: &[u8]) -> super::Page {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("index.html"), html).unwrap();
+        let site = load_site(temp_dir.path()).unwrap();
+        site.page("").unwrap().clone()
+    }
+
+    #[test]
+    fn title_and_h1_are_found_whatever_the_tag_case() {
+        let page = only_page(
+            b"<HTML><HEAD><TITLE>Upper</TITLE></HEAD><BODY><H1 CLASS=\"a\">Head</H1></BODY></HTML>",
+        );
+        assert_eq!(page.title.as_deref(), Some("Upper"));
+        assert_eq!(page.h1_texts, vec!["Head".to_string()]);
+    }
+
+    #[test]
+    fn comments_scripts_templates_and_svg_titles_are_not_markup() {
+        let page = only_page(
+            b"<html><head><!-- <title>Old</title> --><title>Live</title><script>x='<h1>s</h1>'</script></head>\
+              <body><svg><title>Icon</title></svg><!-- <h1>Old</h1> --><h1>Live</h1><template><h1>t</h1></template></body></html>",
+        );
+        assert_eq!(page.title.as_deref(), Some("Live"));
+        assert_eq!(page.h1_texts, vec!["Live".to_string()]);
+        assert_eq!(page.h1_count, 1);
+    }
+
+    #[test]
+    fn svg_title_is_not_the_page_title() {
+        let page = only_page(b"<html><body><svg><title>Icon</title></svg><h1>x</h1></body></html>");
+        assert_eq!(page.title, None);
+    }
+
+    #[test]
+    fn title_and_h1_text_decode_entities_and_keep_nested_text() {
+        let page = only_page(b"<title>A &amp; B</title><h1>One <em>two</em>\n three</h1>");
+        assert_eq!(page.title.as_deref(), Some("A & B"));
+        assert_eq!(page.h1_texts, vec!["One two three".to_string()]);
+    }
+
+    #[test]
+    fn empty_h1_does_not_count() {
+        let page = only_page(b"<title>x</title><h1> </h1>");
+        assert_eq!(page.h1_count, 0);
+    }
+
+    #[test]
+    fn line_numbers_of_other_elements_are_unaffected_by_title_extraction() {
+        let page = only_page(b"<!-- c -->\n<TITLE>x</TITLE>\n<H1>y</H1>\n<a href=\"/z\">z</a>");
+        assert_eq!(page.links[0].line, 4);
+    }
+
+    #[test]
+    fn non_utf8_page_is_decoded_lossily_and_the_site_keeps_loading() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        fs::write(root.join("index.html"), "<title>Home</title><h1>Home</h1>").unwrap();
+        fs::write(
+            root.join("latin.html"),
+            b"<title>Caf\xe9</title><h1>Caf\xe9</h1>",
+        )
+        .unwrap();
+
+        let site = load_site(root).unwrap();
+
+        assert!(site.has_route(""));
+        assert_eq!(
+            site.page("latin").unwrap().title.as_deref(),
+            Some("Caf\u{fffd}")
+        );
+    }
+
+    #[test]
+    fn non_utf8_robots_still_counts_as_present() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        fs::write(root.join("index.html"), "<title>Home</title>").unwrap();
+        fs::write(
+            root.join("robots.txt"),
+            b"User-agent: *\nDisallow: /caf\xe9\n",
+        )
+        .unwrap();
+
+        let site = load_site(root).unwrap();
+
+        assert!(site.robots_text.is_some());
     }
 }

@@ -10,6 +10,7 @@ pub mod content_presets;
 pub mod content_rules;
 pub mod docs;
 pub mod editorial_rules;
+pub mod error;
 pub mod fix;
 pub mod generate;
 pub mod header_rules;
@@ -43,6 +44,7 @@ pub mod structure_rules;
 pub mod surface_rules;
 pub mod surfaces;
 pub(crate) mod text;
+pub mod text_index;
 pub mod time_shim;
 pub mod verification;
 pub mod well_known_rules;
@@ -60,7 +62,7 @@ pub use docs::{
     render_config_reference, render_rule_reference, write_reference_documents,
 };
 pub use editorial_rules::run_editorial_rules;
-pub use fix::{FixOptions, apply_safe_fixes, apply_safe_fixes_with_options};
+pub use fix::{FixOptions, FixReport, SkippedFix, apply_safe_fixes, apply_safe_fixes_with_options};
 pub use generate::{
     GeneratedMachineArtifact, MachineArtifactBundle, build_link_suggestions,
     build_machine_artifact_bundle, render_llms_full_txt, render_llms_txt, render_markdown_mirror,
@@ -82,7 +84,7 @@ pub use integrations::{
     submit_indexnow_with_ledger, validate_indexnow,
 };
 pub use intelligence::{
-    AnswerFanoutQuery, AnswerFanoutReport, AnswerFanoutRouteMatch, EvidenceClaim,
+    AnswerFanoutQuery, AnswerFanoutReport, AnswerFanoutRouteMatch, AnswerPackFacts, EvidenceClaim,
     EvidenceClaimKind, EvidenceRouteAssessment, EvidenceSectionAssessment, EvidenceSiteAssessment,
     GroundingCoverageGap, GroundingIntentFamily, GroundingRouteAnalysis, GroundingSiteAnalysis,
     IdentityDrift, IntelligenceBlocker, PageIdentity, PageIdentitySources, RouteIntelligenceScore,
@@ -96,6 +98,7 @@ pub use intelligence::{
     looks_like_generic_entity_name, map_grounding_queries, reconcile_trust_surfaces,
     render_facts_prompt, score_intelligence, validate_truth_manifest,
 };
+pub use link_graph::redact_url;
 pub use link_rules::run_link_rules;
 pub use llm_rules::run_llm_rules;
 pub use plugin::{PluginManifestCheck, validate_python_plugin_module};
@@ -107,9 +110,10 @@ pub use registry::{
 };
 pub use reporting::{
     DEFAULT_AUDIT_LOG_LIMIT, LayerBreakdown, build_audit_artifact, build_recap_lines,
-    render_audit_artifact_json, render_markdown_artifact, render_sarif, render_text,
-    render_text_artifact, rule_group_name, summarize_findings, summarize_findings_by_layer,
-    write_audit_artifact, write_partial_audit_artifact, write_progress_audit_artifact,
+    is_reports_dir, render_audit_artifact_json, render_markdown_artifact, render_sarif,
+    render_text, render_text_artifact, reports_dir, rule_group_name, summarize_findings,
+    summarize_findings_by_layer, write_audit_artifact, write_partial_audit_artifact,
+    write_progress_audit_artifact,
 };
 pub use robots_rules::run_robots_rules;
 #[cfg(feature = "net")]

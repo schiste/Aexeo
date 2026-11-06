@@ -4,6 +4,59 @@ All notable changes to `@aeptus/aexeo-emdash` are listed here.
 The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Security
+
+- **EVAL_TOKEN never falls back to plaintext.** When the host cannot encrypt
+  the token (usually `EMDASH_ENCRYPTION_KEY` is unset), the Setup page now shows
+  an error and changes nothing, where it used to store the token in plaintext KV
+  with only a log line. **Behaviour change:** on such a host, saving the Setup
+  form fails until the key is set, even for a URL-only change. A token already
+  in KV keeps working, and the Setup page says it is unencrypted.
+- **A rotated token is no longer ignored.** Reads preferred settings, so a token
+  that fell back to KV during a rotation lost to the older one in settings. A KV
+  token is always the newer of the two, and is now read first.
+- **The Setup form rejects trailing-dot hosts** such as `https://localhost./`,
+  which passed the loopback check.
+
+### Changed
+
+- **Editors can read findings.** The configured plugin's `admin` and `data`
+  routes declare `plugins:read`; emdash otherwise requires `plugins:manage`.
+  Refresh, facts and presence stay admin-only, and the `admin` route refuses
+  `refresh_findings` for non-admins. The sandboxed entry stays admin-only because
+  its `admin` route also saves the Setup form.
+- **The configured plugin declares its network use**: `network:request` and the
+  presence sources' hosts, which it was using while declaring only `content:read`.
+
+### Fixed
+
+- **Concurrent writes no longer lose newer data.** A save older than the stored
+  revision is ignored, a slow evaluation does not overwrite the findings of a
+  later save or delete, and a Refresh does not overwrite a save that landed during
+  the sweep or remove a document created during it.
+- **Deleted content leaves the findings immediately**, through a
+  `content:afterDelete` hook, including when it is only trashed. Restoring an
+  entry brings it back at its next save or Refresh.
+- **Legacy `document:` entries are removed** by a Refresh that does not see their
+  route. They record no collection, so they were previously never removed.
+- **The sandboxed score widget reports the score as unavailable** instead of a
+  score of 0, which read as a measured result.
+- **Entity presence no longer reports false results.** Common Crawl searches the
+  whole domain, where an exact-URL match reported a site absent when the crawl
+  skipped only its home page. Wikipedia and Wikidata records must name the entity
+  or a declared alias, ignoring legal forms; a substring used to count, so
+  "Pineapple" matched "Apple".
+- **Saving a document no longer reports false site-graph findings or erases
+  real ones.** A save evaluates one document as a one-page site, so every
+  internal link was reported as broken (`LNK001`) and the page as an orphan
+  (`LNK002`), and those results replaced the route's stored findings until the
+  next Refresh. Rules that depend on other documents (`LNK001`-`LNK004`,
+  `SEO009`, `SEO012`, `SEO016`, `SEO017`, `CNT005`) are now computed by Refresh
+  only: a save keeps the route's stored findings for them, so a link fixed or
+  added in that save is reflected at the next Refresh.
+
 ## [0.8.19] - 2026-09-29
 
 Updates the EmDash integration to the current plugin and content APIs, and
@@ -130,6 +183,16 @@ version, since 0.8.19 had never been published.
 
 ### Changed
 
+- **The dashboard widget no longer shows a composite score.** The "Overall"
+  stat and the "Site score is N — below the 60 quality threshold" banner are
+  gone; blockers remain the call to action. `SiteIntelligenceScore` loses
+  `overall_score`, `answer_pack_score` and `elapsed_us` and gains
+  `answer_pack`, and `citation_readiness_score` and `truth_consistency_score`
+  may now be `null`, shown as "unknown", when nothing was measured.
+- **Entity presence resolves the newest Common Crawl index at runtime** from
+  `collinfo.json` instead of a pinned crawl, so a site first crawled after a
+  plugin release is no longer reported `not_found`. Failing to resolve the
+  index reports `unreachable`.
 - Support EmDash `^1.2.0` and run the plugin-host integration coverage against
   EmDash `1.2.0`.
 

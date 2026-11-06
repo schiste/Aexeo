@@ -97,6 +97,7 @@ fn scan_non_test_rust_source(
                     severity: "error".to_string(),
                     suggestion: None,
                     scope: FindingScope::Sitewide,
+                    subject: None,
                 });
                 break;
             }

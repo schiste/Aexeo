@@ -106,6 +106,16 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
             description: "Whether runtime crawl should seed additional routes from sitemap.xml when available.",
         },
         ConfigFieldDoc {
+            key: "crawl_ignore_robots",
+            default_value: "`false`",
+            description: "Crawl URLs that robots.txt disallows. Only for auditing a site you own, such as staging.",
+        },
+        ConfigFieldDoc {
+            key: "crawl_delay_ms",
+            default_value: "`0`",
+            description: "Milliseconds to wait between batches of crawl requests. A batch holds up to `max_workers` requests.",
+        },
+        ConfigFieldDoc {
             key: "crawl_capture_screenshot",
             default_value: "`false`",
             description: "Whether browser crawl should save page screenshots.",
@@ -578,6 +588,14 @@ fn flat_properties() -> Map<String, Value> {
         boolean_schema("Whether runtime crawl should seed routes from sitemap.xml."),
     );
     properties.insert(
+        "crawl_ignore_robots".to_string(),
+        boolean_schema("Crawl URLs that robots.txt disallows. Only for a site you own."),
+    );
+    properties.insert(
+        "crawl_delay_ms".to_string(),
+        integer_schema("Milliseconds to wait between batches of crawl requests."),
+    );
+    properties.insert(
         "crawl_capture_trace".to_string(),
         boolean_schema("Whether browser crawl should capture a trace artifact."),
     );
@@ -849,6 +867,8 @@ fn nested_properties() -> Map<String, Value> {
                 "include_patterns": { "type": "array", "items": { "type": "string" } },
                 "exclude_patterns": { "type": "array", "items": { "type": "string" } },
                 "use_sitemap": { "type": "boolean" },
+                "ignore_robots": { "type": "boolean" },
+                "crawl_delay_ms": { "type": "integer", "minimum": 0 },
                 "capture_trace": { "type": "boolean" },
                 "capture_screenshot": { "type": "boolean" },
                 "capture_console": { "type": "boolean" },

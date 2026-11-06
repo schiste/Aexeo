@@ -159,7 +159,7 @@ export interface AdminViewTuning {
   score: (
     documents: readonly EmdashDocument[],
     kv: KvNamespace,
-  ) => Promise<SiteIntelligenceScore>;
+  ) => Promise<SiteIntelligenceScore | null>;
   /**
    * Label for the widget's truth-consistency stat. Configured mode badges
    * it with the real signal source so a schema-only 60 doesn't read the
@@ -401,27 +401,36 @@ export async function renderScoreWidget(
     };
   }
   const score = await tuning.score(documents, kv);
+  if (score === null) {
+    return {
+      blocks: [
+        { type: "header", text: "SEO score" },
+        {
+          type: "context",
+          text: "The site score is unavailable in sandboxed mode. Findings are not affected.",
+        },
+      ],
+    };
+  }
   const blocks: unknown[] = [
     {
       type: "stats",
       items: [
-        { label: "Overall", value: `${score.overall_score}` },
-        { label: "Citation", value: `${score.citation_readiness_score}` },
+        {
+          label: "Citation",
+          value: score.citation_readiness_score?.toString() ?? "unknown",
+        },
         {
           label: tuning.truthLabel(score),
-          value: `${score.truth_consistency_score}`,
+          value: score.truth_consistency_score?.toString() ?? "unknown",
         },
-        { label: "Answers", value: `${score.answer_pack_score}` },
+        {
+          label: "Answers",
+          value: `${score.answer_pack.routes_with_answer_blocks}/${score.answer_pack.routes_analyzed} routes`,
+        },
       ],
     },
   ];
-  if (score.overall_score < 60) {
-    blocks.unshift({
-      type: "banner",
-      title: `Site score is ${score.overall_score} — below the 60 quality threshold`,
-      variant: "alert",
-    });
-  }
   if (score.blockers.length > 0) {
     blocks.push({
       type: "context",

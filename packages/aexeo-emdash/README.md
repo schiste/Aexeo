@@ -3,7 +3,7 @@
 Aexeo SEO/GEO content evaluator as an emdash plugin.
 
 Adds a Findings admin page, per-document panel, and dashboard
-intelligence-score widget to an emdash site. Saves auto-evaluate the
+intelligence facts widget to an emdash site. Saves auto-evaluate the
 changed document; the Refresh button re-evaluates the whole site.
 
 ## Install
@@ -43,13 +43,20 @@ troubleshooting list, see [INSTALL.md](./INSTALL.md).
 - **Findings page** at `/_emdash/admin/plugins/aexeo-emdash/findings`:
   rule violations across the site, filterable by severity.
 - **Document panel** at `/document`: findings scoped to one document.
-- **Dashboard widget**: top-line intelligence score (citation, truth,
-  answer-pack, external-trust dimensions). Banner appears below 60.
+- **Dashboard widget**: citation readiness, truth consistency and answer
+  structure side by side, with the top blockers. There is no composite score
+  or quality threshold, and a dimension with nothing to measure reads
+  `unknown`.
+- **Entity presence**: Wikipedia is searched on `en.wikipedia.org` only, so
+  `not_found` says nothing about other language editions.
 - **Refresh button**: re-evaluate every document in the configured
   collections (`posts`, `pages` by default).
 - **Auto-evaluate on save**: EmDash's `content:afterSave` hook evaluates
   the saved document and updates its findings. Sandboxed installs need a
   configured evaluator sidecar; configured installs run evaluation in-process.
+  Findings that depend on other documents (broken and weak internal links,
+  inbound links, hreflang targets, shared canonicals, duplicate metadata and
+  text) stay as the last Refresh stored them until the next Refresh.
 
 ## Compatibility
 

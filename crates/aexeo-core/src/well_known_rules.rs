@@ -53,6 +53,7 @@ fn finding(
         severity: severity.to_string(),
         suggestion: suggestion.map(str::to_string),
         scope: FindingScope::Sitewide,
+        subject: None,
     }
 }
 
