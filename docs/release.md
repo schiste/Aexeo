@@ -18,15 +18,15 @@ sh scripts/pre-push.sh
 `scripts/check-repo.sh` runs, in order:
 
 - `scripts/check-code.sh` — `cargo fmt --check`, a strict non-test Clippy pass, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --all-targets`
-- `scripts/check-deps.sh` — `cargo audit`, `cargo deny check`, `cargo +nightly udeps --workspace --all-targets`
+- `scripts/check-deps.sh` — `cargo audit`, `cargo deny check`, `cargo-udeps --workspace --all-targets` on the nightly pinned in `scripts/quality-tool-versions.sh`
 - `scripts/check-docs.sh` — `aexeo-cli docs check .` and `aexeo-cli quality .`
 - `scripts/check-config.sh` — `aexeo-cli config print . --format json` and the same for `docs/examples/aexeo.v1.toml`
 
 `scripts/pre-push.sh` adds the release-build and install-path smoke test.
 
 `scripts/install-quality-tools.sh` must run first: `check-deps.sh` hard-fails
-before running any check if `cargo-audit`, `cargo-deny`, or `cargo +nightly
-udeps` is missing.
+before running any check if `cargo-audit`, `cargo-deny`, or `cargo-udeps` on the
+pinned nightly is missing.
 
 To reproduce CI locally in one command:
 

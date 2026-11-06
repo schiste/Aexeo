@@ -1,14 +1,17 @@
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 GUARD = ROOT / "scripts" / "check-release-ci.py"
+WORKFLOWS = [ROOT / ".github/workflows/ci.yml", ROOT / ".github/workflows/release-internal.yml"]
 SHA = "a" * 40
 
 
@@ -81,6 +84,43 @@ class ReleaseGuardTests(unittest.TestCase):
         self.assert_refused(self.guard([run()], gh_exit=1), "could not determine")
         self.assert_refused(self.guard(gh_stdout="not json"), "could not determine")
         self.assert_refused(self.guard(gh_stdout="{}"), "could not determine")
+
+
+class PinTests(unittest.TestCase):
+    def test_toolchain_channel_is_an_exact_release(self):
+        channel = tomllib.loads((ROOT / "rust-toolchain.toml").read_text())["toolchain"]["channel"]
+        self.assertRegex(channel, r"^\d+\.\d+\.\d+$")
+
+    def test_workflows_do_not_float_tools(self):
+        for path in WORKFLOWS:
+            for line in path.read_text().splitlines():
+                if line.lstrip().startswith("#"):
+                    continue
+                if "cargo install" in line:
+                    self.assertIn("--locked", line, f"{path.name}: {line}")
+                    self.assertIn("@", line, f"{path.name}: unversioned install: {line}")
+                self.assertNotRegex(line, r"toolchain install nightly\b", f"{path.name}: {line}")
+                self.assertNotRegex(line, r"\+nightly\b", f"{path.name}: {line}")
+
+    def test_every_rust_install_step_names_its_toolchain(self):
+        # The action defaults to `stable`, a different rustup toolchain from the
+        # pin: `targets:` and `components:` would land on the wrong one.
+        pattern = r"uses: dtolnay/rust-toolchain@\S+\n((?:(?!\s+- ).*\n)*)"
+        for path in WORKFLOWS:
+            steps = list(re.finditer(pattern, path.read_text()))
+            self.assertTrue(steps, path.name)
+            for step in steps:
+                self.assertIn("toolchain:", step.group(1), f"{path.name}: {step.group(0)}")
+
+    def test_scripts_use_the_pinned_nightly_and_tool_versions(self):
+        versions = (ROOT / "scripts/quality-tool-versions.sh").read_text()
+        self.assertRegex(versions, r"AEXEO_NIGHTLY_TOOLCHAIN=nightly-\d{4}-\d{2}-\d{2}\n")
+        for tool in ("AUDIT", "DENY", "UDEPS", "LLVM_COV"):
+            self.assertRegex(versions, rf"AEXEO_CARGO_{tool}_VERSION=\d+\.\d+\.\d+\n")
+        self.assertNotIn("+nightly", (ROOT / "scripts/check-deps.sh").read_text())
+        install = (ROOT / "scripts/install-quality-tools.sh").read_text()
+        self.assertIn("cargo install --locked", install)
+        self.assertNotRegex(install, r"toolchain install nightly\b")
 
 
 if __name__ == "__main__":
