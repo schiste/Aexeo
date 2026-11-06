@@ -40,6 +40,15 @@ const FETCH_TIMEOUT_MS = 5_000;
 const USER_AGENT =
   "aexeo-emdash-plugin/0.8 (+https://github.com/schiste/Aexeo; entity-presence diagnostic)";
 
+// Hosts this module contacts directly, declared on the configured plugin.
+export const PRESENCE_HOSTS = [
+  "en.wikipedia.org",
+  "www.wikidata.org",
+  "api.github.com",
+  "rdap.org",
+  "index.commoncrawl.org",
+] as const;
+
 export type SourceStatus = "found" | "not_found" | "unreachable" | "skipped";
 
 export interface SourceResult {
@@ -146,11 +155,9 @@ async function checkWikipedia(
       return notFound("wikipedia");
     }
     const title = String(titles[0]);
-    // OpenSearch fuzzy-matches; if the top hit's title differs
-    // dramatically from the query, treat as not_found rather than
-    // claim the entity has an article. Heuristic: case-insensitive
-    // substring match in either direction.
-    if (!fuzzyMatch(title, input.name)) {
+    // OpenSearch fuzzy-matches; if the top hit names something else,
+    // treat as not_found rather than claim the entity has an article.
+    if (!namesEntity(title, input)) {
       return notFound("wikipedia");
     }
     const articleUrl = String(urls[0] ?? "");
@@ -193,7 +200,7 @@ async function checkWikidata(
       return notFound("wikidata");
     }
     const label = top.label ?? input.name;
-    if (!fuzzyMatch(label, input.name)) {
+    if (!namesEntity(label, input)) {
       return notFound("wikidata");
     }
     return found("wikidata", {
@@ -314,18 +321,21 @@ async function checkCommonCrawl(
       "no website URL in manifest, can't query crawl index",
     );
   }
-  // The CDX index ships a new "month" every few weeks; we point at
-  // the latest known stable index. New indexes appear at predictable
-  // URLs (CC-MAIN-YYYY-WW), but listing them requires another
-  // request. For Phase 3, hard-code the latest index — periodic
-  // refresh of this constant is part of plugin maintenance until we
-  // wire in the index-of-indexes fetch.
-  const index = "CC-MAIN-2026-15";
-  const url = new URL(`https://index.commoncrawl.org/${index}-index`);
-  url.searchParams.set("url", host);
-  url.searchParams.set("output", "json");
-  url.searchParams.set("limit", "1");
   try {
+    // A new index ships every few weeks, and the CDX API answers 404 both for
+    // an unknown index and for a host with no captures. Only an index taken
+    // from the published list makes a 404 mean the host is absent.
+    const index = await latestCommonCrawlIndex(fetcher);
+    if (index === null) {
+      return unreachable("common_crawl", "could not read the crawl index list");
+    }
+    const url = new URL(`https://index.commoncrawl.org/${index}-index`);
+    url.searchParams.set("url", host);
+    // The default exact match covers only the home page URL, which a crawl
+    // can miss even when it captured the rest of the site.
+    url.searchParams.set("matchType", "domain");
+    url.searchParams.set("output", "json");
+    url.searchParams.set("limit", "1");
     const res = await timedFetch(fetcher, url.toString());
     if (res.status === 404) return notFound("common_crawl");
     if (!res.ok) return unreachable("common_crawl", `HTTP ${res.status}`);
@@ -353,6 +363,20 @@ async function checkCommonCrawl(
   } catch (error) {
     return unreachable("common_crawl", errMsg(error));
   }
+}
+
+async function latestCommonCrawlIndex(
+  fetcher: typeof fetch,
+): Promise<string | null> {
+  const res = await timedFetch(
+    fetcher,
+    "https://index.commoncrawl.org/collinfo.json",
+  );
+  if (!res.ok) return null;
+  // The list is published newest first.
+  const body = (await res.json()) as unknown;
+  const id = Array.isArray(body) ? (body[0] as { id?: unknown })?.id : null;
+  return typeof id === "string" && /^CC-MAIN-[\w-]+$/.test(id) ? id : null;
 }
 
 // --- Helpers ---------------------------------------------------------
@@ -417,10 +441,35 @@ function errMsg(error: unknown): string {
   return String(error);
 }
 
-function fuzzyMatch(a: string, b: string): boolean {
-  const aL = a.toLowerCase().trim();
-  const bL = b.toLowerCase().trim();
-  return aL.includes(bL) || bL.includes(aL);
+// Whether a source's record names this entity. Substring matching called
+// "Pineapple" a match for "Apple" and "Acme Rockets" one for "Acme", so names
+// must be equal once spelling that does not identify anything is removed.
+function namesEntity(candidate: string, input: EntityInput): boolean {
+  const normalized = normalizeEntityName(candidate);
+  return [input.name, ...(input.aliases ?? [])].some(
+    (name) => normalizeEntityName(name) === normalized,
+  );
+}
+
+const LEGAL_FORMS = new Set([
+  "ab", "ag", "bv", "co", "company", "corp", "corporation", "gmbh", "inc",
+  "incorporated", "kk", "limited", "llc", "llp", "lp", "ltd", "nv", "oy", "plc",
+  "pty", "sa", "sarl", "sas", "srl",
+]);
+
+// Drops a parenthetical disambiguator, case, punctuation, a leading "the", and
+// trailing legal forms. A name made only of those words keeps them.
+function normalizeEntityName(name: string): string {
+  const words = name
+    .replace(/\([^)]*\)/g, " ")
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((word) => word.length > 0);
+  let end = words.length;
+  while (end > 0 && LEGAL_FORMS.has(words[end - 1] as string)) end -= 1;
+  const start = words[0] === "the" ? 1 : 0;
+  const core = words.slice(start, end);
+  return (core.length > 0 ? core : words).join(" ");
 }
 
 function sanitizeGitHubHandle(name: string): string | null {
