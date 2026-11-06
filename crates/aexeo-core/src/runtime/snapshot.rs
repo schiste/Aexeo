@@ -145,6 +145,7 @@ impl RuntimeSnapshotBuilder {
                                 .to_string(),
                         ),
                         scope: FindingScope::Sitewide,
+                        subject: None,
                     });
                     continue;
                 }
@@ -294,6 +295,7 @@ fn build_runtime_site_from_pages(
                 severity: "warning".to_string(),
                 suggestion: Some("increase --max-pages for a more complete runtime audit".to_string()),
                 scope: FindingScope::Sitewide,
+                subject: None,
             });
     }
     Ok((site, crawl_findings))

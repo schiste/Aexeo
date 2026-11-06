@@ -167,6 +167,8 @@ pub(crate) struct LoadedRobots {
     pub(crate) text: Option<String>,
     /// Why the file could not be read, when that restricts the crawl.
     pub(crate) unreachable: Option<String>,
+    /// No HTTP response came back at all, as opposed to an error status.
+    pub(crate) no_response: bool,
 }
 
 pub(crate) fn load_robots(origin: &str, runtime: &RuntimeConfig<'_>) -> LoadedRobots {
@@ -193,6 +195,7 @@ fn interpret_response(
                 policy: RobotsPolicy::DenyAll,
                 text: None,
                 unreachable: Some(fetch_error_summary(&error).to_string()),
+                no_response: true,
             };
         }
     };
@@ -204,12 +207,14 @@ fn interpret_response(
                 policy: RobotsPolicy::parse(&body, token),
                 text: Some(body),
                 unreachable: None,
+                no_response: false,
             }
         }
         (Some(status), _) if (400..500).contains(&status) && status != 429 => LoadedRobots {
             policy: RobotsPolicy::AllowAll,
             text: None,
             unreachable: None,
+            no_response: false,
         },
         (status, _) => LoadedRobots {
             policy: RobotsPolicy::DenyAll,
@@ -218,6 +223,7 @@ fn interpret_response(
                 Some(status) => format!("HTTP {status}"),
                 None => "no HTTP status".to_string(),
             }),
+            no_response: false,
         },
     }
 }
@@ -332,9 +338,11 @@ mod tests {
             let down = check(response(status, None));
             assert_eq!(down.policy, RobotsPolicy::DenyAll, "{status}");
             assert!(down.unreachable.is_some());
+            assert!(!down.no_response, "{status}");
         }
         let failed = check(Err(anyhow::anyhow!("timed out")));
         assert_eq!(failed.policy, RobotsPolicy::DenyAll);
         assert_eq!(failed.unreachable.as_deref(), Some("request failed"));
+        assert!(failed.no_response);
     }
 }

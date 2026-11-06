@@ -26,7 +26,8 @@ RFC 9309, for page, seed and sitemap URLs and for optional artifact probes.
 | --- | --- |
 | 2xx | The rules apply: the group naming the crawler's product token, otherwise `*` |
 | 4xx other than 429 | No restrictions |
-| 5xx or a network failure | Everything is disallowed, with a `CRW002` warning naming `--ignore-robots` |
+| 5xx | Everything is disallowed, with a `CRW002` warning naming `--ignore-robots` |
+| No response (network failure) | Everything is disallowed, with a `CRW002` warning naming `--ignore-robots`. If no page responds either, the target is unreachable: the command fails with exit 2 instead of reporting an audit |
 | 429 | Treated like a 5xx. RFC 9309 groups it with 4xx; this is deliberately stricter, because 429 asks the client to back off |
 
 Requests send `User-Agent: aexeo/<version>` unless `headers` sets another one. The

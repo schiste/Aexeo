@@ -15,6 +15,7 @@ use super::search_console::{
 };
 use super::{ensure_reports_dir, normalize_audit_path_to_route};
 use crate::config::{Config, load_config};
+use crate::reporting::reports_dir;
 use crate::site::route_from_urlish;
 use crate::static_check::run_native_static_audit_with_config;
 
@@ -32,7 +33,7 @@ pub struct PublishHookReport {
 }
 
 fn publish_hook_search_console_path(root: &Path) -> PathBuf {
-    root.join(".aexeo-reports/publish-hook-search-console.csv")
+    reports_dir(root).join("publish-hook-search-console.csv")
 }
 
 pub fn build_publish_hook_report(

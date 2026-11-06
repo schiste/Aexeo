@@ -18,6 +18,7 @@ fn finding(
         severity: "warning".to_string(),
         suggestion: suggestion.map(str::to_string),
         scope: FindingScope::Sitewide,
+        subject: None,
     }
 }
 

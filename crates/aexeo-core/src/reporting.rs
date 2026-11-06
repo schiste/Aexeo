@@ -5,6 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::adapter::resolve_static_site_root;
+use crate::config::load_config;
 use crate::registry::rule_metadata_for_id;
 use aexeo_contracts::{
     AuditArtifact, AuditStatus, AuditSummary, CrawlStats, Finding, FindingScope, RuleClass,
@@ -943,13 +945,51 @@ pub fn update_trend_history(
     Ok(())
 }
 
+const REPORTS_DIR_NAME: &str = ".aexeo-reports";
+
+/// Whether `dir` is a reports directory, whichever root it belongs to.
+pub fn is_reports_dir(dir: &Path) -> bool {
+    dir.file_name().and_then(|name| name.to_str()) == Some(REPORTS_DIR_NAME)
+}
+
+/// The directory that holds Aexeo's reports for `root`.
+///
+/// Normally `<root>/.aexeo-reports`. When `root` is the build output of a
+/// project above it (`source_dir` in its `aexeo.toml`, or a detected framework
+/// output such as Astro's `dist`), reports go to that project instead: anything
+/// inside build output would be deployed and served publicly.
+///
+/// A bare directory with no project above it is indistinguishable from a site
+/// root, so it keeps its reports inside itself.
+pub fn reports_dir(root: &Path) -> PathBuf {
+    project_of_build_output(root)
+        .as_deref()
+        .unwrap_or(root)
+        .join(REPORTS_DIR_NAME)
+}
+
+fn project_of_build_output(root: &Path) -> Option<PathBuf> {
+    let output = root.canonicalize().ok()?;
+    output
+        .ancestors()
+        .skip(1)
+        .find(|project| {
+            // A project whose config cannot be read does not claim this
+            // directory; the command itself still validates what it loads.
+            load_config(project, None)
+                .and_then(|config| resolve_static_site_root(project, &config))
+                .is_ok_and(|site_root| site_root == output)
+        })
+        .map(Path::to_path_buf)
+}
+
 pub fn write_audit_artifact(
     artifact: &AuditArtifact,
     base_dir: &Path,
     command_name: &str,
     keep: usize,
 ) -> Result<PathBuf> {
-    let artifact_dir = base_dir.join(".aexeo-reports");
+    let artifact_dir = reports_dir(base_dir);
     fs::create_dir_all(&artifact_dir)?;
     let timestamp = artifact.generated_at;
     let history_path = artifact_dir.join(format!("{}-{}.json", command_name, timestamp));
@@ -967,7 +1007,7 @@ pub fn write_partial_audit_artifact(
     base_dir: &Path,
     command_name: &str,
 ) -> Result<PathBuf> {
-    let artifact_dir = base_dir.join(".aexeo-reports");
+    let artifact_dir = reports_dir(base_dir);
     fs::create_dir_all(&artifact_dir)?;
     let latest_path = artifact_dir.join(format!("{}-latest.json", command_name));
     fs::write(&latest_path, render_audit_artifact_json(artifact)?)?;
@@ -979,7 +1019,7 @@ pub fn write_progress_audit_artifact(
     base_dir: &Path,
     command_name: &str,
 ) -> Result<PathBuf> {
-    let artifact_dir = base_dir.join(".aexeo-reports");
+    let artifact_dir = reports_dir(base_dir);
     fs::create_dir_all(&artifact_dir)?;
     let latest_path = artifact_dir.join(format!("{}-progress-latest.json", command_name));
     fs::write(&latest_path, render_audit_artifact_json(artifact)?)?;
@@ -1005,6 +1045,7 @@ mod tests {
             severity: "error".into(),
             suggestion: None,
             scope: FindingScope::Page,
+            subject: None,
         }
     }
 
@@ -1101,6 +1142,7 @@ mod tests {
             severity: "warning".into(),
             suggestion: None,
             scope: FindingScope::Page,
+            subject: None,
         };
         let text = render_text(&[actionable, heuristic], "ok", None);
         assert!(text.contains("Page Findings"));

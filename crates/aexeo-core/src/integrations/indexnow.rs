@@ -12,6 +12,7 @@ use std::time::Duration;
 use reqwest::blocking::Client;
 
 use super::{ensure_reports_dir, now_epoch_seconds};
+use crate::reporting::reports_dir;
 use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -88,7 +89,7 @@ pub struct IndexNowRetryReport {
 }
 
 pub(super) fn indexnow_ledger_path(root: &Path) -> PathBuf {
-    root.join(".aexeo-reports/indexnow-ledger.json")
+    reports_dir(root).join("indexnow-ledger.json")
 }
 
 fn indexnow_host(site_url: &str) -> Result<String> {

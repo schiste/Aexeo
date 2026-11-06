@@ -37,6 +37,7 @@ pub(super) fn find_missing_required_docs(root: &Path) -> Vec<Finding> {
             severity: "error".to_string(),
             suggestion: None,
             scope: FindingScope::Sitewide,
+            subject: None,
         })
         .collect()
 }
@@ -59,6 +60,7 @@ pub(super) fn find_missing_rule_docs(root: &Path) -> Result<Vec<Finding>> {
             severity: "error".to_string(),
             suggestion: None,
             scope: FindingScope::Sitewide,
+            subject: Some(group.name.to_string()),
         })
         .collect())
 }

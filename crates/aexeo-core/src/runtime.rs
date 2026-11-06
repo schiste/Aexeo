@@ -1521,17 +1521,22 @@ fn crawl_incomplete_reason(planner: &CrawlPlanner, crawl_stats: &CrawlStats) -> 
 
 /// Fetch robots.txt for the planner's current origin and start honouring it. It
 /// is always fetched, because the robots rules audit it even with `ignore_robots`.
+/// Returns the cause when the origin gave no HTTP response to the request.
 fn apply_robots_txt(
     planner: &mut CrawlPlanner,
     snapshot: &mut RuntimeSnapshotBuilder,
     crawl_findings: &mut Vec<Finding>,
     runtime: &crate::config::RuntimeConfig<'_>,
     ignore_robots: bool,
-) {
+) -> Option<String> {
     let loaded = load_robots(&origin_for_url(planner.normalized_base()), runtime);
     snapshot.set_robots_text(loaded.text);
+    let no_response = loaded
+        .no_response
+        .then(|| loaded.unreachable.clone())
+        .flatten();
     if ignore_robots {
-        return;
+        return no_response;
     }
     planner.set_robots_policy(loaded.policy);
     if let Some(cause) = loaded.unreachable {
@@ -1548,8 +1553,10 @@ fn apply_robots_txt(
                 "make robots.txt reachable and retry the crawl".to_string(),
             ),
             scope: FindingScope::Sitewide,
+            subject: None,
         });
     }
+    no_response
 }
 
 fn fetch_finding(url: &str, detail: &str, severity: &str) -> Finding {
@@ -1563,6 +1570,7 @@ fn fetch_finding(url: &str, detail: &str, severity: &str) -> Finding {
         severity: severity.to_string(),
         suggestion: None,
         scope: FindingScope::Page,
+        subject: None,
     }
 }
 
@@ -1836,7 +1844,7 @@ fn materialize_runtime_site(
     // Before any other request, and again on resume: a checkpoint must not keep
     // a crawl going against rules that have changed since.
     let robots_started_at = Instant::now();
-    apply_robots_txt(
+    let robots_no_response = apply_robots_txt(
         &mut planner,
         &mut snapshot,
         &mut crawl_findings,
@@ -1847,6 +1855,8 @@ fn materialize_runtime_site(
         Phase::OptionalArtifactFetch,
         robots_started_at.elapsed().as_micros() as u64,
     );
+
+    let mut origin_responded = false;
 
     if options.resume_from.is_none() {
         for seed in runtime.crawl_seeds {
@@ -1914,7 +1924,10 @@ fn materialize_runtime_site(
                 elapsed_us: fetch_elapsed_us,
             } = outcome;
             let fetched = match result {
-                Ok(fetched) => fetched,
+                Ok(fetched) => {
+                    origin_responded = true;
+                    fetched
+                }
                 Err(error) => {
                     record_failed_fetch(
                         &mut crawl_stats,
@@ -1993,7 +2006,7 @@ fn materialize_runtime_site(
             planner.align_with_effective_url(&fetched.effective_url);
             if origin_for_url(planner.normalized_base()) != origin_before {
                 // robots.txt is per origin, and the crawl has just moved to another.
-                apply_robots_txt(
+                let _ = apply_robots_txt(
                     &mut planner,
                     &mut snapshot,
                     &mut crawl_findings,
@@ -2137,6 +2150,20 @@ fn materialize_runtime_site(
             performance.record_partial_audit(crawl_stats.visited_pages, partial_duration_us);
             performance.apply_to(&mut crawl_stats);
         }
+    }
+
+    // SPEC.md: an unreachable crawl target is exit 2, not a result. An error status
+    // or one failed page on a target that does answer stays a `partial` audit.
+    if let Some(cause) = robots_no_response.filter(|_| !origin_responded) {
+        let hint = if config.crawl_ignore_robots {
+            ""
+        } else {
+            "; for a site you own, --ignore-robots drops the robots.txt requirement"
+        };
+        anyhow::bail!(
+            "cannot reach {}: robots.txt could not be fetched ({cause}) and no page responded, so nothing was audited{hint}",
+            redact_url(planner.normalized_base())
+        );
     }
 
     let (optional_fetch_us, optional_artifact_warnings) =
@@ -2452,6 +2479,7 @@ fn probe_markdown_negotiation_finding(
                 .to_string(),
         ),
         scope: FindingScope::Sitewide,
+        subject: None,
     }]
 }
 
@@ -3217,6 +3245,7 @@ mod tests {
                 severity: "error".to_string(),
                 suggestion: None,
                 scope: FindingScope::Page,
+                subject: None,
             }],
             status: AuditStatus::Complete,
             crawl_stats: CrawlStats {

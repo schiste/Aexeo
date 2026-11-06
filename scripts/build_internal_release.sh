@@ -79,9 +79,9 @@ fi
 
 # Release builds run the build directly. The full quality gate
 # (cargo-audit, cargo-deny, cargo-udeps with nightly + rust-src) is a
-# pre-merge concern and runs on ci.yml against PRs and main pushes; by
-# the time a v* tag is pushed, the code at HEAD has already been gated
-# there. Re-running the gate per release matrix job would add minutes
+# pre-merge concern and runs on ci.yml against PRs and main pushes. The
+# guard job in release-internal.yml refuses to reach this build unless
+# ci.yml succeeded on main for the tagged commit. Re-running the gate per release matrix job would add minutes
 # of extra dependency installs on every runner without producing any
 # additional signal.
 cargo build --release

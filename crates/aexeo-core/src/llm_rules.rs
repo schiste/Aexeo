@@ -91,6 +91,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
             severity: "error".to_string(),
             suggestion: None,
             scope: FindingScope::Sitewide,
+            subject: None,
         }];
     };
     let text = text.trim();
@@ -104,6 +105,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
             severity: "error".to_string(),
             suggestion: None,
             scope: FindingScope::Sitewide,
+            subject: None,
         }];
     }
 
@@ -136,6 +138,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
             severity: "error".to_string(),
             suggestion: Some("regenerate llms.txt from site inventory so it mirrors the current route and feature structure".to_string()),
             scope: FindingScope::Sitewide,
+            subject: None,
         });
     }
 
@@ -161,6 +164,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
                         .to_string(),
                 ),
                 scope: FindingScope::Sitewide,
+                subject: Some(href.to_string()),
             });
         }
         if config.canonical_style == "extensionless" && href.ends_with(".html") {
@@ -173,6 +177,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
                 severity: "warning".to_string(),
                 suggestion: Some("prefer clean routes in llms.txt or regenerate the artifact from canonical URLs".to_string()),
                 scope: FindingScope::Sitewide,
+                subject: Some(href.to_string()),
             });
         }
     }
@@ -196,6 +201,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
                         .to_string(),
                 ),
                 scope: FindingScope::Sitewide,
+                subject: None,
             });
         }
         if let Some(claimed_feature_pages) = feature_page_count(text)
@@ -216,6 +222,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
                         .to_string(),
                 ),
                 scope: FindingScope::Sitewide,
+                subject: None,
             });
         }
     }

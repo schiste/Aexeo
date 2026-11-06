@@ -18,6 +18,9 @@ pub struct RenderedPage {
     pub status_code: Option<u16>,
     /// None means response headers were not captured; an empty map means they were.
     pub response_headers: Option<std::collections::BTreeMap<String, String>>,
+    /// The URL fetched when it differs from `url`, if the producer captured it.
+    #[serde(default)]
+    pub requested_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,12 +48,85 @@ pub struct ObservedPageLinks {
     /// Observed counts only; zero does not establish orphanhood.
     pub distinct_source_pages: usize,
     pub source_pages_by_context: std::collections::BTreeMap<LinkContext, usize>,
+    /// Sources with a link free of `nofollow`, `ugc` and `sponsored`. Zero while
+    /// `distinct_source_pages` is positive means every observed link is qualified.
+    #[serde(default)]
+    pub followed_source_pages: usize,
+    #[serde(default)]
+    pub source_pages_by_rel: std::collections::BTreeMap<String, usize>,
+    /// Observed destinations that differ from this page's URL only by a trailing
+    /// slash, percent-encoding spelling or an empty query. They are not counted
+    /// above: the URLs are not proven equivalent.
+    #[serde(default)]
+    pub near_variant_destinations: Vec<String>,
+    /// The URL requested when the response came from this different URL.
+    #[serde(default)]
+    pub redirected_from: Option<String>,
+    /// Other pages linking to `redirected_from`; not included in the counts above.
+    #[serde(default)]
+    pub redirected_source_pages: usize,
 }
 
 fn has_noindex(value: &str) -> bool {
     value
         .split(|ch: char| ch.is_ascii_whitespace() || matches!(ch, ',' | ';' | ':'))
         .any(|part| part.eq_ignore_ascii_case("noindex") || part.eq_ignore_ascii_case("none"))
+}
+
+fn http_origin(value: &str) -> Option<String> {
+    Url::parse(value)
+        .ok()
+        .filter(|url| {
+            matches!(url.scheme(), "http" | "https")
+                && url.username().is_empty()
+                && url.password().is_none()
+        })
+        .map(|url| url.origin().ascii_serialization())
+}
+
+/// Spell percent escapes canonically: decode unreserved bytes, uppercase the rest.
+fn normalize_percent_encoding(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut result = String::with_capacity(value.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let escape = (bytes[index] == b'%')
+            .then(|| value.get(index + 1..index + 3))
+            .flatten()
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok().map(|byte| (hex, byte)));
+        if let Some((hex, byte)) = escape {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+                result.push(byte as char);
+            } else {
+                result.push('%');
+                result.push_str(&hex.to_ascii_uppercase());
+            }
+            index += 3;
+        } else {
+            let ch = value[index..].chars().next().unwrap_or_default();
+            result.push(ch);
+            index += ch.len_utf8();
+        }
+    }
+    result
+}
+
+/// A comparison key shared by URLs differing only by a trailing slash, percent
+/// spelling or an empty query. It detects likely mismatches and is never used
+/// to credit links, since a server may treat those URLs as different pages.
+fn near_variant_key(value: &str) -> Option<String> {
+    let url = Url::parse(value).ok()?;
+    let path = normalize_percent_encoding(url.path());
+    let path = path.strip_suffix('/').unwrap_or(&path);
+    let query = url
+        .query()
+        .filter(|query| !query.is_empty())
+        .map(normalize_percent_encoding)
+        .unwrap_or_default();
+    Some(format!(
+        "{}{path}?{query}",
+        url.origin().ascii_serialization()
+    ))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,18 +182,33 @@ pub fn build_link_report_from_audit_with_static_urls(
         static_urls.is_none() || site.deployment_model == "static_export",
         "static URL mapping requires a static_export audit artifact"
     );
-    let origin = site
+    let mut origin = site
         .site_url
         .as_deref()
-        .and_then(|value| Url::parse(value).ok())
-        .filter(|url| {
-            matches!(url.scheme(), "http" | "https")
-                && url.username().is_empty()
-                && url.password().is_none()
-        })
-        .map(|url| url.origin().ascii_serialization())
+        .and_then(http_origin)
         .unwrap_or_default();
     let mut issues = std::collections::BTreeSet::new();
+    // The crawl target can redirect to another origin, such as apex to www.
+    // Observed URLs decide then, because links resolve against those pages.
+    if static_urls.is_none() && !origin.is_empty() {
+        let observed = site
+            .pages
+            .iter()
+            .filter_map(|page| page.crawl_response.as_ref()?.observed_url.as_deref())
+            .filter_map(http_origin)
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut observed = observed.into_iter();
+        match (observed.next(), observed.next()) {
+            (Some(_), Some(_)) => {
+                issues.insert("audit_observed_origins_ambiguous");
+            }
+            (Some(single), None) if single != origin => {
+                issues.insert("audit_observed_origin_differs_from_target");
+                origin = single;
+            }
+            _ => {}
+        }
+    }
     if let Some(identity) = context.and_then(|value| value.identity.as_ref()) {
         if origin.is_empty() {
             issues.insert("audit_origin_missing_or_invalid");
@@ -143,6 +234,7 @@ pub fn build_link_report_from_audit_with_static_urls(
                     html: page.raw_html.clone(),
                     status_code: None,
                     response_headers: None,
+                    requested_url: None,
                 });
             }
             let Some(response) = &page.crawl_response else {
@@ -163,6 +255,7 @@ pub fn build_link_report_from_audit_with_static_urls(
                 response_headers: response
                     .headers_observed
                     .then(|| page.response_headers.clone()),
+                requested_url: Some(response.requested_url.clone()),
             })
         })
         .collect();
@@ -179,6 +272,7 @@ pub fn build_link_report_from_audit_with_static_urls(
                 html: String::new(),
                 status_code: response.status_code,
                 response_headers: None,
+                requested_url: Some(response.requested_url.clone()),
             }),
     );
     let input = LinkReportInput {
@@ -198,7 +292,15 @@ pub fn build_link_report_from_audit_with_static_urls(
     };
     let mut report = build_link_report(&input)?;
     report.issues.extend(issues.into_iter().map(str::to_string));
+    report.issues.sort();
+    report.issues.dedup();
     Ok(report)
+}
+
+/// The serialized requested URL, when it differs from the observed page URL.
+fn redirected_from(page: &RenderedPage) -> Option<String> {
+    let requested = String::from(Url::parse(page.requested_url.as_deref()?).ok()?);
+    (Url::parse(&page.url).ok().map(String::from).as_ref() != Some(&requested)).then_some(requested)
 }
 
 /// This report lists observations and coverage issues. It never declares an
@@ -247,6 +349,12 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
     let mut evidence = Vec::new();
     let mut observations = Vec::<(HtmlLinkMetadata, bool, Option<String>)>::new();
     let mut coverage_issues = std::collections::BTreeSet::new();
+    let inventory_dispositions = input
+        .inventory
+        .iter()
+        .flat_map(|inventory| &inventory.pages)
+        .map(|entry| (entry.url.as_str(), entry.disposition))
+        .collect::<std::collections::BTreeMap<_, _>>();
     if input
         .snapshot_date
         .as_deref()
@@ -312,13 +420,26 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
             || header_noindex;
         if noindex {
             issues.push("noindex_observed".to_string());
-            if input.inventory.as_ref().is_some_and(|inventory| {
-                inventory.pages.iter().any(|entry| {
-                    entry.url == page.url && entry.disposition == InventoryDisposition::Published
-                })
-            }) {
+        }
+        // Without captured headers, an X-Robots-Tag noindex cannot be ruled out.
+        let served_indexable = !noindex
+            && headers.is_some()
+            && page
+                .status_code
+                .is_some_and(|status| (200..300).contains(&status));
+        match inventory_dispositions.get(page.url.as_str()) {
+            Some(InventoryDisposition::Published) if noindex => {
                 coverage_issues.insert("inventory_indexability_mismatch");
             }
+            Some(InventoryDisposition::Draft | InventoryDisposition::Noindex)
+                if served_indexable =>
+            {
+                coverage_issues.insert("inventory_indexability_mismatch");
+            }
+            _ => {}
+        }
+        if redirected_from(page).is_some() {
+            coverage_issues.insert("redirect_observed");
         }
         if metadata.canonical_hrefs.len() > 1
             || metadata.canonical_hrefs.iter().any(|href| {
@@ -341,6 +462,30 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
     let links = count_links(evidence);
     if !links.indeterminate.is_empty() {
         issues.push("indeterminate_links".to_string());
+    }
+    let observed_urls = input
+        .pages
+        .iter()
+        .filter_map(|page| Url::parse(&page.url).ok().map(String::from))
+        .collect::<std::collections::BTreeSet<_>>();
+    let observed_keys = observed_urls
+        .iter()
+        .filter_map(|url| near_variant_key(url))
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut near_variants = std::collections::BTreeMap::<String, Vec<String>>::new();
+    for destination in &links.destinations {
+        if observed_urls.contains(&destination.destination) {
+            continue;
+        }
+        if let Some(key) =
+            near_variant_key(&destination.destination).filter(|key| observed_keys.contains(key))
+        {
+            near_variants
+                .entry(key)
+                .or_default()
+                .push(destination.destination.clone());
+            coverage_issues.insert("destination_unmatched_near_variant");
+        }
     }
     let mut reconciliation = input.inventory.as_ref().map(|inventory| {
         reconcile(
@@ -388,6 +533,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
             let inbound = normalized_url
                 .as_deref()
                 .and_then(|url| by_destination.get(url));
+            let redirected = redirected_from(page);
             let mut contexts = [
                 LinkContext::Body,
                 LinkContext::RelatedContent,
@@ -418,6 +564,27 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
                 distinct_source_pages: inbound
                     .map_or(0, |destination| destination.distinct_source_pages),
                 source_pages_by_context: contexts,
+                followed_source_pages: inbound
+                    .map_or(0, |destination| destination.followed_source_pages),
+                source_pages_by_rel: inbound
+                    .map(|destination| destination.source_pages_by_rel.clone())
+                    .unwrap_or_default(),
+                near_variant_destinations: near_variant_key(&page.url)
+                    .and_then(|key| near_variants.get(&key).cloned())
+                    .unwrap_or_default(),
+                redirected_source_pages: redirected
+                    .as_deref()
+                    .and_then(|url| by_destination.get(url))
+                    .map_or(0, |destination| {
+                        destination
+                            .evidence
+                            .iter()
+                            .map(|link| link.source.as_str())
+                            .filter(|source| *source != page.url)
+                            .collect::<std::collections::BTreeSet<_>>()
+                            .len()
+                    }),
+                redirected_from: redirected,
             }
         })
         .collect();
@@ -455,18 +622,21 @@ mod tests {
                     html: "<main><a href='/target?lang=fr'>link</a></main>".into(),
                     status_code: Some(200),
                     response_headers: Some(Default::default()),
+                    requested_url: None,
                 },
                 RenderedPage {
                     url: "https://EXAMPLE.org:443/target?lang=fr".into(),
                     html: String::new(),
                     status_code: Some(200),
                     response_headers: Some(Default::default()),
+                    requested_url: None,
                 },
                 RenderedPage {
                     url: "https://example.org/target?lang=en".into(),
                     html: String::new(),
                     status_code: Some(200),
                     response_headers: Some(Default::default()),
+                    requested_url: None,
                 },
             ],
             inventory: None,

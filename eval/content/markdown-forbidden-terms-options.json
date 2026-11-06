@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "fixture_kind": "synthetic_regression",
+  "description": "Synthetic Markdown regression fixture, written to pin specific adapter and gate behaviour. Labels are the expected tool behaviour, not human-reviewed editorial judgements, and results do not estimate production accuracy.",
+  "preset": "fixture",
+  "preset_toml": "version=1\nname='fixture'\n[[gates]]\nid='g'\nkind='forbidden_terms'\nterms=['free']\nwhole_words=false\ncase_insensitive=true\n",
+  "gate_id": "g",
+  "input_format": "markdown",
+  "examples": [
+    {
+      "id": "case-and-substring",
+      "split": "development",
+      "text": "FREEDOM rings.\n",
+      "expected": "failed",
+      "why": "Both options apply together.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "absent",
+      "split": "development",
+      "text": "Nothing here.\n",
+      "expected": "passed",
+      "why": "No occurrence.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "mixed-case",
+      "split": "holdout",
+      "text": "A Free trial.\n",
+      "expected": "failed",
+      "why": "Case-insensitive.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "split-word",
+      "split": "holdout",
+      "text": "fre e\n",
+      "expected": "passed",
+      "why": "Whitespace folding does not remove whitespace.",
+      "review_status": "not_reviewed"
+    }
+  ]
+}

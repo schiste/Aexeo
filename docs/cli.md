@@ -747,6 +747,9 @@ Options:
       --inject-schema
           Read schema-suggestions.json from the path and inject suggested JSON-LD into HTML <head> blocks (per-type augmentation; existing types are skipped).
 
+      --dry-run
+          List the files fix would change or skip without writing anything.
+
       --format <format>
           [default: text]
           [possible values: text, json]

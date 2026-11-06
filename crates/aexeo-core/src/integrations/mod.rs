@@ -17,6 +17,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::reporting::reports_dir;
 use crate::site::{Page, route_from_urlish};
 
 mod bing_ai;
@@ -67,7 +68,7 @@ fn now_epoch_seconds() -> u64 {
 }
 
 fn ensure_reports_dir(root: &Path) -> Result<PathBuf> {
-    let reports_dir = root.join(".aexeo-reports");
+    let reports_dir = reports_dir(root);
     fs::create_dir_all(&reports_dir)?;
     Ok(reports_dir)
 }

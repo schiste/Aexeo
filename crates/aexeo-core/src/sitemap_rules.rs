@@ -39,6 +39,7 @@ fn sitemap_error_finding(site: &Site, sitemap: &std::path::Path) -> Finding {
         severity: "error".to_string(),
         suggestion: None,
         scope: FindingScope::Sitewide,
+        subject: None,
     }
 }
 
@@ -122,6 +123,7 @@ pub fn run_sitemap_rules(site: &Site, _config: &Config) -> Vec<Finding> {
             severity: "error".to_string(),
             suggestion: None,
             scope: FindingScope::Sitewide,
+            subject: None,
         }];
     }
 
@@ -143,6 +145,7 @@ pub fn run_sitemap_rules(site: &Site, _config: &Config) -> Vec<Finding> {
                 severity: "error".to_string(),
                 suggestion: None,
                 scope: FindingScope::Page,
+                subject: None,
             });
         }
     }
@@ -161,6 +164,7 @@ pub fn run_sitemap_rules(site: &Site, _config: &Config) -> Vec<Finding> {
                         .to_string(),
                 ),
                 scope: FindingScope::Sitewide,
+                subject: None,
             });
         } else {
             let invalid_lastmods = lastmods
@@ -184,6 +188,7 @@ pub fn run_sitemap_rules(site: &Site, _config: &Config) -> Vec<Finding> {
                         "use ISO-8601 date or datetime values in <lastmod> entries".to_string(),
                     ),
                     scope: FindingScope::Sitewide,
+                    subject: None,
                 });
             }
         }

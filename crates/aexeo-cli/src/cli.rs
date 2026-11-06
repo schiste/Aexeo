@@ -1097,6 +1097,12 @@ pub fn build_cli() -> Command {
                         ),
                 )
                 .arg(
+                    Arg::new("dry-run")
+                        .long("dry-run")
+                        .action(clap::ArgAction::SetTrue)
+                        .help("List the files fix would change or skip without writing anything."),
+                )
+                .arg(
                     Arg::new("format")
                         .long("format")
                         .value_parser(["text", "json"])

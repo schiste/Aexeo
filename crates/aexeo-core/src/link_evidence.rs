@@ -29,6 +29,10 @@ pub struct LinkEvidence {
     pub context: LinkContext,
     pub component: Option<String>,
     pub paragraph: Option<String>,
+    /// `nofollow`, `ugc` and `sponsored` tokens of the anchor's `rel`, lowercase
+    /// and sorted. Other tokens, such as `noopener`, do not qualify a link.
+    #[serde(default)]
+    pub rel: Vec<String>,
     /// DOM parsing does not reliably preserve original byte positions.
     pub line: Option<usize>,
     pub column: Option<usize>,
@@ -49,6 +53,8 @@ struct Scope {
     paragraph: Option<String>,
     locale: Option<String>,
     explicit: bool,
+    /// Inside an `aside` or `header`, which `article` and `main` cannot promote to body.
+    non_body_landmark: bool,
 }
 
 fn attribute(handle: &Handle, key: &str) -> Option<String> {
@@ -63,7 +69,7 @@ fn attribute(handle: &Handle, key: &str) -> Option<String> {
     }
 }
 
-fn text_content(root: &Handle) -> String {
+pub(crate) fn text_content(root: &Handle) -> String {
     let mut result = String::new();
     let mut stack = vec![root.clone()];
     while let Some(node) = stack.pop() {
@@ -91,9 +97,21 @@ fn explicit_context(value: &str) -> LinkContext {
     }
 }
 
+fn crawl_rel_tokens(rel: Option<String>) -> Vec<String> {
+    let tokens = rel
+        .iter()
+        .flat_map(|value| value.split_ascii_whitespace())
+        .map(str::to_ascii_lowercase)
+        .filter(|token| matches!(token.as_str(), "nofollow" | "ugc" | "sponsored"))
+        .collect::<std::collections::BTreeSet<_>>();
+    tokens.into_iter().collect()
+}
+
 /// Extract evidence in DOM order. Contexts can be explicitly marked using
 /// `data-aexeo-link-context`; otherwise only unambiguous semantic elements are
-/// classified. Unmarked related-content components remain unknown.
+/// classified. An `aside` or `header` inside body content is unknown rather
+/// than body. Generic containers inherit their surrounding context, so a related
+/// block built from an unmarked `div` inside `main` needs an explicit marker.
 pub fn extract_links(
     html: &str,
     source_url: &str,
@@ -121,8 +139,9 @@ pub fn extract_document(
             base = attribute(&node, "href");
         }
         let robots_content = if matches!(&node.data, NodeData::Element { name, .. } if name.local.as_ref() == "meta")
-            && attribute(&node, "name").is_some_and(|name| name.eq_ignore_ascii_case("robots"))
-        {
+            && attribute(&node, "name").is_some_and(|name| {
+                name.eq_ignore_ascii_case("robots") || name.eq_ignore_ascii_case("googlebot")
+            }) {
             attribute(&node, "content")
         } else {
             None
@@ -150,6 +169,7 @@ pub fn extract_document(
         paragraph: None,
         locale: None,
         explicit: false,
+        non_body_landmark: false,
     };
     // Keep the document alive while traversing: RcDom drains descendants when
     // the last handle to a node is dropped, even if descendants were cloned.
@@ -163,8 +183,15 @@ pub fn extract_document(
             }
             let explicit = attribute(&node, "data-aexeo-link-context");
             let semantic = match tag {
-                "article" | "main" if !scope.explicit && scope.context == LinkContext::Unknown => {
+                "article" | "main"
+                    if !scope.explicit
+                        && !scope.non_body_landmark
+                        && scope.context == LinkContext::Unknown =>
+                {
                     Some(LinkContext::Body)
+                }
+                "aside" | "header" if !scope.explicit && scope.context == LinkContext::Body => {
+                    Some(LinkContext::Unknown)
                 }
                 "nav" if !scope.explicit => Some(
                     match attribute(&node, "aria-label")
@@ -183,6 +210,9 @@ pub fn extract_document(
             };
             if explicit.is_some() {
                 scope.explicit = true;
+            }
+            if matches!(tag, "aside" | "header") {
+                scope.non_body_landmark = true;
             }
             if let Some(context) = explicit.as_deref().map(explicit_context).or(semantic) {
                 scope.context = context;
@@ -210,6 +240,7 @@ pub fn extract_document(
                     context: scope.context,
                     component: scope.component.clone(),
                     paragraph: scope.paragraph.clone(),
+                    rel: crawl_rel_tokens(attribute(&node, "rel")),
                     line: None,
                     column: None,
                     resolution,
@@ -382,6 +413,77 @@ mod tests {
         );
         assert_eq!(links[0].context, LinkContext::Unknown);
         assert_eq!(links[0].line, None);
+    }
+
+    fn contexts(html: &str) -> Vec<LinkContext> {
+        extract_links(html, "https://example.org/", "https://example.org", None)
+            .iter()
+            .map(|link| link.context)
+            .collect()
+    }
+
+    #[test]
+    fn non_body_landmarks_inside_main_do_not_inherit_body() {
+        assert_eq!(
+            contexts(
+                "<main><aside><a href='/a'>a</a></aside><header><a href='/b'>b</a></header><nav><a href='/c'>c</a></nav><footer><a href='/d'>d</a></footer><p><a href='/e'>e</a></p></main>"
+            ),
+            vec![
+                LinkContext::Unknown,
+                LinkContext::Unknown,
+                LinkContext::Navigation,
+                LinkContext::Footer,
+                LinkContext::Body
+            ]
+        );
+    }
+
+    #[test]
+    fn articles_nested_in_non_body_landmarks_are_not_promoted_to_body() {
+        assert_eq!(
+            contexts(
+                "<main><aside><article><a href='/a'>a</a></article></aside></main><aside><article><a href='/b'>b</a></article></aside><header><main><a href='/c'>c</a></main></header>"
+            ),
+            vec![
+                LinkContext::Unknown,
+                LinkContext::Unknown,
+                LinkContext::Unknown
+            ]
+        );
+    }
+
+    #[test]
+    fn landmarks_refine_or_keep_the_surrounding_non_body_context() {
+        assert_eq!(
+            contexts(
+                "<main><aside><nav><a href='/a'>a</a></nav></aside></main><footer><aside><a href='/b'>b</a></aside></footer><nav><header><a href='/c'>c</a></header></nav>"
+            ),
+            vec![
+                LinkContext::Navigation,
+                LinkContext::Footer,
+                LinkContext::Navigation
+            ]
+        );
+    }
+
+    #[test]
+    fn explicit_markers_override_non_body_landmarks() {
+        assert_eq!(
+            contexts(
+                "<main><aside data-aexeo-link-context='related'><a href='/a'>a</a></aside><aside><div data-aexeo-link-context='body'><a href='/b'>b</a></div></aside></main>"
+            ),
+            vec![LinkContext::RelatedContent, LinkContext::Body]
+        );
+    }
+
+    #[test]
+    fn unmarked_generic_containers_inside_main_remain_body() {
+        // Class names are not semantics: an unmarked related block needs
+        // `data-aexeo-link-context` to be attributed as related content.
+        assert_eq!(
+            contexts("<main><div class='related-posts'><a href='/a'>a</a></div></main>"),
+            vec![LinkContext::Body]
+        );
     }
 
     #[test]
