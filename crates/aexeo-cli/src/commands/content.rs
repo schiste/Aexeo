@@ -1,6 +1,9 @@
 use super::exit_code::{EXIT_FINDINGS, EXIT_SUCCESS, EXIT_UNSUPPORTED};
 use aexeo_core::{
-    content_gate::{ContentEvaluationContext, ContentGate, ContentInput, GateStatus},
+    content_gate::{
+        ContentContext, ContentEvaluationContext, ContentGate, ContentInput, GateStatus,
+        MAX_CONTENT_INPUT_BYTES,
+    },
     content_presets::{builtin_content_presets, resolve_content_preset},
 };
 use anyhow::{Context, Result, bail};
@@ -103,14 +106,18 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     }
     let measuring = args.get_flag("telemetry");
     let input_started = measuring.then(std::time::Instant::now);
-    let mut text = if args.get_flag("no-text") {
-        None
+    let is_markdown =
+        args.get_one::<String>("input-format").map(String::as_str) == Some("markdown");
+    let (mut text, input_limit) = if args.get_flag("no-text") {
+        (None, None)
     } else if path == "-" {
-        let mut text = String::new();
-        io::stdin().read_to_string(&mut text)?;
-        Some(text)
+        read_limited_content(io::stdin(), is_markdown)?
     } else {
-        Some(fs::read_to_string(path).with_context(|| format!("reading content {path}"))?)
+        read_limited_content(
+            fs::File::open(path).with_context(|| format!("reading content {path}"))?,
+            is_markdown,
+        )
+        .with_context(|| format!("reading content {path}"))?
     };
     let metadata: Option<BTreeMap<String, String>> = args
         .get_one::<String>("metadata")
@@ -198,7 +205,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     };
     let input_load_ms = input_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
     let adapter_started = measuring.then(std::time::Instant::now);
-    let mut context = None;
+    let mut context = input_limit.map(|limit| ContentContext {
+        input_limit: Some(limit),
+        ..Default::default()
+    });
     let mut link_count = None;
     let mut source_map = None;
     let mut destinations = None;
@@ -295,8 +305,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                     })
                     .collect();
                 positional_findings += result.findings.len();
-                if indices.len() == result.findings.len() {
-                    for (finding_index, index) in indices.into_iter().enumerate() {
+                if indices.len() == result.total_findings() {
+                    for (finding_index, index) in
+                        indices.into_iter().take(result.findings.len()).enumerate()
+                    {
                         if let Some((line, column)) = map.link_source_position(source, index) {
                             source_locations.push(SourceLocation {
                                 gate_id: &result.gate_id,
@@ -312,8 +324,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                     aexeo_core::content_gate::heading_finding_indices(gate, headings)
             {
                 positional_findings += result.findings.len();
-                if indices.len() == result.findings.len() {
-                    for (finding_index, index) in indices.into_iter().enumerate() {
+                if indices.len() == result.total_findings() {
+                    for (finding_index, index) in
+                        indices.into_iter().take(result.findings.len()).enumerate()
+                    {
                         if let Some((line, column)) = map.heading_source_position(source, index) {
                             source_locations.push(SourceLocation {
                                 gate_id: &result.gate_id,
@@ -413,6 +427,35 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             EXIT_SUCCESS
         },
     )
+}
+
+/// Read content up to the supported size. Input that is too large, or Markdown
+/// nested too deeply to process safely, yields a reason instead of the text, and
+/// gates that need it report `not_checked`.
+fn read_limited_content(
+    reader: impl Read,
+    is_markdown: bool,
+) -> Result<(Option<String>, Option<String>)> {
+    let mut bytes = Vec::new();
+    reader
+        .take(MAX_CONTENT_INPUT_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > MAX_CONTENT_INPUT_BYTES {
+        return Ok((
+            None,
+            Some(format!(
+                "input exceeds the {MAX_CONTENT_INPUT_BYTES} byte limit and was not evaluated"
+            )),
+        ));
+    }
+    let text = String::from_utf8(bytes).context("content is not valid UTF-8")?;
+    let limit = is_markdown
+        .then(|| aexeo_core::markdown_adapter::markdown_limit_reason(&text))
+        .flatten();
+    Ok(match limit {
+        Some(reason) => (None, Some(reason)),
+        None => (Some(text), None),
+    })
 }
 
 fn evaluate_crawl(
