@@ -60,6 +60,9 @@ not change their counts or assert confirmed orphans.
 - Runtime crawls can write a separate link report and opt-in aggregate telemetry
   directly (#78). The audit schema and normal crawl result stay unchanged; the
   report still cannot attest a matching complete inventory or snapshot.
+- Normalized URL serialization now matches observed pages to link destinations
+  and equivalent URL duplicates prevent inventory/crawl coverage (#80). Query
+  variants remain distinct and aliases are not inferred.
 - A synthetic in-process benchmark covers 50 pages and 500 links (#76). No CI
   performance budget has been established for this graph benchmark.
 - A live Aeptus URL returned a generic noindex holding page, not the article
