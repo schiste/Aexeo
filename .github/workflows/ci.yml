@@ -48,11 +48,10 @@ jobs:
       # `sync-version && build:wasm && build:ts && build:bundle`, and
       # build:wasm shells out to scripts/build-wasm.sh, which requires a Rust
       # toolchain plus wasm-bindgen and the wasm32 target. Adding a second
-      # toolchain to a node job to duplicate a bundle that
-      # release-internal.yml already produces costs more minutes than the
-      # signal is worth. typecheck is the cheap, high-value half: it covers
-      # the whole TypeScript surface including the generated wasm bindings'
-      # .d.ts, and the wasm/bundle build stays owned by the release job.
+      # toolchain to this node job would slow every plugin check. typecheck is
+      # the cheap, high-value half: it covers the whole TypeScript surface
+      # including the generated wasm bindings' .d.ts. The wasm/bundle build and
+      # the tests that need it are owned by the wasm-integration job below.
       # Scope note: the gate covers the dependency surface this package
       # actually publishes, which is `--omit=dev`. The package has zero
       # runtime `dependencies` — it is self-contained plus the WASM bridge —
@@ -79,9 +78,8 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: packages/aexeo-crawl-worker/package-lock.json
-      # packages/aexeo-crawl-worker ships crawl artifacts and runtime
-      # evaluation results to the emdash admin UI behind an R2 bucket and an
-      # eval token. SECURITY.md puts it in security scope, yet it had no CI
+      # packages/aexeo-crawl-worker runs evaluation for the sandboxed emdash
+      # plugin behind an eval token. SECURITY.md puts it in security scope, yet it had no CI
       # coverage at all: nothing in this workflow ever touched it, so a
       # TypeScript error in src/worker.ts or its wasm bindings could land on
       # main unnoticed. It has its own committed package-lock.json (not
@@ -92,12 +90,62 @@ jobs:
         run: npm run typecheck --prefix packages/aexeo-crawl-worker
       # Same scoping rationale as the plugin job: the worker has no runtime
       # `dependencies` (Wrangler injects the binding types and the runtime),
-      # so `--omit=dev` is the whole shipped surface. The dev tree's four
-      # high advisories are all inside `wrangler@3.x` via `miniflare`;
-      # clearing them needs a `wrangler@4` major bump, which is a separate
-      # piece of work. This gate watches the surface consumers actually run.
+      # so `--omit=dev` is the whole shipped surface. This gate watches the
+      # surface consumers actually run.
       - name: Audit crawl worker published dependency surface
         run: npm audit --omit=dev --audit-level=high --prefix packages/aexeo-crawl-worker
+
+  wasm-integration:
+    name: wasm-integration (build, plugin test:wasm, worker in workerd)
+    runs-on: ubuntu-latest
+    # Compiles the bridge in release mode, and from cold also builds
+    # wasm-bindgen-cli from source.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: sed -n 's/^channel = "\(.*\)"$/channel=\1/p' rust-toolchain.toml >> "$GITHUB_OUTPUT"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # Holds wasm32 artifacts the other Rust jobs do not use.
+          key: wasm
+      # The CLI must match the wasm-bindgen crate exactly or the build fails,
+      # so the version comes from the lockfile rather than a second pin here.
+      - name: Install wasm-bindgen CLI
+        run: |
+          version="$(awk '/^name = "wasm-bindgen"$/ { getline; gsub(/version = |"/, ""); print; exit }' Cargo.lock)"
+          if [ "$(wasm-bindgen --version 2>/dev/null)" != "wasm-bindgen $version" ]; then
+            cargo install --locked --force wasm-bindgen-cli --version "$version"
+          fi
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            packages/aexeo-emdash/package-lock.json
+            packages/aexeo-crawl-worker/package-lock.json
+      - name: Install dependencies
+        run: |
+          npm ci --prefix packages/aexeo-emdash
+          npm ci --prefix packages/aexeo-crawl-worker
+      # Nothing regenerates this hand-maintained declaration file, and the
+      # worker's copy has drifted from the plugin's before.
+      - name: Check the bridge declarations match
+        run: npm run check:dts --prefix packages/aexeo-crawl-worker
+      - name: Build the plugin with its WASM and bundles
+        run: npm run build --prefix packages/aexeo-emdash
+      - name: Test the plugin against the real WASM
+        run: npm run test:wasm --prefix packages/aexeo-emdash
+      - name: Build the worker's WASM
+        run: npm run build:wasm --prefix packages/aexeo-crawl-worker
+      - name: Test the worker in workerd with the real WASM
+        run: npm test --prefix packages/aexeo-crawl-worker
 
   jev-adapter:
     name: Jev adapter (offline tests)

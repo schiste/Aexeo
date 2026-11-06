@@ -6,6 +6,13 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **The sandboxed plugin warns when its sidecar is on another version.** The
+  Worker reports its version in the `x-aexeo-version` response header, and the
+  plugin logs a warning when it differs, since a Worker left behind on an upgrade
+  keeps evaluating with older rules.
+
 ### Security
 
 - **EVAL_TOKEN never falls back to plaintext.** When the host cannot encrypt
@@ -22,6 +29,12 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **`aexeo-crawl-worker` upgrade notes.** The Worker refuses every request when
+  `EVAL_TOKEN` is shorter than 32 characters, so rotate a shorter token before
+  redeploying. It answers `413` above 8 MiB, the limit of emdash's sandbox
+  bridge. Malformed bodies and initialization failures now return JSON errors, and
+  token comparison is constant-time. It is built with Wrangler 4 and a newer
+  compatibility date.
 - **Editors can read findings.** The configured plugin's `admin` and `data`
   routes declare `plugins:read`; emdash otherwise requires `plugins:manage`.
   Refresh, facts and presence stay admin-only, and the `admin` route refuses
