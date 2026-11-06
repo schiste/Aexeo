@@ -23,6 +23,7 @@ fn finding(
         severity: severity.to_string(),
         suggestion: None,
         scope: FindingScope::Page,
+        subject: None,
     }
 }
 
@@ -264,14 +265,17 @@ fn collect_semantic_block_findings(
         if is_repeatable_data_ui(data_ui, config) {
             let _ = seen_data_ui.insert(data_ui.clone());
         } else if !seen_data_ui.insert(data_ui.clone()) {
-            findings.push(finding(
-                "GEO003",
-                format!("duplicate data-ui '{}' on page", data_ui),
-                &page.path,
-                block.line,
-                block.column,
-                "warning",
-            ));
+            findings.push(
+                finding(
+                    "GEO003",
+                    format!("duplicate data-ui '{}' on page", data_ui),
+                    &page.path,
+                    block.line,
+                    block.column,
+                    "warning",
+                )
+                .with_subject(data_ui.as_str()),
+            );
         }
     }
     if block.has_heading && block_visible_length(&block.text) < config.min_block_text_length {

@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use aexeo_contracts::{AuditArtifact, AuditStatus, Finding, FindingFingerprint};
+use aexeo_contracts::{AuditArtifact, AuditStatus, Finding};
 
 use crate::reporting::{build_audit_artifact, summarize_findings};
 use crate::site::{Site, build_site_from_audit_snapshot};
@@ -55,39 +55,76 @@ pub fn write_baseline_file(findings: &[Finding], path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Pair baseline and current findings, each baseline finding matching at most
+/// one current finding so repeated identical findings are counted, not collapsed.
+///
+/// A stored finding without a subject may predate `subject`, so it first matches
+/// by exact version 1 fingerprint. That is all such a finding can offer for rules
+/// that now set a subject. Everything left matches by version 2 fingerprint, which
+/// ignores wording and position.
 pub fn diff_finding_sets(baseline: &[Finding], current: &[Finding]) -> DiffResult {
-    let baseline_by_key: BTreeMap<FindingFingerprint, Finding> = baseline
+    let (mut baseline_left, with_subject): (Vec<&Finding>, Vec<&Finding>) = baseline
         .iter()
-        .cloned()
-        .map(|finding| (finding.fingerprint(), finding))
-        .collect();
-    let current_by_key: BTreeMap<FindingFingerprint, Finding> = current
-        .iter()
-        .cloned()
-        .map(|finding| (finding.fingerprint(), finding))
-        .collect();
+        .partition(|finding| finding.subject.is_none());
+    let mut current_left: Vec<&Finding> = current.iter().collect();
+    let mut unchanged_findings = Vec::new();
 
-    let new_findings = current_by_key
-        .iter()
-        .filter(|(key, _)| !baseline_by_key.contains_key(key))
-        .map(|(_, finding)| finding.clone())
-        .collect();
-    let resolved_findings = baseline_by_key
-        .iter()
-        .filter(|(key, _)| !current_by_key.contains_key(key))
-        .map(|(_, finding)| finding.clone())
-        .collect();
-    let unchanged_findings = current_by_key
-        .iter()
-        .filter(|(key, _)| baseline_by_key.contains_key(key))
-        .map(|(_, finding)| finding.clone())
-        .collect();
+    pair_by_key(
+        &mut baseline_left,
+        &mut current_left,
+        &mut unchanged_findings,
+        Finding::legacy_fingerprint,
+    );
+    baseline_left.extend(with_subject);
+    pair_by_key(
+        &mut baseline_left,
+        &mut current_left,
+        &mut unchanged_findings,
+        Finding::fingerprint,
+    );
+    baseline_left.sort_by_key(|finding| finding.legacy_fingerprint());
+    current_left.sort_by_key(|finding| finding.legacy_fingerprint());
+    unchanged_findings.sort_by_key(Finding::legacy_fingerprint);
 
     DiffResult {
-        new_findings,
-        resolved_findings,
+        new_findings: current_left.into_iter().cloned().collect(),
+        resolved_findings: baseline_left.into_iter().cloned().collect(),
         unchanged_findings,
     }
+}
+
+/// Move findings present on both sides under `key` out of `baseline` and
+/// `current`, recording the current one as unchanged.
+fn pair_by_key<K: Ord>(
+    baseline: &mut Vec<&Finding>,
+    current: &mut Vec<&Finding>,
+    unchanged: &mut Vec<Finding>,
+    key: impl Fn(&Finding) -> K,
+) {
+    let mut available: BTreeMap<K, usize> = BTreeMap::new();
+    for finding in baseline.iter() {
+        *available.entry(key(finding)).or_default() += 1;
+    }
+    let mut matched: BTreeMap<K, usize> = BTreeMap::new();
+    current.retain(|finding| {
+        let finding_key = key(finding);
+        match available.get_mut(&finding_key) {
+            Some(count) if *count > 0 => {
+                *count -= 1;
+                *matched.entry(finding_key).or_default() += 1;
+                unchanged.push((*finding).clone());
+                false
+            }
+            _ => true,
+        }
+    });
+    baseline.retain(|finding| match matched.get_mut(&key(finding)) {
+        Some(count) if *count > 0 => {
+            *count -= 1;
+            false
+        }
+        _ => true,
+    });
 }
 
 pub fn render_diff_text(diff: &DiffResult) -> String {
@@ -135,6 +172,7 @@ mod tests {
             severity: "error".into(),
             suggestion: None,
             scope: FindingScope::Page,
+            subject: None,
         }
     }
 
@@ -146,6 +184,98 @@ mod tests {
         assert_eq!(diff.new_findings.len(), 1);
         assert_eq!(diff.unchanged_findings.len(), 1);
         assert!(render_diff_text(&diff).contains("New findings: 1"));
+    }
+
+    fn counts(diff: &crate::DiffResult) -> (usize, usize, usize) {
+        (
+            diff.new_findings.len(),
+            diff.resolved_findings.len(),
+            diff.unchanged_findings.len(),
+        )
+    }
+
+    #[test]
+    fn rewording_and_moving_a_finding_keeps_it_unchanged() {
+        let baseline = vec![finding("LNK001", "a.html").with_subject("x")];
+        let mut moved = baseline[0].clone();
+        moved.message = "new wording".into();
+        moved.line = 40;
+        let diff = diff_finding_sets(&baseline, &[moved]);
+        assert_eq!(counts(&diff), (0, 0, 1));
+    }
+
+    #[test]
+    fn a_different_subject_on_the_same_path_is_a_new_finding() {
+        let baseline = vec![finding("LNK001", "a.html").with_subject("x")];
+        let current = vec![finding("LNK001", "a.html").with_subject("y")];
+        let diff = diff_finding_sets(&baseline, &current);
+        assert_eq!(counts(&diff), (1, 1, 0));
+    }
+
+    #[test]
+    fn transient_crawl_error_text_does_not_make_a_finding_new() {
+        let mut baseline = finding("CRW001", "response/a");
+        baseline.message = "failed to fetch URL: https://e.test/a (connection reset)".into();
+        let mut current = finding("CRW001", "response/a");
+        current.message = "failed to fetch URL: https://e.test/a (timed out)".into();
+        let diff = diff_finding_sets(&[baseline], &[current]);
+        assert_eq!(counts(&diff), (0, 0, 1));
+    }
+
+    #[test]
+    fn identical_findings_are_counted_not_collapsed() {
+        let one = finding("A11Y002", "a.html");
+        let diff = diff_finding_sets(std::slice::from_ref(&one), &[one.clone(), one.clone()]);
+        assert_eq!(counts(&diff), (1, 0, 1));
+        let diff = diff_finding_sets(&[one.clone(), one.clone()], std::slice::from_ref(&one));
+        assert_eq!(counts(&diff), (0, 1, 1));
+    }
+
+    #[test]
+    fn baseline_without_subjects_still_matches_by_version_one_fingerprint() {
+        let mut stored = finding("LNK001", "a.html");
+        stored.message = "broken internal link: /x".into();
+        stored.line = 7;
+        let mut current = stored.clone().with_subject("x");
+        let diff = diff_finding_sets(
+            std::slice::from_ref(&stored),
+            std::slice::from_ref(&current),
+        );
+        assert_eq!(counts(&diff), (0, 0, 1));
+
+        // Without the old wording and position there is nothing to prove this
+        // is the same link, so it stays conservative until the baseline is rewritten.
+        current.line = 8;
+        let diff = diff_finding_sets(&[stored], &[current]);
+        assert_eq!(counts(&diff), (1, 1, 0));
+    }
+
+    #[test]
+    fn baseline_without_subjects_tolerates_rewording_of_subjectless_rules() {
+        let mut stored = finding("SEO001", "a.html");
+        stored.message = "missing <title>".into();
+        let mut current = finding("SEO001", "a.html");
+        current.message = "page has no title".into();
+        let diff = diff_finding_sets(&[stored], &[current]);
+        assert_eq!(counts(&diff), (0, 0, 1));
+    }
+
+    #[test]
+    fn orphan_finding_from_a_stored_baseline_matches_the_current_wording() {
+        let mut stored = finding("LNK002", "g.html");
+        stored.message = "orphan page: /g".into();
+        let mut current = finding("LNK002", "g.html");
+        current.message = "no inbound links observed in the analyzed pages: /g".into();
+        let diff = diff_finding_sets(&[stored], &[current]);
+        assert_eq!(counts(&diff), (0, 0, 1));
+    }
+
+    #[test]
+    fn subject_is_optional_on_the_wire() {
+        let without: Finding =
+            serde_json::from_str(r#"{"rule_id":"SEO001","message":"m","path":"a.html"}"#).unwrap();
+        assert_eq!(without.subject, None);
+        assert!(!serde_json::to_string(&without).unwrap().contains("subject"));
     }
 
     #[test]

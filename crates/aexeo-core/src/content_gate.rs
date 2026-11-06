@@ -818,6 +818,7 @@ impl ContentPreset {
                     .into(),
                     suggestion: None,
                     scope: aexeo_contracts::FindingScope::Page,
+                    subject: None,
                 })
             };
             match gate {
@@ -882,6 +883,7 @@ impl ContentPreset {
                                                 severity: match gate.severity() { Severity::Error => "error", Severity::Warning => "warning" }.into(),
                                                 suggestion: None,
                                                 scope: aexeo_contracts::FindingScope::Page,
+                                                subject: None,
                                             });
                                     } else {
                                         first_by_value.insert(value, &item.id);

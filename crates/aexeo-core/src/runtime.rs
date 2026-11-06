@@ -1695,6 +1695,7 @@ fn materialize_runtime_site(
                         severity: "error".to_string(),
                         suggestion: None,
                         scope: FindingScope::Page,
+                        subject: None,
                     });
                     continue;
                 }
@@ -1712,6 +1713,7 @@ fn materialize_runtime_site(
                     severity: "error".to_string(),
                     suggestion: None,
                     scope: FindingScope::Page,
+                    subject: None,
                 });
                 continue;
             };
@@ -2175,6 +2177,7 @@ fn probe_markdown_negotiation_finding(
                 .to_string(),
         ),
         scope: FindingScope::Sitewide,
+        subject: None,
     }]
 }
 
@@ -2940,6 +2943,7 @@ mod tests {
                 severity: "error".to_string(),
                 suggestion: None,
                 scope: FindingScope::Page,
+                subject: None,
             }],
             status: AuditStatus::Complete,
             crawl_stats: CrawlStats {

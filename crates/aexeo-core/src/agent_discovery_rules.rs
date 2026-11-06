@@ -53,6 +53,7 @@ fn finding(rule_id: &str, message: impl Into<String>, suggestion: Option<&str>) 
         severity: "warning".to_string(),
         suggestion: suggestion.map(str::to_string),
         scope: FindingScope::Sitewide,
+        subject: None,
     }
 }
 

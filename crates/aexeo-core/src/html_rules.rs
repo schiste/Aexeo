@@ -17,6 +17,7 @@ fn finding(rule_id: &str, message: impl Into<String>, path: &Path, severity: &st
         severity: severity.to_string(),
         suggestion: None,
         scope: FindingScope::Page,
+        subject: None,
     }
 }
 
@@ -251,12 +252,15 @@ pub fn run_html_rules(site: &Site, config: &Config) -> Vec<Finding> {
         for alternate in &page.alternate_links {
             if let Some(hreflang) = alternate.hreflang.as_deref() {
                 if !is_valid_hreflang(hreflang) {
-                    findings.push(finding(
-                        "SEO010",
-                        format!("invalid hreflang value: {}", hreflang),
-                        &page.path,
-                        "warning",
-                    ));
+                    findings.push(
+                        finding(
+                            "SEO010",
+                            format!("invalid hreflang value: {}", hreflang),
+                            &page.path,
+                            "warning",
+                        )
+                        .with_subject(hreflang),
+                    );
                 }
                 hreflang_values.insert(hreflang.to_string());
             }
@@ -271,15 +275,18 @@ pub fn run_html_rules(site: &Site, config: &Config) -> Vec<Finding> {
                 let is_hreflang_alternate = alternate.hreflang.is_some()
                     || !is_non_hreflang_alternate_type(alternate.type_attr.as_deref());
                 if is_hreflang_alternate && !site.indexed_paths.contains(&target) {
-                    findings.push(finding(
-                        "SEO009",
-                        format!(
-                            "hreflang alternate points to missing internal path: {}",
-                            alternate.href
-                        ),
-                        &page.path,
-                        "warning",
-                    ));
+                    findings.push(
+                        finding(
+                            "SEO009",
+                            format!(
+                                "hreflang alternate points to missing internal path: {}",
+                                alternate.href
+                            ),
+                            &page.path,
+                            "warning",
+                        )
+                        .with_subject(alternate.href.as_str()),
+                    );
                 }
                 normalized_targets.push((alternate.hreflang.clone(), target));
             }
@@ -317,15 +324,18 @@ pub fn run_html_rules(site: &Site, config: &Config) -> Vec<Finding> {
                 .filter_map(|link| normalize_project_href(&link.href, site_url))
                 .collect();
             if !reciprocal_targets.contains(&page.route) {
-                findings.push(finding(
-                    "SEO012",
-                    format!(
-                        "hreflang alternate /{} does not reciprocally reference this page",
-                        target
-                    ),
-                    &page.path,
-                    "warning",
-                ));
+                findings.push(
+                    finding(
+                        "SEO012",
+                        format!(
+                            "hreflang alternate /{} does not reciprocally reference this page",
+                            target
+                        ),
+                        &page.path,
+                        "warning",
+                    )
+                    .with_subject(target.as_str()),
+                );
             }
         }
     }
