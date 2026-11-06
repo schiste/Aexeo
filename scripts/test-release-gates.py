@@ -98,7 +98,7 @@ class PinTests(unittest.TestCase):
                     continue
                 if "cargo install" in line:
                     self.assertIn("--locked", line, f"{path.name}: {line}")
-                    self.assertIn("@", line, f"{path.name}: unversioned install: {line}")
+                    self.assertRegex(line, r"@|--version", f"{path.name}: unversioned install: {line}")
                 self.assertNotRegex(line, r"toolchain install nightly\b", f"{path.name}: {line}")
                 self.assertNotRegex(line, r"\+nightly\b", f"{path.name}: {line}")
 
