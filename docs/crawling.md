@@ -77,13 +77,17 @@ hold URLs reduced to scheme, host, port and path. Userinfo, query and fragment a
 removed because they can carry credentials. Fetch failures are described by a fixed
 summary rather than the underlying error text, which embeds the URL.
 
-A checkpoint file is not a report: it keeps the base URL as given, so that a resume
-can use it. Treat a checkpoint for a URL with embedded credentials as a secret.
+Checkpoints store URLs the same way. They still hold the crawled page bodies, so a
+new checkpoint file is created readable only by its owner (mode 0600 on Unix); an
+existing one keeps its mode.
 
 ## Checkpoints
 
 `--resume` refuses a checkpoint whose version, base URL, host or engine differs from
-the current run, before sending any request. Checkpoints are written atomically and
-triggered once `--checkpoint-every` pages have been visited since the last one. A
+the current run, before sending any request. Where a resumed crawl sends requests
+comes only from the URL given on the command line, never from the file: it starts at
+that URL's origin and follows redirects again. Credentials embedded in the URL apply
+only until the crawl adopts the origin the server answered from, and are not used
+after a resume. Checkpoints are written atomically and triggered once `--checkpoint-every` pages have been visited since the last one. A
 route that did not fit in `--max-pages` stays queued, so a resume crawls it. robots.txt
 is fetched again on resume.

@@ -738,3 +738,72 @@ fn checkpoints_follow_a_page_threshold_whatever_the_batch_size() {
         "a finished crawl leaves no checkpoint or temp file"
     );
 }
+
+#[test]
+fn resume_never_sends_requests_to_a_tampered_normalized_base() {
+    let site = resumable_site();
+    // Same host as the site, on another port: same-site, so only ignoring the
+    // persisted value keeps the crawl away from it.
+    let attacker = resumable_site();
+    let temp = tempfile::tempdir().unwrap();
+    let checkpoint = temp.path().join("checkpoint.json");
+    interrupted_crawl(&site, &checkpoint);
+    let original: Value = serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
+
+    let mut tampered = original.clone();
+    tampered["planner"]["normalized_base"] = format!("{}/", attacker.base_url).into();
+    std::fs::write(&checkpoint, tampered.to_string()).unwrap();
+    let output = resume(&site.base_url, &checkpoint);
+    assert!(
+        attacker.requests.lock().unwrap().is_empty(),
+        "credentials would have gone to another origin"
+    );
+    assert!(
+        site.requested("/next"),
+        "the crawl continues on the given URL"
+    );
+    assert_eq!(parse_json(&output.stdout)["artifact"]["status"], "complete");
+
+    // Another host is refused outright, with or without userinfo.
+    for foreign in ["http://evil.test/", "http://user:pw@evil.test/"] {
+        let mut tampered = original.clone();
+        tampered["planner"]["normalized_base"] = foreign.into();
+        std::fs::write(&checkpoint, tampered.to_string()).unwrap();
+        let output = resume(&site.base_url, &checkpoint);
+        let text = String::from_utf8_lossy(&output.stdout).to_string();
+        assert_ne!(output.status.code(), Some(0), "{text}");
+        assert!(text.contains("checkpoint belongs to"), "{text}");
+        assert!(!text.contains("pw@"), "{text}");
+    }
+}
+
+#[test]
+fn checkpoints_do_not_store_url_credentials() {
+    let site = resumable_site();
+    let authority = site.base_url.trim_start_matches("http://").to_string();
+    let temp = tempfile::tempdir().unwrap();
+    let checkpoint = temp.path().join("checkpoint.json");
+    let output = Command::new(bin())
+        .current_dir(temp.path())
+        .args(["crawl", &format!("http://user:s3cret@{authority}/")])
+        .args(["--engine", "http", "--progress", "off", "--format", "json"])
+        .args([
+            "--max-pages",
+            "1",
+            "--checkpoint-every",
+            "1",
+            "--checkpoint",
+        ])
+        .arg(&checkpoint)
+        .output()
+        .unwrap();
+    assert_eq!(parse_json(&output.stdout)["artifact"]["status"], "partial");
+    let saved = std::fs::read_to_string(&checkpoint).unwrap();
+    assert!(!saved.contains("s3cret"), "{saved}");
+
+    let resumed = resume(&format!("http://user:s3cret@{authority}/"), &checkpoint);
+    assert_eq!(
+        parse_json(&resumed.stdout)["artifact"]["status"],
+        "complete"
+    );
+}

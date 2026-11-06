@@ -15,8 +15,11 @@ use aexeo_contracts::{
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::RandomState;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::hash::BuildHasher;
+use std::io::Write;
 use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -1659,7 +1662,7 @@ fn checkpoint_state(
 ) -> Result<()> {
     let checkpoint = RuntimeCheckpoint {
         version: CHECKPOINT_VERSION,
-        base_url: base_url.to_string(),
+        base_url: redact_url(base_url),
         engine: engine.to_string(),
         planner: planner.checkpoint_state(),
         snapshot: snapshot.checkpoint_state(),
@@ -1670,15 +1673,62 @@ fn checkpoint_state(
 }
 
 /// Replace `path` in one step, so a crash mid-write leaves the previous checkpoint.
+///
+/// The temporary file sits in the same directory, is created exclusively under an
+/// unpredictable name, and is private until it takes over the destination's mode:
+/// a checkpoint holds crawled page bodies, which may come from an authenticated site.
 fn write_atomically(path: &Path, contents: &[u8]) -> Result<()> {
-    let mut temporary = path.as_os_str().to_owned();
-    temporary.push(format!(".tmp.{}", std::process::id()));
-    let temporary = Path::new(&temporary);
-    fs::write(temporary, contents)?;
-    fs::rename(temporary, path).inspect_err(|_| {
-        let _ = fs::remove_file(temporary);
-    })?;
+    let (temporary, mut file) = create_temporary_sibling(path)?;
+    let written = (|| -> Result<()> {
+        file.write_all(contents)?;
+        if let Ok(existing) = fs::metadata(path) {
+            file.set_permissions(existing.permissions())?;
+        }
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary, path)?;
+        Ok(())
+    })();
+    if written.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    written?;
+    // Best effort: not every platform can open or sync a directory.
+    if let Some(Ok(directory)) = path
+        .parent()
+        .map(|parent| match parent.as_os_str().is_empty() {
+            true => fs::File::open("."),
+            false => fs::File::open(parent),
+        })
+    {
+        let _ = directory.sync_all();
+    }
     Ok(())
+}
+
+fn create_temporary_sibling(path: &Path) -> Result<(std::path::PathBuf, fs::File)> {
+    const ATTEMPTS: usize = 16;
+    for attempt in 0..ATTEMPTS {
+        // `create_new` is the safeguard against a planted file; the name only has
+        // to be hard to guess, and `RandomState` is seeded randomly per process.
+        let suffix = RandomState::new().hash_one((std::process::id(), attempt));
+        let mut temporary = path.as_os_str().to_owned();
+        temporary.push(format!(".tmp.{suffix:016x}"));
+        let temporary = std::path::PathBuf::from(temporary);
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        match options.open(&temporary) {
+            Ok(file) => return Ok((temporary, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    anyhow::bail!(
+        "could not create a temporary file next to {}",
+        path.display()
+    )
 }
 
 fn load_checkpoint(
@@ -1706,9 +1756,17 @@ fn validate_checkpoint(checkpoint: &RuntimeCheckpoint, base_url: &str, engine: &
         "checkpoint version {} is not supported (expected {CHECKPOINT_VERSION}); start a new crawl",
         checkpoint.version
     );
+    // The planner's persisted location is ignored on resume. Disagreement with the
+    // current run still means this is not its checkpoint, or that it was altered.
+    let target_host = host_for_url(base_url);
     anyhow::ensure!(
-        normalize_base_url(&checkpoint.base_url) == normalize_base_url(base_url)
-            && same_site_host(&checkpoint.planner.base_host, &host_for_url(base_url)),
+        normalize_base_url(&redact_url(&checkpoint.base_url))
+            == normalize_base_url(&redact_url(base_url))
+            && same_site_host(&checkpoint.planner.base_host, &target_host)
+            && same_site_host(
+                &host_for_url(&checkpoint.planner.normalized_base),
+                &target_host
+            ),
         "checkpoint belongs to {} but this crawl targets {}; pass the same URL or start a new crawl",
         redact_url(&checkpoint.base_url),
         redact_url(base_url)
@@ -1739,7 +1797,7 @@ fn materialize_runtime_site(
             let checkpoint = load_checkpoint(resume_from, base_url, engine, max_pages)?;
             let resumed_elapsed_us = checkpoint.crawl_stats.elapsed_us;
             (
-                CrawlPlanner::from_checkpoint(checkpoint.planner, max_pages),
+                CrawlPlanner::from_checkpoint(checkpoint.planner, base_url, max_pages),
                 RuntimeSnapshotBuilder::from_state(checkpoint.snapshot),
                 checkpoint.crawl_findings,
                 checkpoint.crawl_stats,
@@ -3318,20 +3376,58 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_checkpoint_write_keeps_the_previous_checkpoint() {
+    fn checkpoint_writes_replace_the_file_and_leave_nothing_behind() {
         use super::write_atomically;
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("checkpoint.json");
-        write_atomically(&path, b"previous").unwrap();
-        assert_eq!(std::fs::read(&path).unwrap(), b"previous");
+        write_atomically(&path, b"first").unwrap();
+        write_atomically(&path, b"second").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"second");
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
 
-        let temporary = dir
-            .path()
-            .join(format!("checkpoint.json.tmp.{}", std::process::id()));
-        std::fs::create_dir(&temporary).unwrap();
-        assert!(write_atomically(&path, b"next").is_err());
-        assert_eq!(std::fs::read(&path).unwrap(), b"previous");
+    #[test]
+    fn a_failed_checkpoint_write_removes_its_temporary_file() {
+        use super::write_atomically;
+        let dir = tempfile::tempdir().unwrap();
+        // Renaming a file over a non-empty directory fails after the temp is written.
+        let destination = dir.path().join("checkpoint.json");
+        std::fs::create_dir(&destination).unwrap();
+        std::fs::write(destination.join("keep"), b"kept").unwrap();
+        assert!(write_atomically(&destination, b"next").is_err());
+        assert_eq!(std::fs::read(destination.join("keep")).unwrap(), b"kept");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn temporary_checkpoint_names_are_unique_siblings() {
+        use super::create_temporary_sibling;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("checkpoint.json");
+        let (first, _first_file) = create_temporary_sibling(&path).unwrap();
+        let (second, _second_file) = create_temporary_sibling(&path).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(first.parent(), path.parent());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checkpoints_are_private_unless_the_destination_says_otherwise() {
+        use super::write_atomically;
+        use std::os::unix::fs::PermissionsExt;
+        let mode =
+            |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        let dir = tempfile::tempdir().unwrap();
+        let fresh = dir.path().join("fresh.json");
+        write_atomically(&fresh, b"x").unwrap();
+        assert_eq!(mode(&fresh), 0o600);
+
+        let shared = dir.path().join("shared.json");
+        std::fs::write(&shared, b"old").unwrap();
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o640)).unwrap();
+        write_atomically(&shared, b"new").unwrap();
+        assert_eq!(mode(&shared), 0o640);
+        assert_eq!(std::fs::read(&shared).unwrap(), b"new");
     }
 
     #[test]

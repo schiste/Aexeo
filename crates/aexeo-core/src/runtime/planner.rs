@@ -78,7 +78,7 @@ impl CrawlPlanner {
 
     pub(crate) fn checkpoint_state(&self) -> CrawlPlannerState {
         CrawlPlannerState {
-            normalized_base: self.normalized_base.clone(),
+            normalized_base: redact_url(&self.normalized_base),
             base_host: self.base_host.clone(),
             queue: self.queue.iter().cloned().collect(),
             visited: sorted_vec(&self.visited),
@@ -89,15 +89,23 @@ impl CrawlPlanner {
         }
     }
 
-    pub(crate) fn from_checkpoint(state: CrawlPlannerState, max_pages: usize) -> Self {
+    /// Restore a crawl. Where requests go comes only from `base_url`, which the
+    /// current run supplies: a checkpoint is a file, and the persisted base must
+    /// not be able to send this run's credentials elsewhere. Routes are relative
+    /// to the origin, and redirects re-establish any alignment the crawl had.
+    pub(crate) fn from_checkpoint(
+        state: CrawlPlannerState,
+        base_url: &str,
+        max_pages: usize,
+    ) -> Self {
         let queue_routes = state
             .queue
             .iter()
             .filter_map(|entry| canonicalize_route_entry(entry))
             .collect::<Vec<_>>();
         Self {
-            normalized_base: state.normalized_base,
-            base_host: state.base_host,
+            normalized_base: origin_for_url(base_url),
+            base_host: host_for_url(base_url),
             queue: VecDeque::from(queue_routes.clone()),
             queued: HashSet::from_iter(queue_routes),
             visited: state
@@ -266,7 +274,8 @@ mod tests {
         assert!(planner.truncated());
         assert_eq!(planner.checkpoint_state().queue, ["docs"]);
 
-        let mut resumed = CrawlPlanner::from_checkpoint(planner.checkpoint_state(), 2);
+        let mut resumed =
+            CrawlPlanner::from_checkpoint(planner.checkpoint_state(), "https://example.com", 2);
         assert_eq!(
             resumed.next_url(&runtime).as_deref(),
             Some("https://example.com/docs")
@@ -297,7 +306,8 @@ mod tests {
             planner.next_url(&runtime).as_deref(),
             Some("https://example.com/")
         );
-        let mut resumed = CrawlPlanner::from_checkpoint(planner.checkpoint_state(), 5);
+        let mut resumed =
+            CrawlPlanner::from_checkpoint(planner.checkpoint_state(), "https://example.com", 5);
         resumed.set_robots_policy(robots);
         assert_eq!(
             resumed.next_url(&runtime).as_deref(),
@@ -345,11 +355,43 @@ mod tests {
                 max_pages: 20,
                 ..state
             },
+            "https://example.com",
             20,
         );
         assert_eq!(restored.base_host(), "example.com");
         assert_eq!(restored.discovered_route_count(), 2);
         assert_eq!(restored.visited_count(), 1);
+    }
+
+    #[test]
+    fn a_resumed_planner_targets_the_given_url_not_the_persisted_one() {
+        let config = Config::default();
+        let runtime = config.runtime();
+        let mut planner = CrawlPlanner::new("https://www.example.com/start", 10);
+        planner.align_with_effective_url("https://www.example.com/start");
+        planner.seed_from_user_input("/docs", &runtime);
+        let tampered = CrawlPlannerState {
+            normalized_base: "http://evil.test:8080/".to_string(),
+            base_host: "evil.test:8080".to_string(),
+            ..planner.checkpoint_state()
+        };
+        let mut resumed =
+            CrawlPlanner::from_checkpoint(tampered, "https://www.example.com/start", 10);
+        assert_eq!(resumed.normalized_base(), "https://www.example.com/");
+        assert_eq!(resumed.base_host(), "www.example.com");
+        assert_eq!(
+            resumed.next_url(&runtime).as_deref(),
+            Some("https://www.example.com/")
+        );
+    }
+
+    #[test]
+    fn a_checkpoint_does_not_persist_url_credentials() {
+        let planner = CrawlPlanner::new("https://user:secret@example.com", 10);
+        assert_eq!(
+            planner.checkpoint_state().normalized_base,
+            "https://example.com/"
+        );
     }
 
     #[test]
