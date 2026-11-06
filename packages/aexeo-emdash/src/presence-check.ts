@@ -314,13 +314,27 @@ async function checkCommonCrawl(
       "no website URL in manifest, can't query crawl index",
     );
   }
-  // The CDX index ships a new "month" every few weeks; we point at
-  // the latest known stable index. New indexes appear at predictable
-  // URLs (CC-MAIN-YYYY-WW), but listing them requires another
-  // request. For Phase 3, hard-code the latest index — periodic
-  // refresh of this constant is part of plugin maintenance until we
-  // wire in the index-of-indexes fetch.
-  const index = "CC-MAIN-2026-15";
+  // A new crawl ships every few weeks, and a pinned index would report every
+  // newer site as not_found. Failing to resolve it means nothing was searched,
+  // so that is "unreachable", never "absent".
+  let index: string;
+  try {
+    const res = await timedFetch(
+      fetcher,
+      "https://index.commoncrawl.org/collinfo.json",
+    );
+    if (!res.ok) return unreachable("common_crawl", `HTTP ${res.status}`);
+    const newest = newestCrawlId((await res.json()) as unknown);
+    if (newest === null) {
+      return unreachable(
+        "common_crawl",
+        "no crawl index listed in collinfo.json",
+      );
+    }
+    index = newest;
+  } catch (error) {
+    return unreachable("common_crawl", errMsg(error));
+  }
   const url = new URL(`https://index.commoncrawl.org/${index}-index`);
   url.searchParams.set("url", host);
   url.searchParams.set("output", "json");
@@ -353,6 +367,19 @@ async function checkCommonCrawl(
   } catch (error) {
     return unreachable("common_crawl", errMsg(error));
   }
+}
+
+// Crawl ids are CC-MAIN-YYYY-WW, so the newest sorts last whatever order the
+// listing uses. Ids become part of a URL path, so anything else is ignored.
+function newestCrawlId(collinfo: unknown): string | null {
+  if (!Array.isArray(collinfo)) return null;
+  let newest: string | null = null;
+  for (const crawl of collinfo as Array<{ id?: unknown }>) {
+    const id = crawl?.id;
+    if (typeof id !== "string" || !/^CC-MAIN-[A-Za-z0-9-]+$/.test(id)) continue;
+    if (newest === null || id > newest) newest = id;
+  }
+  return newest;
 }
 
 // --- Helpers ---------------------------------------------------------

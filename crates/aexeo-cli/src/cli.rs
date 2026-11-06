@@ -1,3 +1,4 @@
+use aexeo_core::intelligence::presence::{DEFAULT_WIKIPEDIA_LANGUAGE, is_wikipedia_language};
 use anyhow::{Context, Result};
 use clap::{Arg, ArgAction, Command, value_parser};
 
@@ -392,6 +393,14 @@ pub fn build_cli() -> Command {
                         .arg(Arg::new("path").default_value("."))
                         .arg(Arg::new("manifest").long("manifest").num_args(1))
                         .arg(
+                            Arg::new("wikipedia-language")
+                                .long("wikipedia-language")
+                                .num_args(1)
+                                .default_value(DEFAULT_WIKIPEDIA_LANGUAGE)
+                                .value_parser(parse_wikipedia_language)
+                                .help("Wikipedia edition to search, such as fr or pt-br; other editions are not checked"),
+                        )
+                        .arg(
                             Arg::new("format")
                                 .long("format")
                                 .value_parser(["text", "json"])
@@ -452,7 +461,7 @@ pub fn build_cli() -> Command {
                 )
                 .subcommand(
                     Command::new("score")
-                        .about("Compute site and route intelligence scores")
+                        .about("Report site and route intelligence facts and blockers (no composite score)")
                         .arg(Arg::new("path").default_value("."))
                         .arg(Arg::new("manifest").long("manifest").num_args(1))
                         .arg(Arg::new("trust-surfaces").long("trust-surfaces").num_args(1))
@@ -1177,4 +1186,12 @@ pub fn render_cli_reference() -> Result<String> {
         lines.push(String::new());
     }
     Ok(lines.join("\n"))
+}
+
+fn parse_wikipedia_language(value: &str) -> Result<String, String> {
+    if is_wikipedia_language(value) {
+        Ok(value.to_string())
+    } else {
+        Err("expected a Wikipedia edition code such as en, fr or pt-br".to_string())
+    }
 }

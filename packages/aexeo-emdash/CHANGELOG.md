@@ -130,6 +130,16 @@ version, since 0.8.19 had never been published.
 
 ### Changed
 
+- **The dashboard widget no longer shows a composite score.** The "Overall"
+  stat and the "Site score is N — below the 60 quality threshold" banner are
+  gone; blockers remain the call to action. `SiteIntelligenceScore` loses
+  `overall_score`, `answer_pack_score` and `elapsed_us` and gains
+  `answer_pack`, and `citation_readiness_score` and `truth_consistency_score`
+  may now be `null`, shown as "unknown", when nothing was measured.
+- **Entity presence resolves the newest Common Crawl index at runtime** from
+  `collinfo.json` instead of a pinned crawl, so a site first crawled after a
+  plugin release is no longer reported `not_found`. Failing to resolve the
+  index reports `unreachable`.
 - Support EmDash `^1.2.0` and run the plugin-host integration coverage against
   EmDash `1.2.0`.
 

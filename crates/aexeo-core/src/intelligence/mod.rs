@@ -28,7 +28,8 @@ pub use grounding::{
     map_grounding_queries,
 };
 pub use score::{
-    IntelligenceBlocker, RouteIntelligenceScore, SiteIntelligenceScore, score_intelligence,
+    AnswerPackFacts, IntelligenceBlocker, RouteIntelligenceScore, SiteIntelligenceScore,
+    score_intelligence,
 };
 pub use trust::{
     TrustSurfaceIssue, TrustSurfaceIssueKind, TrustSurfaceReconciliation, TrustSurfaceRecord,

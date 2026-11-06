@@ -405,23 +405,21 @@ export async function renderScoreWidget(
     {
       type: "stats",
       items: [
-        { label: "Overall", value: `${score.overall_score}` },
-        { label: "Citation", value: `${score.citation_readiness_score}` },
+        {
+          label: "Citation",
+          value: score.citation_readiness_score?.toString() ?? "unknown",
+        },
         {
           label: tuning.truthLabel(score),
-          value: `${score.truth_consistency_score}`,
+          value: score.truth_consistency_score?.toString() ?? "unknown",
         },
-        { label: "Answers", value: `${score.answer_pack_score}` },
+        {
+          label: "Answers",
+          value: `${score.answer_pack.routes_with_answer_blocks}/${score.answer_pack.routes_analyzed} routes`,
+        },
       ],
     },
   ];
-  if (score.overall_score < 60) {
-    blocks.unshift({
-      type: "banner",
-      title: `Site score is ${score.overall_score} — below the 60 quality threshold`,
-      variant: "alert",
-    });
-  }
   if (score.blockers.length > 0) {
     blocks.push({
       type: "context",

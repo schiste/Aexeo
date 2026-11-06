@@ -84,7 +84,7 @@ pub use integrations::{
     submit_indexnow_with_ledger, validate_indexnow,
 };
 pub use intelligence::{
-    AnswerFanoutQuery, AnswerFanoutReport, AnswerFanoutRouteMatch, EvidenceClaim,
+    AnswerFanoutQuery, AnswerFanoutReport, AnswerFanoutRouteMatch, AnswerPackFacts, EvidenceClaim,
     EvidenceClaimKind, EvidenceRouteAssessment, EvidenceSectionAssessment, EvidenceSiteAssessment,
     GroundingCoverageGap, GroundingIntentFamily, GroundingRouteAnalysis, GroundingSiteAnalysis,
     IdentityDrift, IntelligenceBlocker, PageIdentity, PageIdentitySources, RouteIntelligenceScore,
