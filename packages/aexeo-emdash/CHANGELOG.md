@@ -4,6 +4,19 @@ All notable changes to `@aeptus/aexeo-emdash` are listed here.
 The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Saving a document no longer reports false site-graph findings or erases
+  real ones.** A save evaluates one document as a one-page site, so every
+  internal link was reported as broken (`LNK001`) and the page as an orphan
+  (`LNK002`), and those results replaced the route's stored findings until the
+  next Refresh. Rules that depend on other documents (`LNK001`-`LNK004`,
+  `SEO009`, `SEO012`, `SEO016`, `SEO017`, `CNT005`) are now computed by Refresh
+  only: a save keeps the route's stored findings for them, so a link fixed or
+  added in that save is reflected at the next Refresh.
+
 ## [0.8.19] - 2026-09-29
 
 Updates the EmDash integration to the current plugin and content APIs, and
