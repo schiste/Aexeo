@@ -455,7 +455,7 @@ pub fn build_cli() -> Command {
                 )
                 .subcommand(
                     Command::new("score")
-                        .about("Compute site and route intelligence scores")
+                        .about("Report site and route intelligence facts and blockers (no composite score)")
                         .arg(Arg::new("path").default_value("."))
                         .arg(Arg::new("manifest").long("manifest").num_args(1))
                         .arg(Arg::new("trust-surfaces").long("trust-surfaces").num_args(1))

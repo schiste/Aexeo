@@ -30,10 +30,14 @@ export async function scoreSite(
   _documents: readonly EmdashDocument[],
 ): Promise<SiteIntelligenceScore> {
   return {
-    overall_score: 0,
-    citation_readiness_score: 0,
-    truth_consistency_score: 0,
-    answer_pack_score: 0,
+    citation_readiness_score: null,
+    truth_consistency_score: null,
+    answer_pack: {
+      routes_analyzed: 0,
+      routes_with_answer_blocks: 0,
+      routes_with_coverage_gaps: 0,
+      answer_blocks: 0,
+    },
     external_trust_alignment_score: null,
     route_scores: [],
     blockers: [],

@@ -761,22 +761,38 @@ fn evidence_text(report: &EvidenceSiteAssessment, report_path: &Path) -> String 
     lines.join("\n")
 }
 
+fn optional_value(value: Option<u8>) -> String {
+    value.map_or_else(|| "unknown".to_string(), |value| value.to_string())
+}
+
+fn optional_count(value: Option<usize>) -> String {
+    value.map_or_else(|| "unknown".to_string(), |value| value.to_string())
+}
+
 fn score_text(report: &SiteIntelligenceScore, report_path: &Path) -> String {
+    let answer_pack = &report.answer_pack;
     let mut lines = vec![
-        "Intelligence Score".to_string(),
+        "Intelligence Facts and Blockers".to_string(),
         String::new(),
-        format!("Overall score: {}", report.overall_score),
-        format!("Citation readiness: {}", report.citation_readiness_score),
-        format!("Facts consistency: {}", report.truth_consistency_score),
-        format!("Answer pack: {}", report.answer_pack_score),
+        format!(
+            "Citation readiness: {}",
+            optional_value(report.citation_readiness_score)
+        ),
+        format!(
+            "Facts consistency: {}",
+            optional_value(report.truth_consistency_score)
+        ),
+        format!(
+            "Answer structure: {} of {} routes have answer blocks ({} blocks), {} have coverage gaps",
+            answer_pack.routes_with_answer_blocks,
+            answer_pack.routes_analyzed,
+            answer_pack.answer_blocks,
+            answer_pack.routes_with_coverage_gaps
+        ),
         format!(
             "External trust alignment: {}",
-            report
-                .external_trust_alignment_score
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "n/a".to_string())
+            optional_value(report.external_trust_alignment_score)
         ),
-        format!("Elapsed: {}ms", report.elapsed_us / 1000),
         format!("Report: {}", report_path.display()),
     ];
     if !report.blockers.is_empty() {
@@ -792,19 +808,18 @@ fn score_text(report: &SiteIntelligenceScore, report_path: &Path) -> String {
         }
     }
     lines.push(String::new());
-    lines.push("Lowest scoring routes:".to_string());
+    lines.push("Routes with the most blockers:".to_string());
     for route in report.route_scores.iter().take(10) {
         lines.push(format!(
-            "- /{} overall={} citation={} facts={} answer_pack={} trust={}",
+            "- /{} blockers={} citation={} facts={} answer_blocks={} headings={} trust={} trust_issues={}",
             route.route,
-            route.overall_score,
-            route.citation_readiness_score,
-            route.truth_consistency_score,
-            route.answer_pack_score,
-            route
-                .external_trust_alignment_score
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "n/a".to_string())
+            route.blockers.len(),
+            optional_value(route.citation_readiness_score),
+            optional_value(route.truth_consistency_score),
+            optional_count(route.answer_blocks),
+            optional_count(route.heading_count),
+            optional_value(route.external_trust_alignment_score),
+            route.external_trust_issue_count,
         ));
     }
     lines.join("\n")
@@ -1232,6 +1247,7 @@ fn command_intelligence_presence(submatches: &ArgMatches) -> Result<i32> {
         eprintln!("warning: {message}");
     }
 
+    entity.wikipedia_language = required_arg(submatches, "wikipedia-language")?.to_string();
     let results = check_all_sources(&entity);
     let report_path = write_report(
         &root,
@@ -1247,7 +1263,6 @@ fn command_intelligence_presence(submatches: &ArgMatches) -> Result<i32> {
     match format {
         "json" => println!(
             "{}",
-    entity.wikipedia_language = required_arg(submatches, "wikipedia-language")?.to_string();
             render_data_command_json(
                 "intelligence presence",
                 true,
@@ -1677,26 +1692,35 @@ mod tests {
 
     // --- score_text -----------------------------------------------------
 
-    /// The external-trust score is optional (it needs network data). When
-    /// absent it must read `n/a`, never a misleading `0`, which would look
-    /// like a failing score.
+    fn answer_pack_fixture() -> serde_json::Value {
+        serde_json::json!({
+            "routes_analyzed": 2,
+            "routes_with_answer_blocks": 1,
+            "routes_with_coverage_gaps": 1,
+            "answer_blocks": 3,
+        })
+    }
+
+    /// An unmeasured dimension must read `unknown`, never a misleading number,
+    /// and no composite is printed.
     #[test]
-    fn score_text_prints_n_a_for_a_missing_external_trust_score() {
+    fn score_text_prints_unknown_for_unmeasured_dimensions() {
         let report: SiteIntelligenceScore = serde_json::from_value(serde_json::json!({
-            "overall_score": 70,
-            "citation_readiness_score": 60,
-            "truth_consistency_score": 80,
-            "answer_pack_score": 70,
+            "citation_readiness_score": null,
+            "truth_consistency_score": null,
+            "answer_pack": answer_pack_fixture(),
             "external_trust_alignment_score": null,
-            "elapsed_us": 0,
             "blockers": [],
             "route_scores": [],
         }))
         .expect("score fixture");
 
         let text = score_text(&report, path("score.json"));
-        assert!(text.contains("External trust alignment: n/a"), "{text}");
-        assert!(!text.contains("External trust alignment: 0"), "{text}");
+        assert!(text.contains("Citation readiness: unknown"), "{text}");
+        assert!(text.contains("Facts consistency: unknown"), "{text}");
+        assert!(text.contains("External trust alignment: unknown"), "{text}");
+        assert!(text.contains("1 of 2 routes have answer blocks"), "{text}");
+        assert!(!text.to_lowercase().contains("overall"), "{text}");
     }
 
     /// Blockers are the most actionable output of the score report: a
@@ -1705,12 +1729,10 @@ mod tests {
     #[test]
     fn score_text_marks_a_sitewide_blocker() {
         let report: SiteIntelligenceScore = serde_json::from_value(serde_json::json!({
-            "overall_score": 40,
             "citation_readiness_score": 30,
             "truth_consistency_score": 50,
-            "answer_pack_score": 40,
+            "answer_pack": answer_pack_fixture(),
             "external_trust_alignment_score": 60,
-            "elapsed_us": 0,
             "blockers": [{
                 "category": "truth",
                 "route": null,
