@@ -6,8 +6,11 @@ import type {
 } from "./plugin.js";
 import {
   DEFAULT_COLLECTIONS,
+  TokenStorageError,
   buildAllowedHosts,
+  handleAfterDelete,
   handleAfterSave,
+  isTokenStoredInPlaintext,
   readSidecarConfig,
   writeSidecarConfig,
 } from "./plugin.js";
@@ -228,17 +231,27 @@ async function renderSetupPage(
   // tells the renderer to show "••• stored" without leaking the value);
   // the URL is shown in plain text since it's not sensitive on its own.
   const existing = await readSidecarConfig(ctx.ctx);
+  const tokenInPlaintext = await isTokenStoredInPlaintext(ctx.ctx);
   const blocks: unknown[] = [
     { type: "header", text: "Aexeo setup" },
     {
       type: "context",
       text:
         "Paste the URL and auth token of your deployed aexeo-crawl-worker. " +
-        "The token is stored encrypted by the emdash host; both values are read " +
-        "at runtime, so no rebuild is required after a change. Rotate the token " +
-        "here whenever you redeploy the sidecar with a new secret.",
+        "Saving stores the token encrypted by the emdash host, and fails if the host " +
+        "cannot encrypt it. Both values are read at runtime, so no rebuild is required " +
+        "after a change. Rotate the token here whenever you redeploy the sidecar with " +
+        "a new secret.",
     },
   ];
+  if (tokenInPlaintext) {
+    blocks.push({
+      type: "banner",
+      title:
+        "EVAL_TOKEN is currently stored unencrypted in plugin KV. Save this form to encrypt it.",
+      variant: "alert",
+    });
+  }
   if (options.bannerError !== undefined) {
     blocks.push({
       type: "banner",
@@ -285,7 +298,7 @@ async function renderSetupPage(
       text:
         existing === null
           ? "Status: not configured. Refresh on the findings page will fail until both fields are saved."
-          : `Status: configured. Sidecar at ${existing.url}. Token stored — paste a new one above to rotate.`,
+          : `Status: configured. Sidecar at ${existing.url}. Token stored ${tokenInPlaintext ? "unencrypted" : "encrypted"} — paste a new one above to rotate.`,
     },
   );
   return { blocks };
@@ -354,7 +367,15 @@ async function handleSetupSubmit(
   // The URL goes to KV; the token goes to ctx.settings, where the host
   // encrypts it (the descriptor declares it `type: "secret"`). Nothing on
   // this path logs or echoes the token.
-  await writeSidecarConfig(ctx.ctx, next);
+  try {
+    await writeSidecarConfig(ctx.ctx, next);
+  } catch (err) {
+    if (!(err instanceof TokenStorageError)) throw err;
+    return renderSetupPage(ctx, {
+      bannerError: err.message,
+      initialUrl: validated.url,
+    });
+  }
   return renderSetupPage(ctx, {
     bannerSuccess:
       "Configuration saved. Click Refresh on the findings page to evaluate.",
@@ -364,6 +385,7 @@ async function handleSetupSubmit(
 export default definePlugin({
   hooks: {
     "content:afterSave": handleAfterSave,
+    "content:afterDelete": handleAfterDelete,
   },
   routes: {
     admin: { handler: handleAdminRoute },

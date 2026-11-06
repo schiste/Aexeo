@@ -13,12 +13,14 @@
 // entry. The sandbox entry stays around for future external publish.
 
 import type {
+  ContentAfterDeleteEvent,
   ContentAfterSaveEvent,
   EvaluatorFn,
   SandboxCtx,
 } from "./plugin.js";
 import {
   DEFAULT_COLLECTIONS,
+  handleAfterDelete,
   handleAfterSaveConfigured,
   readStoredFacts,
 } from "./plugin.js";
@@ -33,6 +35,7 @@ import {
 } from "./findings-view.js";
 import { handleDataRoute } from "./data-route.js";
 import { handleFactsRoute } from "./facts-route.js";
+import { PRESENCE_HOSTS } from "./presence-check.js";
 import { handlePresenceRoute } from "./presence-route.js";
 import { compileSuppressions } from "./suppressions.js";
 import type { Suppression, SuppressionFilter } from "./suppressions.js";
@@ -225,7 +228,11 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
   return definePlugin({
     id: "aexeo-emdash",
     version: PACKAGE_VERSION,
-    capabilities: ["content:read"],
+    // The entity-presence route fetches its public sources directly (see
+    // presence-check.ts). rdap.org then redirects to the registry for the
+    // domain's TLD; those registries cannot be listed here.
+    capabilities: ["content:read", "network:request"],
+    allowedHosts: [...PRESENCE_HOSTS],
     hooks: {
       // afterSave processes one saved document at a time — collections
       // list isn't needed here. The hook always runs regardless of
@@ -237,12 +244,21 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
           evaluator,
           suppressionFilter,
         ),
+      "content:afterDelete": (event: ContentAfterDeleteEvent, ctx: SandboxCtx) =>
+        handleAfterDelete(event, ctx),
     } as never,
+    // emdash requires plugins:manage (admin) on a route that declares no
+    // permission. Reading findings only needs plugins:read (editor); anything
+    // that writes stays admin, stated explicitly so the split is visible.
     routes: {
       // The Refresh sweep (handleAdminRoute → handleRefresh) is the
       // one consumer of `collections`. Bind the resolved list here so
       // every request handles the same set without re-reading options.
+      //
+      // This route serves the pages and the dashboard widget, and also the
+      // refresh_findings action, which handleAdminRoute gates itself.
       admin: {
+        permission: "plugins:read",
         handler: (ctx: RouteContext) =>
           handleAdminRoute(ctx, collections, suppressionFilter, evaluator),
       },
@@ -254,6 +270,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
       // emdash edit page and the public site, which Block Kit can't
       // express in any element type as of emdash 0.8.0.
       data: {
+        permission: "plugins:read",
         handler: async (ctx: SandboxCtx) =>
           (await handleDataRoute(ctx, {
             collections,
@@ -263,6 +280,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
           })).payload,
       },
       refresh: {
+        permission: "plugins:manage",
         handler: (ctx: SandboxCtx) =>
           handleDataRoute(ctx, {
             collections,
@@ -276,6 +294,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
       // onto one POST endpoint via a "kind" body field — see
       // facts-route.ts for the full contract.
       facts: {
+        permission: "plugins:manage",
         handler: (ctx: SandboxCtx) => handleFactsRoute(ctx as never),
       },
       // /presence route serves the layer-4 entity-presence
@@ -285,6 +304,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
       // results in KV for 24h. Multiplexes data / refresh kinds —
       // see presence-route.ts.
       presence: {
+        permission: "plugins:manage",
         handler: (ctx: SandboxCtx) => handlePresenceRoute(ctx as never),
       },
     } as never,
@@ -336,7 +356,13 @@ export default createPlugin;
 // every entry through normalizeInteraction() before dispatch.
 interface RouteContext extends SandboxCtx {
   input?: unknown;
+  // Authenticated caller, attested by the host.
+  user?: { role: number };
 }
+
+// @emdash-cms/auth's Role.ADMIN, which holds plugins:manage. Mirrored because
+// that package is not a dependency of this one.
+const ADMIN_ROLE = 50;
 
 // Copy and variant knobs for the shared renderers. The configured
 // entry is the only one that has an editor-authored truth manifest, so
@@ -371,6 +397,20 @@ async function handleAdminRoute(
       return renderDocumentPanel(ctx.kv, body.value);
     }
     if (body.action_id === "refresh_findings") {
+      if ((ctx.user?.role ?? 0) < ADMIN_ROLE) {
+        const page = await renderFindingsPage(ctx.kv, adminViewTuning);
+        return {
+          ...page,
+          blocks: [
+            {
+              type: "banner",
+              title: "Only administrators can run Refresh.",
+              variant: "error",
+            },
+            ...page.blocks,
+          ],
+        };
+      }
       return handleRefresh({
         ctx,
         collections,

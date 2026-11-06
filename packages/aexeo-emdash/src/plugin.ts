@@ -183,20 +183,42 @@ export async function readSidecarConfig(
   return { url, token };
 }
 
+// The token goes first: if the host cannot encrypt it, nothing changes and
+// the existing configuration stays intact.
 export async function writeSidecarConfig(
   store: SidecarConfigStore,
   config: SidecarRuntimeConfig,
 ): Promise<void> {
-  await store.kv.set(CONFIG_URL_KEY, config.url);
   await writeStoredToken(store, config.token);
+  await store.kv.set(CONFIG_URL_KEY, config.url);
 }
 
-// Settings first, KV second. A site configured before the token moved out
-// of KV has a value only in KV, so the fallback is what keeps those installs
-// working without anyone re-pasting the token.
+// True when the token is held in plaintext in plugin KV, which only happens
+// on an install that has not re-saved it since it moved to settings.
+export async function isTokenStoredInPlaintext(
+  store: SidecarConfigStore,
+): Promise<boolean> {
+  return (await readLegacyToken(store)) !== null;
+}
+
+async function readLegacyToken(
+  store: SidecarConfigStore,
+): Promise<string | null> {
+  const legacy = await store.kv.get<string>(CONFIG_TOKEN_KEY);
+  return typeof legacy === "string" && legacy.length > 0 ? legacy : null;
+}
+
+// KV first, settings second. Every successful settings write deletes the KV
+// copy, so a token still in KV was written after the last settings write and
+// is the newest one: either the site predates the move to settings, or an
+// earlier version fell back to KV when a rotation could not be encrypted.
 async function readStoredToken(
   store: SidecarConfigStore,
 ): Promise<string | null> {
+  const legacy = await readLegacyToken(store);
+  if (legacy !== null) {
+    return legacy;
+  }
   const { settings } = store;
   if (settings !== undefined) {
     try {
@@ -208,42 +230,44 @@ async function readStoredToken(
       // The host throws PluginSettingEncryptionError when the stored value
       // is an encrypted envelope the schema no longer declares as a secret
       // (a site downgraded from a build that had it), or when the value was
-      // written under a key that is no longer in the rotation set. Fall
-      // through to KV rather than failing the editor's save.
+      // written under a key that is no longer in the rotation set. Report
+      // it as unconfigured rather than failing the editor's save.
       store.log?.warn?.(
-        `aexeo: could not read the encrypted EVAL_TOKEN from plugin settings, falling back to KV: ${describeError(err, "")}`,
+        `aexeo: could not read the encrypted EVAL_TOKEN from plugin settings: ${describeError(err, "")}`,
       );
     }
   }
-  const legacy = await store.kv.get<string>(CONFIG_TOKEN_KEY);
-  return typeof legacy === "string" && legacy.length > 0 ? legacy : null;
+  return null;
 }
+
+// Raised when the token cannot be stored encrypted. The Setup page shows the
+// message; it never contains the token.
+export class TokenStorageError extends Error {}
 
 async function writeStoredToken(
   store: SidecarConfigStore,
   token: string,
 ): Promise<void> {
   const { settings } = store;
-  if (settings !== undefined) {
-    try {
-      await settings.set(SETTINGS_TOKEN_KEY, token);
-      // Migration: an install set up before the token moved out of KV still
-      // holds the plaintext copy. Drop it now that an encrypted one exists
-      // so the credential is not sitting in the database twice.
-      await store.kv.delete(CONFIG_TOKEN_KEY);
-      return;
-    } catch (err) {
-      // Most often EMDASH_ENCRYPTION_KEY is unset on this host, in which
-      // case every secret setting fails closed. Warn loudly — the value
-      // below is about to land in plaintext KV — and keep the plugin
-      // usable rather than bricking the Setup page. The token itself is
-      // never part of the message.
-      store.log?.warn?.(
-        `aexeo: could not store the EVAL_TOKEN encrypted in plugin settings; it will be written to plugin KV in plaintext instead. Set EMDASH_ENCRYPTION_KEY on the emdash host to fix this. Detail: ${describeError(err, token)}`,
-      );
-    }
+  if (settings === undefined) {
+    throw new TokenStorageError(
+      "This emdash host does not provide encrypted plugin settings, so EVAL_TOKEN was not saved. Upgrade emdash.",
+    );
   }
-  await store.kv.set(CONFIG_TOKEN_KEY, token);
+  try {
+    await settings.set(SETTINGS_TOKEN_KEY, token);
+    // An install set up before the token moved out of KV still holds the
+    // plaintext copy. It has to go: readStoredToken treats a KV value as the
+    // newest token, so a leftover would shadow the one just saved.
+    await store.kv.delete(CONFIG_TOKEN_KEY);
+  } catch (err) {
+    // Most often EMDASH_ENCRYPTION_KEY is unset on this host, in which case
+    // every secret setting fails closed. So does this: a bearer credential
+    // never falls back to plaintext.
+    throw new TokenStorageError(
+      `EVAL_TOKEN was not saved because the host could not store it encrypted. Set EMDASH_ENCRYPTION_KEY on the emdash host and try again. Detail: ${describeError(err, token)}`,
+    );
+  }
 }
 
 // Error text is only safe to log once the token has been scrubbed out of
@@ -274,10 +298,10 @@ export interface SandboxContentApi {
 
 export interface SandboxCtx {
   kv: KvNamespace;
-  // EmDash 0.41's encrypted settings store (PluginContext.settings).
-  // Optional because the sandboxed descriptor path assembles its own
-  // context: a host build that predates the setting leaves this
-  // undefined and the plugin falls back to KV. See readStoredToken.
+  // EmDash's encrypted settings store (PluginContext.settings). Optional
+  // because the sandboxed descriptor path assembles its own context: a host
+  // build that predates the setting leaves this undefined, and the token
+  // cannot be saved there. See writeStoredToken.
   settings?: PluginSettingsAccess;
   http: SidecarHttp;
   content: SandboxContentApi;
@@ -300,6 +324,31 @@ export interface ContentAfterSaveEvent {
   content: EmdashContentItem;
   collection: string;
   isNew: boolean;
+}
+
+// Shape of emdash's content:afterDelete event. `permanent` is false when the
+// entry was only trashed; a Refresh stops seeing it either way.
+export interface ContentAfterDeleteEvent {
+  id: string;
+  collection: string;
+  permanent: boolean;
+}
+
+export async function handleAfterDelete(
+  event: ContentAfterDeleteEvent,
+  ctx: SandboxCtx,
+): Promise<void> {
+  for (const entry of await ctx.kv.list<unknown>("document:")) {
+    const stored = toStoredDocument(entry.value);
+    if (
+      stored !== null &&
+      stored.meta.id === event.id &&
+      stored.meta.collection === event.collection
+    ) {
+      await ctx.kv.delete(entry.key);
+      await ctx.kv.delete(findingsKey(stored.document.route));
+    }
+  }
 }
 
 // EmDash 0.41 keeps the sandbox bridge available for afterSave work.
@@ -353,7 +402,10 @@ export async function handleAfterSaveConfigured(
   // Persist the WASM-shaped document and metadata, including the exact
   // public URL resolved by EmDash, so the admin needs no second lookup.
   const stored: StoredDocument = { document, meta: adapted.meta };
-  await persistDocument(ctx, stored);
+  if (!(await persistDocument(ctx, stored))) {
+    log?.info?.(`Aexeo afterSave skipped: ${document.route} has a newer save`);
+    return;
+  }
 
   const result = await evaluator([document], { collections: [adapted.meta.collection] });
   if (!result.ok) {
@@ -382,6 +434,13 @@ export async function handleAfterSaveConfigured(
           },
           pageFindings,
         );
+  // The evaluator can take longer than the next save or delete of this entry.
+  // Its findings describe a superseded revision if so; the newer writer owns
+  // this route now.
+  if (await isSuperseded(kv, document.route, adapted.meta.updatedAt)) {
+    log?.info?.(`Aexeo afterSave discarded: ${document.route} changed while evaluating`);
+    return;
+  }
   await kv.set(findingsKey(document.route), {
     route: document.route,
     findings: filtered,
@@ -452,6 +511,10 @@ export async function evaluateAndPersistAll(
     errors: [],
   };
 
+  // Taken before listing content, so anything stored after this point is
+  // recognizably newer than the sweep. See removeStaleDocuments.
+  const storedAtStart = await readAllStoredDocuments(kv);
+
   // 1. Pull every document from each collection. The bridge
   //    enforces a per-call limit of 100; iterate by cursor so the full
   //    set is collected even on larger sites. Empty collections (or
@@ -496,7 +559,10 @@ export async function evaluateAndPersistAll(
   //    and admin findings page both read these. Metadata carries the
   //    editor identity and EmDash-resolved public URL.
   for (const stored of adaptedByRoute.values()) {
-    await kv.set(documentKey(stored.document.route), stored);
+    const current = await readStoredDocument(kv, stored.document.route);
+    if (!isOlderRevision(stored.meta.updatedAt, current?.meta.updatedAt)) {
+      await kv.set(documentKey(stored.document.route), stored);
+    }
   }
 
   // 3. Evaluate via the supplied evaluator and group findings by
@@ -539,6 +605,13 @@ export async function evaluateAndPersistAll(
   let totalAfterSuppression = 0;
   for (const [route, findings] of findingsByRoute) {
     const stored = adaptedByRoute.get(route);
+    // A save or delete that landed during the sweep owns this route now.
+    if (
+      stored !== undefined &&
+      (await isSuperseded(kv, route, stored.meta.updatedAt))
+    ) {
+      continue;
+    }
     const context = {
       route,
       ...(stored?.meta.collection === undefined
@@ -558,46 +631,100 @@ export async function evaluateAndPersistAll(
   }
   summary.totalFindings = totalAfterSuppression;
   if (summary.errors.length === 0) {
-    await removeStaleDocuments(ctx, collections, documentRoutes);
+    await removeStaleDocuments(ctx, collections, documentRoutes, storedAtStart);
   }
   return summary;
 }
 
+// True when `revision` is known to predate `other`. Entries stored before
+// revisions were recorded have none, and nothing can be said about them.
+function isOlderRevision(
+  revision: string | undefined,
+  other: string | undefined,
+): boolean {
+  if (revision === undefined || other === undefined) return false;
+  return Date.parse(revision) < Date.parse(other);
+}
+
+async function readStoredDocument(
+  kv: KvNamespace,
+  route: string,
+): Promise<StoredDocument | null> {
+  return toStoredDocument(await kv.get<unknown>(documentKey(route)));
+}
+
+// True when the route's stored document was deleted, moved, or replaced by a
+// newer revision since `revision` was persisted.
+async function isSuperseded(
+  kv: KvNamespace,
+  route: string,
+  revision: string | undefined,
+): Promise<boolean> {
+  const current = await readStoredDocument(kv, route);
+  return (
+    current === null || isOlderRevision(revision, current.meta.updatedAt)
+  );
+}
+
+// Returns false, writing nothing, when a newer revision of this entry is
+// already stored.
 async function persistDocument(
   ctx: SandboxCtx,
   stored: StoredDocument,
-): Promise<void> {
+): Promise<boolean> {
   const route = stored.document.route;
-  const entries = await ctx.kv.list<unknown>("document:");
-  for (const entry of entries) {
+  const sameEntry = (await ctx.kv.list<unknown>("document:")).flatMap((entry) => {
     const previous = toStoredDocument(entry.value);
-    if (
-      previous === null ||
-      previous.document.route === route ||
-      previous.meta.id !== stored.meta.id ||
-      previous.meta.collection !== stored.meta.collection
-    ) {
-      continue;
-    }
-    await ctx.kv.delete(entry.key);
+    return previous !== null &&
+      previous.meta.id === stored.meta.id &&
+      previous.meta.collection === stored.meta.collection
+      ? [{ key: entry.key, previous }]
+      : [];
+  });
+  if (
+    sameEntry.some(({ previous }) =>
+      isOlderRevision(stored.meta.updatedAt, previous.meta.updatedAt),
+    )
+  ) {
+    return false;
+  }
+  for (const { key, previous } of sameEntry) {
+    if (previous.document.route === route) continue;
+    await ctx.kv.delete(key);
     await ctx.kv.delete(findingsKey(previous.document.route));
   }
   await ctx.kv.set(documentKey(route), stored);
+  return true;
 }
 
+// Removes entries the sweep no longer saw. An absence only proves staleness
+// for an entry that was already stored when the sweep began and has not been
+// written since: anything else was saved during the sweep, possibly after its
+// collection was listed. Legacy entries record no collection, so any sweep
+// that does not see their route removes them.
 async function removeStaleDocuments(
   ctx: SandboxCtx,
   collections: readonly string[],
   currentRoutes: ReadonlySet<string>,
+  storedAtStart: readonly StoredDocument[],
 ): Promise<void> {
   const scannedCollections = new Set(collections);
+  const revisionAtStart = new Map(
+    storedAtStart.map((stored) => [
+      stored.document.route,
+      stored.meta.updatedAt,
+    ]),
+  );
   const entries = await ctx.kv.list<unknown>("document:");
   for (const entry of entries) {
     const stored = toStoredDocument(entry.value);
     if (
       stored === null ||
-      !scannedCollections.has(stored.meta.collection) ||
-      currentRoutes.has(stored.document.route)
+      (stored.meta.collection !== "" &&
+        !scannedCollections.has(stored.meta.collection)) ||
+      currentRoutes.has(stored.document.route) ||
+      !revisionAtStart.has(stored.document.route) ||
+      revisionAtStart.get(stored.document.route) !== stored.meta.updatedAt
     ) {
       continue;
     }
