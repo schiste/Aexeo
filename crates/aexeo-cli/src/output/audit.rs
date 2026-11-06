@@ -20,6 +20,8 @@ struct AuditCommandOutput<'a> {
     findings: &'a [aexeo_contracts::Finding],
     artifact: &'a AuditArtifact,
     warnings: Vec<ConfigWarning>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    link_graph_summary: Option<&'a serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -54,6 +56,17 @@ pub fn render_audit_command_json(
     audit_path: Option<String>,
     warnings: Vec<ConfigWarning>,
 ) -> Result<String> {
+    render_audit_command_json_with_graph(command, artifact, success, audit_path, warnings, None)
+}
+
+pub fn render_audit_command_json_with_graph(
+    command: &str,
+    artifact: &AuditArtifact,
+    success: bool,
+    audit_path: Option<String>,
+    warnings: Vec<ConfigWarning>,
+    link_graph_summary: Option<&serde_json::Value>,
+) -> Result<String> {
     Ok(serde_json::to_string_pretty(&AuditCommandOutput {
         command,
         success,
@@ -62,6 +75,7 @@ pub fn render_audit_command_json(
         findings: &artifact.findings,
         artifact,
         warnings,
+        link_graph_summary,
     })?)
 }
 

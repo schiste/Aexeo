@@ -184,6 +184,9 @@ Options:
       --link-graph-output <link-graph-output>
           Write an observational link graph report to this JSON file
 
+      --link-graph-summary
+          Include an observational link graph coverage summary in the crawl output
+
       --link-graph-telemetry
           Emit aggregate link graph timing and counts to stderr
 

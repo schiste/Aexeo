@@ -156,6 +156,7 @@ fn crawl_accepts_playwright_with_custom_runner() {
     let payload = parse_json(&output.stdout);
     assert_eq!(payload["command"], "crawl");
     assert!(payload["artifact"]["crawl"]["engine"].as_str().is_some());
+    assert!(payload.get("link_graph_summary").is_none());
     assert!(payload.get("error").is_none());
     handle.join().unwrap();
 }
@@ -923,12 +924,24 @@ fn crawl_can_write_observational_link_graph_with_private_telemetry() {
         .arg("--link-graph-output")
         .arg(&graph_path)
         .arg("--link-graph-telemetry")
+        .arg("--link-graph-summary")
         .output()
         .unwrap();
     let payload = parse_json(&output.stdout);
     assert_eq!(payload["command"], "crawl");
     let report: serde_json::Value =
         serde_json::from_slice(&fs::read(&graph_path).unwrap()).unwrap();
+    assert_eq!(payload["link_graph_summary"]["crawl_complete"], false);
+    assert_eq!(
+        payload["link_graph_summary"]["page_count"],
+        report["pages"].as_array().unwrap().len()
+    );
+    assert!(
+        payload["link_graph_summary"]["issues"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("inventory_missing"))
+    );
     assert_eq!(report["crawl_complete"], false);
     assert!(!report["pages"].as_array().unwrap().is_empty());
     assert!(
@@ -945,5 +958,54 @@ fn crawl_can_write_observational_link_graph_with_private_telemetry() {
         .expect("graph telemetry");
     assert!(telemetry["page_count"].as_u64().unwrap() > 0);
     assert!(!telemetry.to_string().contains(&base_url));
+    handle.join().unwrap();
+}
+
+#[test]
+fn crawl_graph_summary_rejects_sarif_before_fetching() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = Command::new(bin())
+        .current_dir(temp.path())
+        .args([
+            "crawl",
+            "http://127.0.0.1:1",
+            "--format",
+            "sarif",
+            "--link-graph-output",
+            "graph.json",
+            "--link-graph-summary",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("supported only with text or json"));
+    assert!(!temp.path().join("graph.json").exists());
+}
+
+#[test]
+fn crawl_graph_summary_is_visible_in_text() {
+    let (base_url, handle) = spawn_server(8);
+    let temp = tempfile::tempdir().unwrap();
+    let output = Command::new(bin())
+        .current_dir(temp.path())
+        .args([
+            "crawl",
+            &base_url,
+            "--engine",
+            "http",
+            "--progress",
+            "off",
+            "--format",
+            "text",
+            "--link-graph-output",
+            "graph.json",
+            "--link-graph-summary",
+        ])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("Link graph observations:"), "{text}");
+    assert!(text.contains("inventory_missing"), "{text}");
+    assert!(text.contains("crawl complete: false"), "{text}");
     handle.join().unwrap();
 }

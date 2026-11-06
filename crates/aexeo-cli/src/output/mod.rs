@@ -2,7 +2,10 @@ mod audit;
 mod config;
 mod misc;
 
-pub use audit::{render_audit_command_json, render_diff_command_json, render_failed_command_json};
+pub use audit::{
+    render_audit_command_json, render_audit_command_json_with_graph, render_diff_command_json,
+    render_failed_command_json,
+};
 pub use config::{emit_config_warnings, render_config_command_json};
 pub use misc::{
     render_data_command_json, render_list_command_json, render_path_command_json,
