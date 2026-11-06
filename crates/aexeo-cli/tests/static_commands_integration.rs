@@ -131,6 +131,47 @@ fn fix_json_contract_reports_changed_paths() {
 }
 
 #[test]
+fn check_reads_title_and_h1_like_a_browser_and_survives_non_utf8_pages() {
+    let fixture =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/html-parser");
+    let temp_dir = tempfile::tempdir().unwrap();
+    for name in ["index.html", "commented.html", "latin1.html"] {
+        std::fs::copy(fixture.join(name), temp_dir.path().join(name)).unwrap();
+    }
+
+    let output = Command::new(bin())
+        .arg("check")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+
+    // 70 is the internal-error exit a single non-UTF-8 page used to cause.
+    assert_ne!(
+        output.status.code(),
+        Some(70),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload = parse_json(&output.stdout);
+    let findings = payload["findings"].as_array().unwrap();
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding["path"].as_str().unwrap().ends_with("latin1.html")),
+        "the non-UTF-8 page must still be audited: {payload}"
+    );
+    for finding in findings {
+        let rule_id = finding["rule_id"].as_str().unwrap();
+        assert!(
+            !matches!(rule_id, "SEO001" | "SEO005" | "SEO006"),
+            "false title/h1 finding: {finding}"
+        );
+    }
+}
+
+#[test]
 fn fix_keeps_a_hand_written_llms_txt_and_reports_it_as_skipped() {
     let temp_dir = tempfile::tempdir().unwrap();
     write_minimal_site(temp_dir.path());

@@ -163,6 +163,7 @@ Reusable GEO rules extracted from the Chau7 website guidelines.
 
 ## `runtime`
 
+- `CRW001`: URL could not be fetched during the crawl
 - `CRW003`: crawl ended before the full internal route graph could be reviewed
 
 ## `deployment`
