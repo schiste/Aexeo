@@ -131,6 +131,142 @@ fn fix_json_contract_reports_changed_paths() {
 }
 
 #[test]
+fn check_reads_title_and_h1_like_a_browser_and_survives_non_utf8_pages() {
+    let fixture =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/html-parser");
+    let temp_dir = tempfile::tempdir().unwrap();
+    for name in ["index.html", "commented.html", "latin1.html"] {
+        std::fs::copy(fixture.join(name), temp_dir.path().join(name)).unwrap();
+    }
+
+    let output = Command::new(bin())
+        .arg("check")
+        .arg(temp_dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+
+    // 70 is the internal-error exit a single non-UTF-8 page used to cause.
+    assert_ne!(
+        output.status.code(),
+        Some(70),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload = parse_json(&output.stdout);
+    let findings = payload["findings"].as_array().unwrap();
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding["path"].as_str().unwrap().ends_with("latin1.html")),
+        "the non-UTF-8 page must still be audited: {payload}"
+    );
+    for finding in findings {
+        let rule_id = finding["rule_id"].as_str().unwrap();
+        assert!(
+            !matches!(rule_id, "SEO001" | "SEO005" | "SEO006"),
+            "false title/h1 finding: {finding}"
+        );
+    }
+}
+
+#[test]
+fn fix_keeps_a_hand_written_llms_txt_and_reports_it_as_skipped() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    write_minimal_site(temp_dir.path());
+    let llms_path = temp_dir.path().join("llms.txt");
+    let hand_written = "# Acme\n\n> Hand-written summary.\n\n## Pages\n- [Home](/): start here\n";
+    std::fs::write(&llms_path, hand_written).unwrap();
+
+    let output = Command::new(bin())
+        .arg("fix")
+        .arg(temp_dir.path())
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(std::fs::read_to_string(&llms_path).unwrap(), hand_written);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("warning: skipped"), "{stderr}");
+    assert!(stderr.contains("llms.txt"), "{stderr}");
+}
+
+#[test]
+fn fix_dry_run_reports_planned_changes_without_writing() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    write_minimal_site(temp_dir.path());
+    let index_path = temp_dir.path().join("index.html");
+    let llms_path = temp_dir.path().join("llms.txt");
+    let index_before = std::fs::read(&index_path).unwrap();
+    let hand_written = "# Acme\n";
+    std::fs::write(&llms_path, hand_written).unwrap();
+
+    let output = Command::new(bin())
+        .arg("fix")
+        .arg(temp_dir.path())
+        .arg("--dry-run")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["action"], "dry-run");
+    assert!(
+        payload["paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| path.as_str().unwrap().ends_with("index.html")),
+        "{payload}"
+    );
+    assert!(
+        payload["skipped"][0]["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("llms.txt"),
+        "{payload}"
+    );
+    assert!(payload["skipped"][0]["reason"].is_string());
+    assert_eq!(std::fs::read(&index_path).unwrap(), index_before);
+    assert_eq!(std::fs::read_to_string(&llms_path).unwrap(), hand_written);
+}
+
+#[test]
+fn page_title_cannot_break_out_of_an_injected_schema_block() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let root = temp_dir.path();
+    let home = root.join("index.html");
+    write(
+        &home,
+        "<html lang=\"en\"><head><title>&lt;/script&gt;&lt;script&gt;alert(1)&lt;/script&gt;</title></head><body><h1>Home</h1></body></html>",
+    );
+
+    let bundle = Command::new(bin())
+        .args(["generate", "public-bundle"])
+        .arg(root)
+        .args(["--site-url", "https://example.com", "--write-dir"])
+        .arg(root)
+        .output()
+        .unwrap();
+    assert!(bundle.status.success());
+    let fix = Command::new(bin())
+        .arg("fix")
+        .arg(root)
+        .arg("--inject-schema")
+        .output()
+        .unwrap();
+    assert!(fix.status.success());
+
+    let html = std::fs::read_to_string(&home).unwrap();
+    assert!(html.contains("application/ld+json"), "{html}");
+    assert!(!html.contains("<script>alert"), "{html}");
+    assert_eq!(html.matches("</script>").count(), 1, "{html}");
+}
+
+#[test]
 fn baseline_written_before_subjects_existed_still_matches_a_current_audit() {
     let temp_dir = tempfile::tempdir().unwrap();
     let root = temp_dir.path();
