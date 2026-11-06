@@ -113,11 +113,15 @@ pub fn reconcile(inventory: &InventorySnapshot, crawl: &CrawlSurface) -> Invento
         issues.push("invalid_origin".to_string());
     }
     let mut records = BTreeMap::new();
+    let mut normalized_inventory = BTreeSet::new();
     for page in &inventory.pages {
         if origin
             .as_ref()
             .is_none_or(|origin| !valid_page_url(&page.url, origin))
             || records.insert(page.url.as_str(), page).is_some()
+            || Url::parse(&page.url)
+                .ok()
+                .is_some_and(|url| !normalized_inventory.insert(String::from(url)))
         {
             issues.push("invalid_or_duplicate_inventory_url".to_string());
         }
@@ -141,7 +145,13 @@ pub fn reconcile(inventory: &InventorySnapshot, crawl: &CrawlSurface) -> Invento
         }
     }
     let crawled: BTreeSet<_> = crawl.pages.iter().map(String::as_str).collect();
+    let normalized_crawl: BTreeSet<_> = crawl
+        .pages
+        .iter()
+        .filter_map(|page| Url::parse(page).ok().map(String::from))
+        .collect();
     if crawled.len() != crawl.pages.len()
+        || normalized_crawl.len() != crawl.pages.len()
         || crawl.pages.iter().any(|page| {
             origin
                 .as_ref()
@@ -237,6 +247,29 @@ mod tests {
                 .contains(&"surface_identity_mismatch".into())
         );
     }
+    #[test]
+    fn equivalent_url_spellings_do_not_attest_unique_inventory_or_crawl() {
+        let (mut inventory, mut crawl) = inputs();
+        inventory.pages.push(InventoryPage {
+            url: "https://EXAMPLE.org:443/a".into(),
+            ..inventory.pages[0].clone()
+        });
+        crawl.pages.push("https://EXAMPLE.org:443/a".into());
+        let result = reconcile(&inventory, &crawl);
+        assert!(!result.comparable);
+        assert!(result.eligible_pages.is_empty());
+        assert!(
+            result
+                .issues
+                .contains(&"invalid_or_duplicate_inventory_url".into())
+        );
+        assert!(
+            result
+                .issues
+                .contains(&"invalid_or_duplicate_crawl_url".into())
+        );
+    }
+
     #[test]
     fn mismatch_and_unknown_alias_fail_closed() {
         let (mut inventory, mut crawl) = inputs();
