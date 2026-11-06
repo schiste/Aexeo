@@ -93,10 +93,16 @@ Publishing the CLI is not a manual step. `.github/workflows/release-internal.yml
 triggers on any pushed `v*` tag and does the build, checksums, and GitHub
 release on its own:
 
-1. Push the release commit and the `v*` tag.
-2. A `build` matrix job runs `scripts/build_internal_release.sh --target <target>`
+1. Push the release commit, wait for `ci.yml` to go green on `main`, then push
+   the `v*` tag.
+2. A `guard` job refuses the release unless the tagged commit is on `main`, the
+   tag matches `[workspace.package].version`, and the latest `ci.yml` push run
+   on `main` for that exact commit succeeded. A commit reached only through a
+   merged branch has no such run, so tag the merge commit. If the tag went up
+   too early, re-run the workflow once CI is green.
+3. A `build` matrix job runs `scripts/build_internal_release.sh --target <target>`
    on `macos-14` (`darwin-arm64`) and `ubuntu-latest` (`linux-x86_64`).
-3. A `release` job downloads both artifacts, re-marks the binaries executable,
+4. A `release` job downloads both artifacts, re-marks the binaries executable,
    re-derives `SHA256SUMS.txt`, and creates the GitHub Release with generated
    notes.
 
@@ -108,8 +114,7 @@ The release assets are:
 
 What still needs a human:
 
-1. Confirm the working tree is clean and the main-branch CI gate has passed
-   before pushing the tag.
+1. Confirm the working tree is clean before pushing the tag.
 2. Update `Formula/aexeo.rb` in `schiste/homebrew-tap` with the release tag and
    the per-target checksums from `SHA256SUMS.txt`.
 3. Publish the npm package when applicable.
