@@ -96,6 +96,8 @@ pub fn build_cli() -> Command {
                         .value_parser(value_parser!(usize))
                         .default_value("200"),
                 )
+                .arg(Arg::new("link-graph-output").long("link-graph-output").num_args(1).help("Write an observational link graph report to this JSON file"))
+                .arg(Arg::new("link-graph-telemetry").long("link-graph-telemetry").requires("link-graph-output").action(ArgAction::SetTrue).help("Emit aggregate link graph timing and counts to stderr"))
                 .arg(Arg::new("checkpoint").long("checkpoint").num_args(1))
                 .arg(Arg::new("resume").long("resume").num_args(1))
                 .arg(
