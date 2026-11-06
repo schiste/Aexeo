@@ -2,7 +2,6 @@ use anyhow::Result;
 use std::collections::BTreeMap;
 use std::thread;
 use std::time::{Duration, Instant};
-use url::Url;
 
 use super::http::{FetchResult, HttpFetcher};
 use super::playwright::PlaywrightFetcher;
@@ -44,24 +43,6 @@ pub(crate) fn is_retryable_response(fetched: &FetchResult) -> bool {
     fetched
         .status_code
         .is_some_and(|status| classify_status(status) == ResponseClass::Failure)
-}
-
-/// A URL safe to record in findings and artifacts, which may be shared. Userinfo,
-/// query and fragment are dropped because they can carry credentials and tokens.
-/// Routes never include a query, so this loses nothing the audit depends on.
-pub fn redact_url(url: &str) -> String {
-    // `user:pass@host` parses as a URL with the scheme `user`, so the scheme matters.
-    let Some(mut parsed) = Url::parse(url)
-        .ok()
-        .filter(|parsed| matches!(parsed.scheme(), "http" | "https"))
-    else {
-        return "[invalid URL]".to_string();
-    };
-    let _ = parsed.set_username("");
-    let _ = parsed.set_password(None);
-    parsed.set_query(None);
-    parsed.set_fragment(None);
-    parsed.into()
 }
 
 /// A fixed description of a failed fetch. Error text is not reused because it
@@ -178,23 +159,13 @@ impl RuntimeFetcher {
 #[cfg(test)]
 mod tests {
     use super::{
-        RuntimeFetcher, crawl_user_agent, fetch_error_summary, headers_with_user_agent, redact_url,
+        RuntimeFetcher, crawl_user_agent, fetch_error_summary, headers_with_user_agent,
         retry_backoff,
     };
     use crate::config::Config;
     use std::collections::BTreeMap;
     use std::net::TcpListener;
     use std::time::{Duration, Instant};
-
-    #[test]
-    fn redacted_urls_keep_only_scheme_host_port_and_path() {
-        assert_eq!(
-            redact_url("https://user:pass@example.org:8443/a/b?token=x#frag"),
-            "https://example.org:8443/a/b"
-        );
-        assert_eq!(redact_url("user:pass@example.org"), "[invalid URL]");
-        assert_eq!(redact_url("not a url with secret"), "[invalid URL]");
-    }
 
     #[test]
     fn error_summaries_never_contain_the_url() {

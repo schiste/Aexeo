@@ -25,17 +25,16 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::config::Config;
+use crate::link_evidence::crawl_links;
+use crate::link_graph::redact_url;
 use crate::reporting::build_audit_artifact;
 use crate::site::{Site, route_from_urlish};
 use crate::static_check::run_checks_for_site_profiled;
 use crate::verification::{DiffResult, diff_finding_sets};
-pub use fetcher::redact_url;
 use fetcher::{
     FetchOutcome, ResponseClass, RuntimeFetcher, classify_status, crawl_user_agent,
     fetch_error_summary, headers_with_user_agent,
 };
-pub(crate) use graph::CrawlLink;
-pub(crate) use graph::crawl_links;
 use graph::{read_loc_values, response_report_path, should_enqueue_link};
 use http::{
     fetch_with_http, host_for_url, is_html_content_type, normalize_base_url, origin_for_url,

@@ -545,11 +545,11 @@ fn apply_crawled_links(page: &mut Page) {
     else {
         return;
     };
-    for crate::runtime::CrawlLink {
+    for crate::link_evidence::CrawlLink {
         href,
         anchor,
         route,
-    } in crate::runtime::crawl_links(&page.raw_text, url)
+    } in crate::link_evidence::crawl_links(&page.raw_text, url)
     {
         let mut located = false;
         for link in page.links.iter_mut().filter(|link| link.href == href) {
@@ -660,7 +660,7 @@ fn deployment_model_from_label(label: &str) -> DeploymentModel {
 pub fn audit_site_snapshot(site: &Site, site_url: Option<&str>) -> AuditSiteSnapshot {
     AuditSiteSnapshot {
         version: 1,
-        site_url: site_url.map(crate::runtime::redact_url),
+        site_url: site_url.map(crate::link_graph::redact_url),
         root: site.root.to_string_lossy().to_string(),
         deployment_model: deployment_model_label(&site.deployment_model).to_string(),
         deployment_markers: site.deployment_markers.clone(),

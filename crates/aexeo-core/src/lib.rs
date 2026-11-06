@@ -96,6 +96,7 @@ pub use intelligence::{
     looks_like_generic_entity_name, map_grounding_queries, reconcile_trust_surfaces,
     render_facts_prompt, score_intelligence, validate_truth_manifest,
 };
+pub use link_graph::redact_url;
 pub use link_rules::run_link_rules;
 pub use llm_rules::run_llm_rules;
 pub use plugin::{PluginManifestCheck, validate_python_plugin_module};
@@ -115,9 +116,8 @@ pub use robots_rules::run_robots_rules;
 #[cfg(feature = "net")]
 pub use runtime::{
     PlaywrightDoctor, RuntimeAudit, RuntimeAuditOptions, RuntimeProgressEvent, RuntimeProgressMode,
-    diff_performance_artifacts, evaluate_performance_budget, redact_url,
-    render_performance_diff_text, run_runtime_audit, run_runtime_audit_with_options,
-    runtime_doctor, verify_runtime_audit,
+    diff_performance_artifacts, evaluate_performance_budget, render_performance_diff_text,
+    run_runtime_audit, run_runtime_audit_with_options, runtime_doctor, verify_runtime_audit,
 };
 pub use schema_rules::run_schema_rules;
 pub use site::{

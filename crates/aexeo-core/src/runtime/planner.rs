@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashSet, VecDeque};
 
-use super::fetcher::redact_url;
 use super::graph::route_is_allowed;
 use super::http::{host_for_url, normalize_base_url, origin_for_url, same_site_host};
 use super::robots::RobotsPolicy;
 use crate::config::RuntimeConfig;
+use crate::link_graph::redact_url;
 use crate::site::{normalize_internal_href, route_from_urlish};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
