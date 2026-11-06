@@ -1009,3 +1009,250 @@ fn crawl_graph_summary_is_visible_in_text() {
     assert!(text.contains("crawl complete: false"), "{text}");
     handle.join().unwrap();
 }
+
+/// A local HTTP server that records every request head, so a test can assert
+/// what actually crossed the wire. `127.0.0.1` and `localhost` are two distinct
+/// hosts to the crawler, which is how these tests get a "third party".
+struct RecordingHost {
+    port: u16,
+    requests: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl RecordingHost {
+    fn start(respond: impl Fn(&str) -> String + Send + 'static) -> Self {
+        use std::sync::atomic::Ordering;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (recorded, stopped) = (requests.clone(), stop.clone());
+        thread::spawn(move || {
+            while !stopped.load(Ordering::Relaxed) {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    thread::sleep(Duration::from_millis(5));
+                    continue;
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut head = Vec::new();
+                let mut buffer = [0_u8; 4096];
+                while !head.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                    match stream.read(&mut buffer) {
+                        Ok(size) if size > 0 => head.extend_from_slice(&buffer[..size]),
+                        _ => break,
+                    }
+                }
+                let head = String::from_utf8_lossy(&head).to_lowercase();
+                let path = head.split_whitespace().nth(1).unwrap_or("/").to_string();
+                recorded.lock().unwrap().push(head);
+                let _ = stream.write_all(respond(&path).as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        Self {
+            port,
+            requests,
+            stop,
+        }
+    }
+
+    fn requests(&self) -> Vec<String> {
+        self.requests.lock().unwrap().clone()
+    }
+}
+
+impl Drop for RecordingHost {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+fn http_response(status: &str, extra_headers: &str, content_type: &str, body: &str) -> String {
+    format!(
+        "HTTP/1.1 {status}\r\n{extra_headers}Content-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+const HOME_PAGE: &str = "<html><head><title>Home</title></head><body><h1>Home</h1></body></html>";
+
+/// Crawl `base_url` with a secret in every credential slot and return the
+/// parsed JSON output.
+fn credentialed_crawl(base_url: &str, dir: &Path) -> serde_json::Value {
+    write(
+        &dir.join("aexeo.toml"),
+        "version = 1\n\n[runtime]\nheaders = { \"x-secret\" = \"header-secret\" }\ncookies = [{ session = \"cookie-secret\" }]\nbasic_auth = { username = \"user\", password = \"pass\" }\n",
+    );
+    let output = Command::new(bin())
+        .current_dir(dir)
+        .arg("crawl")
+        .arg(base_url)
+        .arg("--engine")
+        .arg("http")
+        .arg("--max-pages")
+        .arg("5")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(
+        matches!(output.status.code(), Some(0 | 1)),
+        "crawl failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    parse_json(&output.stdout)
+}
+
+fn assert_no_credentials(requests: &[String]) {
+    for request in requests {
+        for secret in ["x-secret", "cookie", "authorization"] {
+            assert!(
+                !request.contains(secret),
+                "{secret} crossed to another host: {request}"
+            );
+        }
+    }
+}
+
+#[test]
+fn crawl_does_not_fetch_a_sitemap_on_another_host() {
+    let other = RecordingHost::start(|_| {
+        http_response(
+            "200 OK",
+            "",
+            "application/xml",
+            "<urlset><url><loc>/x</loc></url></urlset>",
+        )
+    });
+    let other_port = other.port;
+    let crawl = RecordingHost::start(move |path| match path {
+        "/" => http_response("200 OK", "", "text/html", HOME_PAGE),
+        "/sitemap.xml" => http_response(
+            "200 OK",
+            "",
+            "application/xml",
+            &format!(
+                "<sitemapindex><sitemap><loc>http://localhost:{other_port}/stolen.xml</loc></sitemap></sitemapindex>"
+            ),
+        ),
+        _ => http_response("404 Not Found", "", "text/plain", "missing"),
+    });
+    let temp_dir = tempfile::tempdir().unwrap();
+
+    let payload = credentialed_crawl(&format!("http://127.0.0.1:{}", crawl.port), temp_dir.path());
+
+    assert!(
+        other.requests().is_empty(),
+        "a sitemap on another host must not be fetched at all: {:?}",
+        other.requests()
+    );
+    assert!(
+        crawl.requests()[0].contains("x-secret: header-secret"),
+        "the crawl origin still gets its credentials"
+    );
+    let text = payload.to_string();
+    assert!(
+        text.contains("refused to fetch sitemap") && text.contains("stolen.xml"),
+        "the refusal must be reported, not silently dropped: {text}"
+    );
+}
+
+#[test]
+fn crawl_redirect_to_another_host_does_not_carry_credentials() {
+    let other = RecordingHost::start(|_| http_response("200 OK", "", "text/html", HOME_PAGE));
+    let location = format!("Location: http://localhost:{}/landing\r\n", other.port);
+    let crawl = RecordingHost::start(move |path| match path {
+        "/" => http_response("302 Found", &location, "text/plain", ""),
+        _ => http_response("404 Not Found", "", "text/plain", "missing"),
+    });
+    let temp_dir = tempfile::tempdir().unwrap();
+
+    credentialed_crawl(&format!("http://127.0.0.1:{}", crawl.port), temp_dir.path());
+
+    assert!(
+        !other.requests().is_empty(),
+        "the redirect is still followed"
+    );
+    assert_no_credentials(&other.requests());
+}
+
+/// The reported attack: a 302 to the same host on another port used to rebase
+/// the crawl there, sending every later request and its credentials over.
+#[test]
+fn crawl_redirect_to_another_port_neither_rebases_nor_carries_credentials() {
+    let other = RecordingHost::start(|_| http_response("200 OK", "", "text/html", HOME_PAGE));
+    let location = format!("Location: http://127.0.0.1:{}/\r\n", other.port);
+    let crawl = RecordingHost::start(move |path| match path {
+        "/" => http_response("302 Found", &location, "text/plain", ""),
+        _ => http_response("404 Not Found", "", "text/plain", "missing"),
+    });
+    let temp_dir = tempfile::tempdir().unwrap();
+
+    credentialed_crawl(&format!("http://127.0.0.1:{}", crawl.port), temp_dir.path());
+
+    assert_no_credentials(&other.requests());
+    assert!(
+        other
+            .requests()
+            .iter()
+            .all(|request| request.starts_with("get / ")),
+        "only the redirect target may reach the other port: {:?}",
+        other.requests()
+    );
+    assert!(
+        crawl
+            .requests()
+            .iter()
+            .any(|request| request.starts_with("get /robots.txt ")),
+        "follow-up requests stay on the crawl origin: {:?}",
+        crawl.requests()
+    );
+}
+
+#[test]
+fn crawl_artifacts_redact_set_cookie_and_checkpoints_are_private() {
+    let crawl = RecordingHost::start(|path| match path {
+        "/" | "/next" => http_response(
+            "200 OK",
+            "Set-Cookie: session=server-secret; Secure\r\n",
+            "text/html",
+            "<html><head><title>Home</title></head><body><a href=\"/next\">n</a><a href=\"/more\">m</a></body></html>",
+        ),
+        _ => http_response("404 Not Found", "", "text/plain", "missing"),
+    });
+    let temp_dir = tempfile::tempdir().unwrap();
+    let checkpoint = temp_dir.path().join("crawl.checkpoint.json");
+    let output = Command::new(bin())
+        .current_dir(temp_dir.path())
+        .arg("crawl")
+        .arg(format!("http://127.0.0.1:{}", crawl.port))
+        .arg("--engine")
+        .arg("http")
+        .arg("--max-pages")
+        .arg("1")
+        .arg("--checkpoint")
+        .arg(&checkpoint)
+        .arg("--checkpoint-every")
+        .arg("1")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+    assert!(matches!(output.status.code(), Some(0 | 1)));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("server-secret"), "{stdout}");
+
+    let saved = fs::read_to_string(&checkpoint).expect("truncated crawl keeps its checkpoint");
+    assert!(!saved.contains("server-secret"), "{saved}");
+    assert!(saved.contains("[redacted]"), "{saved}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(&checkpoint).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+}

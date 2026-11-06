@@ -225,9 +225,9 @@ fn write_runtime_baseline_artifact(
     let latest_path = runtime_baseline_latest_path(cwd, name);
     let timestamped_path = runtime_baseline_timestamped_path(cwd, name, artifact.generated_at);
     let payload = serde_json::to_string_pretty(artifact)?;
-    fs::write(&timestamped_path, &payload)?;
+    aexeo_core::write_private_file(&timestamped_path, payload.as_bytes())?;
     if update_latest {
-        fs::write(&latest_path, payload)?;
+        aexeo_core::write_private_file(&latest_path, payload.as_bytes())?;
     }
     Ok((latest_path, timestamped_path))
 }

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
 use super::graph::route_is_allowed;
-use super::http::{host_for_url, normalize_base_url, origin_for_url, same_site_host};
+use super::http::{host_for_url, normalize_base_url, origin_for_url, same_crawl_origin};
 use crate::config::RuntimeConfig;
 use crate::site::{normalize_internal_href, route_from_urlish};
 
@@ -147,8 +147,11 @@ impl CrawlPlanner {
     }
 
     pub(crate) fn align_with_effective_url(&mut self, effective_url: &str) {
+        // Only `www.` canonicalization rebases the crawl. A scheme or port
+        // change must not: a redirect would otherwise move every later request
+        // to an origin the user never named.
         let effective_host = host_for_url(effective_url);
-        if effective_host.is_empty() || !same_site_host(&self.base_host, &effective_host) {
+        if effective_host.is_empty() || !same_crawl_origin(&self.normalized_base, effective_url) {
             return;
         }
         self.base_host = effective_host;
@@ -234,6 +237,25 @@ mod tests {
             planner.next_url(&runtime).as_deref(),
             Some("https://www.example.com/docs")
         );
+    }
+
+    #[test]
+    fn planner_does_not_rebase_on_scheme_or_port_change() {
+        for effective in [
+            "http://example.com/",
+            "http://example.com:81/",
+            "https://example.com:8443/",
+            "http://www.example.com/",
+        ] {
+            let mut planner = CrawlPlanner::new("https://example.com", 10);
+            planner.align_with_effective_url(effective);
+            assert_eq!(
+                planner.normalized_base(),
+                "https://example.com/",
+                "{effective}"
+            );
+            assert_eq!(planner.base_host(), "example.com", "{effective}");
+        }
     }
 
     #[test]

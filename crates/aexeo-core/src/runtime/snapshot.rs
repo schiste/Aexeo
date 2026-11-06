@@ -5,9 +5,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::time::Instant;
 
+use super::egress::refused_finding;
 use super::graph::response_report_path;
-use super::http::fetch_with_http;
-use crate::config::RuntimeConfig;
+use super::http::HttpFetcher;
 use crate::site::{
     CrawlMeta, DeploymentModel, Site, SiteArtifacts, SiteBuildInput, build_page_from_source,
     build_site_from_parts,
@@ -85,17 +85,22 @@ impl RuntimeSnapshotBuilder {
     pub(crate) fn capture_optional_artifacts(
         &mut self,
         base_url: &str,
-        runtime: &RuntimeConfig<'_>,
-    ) -> Result<u64> {
+        http: &HttpFetcher,
+    ) -> Result<(u64, Vec<Finding>)> {
         let started_at = Instant::now();
+        let mut findings = Vec::new();
         for artifact in ["robots.txt", "llms.txt", "sitemap.xml"] {
             let artifact_url = format!("{}{}", base_url, artifact);
-            let fetched = fetch_with_http(
-                &artifact_url,
-                runtime.crawl_headers,
-                runtime.crawl_cookies,
-                runtime.crawl_basic_auth,
-            )?;
+            let fetched = match http.fetch(&artifact_url) {
+                Ok(fetched) => fetched,
+                Err(error) => match refused_finding(&artifact_url, &error) {
+                    Some(finding) => {
+                        findings.push(finding);
+                        continue;
+                    }
+                    None => return Err(error),
+                },
+            };
             if fetched.status_code.unwrap_or(500) >= 400 {
                 continue;
             }
@@ -109,7 +114,7 @@ impl RuntimeSnapshotBuilder {
                 _ => {}
             }
         }
-        Ok(started_at.elapsed().as_micros() as u64)
+        Ok((started_at.elapsed().as_micros() as u64, findings))
     }
 
     pub(crate) fn finalize(

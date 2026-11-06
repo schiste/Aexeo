@@ -940,6 +940,17 @@ pub fn update_trend_history(
     Ok(())
 }
 
+/// Write a file that is created readable only by its owner: crawl artifacts and
+/// checkpoints hold raw page bodies from possibly authenticated origins. An
+/// existing destination keeps its mode, since its owner may have chosen it.
+pub fn write_private_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    std::io::Write::write_all(&mut options.open(path)?, contents)
+}
+
 pub fn write_audit_artifact(
     artifact: &AuditArtifact,
     base_dir: &Path,
@@ -952,8 +963,8 @@ pub fn write_audit_artifact(
     let history_path = artifact_dir.join(format!("{}-{}.json", command_name, timestamp));
     let latest_path = artifact_dir.join(format!("{}-latest.json", command_name));
     let payload = render_audit_artifact_json(artifact)?;
-    fs::write(&history_path, &payload)?;
-    fs::write(&latest_path, payload)?;
+    write_private_file(&history_path, payload.as_bytes())?;
+    write_private_file(&latest_path, payload.as_bytes())?;
     prune_old_audit_logs(&artifact_dir, command_name, keep)?;
     update_trend_history(&artifact_dir, command_name, artifact)?;
     Ok(latest_path)
@@ -967,7 +978,10 @@ pub fn write_partial_audit_artifact(
     let artifact_dir = base_dir.join(".aexeo-reports");
     fs::create_dir_all(&artifact_dir)?;
     let latest_path = artifact_dir.join(format!("{}-latest.json", command_name));
-    fs::write(&latest_path, render_audit_artifact_json(artifact)?)?;
+    write_private_file(
+        &latest_path,
+        render_audit_artifact_json(artifact)?.as_bytes(),
+    )?;
     Ok(latest_path)
 }
 
@@ -979,7 +993,10 @@ pub fn write_progress_audit_artifact(
     let artifact_dir = base_dir.join(".aexeo-reports");
     fs::create_dir_all(&artifact_dir)?;
     let latest_path = artifact_dir.join(format!("{}-progress-latest.json", command_name));
-    fs::write(&latest_path, render_audit_artifact_json(artifact)?)?;
+    write_private_file(
+        &latest_path,
+        render_audit_artifact_json(artifact)?.as_bytes(),
+    )?;
     Ok(latest_path)
 }
 

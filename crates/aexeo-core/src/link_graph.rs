@@ -103,6 +103,24 @@ pub fn resolve_link(
     }
 }
 
+/// A URL safe to record in findings and artifacts, which may be shared. Userinfo,
+/// query and fragment are dropped because they can carry credentials and tokens.
+/// Routes never include a query, so this loses nothing the audit depends on.
+pub fn redact_url(url: &str) -> String {
+    // `user:pass@host` parses as a URL with the scheme `user`, so the scheme matters.
+    let Some(mut parsed) = Url::parse(url)
+        .ok()
+        .filter(|parsed| matches!(parsed.scheme(), "http" | "https"))
+    else {
+        return "[invalid URL]".to_string();
+    };
+    let _ = parsed.set_username("");
+    let _ = parsed.set_password(None);
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+    parsed.into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::time::Instant;
 
+use super::egress::CrawlEgress;
 use super::http::HttpFetcher;
 use super::playwright::PlaywrightFetcher;
 use crate::config::RuntimeConfig;
@@ -20,10 +21,15 @@ pub(crate) enum RuntimeFetcher {
 }
 
 impl RuntimeFetcher {
-    pub(crate) fn new(engine: &str, runtime: &RuntimeConfig<'_>) -> Result<Self> {
+    pub(crate) fn new(
+        engine: &str,
+        runtime: &RuntimeConfig<'_>,
+        http: &HttpFetcher,
+        egress: &CrawlEgress,
+    ) -> Result<Self> {
         match engine {
-            "http" => Ok(Self::Http(HttpFetcher::new(runtime)?)),
-            "playwright" => Ok(Self::Playwright(PlaywrightFetcher::new(runtime)?)),
+            "http" => Ok(Self::Http(http.clone())),
+            "playwright" => Ok(Self::Playwright(PlaywrightFetcher::new(runtime, egress)?)),
             other => anyhow::bail!("unsupported runtime engine '{other}'"),
         }
     }
