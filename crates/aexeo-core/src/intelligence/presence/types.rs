@@ -49,6 +49,27 @@ pub struct EntityInput {
     pub name: String,
     pub website: Option<String>,
     pub aliases: Vec<String>,
+    /// Wikipedia language edition to search, such as `en` or `pt-br`. Only
+    /// this edition is searched, so `not_found` is limited to it.
+    pub wikipedia_language: String,
+}
+
+/// Edition searched unless the caller picks another.
+pub const DEFAULT_WIKIPEDIA_LANGUAGE: &str = "en";
+
+/// Whether `value` has the shape of a Wikipedia edition subdomain. It becomes
+/// part of a hostname, so nothing else may reach the URL.
+pub fn is_wikipedia_language(value: &str) -> bool {
+    let mut parts = value.split('-');
+    let primary = parts.next().unwrap_or_default();
+    (2..=3).contains(&primary.len())
+        && primary.chars().all(|c| c.is_ascii_lowercase())
+        && parts.all(|part| {
+            !part.is_empty()
+                && part
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        })
 }
 
 /// Project a TruthManifest down to the EntityInput shape the
@@ -64,6 +85,7 @@ pub fn entity_from_manifest(manifest: &TruthManifest) -> Option<EntityInput> {
         name: org.name.clone(),
         website: org.website.clone(),
         aliases: org.aliases.clone(),
+        wikipedia_language: DEFAULT_WIKIPEDIA_LANGUAGE.to_string(),
     })
 }
 
@@ -122,6 +144,16 @@ mod tests {
         assert_eq!(entity.name, "Aeptus");
         assert_eq!(entity.website.as_deref(), Some("https://aeptus.com"));
         assert_eq!(entity.aliases, vec!["Aeptus Inc.".to_string()]);
+    }
+
+    #[test]
+    fn wikipedia_language_accepts_only_edition_shaped_values() {
+        for valid in ["en", "fr", "sco", "pt-br", "zh-classical", "be-x-old"] {
+            assert!(is_wikipedia_language(valid), "{valid}");
+        }
+        for invalid in ["", "e", "EN", "english", "en.evil.com", "fr/", "fr-", "-fr"] {
+            assert!(!is_wikipedia_language(invalid), "{invalid}");
+        }
     }
 
     #[test]

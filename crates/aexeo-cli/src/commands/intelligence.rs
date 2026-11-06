@@ -1201,7 +1201,7 @@ fn command_intelligence_presence(submatches: &ArgMatches) -> Result<i32> {
         Err(error) => return emit_failure("intelligence presence", format, error),
     };
 
-    let entity = match entity_from_manifest(&manifest) {
+    let mut entity = match entity_from_manifest(&manifest) {
         Some(entity) => entity,
         None => {
             return emit_failure(
@@ -1247,6 +1247,7 @@ fn command_intelligence_presence(submatches: &ArgMatches) -> Result<i32> {
     match format {
         "json" => println!(
             "{}",
+    entity.wikipedia_language = required_arg(submatches, "wikipedia-language")?.to_string();
             render_data_command_json(
                 "intelligence presence",
                 true,
