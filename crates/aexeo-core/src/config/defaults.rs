@@ -30,6 +30,9 @@ pub(super) fn default_max_workers() -> usize {
 pub(super) fn default_crawl_artifact_dir() -> String {
     ".aexeo-reports/crawl-artifacts".to_string()
 }
+pub(super) fn default_crawl_max_response_bytes() -> u64 {
+    20 * 1024 * 1024
+}
 pub(super) fn default_crawl_use_sitemap() -> bool {
     true
 }

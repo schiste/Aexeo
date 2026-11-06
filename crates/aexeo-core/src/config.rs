@@ -11,12 +11,13 @@ use self::defaults::{
     default_accessibility_strict, default_adapter, default_agent_discovery_enabled,
     default_audit_log_limit, default_baseline_file, default_browser_engine,
     default_browser_wait_until, default_canonical_style, default_checks,
-    default_crawl_artifact_dir, default_crawl_use_sitemap, default_default_twitter_card,
-    default_link_suggestion_count, default_max_workers, default_min_answer_blocks,
-    default_min_block_text_length, default_min_inbound_links, default_min_page_size,
-    default_orphan_exclude, default_performance_budget_file, default_profile,
-    default_related_links_heading, default_repeatable_data_ui, default_require_fact_consistency,
-    default_require_html_lang, default_require_meta_robots_consistency, default_require_open_graph,
+    default_crawl_artifact_dir, default_crawl_max_response_bytes, default_crawl_use_sitemap,
+    default_default_twitter_card, default_link_suggestion_count, default_max_workers,
+    default_min_answer_blocks, default_min_block_text_length, default_min_inbound_links,
+    default_min_page_size, default_orphan_exclude, default_performance_budget_file,
+    default_profile, default_related_links_heading, default_repeatable_data_ui,
+    default_require_fact_consistency, default_require_html_lang,
+    default_require_meta_robots_consistency, default_require_open_graph,
     default_require_robots_sitemap, default_require_schema_title_alignment,
     default_require_social_images, default_require_twitter_card, default_required_feature_markers,
     default_source_dir, default_utility_route_patterns, default_weak_anchor_text,
@@ -78,6 +79,10 @@ pub struct Config {
     pub crawl_capture_network: bool,
     #[serde(default = "default_crawl_artifact_dir")]
     pub crawl_artifact_dir: String,
+    #[serde(default)]
+    pub crawl_allow_private_network: bool,
+    #[serde(default = "default_crawl_max_response_bytes")]
+    pub crawl_max_response_bytes: u64,
     #[serde(default)]
     pub ignore_rules: Vec<String>,
     #[serde(default)]
@@ -344,6 +349,8 @@ impl Default for Config {
             crawl_capture_console: false,
             crawl_capture_network: false,
             crawl_artifact_dir: default_crawl_artifact_dir(),
+            crawl_allow_private_network: false,
+            crawl_max_response_bytes: default_crawl_max_response_bytes(),
             ignore_rules: Vec::new(),
             ignore_paths: Vec::new(),
             severity_overrides: BTreeMap::new(),

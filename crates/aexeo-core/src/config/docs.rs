@@ -68,7 +68,7 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
         ConfigFieldDoc {
             key: "crawl_headers",
             default_value: "(none)",
-            description: "Extra HTTP headers applied to runtime crawl requests.",
+            description: "Extra HTTP headers applied to runtime crawl requests. Like cookies and basic auth, they are sent only to the crawl origin (same scheme, host, and port, with `www.` equivalence).",
         },
         ConfigFieldDoc {
             key: "crawl_cookies",
@@ -124,6 +124,16 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
             key: "crawl_artifact_dir",
             default_value: "`.aexeo-reports/crawl-artifacts`",
             description: "Directory used for crawl artifacts such as traces, screenshots, console logs, and network logs.",
+        },
+        ConfigFieldDoc {
+            key: "crawl_allow_private_network",
+            default_value: "`false`",
+            description: "Allow runtime crawl to contact loopback, private, and link-local addresses when the crawl target itself is public. A target that resolves only to non-public addresses (local preview) is allowed without this.",
+        },
+        ConfigFieldDoc {
+            key: "crawl_max_response_bytes",
+            default_value: "`20971520`",
+            description: "Largest response body runtime crawl reads over HTTP, in bytes. A larger response is recorded as a failed fetch.",
         },
         ConfigFieldDoc {
             key: "ignore_rules",
@@ -523,6 +533,20 @@ fn flat_properties() -> Map<String, Value> {
         string_schema("Directory used for crawl artifacts."),
     );
     properties.insert(
+        "crawl_allow_private_network".to_string(),
+        boolean_schema(
+            "Allow runtime crawl to contact non-public addresses when the crawl target is public.",
+        ),
+    );
+    properties.insert(
+        "crawl_max_response_bytes".to_string(),
+        json!({
+            "type": "integer",
+            "minimum": 1,
+            "description": "Largest response body runtime crawl reads over HTTP, in bytes."
+        }),
+    );
+    properties.insert(
         "ignore_rules".to_string(),
         string_array_schema("Rule IDs to suppress after evaluation."),
     );
@@ -742,7 +766,9 @@ fn nested_properties() -> Map<String, Value> {
                 "capture_screenshot": { "type": "boolean" },
                 "capture_console": { "type": "boolean" },
                 "capture_network": { "type": "boolean" },
-                "artifact_dir": { "type": "string" }
+                "artifact_dir": { "type": "string" },
+                "allow_private_network": { "type": "boolean" },
+                "max_response_bytes": { "type": "integer", "minimum": 1 }
             }
         }),
     );
