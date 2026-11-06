@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use super::exit_code::EXIT_UNSUPPORTED;
 use crate::commands::common::required_arg;
 use crate::output::{
-    emit_config_warnings, render_audit_command_json, render_diff_command_json,
+    emit_config_warnings, render_audit_command_json_with_graph, render_diff_command_json,
     render_failed_command_json,
 };
 
@@ -372,6 +372,9 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
         .get_one::<String>("format")
         .map(String::as_str)
         .unwrap_or("text");
+    if submatches.get_flag("link-graph-summary") && format == "sarif" {
+        bail!("--link-graph-summary is supported only with text or json output");
+    }
     let progress_mode = submatches
         .get_one::<String>("progress")
         .map(String::as_str)
@@ -417,9 +420,21 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
         "crawl",
         config.output().audit_log_limit,
     )?;
+    let mut graph_summary = None;
     if let Some(path) = submatches.get_one::<String>("link-graph-output") {
         let started = std::time::Instant::now();
         let graph = aexeo_core::link_report::build_link_report_from_audit(&full_audit_artifact)?;
+        if submatches.get_flag("link-graph-summary") {
+            graph_summary = Some(serde_json::json!({
+                "version": 1,
+                "crawl_complete": graph.crawl_complete,
+                "page_count": graph.pages.len(),
+                "destination_count": graph.links.destinations.len(),
+                "same_document_count": graph.links.same_document.len(),
+                "indeterminate_count": graph.links.indeterminate.len(),
+                "issues": graph.issues,
+            }));
+        }
         let bytes = serde_json::to_vec_pretty(&graph)?;
         fs::write(path, bytes)
             .with_context(|| format!("cannot write link graph report: {path}"))?;
@@ -452,12 +467,13 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     match format {
         "json" => println!(
             "{}",
-            render_audit_command_json(
+            render_audit_command_json_with_graph(
                 "crawl",
                 &render_artifact,
                 success,
                 Some(audit_path.display().to_string()),
                 warnings,
+                graph_summary.as_ref(),
             )?
         ),
         "sarif" => {
@@ -474,6 +490,18 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
                     Some(&audit_path)
                 )
             );
+            if let Some(summary) = &graph_summary {
+                println!(
+                    "Link graph observations: {} pages, {} destinations, {} same-page jumps",
+                    summary["page_count"],
+                    summary["destination_count"],
+                    summary["same_document_count"]
+                );
+                println!(
+                    "Link graph crawl complete: {}; issues: {}",
+                    summary["crawl_complete"], summary["issues"]
+                );
+            }
         }
     }
     Ok(if success { 0 } else { 1 })

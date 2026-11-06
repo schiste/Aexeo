@@ -88,6 +88,10 @@ output and exit status remain unchanged. Add `--link-graph-telemetry` to emit
 the same aggregate-only event to stderr. This is opt-in; graph evidence in the
 output file can include URLs and page text. The result retains incomplete
 coverage because the crawl does not independently attest a matching inventory.
+Add `--link-graph-summary` alongside `--link-graph-output` to include aggregate
+observations and coverage issues in the text or JSON command output. The JSON
+field `link_graph_summary` is omitted unless requested. SARIF does not support
+this option. The summary does not identify confirmed orphans or include evidence.
 
 ## Static audit artifacts
 
