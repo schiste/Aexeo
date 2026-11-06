@@ -450,7 +450,9 @@ fn build_inbound_link_map(pages: &[Page]) -> BTreeMap<String, BTreeSet<String>> 
 }
 
 fn read_optional_text(path: &Path) -> Option<String> {
-    fs::read_to_string(path).ok()
+    fs::read(path)
+        .ok()
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
 }
 
 fn detect_deployment_model(root: &Path) -> (DeploymentModel, Vec<String>) {
@@ -801,5 +803,93 @@ mod tests {
         let site = load_site(root).unwrap();
         assert_eq!(site.deployment_model, DeploymentModel::SsrWorker);
         assert!(!site.deployment_markers.is_empty());
+    }
+
+    fn only_page(html: &[u8]) -> super::Page {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("index.html"), html).unwrap();
+        let site = load_site(temp_dir.path()).unwrap();
+        site.page("").unwrap().clone()
+    }
+
+    #[test]
+    fn title_and_h1_are_found_whatever_the_tag_case() {
+        let page = only_page(
+            b"<HTML><HEAD><TITLE>Upper</TITLE></HEAD><BODY><H1 CLASS=\"a\">Head</H1></BODY></HTML>",
+        );
+        assert_eq!(page.title.as_deref(), Some("Upper"));
+        assert_eq!(page.h1_texts, vec!["Head".to_string()]);
+    }
+
+    #[test]
+    fn comments_scripts_templates_and_svg_titles_are_not_markup() {
+        let page = only_page(
+            b"<html><head><!-- <title>Old</title> --><title>Live</title><script>x='<h1>s</h1>'</script></head>\
+              <body><svg><title>Icon</title></svg><!-- <h1>Old</h1> --><h1>Live</h1><template><h1>t</h1></template></body></html>",
+        );
+        assert_eq!(page.title.as_deref(), Some("Live"));
+        assert_eq!(page.h1_texts, vec!["Live".to_string()]);
+        assert_eq!(page.h1_count, 1);
+    }
+
+    #[test]
+    fn svg_title_is_not_the_page_title() {
+        let page = only_page(b"<html><body><svg><title>Icon</title></svg><h1>x</h1></body></html>");
+        assert_eq!(page.title, None);
+    }
+
+    #[test]
+    fn title_and_h1_text_decode_entities_and_keep_nested_text() {
+        let page = only_page(b"<title>A &amp; B</title><h1>One <em>two</em>\n three</h1>");
+        assert_eq!(page.title.as_deref(), Some("A & B"));
+        assert_eq!(page.h1_texts, vec!["One two three".to_string()]);
+    }
+
+    #[test]
+    fn empty_h1_does_not_count() {
+        let page = only_page(b"<title>x</title><h1> </h1>");
+        assert_eq!(page.h1_count, 0);
+    }
+
+    #[test]
+    fn line_numbers_of_other_elements_are_unaffected_by_title_extraction() {
+        let page = only_page(b"<!-- c -->\n<TITLE>x</TITLE>\n<H1>y</H1>\n<a href=\"/z\">z</a>");
+        assert_eq!(page.links[0].line, 4);
+    }
+
+    #[test]
+    fn non_utf8_page_is_decoded_lossily_and_the_site_keeps_loading() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        fs::write(root.join("index.html"), "<title>Home</title><h1>Home</h1>").unwrap();
+        fs::write(
+            root.join("latin.html"),
+            b"<title>Caf\xe9</title><h1>Caf\xe9</h1>",
+        )
+        .unwrap();
+
+        let site = load_site(root).unwrap();
+
+        assert!(site.has_route(""));
+        assert_eq!(
+            site.page("latin").unwrap().title.as_deref(),
+            Some("Caf\u{fffd}")
+        );
+    }
+
+    #[test]
+    fn non_utf8_robots_still_counts_as_present() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        fs::write(root.join("index.html"), "<title>Home</title>").unwrap();
+        fs::write(
+            root.join("robots.txt"),
+            b"User-agent: *\nDisallow: /caf\xe9\n",
+        )
+        .unwrap();
+
+        let site = load_site(root).unwrap();
+
+        assert!(site.robots_text.is_some());
     }
 }

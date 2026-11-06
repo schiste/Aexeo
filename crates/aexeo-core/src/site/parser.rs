@@ -1,7 +1,14 @@
 use anyhow::Result;
+use html5ever::driver::ParseOpts;
+use html5ever::tendril::TendrilSink;
+use html5ever::tree_builder::TreeBuilderOpts;
+use html5ever::{namespace_url, ns, parse_document};
+use markup5ever_rcdom::{NodeData, RcDom};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use crate::link_evidence::text_content;
 
 use super::{
     AlternateLink, Block, DetailsBlock, ImageReference, JsonLdBlock, Link, Page, PreBlock,
@@ -15,7 +22,8 @@ pub(super) fn parse_page_from_file(path: &Path, root: &Path) -> Result<Page> {
         .unwrap_or(path)
         .to_string_lossy()
         .replace('\\', "/");
-    let raw = fs::read_to_string(path)?;
+    // A single page in a legacy encoding must not abort the whole site load.
+    let raw = String::from_utf8_lossy(&fs::read(path)?).into_owned();
     Ok(build_page_from_source(
         path.to_path_buf(),
         relative,
@@ -36,9 +44,8 @@ pub(super) fn build_page_from_source(
         .iter()
         .filter_map(|link| link.target.clone())
         .collect();
-    let h1_texts = capture_paired_tag_texts(&raw, "h1");
+    let (title, h1_texts) = capture_title_and_h1s(&raw);
     let route = capture_route_for_relative_path(&relative_path);
-    let title = capture_tag_text(&raw, "title");
     let canonical = capture_canonical_href(&raw);
     let html_lang = capture_html_lang(&raw);
     let has_breadcrumb_nav = capture_breadcrumb_nav(&raw);
@@ -75,32 +82,44 @@ pub(super) fn build_page_from_source(
     }
 }
 
-fn capture_tag_text(raw: &str, tag: &str) -> Option<String> {
-    capture_paired_tag_texts(raw, tag).into_iter().next()
-}
-
-fn capture_paired_tag_texts(raw: &str, tag: &str) -> Vec<String> {
-    let mut texts = Vec::new();
-    let start_marker = format!("<{}", tag);
-    let end_marker = format!("</{}>", tag);
-    let mut offset = 0;
-    while let Some(index) = raw[offset..].find(&start_marker) {
-        let start = offset + index;
-        let Some(open_end_rel) = raw[start..].find('>') else {
-            break;
-        };
-        let open_end = start + open_end_rel;
-        let Some(close_start_rel) = raw[open_end + 1..].find(&end_marker) else {
-            break;
-        };
-        let close_start = open_end + 1 + close_start_rel;
-        let text = strip_tags(&raw[open_end + 1..close_start]);
-        if !text.is_empty() {
-            texts.push(text);
+/// First non-empty `<title>` and every non-empty `<h1>` of the parsed document,
+/// so tag case, comments, scripts and `<template>` contents are handled the way
+/// a browser handles them. Scripting is off to match a non-rendering crawler:
+/// `<noscript>` content counts as markup. SVG `<title>` elements do not count.
+fn capture_title_and_h1s(raw: &str) -> (Option<String>, Vec<String>) {
+    let opts = ParseOpts {
+        tree_builder: TreeBuilderOpts {
+            scripting_enabled: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let dom = parse_document(RcDom::default(), opts).one(raw);
+    let mut title = None;
+    let mut h1_texts = Vec::new();
+    let mut nodes = vec![dom.document.clone()];
+    while let Some(node) = nodes.pop() {
+        if let NodeData::Element { name, .. } = &node.data
+            && name.ns == ns!(html)
+        {
+            match name.local.as_ref() {
+                "title" if title.is_none() => {
+                    title = Some(text_content(&node)).filter(|text| !text.is_empty());
+                    continue;
+                }
+                "h1" => {
+                    let text = text_content(&node);
+                    if !text.is_empty() {
+                        h1_texts.push(text);
+                    }
+                    continue;
+                }
+                _ => {}
+            }
         }
-        offset = close_start + end_marker.len();
+        nodes.extend(node.children.borrow().iter().rev().cloned());
     }
-    texts
+    (title, h1_texts)
 }
 
 fn capture_meta_maps(raw: &str) -> (BTreeMap<String, String>, BTreeMap<String, String>) {

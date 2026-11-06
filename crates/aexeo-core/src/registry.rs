@@ -979,11 +979,18 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
             name: "runtime",
             title: "Runtime Crawl",
             description: "",
-            rules: &[RuleDescriptor {
-                rule_id: "CRW003",
-                sitewide: true,
-                summary: "crawl ended before the full internal route graph could be reviewed",
-            }],
+            rules: &[
+                RuleDescriptor {
+                    rule_id: "CRW001",
+                    sitewide: false,
+                    summary: "URL could not be fetched during the crawl",
+                },
+                RuleDescriptor {
+                    rule_id: "CRW003",
+                    sitewide: true,
+                    summary: "crawl ended before the full internal route graph could be reviewed",
+                },
+            ],
         },
         RuleGroupDefinition {
             name: "deployment",
