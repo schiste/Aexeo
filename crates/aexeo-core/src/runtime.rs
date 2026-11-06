@@ -4,6 +4,7 @@ mod graph;
 mod http;
 mod planner;
 mod playwright;
+mod robots;
 mod snapshot;
 
 use aexeo_contracts::{
@@ -14,22 +15,35 @@ use aexeo_contracts::{
 };
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::RandomState;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::hash::BuildHasher;
+use std::io::Write;
 use std::path::Path;
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::config::Config;
+use crate::link_evidence::crawl_links;
+use crate::link_graph::redact_url;
 use crate::reporting::build_audit_artifact;
 use crate::site::{Site, route_from_urlish};
 use crate::static_check::run_checks_for_site_profiled;
 use crate::verification::{DiffResult, diff_finding_sets};
-use fetcher::{FetchOutcome, RuntimeFetcher};
-use graph::{extract_internal_links, read_loc_values, response_report_path, should_enqueue_link};
-use http::{fetch_with_http, host_for_url, is_html_content_type, same_site_host};
+use fetcher::{
+    FetchOutcome, ResponseClass, RuntimeFetcher, classify_status, crawl_user_agent,
+    fetch_error_summary, headers_with_user_agent,
+};
+use graph::{read_loc_values, response_report_path, should_enqueue_link};
+use http::{
+    fetch_with_http, host_for_url, is_html_content_type, normalize_base_url, origin_for_url,
+    same_site_host,
+};
 use planner::{CrawlPlanner, CrawlPlannerState};
 pub use playwright::PlaywrightDoctor;
 use playwright::{playwright_is_available, probe_playwright_runtime};
+use robots::load_robots;
 use snapshot::{RuntimeSnapshotBuilder, RuntimeSnapshotState};
 
 #[derive(Debug, Clone)]
@@ -42,6 +56,8 @@ pub struct RuntimeAudit {
     pub truncation_reason: Option<String>,
     pub performance: Option<AuditPerformance>,
 }
+
+const CHECKPOINT_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeCheckpoint {
@@ -1462,6 +1478,112 @@ fn emit_partial_audit_artifact(
     Ok(())
 }
 
+/// Why this crawl does not cover everything it set out to cover, if so. A reason
+/// makes the audit `partial`: `complete` requires no truncation and no failed fetch.
+fn crawl_incomplete_reason(planner: &CrawlPlanner, crawl_stats: &CrawlStats) -> Option<String> {
+    let mut reasons = Vec::new();
+    if planner.truncated() {
+        reasons.push(format!(
+            "crawl stopped at max_pages={} after visiting {} pages while at least {} routes were discovered",
+            crawl_stats.max_pages,
+            planner.visited_count(),
+            planner.discovered_route_count()
+        ));
+    }
+    if crawl_stats.fetch_failures > 0 {
+        reasons.push(format!(
+            "{} of {} requested URLs failed (transport error, HTTP 429 or 5xx) and were not audited",
+            crawl_stats.fetch_failures,
+            planner.visited_count()
+        ));
+    }
+    if crawl_stats.access_denied > 0 {
+        reasons.push(format!(
+            "{} requested URLs denied access (HTTP 401 or 403) and were not audited",
+            crawl_stats.access_denied
+        ));
+    }
+    if crawl_stats.observed_error_responses > 0
+        && crawl_stats.observed_error_responses == planner.visited_count()
+    {
+        reasons.push(
+            "every requested URL returned an error status, so nothing was audited".to_string(),
+        );
+    }
+    if planner.visited_count() == 0 && planner.robots_skipped_count() > 0 {
+        reasons.push(format!(
+            "robots.txt disallowed all {} routes tried, so nothing was audited; for a site you own, --ignore-robots overrides this",
+            planner.robots_skipped_count()
+        ));
+    }
+    (!reasons.is_empty()).then(|| reasons.join("; "))
+}
+
+/// Fetch robots.txt for the planner's current origin and start honouring it. It
+/// is always fetched, because the robots rules audit it even with `ignore_robots`.
+/// Returns the cause when the origin gave no HTTP response to the request.
+fn apply_robots_txt(
+    planner: &mut CrawlPlanner,
+    snapshot: &mut RuntimeSnapshotBuilder,
+    crawl_findings: &mut Vec<Finding>,
+    runtime: &crate::config::RuntimeConfig<'_>,
+    ignore_robots: bool,
+) -> Option<String> {
+    let loaded = load_robots(&origin_for_url(planner.normalized_base()), runtime);
+    snapshot.set_robots_text(loaded.text);
+    let no_response = loaded
+        .no_response
+        .then(|| loaded.unreachable.clone())
+        .flatten();
+    if ignore_robots {
+        return no_response;
+    }
+    planner.set_robots_policy(loaded.policy);
+    if let Some(cause) = loaded.unreachable {
+        crawl_findings.push(Finding {
+            rule_id: "CRW002".to_string(),
+            message: format!(
+                "could not fetch robots.txt ({cause}); RFC 9309 requires assuming everything is disallowed, so the site was not crawled; for a site you own, --ignore-robots overrides this"
+            ),
+            path: "crawl/robots.txt".to_string(),
+            line: 1,
+            column: 1,
+            severity: "warning".to_string(),
+            suggestion: Some(
+                "make robots.txt reachable and retry the crawl".to_string(),
+            ),
+            scope: FindingScope::Sitewide,
+            subject: None,
+        });
+    }
+    no_response
+}
+
+fn fetch_finding(url: &str, detail: &str, severity: &str) -> Finding {
+    let route = route_from_urlish(url).unwrap_or_default();
+    Finding {
+        rule_id: "CRW001".to_string(),
+        message: format!("failed to fetch URL: {} ({detail})", redact_url(url)),
+        path: response_report_path(&route),
+        line: 1,
+        column: 1,
+        severity: severity.to_string(),
+        suggestion: None,
+        scope: FindingScope::Page,
+        subject: None,
+    }
+}
+
+fn record_failed_fetch(
+    crawl_stats: &mut CrawlStats,
+    crawl_findings: &mut Vec<Finding>,
+    url: &str,
+    detail: &str,
+) {
+    crawl_stats.fetch_failures += 1;
+    crawl_findings.push(fetch_finding(url, detail, "error"));
+}
+
 fn build_progress_runtime_artifact(
     command: &str,
     planner: &CrawlPlanner,
@@ -1469,26 +1591,19 @@ fn build_progress_runtime_artifact(
     crawl_stats: &CrawlStats,
     performance: &RuntimePerformance,
 ) -> AuditArtifact {
-    let status = if planner.queued_count() > 0 || planner.truncated() {
+    let truncation_reason = crawl_incomplete_reason(planner, crawl_stats).or_else(|| {
+        (planner.queued_count() > 0).then(|| {
+            format!(
+                "checkpoint after visiting {} pages with {} routes still queued",
+                planner.visited_count(),
+                planner.queued_count()
+            )
+        })
+    });
+    let status = if truncation_reason.is_some() {
         AuditStatus::Partial
     } else {
         AuditStatus::Complete
-    };
-    let truncation_reason = if planner.truncated() {
-        Some(format!(
-            "crawl stopped at max_pages={} after visiting {} pages while at least {} routes were discovered",
-            crawl_stats.max_pages,
-            planner.visited_count(),
-            planner.discovered_route_count()
-        ))
-    } else if planner.queued_count() > 0 {
-        Some(format!(
-            "checkpoint after visiting {} pages with {} routes still queued",
-            planner.visited_count(),
-            planner.queued_count()
-        ))
-    } else {
-        None
     };
     let mut artifact = build_audit_artifact(
         command,
@@ -1570,24 +1685,122 @@ fn checkpoint_state(
     crawl_stats: &CrawlStats,
 ) -> Result<()> {
     let checkpoint = RuntimeCheckpoint {
-        version: 1,
-        base_url: base_url.to_string(),
+        version: CHECKPOINT_VERSION,
+        base_url: redact_url(base_url),
         engine: engine.to_string(),
         planner: planner.checkpoint_state(),
         snapshot: snapshot.checkpoint_state(),
         crawl_findings: crawl_findings.to_vec(),
         crawl_stats: crawl_stats.clone(),
     };
-    fs::write(checkpoint_path, serde_json::to_string_pretty(&checkpoint)?)?;
+    write_atomically(checkpoint_path, &serde_json::to_vec_pretty(&checkpoint)?)
+}
+
+/// Replace `path` in one step, so a crash mid-write leaves the previous checkpoint.
+///
+/// The temporary file sits in the same directory, is created exclusively under an
+/// unpredictable name, and is private until it takes over the destination's mode:
+/// a checkpoint holds crawled page bodies, which may come from an authenticated site.
+fn write_atomically(path: &Path, contents: &[u8]) -> Result<()> {
+    let (temporary, mut file) = create_temporary_sibling(path)?;
+    let written = (|| -> Result<()> {
+        file.write_all(contents)?;
+        if let Ok(existing) = fs::metadata(path) {
+            file.set_permissions(existing.permissions())?;
+        }
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary, path)?;
+        Ok(())
+    })();
+    if written.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    written?;
+    // Best effort: not every platform can open or sync a directory.
+    if let Some(Ok(directory)) = path
+        .parent()
+        .map(|parent| match parent.as_os_str().is_empty() {
+            true => fs::File::open("."),
+            false => fs::File::open(parent),
+        })
+    {
+        let _ = directory.sync_all();
+    }
     Ok(())
 }
 
-fn load_checkpoint(checkpoint_path: &Path, max_pages: usize) -> Result<RuntimeCheckpoint> {
+fn create_temporary_sibling(path: &Path) -> Result<(std::path::PathBuf, fs::File)> {
+    const ATTEMPTS: usize = 16;
+    for attempt in 0..ATTEMPTS {
+        // `create_new` is the safeguard against a planted file; the name only has
+        // to be hard to guess, and `RandomState` is seeded randomly per process.
+        let suffix = RandomState::new().hash_one((std::process::id(), attempt));
+        let mut temporary = path.as_os_str().to_owned();
+        temporary.push(format!(".tmp.{suffix:016x}"));
+        let temporary = std::path::PathBuf::from(temporary);
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        match options.open(&temporary) {
+            Ok(file) => return Ok((temporary, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    anyhow::bail!(
+        "could not create a temporary file next to {}",
+        path.display()
+    )
+}
+
+fn load_checkpoint(
+    checkpoint_path: &Path,
+    base_url: &str,
+    engine: &str,
+    max_pages: usize,
+) -> Result<RuntimeCheckpoint> {
     let text = fs::read_to_string(checkpoint_path)?;
     let mut checkpoint = serde_json::from_str::<RuntimeCheckpoint>(&text)?;
+    // In the message itself: failure output renders only the outermost error.
+    validate_checkpoint(&checkpoint, base_url, engine).map_err(|reason| {
+        anyhow::anyhow!("cannot resume from {}: {reason}", checkpoint_path.display())
+    })?;
     checkpoint.planner.max_pages = max_pages;
     checkpoint.crawl_stats.max_pages = max_pages;
     Ok(checkpoint)
+}
+
+/// A checkpoint decides which host the crawl talks to, and the current run supplies
+/// the credentials, so resuming a different crawl could send them to the wrong site.
+fn validate_checkpoint(checkpoint: &RuntimeCheckpoint, base_url: &str, engine: &str) -> Result<()> {
+    anyhow::ensure!(
+        checkpoint.version == CHECKPOINT_VERSION,
+        "checkpoint version {} is not supported (expected {CHECKPOINT_VERSION}); start a new crawl",
+        checkpoint.version
+    );
+    // The planner's persisted location is ignored on resume. Disagreement with the
+    // current run still means this is not its checkpoint, or that it was altered.
+    let target_host = host_for_url(base_url);
+    anyhow::ensure!(
+        normalize_base_url(&redact_url(&checkpoint.base_url))
+            == normalize_base_url(&redact_url(base_url))
+            && same_site_host(&checkpoint.planner.base_host, &target_host)
+            && same_site_host(
+                &host_for_url(&checkpoint.planner.normalized_base),
+                &target_host
+            ),
+        "checkpoint belongs to {} but this crawl targets {}; pass the same URL or start a new crawl",
+        redact_url(&checkpoint.base_url),
+        redact_url(base_url)
+    );
+    anyhow::ensure!(
+        checkpoint.engine == engine,
+        "checkpoint was made with engine '{}' but this crawl uses '{engine}'; pass the same engine or start a new crawl",
+        checkpoint.engine
+    );
+    Ok(())
 }
 
 fn materialize_runtime_site(
@@ -1597,13 +1810,18 @@ fn materialize_runtime_site(
     config: &Config,
     options: &mut RuntimeAuditOptions<'_>,
 ) -> Result<RuntimeMaterialization> {
-    let runtime = config.runtime();
+    // Injected here so every request of the crawl, whatever its engine, identifies itself.
+    let crawl_headers = headers_with_user_agent(config.runtime().crawl_headers);
+    let runtime = crate::config::RuntimeConfig {
+        crawl_headers: &crawl_headers,
+        ..config.runtime()
+    };
     let (mut planner, mut snapshot, mut crawl_findings, mut crawl_stats, mut performance) =
         if let Some(resume_from) = options.resume_from {
-            let checkpoint = load_checkpoint(resume_from, max_pages)?;
+            let checkpoint = load_checkpoint(resume_from, base_url, engine, max_pages)?;
             let resumed_elapsed_us = checkpoint.crawl_stats.elapsed_us;
             (
-                CrawlPlanner::from_checkpoint(checkpoint.planner, max_pages),
+                CrawlPlanner::from_checkpoint(checkpoint.planner, base_url, max_pages),
                 RuntimeSnapshotBuilder::from_state(checkpoint.snapshot),
                 checkpoint.crawl_findings,
                 checkpoint.crawl_stats,
@@ -1623,6 +1841,23 @@ fn materialize_runtime_site(
             )
         };
 
+    // Before any other request, and again on resume: a checkpoint must not keep
+    // a crawl going against rules that have changed since.
+    let robots_started_at = Instant::now();
+    let robots_no_response = apply_robots_txt(
+        &mut planner,
+        &mut snapshot,
+        &mut crawl_findings,
+        &runtime,
+        config.crawl_ignore_robots,
+    );
+    performance.record(
+        Phase::OptionalArtifactFetch,
+        robots_started_at.elapsed().as_micros() as u64,
+    );
+
+    let mut origin_responded = false;
+
     if options.resume_from.is_none() {
         for seed in runtime.crawl_seeds {
             planner.seed_from_user_input(seed, &runtime);
@@ -1633,9 +1868,13 @@ fn materialize_runtime_site(
             let sitemap_base = planner.normalized_base().to_string();
             let sitemap_seed_started_at = Instant::now();
             for sitemap_name in ["sitemap.xml", "sitemap-index.xml", "sitemap_index.xml"] {
+                let sitemap_url = format!("{}{}", sitemap_base, sitemap_name);
+                if !planner.robots().allows_url(&sitemap_url) {
+                    continue;
+                }
                 let _ = seed_routes_from_sitemap(
                     &mut planner,
-                    &format!("{}{}", sitemap_base, sitemap_name),
+                    &sitemap_url,
                     &runtime,
                     &mut visited_sitemaps,
                 );
@@ -1648,6 +1887,7 @@ fn materialize_runtime_site(
     }
 
     let mut fetcher = RuntimeFetcher::new(engine, &runtime)?;
+    let mut last_checkpoint_visited = planner.visited_count();
     let effective_workers = if engine == "http" {
         runtime.max_workers.max(1)
     } else {
@@ -1669,6 +1909,9 @@ fn materialize_runtime_site(
         if batch.is_empty() {
             break;
         }
+        if config.crawl_delay_ms > 0 && planner.visited_count() > batch.len() {
+            thread::sleep(Duration::from_millis(config.crawl_delay_ms));
+        }
 
         let outcomes = fetcher.fetch_batch(&batch, options.fetch_retry_budget);
         for outcome in outcomes {
@@ -1681,40 +1924,75 @@ fn materialize_runtime_site(
                 elapsed_us: fetch_elapsed_us,
             } = outcome;
             let fetched = match result {
-                Ok(fetched) => fetched,
+                Ok(fetched) => {
+                    origin_responded = true;
+                    fetched
+                }
                 Err(error) => {
-                    let route = route_from_urlish(&current).unwrap_or_default();
-                    crawl_stats.fetch_failures += 1;
+                    record_failed_fetch(
+                        &mut crawl_stats,
+                        &mut crawl_findings,
+                        &current,
+                        fetch_error_summary(&error),
+                    );
                     performance.apply_to(&mut crawl_stats);
-                    crawl_findings.push(Finding {
-                        rule_id: "CRW001".to_string(),
-                        message: format!("failed to fetch URL: {} ({})", current, error),
-                        path: response_report_path(&route),
-                        line: 1,
-                        column: 1,
-                        severity: "error".to_string(),
-                        suggestion: None,
-                        scope: FindingScope::Page,
-                        subject: None,
-                    });
                     continue;
                 }
             };
-            let Some(body) = fetched.body else {
-                let route = route_from_urlish(&current).unwrap_or_default();
-                crawl_stats.fetch_failures += 1;
+            let effective_host = host_for_url(&fetched.effective_url);
+            if !same_site_host(&effective_host, planner.base_host()) {
                 performance.apply_to(&mut crawl_stats);
-                crawl_findings.push(Finding {
-                    rule_id: "CRW001".to_string(),
-                    message: format!("failed to fetch URL: {}", current),
-                    path: response_report_path(&route),
-                    line: 1,
-                    column: 1,
-                    severity: "error".to_string(),
-                    suggestion: None,
-                    scope: FindingScope::Page,
-                    subject: None,
-                });
+                continue;
+            }
+            let provenance = aexeo_contracts::CrawlResponseProvenance {
+                requested_url: redact_url(&current),
+                observed_url: fetched
+                    .effective_url_observed
+                    .then(|| redact_url(&fetched.effective_url)),
+                status_code: fetched.status_code,
+                headers_observed: fetched.headers_observed,
+            };
+            // An unknown status (a browser runner may not report one) is not
+            // evidence of a problem; a known non-2xx is not a page of the site.
+            if let Some(status) = fetched
+                .status_code
+                .filter(|status| classify_status(*status) != ResponseClass::Success)
+            {
+                let detail = format!("HTTP {status}");
+                match classify_status(status) {
+                    ResponseClass::Failure => {
+                        record_failed_fetch(
+                            &mut crawl_stats,
+                            &mut crawl_findings,
+                            &current,
+                            &detail,
+                        );
+                    }
+                    // A limit on coverage, like truncation: partial, and a warning
+                    // because nothing shows that the site is wrong.
+                    ResponseClass::AccessDenied => {
+                        crawl_stats.access_denied += 1;
+                        crawl_findings.push(fetch_finding(&current, &detail, "warning"));
+                    }
+                    // A finished fetch with a clear answer: the audit is complete
+                    // and the defect is reported through its findings.
+                    ResponseClass::Observation | ResponseClass::Success => {
+                        crawl_stats.observed_error_responses += 1;
+                        crawl_findings.push(fetch_finding(&current, &detail, "error"));
+                    }
+                }
+                snapshot.record_failed_response(provenance);
+                performance.apply_to(&mut crawl_stats);
+                continue;
+            }
+            let Some(body) = fetched.body else {
+                record_failed_fetch(
+                    &mut crawl_stats,
+                    &mut crawl_findings,
+                    &current,
+                    "no readable response body",
+                );
+                performance.apply_to(&mut crawl_stats);
                 continue;
             };
             if !is_html_content_type(fetched.content_type.as_deref()) {
@@ -1722,40 +2000,39 @@ fn materialize_runtime_site(
                 performance.apply_to(&mut crawl_stats);
                 continue;
             }
-            let effective_host = host_for_url(&fetched.effective_url);
-            if !same_site_host(&effective_host, planner.base_host()) {
+            let process_started_at = Instant::now();
+            let planner_started_at = Instant::now();
+            let origin_before = origin_for_url(planner.normalized_base());
+            planner.align_with_effective_url(&fetched.effective_url);
+            if origin_for_url(planner.normalized_base()) != origin_before {
+                // robots.txt is per origin, and the crawl has just moved to another.
+                let _ = apply_robots_txt(
+                    &mut planner,
+                    &mut snapshot,
+                    &mut crawl_findings,
+                    &runtime,
+                    config.crawl_ignore_robots,
+                );
+            }
+            // The request cannot be taken back, but a page reached through a
+            // redirect into a disallowed path must not be audited.
+            if planner.skip_if_disallowed(&fetched.effective_url) {
                 performance.apply_to(&mut crawl_stats);
                 continue;
             }
-            let process_started_at = Instant::now();
-            let planner_started_at = Instant::now();
-            planner.align_with_effective_url(&fetched.effective_url);
             let route = route_from_urlish(&fetched.effective_url).unwrap_or_default();
             let snapshot_write_started_at = Instant::now();
-            snapshot.write_page(
-                &route,
-                &body,
-                &fetched.headers,
-                Some(aexeo_contracts::CrawlResponseProvenance {
-                    requested_url: current.clone(),
-                    observed_url: fetched
-                        .effective_url_observed
-                        .then(|| fetched.effective_url.clone()),
-                    status_code: fetched.status_code,
-                    headers_observed: fetched.headers_observed,
-                }),
-            )?;
+            snapshot.write_page(&route, &body, &fetched.headers, Some(provenance))?;
             performance.record(
                 Phase::SnapshotWrite,
                 snapshot_write_started_at.elapsed().as_micros() as u64,
             );
 
             let extraction_started_at = Instant::now();
-            for target in extract_internal_links(&body, planner.base_host()) {
-                if !should_enqueue_link(&target) {
-                    continue;
+            for link in crawl_links(&body, &fetched.effective_url) {
+                if should_enqueue_link(&link.route) {
+                    planner.discover_link_target(&link.route, &runtime);
                 }
-                planner.discover_link_target(&target, &runtime);
             }
             performance.record(
                 Phase::LinkExtraction,
@@ -1769,10 +2046,11 @@ fn materialize_runtime_site(
             crawl_stats.visited_pages = planner.visited_count();
             crawl_stats.discovered_internal_routes = planner.discovered_route_count();
             crawl_stats.queued_routes_remaining = planner.queued_count();
+            crawl_stats.skipped_by_robots = planner.robots_skipped_count();
             crawl_stats.truncated = planner.truncated();
             let page_process_us = process_started_at.elapsed().as_micros() as u64;
             performance.record_page_process(
-                &fetched.effective_url,
+                &redact_url(&fetched.effective_url),
                 fetch_elapsed_us,
                 page_process_us,
             );
@@ -1783,7 +2061,7 @@ fn materialize_runtime_site(
                 RuntimeProgressEvent {
                     phase: "progress".to_string(),
                     engine: engine.to_string(),
-                    current_url: Some(fetched.effective_url),
+                    current_url: Some(redact_url(&fetched.effective_url)),
                     visited_pages: crawl_stats.visited_pages,
                     discovered_internal_routes: crawl_stats.discovered_internal_routes,
                     queued_routes_remaining: crawl_stats.queued_routes_remaining,
@@ -1808,10 +2086,13 @@ fn materialize_runtime_site(
             );
         }
 
+        // A threshold, not a multiple: a batch advances by up to `max_workers`,
+        // which can step over multiples of `checkpoint_every`.
+        crawl_stats.visited_pages = planner.visited_count();
         if let Some(checkpoint_path) = options.checkpoint_path
-            && crawl_stats.visited_pages > 0
-            && crawl_stats.visited_pages % options.checkpoint_every.max(1) == 0
+            && planner.visited_count() - last_checkpoint_visited >= options.checkpoint_every.max(1)
         {
+            last_checkpoint_visited = planner.visited_count();
             performance.record_checkpoint();
             performance.apply_to(&mut crawl_stats);
             let checkpoint_started_at = Instant::now();
@@ -1848,6 +2129,7 @@ fn materialize_runtime_site(
         }
         if performance.should_emit_partial_audit(crawl_stats.visited_pages, options) {
             let partial_build_started_at = Instant::now();
+            snapshot.set_robots_skipped_urls(planner.robots_skipped_urls());
             let artifact = build_partial_runtime_artifact(
                 options.artifact_command,
                 &snapshot,
@@ -1870,17 +2152,36 @@ fn materialize_runtime_site(
         }
     }
 
-    let optional_fetch_us =
-        snapshot.capture_optional_artifacts(planner.normalized_base(), &runtime)?;
+    // SPEC.md: an unreachable crawl target is exit 2, not a result. An error status
+    // or one failed page on a target that does answer stays a `partial` audit.
+    if let Some(cause) = robots_no_response.filter(|_| !origin_responded) {
+        let hint = if config.crawl_ignore_robots {
+            ""
+        } else {
+            "; for a site you own, --ignore-robots drops the robots.txt requirement"
+        };
+        anyhow::bail!(
+            "cannot reach {}: robots.txt could not be fetched ({cause}) and no page responded, so nothing was audited{hint}",
+            redact_url(planner.normalized_base())
+        );
+    }
+
+    let (optional_fetch_us, optional_artifact_warnings) =
+        snapshot.capture_optional_artifacts(planner.normalized_base(), &runtime, planner.robots());
     performance.record(Phase::OptionalArtifactFetch, optional_fetch_us);
+    crawl_findings.extend(optional_artifact_warnings);
     // Probe well-known machine-readable artifact paths (manifest-
     // listed + canonical fallbacks). The crawler skipped non-HTML
     // responses, so without this step facts.json / llms-full.txt /
     // .md.txt mirrors only reachable via manifest.json appear as
     // missing in surface discovery.
-    let probed_artifact_paths =
-        artifact_probe::probe_well_known_artifacts(planner.normalized_base(), &runtime);
+    let probed_artifact_paths = artifact_probe::probe_well_known_artifacts(
+        planner.normalized_base(),
+        &runtime,
+        planner.robots(),
+    );
     let snapshot_started_at = Instant::now();
+    snapshot.set_robots_skipped_urls(planner.robots_skipped_urls());
     let (mut site, snapshot_findings) = snapshot.finalize(
         planner.visited_count(),
         max_pages,
@@ -1902,19 +2203,11 @@ fn materialize_runtime_site(
     crawl_stats.visited_pages = planner.visited_count();
     crawl_stats.discovered_internal_routes = planner.discovered_route_count();
     crawl_stats.queued_routes_remaining = planner.queued_count();
+    crawl_stats.skipped_by_robots = planner.robots_skipped_count();
     crawl_stats.truncated = planner.truncated();
     performance.apply_to(&mut crawl_stats);
     crawl_findings.extend(snapshot_findings);
-    let truncation_reason = if planner.truncated() {
-        Some(format!(
-            "crawl stopped at max_pages={} after visiting {} pages while at least {} routes were discovered",
-            max_pages,
-            planner.visited_count(),
-            planner.discovered_route_count()
-        ))
-    } else {
-        None
-    };
+    let truncation_reason = crawl_incomplete_reason(&planner, &crawl_stats);
     if let Some(checkpoint_path) = options.checkpoint_path
         && site
             .crawl_meta
@@ -2014,7 +2307,7 @@ pub fn run_runtime_audit_with_options(
     let mut findings = crawl_findings.clone();
     findings.extend(profiled.findings.clone());
     findings.extend(probe_markdown_negotiation_finding(base_url, config, &site));
-    let status = if crawl_stats.truncated {
+    let status = if truncation_reason.is_some() {
         AuditStatus::Partial
     } else {
         AuditStatus::Complete
@@ -2138,10 +2431,19 @@ fn probe_markdown_negotiation_finding(
     if homepage_advertises_markdown_mirror_discovery(site) {
         return Vec::new();
     }
+    let home_disallowed = site.crawl_meta.iter().any(|meta| {
+        meta.robots_skipped_urls
+            .iter()
+            .any(|url| route_from_urlish(url).is_some_and(|route| route.is_empty()))
+    });
+    if home_disallowed {
+        return Vec::new();
+    }
 
     let client = match Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .redirect(reqwest::redirect::Policy::limited(5))
+        .user_agent(crawl_user_agent(&config.crawl_headers))
         .build()
     {
         Ok(client) => client,
@@ -2168,7 +2470,7 @@ fn probe_markdown_negotiation_finding(
         message: format!(
             "homepage doesn't honor `Accept: text/markdown` content negotiation; observed `{content_type}` instead of `text/markdown`"
         ),
-        path: format!("{base_url}/"),
+        path: format!("{}/", redact_url(base_url).trim_end_matches('/')),
         line: 1,
         column: 1,
         severity: "warning".to_string(),
@@ -3133,6 +3435,61 @@ mod tests {
             type_attr: Some("application/atom+xml".to_string()),
         }]);
         assert!(!homepage_advertises_markdown_mirror_discovery(&site));
+    }
+
+    #[test]
+    fn checkpoint_writes_replace_the_file_and_leave_nothing_behind() {
+        use super::write_atomically;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("checkpoint.json");
+        write_atomically(&path, b"first").unwrap();
+        write_atomically(&path, b"second").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"second");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn a_failed_checkpoint_write_removes_its_temporary_file() {
+        use super::write_atomically;
+        let dir = tempfile::tempdir().unwrap();
+        // Renaming a file over a non-empty directory fails after the temp is written.
+        let destination = dir.path().join("checkpoint.json");
+        std::fs::create_dir(&destination).unwrap();
+        std::fs::write(destination.join("keep"), b"kept").unwrap();
+        assert!(write_atomically(&destination, b"next").is_err());
+        assert_eq!(std::fs::read(destination.join("keep")).unwrap(), b"kept");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn temporary_checkpoint_names_are_unique_siblings() {
+        use super::create_temporary_sibling;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("checkpoint.json");
+        let (first, _first_file) = create_temporary_sibling(&path).unwrap();
+        let (second, _second_file) = create_temporary_sibling(&path).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(first.parent(), path.parent());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checkpoints_are_private_unless_the_destination_says_otherwise() {
+        use super::write_atomically;
+        use std::os::unix::fs::PermissionsExt;
+        let mode =
+            |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        let dir = tempfile::tempdir().unwrap();
+        let fresh = dir.path().join("fresh.json");
+        write_atomically(&fresh, b"x").unwrap();
+        assert_eq!(mode(&fresh), 0o600);
+
+        let shared = dir.path().join("shared.json");
+        std::fs::write(&shared, b"old").unwrap();
+        std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o640)).unwrap();
+        write_atomically(&shared, b"new").unwrap();
+        assert_eq!(mode(&shared), 0o640);
+        assert_eq!(std::fs::read(&shared).unwrap(), b"new");
     }
 
     #[test]

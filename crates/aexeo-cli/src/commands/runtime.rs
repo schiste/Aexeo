@@ -36,6 +36,9 @@ fn apply_runtime_cli_overrides(config: &mut aexeo_core::Config, submatches: &Arg
     if submatches.get_flag("no-sitemap-seed") {
         config.crawl_use_sitemap = false;
     }
+    if submatches.get_flag("ignore-robots") {
+        config.crawl_ignore_robots = true;
+    }
     // try_get_one because not every runtime subcommand registers
     // --a11y-strict (only `crawl` does today). get_flag would panic.
     if matches!(
@@ -842,7 +845,7 @@ pub fn command_perf_baseline(submatches: &ArgMatches) -> Result<i32> {
                 "command": "perf baseline",
                 "success": success,
                 "name": baseline_name,
-                "url": target_url,
+                "url": aexeo_core::redact_url(target_url),
                 "audit_path": audit_path.display().to_string(),
                 "baseline_path": timestamped_path.display().to_string(),
                 "latest_path": latest_path.display().to_string(),
@@ -858,7 +861,7 @@ pub fn command_perf_baseline(submatches: &ArgMatches) -> Result<i32> {
             println!("Performance Baseline");
             println!();
             println!("- Name: {}", baseline_name);
-            println!("- URL: {}", target_url);
+            println!("- URL: {}", aexeo_core::redact_url(target_url));
             println!("- Status: {:?}", audit.status);
             println!("- Pages: {}", audit.crawl_stats.visited_pages);
             println!("- Elapsed: {}ms", audit.crawl_stats.elapsed_ms);

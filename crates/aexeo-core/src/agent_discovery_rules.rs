@@ -141,6 +141,8 @@ mod tests {
                 discovered_internal_routes: 1,
                 truncated: false,
                 probed_artifact_paths: probed.iter().map(|s| s.to_string()).collect(),
+                failed_responses: Vec::new(),
+                robots_skipped_urls: Vec::new(),
             }),
         })
         .unwrap()

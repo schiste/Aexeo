@@ -262,6 +262,7 @@ These names are part of the config and reporting contract.
 
 ### Runtime Crawl
 - `CRW001`
+- `CRW002`
 - `CRW003`
 
 ### Deployment Model

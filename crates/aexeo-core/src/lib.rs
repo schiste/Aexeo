@@ -98,6 +98,7 @@ pub use intelligence::{
     looks_like_generic_entity_name, map_grounding_queries, reconcile_trust_surfaces,
     render_facts_prompt, score_intelligence, validate_truth_manifest,
 };
+pub use link_graph::redact_url;
 pub use link_rules::run_link_rules;
 pub use llm_rules::run_llm_rules;
 pub use plugin::{PluginManifestCheck, validate_python_plugin_module};

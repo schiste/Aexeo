@@ -983,7 +983,12 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                 RuleDescriptor {
                     rule_id: "CRW001",
                     sitewide: false,
-                    summary: "URL could not be fetched during the crawl",
+                    summary: "a crawled URL could not be fetched or returned a non-2xx status",
+                },
+                RuleDescriptor {
+                    rule_id: "CRW002",
+                    sitewide: true,
+                    summary: "a site artifact such as robots.txt or llms.txt could not be fetched",
                 },
                 RuleDescriptor {
                     rule_id: "CRW003",
