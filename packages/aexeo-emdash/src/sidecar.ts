@@ -1,4 +1,5 @@
 import type { EmdashDocument, Finding } from "./types.js";
+import { PACKAGE_VERSION } from "./version.js";
 
 // HTTP client for the Aexeo sidecar Worker (POST /evaluate).
 //
@@ -23,7 +24,12 @@ export interface SidecarHttp {
       headers?: Record<string, string>;
       body?: string;
     },
-  ): Promise<{ status: number; ok: boolean; text(): Promise<string> }>;
+  ): Promise<{
+    status: number;
+    ok: boolean;
+    text(): Promise<string>;
+    headers?: { get(name: string): string | null };
+  }>;
 }
 
 export interface SidecarConfig {
@@ -33,6 +39,7 @@ export interface SidecarConfig {
   // optional configJson argument. Most callers leave this empty and
   // accept the default Aexeo config the bridge builds.
   configJson?: string;
+  log?: { warn(msg: string): void } | undefined;
 }
 
 export type SidecarResult =
@@ -91,6 +98,14 @@ export async function evaluateViaSidecar(
       // Body unavailable — keep the bare status.
     }
     return { ok: false, reason: "server_error", detail };
+  }
+  // The rule engine lives in the deployed Worker, so a Worker left behind on an
+  // upgrade keeps evaluating with older rules and nothing else shows it.
+  const workerVersion = response.headers?.get("x-aexeo-version") ?? "unknown";
+  if (workerVersion !== PACKAGE_VERSION) {
+    config.log?.warn(
+      `Aexeo sidecar is version ${workerVersion} but the plugin is ${PACKAGE_VERSION}; redeploy the Worker so both run the same rules`,
+    );
   }
   let raw: string;
   try {
