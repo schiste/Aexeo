@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::{ensure_reports_dir, normalize_audit_path_to_route, now_epoch_seconds};
+use crate::reporting::reports_dir;
 use crate::site::route_from_urlish;
 use crate::verification::load_audit_artifact;
 
@@ -109,7 +110,7 @@ pub struct BingAiTrendReport {
 }
 
 fn bing_ai_trend_path(root: &Path) -> PathBuf {
-    root.join(".aexeo-reports/bing-ai-trends.json")
+    reports_dir(root).join("bing-ai-trends.json")
 }
 
 fn normalize_export_key(key: &str) -> String {

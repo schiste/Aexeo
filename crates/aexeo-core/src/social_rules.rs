@@ -13,6 +13,7 @@ fn finding(rule_id: &str, message: impl Into<String>, page: &Page) -> Finding {
         severity: "warning".to_string(),
         suggestion: None,
         scope: FindingScope::Page,
+        subject: None,
     }
 }
 
@@ -91,11 +92,14 @@ pub fn run_social_rules(site: &Site, config: &Config) -> Vec<Finding> {
                 continue;
             };
             if !site.indexed_paths.contains(&target) {
-                findings.push(finding(
-                    "SOC008",
-                    format!("{} points to missing internal asset: {}", key, value),
-                    page,
-                ));
+                findings.push(
+                    finding(
+                        "SOC008",
+                        format!("{} points to missing internal asset: {}", key, value),
+                        page,
+                    )
+                    .with_subject(key),
+                );
             }
         }
     }

@@ -54,6 +54,7 @@ sh scripts/ci-local.sh
 cargo run -p aexeo-cli -- check .
 cargo run -p aexeo-cli -- crawl http://localhost:8000 --engine http
 cargo run -p aexeo-cli -- fix .
+cargo run -p aexeo-cli -- fix . --dry-run
 cargo run -p aexeo-cli -- generate llms .
 cargo run -p aexeo-cli -- generate robots .
 cargo run -p aexeo-cli -- generate sitemap . --site-url https://example.com
@@ -108,6 +109,10 @@ cargo run -p aexeo-cli -- adapters
 ## Notes
 
 `cargo run -p aexeo-cli -- docs generate .` refreshes generated docs from the Rust codebase. `cargo run -p aexeo-cli -- docs check .` fails when those docs are stale.
+
+### What `fix` rewrites
+
+`fix` only regenerates an `llms.txt` it can recognise as its own: one carrying the generated marker line, a blank one, or one matching the marker-less output for the current site. Any other `llms.txt` is left in place and reported as skipped with a warning, also in the `skipped` array of `--format json`; add the marker line to opt in. Files that are symlinks, have several hard links, or are not valid UTF-8 are skipped the same way. `robots.txt` and HTML pages only ever gain lines. Writes go through a temporary file and a rename. `--dry-run` reports the same changes and skips without writing. `fix` does not write `sitemap.xml`.
 
 ### Agent content skill
 

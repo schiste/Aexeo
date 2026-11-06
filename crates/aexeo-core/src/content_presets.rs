@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 use crate::content_gate::{ContentGate, ContentPreset};
+use crate::error::into_user_error;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -89,9 +90,9 @@ pub fn resolve_content_preset(
         }
         Ok(preset)
     }
-    let preset = visit(name, sources, &mut Vec::new())?;
+    let preset = visit(name, sources, &mut Vec::new()).map_err(into_user_error)?;
     if preset.gates.is_empty() {
-        bail!("preset {name} resolves to no gates, so it would check nothing");
+        crate::user_bail!("preset {name} resolves to no gates, so it would check nothing");
     }
     Ok(preset)
 }
