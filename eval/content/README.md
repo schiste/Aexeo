@@ -89,3 +89,35 @@ fresh independent examples for stronger validation. Run the evaluator for both
 splits and its unit tests; report sample sizes and unchecked cases with any
 metrics. Contributions and review discussions remain subject to the repository's
 normal review and privacy policies.
+
+## Local human-feedback notes
+
+A human can provide feedback while an agent drafts or reviews content. To capture
+it, use a saved UTF-8 content snapshot and the corresponding Aexeo JSON report:
+
+```sh
+python3 scripts/content-review-note.py capture --text draft.md --report report.json \
+  --gate sentence-length --example example-1 --human-status failed \
+  --reviewer reviewer-1 --method manual --output feedback.json
+python3 scripts/content-review-note.py export-review --note feedback.json \
+  --corpus corpus.json --output review-events.json
+```
+
+Use the actual gate ID from the report. `--human-status`, `--reviewer` and
+`--method` may be omitted during capture; use `uncertain` or omit the verdict
+when no pass/fail was given. Optional `--language`, `--content-type`, `--preset`,
+`--config-version` and `--tool-version` record supplied context. The note stores
+the exact UTF-8 text hash, not the text; no data is sent. The tool cannot verify
+that the supplied report was produced from that snapshot, so the operator must
+ensure the two match. A hash, example ID and provenance can still be sensitive.
+An explicitly supplied `--reason-file` includes its text in the local note and
+may contain sensitive information. Choose an appropriate private output path.
+
+Export is a separate explicit action and requires an unambiguous human verdict,
+reviewer and method. It validates the corpus and matches the gate, example and
+text hash before writing the existing historical review-log format. It never
+changes the corpus, its review status, or its split, and does not export the
+optional reason or context. Output files are created only if absent. A reported
+verdict and supplied provenance do not prove independent review. Keep unresolved
+feedback out of reviewed metrics and follow the contribution and holdout policy
+above before sharing or adding examples.
