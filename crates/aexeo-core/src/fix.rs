@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
+use std::collections::hash_map::RandomState;
 use std::fs;
+use std::hash::{BuildHasher, Hasher};
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::config::Config;
 use crate::generate::{
@@ -120,26 +121,16 @@ fn unsafe_to_replace(path: &Path) -> Result<Option<&'static str>> {
 /// Write through a sibling temporary file and a rename, so a crash or a full
 /// disk leaves either the old file or the new one, never a truncated page.
 fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?
-        .to_string_lossy();
-    let temp_path = path.with_file_name(format!(
-        ".{file_name}.aexeo-fix-{}-{}.tmp",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
+    let destination_permissions = match fs::metadata(path) {
+        Ok(metadata) => Some(metadata.permissions()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    let (mut temp, temp_path) = create_temp_sibling(path, destination_permissions.is_some())?;
     let result = (|| {
-        let mut temp = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp_path)?;
         temp.write_all(text.as_bytes())?;
-        match fs::metadata(path) {
-            Ok(metadata) => temp.set_permissions(metadata.permissions())?,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
+        if let Some(permissions) = destination_permissions {
+            temp.set_permissions(permissions)?;
         }
         temp.sync_all()?;
         fs::rename(&temp_path, path)
@@ -148,6 +139,40 @@ fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
         let _ = fs::remove_file(&temp_path);
     }
     result
+}
+
+/// Create a new file next to `path` under an unpredictable name. `create_new`
+/// refuses anything already there, including a planted symlink. When `private`,
+/// the file stays owner-only until the caller applies the destination's mode, so
+/// a restricted file's new content is never briefly readable by others.
+fn create_temp_sibling(path: &Path, private: bool) -> io::Result<(fs::File, PathBuf)> {
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?
+        .to_string_lossy();
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    if private {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    #[cfg(not(unix))]
+    let _ = private;
+    for _ in 0..16 {
+        // RandomState is seeded from OS randomness, unlike a pid or a counter.
+        let token = RandomState::new().build_hasher().finish();
+        let temp_path = path.with_file_name(format!(".{file_name}.aexeo-fix-{token:016x}.tmp"));
+        match options.open(&temp_path) {
+            Ok(file) => return Ok((file, temp_path)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "could not allocate a temporary file name",
+    ))
 }
 
 /// HTML file for a route under `root`, in the conventional layouts: `index.html`
@@ -1106,6 +1131,45 @@ mod tests {
 
         assert_eq!(fs::read_to_string(&path)?, "new");
         assert_eq!(fs::read_dir(temp_dir.path())?.count(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn failed_atomic_write_removes_its_temporary_file() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        // Renaming a file over a non-empty directory fails after the temporary
+        // file has been written.
+        let target = temp_dir.path().join("target");
+        write(&target.join("keep.txt"), "kept");
+
+        assert!(super::write_atomic(&target, "new").is_err());
+
+        assert_eq!(fs::read_dir(temp_dir.path())?.count(), 1);
+        assert_eq!(fs::read_to_string(target.join("keep.txt"))?, "kept");
+        Ok(())
+    }
+
+    #[test]
+    fn temporary_names_differ_between_calls() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("page.html");
+        let (_first, first_path) = super::create_temp_sibling(&path, false)?;
+        let (_second, second_path) = super::create_temp_sibling(&path, false)?;
+        assert_ne!(first_path, second_path);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temporary_file_is_private_while_replacing_an_existing_file() -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("page.html");
+        let (_file, temp_path) = super::create_temp_sibling(&path, true)?;
+        assert_eq!(
+            fs::metadata(&temp_path)?.permissions().mode() & 0o777,
+            0o600
+        );
         Ok(())
     }
 
