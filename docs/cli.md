@@ -360,7 +360,7 @@ Commands:
   presence       Surface what the open web shows about the manifest's organization (5 sources, no scoring)
   trust-surface  Import and reconcile trusted external surfaces against site truth
   surfaces       Discover machine-readable website surfaces and retrieval paths
-  score          Compute site and route intelligence scores
+  score          Report site and route intelligence facts and blockers (no composite score)
   help           Print this message or the help of the given subcommand(s)
 
 Options:
