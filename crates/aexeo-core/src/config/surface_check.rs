@@ -269,6 +269,8 @@ mod tests {
             crawl_include_patterns: _,
             crawl_exclude_patterns: _,
             crawl_use_sitemap: _,
+            crawl_ignore_robots: _,
+            crawl_delay_ms: _,
             crawl_capture_trace: _,
             crawl_capture_screenshot: _,
             crawl_capture_console: _,
@@ -314,7 +316,7 @@ mod tests {
             performance_budget_file: _,
         } = Config::default();
         // `checks` has its own reference section; every other field has a doc entry.
-        const FIELDS_ABOVE: usize = 62;
+        const FIELDS_ABOVE: usize = 64;
         assert_eq!(
             config_field_docs().len() + 1,
             FIELDS_ABOVE,

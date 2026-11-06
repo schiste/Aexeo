@@ -341,6 +341,8 @@ pub fn versioned_location(key: &str) -> Option<&'static [&'static str]> {
         "crawl_include_patterns" => &["runtime", "include_patterns"],
         "crawl_exclude_patterns" => &["runtime", "exclude_patterns"],
         "crawl_use_sitemap" => &["runtime", "use_sitemap"],
+        "crawl_ignore_robots" => &["runtime", "ignore_robots"],
+        "crawl_delay_ms" => &["runtime", "crawl_delay_ms"],
         "crawl_capture_trace" => &["runtime", "capture_trace"],
         "crawl_capture_screenshot" => &["runtime", "capture_screenshot"],
         "crawl_capture_console" => &["runtime", "capture_console"],
