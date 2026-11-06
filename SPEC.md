@@ -74,14 +74,37 @@ Where supported:
 
 - `0`: success with no blocking findings or no regressions
 - `1`: one or more blocking findings or regressions
-- `2`: invalid command usage or unsupported input state
+- `2`: the command could not be carried out as asked: invalid usage, a bad
+  path, an unreadable or invalid input (configuration, preset, audit artifact,
+  manifest, content file), an unreachable crawl or integration target, an I/O
+  failure in the environment, or an unsupported input state
 - `70`: an internal error in Aexeo itself (`EX_SOFTWARE`)
 
-`0`, `1`, and `2` are all *results*: the command did what it was asked and
-the exit code is the answer. `70` is the only code that means the tool
-failed, so automation can separate "this site has problems" from "Aexeo
-has a problem worth reporting". It used to be `1`, which made the two
-indistinguishable.
+`0` and `1` are *results*: the command ran and the exit code is the answer. `2`
+means there is no answer yet and the input or the environment has to change.
+`70` is the only code that means the tool failed, so automation can separate
+"this site has problems" from "Aexeo has a problem worth reporting". An
+unreadable site is never `1`: "has findings" must not be reachable without an
+evaluation.
+
+### Failure output
+
+With `--format json`, a failed command prints one JSON document on stdout with
+`command`, `success: false`, `error` and `warnings`, and no plain text on stderr
+(stderr stays reserved for opt-in telemetry and progress events). With any other
+format, stdout stays empty of the failure and the message goes to stderr. `error`
+and the stderr message include the full cause chain. Usage errors rejected by the
+argument parser exit `2` and always use plain text on stderr, because the parser
+fails before the format is known.
+
+### Report location
+
+Reports live in `.aexeo-reports` under the given path. When that path is the
+build output of a project above it (`source_dir` in the project's `aexeo.toml`,
+or a detected framework output), they live in the project instead, so reports
+are not deployed with the site. A directory with no such project above it is
+treated as the site root; run from the project, or set `source_dir`, if that
+directory is what gets published.
 
 ## 4. Finding Contract
 
@@ -238,6 +261,8 @@ These names are part of the config and reporting contract.
 - `GEO013`
 
 ### Runtime Crawl
+- `CRW001`
+- `CRW002`
 - `CRW003`
 
 ### Deployment Model

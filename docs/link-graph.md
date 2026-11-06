@@ -38,11 +38,17 @@ object means the headers were captured and none were present. The report flags
 missing information and inventory mismatches. Inventory dispositions are
 `published`, `draft`, `noindex`, `redirect`, `canonical_alias`,
 `locale_fallback` and `unknown`. Alias records require an explicit target;
-any unresolved alias prevents coverage eligibility. Observed robots noindex
-directives, redirects and canonical targets are reported; missing response
-metadata or unresolved targets also withhold eligibility. Matching caller-provided
+any unresolved alias prevents coverage eligibility. Observed noindex directives
+(`robots` and `googlebot` meta tags, `X-Robots-Tag`), redirects and canonical
+targets are reported; missing response metadata or unresolved targets also
+withhold eligibility. `inventory_indexability_mismatch` also withholds it, in
+both directions: a `published` page observed noindex, and a `draft` or `noindex`
+page served with a 2xx status and no noindex directive. Matching caller-provided
 identities and completeness attestations cannot independently prove that a
 snapshot is correct.
+
+`requested_url` is optional on an input page and records the URL fetched when
+it differs from `url`.
 
 The report lists every observed page, including pages with zero observed links,
 and counts distinct source URLs separately for each context. It preserves
@@ -51,12 +57,39 @@ unsupported schemes and indeterminate references. The same source may count
 in several contexts. URL aliases are not inferred. No orphan conclusion is
 produced by this command, even with a matching inventory.
 
+Destinations are matched to pages by exact URL, after parsing. A destination
+that matches no page, but would match one if a trailing slash, percent-encoding
+spelling (`%7E` and `~`, `%c3` and `%C3`) or empty query were ignored, is not
+credited to that page, since a server may treat those URLs differently. It raises
+`destination_unmatched_near_variant`, which withholds eligibility, and appears in
+the page's `near_variant_destinations`. Until this is resolved, zero counts on
+that page say nothing about its inbound links.
+
+Each link's evidence has a `rel` list with its `nofollow`, `ugc` and `sponsored`
+tokens. Destinations and pages report `followed_source_pages`, the sources with
+at least one link free of those tokens, and `source_pages_by_rel`, the sources
+per token. A page with `distinct_source_pages` above zero and
+`followed_source_pages` at zero is linked only through qualified links. A
+page-level `nofollow` robots directive does not change these counts.
+
+A page whose `requested_url` differs reports it as `redirected_from`, with the
+other pages linking to it as `redirected_source_pages`, and raises
+`redirect_observed`, which withholds eligibility. These sources are not added
+to the page's other counts: only the first and last URL of a redirect chain are
+known, and links to an intermediate URL are not attributed.
+
 Semantic `main`, `article`, `nav` and `footer` elements provide some contexts;
 `aria-label="breadcrumb"`, `"breadcrumbs"` or `"pagination"` distinguish
 navigation types. Use `data-aexeo-link-context` with `body`, `related`,
 `navigation`, `footer`, `breadcrumb` or `pagination` for explicit component
-attribution. Unrecognized or unmarked contexts remain `unknown`. The parser
-cannot reliably preserve source line and column, so these are null.
+attribution. Links outside any recognized element, or under an unrecognized
+marker, are `unknown`. So are links in an `aside` or `header` inside `main` or
+`article`, including articles nested in them, because these elements do not say
+what their links are; nested `nav` and `footer` elements keep their own context.
+Generic containers inherit their surroundings: a related-content block built from
+an unmarked `div` inside `main` counts as `body`, because class names are not
+treated as semantics, and needs an explicit marker. The parser cannot reliably
+preserve source line and column, so these are null.
 
 Add `--telemetry` to write a single JSON event containing only duration, page,
 link and issue counts to standard error. It is opt-in and does not include page
@@ -69,7 +102,13 @@ Run `aexeo-cli link-graph audit.json --audit` to analyze pages in an Aexeo
 crawl artifact. Only pages with a captured effective URL are included. Older
 artifacts and pages without response provenance are reported as missing rather
 than assigned an inferred URL. Requested and effective URLs that differ are
-flagged because the intermediate redirect chain is unavailable. This adapter
+flagged because the intermediate redirect chain is unavailable. The site URL
+gives the origin unless every observed URL shares a different one, as when
+`example.com` redirects to `www.example.com`: that origin is then used and
+`audit_observed_origin_differs_from_target` is raised. Links written with the
+target's origin count as external in that case. Several observed origins are not
+resolved: `audit_observed_origins_ambiguous` is raised, the site URL is kept and
+links on pages from other origins are indeterminate. This adapter
 cannot establish the CMS inventory, release, publication surface or snapshot
 date, and therefore always reports incomplete coverage; it does not confirm
 orphans. `--telemetry` retains the same opt-in, aggregate-only behavior.

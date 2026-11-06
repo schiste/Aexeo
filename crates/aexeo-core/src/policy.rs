@@ -137,6 +137,7 @@ mod tests {
                 severity: "warning".to_string(),
                 suggestion: None,
                 scope: FindingScope::Page,
+                subject: None,
             },
             Finding {
                 rule_id: "GEO007".to_string(),
@@ -147,6 +148,7 @@ mod tests {
                 severity: "warning".to_string(),
                 suggestion: None,
                 scope: FindingScope::Page,
+                subject: None,
             },
         ];
         let mut route_kinds = BTreeMap::new();
@@ -182,6 +184,7 @@ mod tests {
             severity: "warning".to_string(),
             suggestion: None,
             scope: FindingScope::Page,
+            subject: None,
         }];
         let mut route_kinds = BTreeMap::new();
         route_kinds.insert(
@@ -212,6 +215,7 @@ mod tests {
             severity: "error".to_string(),
             suggestion: None,
             scope: FindingScope::Page,
+            subject: None,
         }];
         let config = Config {
             suppressions: vec![SuppressionRule {
@@ -237,6 +241,7 @@ mod tests {
                 severity: "error".to_string(),
                 suggestion: None,
                 scope: FindingScope::Page,
+                subject: None,
             },
             Finding {
                 rule_id: "SEO002".to_string(),
@@ -247,6 +252,7 @@ mod tests {
                 severity: "error".to_string(),
                 suggestion: None,
                 scope: FindingScope::Page,
+                subject: None,
             },
             Finding {
                 rule_id: "SEO004".to_string(),
@@ -257,6 +263,7 @@ mod tests {
                 severity: "error".to_string(),
                 suggestion: None,
                 scope: FindingScope::Page,
+                subject: None,
             },
         ];
         let config = Config {

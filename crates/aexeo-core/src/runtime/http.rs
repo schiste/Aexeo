@@ -9,6 +9,7 @@ use std::time::Duration;
 use url::Url;
 
 use super::fetcher::FetchOutcome;
+pub(crate) use crate::link_graph::same_site_host;
 
 #[derive(Debug, Clone)]
 pub(crate) struct FetchResult {
@@ -59,30 +60,6 @@ pub(crate) fn host_for_url(url: &str) -> String {
             Some(format!("{host}{port}"))
         })
         .unwrap_or_default()
-}
-
-fn comparable_host(host: &str) -> String {
-    let without_userinfo = host.rsplit_once('@').map(|(_, rest)| rest).unwrap_or(host);
-    let without_port = if without_userinfo.starts_with('[') {
-        without_userinfo
-            .split_once(']')
-            .map(|(value, _)| value)
-            .unwrap_or(without_userinfo)
-    } else {
-        without_userinfo
-            .split_once(':')
-            .map(|(value, _)| value)
-            .unwrap_or(without_userinfo)
-    };
-    let normalized = without_port.trim_end_matches('.').to_ascii_lowercase();
-    normalized
-        .strip_prefix("www.")
-        .unwrap_or(&normalized)
-        .to_string()
-}
-
-pub(crate) fn same_site_host(left: &str, right: &str) -> bool {
-    comparable_host(left) == comparable_host(right)
 }
 
 fn headers_from_map(headers: &BTreeMap<String, String>) -> Result<HeaderMap> {
@@ -170,9 +147,19 @@ impl HttpFetcher {
                 let mut retries = 0usize;
                 let result = loop {
                     match fetcher.fetch(&url) {
-                        Ok(fetched) => break Ok(fetched),
+                        Ok(fetched)
+                            if !super::fetcher::is_retryable_response(&fetched)
+                                || retries >= fetch_retry_budget =>
+                        {
+                            break Ok(fetched);
+                        }
+                        Ok(_) => {
+                            retries += 1;
+                            thread::sleep(super::fetcher::retry_backoff(retries));
+                        }
                         Err(_) if retries < fetch_retry_budget => {
                             retries += 1;
+                            thread::sleep(super::fetcher::retry_backoff(retries));
                         }
                         Err(error) => break Err(error),
                     }

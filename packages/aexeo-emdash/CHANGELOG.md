@@ -48,6 +48,14 @@ and the project follows [Semantic Versioning](https://semver.org/).
   skipped only its home page. Wikipedia and Wikidata records must name the entity
   or a declared alias, ignoring legal forms; a substring used to count, so
   "Pineapple" matched "Apple".
+- **Saving a document no longer reports false site-graph findings or erases
+  real ones.** A save evaluates one document as a one-page site, so every
+  internal link was reported as broken (`LNK001`) and the page as an orphan
+  (`LNK002`), and those results replaced the route's stored findings until the
+  next Refresh. Rules that depend on other documents (`LNK001`-`LNK004`,
+  `SEO009`, `SEO012`, `SEO016`, `SEO017`, `CNT005`) are now computed by Refresh
+  only: a save keeps the route's stored findings for them, so a link fixed or
+  added in that save is reflected at the next Refresh.
 
 ## [0.8.19] - 2026-09-29
 
@@ -175,6 +183,16 @@ version, since 0.8.19 had never been published.
 
 ### Changed
 
+- **The dashboard widget no longer shows a composite score.** The "Overall"
+  stat and the "Site score is N — below the 60 quality threshold" banner are
+  gone; blockers remain the call to action. `SiteIntelligenceScore` loses
+  `overall_score`, `answer_pack_score` and `elapsed_us` and gains
+  `answer_pack`, and `citation_readiness_score` and `truth_consistency_score`
+  may now be `null`, shown as "unknown", when nothing was measured.
+- **Entity presence resolves the newest Common Crawl index at runtime** from
+  `collinfo.json` instead of a pinned crawl, so a site first crawled after a
+  plugin release is no longer reported `not_found`. Failing to resolve the
+  index reports `unreachable`.
 - Support EmDash `^1.2.0` and run the plugin-host integration coverage against
   EmDash `1.2.0`.
 

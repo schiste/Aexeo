@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "fixture_kind": "synthetic_regression",
+  "description": "Synthetic Markdown regression fixture, written to pin specific adapter and gate behaviour. Labels are the expected tool behaviour, not human-reviewed editorial judgements, and results do not estimate production accuracy.",
+  "preset": "fixture",
+  "preset_toml": "version=1\nname='fixture'\n[[gates]]\nid='g'\nkind='required_headings'\nheadings=['Option a']\n",
+  "gate_id": "g",
+  "input_format": "markdown",
+  "examples": [
+    {
+      "id": "inline-code",
+      "split": "development",
+      "text": "## Option `a`\n",
+      "expected": "passed",
+      "why": "Inline code text counts towards the required heading.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "other-code",
+      "split": "development",
+      "text": "## Option `b`\n",
+      "expected": "failed",
+      "why": "Different code text does not match.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "emphasis",
+      "split": "holdout",
+      "text": "## Option *a*\n",
+      "expected": "passed",
+      "why": "Emphasis markup is not part of the heading text.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "paragraph-only",
+      "split": "holdout",
+      "text": "Option `a`\n",
+      "expected": "failed",
+      "why": "A paragraph is not a heading.",
+      "review_status": "not_reviewed"
+    }
+  ]
+}
