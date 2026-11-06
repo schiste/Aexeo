@@ -159,7 +159,7 @@ export interface AdminViewTuning {
   score: (
     documents: readonly EmdashDocument[],
     kv: KvNamespace,
-  ) => Promise<SiteIntelligenceScore>;
+  ) => Promise<SiteIntelligenceScore | null>;
   /**
    * Label for the widget's truth-consistency stat. Configured mode badges
    * it with the real signal source so a schema-only 60 doesn't read the
@@ -401,6 +401,17 @@ export async function renderScoreWidget(
     };
   }
   const score = await tuning.score(documents, kv);
+  if (score === null) {
+    return {
+      blocks: [
+        { type: "header", text: "SEO score" },
+        {
+          type: "context",
+          text: "The site score is unavailable in sandboxed mode. Findings are not affected.",
+        },
+      ],
+    };
+  }
   const blocks: unknown[] = [
     {
       type: "stats",

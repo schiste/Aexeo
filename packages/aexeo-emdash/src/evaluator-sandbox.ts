@@ -15,10 +15,10 @@ import type {
 // calls via fetch. See docs/architecture.md for the long-form rationale.
 //
 // This module exposes the same shape as ./evaluator.ts but returns the
-// neutral "no findings, baseline score" response. The findings page,
-// score widget, and document panel all read from KV (populated by an
-// out-of-sandbox evaluator), so a quiet stub here keeps the UI working
-// while the host wires up real evaluation in its own context.
+// "no findings, score unavailable" response. The findings page and document
+// panel read from KV (populated by an out-of-sandbox evaluator), so a quiet
+// stub keeps them working. The score is computed on demand, so the sandbox
+// has none to show, and a 0 would read as a measured result.
 
 export async function evaluate(
   _documents: readonly EmdashDocument[],
@@ -28,20 +28,8 @@ export async function evaluate(
 
 export async function scoreSite(
   _documents: readonly EmdashDocument[],
-): Promise<SiteIntelligenceScore> {
-  return {
-    citation_readiness_score: null,
-    truth_consistency_score: null,
-    answer_pack: {
-      routes_analyzed: 0,
-      routes_with_answer_blocks: 0,
-      routes_with_coverage_gaps: 0,
-      answer_blocks: 0,
-    },
-    external_trust_alignment_score: null,
-    route_scores: [],
-    blockers: [],
-  };
+): Promise<SiteIntelligenceScore | null> {
+  return null;
 }
 
 // These two are pure post-processing — they take Findings and slice
