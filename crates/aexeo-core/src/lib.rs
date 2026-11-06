@@ -10,6 +10,7 @@ pub mod content_presets;
 pub mod content_rules;
 pub mod docs;
 pub mod editorial_rules;
+pub mod error;
 pub mod fix;
 pub mod generate;
 pub mod header_rules;
@@ -107,9 +108,10 @@ pub use registry::{
 };
 pub use reporting::{
     DEFAULT_AUDIT_LOG_LIMIT, LayerBreakdown, build_audit_artifact, build_recap_lines,
-    render_audit_artifact_json, render_markdown_artifact, render_sarif, render_text,
-    render_text_artifact, rule_group_name, summarize_findings, summarize_findings_by_layer,
-    write_audit_artifact, write_partial_audit_artifact, write_progress_audit_artifact,
+    is_reports_dir, render_audit_artifact_json, render_markdown_artifact, render_sarif,
+    render_text, render_text_artifact, reports_dir, rule_group_name, summarize_findings,
+    summarize_findings_by_layer, write_audit_artifact, write_partial_audit_artifact,
+    write_progress_audit_artifact,
 };
 pub use robots_rules::run_robots_rules;
 #[cfg(feature = "net")]

@@ -2,11 +2,13 @@ use aexeo_contracts::AuditStatus;
 use aexeo_contracts::PerformanceBudget;
 use aexeo_contracts::PerformanceDiffThresholds;
 use aexeo_core::config::load_config_with_diagnostics;
+use aexeo_core::error::UserContext;
+use aexeo_core::user_bail;
 use aexeo_core::{
     RuntimeAudit, RuntimeAuditOptions, RuntimeProgressEvent, RuntimeProgressMode,
     audit_site_snapshot, build_audit_artifact, diff_finding_sets, diff_performance_artifacts,
     evaluate_performance_budget, load_audit_artifact, load_findings_from_audit, render_diff_text,
-    render_performance_diff_text, render_sarif, render_text_artifact,
+    render_performance_diff_text, render_sarif, render_text_artifact, reports_dir,
     run_runtime_audit_with_options, runtime_doctor, verify_runtime_audit, write_audit_artifact,
     write_partial_audit_artifact, write_progress_audit_artifact,
 };
@@ -16,10 +18,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::exit_code::EXIT_UNSUPPORTED;
-use crate::commands::common::required_arg;
+use crate::commands::common::{report_failure, required_arg};
 use crate::output::{
     emit_config_warnings, render_audit_command_json_with_graph, render_diff_command_json,
-    render_failed_command_json,
 };
 
 fn apply_runtime_cli_overrides(config: &mut aexeo_core::Config, submatches: &ArgMatches) {
@@ -120,8 +121,10 @@ fn load_performance_budget(
 }
 
 fn load_performance_budget_path(path: PathBuf) -> Result<(PathBuf, PerformanceBudget)> {
-    let text = fs::read_to_string(&path)?;
-    let budget = serde_json::from_str::<PerformanceBudget>(&text)?;
+    let text = fs::read_to_string(&path)
+        .user_context(format!("cannot read performance budget {}", path.display()))?;
+    let budget = serde_json::from_str::<PerformanceBudget>(&text)
+        .user_context(format!("invalid performance budget {}", path.display()))?;
     Ok((path, budget))
 }
 
@@ -205,13 +208,11 @@ fn sanitize_baseline_name(name: &str) -> String {
 }
 
 fn runtime_baseline_latest_path(cwd: &Path, name: &str) -> PathBuf {
-    cwd.join(".aexeo-reports")
-        .join(format!("{name}-runtime-baseline-latest.json"))
+    reports_dir(cwd).join(format!("{name}-runtime-baseline-latest.json"))
 }
 
 fn runtime_baseline_timestamped_path(cwd: &Path, name: &str, generated_at: u64) -> PathBuf {
-    cwd.join(".aexeo-reports")
-        .join(format!("{name}-runtime-baseline-{generated_at}.json"))
+    reports_dir(cwd).join(format!("{name}-runtime-baseline-{generated_at}.json"))
 }
 
 fn write_runtime_baseline_artifact(
@@ -220,8 +221,7 @@ fn write_runtime_baseline_artifact(
     name: &str,
     update_latest: bool,
 ) -> Result<(PathBuf, PathBuf)> {
-    let reports_dir = cwd.join(".aexeo-reports");
-    fs::create_dir_all(&reports_dir)?;
+    fs::create_dir_all(reports_dir(cwd))?;
     let latest_path = runtime_baseline_latest_path(cwd, name);
     let timestamped_path = runtime_baseline_timestamped_path(cwd, name, artifact.generated_at);
     let payload = serde_json::to_string_pretty(artifact)?;
@@ -343,13 +343,10 @@ fn emit_runtime_failure(
     warnings: Vec<aexeo_core::config::ConfigWarning>,
 ) -> Result<i32> {
     match format {
-        "json" => println!(
-            "{}",
-            render_failed_command_json(command, error.to_string(), warnings)?
-        ),
+        "json" => report_failure(command, format, error, warnings)?,
         _ => {
             emit_config_warnings(&warnings);
-            eprintln!("Runtime audit failed: {}", error);
+            eprintln!("Runtime audit failed: {error:#}");
         }
     }
     Ok(EXIT_UNSUPPORTED)
@@ -365,7 +362,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     let baseline_path = submatches.get_one::<String>("baseline");
     let regressions_only = submatches.get_flag("regressions-only");
     if regressions_only && baseline_path.is_none() {
-        bail!("--regressions-only requires --baseline");
+        user_bail!("--regressions-only requires --baseline");
     }
     let performance_budget = load_performance_budget(submatches)?;
     let format = submatches
@@ -373,7 +370,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
         .map(String::as_str)
         .unwrap_or("text");
     if submatches.get_flag("link-graph-summary") && format == "sarif" {
-        bail!("--link-graph-summary is supported only with text or json output");
+        user_bail!("--link-graph-summary is supported only with text or json output");
     }
     let progress_mode = submatches
         .get_one::<String>("progress")
@@ -562,7 +559,7 @@ pub fn command_verify(submatches: &ArgMatches) -> Result<i32> {
         build_audit_artifact("baseline", &[], AuditStatus::Complete, None, None)
     };
     if baseline_artifact.is_partial() && !submatches.get_flag("allow-partial-baseline") {
-        bail!(
+        user_bail!(
             "baseline audit is partial; rerun the baseline or pass --allow-partial-baseline to compare against an incomplete crawl"
         );
     }
@@ -606,7 +603,8 @@ pub fn command_profile_runtime(submatches: &ArgMatches) -> Result<i32> {
         selected_runtime_engine(&config, submatches),
         &config,
         &mut options,
-    )?;
+    )
+    .user_context("runtime audit failed")?;
     let mut artifact =
         runtime_output_artifact("profile", &audit, &audit.findings, Some(target_url));
     let performance_budget_passed =
@@ -805,7 +803,8 @@ pub fn command_perf_baseline(submatches: &ArgMatches) -> Result<i32> {
         selected_runtime_engine(&config, submatches),
         &config,
         &mut options,
-    )?;
+    )
+    .user_context("runtime audit failed")?;
     let mut artifact =
         runtime_output_artifact("perf-baseline", &audit, &audit.findings, Some(target_url));
     let performance_budget_passed =

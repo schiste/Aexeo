@@ -1,7 +1,8 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 use crate::config::Config;
+use crate::user_bail;
 
 fn canonical_or_original(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
@@ -73,7 +74,7 @@ pub fn resolve_static_adapter_name(root: &Path, config: &Config) -> Result<&'sta
             "astro-dist" => Ok("astro-dist"),
             "docusaurus-build" => Ok("docusaurus-build"),
             "generic" => Ok("generic"),
-            other => bail!("unknown adapter '{other}'"),
+            other => user_bail!("unknown adapter '{other}'"),
         };
     }
 
@@ -96,7 +97,7 @@ pub fn resolve_static_site_root(root: &Path, config: &Config) -> Result<PathBuf>
         "astro-dist" => resolve_astro_dist(root, config),
         "docusaurus-build" => resolve_docusaurus_build(root, config),
         "generic" => resolve_generic(root, config),
-        other => bail!("unknown adapter '{other}'"),
+        other => user_bail!("unknown adapter '{other}'"),
     })
 }
 

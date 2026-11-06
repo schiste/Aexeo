@@ -415,8 +415,9 @@ fn internal_errors_exit_distinctly_from_findings() {
         "findings are a result and must stay exit 1"
     );
 
-    // An unexpected error: aexeo itself failed, exit 70.
-    let internal_error = Command::new(bin())
+    // A path that cannot be audited: the command could not run as asked, which
+    // SPEC.md assigns to exit 2. It is neither findings nor a bug in Aexeo.
+    let bad_path = Command::new(bin())
         .arg("check")
         .arg(temp_dir.path().join("does-not-exist"))
         .arg("--format")
@@ -424,9 +425,9 @@ fn internal_errors_exit_distinctly_from_findings() {
         .output()
         .unwrap();
     assert_eq!(
-        internal_error.status.code(),
-        Some(70),
-        "an internal error must not be reported as findings; stderr: {}",
-        String::from_utf8_lossy(&internal_error.stderr)
+        bad_path.status.code(),
+        Some(2),
+        "a bad path must not be reported as findings or as a bug; stderr: {}",
+        String::from_utf8_lossy(&bad_path.stderr)
     );
 }

@@ -1,11 +1,12 @@
 use crate::time_shim::Instant;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use url::Url;
 
+use crate::error::UserContext;
 use crate::schema_rules::{iter_schema_field_values, iter_schema_types};
 use crate::site::{PageKind, Site};
 
@@ -114,9 +115,9 @@ pub struct TruthManifestGeneration {
 
 pub fn load_truth_manifest(path: &Path) -> Result<TruthManifest> {
     let raw = fs::read_to_string(path)
-        .with_context(|| format!("failed to read facts manifest {}", path.display()))?;
+        .user_context(format!("failed to read facts manifest {}", path.display()))?;
     let manifest = serde_json::from_str::<TruthManifest>(&raw)
-        .with_context(|| format!("failed to parse facts manifest {}", path.display()))?;
+        .user_context(format!("failed to parse facts manifest {}", path.display()))?;
     Ok(manifest)
 }
 

@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 use crate::content_gate::{ContentGate, ContentPreset};
+use crate::error::into_user_error;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -86,7 +87,7 @@ pub fn resolve_content_preset(
             .with_context(|| format!("invalid resolved preset {name}"))?;
         Ok(preset)
     }
-    visit(name, sources, &mut Vec::new())
+    visit(name, sources, &mut Vec::new()).map_err(into_user_error)
 }
 
 fn merge_gate(gates: &mut Vec<ContentGate>, gate: ContentGate) {

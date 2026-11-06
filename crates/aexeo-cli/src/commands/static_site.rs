@@ -1,6 +1,7 @@
 use aexeo_contracts::AuditStatus;
 use aexeo_core::adapter::resolve_static_site_root;
 use aexeo_core::config::load_config_with_diagnostics;
+use aexeo_core::user_bail;
 use aexeo_core::{
     MachineArtifactBundle, build_audit_artifact, build_machine_artifact_bundle, diff_finding_sets,
     generate_schema_suggestions, load_findings_from_audit, load_site, render_facts_prompt,
@@ -34,7 +35,7 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
     let baseline_path = submatches.get_one::<String>("baseline");
     let regressions_only = submatches.get_flag("regressions-only");
     if regressions_only && baseline_path.is_none() {
-        bail!("--regressions-only requires --baseline");
+        user_bail!("--regressions-only requires --baseline");
     }
 
     let findings = run_native_static_audit_with_config(&root, &config)?;
@@ -322,7 +323,6 @@ pub fn command_fix(submatches: &ArgMatches) -> Result<i32> {
     let root = canonicalize_or_keep(required_arg(submatches, "path")?);
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
     let loaded = load_config_with_diagnostics(&root, explicit_config.as_deref())?;
-    emit_config_warnings(&loaded.warnings);
     let config = loaded.config;
     let dry_run = submatches.get_flag("dry-run");
     let fix_options = aexeo_core::FixOptions {
