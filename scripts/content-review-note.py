@@ -5,6 +5,8 @@ import hashlib
 import importlib.util
 import json
 import os
+import sys
+import time
 from pathlib import Path
 
 
@@ -73,11 +75,14 @@ def main():
     for key in ("language", "content-type", "preset", "config-version", "tool-version"):
         note.add_argument("--" + key)
     note.add_argument("--output", type=Path, required=True)
+    note.add_argument("--telemetry", action="store_true", help="Emit aggregate local timing to stderr")
     export = actions.add_parser("export-review", help="Explicitly export a validated historical review log")
     export.add_argument("--corpus", type=Path, required=True)
     export.add_argument("--note", type=Path, required=True)
     export.add_argument("--output", type=Path, required=True)
+    export.add_argument("--telemetry", action="store_true", help="Emit aggregate local timing to stderr")
     args = parser.parse_args()
+    started = time.perf_counter()
     try:
         if args.action == "capture":
             value = capture(args.text.read_bytes().decode("utf-8"), read_json(args.report), args.gate,
@@ -87,6 +92,9 @@ def main():
         else:
             value = export_review(read_json(args.corpus), read_json(args.note))
         write_new(args.output, value)
+        if args.telemetry:
+            print(json.dumps({"event": "content_review_note", "version": 1, "operation": args.action,
+                              "elapsed_ms": (time.perf_counter() - started) * 1000}), file=sys.stderr)
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
         parser.exit(2, f"feedback operation failed: {error}\n")
 

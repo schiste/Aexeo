@@ -69,7 +69,11 @@ class FeedbackTests(unittest.TestCase):
             (root / "report").write_text(json.dumps(self.report))
             (root / "corpus").write_text(json.dumps(self.corpus))
             command = [sys.executable, str(SCRIPT), "capture", "--text", str(root / "text"), "--report", str(root / "report"), "--gate", "length", "--example", "e1", "--human-status", "passed", "--reviewer", "r", "--method", "manual", "--output", str(root / "note")]
-            self.assertEqual(subprocess.run(command, capture_output=True).returncode, 0)
+            result = subprocess.run(command + ["--telemetry"], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(json.loads(result.stderr)["operation"], "capture")
+            self.assertNotIn("Private text", result.stderr)
+            self.assertNotIn("e1", result.stderr)
             self.assertEqual((root / "note").stat().st_mode & 0o077, 0)
             self.assertEqual(json.loads((root / "note").read_text())["text_sha256"], hashlib.sha256(self.text.encode()).hexdigest())
             self.assertEqual(subprocess.run(command, capture_output=True).returncode, 2)
