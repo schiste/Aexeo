@@ -18,6 +18,26 @@ python3 scripts/evaluate-content-gates.py eval/content/link-destinations.json \
 python3 scripts/test-evaluate-content-gates.py
 ```
 
+## Markdown regression fixtures
+
+`eval/content/markdown-*.json` run through `--input-format markdown` and are
+gated by `scripts/check-code.sh`. They cover lists, tables, headings with inline
+code, soft wraps, CJK, www and email autolinks, term options, wrapped evidence
+claims and input limits. They are **regression fixtures only**: synthetic text,
+written with the behaviour they pin, marked `fixture_kind: "synthetic_regression"`
+and `review_status: "not_reviewed"`. Each example has a `why`. Their labels
+state expected tool behaviour, not an editorial judgement by a human reviewer,
+and the runner rejects a declared review on them. Passing them says nothing
+about accuracy on real content.
+
+A real, independently reviewed corpus remains open: see item 7 of
+[the content roadmap](../../CONTENT-ROADMAP.md). These fixtures do not advance it.
+
+An example may expect `not_checked`, reported as `expected_not_checked`.
+`--assert-regression` fails on `missed_not_checked`, when such an example was
+assessed, as well as on mismatches and unexpected `not_checked` results. A corpus
+may also embed `evidence_sources`, materialized as temporary local files.
+
 A corpus may specify an input format and an embedded TOML preset; the runner
 materializes the preset in a temporary directory and removes it afterward.
 The runner invokes the local CLI once per example and does not contact a remote

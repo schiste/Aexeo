@@ -67,7 +67,7 @@ fn attribute(handle: &Handle, key: &str) -> Option<String> {
     }
 }
 
-fn text_content(root: &Handle) -> String {
+pub(crate) fn text_content(root: &Handle) -> String {
     let mut result = String::new();
     let mut stack = vec![root.clone()];
     while let Some(node) = stack.pop() {

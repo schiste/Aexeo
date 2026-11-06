@@ -13,7 +13,19 @@ aexeo-cli content --preset seo-website --site ./dist --no-text --format json
 aexeo-cli content --preset seo-website --crawl-url https://example.org --crawl-max-pages 200 --format json
 ```
 
-By default the CLI reads the supplied UTF-8 bytes as raw text, including Markdown syntax. With `--input-format markdown`, it parses CommonMark with GFM extensions and projects text and headings while excluding front matter, code and HTML; link labels and image alt text are included. Word counts split on whitespace, and forbidden terms are exact, case-sensitive substrings. Locations in raw-text mode refer to the supplied text. Markdown and EmDash findings refer to their extracted plain-text projection, not source line positions.
+By default the CLI reads the supplied UTF-8 bytes as raw text, including Markdown syntax. With `--input-format markdown`, it parses CommonMark with GFM extensions and projects text and headings while excluding front matter, code blocks and HTML; link labels, image alt text and inline code text are included, matching EmDash, which keeps the text of code-marked spans. Word counts split on whitespace. Locations in raw-text mode refer to the supplied text. Markdown and EmDash findings refer to their extracted plain-text projection, not source line positions.
+
+Markdown and EmDash adapters report where each heading, paragraph, list item and table cell ends. Those block ends terminate a sentence and a literal term cannot match across one. Soft-wrapped lines remain one sentence. Raw text has no known block structure.
+
+Literal matching for `forbidden_terms`, `repeated_terms` and the claim of an evidence gate ignores whitespace differences: `best price` matches `best` and `price` separated by any run of whitespace without a blank line. Finding positions stay in the original text. Quote anchors in evidence sources remain exact.
+
+`forbidden_terms` accepts `whole_words` (default `true`, as in `repeated_terms`; set `false` for substring matches, the behaviour before this option existed) and `case_insensitive` (default `false`). Case-insensitive matching lowercases each character, without full Unicode case folding. Word boundaries use Unicode alphanumeric characters and underscores. Thai, Lao, Myanmar, Khmer, CJK and Hangul characters do not act as word characters, because these scripts do not reliably separate words with spaces; a term in them matches inside surrounding text.
+
+### Input limits
+
+The CLI reads at most 16 MiB of content. Before parsing Markdown it rejects more than 100 nested block containers on one line, more than 100 unclosed link or image labels, or more than 1000 emphasis delimiter runs in one block. This conservative scan can overestimate nesting. Input beyond any limit is not evaluated: each gate that needs it reports `not_checked` with the limit as its reason, and a blocking gate exits 2. Rust callers of the Markdown adapter receive an error, and can test with `markdown_limit_reason` first.
+
+A document gate keeps its first 1000 findings. It still fails, its source locations cover those findings, and its `findings_omitted` measurement counts the rest. A preset that resolves to no gates, including one whose gates are all disabled, is an error because it would check nothing.
 
 Rust callers can evaluate a preset against a completed or partial `RuntimeAudit` with `evaluate_preset`. Its report retains the crawl status, truncation reason crawl-specific findings and the original full audit findings separately; inspect the crawl status before treating a site review as complete. The existing `crawl` CLI output is unchanged. Use `content --crawl-url URL --preset seo-website` for a preset report: the JSON envelope includes `crawl_status`, `truncation_reason`, `crawl_findings`, `audit_findings`, and `content`. A partial or failed crawl exits 2, regardless of the gate results; completed crawls use the normal blocking gate and audit severity rules. Site-scoped gates on a truncated crawl report `not_checked` because coverage is incomplete, while retaining any findings from the visited pages; these findings still require attention. A `not_checked` gate is not a pass. `--crawl-config`, `--crawl-max-pages`, and `--crawl-engine` configure this mode, which does not read stdin.
 
@@ -77,7 +89,7 @@ Metadata must be a JSON object with string values. Without `--metadata`, metadat
 
 `extends` is a list of named presets. Parents are applied left to right; gates with an existing ID replace the earlier definition in place, and new gates append. `disable = ["gate.id"]` removes inherited gates and rejects unknown IDs. Supply each custom parent with a separate `--preset-source name=path`; built-ins are already available. Cycles, unknown parents, duplicate local IDs, unknown fields, invalid bounds and unsupported versions fail resolution. A preset's `name` is its report label, while its source name is the key used in `extends` and `--preset`.
 
-Each gate may set `severity` to `error` or `warning` (default), and `blocking` to true (default) or false. Status always reports the gate result; the CLI exits 1 for a failed blocking gate, 2 if a blocking gate was not checked (even if another blocking gate failed), and 0 otherwise. Non-blocking gates still appear in the report, including when they could not be checked. Invalid configuration or I/O errors use the CLI's internal-error path. Content is unchanged unless `--fix` is passed explicitly.
+Each gate may set `severity` to `error` or `warning` (default), and `blocking` to true (default) or false. Status always reports the gate result; the CLI exits 1 for a failed blocking gate, 2 if a blocking gate was not checked (even if another blocking gate failed), and 0 otherwise. Non-blocking gates still appear in the report, including when they could not be checked. Invalid configuration, invalid presets and unreadable inputs exit 2; 70 is reserved for internal errors in Aexeo. Content is unchanged unless `--fix` is passed explicitly.
 
 The EmDash package exposes `evaluateContent` from `@aeptus/aexeo-emdash/content`; the Rust bridge and WASM API accept the same named source map and preset. The document adapter has no site capability, so site gates are `not_checked`. Configured-mode plugins can opt into a document preset for both save hooks and refreshes:
 
@@ -213,6 +225,21 @@ adjacent spans. Images are not counted. This is a presence check only: it does
 not validate destinations, check network availability, or assess sources.
 When an adapter cannot supply link data, the gate reports `not_checked`.
 
+### Sentence length
+
+The opt-in `sentence_length` gate limits whitespace-separated words per sentence. `article-readable` and `glossary-readable` combine their editorial starter with the shared `readability` preset, which adds it as an advisory 30-word limit:
+
+```toml
+[[gates]]
+id = "editorial.sentence_length"
+kind = "sentence_length"
+max_words = 30
+delimiters = ".!?。！？"
+blocking = false
+```
+
+`delimiters` lists the characters that end a sentence and defaults to `.!?`. A decimal point between ASCII digits does not end one, and neither do Markdown hard breaks. Adapter block ends always do, so unpunctuated bullets, headings and table cells are measured separately. This is a heuristic, not linguistic segmentation: abbreviations end a sentence, and languages without whitespace-separated words need tailored rules. Measurements report the limit, sentence count and longest sentence; absent text is `not_checked`.
+
 ### Repeated terms
 
 The opt-in `repeated_terms` gate checks configured literal terms:
@@ -268,8 +295,11 @@ coordinates in extracted prose. The additive `source_locations` array supplies
 original-file coordinates for exact, untransformed text spans, indexed by
 `gate_id` and zero-based `finding_index`. An absent entry means no reliable
 source position was found; escaped or transformed Markdown may be unmappable.
-These locations apply only to positional prose gates, not metadata, site or
-collection findings. The map is local; opt-in telemetry includes only mapped and
+These locations apply to positional prose gates and to `link_destinations`,
+`heading_length` and `duplicate_headings` findings, not metadata, site or
+collection findings. Soft-wrapped text maps directly only where the wrapped
+source is unchanged; a wrapped line inside a block quote has no location. Inline
+code maps to its value inside the backticks. The map is local; opt-in telemetry includes only mapped and
 unmapped counts and mapping duration, without positions or content.
 
 ### EmDash source locations and telemetry
@@ -302,10 +332,15 @@ blocking = false
 
 The default for `allow_relative` is true; schemes must be unique lowercase URI
 schemes. Empty, whitespace-containing, malformed and disallowed destinations
-produce findings. Scheme-relative URLs beginning with `//` are rejected because
+produce findings that quote the destination, up to 200 characters, and its scheme.
+Scheme-relative URLs beginning with `//` are rejected because
 their effective scheme depends on the page context. A pass does not establish reachability, safety, source support,
-or content accuracy. Markdown direct and ASCII reference links and used EmDash
-link marks provide destinations. If Markdown references cannot be resolved
+or content accuracy. Markdown direct and ASCII reference links, GFM literal URLs,
+and used EmDash link marks provide destinations. A literal email address in
+Markdown prose is not a link its author wrote: it is outside this gate and
+`link_count`. `<me@example.org>`, `[mail](mailto:me@example.org)`, bare
+`www.example.org` (which GFM renders with `http`) and bare `http://` URLs are
+checked, because they are authored links or web navigation. If Markdown references cannot be resolved
 conservatively, or an adapter lacks destinations, the gate is `not_checked`.
 Markdown reports can provide the source location of an invalid link occurrence,
 including a reference link usage; locations point to the beginning of the link,

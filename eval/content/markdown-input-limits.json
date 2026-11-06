@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "fixture_kind": "synthetic_regression",
+  "description": "Synthetic Markdown regression fixture, written to pin specific adapter and gate behaviour. Labels are the expected tool behaviour, not human-reviewed editorial judgements, and results do not estimate production accuracy.",
+  "preset": "fixture",
+  "preset_toml": "version=1\nname='fixture'\n[[gates]]\nid='g'\nkind='word_count'\nmin=1\n",
+  "gate_id": "g",
+  "input_format": "markdown",
+  "examples": [
+    {
+      "id": "deep-blockquote",
+      "split": "development",
+      "text": ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> text\n",
+      "expected": "not_checked",
+      "why": "Beyond the nesting limit: reported, not parsed.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "nesting-within-limit",
+      "split": "development",
+      "text": ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> text\n",
+      "expected": "passed",
+      "why": "Within the nesting limit.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "deep-list",
+      "split": "holdout",
+      "text": "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - text\n",
+      "expected": "not_checked",
+      "why": "Beyond the nesting limit: reported, not parsed.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "deep-labels",
+      "split": "holdout",
+      "text": "![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![![text\n",
+      "expected": "not_checked",
+      "why": "Beyond the label nesting limit: reported, not parsed.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "flat-document",
+      "split": "holdout",
+      "text": "# Title\n\nSome text.\n",
+      "expected": "passed",
+      "why": "Ordinary document.",
+      "review_status": "not_reviewed"
+    }
+  ]
+}
