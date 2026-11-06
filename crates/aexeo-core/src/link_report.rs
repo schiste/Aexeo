@@ -367,7 +367,12 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
         .iter()
         .zip(observations)
         .map(|(page, (metadata, noindex, redirect_target))| {
-            let inbound = by_destination.get(page.url.as_str());
+            // Link resolution serializes parsed URLs (normalizing host case and
+            // default ports), while page observations preserve the input spelling.
+            let normalized_url = Url::parse(&page.url).ok().map(String::from);
+            let inbound = normalized_url
+                .as_deref()
+                .and_then(|url| by_destination.get(url));
             let mut contexts = [
                 LinkContext::Body,
                 LinkContext::RelatedContent,
@@ -411,4 +416,56 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
         pages,
         links,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matches_observed_pages_using_resolved_url_serialization() {
+        let report = build_link_report(&LinkReportInput {
+            version: 1,
+            identity: Some(SurfaceIdentity {
+                origin: "https://example.org".into(),
+                release: "r1".into(),
+                surface: "public".into(),
+                snapshot: "s1".into(),
+            }),
+            snapshot_date: Some("2026-11-06".into()),
+            crawl_complete: false,
+            pages: vec![
+                RenderedPage {
+                    url: "https://example.org/source".into(),
+                    html: "<main><a href='/target?lang=fr'>link</a></main>".into(),
+                    status_code: Some(200),
+                    response_headers: Some(Default::default()),
+                },
+                RenderedPage {
+                    url: "https://EXAMPLE.org:443/target?lang=fr".into(),
+                    html: String::new(),
+                    status_code: Some(200),
+                    response_headers: Some(Default::default()),
+                },
+                RenderedPage {
+                    url: "https://example.org/target?lang=en".into(),
+                    html: String::new(),
+                    status_code: Some(200),
+                    response_headers: Some(Default::default()),
+                },
+            ],
+            inventory: None,
+        })
+        .unwrap();
+        assert_eq!(
+            report.pages[1].url,
+            "https://EXAMPLE.org:443/target?lang=fr"
+        );
+        assert_eq!(report.pages[1].distinct_source_pages, 1);
+        assert_eq!(
+            report.pages[1].source_pages_by_context[&LinkContext::Body],
+            1
+        );
+        assert_eq!(report.pages[2].distinct_source_pages, 0);
+    }
 }
