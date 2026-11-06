@@ -1,5 +1,8 @@
 # Content quality roadmap
 
+**Status: in progress.** Open items remain in the checklists below, including
+independent evaluation and later source and factuality work.
+
 This roadmap follows the original goal: portable, composable gates and presets,
 adapters for different content sources, and fast feedback for agents. Source
 and fact checking remain later priorities. A passed preset means its configured

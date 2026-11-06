@@ -1,5 +1,9 @@
 # Aexeo : plan de migration vers les gates, presets et adapters
 
+**Status: completed.** Delivered and merged to `main` at `92413c5`, with CI green
+on that commit. The one open item is deliberately deferred: evaluating Jev/JEF or
+an alternative on an independent set. Kept in French as written.
+
 État : livraison de l’architecture et des contrôles disponibles hors ligne. Les modèles Jev/JEF et leur validation réelle sont reportés à une étape ultérieure, conformément au choix du projet.
 
 ## Objectif
