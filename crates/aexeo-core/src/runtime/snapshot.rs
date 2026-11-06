@@ -7,9 +7,8 @@ use std::time::Instant;
 
 use super::fetcher::fetch_error_summary;
 use super::graph::response_report_path;
-use super::http::fetch_with_http;
+use super::http::HttpFetcher;
 use super::robots::RobotsPolicy;
-use crate::config::RuntimeConfig;
 use crate::site::{
     CrawlMeta, DeploymentModel, Site, SiteArtifacts, SiteBuildInput, build_page_from_source,
     build_site_from_parts,
@@ -115,7 +114,7 @@ impl RuntimeSnapshotBuilder {
     pub(crate) fn capture_optional_artifacts(
         &mut self,
         base_url: &str,
-        runtime: &RuntimeConfig<'_>,
+        http: &HttpFetcher,
         robots: &RobotsPolicy,
     ) -> (u64, Vec<Finding>) {
         let started_at = Instant::now();
@@ -125,12 +124,7 @@ impl RuntimeSnapshotBuilder {
             if !robots.allows_url(&artifact_url) {
                 continue;
             }
-            let fetched = match fetch_with_http(
-                &artifact_url,
-                runtime.crawl_headers,
-                runtime.crawl_cookies,
-                runtime.crawl_basic_auth,
-            ) {
+            let fetched = match http.fetch(&artifact_url) {
                 Ok(fetched) => fetched,
                 Err(error) => {
                     warnings.push(Finding {

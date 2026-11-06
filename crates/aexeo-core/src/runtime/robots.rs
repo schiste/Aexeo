@@ -7,9 +7,9 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use url::Url;
 
+use super::egress::is_refused;
 use super::fetcher::{crawl_user_agent, fetch_error_summary};
-use super::http::{FetchResult, fetch_with_http};
-use crate::config::RuntimeConfig;
+use super::http::{FetchResult, HttpFetcher};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Rule {
@@ -171,14 +171,14 @@ pub(crate) struct LoadedRobots {
     pub(crate) no_response: bool,
 }
 
-pub(crate) fn load_robots(origin: &str, runtime: &RuntimeConfig<'_>) -> LoadedRobots {
-    let result = fetch_with_http(
-        &format!("{origin}robots.txt"),
-        runtime.crawl_headers,
-        runtime.crawl_cookies,
-        runtime.crawl_basic_auth,
-    );
-    interpret_response(result, runtime.crawl_headers)
+/// Fetched through the crawl's guarded client: robots.txt is chosen by the server
+/// as much as any page, so its redirects obey the same egress policy.
+pub(crate) fn load_robots(
+    origin: &str,
+    http: &HttpFetcher,
+    headers: &BTreeMap<String, String>,
+) -> LoadedRobots {
+    interpret_response(http.fetch(&format!("{origin}robots.txt")), headers)
 }
 
 /// RFC 9309 section 2.3.1: a 4xx means there are no restrictions; a server error
@@ -194,8 +194,9 @@ fn interpret_response(
             return LoadedRobots {
                 policy: RobotsPolicy::DenyAll,
                 text: None,
-                unreachable: Some(fetch_error_summary(&error).to_string()),
-                no_response: true,
+                unreachable: Some(fetch_error_summary(&error)),
+                // A refusal is this crawl's policy, not an unreachable target.
+                no_response: !is_refused(&error),
             };
         }
     };

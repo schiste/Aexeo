@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use super::egress::{CrawlEgress, FetchRefused, is_refused};
 use super::http::{FetchResult, HttpFetcher};
 use super::playwright::PlaywrightFetcher;
 use crate::config::RuntimeConfig;
@@ -46,25 +47,29 @@ pub(crate) fn is_retryable_response(fetched: &FetchResult) -> bool {
 }
 
 /// A fixed description of a failed fetch. Error text is not reused because it
-/// embeds the request URL, in `reqwest` errors and in our own context alike.
-pub(crate) fn fetch_error_summary(error: &anyhow::Error) -> &'static str {
+/// embeds the request URL, in `reqwest` errors and in our own context alike. A
+/// policy refusal is the exception: its text is written to be reported, and it
+/// only ever names redacted URLs.
+pub(crate) fn fetch_error_summary(error: &anyhow::Error) -> String {
+    if let Some(refused) = error.downcast_ref::<FetchRefused>() {
+        return refused.to_string();
+    }
     let Some(error) = error
         .chain()
         .find_map(|cause| cause.downcast_ref::<reqwest::Error>())
     else {
-        return "request failed";
+        return "request failed".to_string();
     };
-    if error.is_timeout() {
+    let summary = if error.is_timeout() {
         "request timed out"
     } else if error.is_connect() {
         "connection failed"
-    } else if error.is_redirect() {
-        "too many redirects"
     } else if error.is_body() || error.is_decode() {
         "response body could not be read"
     } else {
         "request failed"
-    }
+    };
+    summary.to_string()
 }
 
 /// The User-Agent the crawl presents: the configured one, or a generic identifier.
@@ -105,10 +110,15 @@ pub(crate) enum RuntimeFetcher {
 }
 
 impl RuntimeFetcher {
-    pub(crate) fn new(engine: &str, runtime: &RuntimeConfig<'_>) -> Result<Self> {
+    pub(crate) fn new(
+        engine: &str,
+        runtime: &RuntimeConfig<'_>,
+        http: &HttpFetcher,
+        egress: &CrawlEgress,
+    ) -> Result<Self> {
         match engine {
-            "http" => Ok(Self::Http(HttpFetcher::new(runtime)?)),
-            "playwright" => Ok(Self::Playwright(PlaywrightFetcher::new(runtime)?)),
+            "http" => Ok(Self::Http(http.clone())),
+            "playwright" => Ok(Self::Playwright(PlaywrightFetcher::new(runtime, egress)?)),
             other => anyhow::bail!("unsupported runtime engine '{other}'"),
         }
     }
@@ -137,7 +147,7 @@ impl RuntimeFetcher {
                                 retries += 1;
                                 thread::sleep(retry_backoff(retries));
                             }
-                            Err(_) if retries < fetch_retry_budget => {
+                            Err(error) if retries < fetch_retry_budget && !is_refused(&error) => {
                                 retries += 1;
                                 thread::sleep(retry_backoff(retries));
                             }
@@ -167,6 +177,13 @@ mod tests {
     use std::net::TcpListener;
     use std::time::{Duration, Instant};
 
+    fn test_fetcher(config: &Config) -> RuntimeFetcher {
+        let runtime = config.runtime();
+        let egress = crate::runtime::egress::CrawlEgress::new("http://127.0.0.1/", true);
+        let http = crate::runtime::http::HttpFetcher::new(&runtime, &egress).unwrap();
+        RuntimeFetcher::new("http", &runtime, &http, &egress).unwrap()
+    }
+
     #[test]
     fn error_summaries_never_contain_the_url() {
         let closed_port = TcpListener::bind("127.0.0.1:0")
@@ -174,13 +191,13 @@ mod tests {
             .local_addr()
             .unwrap();
         let config = Config::default();
-        let mut fetcher = RuntimeFetcher::new("http", &config.runtime()).unwrap();
+        let mut fetcher = test_fetcher(&config);
         let url = format!("http://user:secret@{closed_port}/?token=secret");
         let mut outcomes = fetcher.fetch_batch(&[url], 0);
         let error = outcomes.remove(0).result.unwrap_err();
         assert!(
-            format!("{error:#}").contains("secret"),
-            "premise of this test"
+            !format!("{error:#}").contains("secret"),
+            "the error chain itself must not carry the URL's secrets"
         );
         assert_eq!(fetch_error_summary(&error), "connection failed");
         assert_eq!(
@@ -224,7 +241,7 @@ mod tests {
             }
         });
         let config = Config::default();
-        let mut fetcher = RuntimeFetcher::new("http", &config.runtime()).unwrap();
+        let mut fetcher = test_fetcher(&config);
         let outcomes = fetcher.fetch_batch(&[url], 2);
         server.join().unwrap();
         assert_eq!(outcomes[0].retries, 1);
@@ -247,7 +264,7 @@ mod tests {
             .local_addr()
             .unwrap();
         let config = Config::default();
-        let mut fetcher = RuntimeFetcher::new("http", &config.runtime()).unwrap();
+        let mut fetcher = test_fetcher(&config);
         let started_at = Instant::now();
         let outcomes = fetcher.fetch_batch(&[format!("http://{closed_port}/")], 2);
         assert_eq!(outcomes[0].retries, 2);

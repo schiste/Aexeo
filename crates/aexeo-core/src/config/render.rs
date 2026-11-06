@@ -52,6 +52,8 @@ struct RuntimeSection {
     capture_console: bool,
     capture_network: bool,
     artifact_dir: String,
+    allow_private_network: bool,
+    max_response_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -193,6 +195,8 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
             capture_console: config.crawl_capture_console,
             capture_network: config.crawl_capture_network,
             artifact_dir: config.crawl_artifact_dir.clone(),
+            allow_private_network: config.crawl_allow_private_network,
+            max_response_bytes: config.crawl_max_response_bytes,
         },
         policy: PolicySection {
             ignore_rules: config.ignore_rules.clone(),

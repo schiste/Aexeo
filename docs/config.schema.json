@@ -102,6 +102,10 @@
       "description": "Built-in rule-group toggles.",
       "type": "object"
     },
+    "crawl_allow_private_network": {
+      "description": "Allow runtime crawl to contact non-public addresses when the crawl target is public.",
+      "type": "boolean"
+    },
     "crawl_artifact_dir": {
       "description": "Directory used for crawl artifacts.",
       "type": "string"
@@ -168,6 +172,11 @@
         "type": "string"
       },
       "type": "array"
+    },
+    "crawl_max_response_bytes": {
+      "description": "Largest response body runtime crawl reads over HTTP, in bytes.",
+      "minimum": 1,
+      "type": "integer"
     },
     "crawl_seeds": {
       "description": "Additional route seeds for runtime crawl.",
@@ -823,6 +832,9 @@
     "runtime": {
       "additionalProperties": false,
       "properties": {
+        "allow_private_network": {
+          "type": "boolean"
+        },
         "artifact_dir": {
           "type": "string"
         },
@@ -882,6 +894,10 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "max_response_bytes": {
+          "minimum": 1,
+          "type": "integer"
         },
         "seeds": {
           "items": {

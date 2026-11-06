@@ -276,6 +276,8 @@ mod tests {
             crawl_capture_console: _,
             crawl_capture_network: _,
             crawl_artifact_dir: _,
+            crawl_allow_private_network: _,
+            crawl_max_response_bytes: _,
             ignore_rules: _,
             ignore_paths: _,
             severity_overrides: _,
@@ -316,7 +318,7 @@ mod tests {
             performance_budget_file: _,
         } = Config::default();
         // `checks` has its own reference section; every other field has a doc entry.
-        const FIELDS_ABOVE: usize = 64;
+        const FIELDS_ABOVE: usize = 66;
         assert_eq!(
             config_field_docs().len() + 1,
             FIELDS_ABOVE,

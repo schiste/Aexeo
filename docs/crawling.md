@@ -28,6 +28,7 @@ RFC 9309, for page, seed and sitemap URLs and for optional artifact probes.
 | 4xx other than 429 | No restrictions |
 | 5xx | Everything is disallowed, with a `CRW002` warning naming `--ignore-robots` |
 | No response (network failure) | Everything is disallowed, with a `CRW002` warning naming `--ignore-robots`. If no page responds either, the target is unreachable: the command fails with exit 2 instead of reporting an audit |
+| Refused by the [network boundary](#network-boundary), such as a redirect to a private address | Everything is disallowed, with a `CRW002` warning naming the refusal. The target answered, so this is not an unreachable target and does not exit 2 |
 | 429 | Treated like a 5xx. RFC 9309 groups it with 4xx; this is deliberately stricter, because 429 asks the client to back off |
 
 Requests send `User-Agent: aexeo/<version>` unless `headers` sets another one. The
@@ -63,6 +64,7 @@ on the response:
 | 401, 403 | `partial` | warning | `crawl.access_denied` | Not broken: the page may exist |
 | 429, 5xx (after retries) | `partial` | error | `crawl.fetch_failures` | `LNK001` |
 | Transport error, unreadable body | `partial` | error | `crawl.fetch_failures` | `LNK001` |
+| Refused by the [network boundary](#network-boundary) | `partial` | error | `crawl.fetch_failures` | `LNK001` |
 
 A site with one broken link therefore ends `complete` and exits 1. If every requested
 URL returned an error status, nothing was audited and the status is `partial`.
@@ -81,14 +83,42 @@ warning and does not affect the status.
 
 Transport errors, HTTP 429 and 5xx are retried up to `--retry-budget` times with
 exponential backoff from 250 ms to at most 5 s. `Retry-After` is not read. Other
-statuses are not retried.
+statuses are not retried, and neither are refused fetches, whose outcome would not
+change.
+
+## Network boundary
+
+A crawl fetches URLs the audited site chooses, through redirects, sitemaps and
+manifests. These rules apply per hop, to robots.txt as much as to pages. `SECURITY.md`
+lists their known limits.
+
+- `headers`, `cookies` and `basic_auth` go only to the crawl origin: the same scheme,
+  host and port, with `www.` equivalence only when scheme and port match. Other hosts
+  get only the crawl's User-Agent. With the Playwright engine, the browser scopes
+  cookies by host, not port.
+- A redirect still gets followed off the origin, without credentials. Only `www.`
+  canonicalization moves the crawl. A redirect to another scheme or port does not, so
+  an `http://` target that redirects to `https://` requests each page through that
+  redirect and loses credentials on it. Use the `https://` URL for an authenticated
+  crawl.
+- A sitemap on another site, or one that redirects there, gives a `CRW001` warning and
+  is not read. Nesting stops at depth 5 and 1000 sitemaps.
+- Loopback, private, link-local and unique-local addresses are refused, after DNS
+  resolution. This is off when the target itself resolves only to such addresses, so
+  local preview keeps working, or with `allow_private_network = true` under `[runtime]`.
+- A response body over `max_response_bytes` under `[runtime]` (20 MiB by default) is
+  a refused fetch. The Playwright engine does not apply this cap.
+- A fetch of an optional artifact that the boundary refuses gives a warning: `CRW002`
+  for `llms.txt` and `sitemap.xml`, `CRW001` for artifact probes. It does not affect
+  the status.
 
 ## URLs in reports
 
 Findings, response provenance, skipped URLs, timings, progress events and `site_url`
 hold URLs reduced to scheme, host, port and path. Userinfo, query and fragment are
 removed because they can carry credentials. Fetch failures are described by a fixed
-summary rather than the underlying error text, which embeds the URL.
+summary rather than the underlying error text, which embeds the URL. A refusal by the
+network boundary states its reason and names the URL in the same reduced form.
 
 Checkpoints store URLs the same way. They still hold the crawled page bodies, so a
 new checkpoint file is created readable only by its owner (mode 0600 on Unix); an

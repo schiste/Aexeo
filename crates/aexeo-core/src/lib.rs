@@ -113,7 +113,7 @@ pub use reporting::{
     is_reports_dir, render_audit_artifact_json, render_markdown_artifact, render_sarif,
     render_text, render_text_artifact, reports_dir, rule_group_name, summarize_findings,
     summarize_findings_by_layer, write_audit_artifact, write_partial_audit_artifact,
-    write_progress_audit_artifact,
+    write_private_file, write_progress_audit_artifact,
 };
 pub use robots_rules::run_robots_rules;
 #[cfg(feature = "net")]

@@ -48,6 +48,8 @@ const FLAT_TOP_LEVEL_KEYS: &[&str] = &[
     "crawl_capture_console",
     "crawl_capture_network",
     "crawl_artifact_dir",
+    "crawl_allow_private_network",
+    "crawl_max_response_bytes",
     "ignore_rules",
     "ignore_paths",
     "severity_overrides",
@@ -106,6 +108,8 @@ const DEPRECATED_FLAT_KEYS: &[&str] = &[
     "crawl_capture_console",
     "crawl_capture_network",
     "crawl_artifact_dir",
+    "crawl_allow_private_network",
+    "crawl_max_response_bytes",
     "ignore_rules",
     "ignore_paths",
     "severity_overrides",
@@ -445,6 +449,8 @@ fn validate_versioned_sections(root: &toml::map::Map<String, Value>) -> Result<(
                 "capture_console",
                 "capture_network",
                 "artifact_dir",
+                "allow_private_network",
+                "max_response_bytes",
             ],
             "[runtime]",
         )?;
@@ -660,6 +666,18 @@ fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
         move_table_field_if_absent(root, &mut table, "capture_console", "crawl_capture_console");
         move_table_field_if_absent(root, &mut table, "capture_network", "crawl_capture_network");
         move_table_field_if_absent(root, &mut table, "artifact_dir", "crawl_artifact_dir");
+        move_table_field_if_absent(
+            root,
+            &mut table,
+            "allow_private_network",
+            "crawl_allow_private_network",
+        );
+        move_table_field_if_absent(
+            root,
+            &mut table,
+            "max_response_bytes",
+            "crawl_max_response_bytes",
+        );
     }
 
     if let Some(Value::Table(mut table)) = root.remove("policy") {
@@ -1053,6 +1071,8 @@ adapter = "astro-dist"
 engine = "http"
 use_sitemap = false
 seeds = ["/docs"]
+allow_private_network = true
+max_response_bytes = 1024
 
 [policy]
 ignore_rules = ["SCH012"]
@@ -1087,6 +1107,8 @@ performance_budget_file = "custom-budget.json"
         assert_eq!(config.adapter, "astro-dist");
         assert_eq!(config.browser_engine, "http");
         assert!(!config.crawl_use_sitemap);
+        assert!(config.crawl_allow_private_network);
+        assert_eq!(config.crawl_max_response_bytes, 1024);
         assert_eq!(config.crawl_seeds, vec!["/docs".to_string()]);
         assert_eq!(config.ignore_rules, vec!["SCH012".to_string()]);
         assert_eq!(

@@ -140,7 +140,7 @@ Keys are listed by their flat name. In a `version = 1` config, set them at the v
 
 - Default: (none)
 - Versioned location: `headers` under `[runtime]`
-- Meaning: Extra HTTP headers applied to runtime crawl requests.
+- Meaning: Extra HTTP headers applied to runtime crawl requests. Like cookies and basic auth, they are sent only to the crawl origin (same scheme, host, and port, with `www.` equivalence).
 
 ## `crawl_cookies`
 
@@ -219,6 +219,18 @@ Keys are listed by their flat name. In a `version = 1` config, set them at the v
 - Default: `.aexeo-reports/crawl-artifacts`
 - Versioned location: `artifact_dir` under `[runtime]`
 - Meaning: Directory used for crawl artifacts such as traces, screenshots, console logs, and network logs.
+
+## `crawl_allow_private_network`
+
+- Default: `false`
+- Versioned location: `allow_private_network` under `[runtime]`
+- Meaning: Allow runtime crawl to contact loopback, private, and link-local addresses when the crawl target itself is public. A target that resolves only to non-public addresses (local preview) is allowed without this.
+
+## `crawl_max_response_bytes`
+
+- Default: `20971520`
+- Versioned location: `max_response_bytes` under `[runtime]`
+- Meaning: Largest response body runtime crawl reads over HTTP, in bytes. A larger response is recorded as a failed fetch.
 
 ## `ignore_rules`
 

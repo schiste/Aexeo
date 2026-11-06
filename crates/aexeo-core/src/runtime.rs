@@ -1,4 +1,5 @@
 mod artifact_probe;
+mod egress;
 mod fetcher;
 mod graph;
 mod http;
@@ -31,13 +32,14 @@ use crate::reporting::build_audit_artifact;
 use crate::site::{Site, route_from_urlish};
 use crate::static_check::run_checks_for_site_profiled;
 use crate::verification::{DiffResult, diff_finding_sets};
+use egress::{CrawlEgress, crawl_warning, refused_finding};
 use fetcher::{
-    FetchOutcome, ResponseClass, RuntimeFetcher, classify_status, crawl_user_agent,
-    fetch_error_summary, headers_with_user_agent,
+    FetchOutcome, ResponseClass, RuntimeFetcher, classify_status, fetch_error_summary,
+    headers_with_user_agent,
 };
 use graph::{read_loc_values, response_report_path, should_enqueue_link};
 use http::{
-    fetch_with_http, host_for_url, is_html_content_type, normalize_base_url, origin_for_url,
+    HttpFetcher, host_for_url, is_html_content_type, normalize_base_url, origin_for_url,
     same_site_host,
 };
 use planner::{CrawlPlanner, CrawlPlannerState};
@@ -1526,10 +1528,15 @@ fn apply_robots_txt(
     planner: &mut CrawlPlanner,
     snapshot: &mut RuntimeSnapshotBuilder,
     crawl_findings: &mut Vec<Finding>,
+    http: &HttpFetcher,
     runtime: &crate::config::RuntimeConfig<'_>,
     ignore_robots: bool,
 ) -> Option<String> {
-    let loaded = load_robots(&origin_for_url(planner.normalized_base()), runtime);
+    let loaded = load_robots(
+        &origin_for_url(planner.normalized_base()),
+        http,
+        runtime.crawl_headers,
+    );
     snapshot.set_robots_text(loaded.text);
     let no_response = loaded
         .no_response
@@ -1808,6 +1815,7 @@ fn materialize_runtime_site(
     max_pages: usize,
     engine: &str,
     config: &Config,
+    egress: &CrawlEgress,
     options: &mut RuntimeAuditOptions<'_>,
 ) -> Result<RuntimeMaterialization> {
     // Injected here so every request of the crawl, whatever its engine, identifies itself.
@@ -1841,6 +1849,7 @@ fn materialize_runtime_site(
             )
         };
 
+    let http = HttpFetcher::new(&runtime, egress)?;
     // Before any other request, and again on resume: a checkpoint must not keep
     // a crawl going against rules that have changed since.
     let robots_started_at = Instant::now();
@@ -1848,6 +1857,7 @@ fn materialize_runtime_site(
         &mut planner,
         &mut snapshot,
         &mut crawl_findings,
+        &http,
         &runtime,
         config.crawl_ignore_robots,
     );
@@ -1864,21 +1874,20 @@ fn materialize_runtime_site(
         }
 
         if runtime.crawl_use_sitemap {
-            let mut visited_sitemaps = BTreeSet::new();
             let sitemap_base = planner.normalized_base().to_string();
             let sitemap_seed_started_at = Instant::now();
+            let mut seeder = SitemapSeeder {
+                planner: &mut planner,
+                http: &http,
+                runtime: &runtime,
+                visited: BTreeSet::new(),
+                findings: Vec::new(),
+                limit_reported: false,
+            };
             for sitemap_name in ["sitemap.xml", "sitemap-index.xml", "sitemap_index.xml"] {
-                let sitemap_url = format!("{}{}", sitemap_base, sitemap_name);
-                if !planner.robots().allows_url(&sitemap_url) {
-                    continue;
-                }
-                let _ = seed_routes_from_sitemap(
-                    &mut planner,
-                    &sitemap_url,
-                    &runtime,
-                    &mut visited_sitemaps,
-                );
+                seeder.seed(&format!("{sitemap_base}{sitemap_name}"), 0);
             }
+            crawl_findings.append(&mut seeder.findings);
             performance.record(
                 Phase::SitemapSeed,
                 sitemap_seed_started_at.elapsed().as_micros() as u64,
@@ -1886,7 +1895,7 @@ fn materialize_runtime_site(
         }
     }
 
-    let mut fetcher = RuntimeFetcher::new(engine, &runtime)?;
+    let mut fetcher = RuntimeFetcher::new(engine, &runtime, &http, egress)?;
     let mut last_checkpoint_visited = planner.visited_count();
     let effective_workers = if engine == "http" {
         runtime.max_workers.max(1)
@@ -1933,7 +1942,7 @@ fn materialize_runtime_site(
                         &mut crawl_stats,
                         &mut crawl_findings,
                         &current,
-                        fetch_error_summary(&error),
+                        &fetch_error_summary(&error),
                     );
                     performance.apply_to(&mut crawl_stats);
                     continue;
@@ -2010,6 +2019,7 @@ fn materialize_runtime_site(
                     &mut planner,
                     &mut snapshot,
                     &mut crawl_findings,
+                    &http,
                     &runtime,
                     config.crawl_ignore_robots,
                 );
@@ -2167,7 +2177,7 @@ fn materialize_runtime_site(
     }
 
     let (optional_fetch_us, optional_artifact_warnings) =
-        snapshot.capture_optional_artifacts(planner.normalized_base(), &runtime, planner.robots());
+        snapshot.capture_optional_artifacts(planner.normalized_base(), &http, planner.robots());
     performance.record(Phase::OptionalArtifactFetch, optional_fetch_us);
     crawl_findings.extend(optional_artifact_warnings);
     // Probe well-known machine-readable artifact paths (manifest-
@@ -2175,11 +2185,13 @@ fn materialize_runtime_site(
     // responses, so without this step facts.json / llms-full.txt /
     // .md.txt mirrors only reachable via manifest.json appear as
     // missing in surface discovery.
-    let probed_artifact_paths = artifact_probe::probe_well_known_artifacts(
-        planner.normalized_base(),
-        &runtime,
-        planner.robots(),
-    );
+    let (probed_artifact_paths, artifact_probe_findings) =
+        artifact_probe::probe_well_known_artifacts(
+            planner.normalized_base(),
+            &http,
+            planner.robots(),
+        );
+    crawl_findings.extend(artifact_probe_findings);
     let snapshot_started_at = Instant::now();
     snapshot.set_robots_skipped_urls(planner.robots_skipped_urls());
     let (mut site, snapshot_findings) = snapshot.finalize(
@@ -2226,41 +2238,92 @@ fn materialize_runtime_site(
     ))
 }
 
-fn seed_routes_from_sitemap(
-    planner: &mut CrawlPlanner,
-    sitemap_url: &str,
-    runtime: &crate::config::RuntimeConfig<'_>,
-    visited_sitemaps: &mut BTreeSet<String>,
-) -> Result<()> {
-    if !visited_sitemaps.insert(sitemap_url.to_string()) {
-        return Ok(());
-    }
-    let fetched = fetch_with_http(
-        sitemap_url,
-        runtime.crawl_headers,
-        runtime.crawl_cookies,
-        runtime.crawl_basic_auth,
-    )?;
-    if fetched.status_code.unwrap_or(500) >= 400
-        || !fetched
-            .content_type
-            .as_deref()
-            .unwrap_or_default()
-            .contains("xml")
-    {
-        return Ok(());
-    }
-    let Some(body) = fetched.body else {
-        return Ok(());
-    };
-    for loc in read_loc_values(&body) {
-        if loc.trim().ends_with(".xml") {
-            seed_routes_from_sitemap(planner, &loc, runtime, visited_sitemaps)?;
-        } else {
-            planner.seed_from_sitemap_loc(&loc, runtime);
+/// The sitemap protocol has no nesting beyond one index level, so this is
+/// already generous; the cap exists because a hostile index can nest forever.
+const MAX_SITEMAP_DEPTH: usize = 5;
+const MAX_SITEMAP_FETCHES: usize = 1_000;
+
+struct SitemapSeeder<'a, 'r> {
+    planner: &'a mut CrawlPlanner,
+    http: &'a HttpFetcher,
+    runtime: &'a crate::config::RuntimeConfig<'r>,
+    visited: BTreeSet<String>,
+    findings: Vec<Finding>,
+    limit_reported: bool,
+}
+
+impl SitemapSeeder<'_, '_> {
+    fn seed(&mut self, sitemap_url: &str, depth: usize) {
+        if !same_site_host(&host_for_url(sitemap_url), self.planner.base_host()) {
+            self.findings.push(crawl_warning(
+                sitemap_url,
+                format!(
+                    "refused to fetch sitemap {}: it is outside the crawl target's site",
+                    redact_url(sitemap_url)
+                ),
+            ));
+            return;
+        }
+        if !self.planner.robots().allows_url(sitemap_url) {
+            return;
+        }
+        if depth > MAX_SITEMAP_DEPTH || self.visited.len() >= MAX_SITEMAP_FETCHES {
+            if !std::mem::replace(&mut self.limit_reported, true) {
+                self.findings.push(crawl_warning(
+                    sitemap_url,
+                    format!(
+                        "stopped reading sitemaps at {}: limit of {MAX_SITEMAP_FETCHES} sitemaps or nesting depth {MAX_SITEMAP_DEPTH} reached",
+                        redact_url(sitemap_url)
+                    ),
+                ));
+            }
+            return;
+        }
+        if !self.visited.insert(sitemap_url.to_string()) {
+            return;
+        }
+        let fetched = match self.http.fetch(sitemap_url) {
+            Ok(fetched) => fetched,
+            Err(error) => {
+                self.findings.extend(refused_finding(sitemap_url, &error));
+                return;
+            }
+        };
+        if !same_site_host(
+            &host_for_url(&fetched.effective_url),
+            self.planner.base_host(),
+        ) {
+            self.findings.push(crawl_warning(
+                sitemap_url,
+                format!(
+                    "ignored sitemap {}: it redirected outside the crawl target's site to {}",
+                    redact_url(sitemap_url),
+                    redact_url(&fetched.effective_url)
+                ),
+            ));
+            return;
+        }
+        if fetched.status_code.unwrap_or(500) >= 400
+            || !fetched
+                .content_type
+                .as_deref()
+                .unwrap_or_default()
+                .contains("xml")
+        {
+            return;
+        }
+        let Some(body) = fetched.body else {
+            return;
+        };
+        for loc in read_loc_values(&body) {
+            let loc = loc.trim();
+            if loc.ends_with(".xml") {
+                self.seed(loc, depth + 1);
+            } else {
+                self.planner.seed_from_sitemap_loc(loc, self.runtime);
+            }
         }
     }
-    Ok(())
 }
 
 pub fn run_runtime_audit(
@@ -2286,8 +2349,16 @@ pub fn run_runtime_audit_with_options(
     options: &mut RuntimeAuditOptions<'_>,
 ) -> Result<RuntimeAudit> {
     let effective_engine = resolve_runtime_engine(engine)?;
+    let egress = CrawlEgress::for_target(base_url, config.crawl_allow_private_network);
     let (site, crawl_findings, mut crawl_stats, truncation_reason, mut performance) =
-        materialize_runtime_site(base_url, max_pages, effective_engine, config, options)?;
+        materialize_runtime_site(
+            base_url,
+            max_pages,
+            effective_engine,
+            config,
+            &egress,
+            options,
+        )?;
     let final_started_at = Instant::now();
     let profiled = run_checks_for_site_profiled(&site, config);
     performance.record(
@@ -2306,7 +2377,9 @@ pub fn run_runtime_audit_with_options(
     performance.apply_to(&mut crawl_stats);
     let mut findings = crawl_findings.clone();
     findings.extend(profiled.findings.clone());
-    findings.extend(probe_markdown_negotiation_finding(base_url, config, &site));
+    findings.extend(probe_markdown_negotiation_finding(
+        base_url, config, &egress, &site,
+    ));
     let status = if truncation_reason.is_some() {
         AuditStatus::Partial
     } else {
@@ -2414,11 +2487,9 @@ fn homepage_advertises_markdown_mirror_discovery(site: &crate::site::Site) -> bo
 fn probe_markdown_negotiation_finding(
     base_url: &str,
     config: &Config,
+    egress: &CrawlEgress,
     site: &crate::site::Site,
 ) -> Vec<Finding> {
-    use reqwest::blocking::Client;
-    use reqwest::header::ACCEPT;
-
     if !config
         .rules()
         .checks
@@ -2440,28 +2511,18 @@ fn probe_markdown_negotiation_finding(
         return Vec::new();
     }
 
-    let client = match Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .user_agent(crawl_user_agent(&config.crawl_headers))
-        .build()
-    {
-        Ok(client) => client,
-        Err(_) => return Vec::new(),
+    let Ok(http) = HttpFetcher::new(&config.runtime(), egress) else {
+        return Vec::new();
     };
-    let response = match client.get(base_url).header(ACCEPT, "text/markdown").send() {
-        Ok(response) => response,
-        Err(_) => return Vec::new(),
+    let timeout = std::time::Duration::from_secs(5);
+    let (status, content_type) = match http.negotiate(base_url, "text/markdown", timeout) {
+        Ok(outcome) => outcome,
+        Err(error) => return refused_finding(base_url, &error).into_iter().collect(),
     };
-    if !response.status().is_success() {
+    if !status.is_success() {
         return Vec::new();
     }
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_ascii_lowercase)
-        .unwrap_or_default();
+    let content_type = content_type.unwrap_or_default().to_ascii_lowercase();
     if content_type.contains("text/markdown") {
         return Vec::new();
     }
