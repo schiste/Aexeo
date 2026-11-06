@@ -53,6 +53,7 @@ fn finding(
         severity: "warning".to_string(),
         suggestion: Some(suggestion.into()),
         scope: FindingScope::Page,
+        subject: None,
     }
 }
 
@@ -72,6 +73,7 @@ fn missing_route_finding(site: &Site, route: &str) -> Finding {
                 .to_string(),
         ),
         scope: FindingScope::Sitewide,
+        subject: Some(route.to_string()),
     }
 }
 
@@ -423,37 +425,43 @@ fn answer_summary_findings(
             1,
             "editorial brief does not declare an answer summary element ID",
             "Set answer_summary_id in the route brief and render that ID on a block element immediately after the H1.",
-        ));
+        ).with_subject("summary-id-undeclared"));
         return findings;
     };
     let summaries: Vec<&HtmlElement> = block_elements(elements)
         .filter(|element| element.attribute("id") == Some(summary_id))
         .collect();
     if summaries.len() != 1 {
-        findings.push(finding(
-            "EDT001",
-            page,
-            summaries.first().map_or(1, |element| element.line),
-            summaries.first().map_or(1, |element| element.column),
-            format!(
-                "declared answer summary ID '{}' must match exactly one block element",
-                summary_id
-            ),
-            "Add a unique id matching answer_summary_id to the answer summary block.",
-        ));
+        findings.push(
+            finding(
+                "EDT001",
+                page,
+                summaries.first().map_or(1, |element| element.line),
+                summaries.first().map_or(1, |element| element.column),
+                format!(
+                    "declared answer summary ID '{}' must match exactly one block element",
+                    summary_id
+                ),
+                "Add a unique id matching answer_summary_id to the answer summary block.",
+            )
+            .with_subject("summary-id-not-unique"),
+        );
         return findings;
     }
     let summary = summaries[0];
     let h1 = elements.iter().find(|element| element.tag == "h1");
     let Some(h1) = h1 else {
-        findings.push(finding(
-            "EDT001",
-            page,
-            summary.line,
-            summary.column,
-            "declared answer summary cannot be placed because the page has no H1",
-            "Add one page H1 before the answer summary.",
-        ));
+        findings.push(
+            finding(
+                "EDT001",
+                page,
+                summary.line,
+                summary.column,
+                "declared answer summary cannot be placed because the page has no H1",
+                "Add one page H1 before the answer summary.",
+            )
+            .with_subject("summary-no-h1"),
+        );
         return findings;
     };
     let has_intervening_content = summary.start <= h1.end
@@ -487,7 +495,7 @@ fn answer_summary_findings(
             summary.column,
             "declared answer summary is not the first visible content after the H1",
             "Move the answer summary block directly below the H1, before other visible page content.",
-        ));
+        ).with_subject("summary-not-first"));
     }
     let summary_text = summary.visible_text(&page.raw_text);
     let sentences = sentence_count(&summary_text);
@@ -502,7 +510,7 @@ fn answer_summary_findings(
                 sentences
             ),
             "Edit the summary to contain two or three sentences with clear terminal punctuation.",
-        ));
+        ).with_subject("summary-sentence-count"));
     }
     findings
 }
@@ -537,14 +545,17 @@ fn target_question_findings(
     questions: &[EditorialTargetQuestion],
 ) -> Vec<Finding> {
     if questions.is_empty() {
-        return vec![finding(
-            "EDT002",
-            page,
-            1,
-            1,
-            "editorial brief declares no target questions for this route",
-            "Add target_questions from the route's search, sales, or support research.",
-        )];
+        return vec![
+            finding(
+                "EDT002",
+                page,
+                1,
+                1,
+                "editorial brief declares no target questions for this route",
+                "Add target_questions from the route's search, sales, or support research.",
+            )
+            .with_subject("no-target-questions"),
+        ];
     }
     let headings: Vec<&HtmlElement> = elements
         .iter()
@@ -568,7 +579,7 @@ fn target_question_findings(
                     question.question, question.heading_id
                 ),
                 "Render one H2 with the declared heading_id and the exact target question text.",
-            ));
+            ).with_subject(format!("{}:heading", question.heading_id)));
             continue;
         };
         if normalize_text(&heading.visible_text(&page.raw_text))
@@ -584,22 +595,25 @@ fn target_question_findings(
                     question.heading_id, question.question
                 ),
                 "Keep the rendered H2 text aligned with the target question in the editorial brief.",
-            ));
+            ).with_subject(format!("{}:text", question.heading_id)));
             continue;
         }
         let answer = question_answer_text(&page.raw_text, elements, heading);
         if answer.trim().chars().count() < 20 {
-            findings.push(finding(
-                "EDT002",
-                page,
-                heading.line,
-                heading.column,
-                format!(
-                    "target question '{}' has no substantive visible answer before the next H2",
-                    question.question
-                ),
-                "Add visible answer content below this H2 before the next H2.",
-            ));
+            findings.push(
+                finding(
+                    "EDT002",
+                    page,
+                    heading.line,
+                    heading.column,
+                    format!(
+                        "target question '{}' has no substantive visible answer before the next H2",
+                        question.question
+                    ),
+                    "Add visible answer content below this H2 before the next H2.",
+                )
+                .with_subject(format!("{}:answer", question.heading_id)),
+            );
         }
     }
     findings
@@ -679,7 +693,7 @@ fn evidence_findings(
                     "Mark the claim with data-aexeo-claim=\"{}\" and add a non-empty anchor with data-aexeo-evidence-for=\"{}\" pointing to an HTTP(S) source or an existing internal page.",
                     claim_id, claim_id
                 ),
-            ));
+            ).with_subject(claim_id));
         }
     }
     findings

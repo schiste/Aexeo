@@ -131,6 +131,49 @@ fn fix_json_contract_reports_changed_paths() {
 }
 
 #[test]
+fn baseline_written_before_subjects_existed_still_matches_a_current_audit() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let root = temp_dir.path();
+    write_minimal_site(root);
+    // Two broken links on one page: LNK001 sets a subject for these.
+    write(
+        &root.join("about/index.html"),
+        "<html><head><title>About</title><meta name=\"description\" content=\"About page\"></head><body><h1>About</h1><a href=\"/gone\">x</a><a href=\"/lost\">y</a></body></html>",
+    );
+    let current_path = temp_dir.path().join("current.json");
+    let status = Command::new(bin())
+        .arg("baseline")
+        .arg(root)
+        .arg("--output")
+        .arg(&current_path)
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let mut old = parse_json(&std::fs::read(&current_path).unwrap());
+    let mut stripped = 0;
+    for finding in old["findings"].as_array_mut().unwrap() {
+        stripped += usize::from(finding.as_object_mut().unwrap().remove("subject").is_some());
+    }
+    assert!(stripped >= 2, "fixture must exercise subjects: {old}");
+    let old_path = temp_dir.path().join("old-baseline.json");
+    std::fs::write(&old_path, old.to_string()).unwrap();
+
+    let output = Command::new(bin())
+        .arg("diff")
+        .arg(&old_path)
+        .arg(&current_path)
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["diff"]["new_findings"], serde_json::json!([]));
+    assert_eq!(payload["diff"]["resolved_findings"], serde_json::json!([]));
+}
+
+#[test]
 fn baseline_json_contract_reports_output_path() {
     let temp_dir = tempfile::tempdir().unwrap();
     write_minimal_site(temp_dir.path());

@@ -59,6 +59,7 @@ fn finding(
         severity: severity.to_string(),
         suggestion: None,
         scope: FindingScope::Page,
+        subject: None,
     }
 }
 
@@ -90,14 +91,17 @@ fn rule_a11y001_missing_alt(page: &Page, options: AccessibilityOptions) -> Vec<F
             continue;
         }
         let src_hint = crate::text::truncate_at_char_boundary(&image.src, 60, "…");
-        findings.push(finding(
-            "A11Y001",
-            format!("<img src=\"{}\"> missing alt attribute", src_hint),
-            &page.path,
-            image.line,
-            image.column,
-            "error",
-        ));
+        findings.push(
+            finding(
+                "A11Y001",
+                format!("<img src=\"{}\"> missing alt attribute", src_hint),
+                &page.path,
+                image.line,
+                image.column,
+                "error",
+            )
+            .with_subject(image.src.as_str()),
+        );
     }
     findings
 }
@@ -240,17 +244,20 @@ fn rule_a11y003_duplicate_id(page: &Page) -> Vec<Finding> {
     for (id, (count, first_offset)) in seen {
         if count >= 2 {
             let (line, column) = line_column_for(&cleaned, first_offset);
-            findings.push(finding(
-                "A11Y003",
-                format!(
-                    "duplicate id=\"{}\" appears {} times on this page",
-                    id, count
-                ),
-                &page.path,
-                line,
-                column,
-                "error",
-            ));
+            findings.push(
+                finding(
+                    "A11Y003",
+                    format!(
+                        "duplicate id=\"{}\" appears {} times on this page",
+                        id, count
+                    ),
+                    &page.path,
+                    line,
+                    column,
+                    "error",
+                )
+                .with_subject(id.as_str()),
+            );
         }
     }
     findings
@@ -288,17 +295,20 @@ fn rule_a11y004_heading_jump(page: &Page) -> Vec<Finding> {
             && level > prev + 1
         {
             let (line, column) = line_column_for(&cleaned, position);
-            findings.push(finding(
-                "A11Y004",
-                format!(
-                    "heading jumps from h{} to h{} without intermediate level",
-                    prev, level
-                ),
-                &page.path,
-                line,
-                column,
-                "warning",
-            ));
+            findings.push(
+                finding(
+                    "A11Y004",
+                    format!(
+                        "heading jumps from h{} to h{} without intermediate level",
+                        prev, level
+                    ),
+                    &page.path,
+                    line,
+                    column,
+                    "warning",
+                )
+                .with_subject(format!("h{prev}-h{level}")),
+            );
         }
         last_level = Some(level);
         offset = position + 4; // past <hN>
@@ -381,17 +391,20 @@ fn rule_a11y006_alt_equals_filename(page: &Page) -> Vec<Finding> {
             continue;
         }
         if normalize_alt_compare(alt_trimmed) == normalize_alt_compare(&filename) {
-            findings.push(finding(
-                "A11Y006",
-                format!(
-                    "alt text \"{}\" matches the image filename — likely placeholder text",
-                    alt_trimmed
-                ),
-                &page.path,
-                image.line,
-                image.column,
-                "warning",
-            ));
+            findings.push(
+                finding(
+                    "A11Y006",
+                    format!(
+                        "alt text \"{}\" matches the image filename — likely placeholder text",
+                        alt_trimmed
+                    ),
+                    &page.path,
+                    image.line,
+                    image.column,
+                    "warning",
+                )
+                .with_subject(image.src.as_str()),
+            );
         }
     }
     findings

@@ -176,6 +176,7 @@ pub fn run_checks_for_site_profiled(site: &crate::site::Site, config: &Config) -
             severity: "warning".to_string(),
             suggestion: None,
             scope: FindingScope::Sitewide,
+            subject: None,
         });
     }
 
