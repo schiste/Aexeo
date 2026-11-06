@@ -22,6 +22,7 @@
 
 use std::time::Duration;
 
+use super::robots::RobotsPolicy;
 use crate::config::RuntimeConfig;
 
 const PER_PROBE_TIMEOUT_SECS: u64 = 3;
@@ -64,6 +65,7 @@ const FALLBACK_ARTIFACT_PATHS: &[&str] = &[
 pub(crate) fn probe_well_known_artifacts(
     base_url: &str,
     runtime: &RuntimeConfig<'_>,
+    robots: &RobotsPolicy,
 ) -> Vec<String> {
     let normalized_base = base_url.trim_end_matches('/');
     let client = match build_client(runtime) {
@@ -78,7 +80,10 @@ pub(crate) fn probe_well_known_artifacts(
 
     // Manifest-first: if it's reachable, fold every artifact path
     // it lists into the candidate set. Dedupe on insertion.
-    if let Some(manifest_paths) = fetch_manifest_paths(&client, normalized_base, runtime) {
+    let manifest_allowed = robots.allows_url(&format!("{normalized_base}/manifest.json"));
+    if manifest_allowed
+        && let Some(manifest_paths) = fetch_manifest_paths(&client, normalized_base, runtime)
+    {
         for path in manifest_paths {
             if !candidates.contains(&path) {
                 candidates.push(path);
@@ -90,7 +95,9 @@ pub(crate) fn probe_well_known_artifacts(
 
     let mut verified = Vec::new();
     for path in &candidates {
-        if probe_artifact_head(&client, normalized_base, path, runtime) {
+        if robots.allows_url(&format!("{normalized_base}/{path}"))
+            && probe_artifact_head(&client, normalized_base, path, runtime)
+        {
             verified.push(path.clone());
         }
     }
@@ -277,7 +284,7 @@ mod tests {
 
         let config = Config::default();
         let runtime = config.runtime();
-        let probed = probe_well_known_artifacts(&base_url, &runtime);
+        let probed = probe_well_known_artifacts(&base_url, &runtime, &Default::default());
 
         *keep.lock().unwrap() = false;
         let _ = handle.join();
@@ -307,7 +314,7 @@ mod tests {
 
         let config = Config::default();
         let runtime = config.runtime();
-        let probed = probe_well_known_artifacts(&base_url, &runtime);
+        let probed = probe_well_known_artifacts(&base_url, &runtime, &Default::default());
 
         *keep.lock().unwrap() = false;
         let _ = handle.join();

@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeSet, HashSet, VecDeque};
 
 use super::graph::route_is_allowed;
 use super::http::{host_for_url, normalize_base_url, origin_for_url, same_site_host};
+use super::robots::RobotsPolicy;
 use crate::config::RuntimeConfig;
 use crate::site::{normalize_internal_href, route_from_urlish};
 
@@ -15,6 +16,8 @@ pub(crate) struct CrawlPlannerState {
     pub(crate) discovered_routes: Vec<String>,
     pub(crate) max_pages: usize,
     pub(crate) truncated: bool,
+    #[serde(default)]
+    pub(crate) robots_skipped_urls: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -27,6 +30,8 @@ pub(crate) struct CrawlPlanner {
     discovered_routes: HashSet<String>,
     max_pages: usize,
     truncated: bool,
+    robots: RobotsPolicy,
+    robots_skipped_urls: BTreeSet<String>,
 }
 
 impl CrawlPlanner {
@@ -41,6 +46,8 @@ impl CrawlPlanner {
             discovered_routes: HashSet::from([String::new()]),
             max_pages,
             truncated: false,
+            robots: RobotsPolicy::default(),
+            robots_skipped_urls: BTreeSet::new(),
         }
     }
 
@@ -77,6 +84,7 @@ impl CrawlPlanner {
             discovered_routes: sorted_vec(&self.discovered_routes),
             max_pages: self.max_pages,
             truncated: self.truncated,
+            robots_skipped_urls: self.robots_skipped_urls(),
         }
     }
 
@@ -103,7 +111,34 @@ impl CrawlPlanner {
                 .collect(),
             max_pages,
             truncated: false,
+            robots: RobotsPolicy::default(),
+            robots_skipped_urls: state.robots_skipped_urls.into_iter().collect(),
         }
+    }
+
+    pub(crate) fn set_robots_policy(&mut self, robots: RobotsPolicy) {
+        self.robots = robots;
+    }
+
+    pub(crate) fn robots(&self) -> &RobotsPolicy {
+        &self.robots
+    }
+
+    pub(crate) fn robots_skipped_urls(&self) -> Vec<String> {
+        self.robots_skipped_urls.iter().cloned().collect()
+    }
+
+    pub(crate) fn robots_skipped_count(&self) -> usize {
+        self.robots_skipped_urls.len()
+    }
+
+    /// Record `url` as skipped when robots.txt disallows it.
+    pub(crate) fn skip_if_disallowed(&mut self, url: &str) -> bool {
+        let disallowed = !self.robots.allows_url(url);
+        if disallowed {
+            self.robots_skipped_urls.insert(url.to_string());
+        }
+        disallowed
     }
 
     pub(crate) fn seed_from_user_input(&mut self, seed: &str, runtime: &RuntimeConfig<'_>) {
@@ -121,20 +156,23 @@ impl CrawlPlanner {
     }
 
     pub(crate) fn next_url(&mut self, runtime: &RuntimeConfig<'_>) -> Option<String> {
-        while let Some(route) = self.queue.pop_front() {
-            self.queued.remove(&route);
-            if self.visited.len() >= self.max_pages {
+        // The limit is checked before a route is removed: a route that does not
+        // fit stays queued, so a checkpoint can resume it.
+        while let Some(route) = self.queue.front().cloned() {
+            let url = self.url_for_route(&route);
+            let skip = self.visited.contains(&route)
+                || (!route.is_empty() && !route_is_allowed(&route, runtime))
+                || self.skip_if_disallowed(&url);
+            if !skip && self.visited.len() >= self.max_pages {
                 self.truncated = true;
                 return None;
             }
-            if self.visited.contains(&route) {
-                continue;
+            self.queue.pop_front();
+            self.queued.remove(&route);
+            if !skip {
+                self.visited.insert(route);
+                return Some(url);
             }
-            if !route.is_empty() && !route_is_allowed(&route, runtime) {
-                continue;
-            }
-            self.visited.insert(route.clone());
-            return Some(self.url_for_route(&route));
         }
         None
     }
@@ -197,7 +235,7 @@ fn sorted_vec(values: &HashSet<String>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CrawlPlanner, CrawlPlannerState};
+    use super::{CrawlPlanner, CrawlPlannerState, RobotsPolicy};
     use crate::config::Config;
 
     #[test]
@@ -214,6 +252,62 @@ mod tests {
         assert!(planner.next_url(&runtime).is_none());
         assert!(planner.truncated());
         assert_eq!(planner.discovered_route_count(), 2);
+    }
+
+    #[test]
+    fn a_route_beyond_the_limit_stays_queued_for_resume() {
+        let config = Config::default();
+        let runtime = config.runtime();
+        let mut planner = CrawlPlanner::new("https://example.com", 1);
+        planner.seed_from_user_input("/docs", &runtime);
+        planner.next_url(&runtime);
+        assert!(planner.next_url(&runtime).is_none());
+        assert!(planner.truncated());
+        assert_eq!(planner.checkpoint_state().queue, ["docs"]);
+
+        let mut resumed = CrawlPlanner::from_checkpoint(planner.checkpoint_state(), 2);
+        assert_eq!(
+            resumed.next_url(&runtime).as_deref(),
+            Some("https://example.com/docs")
+        );
+    }
+
+    #[test]
+    fn exhausting_the_queue_exactly_at_the_limit_is_not_truncation() {
+        let config = Config::default();
+        let runtime = config.runtime();
+        let mut planner = CrawlPlanner::new("https://example.com", 1);
+        planner.seed_from_user_input("/", &runtime);
+        planner.next_url(&runtime);
+        assert!(planner.next_url(&runtime).is_none());
+        assert!(!planner.truncated());
+    }
+
+    #[test]
+    fn disallowed_routes_are_recorded_and_never_returned_including_after_resume() {
+        let config = Config::default();
+        let runtime = config.runtime();
+        let robots = RobotsPolicy::parse("User-agent: *\nDisallow: /private\n", "aexeo");
+        let mut planner = CrawlPlanner::new("https://example.com", 5);
+        planner.set_robots_policy(robots.clone());
+        planner.seed_from_user_input("/private", &runtime);
+        planner.seed_from_user_input("/docs", &runtime);
+        assert_eq!(
+            planner.next_url(&runtime).as_deref(),
+            Some("https://example.com/")
+        );
+        let mut resumed = CrawlPlanner::from_checkpoint(planner.checkpoint_state(), 5);
+        resumed.set_robots_policy(robots);
+        assert_eq!(
+            resumed.next_url(&runtime).as_deref(),
+            Some("https://example.com/docs")
+        );
+        assert!(resumed.next_url(&runtime).is_none());
+        assert_eq!(
+            resumed.robots_skipped_urls(),
+            ["https://example.com/private"]
+        );
+        assert!(!resumed.truncated());
     }
 
     #[test]

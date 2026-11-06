@@ -35,6 +35,9 @@ fn apply_runtime_cli_overrides(config: &mut aexeo_core::Config, submatches: &Arg
     if submatches.get_flag("no-sitemap-seed") {
         config.crawl_use_sitemap = false;
     }
+    if submatches.get_flag("ignore-robots") {
+        config.crawl_ignore_robots = true;
+    }
     // try_get_one because not every runtime subcommand registers
     // --a11y-strict (only `crawl` does today). get_flag would panic.
     if matches!(

@@ -74,6 +74,8 @@ pub struct CrawlMeta {
     pub probed_artifact_paths: Vec<String>,
     /// Requests answered with a non-2xx status. These are not pages.
     pub failed_responses: Vec<aexeo_contracts::CrawlResponseProvenance>,
+    /// URLs the crawler did not request because robots.txt disallows them.
+    pub robots_skipped_urls: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -608,6 +610,12 @@ pub fn build_site_from_parts(input: SiteBuildInput) -> Result<Site> {
         for path in &meta.probed_artifact_paths {
             indexed_paths.insert(path.clone());
         }
+        // A route the crawler was told not to request is unknown, not broken.
+        indexed_paths.extend(
+            meta.robots_skipped_urls
+                .iter()
+                .filter_map(|url| route_from_urlish(url)),
+        );
     }
     Ok(Site {
         root,
@@ -656,6 +664,7 @@ pub fn audit_site_snapshot(site: &Site, site_url: Option<&str>) -> AuditSiteSnap
             truncated: meta.truncated,
             probed_artifact_paths: meta.probed_artifact_paths.clone(),
             failed_responses: meta.failed_responses.clone(),
+            robots_skipped_urls: meta.robots_skipped_urls.clone(),
         }),
         llms_text: site.llms_text.clone(),
         robots_text: site.robots_text.clone(),
@@ -707,6 +716,7 @@ pub fn build_site_from_audit_snapshot(snapshot: &AuditSiteSnapshot) -> Result<Si
             truncated: meta.truncated,
             probed_artifact_paths: meta.probed_artifact_paths.clone(),
             failed_responses: meta.failed_responses.clone(),
+            robots_skipped_urls: meta.robots_skipped_urls.clone(),
         }),
     })
 }

@@ -178,6 +178,9 @@ Options:
       --no-sitemap-seed
 
 
+      --ignore-robots
+          Crawl URLs that robots.txt disallows; only for auditing a site you own
+
       --max-pages <max-pages>
           [default: 200]
 
@@ -524,6 +527,9 @@ Options:
 
       --no-sitemap-seed
 
+
+      --ignore-robots
+          Crawl URLs that robots.txt disallows; only for auditing a site you own
 
       --config <config>
 

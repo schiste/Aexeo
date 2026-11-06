@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use support::{bin, parse_json};
+use support::{bin, parse_json, write};
 
 /// Status, content type and body of one path.
 type Route = (&'static str, &'static str, String);
@@ -345,4 +345,190 @@ fn an_unreachable_optional_artifact_degrades_to_a_warning() {
             .unwrap()
             .is_empty()
     );
+}
+
+fn robots(rules: &str) -> Route {
+    ("200 OK", "text/plain", rules.to_string())
+}
+
+#[test]
+fn robots_txt_is_fetched_first_and_disallowed_urls_are_recorded_not_requested() {
+    let site = Site::start(vec![
+        (
+            "/",
+            html(r#"<a href="/allowed">a</a> <a href="/private/page">b</a>"#),
+        ),
+        ("/robots.txt", robots("User-agent: *\nDisallow: /private\n")),
+        ("/allowed", html("")),
+        ("/private/page", html("secret")),
+        (
+            "/sitemap.xml",
+            (
+                "200 OK",
+                "application/xml",
+                "<urlset><url><loc>http://example.test/private/from-sitemap</loc></url></urlset>"
+                    .to_string(),
+            ),
+        ),
+        ("/private/from-sitemap", html("secret")),
+    ]);
+    let (_, payload) = crawl(&site, &["--seed", "/private/seeded"]);
+    assert_eq!(site.requests.lock().unwrap()[0].0, "/robots.txt");
+    assert!(site.requested("/allowed"));
+    for path in ["/private/page", "/private/from-sitemap", "/private/seeded"] {
+        assert!(!site.requested(path), "{path} is disallowed");
+    }
+    let artifact = &payload["artifact"];
+    let skipped = artifact["site"]["crawl_meta"]["robots_skipped_urls"].to_string();
+    for path in ["/private/page", "/private/from-sitemap", "/private/seeded"] {
+        assert!(skipped.contains(path), "{path} not recorded in {skipped}");
+    }
+    assert_eq!(artifact["crawl"]["skipped_by_robots"], 3);
+    assert_eq!(artifact["status"], "complete", "a skip is not a failure");
+    assert!(
+        rule_messages(&payload, "LNK001").is_empty(),
+        "a route we chose not to request is not broken: {payload:#}"
+    );
+    assert!(
+        artifact["site"]["robots_text"]
+            .as_str()
+            .unwrap()
+            .contains("Disallow")
+    );
+}
+
+#[test]
+fn ignore_robots_requests_disallowed_urls_and_still_audits_robots_txt() {
+    let site = Site::start(vec![
+        ("/", html(r#"<a href="/private">b</a>"#)),
+        ("/robots.txt", robots("User-agent: *\nDisallow: /\n")),
+        ("/private", html("")),
+    ]);
+    let (_, payload) = crawl(&site, &["--ignore-robots"]);
+    assert!(site.requested("/private"));
+    assert_eq!(payload["artifact"]["crawl"]["skipped_by_robots"], 0);
+    assert!(payload["artifact"]["site"]["robots_text"].is_string());
+}
+
+#[test]
+fn ignore_robots_can_be_set_in_config() {
+    let site = Site::start(vec![
+        ("/", html("")),
+        ("/robots.txt", robots("User-agent: *\nDisallow: /\n")),
+    ]);
+    let temp = tempfile::tempdir().unwrap();
+    let config = temp.path().join("aexeo.toml");
+    write(&config, "version = 1\n\n[runtime]\nignore_robots = true\n");
+    let (_, payload) = crawl(&site, &["--config", config.to_str().unwrap()]);
+    assert!(site.requested("/"), "{payload:#}");
+}
+
+#[test]
+fn a_site_disallowing_everything_is_only_asked_for_robots_txt() {
+    let site = Site::start(vec![
+        ("/", html("")),
+        ("/robots.txt", robots("User-agent: *\nDisallow: /\n")),
+        ("/llms.txt", robots("# site\n")),
+    ]);
+    let (_, payload) = crawl(&site, &[]);
+    let requests = site.requests.lock().unwrap().clone();
+    assert_eq!(
+        requests
+            .iter()
+            .map(|(path, _)| path.as_str())
+            .collect::<Vec<_>>(),
+        ["/robots.txt"],
+        "{payload:#}"
+    );
+    assert_eq!(payload["artifact"]["status"], "partial");
+    assert!(
+        payload["artifact"]["truncation_reason"]
+            .as_str()
+            .unwrap()
+            .contains("robots.txt")
+    );
+}
+
+#[test]
+fn an_unreachable_robots_txt_means_the_site_is_not_crawled() {
+    let site = Site::start(vec![
+        ("/", html("")),
+        (
+            "/robots.txt",
+            ("503 Service Unavailable", "text/plain", String::new()),
+        ),
+    ]);
+    let (_, payload) = crawl(&site, &[]);
+    assert!(!site.requested("/"));
+    assert_eq!(payload["artifact"]["status"], "partial");
+    assert!(rule_messages(&payload, "CRW002")[0].contains("HTTP 503"));
+}
+
+#[test]
+fn a_missing_robots_txt_allows_everything() {
+    let site = Site::start(vec![("/", html(""))]);
+    let (_, payload) = crawl(&site, &[]);
+    assert!(site.requested("/"));
+    assert_eq!(payload["artifact"]["status"], "complete", "{payload:#}");
+}
+
+#[test]
+fn rules_for_the_configured_user_agent_apply_and_every_request_identifies_itself() {
+    let rules = "User-agent: *\nDisallow: /star\n\nUser-agent: CustomBot\nDisallow: /custom\n";
+    let routes = || {
+        vec![
+            (
+                "/",
+                html(r#"<a href="/star">a</a> <a href="/custom">b</a>"#),
+            ),
+            ("/robots.txt", robots(rules)),
+            ("/star", html("")),
+            ("/custom", html("")),
+        ]
+    };
+
+    let default = Site::start(routes());
+    crawl(&default, &[]);
+    assert!(!default.requested("/star"));
+    assert!(default.requested("/custom"));
+    let expected = format!("aexeo/{}", env!("CARGO_PKG_VERSION"));
+    let requests = default.requests.lock().unwrap().clone();
+    assert!(
+        requests.iter().all(|(_, agent)| agent == &expected),
+        "{requests:?}"
+    );
+
+    let custom = Site::start(routes());
+    let temp = tempfile::tempdir().unwrap();
+    let config = temp.path().join("aexeo.toml");
+    write(
+        &config,
+        "version = 1\n\n[runtime]\nheaders = { user-agent = \"CustomBot/2.0\" }\n",
+    );
+    crawl(&custom, &["--config", config.to_str().unwrap()]);
+    assert!(custom.requested("/star"));
+    assert!(!custom.requested("/custom"));
+    let requests = custom.requests.lock().unwrap().clone();
+    assert!(
+        requests.iter().all(|(_, agent)| agent == "CustomBot/2.0"),
+        "{requests:?}"
+    );
+}
+
+#[test]
+fn crawl_delay_spaces_out_batches() {
+    let site = Site::start(vec![
+        ("/", html(r#"<a href="/a">a</a> <a href="/b">b</a>"#)),
+        ("/a", html("")),
+        ("/b", html("")),
+    ]);
+    let temp = tempfile::tempdir().unwrap();
+    let config = temp.path().join("aexeo.toml");
+    write(
+        &config,
+        "version = 1\nmax_workers = 1\n\n[runtime]\ncrawl_delay_ms = 300\n",
+    );
+    let started_at = std::time::Instant::now();
+    crawl(&site, &["--config", config.to_str().unwrap()]);
+    assert!(started_at.elapsed() >= Duration::from_millis(600));
 }

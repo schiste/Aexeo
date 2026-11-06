@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use super::graph::response_report_path;
 use super::http::fetch_with_http;
+use super::robots::RobotsPolicy;
 use crate::config::RuntimeConfig;
 use crate::site::{
     CrawlMeta, DeploymentModel, Site, SiteArtifacts, SiteBuildInput, build_page_from_source,
@@ -37,6 +38,7 @@ pub(crate) struct RuntimeSnapshotBuilder {
     llms_text: Option<String>,
     sitemap_text: Option<String>,
     failed_responses: Vec<aexeo_contracts::CrawlResponseProvenance>,
+    robots_skipped_urls: Vec<String>,
 }
 
 impl RuntimeSnapshotBuilder {
@@ -47,6 +49,7 @@ impl RuntimeSnapshotBuilder {
             llms_text: None,
             sitemap_text: None,
             failed_responses: Vec::new(),
+            robots_skipped_urls: Vec::new(),
         }
     }
 
@@ -57,6 +60,7 @@ impl RuntimeSnapshotBuilder {
             llms_text: state.llms_text,
             sitemap_text: state.sitemap_text,
             failed_responses: state.failed_responses,
+            robots_skipped_urls: Vec::new(),
         }
     }
 
@@ -77,6 +81,14 @@ impl RuntimeSnapshotBuilder {
         response: aexeo_contracts::CrawlResponseProvenance,
     ) {
         self.failed_responses.push(response);
+    }
+
+    pub(crate) fn set_robots_text(&mut self, text: Option<String>) {
+        self.robots_text = text;
+    }
+
+    pub(crate) fn set_robots_skipped_urls(&mut self, urls: Vec<String>) {
+        self.robots_skipped_urls = urls;
     }
 
     pub(crate) fn write_page(
@@ -103,11 +115,15 @@ impl RuntimeSnapshotBuilder {
         &mut self,
         base_url: &str,
         runtime: &RuntimeConfig<'_>,
+        robots: &RobotsPolicy,
     ) -> (u64, Vec<Finding>) {
         let started_at = Instant::now();
         let mut warnings = Vec::new();
-        for artifact in ["robots.txt", "llms.txt", "sitemap.xml"] {
+        for artifact in ["llms.txt", "sitemap.xml"] {
             let artifact_url = format!("{}{}", base_url, artifact);
+            if !robots.allows_url(&artifact_url) {
+                continue;
+            }
             let fetched = match fetch_with_http(
                 &artifact_url,
                 runtime.crawl_headers,
@@ -139,7 +155,6 @@ impl RuntimeSnapshotBuilder {
                 continue;
             };
             match artifact {
-                "robots.txt" => self.robots_text = Some(body),
                 "llms.txt" => self.llms_text = Some(body),
                 "sitemap.xml" => self.sitemap_text = Some(body),
                 _ => {}
@@ -169,6 +184,7 @@ impl RuntimeSnapshotBuilder {
                 truncated,
                 probed_artifact_paths: Vec::new(),
                 failed_responses: self.failed_responses,
+                robots_skipped_urls: self.robots_skipped_urls,
             },
         )
     }
@@ -194,6 +210,7 @@ impl RuntimeSnapshotBuilder {
                 truncated,
                 probed_artifact_paths: Vec::new(),
                 failed_responses: self.failed_responses.clone(),
+                robots_skipped_urls: self.robots_skipped_urls.clone(),
             },
         )
     }

@@ -91,6 +91,12 @@ pub fn build_cli() -> Command {
                         .action(ArgAction::SetTrue),
                 )
                 .arg(
+                    Arg::new("ignore-robots")
+                        .long("ignore-robots")
+                        .action(ArgAction::SetTrue)
+                        .help("Crawl URLs that robots.txt disallows; only for auditing a site you own"),
+                )
+                .arg(
                     Arg::new("max-pages")
                         .long("max-pages")
                         .value_parser(value_parser!(usize))
@@ -707,6 +713,12 @@ pub fn build_cli() -> Command {
                         .long("no-sitemap-seed")
                         .action(ArgAction::SetTrue),
                 )
+                .arg(
+                    Arg::new("ignore-robots")
+                        .long("ignore-robots")
+                        .action(ArgAction::SetTrue)
+                        .help("Crawl URLs that robots.txt disallows; only for auditing a site you own"),
+                )
                 .arg(Arg::new("config").long("config").num_args(1))
                 .arg(Arg::new("baseline").long("baseline").num_args(1))
                 .arg(
@@ -806,6 +818,12 @@ pub fn build_cli() -> Command {
                                 .long("no-sitemap-seed")
                                 .action(ArgAction::SetTrue),
                         )
+                        .arg(
+                            Arg::new("ignore-robots")
+                                .long("ignore-robots")
+                                .action(ArgAction::SetTrue)
+                                .help("Crawl URLs that robots.txt disallows; only for auditing a site you own"),
+                        )
                         .arg(Arg::new("config").long("config").num_args(1))
                         .arg(
                             Arg::new("perf-budget")
@@ -898,6 +916,12 @@ pub fn build_cli() -> Command {
                             Arg::new("no-sitemap-seed")
                                 .long("no-sitemap-seed")
                                 .action(ArgAction::SetTrue),
+                        )
+                        .arg(
+                            Arg::new("ignore-robots")
+                                .long("ignore-robots")
+                                .action(ArgAction::SetTrue)
+                                .help("Crawl URLs that robots.txt disallows; only for auditing a site you own"),
                         )
                         .arg(Arg::new("config").long("config").num_args(1))
                         .arg(

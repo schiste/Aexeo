@@ -988,7 +988,7 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                 RuleDescriptor {
                     rule_id: "CRW002",
                     sitewide: true,
-                    summary: "an optional site artifact such as llms.txt could not be fetched",
+                    summary: "a site artifact such as robots.txt or llms.txt could not be fetched",
                 },
                 RuleDescriptor {
                     rule_id: "CRW003",

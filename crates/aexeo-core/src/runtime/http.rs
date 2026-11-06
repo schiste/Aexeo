@@ -173,6 +173,7 @@ impl HttpFetcher {
                         Ok(fetched) => break Ok(fetched),
                         Err(_) if retries < fetch_retry_budget => {
                             retries += 1;
+                            thread::sleep(super::fetcher::retry_backoff(retries));
                         }
                         Err(error) => break Err(error),
                     }

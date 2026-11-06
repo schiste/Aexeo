@@ -4,6 +4,7 @@ mod graph;
 mod http;
 mod planner;
 mod playwright;
+mod robots;
 mod snapshot;
 
 use aexeo_contracts::{
@@ -17,21 +18,23 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::config::Config;
 use crate::reporting::build_audit_artifact;
 use crate::site::{Site, route_from_urlish};
 use crate::static_check::run_checks_for_site_profiled;
 use crate::verification::{DiffResult, diff_finding_sets};
-use fetcher::{FetchOutcome, RuntimeFetcher};
+use fetcher::{FetchOutcome, RuntimeFetcher, crawl_user_agent, headers_with_user_agent};
 pub(crate) use graph::CrawlLink;
 pub(crate) use graph::crawl_links;
 use graph::{read_loc_values, response_report_path, should_enqueue_link};
-use http::{fetch_with_http, host_for_url, is_html_content_type, same_site_host};
+use http::{fetch_with_http, host_for_url, is_html_content_type, origin_for_url, same_site_host};
 use planner::{CrawlPlanner, CrawlPlannerState};
 pub use playwright::PlaywrightDoctor;
 use playwright::{playwright_is_available, probe_playwright_runtime};
+use robots::load_robots;
 use snapshot::{RuntimeSnapshotBuilder, RuntimeSnapshotState};
 
 #[derive(Debug, Clone)]
@@ -1483,7 +1486,47 @@ fn crawl_incomplete_reason(planner: &CrawlPlanner, crawl_stats: &CrawlStats) -> 
             planner.visited_count()
         ));
     }
+    if planner.visited_count() == 0 && planner.robots_skipped_count() > 0 {
+        reasons.push(format!(
+            "robots.txt disallowed all {} routes tried, so nothing was audited",
+            planner.robots_skipped_count()
+        ));
+    }
     (!reasons.is_empty()).then(|| reasons.join("; "))
+}
+
+/// Fetch robots.txt for the planner's current origin and start honouring it. It
+/// is always fetched, because the robots rules audit it even with `ignore_robots`.
+fn apply_robots_txt(
+    planner: &mut CrawlPlanner,
+    snapshot: &mut RuntimeSnapshotBuilder,
+    crawl_findings: &mut Vec<Finding>,
+    runtime: &crate::config::RuntimeConfig<'_>,
+    ignore_robots: bool,
+) {
+    let loaded = load_robots(&origin_for_url(planner.normalized_base()), runtime);
+    snapshot.set_robots_text(loaded.text);
+    if ignore_robots {
+        return;
+    }
+    planner.set_robots_policy(loaded.policy);
+    if let Some(cause) = loaded.unreachable {
+        crawl_findings.push(Finding {
+            rule_id: "CRW002".to_string(),
+            message: format!(
+                "could not fetch robots.txt ({cause}); RFC 9309 requires assuming everything is disallowed, so the site was not crawled"
+            ),
+            path: "crawl/robots.txt".to_string(),
+            line: 1,
+            column: 1,
+            severity: "warning".to_string(),
+            suggestion: Some(
+                "fix robots.txt or retry; for a site you own, --ignore-robots skips this check"
+                    .to_string(),
+            ),
+            scope: FindingScope::Sitewide,
+        });
+    }
 }
 
 fn record_failed_fetch(
@@ -1634,7 +1677,12 @@ fn materialize_runtime_site(
     config: &Config,
     options: &mut RuntimeAuditOptions<'_>,
 ) -> Result<RuntimeMaterialization> {
-    let runtime = config.runtime();
+    // Injected here so every request of the crawl, whatever its engine, identifies itself.
+    let crawl_headers = headers_with_user_agent(config.runtime().crawl_headers);
+    let runtime = crate::config::RuntimeConfig {
+        crawl_headers: &crawl_headers,
+        ..config.runtime()
+    };
     let (mut planner, mut snapshot, mut crawl_findings, mut crawl_stats, mut performance) =
         if let Some(resume_from) = options.resume_from {
             let checkpoint = load_checkpoint(resume_from, max_pages)?;
@@ -1660,6 +1708,21 @@ fn materialize_runtime_site(
             )
         };
 
+    // Before any other request, and again on resume: a checkpoint must not keep
+    // a crawl going against rules that have changed since.
+    let robots_started_at = Instant::now();
+    apply_robots_txt(
+        &mut planner,
+        &mut snapshot,
+        &mut crawl_findings,
+        &runtime,
+        config.crawl_ignore_robots,
+    );
+    performance.record(
+        Phase::OptionalArtifactFetch,
+        robots_started_at.elapsed().as_micros() as u64,
+    );
+
     if options.resume_from.is_none() {
         for seed in runtime.crawl_seeds {
             planner.seed_from_user_input(seed, &runtime);
@@ -1670,9 +1733,13 @@ fn materialize_runtime_site(
             let sitemap_base = planner.normalized_base().to_string();
             let sitemap_seed_started_at = Instant::now();
             for sitemap_name in ["sitemap.xml", "sitemap-index.xml", "sitemap_index.xml"] {
+                let sitemap_url = format!("{}{}", sitemap_base, sitemap_name);
+                if !planner.robots().allows_url(&sitemap_url) {
+                    continue;
+                }
                 let _ = seed_routes_from_sitemap(
                     &mut planner,
-                    &format!("{}{}", sitemap_base, sitemap_name),
+                    &sitemap_url,
                     &runtime,
                     &mut visited_sitemaps,
                 );
@@ -1705,6 +1772,9 @@ fn materialize_runtime_site(
         );
         if batch.is_empty() {
             break;
+        }
+        if config.crawl_delay_ms > 0 && planner.visited_count() > batch.len() {
+            thread::sleep(Duration::from_millis(config.crawl_delay_ms));
         }
 
         let outcomes = fetcher.fetch_batch(&batch, options.fetch_retry_budget);
@@ -1776,7 +1846,24 @@ fn materialize_runtime_site(
             }
             let process_started_at = Instant::now();
             let planner_started_at = Instant::now();
+            let origin_before = origin_for_url(planner.normalized_base());
             planner.align_with_effective_url(&fetched.effective_url);
+            if origin_for_url(planner.normalized_base()) != origin_before {
+                // robots.txt is per origin, and the crawl has just moved to another.
+                apply_robots_txt(
+                    &mut planner,
+                    &mut snapshot,
+                    &mut crawl_findings,
+                    &runtime,
+                    config.crawl_ignore_robots,
+                );
+            }
+            // The request cannot be taken back, but a page reached through a
+            // redirect into a disallowed path must not be audited.
+            if planner.skip_if_disallowed(&fetched.effective_url) {
+                performance.apply_to(&mut crawl_stats);
+                continue;
+            }
             let route = route_from_urlish(&fetched.effective_url).unwrap_or_default();
             let snapshot_write_started_at = Instant::now();
             snapshot.write_page(&route, &body, &fetched.headers, Some(provenance))?;
@@ -1803,6 +1890,7 @@ fn materialize_runtime_site(
             crawl_stats.visited_pages = planner.visited_count();
             crawl_stats.discovered_internal_routes = planner.discovered_route_count();
             crawl_stats.queued_routes_remaining = planner.queued_count();
+            crawl_stats.skipped_by_robots = planner.robots_skipped_count();
             crawl_stats.truncated = planner.truncated();
             let page_process_us = process_started_at.elapsed().as_micros() as u64;
             performance.record_page_process(
@@ -1882,6 +1970,7 @@ fn materialize_runtime_site(
         }
         if performance.should_emit_partial_audit(crawl_stats.visited_pages, options) {
             let partial_build_started_at = Instant::now();
+            snapshot.set_robots_skipped_urls(planner.robots_skipped_urls());
             let artifact = build_partial_runtime_artifact(
                 options.artifact_command,
                 &snapshot,
@@ -1905,7 +1994,7 @@ fn materialize_runtime_site(
     }
 
     let (optional_fetch_us, optional_artifact_warnings) =
-        snapshot.capture_optional_artifacts(planner.normalized_base(), &runtime);
+        snapshot.capture_optional_artifacts(planner.normalized_base(), &runtime, planner.robots());
     performance.record(Phase::OptionalArtifactFetch, optional_fetch_us);
     crawl_findings.extend(optional_artifact_warnings);
     // Probe well-known machine-readable artifact paths (manifest-
@@ -1913,9 +2002,13 @@ fn materialize_runtime_site(
     // responses, so without this step facts.json / llms-full.txt /
     // .md.txt mirrors only reachable via manifest.json appear as
     // missing in surface discovery.
-    let probed_artifact_paths =
-        artifact_probe::probe_well_known_artifacts(planner.normalized_base(), &runtime);
+    let probed_artifact_paths = artifact_probe::probe_well_known_artifacts(
+        planner.normalized_base(),
+        &runtime,
+        planner.robots(),
+    );
     let snapshot_started_at = Instant::now();
+    snapshot.set_robots_skipped_urls(planner.robots_skipped_urls());
     let (mut site, snapshot_findings) = snapshot.finalize(
         planner.visited_count(),
         max_pages,
@@ -1937,6 +2030,7 @@ fn materialize_runtime_site(
     crawl_stats.visited_pages = planner.visited_count();
     crawl_stats.discovered_internal_routes = planner.discovered_route_count();
     crawl_stats.queued_routes_remaining = planner.queued_count();
+    crawl_stats.skipped_by_robots = planner.robots_skipped_count();
     crawl_stats.truncated = planner.truncated();
     performance.apply_to(&mut crawl_stats);
     crawl_findings.extend(snapshot_findings);
@@ -2164,10 +2258,19 @@ fn probe_markdown_negotiation_finding(
     if homepage_advertises_markdown_mirror_discovery(site) {
         return Vec::new();
     }
+    let home_disallowed = site.crawl_meta.iter().any(|meta| {
+        meta.robots_skipped_urls
+            .iter()
+            .any(|url| route_from_urlish(url).is_some_and(|route| route.is_empty()))
+    });
+    if home_disallowed {
+        return Vec::new();
+    }
 
     let client = match Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .redirect(reqwest::redirect::Policy::limited(5))
+        .user_agent(crawl_user_agent(&config.crawl_headers))
         .build()
     {
         Ok(client) => client,

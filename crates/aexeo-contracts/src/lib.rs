@@ -363,6 +363,9 @@ pub struct AuditCrawlMeta {
     /// They are not pages, and their routes count as broken link targets.
     #[serde(default)]
     pub failed_responses: Vec<CrawlResponseProvenance>,
+    /// URLs the crawler did not request because robots.txt disallows them.
+    #[serde(default)]
+    pub robots_skipped_urls: Vec<String>,
 }
 
 /// Response provenance recorded by a live crawl. Missing fields are unknown, not inferred.
@@ -421,6 +424,8 @@ pub struct CrawlStats {
     pub fetch_failures: usize,
     pub fetch_retries: usize,
     pub skipped_non_html: usize,
+    #[serde(default)]
+    pub skipped_by_robots: usize,
     pub truncated: bool,
     #[serde(default)]
     pub elapsed_us: u64,
