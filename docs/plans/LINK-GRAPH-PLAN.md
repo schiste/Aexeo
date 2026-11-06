@@ -1,5 +1,10 @@
 # Link graph improvement plan
 
+**Status: in progress.** Work merges incrementally; see Progress and the
+remaining integration and validation items below. The checklist near the top
+predates that section and is not ticked as items merge, so read Progress first.
+Shipped behaviour is described in [docs/link-graph.md](../link-graph.md).
+
 The existing orphan rules count incoming page links without distinguishing body
 from navigation and do not resolve all valid URL forms. Do not interpret those
 counts as article-body connectivity. This plan is delivered incrementally; an

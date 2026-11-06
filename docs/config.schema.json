@@ -50,9 +50,29 @@
     }
   ],
   "properties": {
+    "accessibility": {
+      "additionalProperties": false,
+      "properties": {
+        "strict": {
+          "description": "Fire A11Y001 on every image without alt.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "adapter": {
       "description": "Adapter selection mode.",
       "type": "string"
+    },
+    "agent_discovery": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Enable the opt-in AGT rules.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
     },
     "audit_log_limit": {
       "description": "Number of audit artifacts retained per command.",
@@ -470,6 +490,34 @@
       },
       "type": "array"
     },
+    "route_kinds": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "match": {
+            "description": "Path substrings selecting this route kind.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "noindex": {
+            "description": "Accepted, but not read by any rule yet.",
+            "type": "boolean"
+          },
+          "skip_rules": {
+            "description": "Rule IDs dropped on matching paths.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "description": "Named route groups whose matching paths skip the listed rules.",
+      "type": "object"
+    },
     "route_policy_overrides": {
       "description": "Per-route robots policy overrides.",
       "items": {
@@ -747,6 +795,22 @@
                     "type": "string"
                   },
                   "type": "array"
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "surfaces": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
                 }
               },
               "type": "object"

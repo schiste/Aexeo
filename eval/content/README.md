@@ -31,7 +31,7 @@ and the runner rejects a declared review on them. Passing them says nothing
 about accuracy on real content.
 
 A real, independently reviewed corpus remains open: see item 7 of
-[the content roadmap](../../CONTENT-ROADMAP.md). These fixtures do not advance it.
+[the content roadmap](../../docs/plans/CONTENT-ROADMAP.md). These fixtures do not advance it.
 
 An example may expect `not_checked`, reported as `expected_not_checked`.
 `--assert-regression` fails on `missed_not_checked`, when such an example was

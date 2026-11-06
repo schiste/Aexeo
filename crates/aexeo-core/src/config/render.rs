@@ -1,7 +1,10 @@
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-use super::{Config, Editorial, RoutePolicyOverride, SuppressionRule};
+use super::{
+    Accessibility, AgentDiscovery, Config, Editorial, RouteKind, RoutePolicyOverride,
+    SuppressionRule,
+};
 
 #[derive(Debug, Clone, Serialize)]
 struct ResolvedConfigDocument {
@@ -12,6 +15,9 @@ struct ResolvedConfigDocument {
     max_workers: usize,
     plugin_settings: BTreeMap<String, BTreeMap<String, toml::Value>>,
     editorial: Editorial,
+    route_kinds: BTreeMap<String, RouteKind>,
+    accessibility: Accessibility,
+    agent_discovery: AgentDiscovery,
     site: SiteSection,
     runtime: RuntimeSection,
     policy: PolicySection,
@@ -66,6 +72,7 @@ struct RulesSection {
     social: SocialRulesSection,
     schema: SchemaRulesSection,
     llm: EnabledRuleSection,
+    surfaces: EnabledRuleSection,
     content: ContentRulesSection,
     structure: StructureRulesSection,
     editorial: EnabledRuleSection,
@@ -160,6 +167,9 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
         max_workers: config.max_workers,
         plugin_settings: config.plugin_settings.clone(),
         editorial: config.editorial.clone(),
+        route_kinds: config.route_kinds.clone(),
+        accessibility: config.accessibility.clone(),
+        agent_discovery: config.agent_discovery.clone(),
         site: SiteSection {
             url: config.site_url.clone(),
             source_dir: config.source_dir.clone(),
@@ -231,6 +241,9 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
             llm: EnabledRuleSection {
                 enabled: is_enabled(config, "llm"),
             },
+            surfaces: EnabledRuleSection {
+                enabled: is_enabled(config, "surfaces"),
+            },
             content: ContentRulesSection {
                 enabled: is_enabled(config, "content"),
                 min_page_size: config.min_page_size,
@@ -272,6 +285,27 @@ pub fn render_resolved_config_toml(config: &Config) -> anyhow::Result<String> {
 mod tests {
     use super::{render_resolved_config_json, render_resolved_config_toml};
     use crate::config::Config;
+
+    #[test]
+    fn resolved_config_keeps_route_kinds_accessibility_discovery_and_surfaces() {
+        let toml_text = "version = 1\n[route_kinds.a]\nskip_rules = [\"GEO007\"]\n\
+                         [accessibility]\nstrict = true\n[agent_discovery]\nenabled = true\n\
+                         [rules.surfaces]\nenabled = false\n";
+        let merged: toml::Value = toml::from_str(toml_text).unwrap();
+        let config = crate::config::load::config_from_merged(merged, "test")
+            .unwrap()
+            .config;
+
+        let rendered = render_resolved_config_toml(&config).unwrap();
+        let reloaded: toml::Value = toml::from_str(&rendered).unwrap();
+        let again = crate::config::load::config_from_merged(reloaded, "rendered")
+            .unwrap()
+            .config;
+        assert_eq!(again.route_kinds, config.route_kinds);
+        assert!(again.accessibility.strict);
+        assert!(again.agent_discovery.enabled);
+        assert_eq!(again.checks.get("surfaces"), Some(&false));
+    }
 
     #[test]
     fn renders_canonical_resolved_config() {

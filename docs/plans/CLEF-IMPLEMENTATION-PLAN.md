@@ -1,5 +1,9 @@
 # CLEF et revue d'Aexeo
 
+**Status: completed.** Delivered to `main` in PR #24 (`3d1f373`), with CI green on
+that commit. The final checkbox below was never ticked; the merge is what it
+asked for. Kept in French as written.
+
 - [x] Vérifier l'API publique Lift Wing et le contrat effectif de CLEF-Flash.
 - [x] Raccorder CLEF au contrat de revue existant avec provenance distincte, conservation du texte et fiabilité des sources explicitement incertaine.
 - [x] Tester l'adaptateur hors ligne et effectuer un essai exploratoire borné sur des annotations humaines ; documenter biais, échecs et limites.

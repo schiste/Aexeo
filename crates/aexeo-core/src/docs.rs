@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::config::{Config, config_field_docs, default_rule_switches, render_config_schema};
+use crate::config::{
+    COMPLETE_EXAMPLE, Config, check_config_surface, config_field_docs, default_rule_switches,
+    render_config_schema, versioned_location,
+};
 use crate::quality::QUALITY_RULES;
 use crate::registry::{builtin_adapters, builtin_rule_groups};
 
@@ -26,6 +29,9 @@ pub fn render_config_reference() -> String {
             .to_string(),
         String::new(),
         "Generated JSON Schema: `docs/config.schema.json`".to_string(),
+        String::new(),
+        "Every documented key at its canonical location: `docs/examples/aexeo.complete.toml`. `aexeo-cli docs check` fails unless that file passes both the schema and the loader."
+            .to_string(),
         String::new(),
         "Editor hint: add `#:schema ../config.schema.json` at the top of a config file stored under `docs/examples/` or adjust the relative path for your repository layout."
             .to_string(),
@@ -89,6 +95,9 @@ pub fn render_config_reference() -> String {
         String::new(),
         "## Top-Level Keys".to_string(),
         String::new(),
+        "Keys are listed by their flat name. In a `version = 1` config, set them at the versioned location shown: the nested name is often shorter, so `crawl_headers` becomes `headers` under `[runtime]`, and `crawl_headers` under `[runtime]` is rejected as an unknown key."
+            .to_string(),
+        String::new(),
     ];
     for field in config_field_docs() {
         lines.push(format!("## `{}`", field.key));
@@ -97,18 +106,29 @@ pub fn render_config_reference() -> String {
             "- Default: {}",
             format_default_value(field.default_value)
         ));
+        lines.push(format!(
+            "- Versioned location: {}",
+            format_versioned_location(field.key)
+        ));
         lines.push(format!("- Meaning: {}", field.description));
         lines.push(String::new());
     }
     lines.push("## `checks`".to_string());
     lines.push(String::new());
-    lines.push("Built-in rule-group toggles. Unknown plugin rule groups default to enabled unless explicitly disabled.".to_string());
+    lines.push("Built-in rule-group toggles. Unknown plugin rule groups default to enabled unless explicitly disabled. In a `version = 1` config use `[rules.<group>] enabled = ...` for the groups `[rules]` accepts (`html`, `links`, `sitemap`, `robots`, `social`, `schema`, `llm`, `surfaces`, `content`, `editorial`, `structure`); the others are only reachable through `[checks]`.".to_string());
     lines.push(String::new());
     for (rule_name, enabled) in default_rule_switches() {
         lines.push(format!("- `{}`: default `{}`", rule_name, enabled));
     }
     lines.push(String::new());
     lines.join("\n")
+}
+
+fn format_versioned_location(key: &str) -> String {
+    match versioned_location(key) {
+        Some([table @ .., name]) => format!("`{}` under `[{}]`", name, table.join(".")),
+        _ => "top level, same name".to_string(),
+    }
 }
 
 pub fn render_rule_reference() -> String {
@@ -171,7 +191,12 @@ pub fn render_adapter_reference() -> String {
 }
 
 pub fn reference_documents(cli_reference: String) -> Result<BTreeMap<String, String>> {
+    check_config_surface()?;
     Ok(BTreeMap::from([
+        (
+            "docs/examples/aexeo.complete.toml".to_string(),
+            COMPLETE_EXAMPLE.to_string(),
+        ),
         ("docs/cli.md".to_string(), cli_reference),
         ("docs/config.md".to_string(), render_config_reference()),
         (
