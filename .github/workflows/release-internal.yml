@@ -12,15 +12,18 @@ permissions:
 
 jobs:
   # scripts/build_internal_release.sh skips the quality gate (cargo-audit,
-  # cargo-deny, cargo-udeps) on the stated assumption that "by the time a
-  # v* tag is pushed, the code at HEAD has already been gated" by ci.yml.
-  # Nothing enforced that assumption: the trigger is a bare `v*` tag glob, so
-  # a tag on any commit, any branch, at any point in history produces a
-  # published release. This job is what turns the assumption into a check.
+  # cargo-deny, cargo-udeps) because ci.yml already ran it. The trigger is a
+  # bare `v*` tag glob, so nothing else stops a tag on any commit producing a
+  # published release. This job is what turns that reliance into a check.
   guard:
     name: Release tag guard
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Job-level permissions replace the workflow-level ones, so contents: read
+    # has to be repeated. actions: read is what the CI conclusion query needs.
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -41,11 +44,20 @@ jobs:
           commit=$(git rev-parse "refs/tags/${TAG}^{commit}")
           if ! git merge-base --is-ancestor "$commit" refs/remotes/origin/main; then
             echo "release tag ${TAG} points at ${commit}, which is NOT an ancestor of origin/main." >&2
-            echo "Refusing to release code that has not passed ci.yml on main." >&2
+            echo "Refusing to release code that is not on main." >&2
             echo "Merge the commit to main (or retag an already-merged commit) and push the tag again." >&2
             exit 1
           fi
           echo "ok: ${TAG} -> ${commit} is an ancestor of origin/main"
+      - name: "Guard: ci.yml must have succeeded on main for the tagged commit"
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          commit=$(git rev-parse "refs/tags/${TAG}^{commit}")
+          python3 scripts/check-release-ci.py --repo "$REPO" --sha "$commit"
       - name: "Guard: tag must match the workspace version in Cargo.toml"
         env:
           TAG: ${{ github.ref_name }}
@@ -90,9 +102,13 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: sed -n 's/^channel = "\(.*\)"$/channel=\1/p' rust-toolchain.toml >> "$GITHUB_OUTPUT"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
           components: rustfmt, clippy
       - name: Build native target
         env:
