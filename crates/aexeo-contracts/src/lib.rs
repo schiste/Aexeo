@@ -359,6 +359,10 @@ pub struct AuditCrawlMeta {
     /// `#[serde(default)]` so old artifacts deserialize cleanly.
     #[serde(default)]
     pub probed_artifact_paths: Vec<String>,
+    /// Requests answered with a non-2xx status during the live crawl.
+    /// They are not pages, and their routes count as broken link targets.
+    #[serde(default)]
+    pub failed_responses: Vec<CrawlResponseProvenance>,
 }
 
 /// Response provenance recorded by a live crawl. Missing fields are unknown, not inferred.

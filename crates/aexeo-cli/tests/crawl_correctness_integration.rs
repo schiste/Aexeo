@@ -23,6 +23,9 @@ fn html(body: &str) -> Route {
     )
 }
 
+/// Status of a route whose connection is closed without any response.
+const CLOSE: &str = "close";
+
 struct Site {
     base_url: String,
     /// `(path, user agent)` of every request, in arrival order.
@@ -70,6 +73,13 @@ impl Site {
                             .then(|| value.trim().to_string())
                     })
                     .unwrap_or_default();
+                if routes
+                    .get(path.as_str())
+                    .is_some_and(|route| route.0 == CLOSE)
+                {
+                    log.lock().unwrap().push((path, agent));
+                    continue;
+                }
                 let not_found = ("404 Not Found", "text/plain", "missing".to_string());
                 let (status, content_type, body) = routes.get(path.as_str()).unwrap_or(&not_found);
                 log.lock().unwrap().push((path, agent));
@@ -196,4 +206,143 @@ fn relative_links_count_for_broken_link_and_inbound_rules() {
         "{payload:#}"
     );
     assert!(rule_messages(&payload, "LNK002").is_empty(), "{payload:#}");
+}
+
+#[test]
+fn non_2xx_responses_are_recorded_but_are_not_pages() {
+    for (status, code) in [("404 Not Found", 404), ("500 Internal Server Error", 500)] {
+        let site = Site::start(vec![
+            ("/", html(r#"<a href="/bad">bad</a>"#)),
+            (
+                "/bad",
+                (status, "text/html", "<title>Error</title>".to_string()),
+            ),
+        ]);
+        let temp = tempfile::tempdir().unwrap();
+        let graph = temp.path().join("graph.json");
+        let (_, payload) = crawl(&site, &["--link-graph-output", graph.to_str().unwrap()]);
+        let artifact = &payload["artifact"];
+
+        let routes = artifact["site"]["pages"].as_array().unwrap();
+        assert!(
+            routes.iter().all(|page| page["route"] != "bad"),
+            "{status}: {payload:#}"
+        );
+        let failed = artifact["site"]["crawl_meta"]["failed_responses"]
+            .as_array()
+            .unwrap();
+        assert_eq!(failed.len(), 1, "{status}");
+        assert_eq!(failed[0]["status_code"], code);
+        assert_eq!(
+            rule_messages(&payload, "LNK001"),
+            ["broken internal link: /bad"]
+        );
+        assert!(rule_messages(&payload, "CRW001")[0].contains(&format!("HTTP {code}")));
+        assert!(
+            rule_messages(&payload, "SEO001")
+                .iter()
+                .all(|m| !m.contains("/bad"))
+        );
+
+        assert_eq!(artifact["status"], "partial", "{status}");
+        assert_eq!(artifact["crawl"]["fetch_failures"], 1);
+        assert!(
+            artifact["truncation_reason"]
+                .as_str()
+                .unwrap()
+                .contains("non-2xx")
+        );
+
+        let report: Value = serde_json::from_slice(&std::fs::read(&graph).unwrap()).unwrap();
+        assert!(
+            report["issues"]
+                .to_string()
+                .contains("non_success_response"),
+            "{report:#}"
+        );
+    }
+}
+
+#[test]
+fn a_crawl_with_only_successful_fetches_stays_complete() {
+    let site = Site::start(vec![
+        ("/", html(r#"<a href="/ok">ok</a>"#)),
+        ("/ok", html("")),
+    ]);
+    let (_, payload) = crawl(&site, &[]);
+    assert_eq!(payload["artifact"]["status"], "complete", "{payload:#}");
+    assert!(payload["artifact"]["truncation_reason"].is_null());
+}
+
+#[test]
+fn a_failed_home_page_yields_a_partial_audit_rather_than_an_error() {
+    let site = Site::start(vec![(
+        "/",
+        (
+            "503 Service Unavailable",
+            "text/html",
+            "<p>down</p>".to_string(),
+        ),
+    )]);
+    let (output, payload) = crawl(&site, &[]);
+    assert_eq!(payload["artifact"]["status"], "partial", "{payload:#}");
+    assert_eq!(
+        payload["artifact"]["site"]["pages"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "CRW001 is a blocking finding"
+    );
+}
+
+#[test]
+fn failed_fetches_make_content_mode_exit_2_like_any_partial_crawl() {
+    let site = Site::start(vec![("/", html(r#"<a href="/bad">bad</a>"#))]);
+    let temp = tempfile::tempdir().unwrap();
+    let output = Command::new(bin())
+        .current_dir(temp.path())
+        .args([
+            "content",
+            "--crawl-url",
+            &site.base_url,
+            "--preset",
+            "seo-website",
+        ])
+        .args(["--crawl-engine", "http", "--format", "json"])
+        .output()
+        .unwrap();
+    let report = parse_json(&output.stdout);
+    assert_eq!(report["crawl_status"], "partial", "{report:#}");
+    assert_eq!(output.status.code(), Some(2));
+}
+
+#[test]
+fn an_unreachable_optional_artifact_degrades_to_a_warning() {
+    let site = Site::start(vec![
+        ("/", html("")),
+        ("/llms.txt", (CLOSE, "", String::new())),
+    ]);
+    let (output, payload) = crawl(&site, &[]);
+    assert!(site.requested("/llms.txt"));
+    assert_ne!(
+        output.status.code(),
+        Some(70),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(payload["artifact"]["status"], "complete", "{payload:#}");
+    let warnings = rule_messages(&payload, "CRW002");
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("llms.txt"));
+    assert!(
+        !payload["artifact"]["site"]["pages"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }

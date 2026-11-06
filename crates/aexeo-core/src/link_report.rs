@@ -128,7 +128,7 @@ pub fn build_link_report_from_audit_with_static_urls(
             issues.insert("audit_origin_mismatch");
         }
     }
-    let pages = site
+    let mut pages: Vec<_> = site
         .pages
         .iter()
         .filter_map(|page| {
@@ -166,6 +166,21 @@ pub fn build_link_report_from_audit_with_static_urls(
             })
         })
         .collect();
+    // Non-2xx responses are not site pages but remain observations of the crawl.
+    pages.extend(
+        site.crawl_meta
+            .iter()
+            .flat_map(|meta| &meta.failed_responses)
+            .map(|response| RenderedPage {
+                url: response
+                    .observed_url
+                    .clone()
+                    .unwrap_or_else(|| response.requested_url.clone()),
+                html: String::new(),
+                status_code: response.status_code,
+                response_headers: None,
+            }),
+    );
     let input = LinkReportInput {
         version: 1,
         identity: context

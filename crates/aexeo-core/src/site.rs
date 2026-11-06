@@ -72,6 +72,8 @@ pub struct CrawlMeta {
     /// discovery sees them as present even when they're not
     /// reachable from the HTML link graph.
     pub probed_artifact_paths: Vec<String>,
+    /// Requests answered with a non-2xx status. These are not pages.
+    pub failed_responses: Vec<aexeo_contracts::CrawlResponseProvenance>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -653,6 +655,7 @@ pub fn audit_site_snapshot(site: &Site, site_url: Option<&str>) -> AuditSiteSnap
             discovered_internal_routes: meta.discovered_internal_routes,
             truncated: meta.truncated,
             probed_artifact_paths: meta.probed_artifact_paths.clone(),
+            failed_responses: meta.failed_responses.clone(),
         }),
         llms_text: site.llms_text.clone(),
         robots_text: site.robots_text.clone(),
@@ -703,6 +706,7 @@ pub fn build_site_from_audit_snapshot(snapshot: &AuditSiteSnapshot) -> Result<Si
             discovered_internal_routes: meta.discovered_internal_routes,
             truncated: meta.truncated,
             probed_artifact_paths: meta.probed_artifact_paths.clone(),
+            failed_responses: meta.failed_responses.clone(),
         }),
     })
 }

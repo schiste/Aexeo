@@ -1464,6 +1464,48 @@ fn emit_partial_audit_artifact(
     Ok(())
 }
 
+/// Why this crawl does not cover everything it set out to cover, if so. A reason
+/// makes the audit `partial`: `complete` requires no truncation and no failed fetch.
+fn crawl_incomplete_reason(planner: &CrawlPlanner, crawl_stats: &CrawlStats) -> Option<String> {
+    let mut reasons = Vec::new();
+    if planner.truncated() {
+        reasons.push(format!(
+            "crawl stopped at max_pages={} after visiting {} pages while at least {} routes were discovered",
+            crawl_stats.max_pages,
+            planner.visited_count(),
+            planner.discovered_route_count()
+        ));
+    }
+    if crawl_stats.fetch_failures > 0 {
+        reasons.push(format!(
+            "{} of {} requested URLs failed or returned a non-2xx status and were not audited",
+            crawl_stats.fetch_failures,
+            planner.visited_count()
+        ));
+    }
+    (!reasons.is_empty()).then(|| reasons.join("; "))
+}
+
+fn record_failed_fetch(
+    crawl_stats: &mut CrawlStats,
+    crawl_findings: &mut Vec<Finding>,
+    url: &str,
+    detail: &str,
+) {
+    let route = route_from_urlish(url).unwrap_or_default();
+    crawl_stats.fetch_failures += 1;
+    crawl_findings.push(Finding {
+        rule_id: "CRW001".to_string(),
+        message: format!("failed to fetch URL: {url} ({detail})"),
+        path: response_report_path(&route),
+        line: 1,
+        column: 1,
+        severity: "error".to_string(),
+        suggestion: None,
+        scope: FindingScope::Page,
+    });
+}
+
 fn build_progress_runtime_artifact(
     command: &str,
     planner: &CrawlPlanner,
@@ -1471,26 +1513,19 @@ fn build_progress_runtime_artifact(
     crawl_stats: &CrawlStats,
     performance: &RuntimePerformance,
 ) -> AuditArtifact {
-    let status = if planner.queued_count() > 0 || planner.truncated() {
+    let truncation_reason = crawl_incomplete_reason(planner, crawl_stats).or_else(|| {
+        (planner.queued_count() > 0).then(|| {
+            format!(
+                "checkpoint after visiting {} pages with {} routes still queued",
+                planner.visited_count(),
+                planner.queued_count()
+            )
+        })
+    });
+    let status = if truncation_reason.is_some() {
         AuditStatus::Partial
     } else {
         AuditStatus::Complete
-    };
-    let truncation_reason = if planner.truncated() {
-        Some(format!(
-            "crawl stopped at max_pages={} after visiting {} pages while at least {} routes were discovered",
-            crawl_stats.max_pages,
-            planner.visited_count(),
-            planner.discovered_route_count()
-        ))
-    } else if planner.queued_count() > 0 {
-        Some(format!(
-            "checkpoint after visiting {} pages with {} routes still queued",
-            planner.visited_count(),
-            planner.queued_count()
-        ))
-    } else {
-        None
     };
     let mut artifact = build_audit_artifact(
         command,
@@ -1685,45 +1720,57 @@ fn materialize_runtime_site(
             let fetched = match result {
                 Ok(fetched) => fetched,
                 Err(error) => {
-                    let route = route_from_urlish(&current).unwrap_or_default();
-                    crawl_stats.fetch_failures += 1;
+                    record_failed_fetch(
+                        &mut crawl_stats,
+                        &mut crawl_findings,
+                        &current,
+                        &error.to_string(),
+                    );
                     performance.apply_to(&mut crawl_stats);
-                    crawl_findings.push(Finding {
-                        rule_id: "CRW001".to_string(),
-                        message: format!("failed to fetch URL: {} ({})", current, error),
-                        path: response_report_path(&route),
-                        line: 1,
-                        column: 1,
-                        severity: "error".to_string(),
-                        suggestion: None,
-                        scope: FindingScope::Page,
-                    });
                     continue;
                 }
             };
-            let Some(body) = fetched.body else {
-                let route = route_from_urlish(&current).unwrap_or_default();
-                crawl_stats.fetch_failures += 1;
+            let effective_host = host_for_url(&fetched.effective_url);
+            if !same_site_host(&effective_host, planner.base_host()) {
                 performance.apply_to(&mut crawl_stats);
-                crawl_findings.push(Finding {
-                    rule_id: "CRW001".to_string(),
-                    message: format!("failed to fetch URL: {}", current),
-                    path: response_report_path(&route),
-                    line: 1,
-                    column: 1,
-                    severity: "error".to_string(),
-                    suggestion: None,
-                    scope: FindingScope::Page,
-                });
+                continue;
+            }
+            let provenance = aexeo_contracts::CrawlResponseProvenance {
+                requested_url: current.clone(),
+                observed_url: fetched
+                    .effective_url_observed
+                    .then(|| fetched.effective_url.clone()),
+                status_code: fetched.status_code,
+                headers_observed: fetched.headers_observed,
+            };
+            // An unknown status (a browser runner may not report one) is not
+            // evidence of failure; a known non-2xx is not a page of the site.
+            if let Some(status) = fetched
+                .status_code
+                .filter(|status| !(200..300).contains(status))
+            {
+                record_failed_fetch(
+                    &mut crawl_stats,
+                    &mut crawl_findings,
+                    &current,
+                    &format!("HTTP {status}"),
+                );
+                snapshot.record_failed_response(provenance);
+                performance.apply_to(&mut crawl_stats);
+                continue;
+            }
+            let Some(body) = fetched.body else {
+                record_failed_fetch(
+                    &mut crawl_stats,
+                    &mut crawl_findings,
+                    &current,
+                    "no readable response body",
+                );
+                performance.apply_to(&mut crawl_stats);
                 continue;
             };
             if !is_html_content_type(fetched.content_type.as_deref()) {
                 crawl_stats.skipped_non_html += 1;
-                performance.apply_to(&mut crawl_stats);
-                continue;
-            }
-            let effective_host = host_for_url(&fetched.effective_url);
-            if !same_site_host(&effective_host, planner.base_host()) {
                 performance.apply_to(&mut crawl_stats);
                 continue;
             }
@@ -1732,19 +1779,7 @@ fn materialize_runtime_site(
             planner.align_with_effective_url(&fetched.effective_url);
             let route = route_from_urlish(&fetched.effective_url).unwrap_or_default();
             let snapshot_write_started_at = Instant::now();
-            snapshot.write_page(
-                &route,
-                &body,
-                &fetched.headers,
-                Some(aexeo_contracts::CrawlResponseProvenance {
-                    requested_url: current.clone(),
-                    observed_url: fetched
-                        .effective_url_observed
-                        .then(|| fetched.effective_url.clone()),
-                    status_code: fetched.status_code,
-                    headers_observed: fetched.headers_observed,
-                }),
-            )?;
+            snapshot.write_page(&route, &body, &fetched.headers, Some(provenance))?;
             performance.record(
                 Phase::SnapshotWrite,
                 snapshot_write_started_at.elapsed().as_micros() as u64,
@@ -1869,9 +1904,10 @@ fn materialize_runtime_site(
         }
     }
 
-    let optional_fetch_us =
-        snapshot.capture_optional_artifacts(planner.normalized_base(), &runtime)?;
+    let (optional_fetch_us, optional_artifact_warnings) =
+        snapshot.capture_optional_artifacts(planner.normalized_base(), &runtime);
     performance.record(Phase::OptionalArtifactFetch, optional_fetch_us);
+    crawl_findings.extend(optional_artifact_warnings);
     // Probe well-known machine-readable artifact paths (manifest-
     // listed + canonical fallbacks). The crawler skipped non-HTML
     // responses, so without this step facts.json / llms-full.txt /
@@ -1904,16 +1940,7 @@ fn materialize_runtime_site(
     crawl_stats.truncated = planner.truncated();
     performance.apply_to(&mut crawl_stats);
     crawl_findings.extend(snapshot_findings);
-    let truncation_reason = if planner.truncated() {
-        Some(format!(
-            "crawl stopped at max_pages={} after visiting {} pages while at least {} routes were discovered",
-            max_pages,
-            planner.visited_count(),
-            planner.discovered_route_count()
-        ))
-    } else {
-        None
-    };
+    let truncation_reason = crawl_incomplete_reason(&planner, &crawl_stats);
     if let Some(checkpoint_path) = options.checkpoint_path
         && site
             .crawl_meta
@@ -2013,7 +2040,7 @@ pub fn run_runtime_audit_with_options(
     let mut findings = crawl_findings.clone();
     findings.extend(profiled.findings.clone());
     findings.extend(probe_markdown_negotiation_finding(base_url, config, &site));
-    let status = if crawl_stats.truncated {
+    let status = if truncation_reason.is_some() {
         AuditStatus::Partial
     } else {
         AuditStatus::Complete

@@ -27,6 +27,8 @@ pub(crate) struct RuntimeSnapshotState {
     robots_text: Option<String>,
     llms_text: Option<String>,
     sitemap_text: Option<String>,
+    #[serde(default)]
+    failed_responses: Vec<aexeo_contracts::CrawlResponseProvenance>,
 }
 
 pub(crate) struct RuntimeSnapshotBuilder {
@@ -34,6 +36,7 @@ pub(crate) struct RuntimeSnapshotBuilder {
     robots_text: Option<String>,
     llms_text: Option<String>,
     sitemap_text: Option<String>,
+    failed_responses: Vec<aexeo_contracts::CrawlResponseProvenance>,
 }
 
 impl RuntimeSnapshotBuilder {
@@ -43,6 +46,7 @@ impl RuntimeSnapshotBuilder {
             robots_text: None,
             llms_text: None,
             sitemap_text: None,
+            failed_responses: Vec::new(),
         }
     }
 
@@ -52,6 +56,7 @@ impl RuntimeSnapshotBuilder {
             robots_text: state.robots_text,
             llms_text: state.llms_text,
             sitemap_text: state.sitemap_text,
+            failed_responses: state.failed_responses,
         }
     }
 
@@ -61,7 +66,17 @@ impl RuntimeSnapshotBuilder {
             robots_text: self.robots_text.clone(),
             llms_text: self.llms_text.clone(),
             sitemap_text: self.sitemap_text.clone(),
+            failed_responses: self.failed_responses.clone(),
         }
+    }
+
+    /// Record a non-2xx response. It is not a page of the site: its route stays
+    /// out of the snapshot, so broken-link rules report the links pointing at it.
+    pub(crate) fn record_failed_response(
+        &mut self,
+        response: aexeo_contracts::CrawlResponseProvenance,
+    ) {
+        self.failed_responses.push(response);
     }
 
     pub(crate) fn write_page(
@@ -82,20 +97,41 @@ impl RuntimeSnapshotBuilder {
         Ok(())
     }
 
+    /// Fetch the optional site artifacts. They are optional: one that cannot be
+    /// fetched is reported as a warning and must not discard the finished crawl.
     pub(crate) fn capture_optional_artifacts(
         &mut self,
         base_url: &str,
         runtime: &RuntimeConfig<'_>,
-    ) -> Result<u64> {
+    ) -> (u64, Vec<Finding>) {
         let started_at = Instant::now();
+        let mut warnings = Vec::new();
         for artifact in ["robots.txt", "llms.txt", "sitemap.xml"] {
             let artifact_url = format!("{}{}", base_url, artifact);
-            let fetched = fetch_with_http(
+            let fetched = match fetch_with_http(
                 &artifact_url,
                 runtime.crawl_headers,
                 runtime.crawl_cookies,
                 runtime.crawl_basic_auth,
-            )?;
+            ) {
+                Ok(fetched) => fetched,
+                Err(error) => {
+                    warnings.push(Finding {
+                        rule_id: "CRW002".to_string(),
+                        message: format!("could not fetch {artifact}: {error:#}"),
+                        path: format!("crawl/{artifact}"),
+                        line: 1,
+                        column: 1,
+                        severity: "warning".to_string(),
+                        suggestion: Some(
+                            "rules about this artifact did not see it; re-run the crawl to rule out a transient failure"
+                                .to_string(),
+                        ),
+                        scope: FindingScope::Sitewide,
+                    });
+                    continue;
+                }
+            };
             if fetched.status_code.unwrap_or(500) >= 400 {
                 continue;
             }
@@ -109,7 +145,7 @@ impl RuntimeSnapshotBuilder {
                 _ => {}
             }
         }
-        Ok(started_at.elapsed().as_micros() as u64)
+        (started_at.elapsed().as_micros() as u64, warnings)
     }
 
     pub(crate) fn finalize(
@@ -132,6 +168,7 @@ impl RuntimeSnapshotBuilder {
                 discovered_internal_routes,
                 truncated,
                 probed_artifact_paths: Vec::new(),
+                failed_responses: self.failed_responses,
             },
         )
     }
@@ -156,6 +193,7 @@ impl RuntimeSnapshotBuilder {
                 discovered_internal_routes,
                 truncated,
                 probed_artifact_paths: Vec::new(),
+                failed_responses: self.failed_responses.clone(),
             },
         )
     }
@@ -333,6 +371,7 @@ mod tests {
             robots_text: state.robots_text,
             llms_text: state.llms_text,
             sitemap_text: state.sitemap_text,
+            failed_responses: state.failed_responses,
         });
         let (site, _) = restored.finalize(1, 10, 1, false).unwrap();
         assert!(site.has_route("docs"));

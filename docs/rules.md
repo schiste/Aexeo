@@ -163,6 +163,8 @@ Reusable GEO rules extracted from the Chau7 website guidelines.
 
 ## `runtime`
 
+- `CRW001`: a crawled URL could not be fetched or returned a non-2xx status
+- `CRW002`: an optional site artifact such as llms.txt could not be fetched
 - `CRW003`: crawl ended before the full internal route graph could be reviewed
 
 ## `deployment`
