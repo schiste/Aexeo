@@ -14,6 +14,7 @@ fn main() -> anyhow::Result<()> {
                 html: format!("<html lang='en'><body><main>{links}</main></body></html>"),
                 status_code: Some(200),
                 response_headers: Some(Default::default()),
+                requested_url: None,
             }
         })
         .collect();
