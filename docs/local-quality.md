@@ -83,7 +83,7 @@ scope, call the underlying scripts directly (`sh scripts/check-repo.sh`,
 `sh scripts/pre-push.sh`, `sh scripts/check-performance.sh`).
 
 `--with-audit` is accepted but does nothing: the dependency audit
-(`cargo audit`, `cargo deny check`, `cargo +nightly udeps`) already runs
+(`cargo audit`, `cargo deny check`, `cargo-udeps` on the pinned nightly) already runs
 unconditionally as part of the `check-repo` stage, via `check-deps.sh`. The
 flag exists so the older documented invocation still succeeds instead of
 exiting `2`, and so the run summary states plainly that the audit ran.
@@ -92,7 +92,7 @@ exiting `2`, and so the run summary states plainly that the audit ran.
 `check-repo.sh` gate, the pre-push gate, and the performance budget check.
 `cargo audit` is not optional in this path: `check-repo.sh` always runs
 `check-deps.sh`, which hard-fails without `cargo-audit`, `cargo-deny`, and
-nightly `cargo-udeps`.
+`cargo-udeps` with the pinned nightly.
 
 `guard-staged.sh` runs automatically when `ci-local.sh` is executed inside a
 git work tree with a non-empty index, and is skipped with a printed reason
@@ -157,9 +157,11 @@ The hard local gate depends on:
 - `cargo-audit`
 - `cargo-deny`
 - `cargo-udeps`
-- `nightly` plus `rust-src` and `llvm-tools-preview`
+- the dated nightly plus `rust-src` and `llvm-tools-preview`
 
-Use `sh scripts/install-quality-tools.sh` to provision them.
+Use `sh scripts/install-quality-tools.sh` to provision them. Tool versions and
+the nightly date are pinned in `scripts/quality-tool-versions.sh`; the stable
+toolchain is pinned in `rust-toolchain.toml`.
 
 Run the hardest local gate explicitly:
 

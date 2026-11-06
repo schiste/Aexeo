@@ -1,4 +1,5 @@
 use aexeo_contracts::AuditStatus;
+use aexeo_core::error::UserContext;
 use aexeo_core::intelligence::presence::{
     SOURCE_ORDER, SourceResult, SourceStatus, check_all_sources, entity_from_manifest, source_label,
 };
@@ -8,9 +9,9 @@ use aexeo_core::{
     TrustSurfaceReconciliation, TruthAssessment, TruthManifestGeneration, TruthManifestValidation,
     TruthStructuredSource, assess_answer_fanout, assess_evidence_coverage, assess_truth_layer,
     compute_page_identity, discover_machine_surface_graph, discover_truth_manifest,
-    generate_truth_manifest_with_options, import_trust_surface_records, load_site,
+    generate_truth_manifest_with_options, import_trust_surface_records, is_reports_dir, load_site,
     load_site_from_audit_artifact, looks_like_generic_entity_name, map_grounding_queries,
-    reconcile_trust_surfaces, score_intelligence, validate_truth_manifest,
+    reconcile_trust_surfaces, reports_dir, score_intelligence, user_bail, validate_truth_manifest,
 };
 use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
@@ -18,9 +19,9 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::exit_code::{EXIT_FINDINGS, EXIT_SUCCESS, EXIT_UNSUPPORTED};
-use crate::commands::common::{canonicalize_or_keep, required_arg};
-use crate::output::{render_data_command_json, render_failed_command_json};
+use super::exit_code::{EXIT_SUCCESS, EXIT_UNSUPPORTED};
+use crate::commands::common::{canonicalize_or_keep, emit_failure, required_arg};
+use crate::output::render_data_command_json;
 
 #[derive(Debug, Clone, Serialize)]
 struct IntelligenceInputMetadata {
@@ -47,12 +48,12 @@ pub fn command_intelligence(submatches: &ArgMatches) -> Result<i32> {
         Some(("evidence", evidence_matches)) => match evidence_matches.subcommand() {
             Some(("assess", assess_matches)) => command_evidence_assess(assess_matches),
             Some((other, _)) => bail!("unsupported evidence command: {}", other),
-            None => bail!("missing evidence subcommand"),
+            None => user_bail!("missing evidence subcommand"),
         },
         Some(("fanout", fanout_matches)) => match fanout_matches.subcommand() {
             Some(("assess", assess_matches)) => command_fanout_assess(assess_matches),
             Some((other, _)) => bail!("unsupported fanout command: {}", other),
-            None => bail!("missing fanout subcommand"),
+            None => user_bail!("missing fanout subcommand"),
         },
         Some(("facts", truth_matches)) | Some(("truth", truth_matches)) => {
             match truth_matches.subcommand() {
@@ -60,7 +61,7 @@ pub fn command_intelligence(submatches: &ArgMatches) -> Result<i32> {
                 Some(("generate", generate_matches)) => command_truth_generate(generate_matches),
                 Some(("assess", assess_matches)) => command_truth_assess(assess_matches),
                 Some((other, _)) => bail!("unsupported facts command: {}", other),
-                None => bail!("missing facts subcommand"),
+                None => user_bail!("missing facts subcommand"),
             }
         }
         Some(("trust-surface", trust_matches)) => match trust_matches.subcommand() {
@@ -69,17 +70,17 @@ pub fn command_intelligence(submatches: &ArgMatches) -> Result<i32> {
                 command_trust_surface_reconcile(reconcile_matches)
             }
             Some((other, _)) => bail!("unsupported trust-surface command: {}", other),
-            None => bail!("missing trust-surface subcommand"),
+            None => user_bail!("missing trust-surface subcommand"),
         },
         Some(("surfaces", surfaces_matches)) => match surfaces_matches.subcommand() {
             Some(("discover", discover_matches)) => command_surfaces_discover(discover_matches),
             Some((other, _)) => bail!("unsupported surfaces command: {}", other),
-            None => bail!("missing surfaces subcommand"),
+            None => user_bail!("missing surfaces subcommand"),
         },
         Some(("score", score_matches)) => command_intelligence_score(score_matches),
         Some(("presence", presence_matches)) => command_intelligence_presence(presence_matches),
         Some((other, _)) => bail!("unsupported intelligence command: {}", other),
-        None => bail!("missing intelligence subcommand"),
+        None => user_bail!("missing intelligence subcommand"),
     }
 }
 
@@ -476,7 +477,7 @@ fn status_label(status: AuditStatus) -> &'static str {
 
 fn report_root_for_artifact(path: &Path) -> PathBuf {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    if parent.file_name().and_then(|item| item.to_str()) == Some(".aexeo-reports") {
+    if is_reports_dir(parent) {
         let root = parent
             .parent()
             .filter(|candidate| !candidate.as_os_str().is_empty())
@@ -503,7 +504,7 @@ fn load_intelligence_input(submatches: &ArgMatches) -> Result<IntelligenceInput>
         let snapshot = artifact
             .site
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("audit artifact does not include a site snapshot"))?;
+            .user_context("audit artifact does not include a site snapshot")?;
         let report_root = report_root_for_artifact(&artifact_path);
         let partial = artifact.is_partial();
         let warning = if partial {
@@ -532,7 +533,7 @@ fn load_intelligence_input(submatches: &ArgMatches) -> Result<IntelligenceInput>
 
     let root = PathBuf::from(required_arg(submatches, "path")?);
     if root.is_file() {
-        bail!(
+        user_bail!(
             "{} is a file; pass --from-crawl-artifact for crawl audit artifacts or provide a site directory",
             root.display()
         );
@@ -568,19 +569,8 @@ fn with_input_text(mut text: String, metadata: &IntelligenceInputMetadata) -> St
     text
 }
 
-fn emit_failure(command: &str, format: &str, error: anyhow::Error) -> Result<i32> {
-    match format {
-        "json" => println!(
-            "{}",
-            render_failed_command_json(command, error.to_string(), Vec::new())?
-        ),
-        _ => eprintln!("{}", error),
-    }
-    Ok(EXIT_FINDINGS)
-}
-
 fn write_report<T: Serialize>(root: &Path, file_name: &str, payload: &T) -> Result<PathBuf> {
-    let reports_dir = root.join(".aexeo-reports");
+    let reports_dir = reports_dir(root);
     fs::create_dir_all(&reports_dir)?;
     let path = reports_dir.join(file_name);
     fs::write(&path, serde_json::to_string_pretty(payload)?)?;

@@ -146,6 +146,11 @@ pub struct Finding {
     pub suggestion: Option<String>,
     #[serde(default)]
     pub scope: FindingScope,
+    /// Stable key telling apart findings of one rule on one path, such as a
+    /// link target. Part of the fingerprint, unlike `message`. Rules that can
+    /// report several distinct problems per path must set it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -504,8 +509,20 @@ pub struct AuditArtifact {
     pub findings: Vec<Finding>,
 }
 
+/// Identity of a finding across runs (fingerprint version 2). Message wording
+/// and source position are deliberately left out: both change without the
+/// underlying problem changing.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FindingFingerprint {
+    pub rule_id: String,
+    pub path: String,
+    pub subject: Option<String>,
+}
+
+/// Fingerprint version 1, computed from the fields every stored finding has.
+/// Baselines written before `subject` existed keep matching through it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LegacyFindingFingerprint {
     pub rule_id: String,
     pub path: String,
     pub line: usize,
@@ -549,8 +566,21 @@ impl Finding {
         self.severity != "warning"
     }
 
+    pub fn with_subject(mut self, subject: impl Into<String>) -> Self {
+        self.subject = Some(subject.into());
+        self
+    }
+
     pub fn fingerprint(&self) -> FindingFingerprint {
         FindingFingerprint {
+            rule_id: self.rule_id.clone(),
+            path: self.path.clone(),
+            subject: self.subject.clone(),
+        }
+    }
+
+    pub fn legacy_fingerprint(&self) -> LegacyFindingFingerprint {
+        LegacyFindingFingerprint {
             rule_id: self.rule_id.clone(),
             path: self.path.clone(),
             line: self.line,
@@ -636,6 +666,7 @@ mod tests {
             severity: "error".into(),
             suggestion: Some("add a title".into()),
             scope: FindingScope::Page,
+            subject: None,
         };
         assert_eq!(
             finding.render(),
@@ -665,12 +696,34 @@ mod tests {
             severity: "warning".into(),
             suggestion: None,
             scope: FindingScope::Page,
+            subject: None,
         };
         let mut current = old.clone();
         current.message = "no inbound links observed in the analyzed pages: /guide".into();
-        assert_eq!(old.fingerprint(), current.fingerprint());
+        assert_eq!(old.legacy_fingerprint(), current.legacy_fingerprint());
         current.rule_id = "OTHER".into();
-        assert_ne!(old.fingerprint(), current.fingerprint());
+        assert_ne!(old.legacy_fingerprint(), current.legacy_fingerprint());
+    }
+
+    #[test]
+    fn fingerprint_ignores_wording_and_position_but_not_subject() {
+        let old = Finding {
+            rule_id: "LNK001".into(),
+            message: "broken internal link: /a".into(),
+            path: "guide.html".into(),
+            line: 3,
+            column: 1,
+            severity: "error".into(),
+            suggestion: None,
+            scope: FindingScope::Page,
+            subject: None,
+        }
+        .with_subject("a");
+        let mut reworded = old.clone();
+        reworded.message = "link target does not exist: /a".into();
+        reworded.line = 9;
+        assert_eq!(old.fingerprint(), reworded.fingerprint());
+        assert_ne!(old.fingerprint(), reworded.with_subject("b").fingerprint());
     }
 
     #[test]

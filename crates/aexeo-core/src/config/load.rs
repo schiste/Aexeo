@@ -5,6 +5,7 @@ use std::path::{Component, Path, PathBuf};
 use toml::Value;
 
 use super::Config;
+use crate::error::into_user_error;
 use crate::plugin::validate_plugin_settings;
 
 const VERSIONED_TOP_LEVEL_TABLES: &[&str] =
@@ -845,6 +846,10 @@ pub fn load_config_with_diagnostics(
     root: &Path,
     explicit_path: Option<&Path>,
 ) -> Result<LoadedConfig> {
+    read_config_with_diagnostics(root, explicit_path).map_err(into_user_error)
+}
+
+fn read_config_with_diagnostics(root: &Path, explicit_path: Option<&Path>) -> Result<LoadedConfig> {
     let config_path = explicit_path
         .map(PathBuf::from)
         .unwrap_or_else(|| root.join("aexeo.toml"));
