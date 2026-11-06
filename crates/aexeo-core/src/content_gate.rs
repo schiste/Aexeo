@@ -37,7 +37,24 @@ pub struct ContentParagraph {
 #[derive(Debug, Clone, Default)]
 pub struct ContentContext {
     pub paragraphs: Option<Vec<ContentParagraph>>,
+    /// Sorted byte offsets in the projected text where a block ends: a heading,
+    /// paragraph, list item or table cell. A sentence ends there and a literal
+    /// term does not match across it. Raw text has no known block structure.
+    pub block_ends: Option<Vec<usize>>,
+    /// Why the adapter withheld the input. It explains the `not_checked` status
+    /// of each gate that needed that input.
+    pub input_limit: Option<String>,
 }
+
+/// Largest input the CLI adapters read. Larger input is reported as `not_checked`.
+pub const MAX_CONTENT_INPUT_BYTES: usize = 16 * 1024 * 1024;
+
+/// Findings kept for one document gate. The `findings_omitted` measurement
+/// counts any others, so a truncated gate still reports its full total.
+pub const MAX_FINDINGS_PER_GATE: usize = 1000;
+
+/// The measurement that records findings dropped by `MAX_FINDINGS_PER_GATE`.
+pub const FINDINGS_OMITTED: &str = "findings_omitted";
 
 /// A portable preset. Rules are evaluated in their declared order.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,6 +136,10 @@ pub enum ContentGate {
         #[serde(default = "default_blocking")]
         blocking: bool,
         terms: Vec<String>,
+        #[serde(default = "default_whole_words")]
+        whole_words: bool,
+        #[serde(default)]
+        case_insensitive: bool,
     },
     RequiredMetadata {
         id: String,
@@ -410,29 +431,169 @@ pub fn valid_link_destination(destination: &str, schemes: &[String], allow_relat
     }
 }
 
-// Matching is literal and case-sensitive. Word boundaries use Unicode
-// alphanumeric characters and underscore; positions remain in the original text.
-fn term_matches<'a>(
-    text: &'a str,
-    term: &'a str,
-    whole_words: bool,
-) -> impl Iterator<Item = (usize, &'a str)> + 'a {
-    fn word(ch: char) -> bool {
-        ch.is_alphanumeric() || ch == '_'
+/// Explain why `valid_link_destination` rejected a destination.
+fn link_destination_problem(destination: &str, schemes: &[String], allow_relative: bool) -> String {
+    const MAX_PREVIEW_CHARS: usize = 200;
+    let mut preview: String = destination.chars().take(MAX_PREVIEW_CHARS).collect();
+    if preview.len() < destination.len() {
+        preview.push('…');
     }
-    text.match_indices(term).filter(move |(offset, _)| {
-        !whole_words
-            || ((!term.chars().next().is_some_and(word)
-                || text[..*offset]
-                    .chars()
-                    .next_back()
-                    .is_none_or(|ch| !word(ch)))
-                && (!term.chars().next_back().is_some_and(word)
-                    || text[*offset + term.len()..]
-                        .chars()
-                        .next()
-                        .is_none_or(|ch| !word(ch))))
-    })
+    if destination.is_empty()
+        || destination.chars().any(char::is_whitespace)
+        || destination.chars().any(char::is_control)
+    {
+        return format!("{preview:?} is empty or contains whitespace or control characters");
+    }
+    match url::Url::parse(destination) {
+        Ok(parsed) => format!(
+            "{preview:?} has disallowed scheme {:?}; allowed: {}",
+            parsed.scheme(),
+            schemes.join(", ")
+        ),
+        Err(url::ParseError::RelativeUrlWithoutBase) if !allow_relative => {
+            format!("{preview:?} is relative, and relative links are not allowed")
+        }
+        Err(url::ParseError::RelativeUrlWithoutBase) => {
+            format!("{preview:?} is scheme-relative; its scheme depends on the page")
+        }
+        Err(_) => format!("{preview:?} is malformed"),
+    }
+}
+
+/// Collapse whitespace so a value compares equal however its source wrapped it.
+pub fn collapse_whitespace(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Scripts written without spaces between words, where the characters adjacent
+/// to a term say nothing about whether it is a whole word.
+fn unsegmented_script(ch: char) -> bool {
+    matches!(ch,
+        '\u{0E00}'..='\u{0EFF}' // Thai, Lao
+        | '\u{1000}'..='\u{109F}' // Myanmar
+        | '\u{1780}'..='\u{17FF}' // Khmer
+        | '\u{3040}'..='\u{30FF}' // Hiragana, Katakana
+        | '\u{31F0}'..='\u{31FF}' // Katakana extensions
+        | '\u{3400}'..='\u{4DBF}' // CJK extension A
+        | '\u{4E00}'..='\u{9FFF}' // CJK unified ideographs
+        | '\u{AC00}'..='\u{D7A3}' // Hangul, whose particles attach to nouns
+        | '\u{F900}'..='\u{FAFF}' // CJK compatibility ideographs
+        | '\u{FF66}'..='\u{FF9D}' // Halfwidth Katakana
+        | '\u{20000}'..='\u{3FFFF}' // CJK supplementary planes
+    )
+}
+
+/// Collapse whitespace runs and optionally lowercase. A run containing a blank
+/// line becomes a newline, so a single space in a term never spans paragraphs.
+/// `segments` holds a `(folded, original)` offset pair wherever their difference
+/// changes.
+fn fold_literal(text: &str, case_insensitive: bool) -> (String, Vec<(usize, usize)>) {
+    let mut folded = String::with_capacity(text.len());
+    let mut segments = vec![(0, 0)];
+    let mut chars = text.char_indices().peekable();
+    while let Some((offset, ch)) = chars.next() {
+        let mut end = offset + ch.len_utf8();
+        if ch.is_whitespace() {
+            let mut newlines = usize::from(ch == '\n');
+            while let Some((next, following)) = chars.next_if(|(_, c)| c.is_whitespace()) {
+                newlines += usize::from(following == '\n');
+                end = next + following.len_utf8();
+            }
+            folded.push(if newlines > 1 { '\n' } else { ' ' });
+            if end - offset != 1 {
+                segments.push((folded.len(), end));
+            }
+        } else {
+            let start = folded.len();
+            if case_insensitive {
+                folded.extend(ch.to_lowercase());
+            } else {
+                folded.push(ch);
+            }
+            if folded.len() - start != end - offset {
+                segments.push((folded.len(), end));
+            }
+        }
+    }
+    (folded, segments)
+}
+
+/// A text prepared for literal matching. Whitespace differences never prevent a
+/// match, and reported offsets remain in the original text.
+struct LiteralText<'a> {
+    original: &'a str,
+    folded: String,
+    segments: Vec<(usize, usize)>,
+    block_ends: &'a [usize],
+    case_insensitive: bool,
+}
+
+impl<'a> LiteralText<'a> {
+    fn new(original: &'a str, block_ends: &'a [usize], case_insensitive: bool) -> Self {
+        let (folded, segments) = fold_literal(original, case_insensitive);
+        Self {
+            original,
+            folded,
+            segments,
+            block_ends,
+            case_insensitive,
+        }
+    }
+
+    fn original_offset(&self, folded: usize) -> usize {
+        let index = self.segments.partition_point(|&(start, _)| start <= folded) - 1;
+        let (start, original) = self.segments[index];
+        let mut offset = (original + folded - start).min(self.original.len());
+        // Lowercasing can lengthen a character; report its start from inside it.
+        while !self.original.is_char_boundary(offset) {
+            offset -= 1;
+        }
+        offset
+    }
+
+    fn crosses_block_end(&self, start: usize, end: usize) -> bool {
+        let next = self.block_ends.partition_point(|&block| block < start);
+        self.block_ends.get(next).is_some_and(|&block| block < end)
+    }
+
+    /// Non-overlapping occurrences of `term`, as original byte offsets. Word
+    /// boundaries use Unicode alphanumeric characters and underscore, outside
+    /// scripts written without spaces.
+    fn matches(&self, term: &str, whole_words: bool) -> Vec<usize> {
+        fn word(ch: char) -> bool {
+            (ch.is_alphanumeric() || ch == '_') && !unsegmented_script(ch)
+        }
+        let (needle, _) = fold_literal(term, self.case_insensitive);
+        let text = self.folded.as_str();
+        text.match_indices(needle.as_str())
+            .filter(|(offset, _)| {
+                !whole_words
+                    || ((!needle.chars().next().is_some_and(word)
+                        || text[..*offset]
+                            .chars()
+                            .next_back()
+                            .is_none_or(|ch| !word(ch)))
+                        && (!needle.chars().next_back().is_some_and(word)
+                            || text[*offset + needle.len()..]
+                                .chars()
+                                .next()
+                                .is_none_or(|ch| !word(ch))))
+            })
+            .filter_map(|(offset, _)| {
+                let start = self.original_offset(offset);
+                let end = self.original_offset(offset + needle.len());
+                (!self.crosses_block_end(start, end)).then_some(start)
+            })
+            .collect()
+    }
+}
+
+/// Whether a claim anchor occurs, allowing for how the content happens to wrap.
+fn claim_is_present(text: &str, claim: &str, block_ends: &[usize]) -> bool {
+    text.contains(claim)
+        || !LiteralText::new(text, block_ends, false)
+            .matches(claim, false)
+            .is_empty()
 }
 
 /// An assessment produced by an external reviewer; it is not verified by Aexeo.
@@ -518,6 +679,18 @@ pub struct ContentGateResult {
     pub measurements: std::collections::BTreeMap<String, usize>,
 }
 
+impl ContentGateResult {
+    /// All findings of this gate, including any omitted from `findings`.
+    pub fn total_findings(&self) -> usize {
+        self.findings.len()
+            + self
+                .measurements
+                .get(FINDINGS_OMITTED)
+                .copied()
+                .unwrap_or(0)
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ContentSummary {
     pub passed: usize,
@@ -557,6 +730,12 @@ impl ContentPreset {
         }
         if self.name.trim().is_empty() {
             bail!("preset name must not be empty");
+        }
+        if self.gates.is_empty() {
+            bail!(
+                "preset {:?} has no gates, so it would check nothing",
+                self.name
+            );
         }
         let mut ids = BTreeSet::new();
         for gate in &self.gates {
@@ -797,6 +976,9 @@ impl ContentPreset {
         self.validate()?;
         let mut results = Vec::with_capacity(self.gates.len());
         let mut word_count = None;
+        let block_ends = context
+            .and_then(|context| context.block_ends.as_deref())
+            .unwrap_or_default();
         for gate in &self.gates {
             if let Some(observe) = observer.as_deref_mut() {
                 observe(GateObservation::Started);
@@ -804,7 +986,12 @@ impl ContentPreset {
             let mut findings = Vec::new();
             let mut reason = None;
             let mut measurements = std::collections::BTreeMap::new();
+            let mut omitted = 0;
             let mut emit = |message: String, line: usize, column: usize| {
+                if findings.len() >= MAX_FINDINGS_PER_GATE {
+                    omitted += 1;
+                    return;
+                }
                 findings.push(aexeo_contracts::Finding {
                     rule_id: gate.id().to_owned(),
                     message,
@@ -934,8 +1121,13 @@ impl ContentPreset {
                                 invalid += 1;
                                 emit(
                                     format!(
-                                        "Link destination #{} is invalid or has a disallowed scheme",
-                                        index + 1
+                                        "Link destination #{} {}",
+                                        index + 1,
+                                        link_destination_problem(
+                                            destination,
+                                            allowed_schemes,
+                                            *allow_relative,
+                                        )
                                     ),
                                     1,
                                     1,
@@ -989,6 +1181,7 @@ impl ContentPreset {
                             let mut line = 1;
                             let mut column = 1;
                             let mut first_position = None;
+                            let mut next_block = 0;
                             for (offset, ch) in text
                                 .char_indices()
                                 .map(|(offset, ch)| (offset, Some(ch)))
@@ -1003,7 +1196,13 @@ impl ContentPreset {
                                         .chars()
                                         .next()
                                         .is_some_and(|c| c.is_ascii_digit());
-                                if !decimal_point && ch.is_none_or(|ch| delimiters.contains(ch)) {
+                                while block_ends.get(next_block).is_some_and(|&end| end < offset) {
+                                    next_block += 1;
+                                }
+                                let block_end = block_ends.get(next_block) == Some(&offset);
+                                if block_end
+                                    || !decimal_point && ch.is_none_or(|ch| delimiters.contains(ch))
+                                {
                                     let count =
                                         text[segment_start..offset].split_whitespace().count();
                                     if count > 0 {
@@ -1053,10 +1252,11 @@ impl ContentPreset {
                         Some(text) => {
                             let mut total = 0;
                             let mut exceeded = 0;
+                            let literal = LiteralText::new(text, block_ends, false);
                             for term in terms {
                                 let mut first_excess = None;
                                 let mut count = 0;
-                                for (offset, _) in term_matches(text, term, *whole_words) {
+                                for offset in literal.matches(term, *whole_words) {
                                     count += 1;
                                     if count > *max_occurrences && first_excess.is_none() {
                                         first_excess = Some(offset);
@@ -1085,14 +1285,20 @@ impl ContentPreset {
                         None => reason = Some("text is unavailable from this adapter".into()),
                     }
                 }
-                ContentGate::ForbiddenTerms { terms, .. } => {
+                ContentGate::ForbiddenTerms {
+                    terms,
+                    whole_words,
+                    case_insensitive,
+                    ..
+                } => {
                     measurements.insert("configured_terms".into(), terms.len());
                     match &input.text {
                         Some(text) => {
                             let mut matches = 0;
+                            let literal = LiteralText::new(text, block_ends, *case_insensitive);
                             for term in terms {
                                 let (mut cursor, mut line, mut column) = (0, 1, 1);
-                                for (offset, _) in term_matches(text, term, false) {
+                                for offset in literal.matches(term, *whole_words) {
                                     matches += 1;
                                     for ch in text[cursor..offset].chars() {
                                         if ch == '\n' {
@@ -1196,7 +1402,7 @@ impl ContentPreset {
                 } => match (&input.text, &input.evidence_sources) {
                     (Some(text), Some(sources)) => match sources.get(source) {
                         Some(snapshot) => {
-                            if !text.contains(claim) {
+                            if !claim_is_present(text, claim, block_ends) {
                                 emit("Claim anchor is absent from content".into(), 1, 1);
                             }
                             if !snapshot.contains(quote) {
@@ -1224,7 +1430,7 @@ impl ContentPreset {
                         {
                             Ok(value) => match value.pointer(pointer) {
                                 Some(actual) => {
-                                    if !text.contains(claim) {
+                                    if !claim_is_present(text, claim, block_ends) {
                                         emit("Claim anchor is absent from content".into(), 1, 1);
                                     }
                                     if actual != expected {
@@ -1270,7 +1476,7 @@ impl ContentPreset {
                                         && record.source_text == *snapshot
                                         && !record.reviewer.trim().is_empty() =>
                                 {
-                                    if !text.contains(claim) {
+                                    if !claim_is_present(text, claim, block_ends) {
                                         emit("Claim anchor is absent from content".into(), 1, 1);
                                     }
                                     match (&record.support, &record.reliability) {
@@ -1364,6 +1570,22 @@ impl ContentPreset {
                     }
                 }
             }
+            if omitted > 0 {
+                measurements.insert(FINDINGS_OMITTED.into(), omitted);
+            }
+            if reason.is_some()
+                && !matches!(
+                    gate,
+                    ContentGate::RequiredMetadata { .. }
+                        | ContentGate::UniqueCollectionMetadata { .. }
+                        | ContentGate::Custom { .. }
+                        | ContentGate::SiteGroup { .. }
+                        | ContentGate::SiteAudit { .. }
+                )
+                && let Some(limit) = context.and_then(|context| context.input_limit.as_ref())
+            {
+                reason = Some(limit.clone());
+            }
             let status = if reason.is_some() {
                 GateStatus::NotChecked
             } else if findings.is_empty() {
@@ -1420,6 +1642,149 @@ impl ContentPreset {
 
 #[cfg(test)]
 mod tests {
+    fn literal_input(text: &str) -> ContentInput {
+        ContentInput {
+            id: "t".into(),
+            text: Some(text.into()),
+            ..Default::default()
+        }
+    }
+
+    fn forbidden(settings: &str, text: &str) -> ContentGateResult {
+        ContentPreset::from_toml(&format!(
+            "version=1\nname='t'\n[[gates]]\nid='g'\nkind='forbidden_terms'\n{settings}\n"
+        ))
+        .unwrap()
+        .evaluate(&literal_input(text))
+        .unwrap()
+        .gates
+        .remove(0)
+    }
+
+    #[test]
+    fn forbidden_terms_default_to_whole_words_like_repeated_terms() {
+        assert_eq!(
+            forbidden("terms=['free']", "freedom and carefree").status,
+            GateStatus::Passed
+        );
+        assert_eq!(
+            forbidden("terms=['free']", "a free trial").status,
+            GateStatus::Failed
+        );
+        assert_eq!(
+            forbidden("terms=['free']\nwhole_words=false", "freedom").status,
+            GateStatus::Failed
+        );
+    }
+
+    #[test]
+    fn whole_words_still_match_in_scripts_without_spaces() {
+        assert_eq!(
+            forbidden("terms=['価格']", "この価格は安い").status,
+            GateStatus::Failed
+        );
+        assert_eq!(
+            forbidden("terms=['free']", "無料free試用").status,
+            GateStatus::Failed
+        );
+    }
+
+    #[test]
+    fn forbidden_terms_are_case_sensitive_unless_configured() {
+        assert_eq!(
+            forbidden("terms=['free']", "FREE").status,
+            GateStatus::Passed
+        );
+        assert_eq!(
+            forbidden("terms=['free']\ncase_insensitive=true", "A FREE trial").status,
+            GateStatus::Failed
+        );
+        let result = forbidden("terms=['fin']\ncase_insensitive=true", "İİ\nİ FIN");
+        assert_eq!((result.findings[0].line, result.findings[0].column), (2, 3));
+    }
+
+    #[test]
+    fn literal_matches_ignore_whitespace_differences_and_keep_positions() {
+        let result = forbidden(
+            "terms=['best price']",
+            "é  best\n  price and best\u{a0}price and best  price",
+        );
+        let positions: Vec<_> = result.findings.iter().map(|f| (f.line, f.column)).collect();
+        assert_eq!(positions, [(1, 4), (2, 13), (2, 28)]);
+        assert_eq!(
+            forbidden("terms=['best price']", "best\n\nprice").status,
+            GateStatus::Passed
+        );
+    }
+
+    #[test]
+    fn wrapped_claims_are_present_in_every_anchor_gate() {
+        for gate in [
+            "kind='evidence_anchors'\nsource='s'\nclaim='rose by ten percent'\nquote='x'",
+            "kind='structured_fact'\nsource='s'\nclaim='rose by ten percent'\npointer=''\nexpected='x'",
+        ] {
+            let preset = ContentPreset::from_toml(&format!(
+                "version=1\nname='t'\n[[gates]]\nid='g'\n{gate}\n"
+            ))
+            .unwrap();
+            let report = preset
+                .evaluate(&ContentInput {
+                    evidence_sources: Some(BTreeMap::from([("s".into(), "\"x\"".into())])),
+                    ..literal_input("Sales rose\nby ten\n  percent.")
+                })
+                .unwrap();
+            assert_eq!(report.gates[0].status, GateStatus::Passed, "{gate}");
+        }
+    }
+
+    #[test]
+    fn findings_are_capped_and_the_rest_counted() {
+        let result = forbidden("terms=['x']", &"x ".repeat(MAX_FINDINGS_PER_GATE + 5));
+        assert_eq!(result.status, GateStatus::Failed);
+        assert_eq!(result.findings.len(), MAX_FINDINGS_PER_GATE);
+        assert_eq!(result.measurements[FINDINGS_OMITTED], 5);
+        assert_eq!(result.measurements["matches"], MAX_FINDINGS_PER_GATE + 5);
+        assert_eq!(result.total_findings(), MAX_FINDINGS_PER_GATE + 5);
+    }
+
+    #[test]
+    fn a_preset_without_gates_is_invalid() {
+        assert!(ContentPreset::from_toml("version=1\nname='x'\ngates=[]\n").is_err());
+    }
+
+    #[test]
+    fn link_finding_names_value_and_scheme() {
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='t'\n[[gates]]\nid='g'\nkind='link_destinations'\nallowed_schemes=['https']\nallow_relative=false\n",
+        )
+        .unwrap();
+        let destinations = [
+            "http://a.example".to_owned(),
+            "/local".to_owned(),
+            "a b".to_owned(),
+        ];
+        let report = preset
+            .evaluate_with_destinations(
+                &literal_input(""),
+                &ContentEvaluationContext::default(),
+                Some(&destinations),
+            )
+            .unwrap();
+        let messages: Vec<_> = report.gates[0]
+            .findings
+            .iter()
+            .map(|f| f.message.as_str())
+            .collect();
+        assert_eq!(
+            messages,
+            [
+                "Link destination #1 \"http://a.example\" has disallowed scheme \"http\"; allowed: https",
+                "Link destination #2 \"/local\" is relative, and relative links are not allowed",
+                "Link destination #3 \"a b\" is empty or contains whitespace or control characters",
+            ]
+        );
+    }
+
     use super::*;
     const PRESET: &str = r#"
 version = 1

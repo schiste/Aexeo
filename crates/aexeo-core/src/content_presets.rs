@@ -82,12 +82,19 @@ pub fn resolve_content_preset(
             name: spec.name,
             gates,
         };
-        preset
-            .validate()
-            .with_context(|| format!("invalid resolved preset {name}"))?;
+        // A parent may contribute no gates; only the resolved result must have some.
+        if !preset.gates.is_empty() {
+            preset
+                .validate()
+                .with_context(|| format!("invalid resolved preset {name}"))?;
+        }
         Ok(preset)
     }
-    visit(name, sources, &mut Vec::new()).map_err(into_user_error)
+    let preset = visit(name, sources, &mut Vec::new()).map_err(into_user_error)?;
+    if preset.gates.is_empty() {
+        crate::user_bail!("preset {name} resolves to no gates, so it would check nothing");
+    }
+    Ok(preset)
 }
 
 fn merge_gate(gates: &mut Vec<ContentGate>, gate: ContentGate) {
@@ -139,6 +146,31 @@ pub fn builtin_content_presets() -> BTreeMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn resolved_preset_without_gates_is_an_error_but_an_empty_parent_is_not() {
+        let sources = BTreeMap::from([
+            ("empty".to_owned(), "version=1\nname='x'\n".to_owned()),
+            (
+                "child".to_owned(),
+                "version=1\nname='c'\nextends=['empty']\n[[gates]]\nid='w'\nkind='word_count'\nmin=1\n"
+                    .to_owned(),
+            ),
+            (
+                "disabled".to_owned(),
+                "version=1\nname='d'\nextends=['child']\ndisable=['w']\n".to_owned(),
+            ),
+        ]);
+        assert!(resolve_content_preset("empty", &sources).is_err());
+        assert!(resolve_content_preset("disabled", &sources).is_err());
+        assert_eq!(
+            resolve_content_preset("child", &sources)
+                .unwrap()
+                .gates
+                .len(),
+            1
+        );
+    }
+
     #[test]
     fn editorial_starters_are_composable_and_advisory() {
         use crate::content_gate::{ContentInput, GateStatus};
