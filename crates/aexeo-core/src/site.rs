@@ -3,6 +3,7 @@ mod parser;
 #[path = "site/sitemap.rs"]
 mod sitemap;
 
+use crate::error::UserContext;
 use aexeo_contracts::{AuditCrawlMeta, AuditPageSnapshot, AuditSiteSnapshot};
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
@@ -665,6 +666,10 @@ pub fn build_site_from_audit_snapshot(snapshot: &AuditSiteSnapshot) -> Result<Si
 }
 
 pub fn load_site(root: &Path) -> Result<Site> {
+    read_site(root).user_context(format!("cannot load site at {}", root.display()))
+}
+
+fn read_site(root: &Path) -> Result<Site> {
     let mut html_files = Vec::new();
     iter_html_files(root, &mut html_files)?;
     html_files.sort();

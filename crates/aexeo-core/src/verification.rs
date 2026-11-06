@@ -6,6 +6,7 @@ use std::path::Path;
 
 use aexeo_contracts::{AuditArtifact, AuditStatus, Finding, FindingFingerprint};
 
+use crate::error::UserContext;
 use crate::reporting::{build_audit_artifact, summarize_findings};
 use crate::site::{Site, build_site_from_audit_snapshot};
 
@@ -17,11 +18,13 @@ pub struct DiffResult {
 }
 
 pub fn load_audit_artifact(path: &Path) -> Result<AuditArtifact> {
-    let text = fs::read_to_string(path)?;
+    let text = fs::read_to_string(path)
+        .user_context(format!("cannot read audit artifact {}", path.display()))?;
     if let Ok(artifact) = serde_json::from_str::<AuditArtifact>(&text) {
         return Ok(artifact);
     }
-    let findings = serde_json::from_str::<Vec<Finding>>(&text)?;
+    let findings = serde_json::from_str::<Vec<Finding>>(&text)
+        .user_context(format!("invalid audit artifact {}", path.display()))?;
     let mut artifact = build_audit_artifact("legacy", &findings, AuditStatus::Complete, None, None);
     artifact.generated_at = 0;
     artifact.summary = summarize_findings(&artifact.findings);
@@ -41,7 +44,8 @@ pub fn site_from_audit_artifact(artifact: &AuditArtifact) -> Result<Site> {
 
 pub fn load_site_from_audit_artifact(path: &Path) -> Result<(AuditArtifact, Site)> {
     let artifact = load_audit_artifact(path)?;
-    let site = site_from_audit_artifact(&artifact)?;
+    let site = site_from_audit_artifact(&artifact)
+        .user_context(format!("unusable audit artifact {}", path.display()))?;
     Ok((artifact, site))
 }
 
