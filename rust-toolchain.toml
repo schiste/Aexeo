@@ -1,14 +1,17 @@
 # Pinned toolchain for the workspace.
 #
-# The workspace declares `edition = "2024"`, which requires Rust 1.85 or
-# newer. There was no `rust-toolchain.toml` and no `rust-version` in
-# `Cargo.toml`, so a stable-channel regression would have broken every CI run
-# and every contributor's build with no earlier warning and no statement of
-# the minimum supported version.
+# An exact release, so a new stable cannot turn CI red on an unrelated commit
+# or make a release build differ from the commit CI checked. Dependabot proposes
+# bumps (.github/dependabot.yml); ci.yml and release-internal.yml read the
+# channel from this file. This is the toolchain development uses; the oldest
+# one the workspace supports is `rust-version` in Cargo.toml, checked by the
+# msrv job in ci.yml.
 #
-# `stable` is pinned rather than a fixed release number: contributors should
-# track the current stable toolchain, and the components below are the ones
-# `scripts/check-code.sh` and `scripts/clippy-strict.sh` actually invoke.
+# The components are the ones `scripts/check-code.sh` and
+# `scripts/clippy-strict.sh` invoke. The target is the one
+# `packages/aexeo-emdash/scripts/build-wasm.sh` needs: rustup keeps targets per
+# toolchain, so without it every bump would strand that build.
 [toolchain]
-channel = "stable"
+channel = "1.99.0"
 components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]
