@@ -194,6 +194,38 @@ fn fix_dry_run_reports_planned_changes_without_writing() {
 }
 
 #[test]
+fn page_title_cannot_break_out_of_an_injected_schema_block() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let root = temp_dir.path();
+    let home = root.join("index.html");
+    write(
+        &home,
+        "<html lang=\"en\"><head><title>&lt;/script&gt;&lt;script&gt;alert(1)&lt;/script&gt;</title></head><body><h1>Home</h1></body></html>",
+    );
+
+    let bundle = Command::new(bin())
+        .args(["generate", "public-bundle"])
+        .arg(root)
+        .args(["--site-url", "https://example.com", "--write-dir"])
+        .arg(root)
+        .output()
+        .unwrap();
+    assert!(bundle.status.success());
+    let fix = Command::new(bin())
+        .arg("fix")
+        .arg(root)
+        .arg("--inject-schema")
+        .output()
+        .unwrap();
+    assert!(fix.status.success());
+
+    let html = std::fs::read_to_string(&home).unwrap();
+    assert!(html.contains("application/ld+json"), "{html}");
+    assert!(!html.contains("<script>alert"), "{html}");
+    assert_eq!(html.matches("</script>").count(), 1, "{html}");
+}
+
+#[test]
 fn baseline_json_contract_reports_output_path() {
     let temp_dir = tempfile::tempdir().unwrap();
     write_minimal_site(temp_dir.path());

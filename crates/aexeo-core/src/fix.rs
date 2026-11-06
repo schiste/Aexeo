@@ -377,10 +377,7 @@ fn plan_schema_injection_fixes(plan: &mut FixPlan, root: &Path) -> Result<()> {
             if existing_types.contains(type_name.as_str()) {
                 continue;
             }
-            let body_text = serde_json::to_string(body).unwrap_or_else(|_| "{}".to_string());
-            to_inject.push(format!(
-                "<script type=\"application/ld+json\">{body_text}</script>"
-            ));
+            to_inject.push(render_json_ld_script(body));
         }
         if to_inject.is_empty() {
             continue;
@@ -388,6 +385,18 @@ fn plan_schema_injection_fixes(plan: &mut FixPlan, root: &Path) -> Result<()> {
         plan.inject_into_head(&html_path, &to_inject)?;
     }
     Ok(())
+}
+
+/// JSON-LD block for a page. serde_json leaves `<` as is, and suggestion text
+/// comes from page content, so `</script>` in a value would end the block and
+/// run what follows. JSON unicode escapes keep the value identical for parsers.
+fn render_json_ld_script(body: &serde_json::Value) -> String {
+    let body_text = serde_json::to_string(body)
+        .unwrap_or_else(|_| "{}".to_string())
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('&', "\\u0026");
+    format!("<script type=\"application/ld+json\">{body_text}</script>")
 }
 
 /// Scan an HTML string for the `@type` values of every existing
@@ -783,6 +792,38 @@ mod tests {
             1,
             "schema injection must not duplicate types on second run"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn injected_schema_cannot_close_its_script_block() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><title>x</title></head><body></body></html>",
+        );
+        write(
+            &root.join("schema-suggestions.json"),
+            r#"{"suggestions":[{"route":"","types":{"WebSite":{"@type":"WebSite","name":"</script><script>alert(1)</script> & co"}}}]}"#,
+        );
+
+        apply_safe_fixes_with_options(
+            root,
+            &Config::default(),
+            FixOptions {
+                inject_schema: true,
+                ..FixOptions::default()
+            },
+        )?;
+
+        let html = fs::read_to_string(root.join("index.html"))?;
+        assert_eq!(html.matches("</script>").count(), 1, "{html}");
+        assert!(!html.contains("<script>"), "{html}");
+        let start = html.find("ld+json\">").unwrap() + "ld+json\">".len();
+        let end = html.find("</script>").unwrap();
+        let value: serde_json::Value = serde_json::from_str(&html[start..end])?;
+        assert_eq!(value["name"], "</script><script>alert(1)</script> & co");
         Ok(())
     }
 
