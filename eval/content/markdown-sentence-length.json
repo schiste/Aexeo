@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "fixture_kind": "synthetic_regression",
+  "description": "Synthetic Markdown regression fixture, written to pin specific adapter and gate behaviour. Labels are the expected tool behaviour, not human-reviewed editorial judgements, and results do not estimate production accuracy.",
+  "preset": "fixture",
+  "preset_toml": "version=1\nname='fixture'\n[[gates]]\nid='g'\nkind='sentence_length'\nmax_words=6\ndelimiters='.!?。！？'\n",
+  "gate_id": "g",
+  "input_format": "markdown",
+  "examples": [
+    {
+      "id": "bullets",
+      "split": "development",
+      "text": "- one two three four\n- five six seven eight\n- nine ten eleven twelve\n",
+      "expected": "passed",
+      "why": "Each list item ends a sentence.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "table-cells",
+      "split": "development",
+      "text": "| one two three four | five six seven eight |\n| --- | --- |\n| nine ten eleven twelve | one two three four |\n",
+      "expected": "passed",
+      "why": "Each table cell ends a sentence.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "heading-then-paragraph",
+      "split": "development",
+      "text": "# one two three four\n\nfive six seven eight\n",
+      "expected": "passed",
+      "why": "A heading is not joined to the next paragraph.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "soft-wrap-one-sentence",
+      "split": "development",
+      "text": "one two three four\nfive six seven eight\n",
+      "expected": "failed",
+      "why": "A soft wrap does not end a sentence.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "ordered-list",
+      "split": "holdout",
+      "text": "1. one two three four\n2. five six seven eight\n",
+      "expected": "passed",
+      "why": "Each ordered item ends a sentence.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "long-bullet",
+      "split": "holdout",
+      "text": "- one two three four five six seven\n- short\n",
+      "expected": "failed",
+      "why": "One bullet alone exceeds the limit.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "cjk-delimiters",
+      "split": "holdout",
+      "text": "短い文です。次の文です。\n",
+      "expected": "passed",
+      "why": "CJK delimiters split, and each sentence has one whitespace-separated word.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "cjk-spaced-long",
+      "split": "holdout",
+      "text": "一 二 三 四 五 六 七 八。\n",
+      "expected": "failed",
+      "why": "Word counting remains whitespace-based for CJK text.",
+      "review_status": "not_reviewed"
+    }
+  ]
+}

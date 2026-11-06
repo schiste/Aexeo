@@ -43,8 +43,10 @@ fn collection_cli_reports_duplicates_missing_data_and_private_telemetry() {
     assert_eq!(report["gates"][0]["status"], "not_checked");
     let ambiguous = run(r#"[{"id":"/a"},{"id":"/a"}]"#);
     assert!(!ambiguous.status.success());
+    let failure: serde_json::Value = serde_json::from_slice(&ambiguous.stdout).unwrap();
     assert!(
-        String::from_utf8(ambiguous.stderr)
+        failure["error"]
+            .as_str()
             .unwrap()
             .contains("IDs must be nonempty and unique")
     );

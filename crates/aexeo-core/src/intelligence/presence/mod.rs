@@ -11,11 +11,11 @@
 //     bridge keeps the wire format identical (camelCase JSON).
 //
 // The five sources:
-//   - Wikipedia        — OpenSearch
+//   - Wikipedia        — OpenSearch, one language edition per run
 //   - Wikidata         — wbsearchentities
 //   - GitHub           — /users/<handle>
 //   - RDAP             — rdap.org redirector
-//   - Common Crawl     — CDX index
+//   - Common Crawl     — CDX index of the newest listed crawl
 //
 // Network code lives behind the `net` feature; the WASM bridge
 // builds without it. The pure helpers (formatting, host parsing,
@@ -28,7 +28,8 @@ mod util;
 mod sources;
 
 pub use types::{
-    EntityInput, SOURCE_ORDER, SourceResult, SourceStatus, entity_from_manifest, source_label,
+    DEFAULT_WIKIPEDIA_LANGUAGE, EntityInput, SOURCE_ORDER, SourceResult, SourceStatus,
+    entity_from_manifest, is_wikipedia_language, source_label,
 };
 pub use util::{
     days_since, extract_host, format_age, format_cdx_timestamp, fuzzy_match, iso_now,

@@ -103,9 +103,13 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: sed -n 's/^channel = "\(.*\)"$/channel=\1/p' rust-toolchain.toml >> "$GITHUB_OUTPUT"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -152,6 +156,34 @@ jobs:
       - name: Test optional adapter without network
         run: python3 -m unittest discover -s adapters/jev -v
 
+  # `rust-version` in Cargo.toml is a promise nothing else checks: every other
+  # job builds with the newer pin from rust-toolchain.toml. If a dependency bump
+  # or new code needs a newer compiler, this goes red: raise rust-version to
+  # what it takes. RUSTUP_TOOLCHAIN outranks rust-toolchain.toml for the whole
+  # job, including the toolchain probe inside rust-cache.
+  msrv:
+    name: msrv (cargo check at rust-version)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read declared rust-version
+        id: msrv
+        run: |
+          set -eu
+          version=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "RUSTUP_TOOLCHAIN=$version" >> "$GITHUB_ENV"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: msrv
+      - name: Check the workspace at rust-version
+        run: cargo check --workspace --all-targets --locked
+
   validate:
     name: validate (rust gate, install smoke, perf budget)
     runs-on: ubuntu-latest
@@ -163,12 +195,16 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: sed -n 's/^channel = "\(.*\)"$/channel=\1/p' rust-toolchain.toml >> "$GITHUB_OUTPUT"
       - name: Install Rust
-        # The action's `toolchain` input defaults to `stable`, so pinning the
-        # action to a commit SHA pins the action code without freezing the
-        # Rust version it installs.
+        # The action's `toolchain` input defaults to `stable`, a different
+        # rustup toolchain from the pin that cargo selects in this repository,
+        # so name the pin or `components` land on the wrong one.
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
           components: rustfmt, clippy
       # Nothing was cached before, so every run paid for a cold registry
       # download plus a cold fmt + 2x clippy + full test suite + release
@@ -182,10 +218,8 @@ jobs:
       # `rustc -vV`.
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      - name: Install nightly for unused-dependency analysis
-        run: rustup toolchain install nightly --profile minimal --component rust-src --component llvm-tools-preview
-      - name: Install Rust quality tools
-        run: cargo install --locked cargo-audit cargo-deny cargo-udeps
+      - name: Install Rust quality tools and the pinned nightly
+        run: sh scripts/install-quality-tools.sh --skip-ripgrep
       - name: Run repo quality gate
         run: sh scripts/check-repo.sh
       - name: Run release install smoke
@@ -245,14 +279,21 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read pinned Rust toolchain
+        id: toolchain
+        run: sed -n 's/^channel = "\(.*\)"$/channel=\1/p' rust-toolchain.toml >> "$GITHUB_OUTPUT"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           # Instrumented artifacts are not interchangeable with normal ones.
           key: coverage
       - name: Install cargo-llvm-cov
-        run: cargo install --locked cargo-llvm-cov
+        run: |
+          . scripts/quality-tool-versions.sh
+          cargo install --locked "cargo-llvm-cov@$AEXEO_CARGO_LLVM_COV_VERSION"
       - name: Measure coverage floor
         env:
           COVERAGE_MIN: 87

@@ -136,8 +136,7 @@ export function layerOneLineDescription(layer: Layer): string {
 }
 
 // Mirror of aexeo-core's SiteIntelligenceScore. Exact subset the
-// dashboard widget consumes; less-used fields like elapsed_us live in
-// the JSON the bridge emits but are not typed here.
+// dashboard widget consumes. null means unknown: nothing was measured.
 // Mirror of aexeo-core's TruthStructuredSource enum (snake_case as
 // serialized by serde). The bridge splices this onto SiteIntelligenceScore
 // JSON so the dashboard widget can badge the truth score with the actual
@@ -150,14 +149,20 @@ export type StructuredTruthSource =
   | "none";
 
 export interface SiteIntelligenceScore {
-  citation_readiness_score: number;
-  truth_consistency_score: number;
-  answer_pack_score: number;
+  citation_readiness_score: number | null;
+  truth_consistency_score: number | null;
+  answer_pack: AnswerPackFacts;
   external_trust_alignment_score: number | null;
-  overall_score: number;
   route_scores: unknown[];
   blockers: IntelligenceBlocker[];
   structured_truth_source?: StructuredTruthSource;
+}
+
+export interface AnswerPackFacts {
+  routes_analyzed: number;
+  routes_with_answer_blocks: number;
+  routes_with_coverage_gaps: number;
+  answer_blocks: number;
 }
 
 export interface IntelligenceBlocker {

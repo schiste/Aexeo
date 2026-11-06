@@ -17,6 +17,7 @@ fn sitewide_finding(rule_id: &str, message: String, suggestion: Option<String>) 
         severity: "warning".to_string(),
         suggestion,
         scope: FindingScope::Sitewide,
+        subject: None,
     }
 }
 
@@ -84,6 +85,7 @@ pub fn run_surface_rules(site: &Site, config: &Config) -> Vec<Finding> {
                         .to_string(),
                 ),
                 scope: FindingScope::Page,
+                subject: None,
             });
         } else if route.static_machine_links.is_empty() {
             findings.push(Finding {
@@ -100,6 +102,7 @@ pub fn run_surface_rules(site: &Site, config: &Config) -> Vec<Finding> {
                         .to_string(),
                 ),
                 scope: FindingScope::Page,
+                subject: None,
             });
         }
     }
@@ -127,6 +130,7 @@ pub fn run_surface_rules(site: &Site, config: &Config) -> Vec<Finding> {
                         .to_string(),
                 ),
                 scope: FindingScope::Sitewide,
+                subject: surface.path.clone().or_else(|| surface.url.clone()),
             });
         }
     }

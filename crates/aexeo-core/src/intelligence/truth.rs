@@ -1,11 +1,12 @@
 use crate::time_shim::Instant;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use url::Url;
 
+use crate::error::UserContext;
 use crate::schema_rules::{iter_schema_field_values, iter_schema_types};
 use crate::site::{PageKind, Site};
 
@@ -114,9 +115,9 @@ pub struct TruthManifestGeneration {
 
 pub fn load_truth_manifest(path: &Path) -> Result<TruthManifest> {
     let raw = fs::read_to_string(path)
-        .with_context(|| format!("failed to read facts manifest {}", path.display()))?;
+        .user_context(format!("failed to read facts manifest {}", path.display()))?;
     let manifest = serde_json::from_str::<TruthManifest>(&raw)
-        .with_context(|| format!("failed to parse facts manifest {}", path.display()))?;
+        .user_context(format!("failed to parse facts manifest {}", path.display()))?;
     Ok(manifest)
 }
 
@@ -1211,8 +1212,8 @@ fn is_generic_site_label(value: &str) -> bool {
 /// "Page introuvable" leaking through the v0.0.9 blocklist that
 /// was English-only. Rather than enumerate every locale, we match
 /// on cross-language morphological cues (`-found`, `-trouv`,
-/// `-encontr`, `-trovat`, `-gefunden`) plus the literal numeric
-/// "404" anchor that's the same across languages.
+/// `-encontr`, `-trovat`, `-gefunden`) plus a title segment that is
+/// only a 404 label, which is the same across languages.
 fn looks_like_error_page(title: Option<&str>, h1_texts: &[String]) -> bool {
     let candidates: Vec<&str> = title
         .into_iter()
@@ -1220,7 +1221,7 @@ fn looks_like_error_page(title: Option<&str>, h1_texts: &[String]) -> bool {
         .collect();
     candidates.iter().any(|raw| {
         let lower = raw.to_ascii_lowercase();
-        lower.contains("404")
+        is_404_label(&lower)
             || lower.contains("page doesn't exist")
             || lower.contains("does not exist")
             // English: "page not found", "not found"
@@ -1238,6 +1239,28 @@ fn looks_like_error_page(title: Option<&str>, h1_texts: &[String]) -> bool {
             // Dutch: "pagina niet gevonden"
             || lower.contains("niet gevonden")
     })
+}
+
+/// Whether a lowercased title has a segment that is nothing but a 404 label
+/// ("404", "Error 404", "Oops! 404 | Acme"). Merely mentioning 404 is not
+/// enough: "Top 404 errors guide" is a real page about 404s.
+fn is_404_label(lower: &str) -> bool {
+    const LABEL_WORDS: &[&str] = &[
+        "404", "code", "erreur", "err", "error", "errore", "fehler", "http", "oops", "page",
+        "pagina", "página", "seite",
+    ];
+    lower
+        .split(['|', '–', '—', '·', '•'])
+        .flat_map(|segment| segment.split(" - "))
+        .any(|segment| {
+            let mut words = segment
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|word| !word.is_empty())
+                .peekable();
+            words.peek().is_some()
+                && segment.contains("404")
+                && words.all(|word| LABEL_WORDS.contains(&word))
+        })
 }
 
 fn score_name_quality(value: &str) -> usize {
@@ -1811,6 +1834,53 @@ mod tests {
             generated.manifest.products.first().map(|p| p.name.as_str()),
             Some("AeptusOS"),
             "schema-typed product should win over org-name fallback"
+        );
+    }
+
+    #[test]
+    fn error_page_heuristic_keeps_pages_that_only_mention_404() {
+        for kept in [
+            "Top 404 errors guide",
+            "How to fix a 404 error",
+            "404 errors explained | Acme",
+            "Error 404: how to fix it",
+            "The 4040 report",
+        ] {
+            assert!(!looks_like_error_page(Some(kept), &[]), "{kept}");
+            assert!(
+                !looks_like_error_page(None, &[kept.to_string()]),
+                "h1 {kept}"
+            );
+        }
+        for dropped in [
+            "404",
+            "Error 404",
+            "404 error",
+            "HTTP 404",
+            "Oops! 404",
+            "404 | Acme",
+            "Acme - 404",
+            "Erreur 404 — Acme",
+            "404 page",
+            "404 - Page not found",
+        ] {
+            assert!(looks_like_error_page(Some(dropped), &[]), "{dropped}");
+        }
+    }
+
+    #[test]
+    fn organization_detection_counts_a_page_about_404_errors() {
+        let temp = tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("guides")).unwrap();
+        std::fs::write(
+            temp.path().join("guides/errors.html"),
+            r#"<html><head><title>Top 404 errors guide</title></head><body><p>Guide</p></body></html>"#,
+        )
+        .unwrap();
+        let site = load_site(temp.path()).unwrap();
+        assert_eq!(
+            detect_organization_name(&site).as_deref(),
+            Some("Top 404 errors guide")
         );
     }
 
