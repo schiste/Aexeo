@@ -371,8 +371,10 @@ Node adapter.
   evaluated document under `document:<route>`.
 - **Auto-evaluate on save**: emdash's `content:afterSave` hook fires
   for each save, re-evaluates that one document, and updates its
-  KV findings entry. The dashboard widget reflects the new score on
-  the next page load.
+  KV findings entry. Findings that depend on other documents, such as
+  broken internal links, keep their last Refresh result until the next
+  Refresh. The dashboard widget reflects the new score on the next page
+  load.
 
 ## Architecture in one paragraph
 

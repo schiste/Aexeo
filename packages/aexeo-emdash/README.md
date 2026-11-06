@@ -54,6 +54,9 @@ troubleshooting list, see [INSTALL.md](./INSTALL.md).
 - **Auto-evaluate on save**: EmDash's `content:afterSave` hook evaluates
   the saved document and updates its findings. Sandboxed installs need a
   configured evaluator sidecar; configured installs run evaluation in-process.
+  Findings that depend on other documents (broken and weak internal links,
+  inbound links, hreflang targets, shared canonicals, duplicate metadata and
+  text) stay as the last Refresh stored them until the next Refresh.
 
 ## Compatibility
 

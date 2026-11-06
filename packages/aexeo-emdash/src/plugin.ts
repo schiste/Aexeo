@@ -326,10 +326,33 @@ export async function handleAfterSave(
   );
 }
 
+// Page-scoped rules whose verdict depends on other documents. A save
+// evaluates one document, which the engine sees as a one-page site: the
+// link rules call every other route broken and the page an orphan, and the
+// cluster rules never find the other member. Only a Refresh evaluates the
+// whole document set, so these findings belong to Refresh alone.
+//
+// Evaluating the stored document set on each save would also answer them,
+// but it costs a full-site evaluation in the editor's save hook, on top of
+// a KV list that already returns every stored body.
+export const SITE_GRAPH_RULE_IDS: ReadonlySet<string> = new Set([
+  "LNK001", // internal link target missing from the site
+  "LNK002", // no inbound links
+  "LNK003", // weak anchor, checked only when the target route exists
+  "LNK004", // too few inbound links
+  "SEO009", // hreflang alternate target missing from the site
+  "SEO012", // hreflang alternate does not link back
+  "SEO016", // canonical points at another crawlable route
+  "SEO017", // title and description shared with another route
+  "CNT005", // visible text duplicated on another route
+]);
+
 // Parameterized afterSave for the configured plugin path. Runs in
 // the host's request context so all bridge calls are valid; replaces
 // just this document's findings (sitewide/template findings stay
 // untouched until the next Refresh, which sweeps the whole site).
+// Stored SITE_GRAPH_RULE_IDS findings are carried over the same way, so
+// they can lag this save until the next Refresh.
 //
 // Optional `suppressionFilter` is applied AFTER the evaluator runs
 // but BEFORE writing to KV — suppressed findings never reach the
@@ -366,11 +389,18 @@ export async function handleAfterSaveConfigured(
     return;
   }
 
-  // Page-scoped findings replace this route's stored set; sitewide
-  // and template-scoped findings are left for the next full Refresh.
-  const pageFindings = result.findings.filter(
-    (finding) => finding.scope === "page",
+  // Page-scoped findings replace this route's stored set; site-graph,
+  // sitewide and template-scoped findings are left for the next Refresh.
+  const storedGraphFindings = (await readFindings(kv, document.route)).filter(
+    (finding) => SITE_GRAPH_RULE_IDS.has(finding.rule_id),
   );
+  const pageFindings = [
+    ...result.findings.filter(
+      (finding) =>
+        finding.scope === "page" && !SITE_GRAPH_RULE_IDS.has(finding.rule_id),
+    ),
+    ...storedGraphFindings,
+  ];
   const filtered =
     suppressionFilter === undefined
       ? pageFindings
