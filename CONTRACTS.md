@@ -19,6 +19,9 @@ an Astro build pipeline, or a repo-level CLI integration.
   - `crates/aexeo-contracts`
   - `crates/aexeo-core`
   - `crates/aexeo-cli`
+  - `crates/aexeo-emdash-bridge`, the WASM bridge used by the EmDash plugin
+- `crates/tempfile` is a test-only helper, not a supported surface. See its
+  crate documentation.
 
 ### Stable external types
 
@@ -48,6 +51,10 @@ Stable prefixes:
 - `CRW`
 - `DEP`
 - `QLT`
+- `AGT`
+- `SRF`
+- `EDT`
+- `A11Y`
 
 ### Stable rule metadata semantics
 
