@@ -102,9 +102,10 @@ enabled = true
         .output()
         .unwrap();
     assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("plugin_settings.example.plugin"));
-    assert!(stderr.contains("requires `plugins`"));
+    let failure = parse_json(&output.stdout);
+    let error = failure["error"].as_str().unwrap();
+    assert!(error.contains("plugin_settings.example.plugin"));
+    assert!(error.contains("requires `plugins`"));
 }
 
 #[test]

@@ -40,6 +40,39 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(report["reviewed_metrics"]["recall"], 1)
         self.assertEqual(report["reviewed_metrics"]["unchecked_rate"], 0)
 
+    def test_expected_not_checked_is_separate_from_an_unexpected_one(self):
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": [
+            {"id": "a", "split": "holdout", "text": "a", "expected": "not_checked"},
+            {"id": "b", "split": "holdout", "text": "b", "expected": "not_checked"},
+            {"id": "c", "split": "holdout", "text": "c", "expected": "passed"},
+        ]}
+        results = [SimpleNamespace(returncode=2, stdout=json.dumps({"gates": [{"gate_id": "g", "status": status}]})) for status in ("not_checked", "passed", "not_checked")]
+        with patch.object(eval_module.subprocess, "run", side_effect=results):
+            counts = eval_module.evaluate("cli", corpus, "holdout")["counts"]
+        self.assertEqual(counts["expected_not_checked"], 1)
+        self.assertEqual(counts["missed_not_checked"], 1)
+        self.assertEqual(counts["not_checked"], 1)
+
+    def test_synthetic_fixture_rejects_declared_review(self):
+        corpus = {"version": 1, "fixture_kind": "synthetic_regression", "examples": [
+            {"id": "a", "split": "holdout", "text": "a", "expected": "passed", "review_status": "reviewed",
+             "review": {"reviewer": "reviewer-1", "method": "manual"}},
+        ]}
+        with self.assertRaisesRegex(ValueError, "synthetic"):
+            eval_module.validate_corpus(corpus)
+
+    def test_evidence_sources_reach_the_cli_as_local_files(self):
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "evidence_sources": {"s": "snapshot"}, "examples": [
+            {"id": "a", "split": "holdout", "text": "a", "expected": "passed"},
+        ]}
+        seen = []
+        def run(arguments, **_):
+            seen.append(Path(arguments[arguments.index("--evidence-source") + 1].split("=", 1)[1]).read_text(encoding="utf-8"))
+            return SimpleNamespace(returncode=0, stdout='{"gates":[{"gate_id":"g","status":"passed"}]}')
+        with patch.object(eval_module.subprocess, "run", side_effect=run):
+            eval_module.evaluate("cli", corpus, "holdout")
+        self.assertEqual(seen, ["snapshot"])
+
     def test_reviewed_metrics_are_null_without_reviewed_examples(self):
         corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": [
             {"id": "a", "split": "holdout", "text": "a", "expected": "passed"},

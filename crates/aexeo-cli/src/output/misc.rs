@@ -90,6 +90,48 @@ pub fn render_paths_command_json(
     })?)
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct SkippedFixOutput {
+    path: String,
+    reason: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct FixCommandOutput {
+    command: &'static str,
+    success: bool,
+    action: &'static str,
+    paths: Vec<String>,
+    skipped: Vec<SkippedFixOutput>,
+    warnings: Vec<ConfigWarning>,
+}
+
+pub fn render_fix_command_json(
+    report: &aexeo_core::FixReport,
+    dry_run: bool,
+    warnings: Vec<ConfigWarning>,
+) -> Result<String> {
+    Ok(serde_json::to_string_pretty(&FixCommandOutput {
+        command: "fix",
+        success: true,
+        action: if dry_run { "dry-run" } else { "apply" },
+        paths: report
+            .changed
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect(),
+        skipped: report
+            .skipped
+            .iter()
+            .map(|skipped| SkippedFixOutput {
+                path: skipped.path.display().to_string(),
+                reason: skipped.reason.clone(),
+            })
+            .collect(),
+        warnings,
+    })?)
+}
+
 pub fn render_path_command_json(
     command: &'static str,
     success: bool,

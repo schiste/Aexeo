@@ -62,6 +62,8 @@ def fetch_review(claim, source, model, reliability, threshold, key):
         headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
     with urllib.request.build_opener(NoRedirect()).open(request, timeout=30) as response:
         result = json.load(response)
+    if result["model"] != model:
+        raise ValueError("unexpected model")
     return review_from_response(claim, source, reliability, threshold, result)
 
 

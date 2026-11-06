@@ -5,6 +5,7 @@ use std::path::{Component, Path, PathBuf};
 use toml::Value;
 
 use super::Config;
+use crate::error::into_user_error;
 use crate::plugin::validate_plugin_settings;
 
 const VERSIONED_TOP_LEVEL_TABLES: &[&str] =
@@ -35,6 +36,8 @@ const FLAT_TOP_LEVEL_KEYS: &[&str] = &[
     "crawl_include_patterns",
     "crawl_exclude_patterns",
     "crawl_use_sitemap",
+    "crawl_ignore_robots",
+    "crawl_delay_ms",
     "crawl_capture_trace",
     "crawl_capture_screenshot",
     "crawl_capture_console",
@@ -91,6 +94,8 @@ const DEPRECATED_FLAT_KEYS: &[&str] = &[
     "crawl_include_patterns",
     "crawl_exclude_patterns",
     "crawl_use_sitemap",
+    "crawl_ignore_robots",
+    "crawl_delay_ms",
     "crawl_capture_trace",
     "crawl_capture_screenshot",
     "crawl_capture_console",
@@ -428,6 +433,8 @@ fn validate_versioned_sections(root: &toml::map::Map<String, Value>) -> Result<(
                 "include_patterns",
                 "exclude_patterns",
                 "use_sitemap",
+                "ignore_robots",
+                "crawl_delay_ms",
                 "capture_trace",
                 "capture_screenshot",
                 "capture_console",
@@ -631,6 +638,8 @@ fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
             "crawl_exclude_patterns",
         );
         move_table_field_if_absent(root, &mut table, "use_sitemap", "crawl_use_sitemap");
+        move_table_field_if_absent(root, &mut table, "ignore_robots", "crawl_ignore_robots");
+        move_table_field_if_absent(root, &mut table, "crawl_delay_ms", "crawl_delay_ms");
         move_table_field_if_absent(root, &mut table, "capture_trace", "crawl_capture_trace");
         move_table_field_if_absent(
             root,
@@ -845,6 +854,10 @@ pub fn load_config_with_diagnostics(
     root: &Path,
     explicit_path: Option<&Path>,
 ) -> Result<LoadedConfig> {
+    read_config_with_diagnostics(root, explicit_path).map_err(into_user_error)
+}
+
+fn read_config_with_diagnostics(root: &Path, explicit_path: Option<&Path>) -> Result<LoadedConfig> {
     let config_path = explicit_path
         .map(PathBuf::from)
         .unwrap_or_else(|| root.join("aexeo.toml"));

@@ -178,6 +178,9 @@ Options:
       --no-sitemap-seed
 
 
+      --ignore-robots
+          Crawl URLs that robots.txt disallows; only for auditing a site you own
+
       --max-pages <max-pages>
           [default: 200]
 
@@ -525,6 +528,9 @@ Options:
       --no-sitemap-seed
 
 
+      --ignore-robots
+          Crawl URLs that robots.txt disallows; only for auditing a site you own
+
       --config <config>
 
 
@@ -740,6 +746,9 @@ Options:
 
       --inject-schema
           Read schema-suggestions.json from the path and inject suggested JSON-LD into HTML <head> blocks (per-type augmentation; existing types are skipped).
+
+      --dry-run
+          List the files fix would change or skip without writing anything.
 
       --format <format>
           [default: text]

@@ -25,6 +25,12 @@ class ReviewTests(unittest.TestCase):
         result = review.review_from_response("claim", "source", "reliable", 0.8, self.response("contradicted"))
         self.assertEqual(result["support"], "contradicted")
 
+    def test_unexpected_response_model_is_rejected(self):
+        with patch("urllib.request.build_opener") as opener:
+            opener.return_value.open.return_value = io.BytesIO(json.dumps(self.response()).encode())
+            with self.assertRaisesRegex(ValueError, "unexpected model"):
+                review.fetch_review("claim", "source", "jev-other", "uncertain", 0.8, "key")
+
     def test_invalid_probability_is_rejected(self):
         for probability in (float("nan"), -0.1, 1.1, True):
             with self.assertRaises(ValueError):
@@ -65,7 +71,7 @@ class ReviewTests(unittest.TestCase):
             source = Path(folder) / "source.txt"
             source.write_bytes(b"14 participants\r\n")
             args = ["review.py", "--claim", "The count is 14.", "--source", str(source),
-                    "--model", "jev-1.13.0", "--minimum-probability", "0.8"]
+                    "--model", "jev-pinned", "--minimum-probability", "0.8"]
             fake = FakeResponse(json.dumps(self.response()).encode())
             with patch.dict(os.environ, {"TYPESAFE_API_KEY": "test-key"}), patch("sys.argv", args), \
                     patch("urllib.request.build_opener") as opener, \
