@@ -1,21 +1,26 @@
-// Minimal ambient declarations for the wasm-bindgen bg.js glue module.
-// The full set of `__wbg_*` and `__wbindgen_*` exports exists at runtime
-// for the WASM import object to bind against, but we only call the
-// public API plus __wbg_set_wasm from TypeScript.
-//
-// Hand-maintained and tracked in git, unlike the .wasm and _bg.js next
-// to it: wasm-bindgen 0.2.118 does not emit a _bg.d.ts for the bundler
-// target, so nothing regenerates this file and there is no way for it to
-// drift out of sync silently — but it does mean it has to be edited by
-// hand when the bridge surface changes. It must stay identical in shape
-// to ../../aexeo-emdash/wasm/aexeo_emdash_bridge_bg.d.ts; copy that
-// file here whenever the bridge grows or drops an export.
+// Minimal ambient declarations for the wasm-bindgen "bg" glue
+// module. We import this for two purposes:
+//   1. The named functions we actually call from JS:
+//      __wbg_set_wasm, evaluateDocuments, scoreIntelligence,
+//      generateFactsPrompt, validateFactsManifest.
+//   2. The full namespace, which we hand to WebAssembly.instantiate
+//      as the import map — every __wbg_* / __wbindgen_* import the
+//      WASM declares needs to resolve at instantiation time.
+// We don't enumerate the second set here; they cross the boundary
+// only via `import * as glue` and never appear in TypeScript call
+// sites by name. See scripts/build-wasm.sh for why this file is
+// hand-maintained: wasm-bindgen does not generate it for our target.
 export const __wbg_set_wasm: (wasm: WebAssembly.Exports) => void;
 export const evaluateContent: (
   document_json: string,
   preset_name: string,
   sources_json?: string | null,
   evidence_json?: string | null,
+) => string;
+export const evaluateContentCollection: (
+  documents_json: string,
+  preset_name: string,
+  sources_json?: string | null,
 ) => string;
 export const evaluateDocuments: (
   documents_json: string,
