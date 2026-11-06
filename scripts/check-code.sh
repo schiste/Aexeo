@@ -7,6 +7,7 @@ prefix=${AEXEO_TIMINGS_SCOPE_PREFIX:-}
 
 aexeo_run_timed "${prefix}content-evaluation-tests" "cache-light" python3 scripts/test-evaluate-content-gates.py
 aexeo_run_timed "${prefix}release-gate-tests" "cache-light" python3 scripts/test-release-gates.py
+aexeo_run_timed "${prefix}content-review-note-tests" "cache-light" python3 scripts/test-content-review-note.py
 aexeo_run_timed "${prefix}cargo-fmt-check" "cache-light" cargo fmt --check
 aexeo_run_timed "${prefix}clippy-strict" "cache-sensitive" sh scripts/clippy-strict.sh
 aexeo_run_timed "${prefix}cargo-clippy-workspace" "cache-sensitive" cargo clippy --workspace --all-targets -- -D warnings

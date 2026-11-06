@@ -44,3 +44,14 @@ heading block. Review whether the limit suits the content and language.
 For a truncated site crawl, site gates are `not_checked` and may still include
 findings from visited pages. Review those findings and the crawl status; a
 partial crawl cannot establish complete site coverage.
+
+When a human explicitly gives feedback on a gate, offer to record it locally using
+`scripts/content-review-note.py capture` from the Aexeo repository. Supply the exact
+UTF-8 snapshot and its corresponding JSON report, gate and example ID; the tool
+cannot prove the report came from that snapshot, so verify this correspondence.
+Record only the verdict and provenance actually supplied; leave uncertain cases
+unresolved. A reason file is optional and may contain private content. The note
+is reported feedback, not an independently reviewed label. Use the explicit
+`export-review` command only when the corpus, snapshot hash, human verdict and
+reviewer/method are known. Do not add feedback to a holdout or transmit it without
+the project’s permission and review process; see `eval/content/README.md`.
