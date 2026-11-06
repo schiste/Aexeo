@@ -1042,6 +1042,7 @@ mod tests {
             severity: "error".into(),
             suggestion: None,
             scope: FindingScope::Page,
+            subject: None,
         }
     }
 
@@ -1138,6 +1139,7 @@ mod tests {
             severity: "warning".into(),
             suggestion: None,
             scope: FindingScope::Page,
+            subject: None,
         };
         let text = render_text(&[actionable, heuristic], "ok", None);
         assert!(text.contains("Page Findings"));

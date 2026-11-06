@@ -23,6 +23,7 @@ fn finding(
         severity: severity.to_string(),
         suggestion: None,
         scope: FindingScope::Page,
+        subject: None,
     }
 }
 
@@ -95,6 +96,7 @@ fn collect_feature_marker_findings(page: &Page, config: &Config) -> Vec<Finding>
                 1,
                 "warning",
             )
+            .with_subject(marker.as_str())
         })
         .collect()
 }
@@ -103,14 +105,17 @@ fn collect_image_findings(page: &Page, site: &Site, config: &Config) -> Vec<Find
     let mut findings = Vec::new();
     for image in &page.images {
         if image.alt.is_none() {
-            findings.push(finding(
-                "CNT003",
-                format!("inline image is missing alt text: {}", image.src),
-                &page.path,
-                image.line,
-                image.column,
-                "warning",
-            ));
+            findings.push(
+                finding(
+                    "CNT003",
+                    format!("inline image is missing alt text: {}", image.src),
+                    &page.path,
+                    image.line,
+                    image.column,
+                    "warning",
+                )
+                .with_subject(image.src.as_str()),
+            );
         }
         let Some(normalized) = normalize_internal_image_target(&image.src, config) else {
             continue;
@@ -123,14 +128,17 @@ fn collect_image_findings(page: &Page, site: &Site, config: &Config) -> Vec<Find
             continue;
         };
         if metadata.is_file() && metadata.len() > 5_000_000 {
-            findings.push(finding(
-                "CNT004",
-                format!("inline image is larger than 5MB: {}", image.src),
-                &page.path,
-                image.line,
-                image.column,
-                "warning",
-            ));
+            findings.push(
+                finding(
+                    "CNT004",
+                    format!("inline image is larger than 5MB: {}", image.src),
+                    &page.path,
+                    image.line,
+                    image.column,
+                    "warning",
+                )
+                .with_subject(image.src.as_str()),
+            );
         }
     }
     findings

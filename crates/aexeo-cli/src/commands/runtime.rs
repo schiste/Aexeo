@@ -1158,6 +1158,7 @@ mod tests {
             severity: "error".to_string(),
             suggestion: None,
             scope: aexeo_contracts::FindingScope::Page,
+            subject: None,
         }];
         artifact.summary.errors = errors;
         artifact.performance = Some(aexeo_contracts::AuditPerformance {

@@ -61,7 +61,7 @@ pub use docs::{
     render_config_reference, render_rule_reference, write_reference_documents,
 };
 pub use editorial_rules::run_editorial_rules;
-pub use fix::{FixOptions, apply_safe_fixes, apply_safe_fixes_with_options};
+pub use fix::{FixOptions, FixReport, SkippedFix, apply_safe_fixes, apply_safe_fixes_with_options};
 pub use generate::{
     GeneratedMachineArtifact, MachineArtifactBundle, build_link_suggestions,
     build_machine_artifact_bundle, render_llms_full_txt, render_llms_txt, render_markdown_mirror,
