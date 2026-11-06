@@ -41,6 +41,7 @@ fn finding(
         severity: severity.to_string(),
         suggestion: None,
         scope: FindingScope::Page,
+        subject: None,
     }
 }
 
@@ -61,6 +62,7 @@ fn recommendation(
         severity: "warning".to_string(),
         suggestion: Some(suggestion.into()),
         scope: FindingScope::Page,
+        subject: None,
     }
 }
 
@@ -102,26 +104,32 @@ fn collect_required_type_findings(
     let mut findings = Vec::new();
     for required_type in &config.required_schema_types {
         if !schema_types.contains(required_type) {
-            findings.push(finding(
-                "SCH002",
-                format!("missing JSON-LD schema type: {}", required_type),
-                &page.path,
-                1,
-                1,
-                "error",
-            ));
+            findings.push(
+                finding(
+                    "SCH002",
+                    format!("missing JSON-LD schema type: {}", required_type),
+                    &page.path,
+                    1,
+                    1,
+                    "error",
+                )
+                .with_subject(required_type.as_str()),
+            );
         }
     }
     for family in &config.required_schema_families {
         if !schema_types.contains(family) {
-            findings.push(finding(
-                "SCH008",
-                format!("missing configured schema family: {}", family),
-                &page.path,
-                1,
-                1,
-                "warning",
-            ));
+            findings.push(
+                finding(
+                    "SCH008",
+                    format!("missing configured schema family: {}", family),
+                    &page.path,
+                    1,
+                    1,
+                    "warning",
+                )
+                .with_subject(family.as_str()),
+            );
         }
     }
     findings
@@ -328,18 +336,21 @@ fn collect_schema_family_findings(
         })
         .collect();
     if !missing.is_empty() {
-        findings.push(finding(
-            "SCH006",
-            format!(
-                "{} schema is missing required fields: {}",
-                object_type,
-                missing.join(", ")
-            ),
-            &page.path,
-            1,
-            1,
-            "warning",
-        ));
+        findings.push(
+            finding(
+                "SCH006",
+                format!(
+                    "{} schema is missing required fields: {}",
+                    object_type,
+                    missing.join(", ")
+                ),
+                &page.path,
+                1,
+                1,
+                "warning",
+            )
+            .with_subject(object_type),
+        );
     }
     if let Some(Value::String(schema_url)) = schema_object.get("url")
         && let Some(canonical) = page.canonical.as_deref()
@@ -349,14 +360,17 @@ fn collect_schema_family_findings(
         let normalized_canonical =
             route_from_urlish(canonical).unwrap_or_else(|| canonical.trim_matches('/').to_string());
         if normalized_schema_url != normalized_canonical {
-            findings.push(finding(
-                "SCH007",
-                format!("{} schema url does not align with canonical", object_type),
-                &page.path,
-                1,
-                1,
-                "warning",
-            ));
+            findings.push(
+                finding(
+                    "SCH007",
+                    format!("{} schema url does not align with canonical", object_type),
+                    &page.path,
+                    1,
+                    1,
+                    "warning",
+                )
+                .with_subject(object_type),
+            );
         }
     }
     findings
@@ -555,17 +569,20 @@ fn collect_sitewide_graph_findings(
     let mut findings = Vec::new();
     for (graph_name, values) in sitewide_graphs {
         if values.len() > 1 {
-            findings.push(finding(
-                "SCH009",
-                format!(
-                    "sitewide schema entity graph is inconsistent for {}",
-                    graph_name
-                ),
-                &site.root.join("schema-graph"),
-                1,
-                1,
-                "warning",
-            ));
+            findings.push(
+                finding(
+                    "SCH009",
+                    format!(
+                        "sitewide schema entity graph is inconsistent for {}",
+                        graph_name
+                    ),
+                    &site.root.join("schema-graph"),
+                    1,
+                    1,
+                    "warning",
+                )
+                .with_subject(graph_name.as_str()),
+            );
         }
     }
     findings

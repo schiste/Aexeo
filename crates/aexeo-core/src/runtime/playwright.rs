@@ -11,7 +11,7 @@ use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use super::egress::CrawlEgress;
+use super::egress::{CrawlEgress, FetchRefused};
 use super::http::{FetchResult, redact_sensitive_headers};
 use crate::config::RuntimeConfig;
 use crate::link_graph::redact_url;
@@ -716,11 +716,11 @@ impl PlaywrightSession {
                 )
             })?;
         if !payload["ok"].as_bool().unwrap_or(false) {
-            bail!(
-                "playwright runtime failed for {}: {}",
-                redact_url(url),
-                payload["error"].as_str().unwrap_or("unknown error")
-            );
+            let error = payload["error"].as_str().unwrap_or("unknown error");
+            if let Some(refused) = runner_refusal(error) {
+                return Err(refused.into());
+            }
+            bail!("playwright runtime failed for {}: {error}", redact_url(url));
         }
         Ok(fetch_result_from_payload(url, &payload))
     }
@@ -845,6 +845,14 @@ fn fetch_with_playwright_using(
     )
 }
 
+/// The runner reports a blocked navigation in this form, with its URL redacted.
+fn runner_refusal(message: &str) -> Option<FetchRefused> {
+    let message = message.trim();
+    message
+        .starts_with("refused to fetch ")
+        .then(|| FetchRefused(message.to_string()))
+}
+
 fn fetch_with_playwright_spec(
     executable: Option<PathBuf>,
     spec: &PlaywrightSpec<'_>,
@@ -894,6 +902,9 @@ fn fetch_with_playwright_spec(
     drop(runner);
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        if let Some(refused) = runner_refusal(&stderr) {
+            return Err(refused.into());
+        }
         bail!(
             "playwright runtime failed for {}: {stderr}",
             redact_url(spec.url)
@@ -1289,6 +1300,7 @@ mod tests {
             format!("http://localhost:{port}/?token=hunter2"),
         ] {
             let error = session.fetch(&url).expect_err(&url);
+            assert!(crate::runtime::egress::is_refused(&error), "{error:#}");
             let message = format!("{error:#}");
             assert!(message.contains("non-public"), "{message}");
             assert!(!message.contains("hunter2"), "{message}");

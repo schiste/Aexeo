@@ -9,6 +9,7 @@
 
 use aexeo_core::adapter::resolve_static_site_root;
 use aexeo_core::config::load_config_with_diagnostics;
+use aexeo_core::user_bail;
 use aexeo_core::{
     TruthMismatchSeverity, assess_truth_layer, load_site, load_truth_manifest,
     validate_truth_manifest,
@@ -24,7 +25,7 @@ pub fn command_facts(submatches: &ArgMatches) -> Result<i32> {
     match submatches.subcommand() {
         Some(("validate", validate_matches)) => command_facts_validate(validate_matches),
         Some((other, _)) => bail!("unsupported facts subcommand: {}", other),
-        None => bail!("missing facts subcommand"),
+        None => user_bail!("missing facts subcommand"),
     }
 }
 

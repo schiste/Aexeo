@@ -7,7 +7,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Output};
 use std::thread;
 use std::time::Duration;
 use support::{bin, parse_json, write};
@@ -1255,4 +1255,220 @@ fn crawl_artifacts_redact_set_cookie_and_checkpoints_are_private() {
         let mode = fs::metadata(&checkpoint).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
     }
+}
+
+/// Crawl a public IP literal through a local forward proxy that plays the site.
+///
+/// This is how these tests get a public origin end to end with no test seam in
+/// the binary: `1.1.1.1` classifies as public, so the crawl runs with strict
+/// egress, while `HTTP_PROXY` keeps every request on this machine. Each hop still
+/// goes through the policy before it is handed to the proxy, so a refused address
+/// never shows up at the proxy.
+///
+/// Not exercised: the DNS resolver gate, because a proxy resolves names itself.
+/// That path is covered by `a_public_origin_cannot_redirect_to_a_name_resolving_privately`
+/// in `runtime/http.rs`. Nothing reaches a real public network.
+fn crawl_public_origin_through_proxy(proxy_port: u16, dir: &Path, config: &str) -> Output {
+    write(&dir.join("aexeo.toml"), config);
+    let proxy = format!("http://127.0.0.1:{proxy_port}");
+    Command::new(bin())
+        .current_dir(dir)
+        .env("HTTP_PROXY", &proxy)
+        .env("http_proxy", &proxy)
+        .env_remove("NO_PROXY")
+        .env_remove("no_proxy")
+        .env_remove("ALL_PROXY")
+        .env_remove("all_proxy")
+        .arg("crawl")
+        .arg("http://1.1.1.1/")
+        .arg("--engine")
+        .arg("http")
+        .arg("--max-pages")
+        .arg("3")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap()
+}
+
+const CREDENTIALED_CONFIG: &str =
+    "version = 1\n\n[runtime]\nheaders = { \"x-secret\" = \"header-secret\" }\n";
+
+/// A proxy for a site whose `/` redirects to the private address.
+fn public_site_redirecting_home_to_private() -> RecordingHost {
+    RecordingHost::start(|url| match url {
+        "http://1.1.1.1/" => http_response(
+            "302 Found",
+            "Location: http://169.254.169.254/latest/meta-data/?token=hunter2\r\n",
+            "text/plain",
+            "",
+        ),
+        _ => http_response("404 Not Found", "", "text/plain", "missing"),
+    })
+}
+
+fn proxied_to_private_address(proxy: &RecordingHost) -> Vec<String> {
+    proxy
+        .requests()
+        .into_iter()
+        .filter(|request| request.contains("169.254.169.254"))
+        .collect()
+}
+
+#[test]
+fn crawl_from_a_public_origin_refuses_a_redirect_to_a_private_address() {
+    let proxy = public_site_redirecting_home_to_private();
+    let temp_dir = tempfile::tempdir().unwrap();
+
+    let output =
+        crawl_public_origin_through_proxy(proxy.port, temp_dir.path(), CREDENTIALED_CONFIG);
+
+    assert!(
+        matches!(output.status.code(), Some(0 | 1)),
+        "the origin answered, so this is a result: {:?} {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        proxy
+            .requests()
+            .iter()
+            .any(|request| request.starts_with("get http://1.1.1.1/ ")),
+        "the public origin must be requested: {:?}",
+        proxy.requests()
+    );
+    assert_eq!(
+        proxied_to_private_address(&proxy),
+        Vec::<String>::new(),
+        "the private address must never be contacted"
+    );
+    let payload = parse_json(&output.stdout);
+    let refusal = payload["artifact"]["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .find(|finding| {
+            finding["rule_id"] == "CRW001"
+                && finding["message"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("non-public")
+        })
+        .unwrap_or_else(|| panic!("the refusal must be reported: {payload}"));
+    assert_eq!(refusal["severity"], "error");
+    assert!(
+        payload
+            .to_string()
+            .contains("169.254.169.254/latest/meta-data")
+    );
+    assert!(
+        !payload.to_string().contains("hunter2"),
+        "the Location query must not reach the report: {payload}"
+    );
+    assert_eq!(payload["artifact"]["status"], "partial", "{payload}");
+}
+
+/// The control for the test above: without it, a proxy that never saw the private
+/// address could just mean the redirect was never followed.
+#[test]
+fn allow_private_network_opts_out_of_the_refusal() {
+    let proxy = public_site_redirecting_home_to_private();
+    let temp_dir = tempfile::tempdir().unwrap();
+
+    crawl_public_origin_through_proxy(
+        proxy.port,
+        temp_dir.path(),
+        "version = 1\n\n[runtime]\nallow_private_network = true\n",
+    );
+
+    assert!(!proxied_to_private_address(&proxy).is_empty());
+}
+
+/// robots.txt is chosen by the server like any page. The refusal must disallow
+/// everything per RFC 9309 and must not read as an unreachable target (exit 2):
+/// the origin answered.
+#[test]
+fn robots_txt_redirect_to_a_private_address_is_refused() {
+    let proxy = RecordingHost::start(|url| match url {
+        "http://1.1.1.1/robots.txt" => http_response(
+            "302 Found",
+            "Location: http://169.254.169.254/robots.txt\r\n",
+            "text/plain",
+            "",
+        ),
+        _ => http_response("200 OK", "", "text/html", HOME_PAGE),
+    });
+    let temp_dir = tempfile::tempdir().unwrap();
+
+    let output =
+        crawl_public_origin_through_proxy(proxy.port, temp_dir.path(), CREDENTIALED_CONFIG);
+
+    assert!(
+        matches!(output.status.code(), Some(0 | 1)),
+        "{:?} {}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(proxied_to_private_address(&proxy), Vec::<String>::new());
+    assert!(
+        !proxy
+            .requests()
+            .iter()
+            .any(|request| request.starts_with("get http://1.1.1.1/ ")),
+        "with robots.txt unknown, no page may be requested: {:?}",
+        proxy.requests()
+    );
+    let payload = parse_json(&output.stdout);
+    assert!(
+        payload["artifact"]["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .any(|finding| finding["rule_id"] == "CRW002"
+                && finding["message"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("non-public")),
+        "{payload}"
+    );
+}
+
+#[test]
+fn nested_sitemaps_obey_robots_txt() {
+    let own_port = std::sync::Arc::new(std::sync::atomic::AtomicU16::new(0));
+    let port = own_port.clone();
+    let crawl = RecordingHost::start(move |path| match path {
+        "/" => http_response("200 OK", "", "text/html", HOME_PAGE),
+        "/robots.txt" => http_response(
+            "200 OK",
+            "",
+            "text/plain",
+            "User-agent: *\nDisallow: /private/\n",
+        ),
+        "/sitemap.xml" => http_response("200 OK", "", "application/xml", &{
+            let port = port.load(std::sync::atomic::Ordering::Relaxed);
+            format!(
+                "<sitemapindex><sitemap><loc>http://127.0.0.1:{port}/private/nested.xml</loc></sitemap><sitemap><loc>http://127.0.0.1:{port}/open/nested.xml</loc></sitemap></sitemapindex>"
+            )
+        }),
+        _ => http_response("404 Not Found", "", "text/plain", "missing"),
+    });
+    own_port.store(crawl.port, std::sync::atomic::Ordering::Relaxed);
+    let temp_dir = tempfile::tempdir().unwrap();
+
+    credentialed_crawl(&format!("http://127.0.0.1:{}", crawl.port), temp_dir.path());
+
+    let requests = crawl.requests();
+    assert!(
+        requests
+            .iter()
+            .any(|request| request.starts_with("get /open/nested.xml ")),
+        "an allowed nested sitemap is still read: {requests:?}"
+    );
+    assert!(
+        !requests
+            .iter()
+            .any(|request| request.starts_with("get /private/nested.xml ")),
+        "{requests:?}"
+    );
 }

@@ -14,6 +14,8 @@ Responsibilities:
 - provide deterministic finding fingerprints for diff and baseline workflows
 - remain independent from CLI parsing, CMS integration, and runtime crawl details
 
+What a live crawl requests and how it reports status: see `docs/crawling.md`.
+
 Runtime crawl artifacts are the canonical handoff between collection and
 intelligence. Downstream commands should prefer `--from-crawl-artifact` when
 operating on live sites so they analyze the exact crawled HTML, crawl status,

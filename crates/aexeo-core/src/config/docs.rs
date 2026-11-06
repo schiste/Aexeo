@@ -106,6 +106,16 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
             description: "Whether runtime crawl should seed additional routes from sitemap.xml when available.",
         },
         ConfigFieldDoc {
+            key: "crawl_ignore_robots",
+            default_value: "`false`",
+            description: "Crawl URLs that robots.txt disallows. Only for auditing a site you own, such as staging.",
+        },
+        ConfigFieldDoc {
+            key: "crawl_delay_ms",
+            default_value: "`0`",
+            description: "Milliseconds to wait between batches of crawl requests. A batch holds up to `max_workers` requests.",
+        },
+        ConfigFieldDoc {
             key: "crawl_capture_screenshot",
             default_value: "`false`",
             description: "Whether browser crawl should save page screenshots.",
@@ -154,6 +164,21 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
             key: "editorial",
             default_value: "(no route briefs)",
             description: "Route-scoped editorial briefs for EDT001–EDT003. Each brief declares an answer summary element ID, target question headings, and claim IDs that need evidence links.",
+        },
+        ConfigFieldDoc {
+            key: "route_kinds",
+            default_value: "(none)",
+            description: "Named route groups under `[route_kinds.<name>]`. Findings for rule IDs in `skip_rules` are dropped on paths containing a `match` substring. Accessibility (A11Y) findings ignore this mask. `noindex` is accepted, but no rule reads it yet.",
+        },
+        ConfigFieldDoc {
+            key: "accessibility",
+            default_value: "`strict = false`",
+            description: "Accessibility audit options. `strict = true` makes A11Y001 fire on every `<img>` without `alt`, including ones marked decorative by role or ARIA.",
+        },
+        ConfigFieldDoc {
+            key: "agent_discovery",
+            default_value: "`enabled = false`",
+            description: "Agent discovery audit options. `enabled = true` turns on the AGT rules, which are opt-in.",
         },
         ConfigFieldDoc {
             key: "suppressions",
@@ -306,6 +331,70 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
             description: "Path to a JSON file describing runtime performance budgets.",
         },
     ]
+}
+
+/// Where a flat key lives in a `version = 1` config, as a path from the root.
+/// `None` means it stays at the root under its own name. Nested names are often
+/// shorter than flat ones, so `crawl_headers` is `headers` under `[runtime]`.
+pub fn versioned_location(key: &str) -> Option<&'static [&'static str]> {
+    Some(match key {
+        "site_url" => &["site", "url"],
+        "source_dir" => &["site", "source_dir"],
+        "adapter" => &["site", "adapter"],
+        "canonical_style" => &["site", "canonical_style"],
+        "browser_engine" => &["runtime", "engine"],
+        "browser_wait_until" => &["runtime", "wait_until"],
+        "crawl_headers" => &["runtime", "headers"],
+        "crawl_cookies" => &["runtime", "cookies"],
+        "crawl_basic_auth" => &["runtime", "basic_auth"],
+        "crawl_seeds" => &["runtime", "seeds"],
+        "crawl_include_patterns" => &["runtime", "include_patterns"],
+        "crawl_exclude_patterns" => &["runtime", "exclude_patterns"],
+        "crawl_use_sitemap" => &["runtime", "use_sitemap"],
+        "crawl_ignore_robots" => &["runtime", "ignore_robots"],
+        "crawl_delay_ms" => &["runtime", "crawl_delay_ms"],
+        "crawl_capture_trace" => &["runtime", "capture_trace"],
+        "crawl_capture_screenshot" => &["runtime", "capture_screenshot"],
+        "crawl_capture_console" => &["runtime", "capture_console"],
+        "crawl_capture_network" => &["runtime", "capture_network"],
+        "crawl_artifact_dir" => &["runtime", "artifact_dir"],
+        "crawl_allow_private_network" => &["runtime", "allow_private_network"],
+        "crawl_max_response_bytes" => &["runtime", "max_response_bytes"],
+        "ignore_rules" => &["policy", "ignore_rules"],
+        "ignore_paths" => &["policy", "ignore_paths"],
+        "severity_overrides" => &["policy", "severity_overrides"],
+        "suppressions" => &["policy", "suppressions"],
+        "route_policy_overrides" => &["policy", "route_policy_overrides"],
+        "baseline_file" => &["output", "baseline_file"],
+        "audit_log_limit" => &["output", "audit_log_limit"],
+        "performance_budget_file" => &["quality", "performance_budget_file"],
+        "min_inbound_links" => &["rules", "links", "min_inbound_links"],
+        "link_suggestion_count" => &["rules", "links", "link_suggestion_count"],
+        "enable_link_autofix" => &["rules", "links", "enable_link_autofix"],
+        "related_links_heading" => &["rules", "links", "related_links_heading"],
+        "weak_anchor_text" => &["rules", "links", "weak_anchor_text"],
+        "required_schema_types" => &["rules", "schema", "required_types"],
+        "required_schema_families" => &["rules", "schema", "required_families"],
+        "require_breadcrumb_schema" => &["rules", "schema", "require_breadcrumb_schema"],
+        "require_schema_title_alignment" => &["rules", "schema", "require_title_alignment"],
+        "require_open_graph" => &["rules", "social", "require_open_graph"],
+        "require_twitter_card" => &["rules", "social", "require_twitter_card"],
+        "default_twitter_card" => &["rules", "social", "default_twitter_card"],
+        "require_social_images" => &["rules", "social", "require_social_images"],
+        "require_twitter_image" => &["rules", "social", "require_twitter_image"],
+        "require_robots_sitemap" => &["rules", "robots", "require_sitemap"],
+        "require_meta_robots_consistency" => &["rules", "robots", "require_meta_consistency"],
+        "require_html_lang" => &["rules", "html", "require_html_lang"],
+        "require_hreflang_self" => &["rules", "html", "require_hreflang_self"],
+        "repeatable_data_ui" => &["rules", "structure", "repeatable_data_ui"],
+        "utility_route_patterns" => &["rules", "structure", "utility_route_patterns"],
+        "min_block_text_length" => &["rules", "structure", "min_block_text_length"],
+        "min_answer_blocks" => &["rules", "structure", "min_answer_blocks"],
+        "require_fact_consistency" => &["rules", "structure", "require_fact_consistency"],
+        "min_page_size" => &["rules", "content", "min_page_size"],
+        "required_feature_markers" => &["rules", "content", "required_feature_markers"],
+        _ => return None,
+    })
 }
 
 fn string_schema(description: &str) -> Value {
@@ -513,6 +602,14 @@ fn flat_properties() -> Map<String, Value> {
         boolean_schema("Whether runtime crawl should seed routes from sitemap.xml."),
     );
     properties.insert(
+        "crawl_ignore_robots".to_string(),
+        boolean_schema("Crawl URLs that robots.txt disallows. Only for a site you own."),
+    );
+    properties.insert(
+        "crawl_delay_ms".to_string(),
+        integer_schema("Milliseconds to wait between batches of crawl requests."),
+    );
+    properties.insert(
         "crawl_capture_trace".to_string(),
         boolean_schema("Whether browser crawl should capture a trace artifact."),
     );
@@ -600,6 +697,42 @@ fn flat_properties() -> Map<String, Value> {
                         }
                     }
                 }
+            }
+        }),
+    );
+    properties.insert(
+        "route_kinds".to_string(),
+        json!({
+            "type": "object",
+            "description": "Named route groups whose matching paths skip the listed rules.",
+            "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "match": string_array_schema("Path substrings selecting this route kind."),
+                    "skip_rules": string_array_schema("Rule IDs dropped on matching paths."),
+                    "noindex": boolean_schema("Accepted, but not read by any rule yet.")
+                }
+            }
+        }),
+    );
+    properties.insert(
+        "accessibility".to_string(),
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "strict": boolean_schema("Fire A11Y001 on every image without alt.")
+            }
+        }),
+    );
+    properties.insert(
+        "agent_discovery".to_string(),
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": boolean_schema("Enable the opt-in AGT rules.")
             }
         }),
     );
@@ -762,6 +895,8 @@ fn nested_properties() -> Map<String, Value> {
                 "include_patterns": { "type": "array", "items": { "type": "string" } },
                 "exclude_patterns": { "type": "array", "items": { "type": "string" } },
                 "use_sitemap": { "type": "boolean" },
+                "ignore_robots": { "type": "boolean" },
+                "crawl_delay_ms": { "type": "integer", "minimum": 0 },
                 "capture_trace": { "type": "boolean" },
                 "capture_screenshot": { "type": "boolean" },
                 "capture_console": { "type": "boolean" },
@@ -862,6 +997,13 @@ fn nested_properties() -> Map<String, Value> {
                     }
                 }]},
                 "llm": { "oneOf": [{ "type": "boolean" }, {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": { "type": "boolean" }
+                    }
+                }]},
+                "surfaces": { "oneOf": [{ "type": "boolean" }, {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {

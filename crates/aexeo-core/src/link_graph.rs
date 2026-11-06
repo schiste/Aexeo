@@ -103,6 +103,30 @@ pub fn resolve_link(
     }
 }
 
+fn comparable_host(host: &str) -> String {
+    let without_userinfo = host.rsplit_once('@').map(|(_, rest)| rest).unwrap_or(host);
+    let without_port = if without_userinfo.starts_with('[') {
+        without_userinfo
+            .split_once(']')
+            .map(|(value, _)| value)
+            .unwrap_or(without_userinfo)
+    } else {
+        without_userinfo
+            .split_once(':')
+            .map(|(value, _)| value)
+            .unwrap_or(without_userinfo)
+    };
+    let normalized = without_port.trim_end_matches('.').to_ascii_lowercase();
+    normalized
+        .strip_prefix("www.")
+        .unwrap_or(&normalized)
+        .to_string()
+}
+
+pub(crate) fn same_site_host(left: &str, right: &str) -> bool {
+    comparable_host(left) == comparable_host(right)
+}
+
 /// A URL safe to record in findings and artifacts, which may be shared. Userinfo,
 /// query and fragment are dropped because they can carry credentials and tokens.
 /// Routes never include a query, so this loses nothing the audit depends on.
@@ -124,6 +148,16 @@ pub fn redact_url(url: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redacted_urls_keep_only_scheme_host_port_and_path() {
+        assert_eq!(
+            redact_url("https://user:pass@example.org:8443/a/b?token=x#frag"),
+            "https://example.org:8443/a/b"
+        );
+        assert_eq!(redact_url("user:pass@example.org"), "[invalid URL]");
+        assert_eq!(redact_url("not a url with secret"), "[invalid URL]");
+    }
     fn resolve(href: &str) -> LinkResolution {
         resolve_link(
             href,

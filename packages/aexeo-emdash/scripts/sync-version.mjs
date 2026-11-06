@@ -14,10 +14,15 @@ if (typeof version !== "string" || version.length === 0) {
   throw new Error("package.json is missing a string version");
 }
 
-const next = `export const PACKAGE_VERSION = ${JSON.stringify(version)};\n`;
-const current = await readFile(versionFilePath, "utf8").catch(() => "");
-
-if (current !== next) {
-  await writeFile(versionFilePath, next);
-  console.log(`synced src/version.ts -> ${version}`);
+async function sync(path, constant) {
+  const next = `export const ${constant} = ${JSON.stringify(version)};\n`;
+  const current = await readFile(path, "utf8").catch(() => "");
+  if (current !== next) {
+    await writeFile(path, next);
+    console.log(`synced ${path} -> ${version}`);
+  }
 }
+
+await sync(versionFilePath, "PACKAGE_VERSION");
+// The sidecar reports this back, so the plugin can warn when the two differ.
+await sync(resolve(root, "../aexeo-crawl-worker/src/version.ts"), "WORKER_VERSION");

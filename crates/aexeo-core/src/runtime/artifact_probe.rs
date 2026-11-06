@@ -24,6 +24,7 @@ use std::time::Duration;
 
 use super::egress::refused_finding;
 use super::http::HttpFetcher;
+use super::robots::RobotsPolicy;
 
 const PER_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_PROBES_PER_CRAWL: usize = 64;
@@ -66,6 +67,7 @@ const FALLBACK_ARTIFACT_PATHS: &[&str] = &[
 pub(crate) fn probe_well_known_artifacts(
     base_url: &str,
     http: &HttpFetcher,
+    robots: &RobotsPolicy,
 ) -> (Vec<String>, Vec<Finding>) {
     let normalized_base = base_url.trim_end_matches('/');
     let mut findings = Vec::new();
@@ -77,7 +79,10 @@ pub(crate) fn probe_well_known_artifacts(
 
     // Manifest-first: if it's reachable, fold every artifact path
     // it lists into the candidate set. Dedupe on insertion.
-    if let Some(manifest_paths) = fetch_manifest_paths(http, normalized_base, &mut findings) {
+    let manifest_allowed = robots.allows_url(&format!("{normalized_base}/manifest.json"));
+    if manifest_allowed
+        && let Some(manifest_paths) = fetch_manifest_paths(http, normalized_base, &mut findings)
+    {
         for path in manifest_paths {
             if !candidates.contains(&path) {
                 candidates.push(path);
@@ -89,7 +94,9 @@ pub(crate) fn probe_well_known_artifacts(
 
     let mut verified = Vec::new();
     for path in &candidates {
-        if probe_artifact_head(http, normalized_base, path, &mut findings) {
+        if robots.allows_url(&format!("{normalized_base}/{path}"))
+            && probe_artifact_head(http, normalized_base, path, &mut findings)
+        {
             verified.push(path.clone());
         }
     }
@@ -157,7 +164,7 @@ mod tests {
         let config = Config::default();
         let egress = CrawlEgress::new(base_url, true);
         let http = HttpFetcher::new(&config.runtime(), &egress).unwrap();
-        probe_well_known_artifacts(base_url, &http).0
+        probe_well_known_artifacts(base_url, &http, &Default::default()).0
     }
 
     /// Tiny single-thread HTTP server used by the probe tests. Each

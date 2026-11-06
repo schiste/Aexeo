@@ -8,6 +8,8 @@ The `plugin_settings` table is reserved until a plugin publishes a registered se
 
 Generated JSON Schema: `docs/config.schema.json`
 
+Every documented key at its canonical location: `docs/examples/aexeo.complete.toml`. `aexeo-cli docs check` fails unless that file passes both the schema and the loader.
+
 Editor hint: add `#:schema ../config.schema.json` at the top of a config file stored under `docs/examples/` or adjust the relative path for your repository layout.
 
 ## Canonical Example
@@ -60,309 +62,401 @@ performance_budget_file = "performance-budget.json"
 
 ## Top-Level Keys
 
+Keys are listed by their flat name. In a `version = 1` config, set them at the versioned location shown: the nested name is often shorter, so `crawl_headers` becomes `headers` under `[runtime]`, and `crawl_headers` under `[runtime]` is rejected as an unknown key.
+
 ## `site_url`
 
 - Default: null
+- Versioned location: `url` under `[site]`
 - Meaning: Canonical base URL used for generation, canonical autofix, and robots output.
 
 ## `source_dir`
 
 - Default: `.`
+- Versioned location: `source_dir` under `[site]`
 - Meaning: Optional build-output directory beneath the repository root.
 
 ## `profile`
 
 - Default: `generic`
+- Versioned location: top level, same name
 - Meaning: Built-in policy profile. `chau7` enables stricter feature-page expectations.
 
 ## `adapter`
 
 - Default: `auto`
+- Versioned location: `adapter` under `[site]`
 - Meaning: Adapter selection mode. `auto` chooses the highest-priority matching adapter.
 
 ## `plugins`
 
 - Default: (none)
+- Versioned location: top level, same name
 - Meaning: Modules that extend rules or adapters.
 
 ## `canonical_style`
 
 - Default: `extensionless`
+- Versioned location: `canonical_style` under `[site]`
 - Meaning: Preferred internal canonical style. `extensionless` expects clean routes.
 
 ## `extends`
 
 - Default: (none)
+- Versioned location: top level, same name
 - Meaning: Optional parent config file or files to merge before the current config.
 
 ## `audit_log_limit`
 
 - Default: `5`
+- Versioned location: `audit_log_limit` under `[output]`
 - Meaning: Number of audit artifacts retained per command, including history pruning behavior.
 
 ## `browser_engine`
 
 - Default: `http`
+- Versioned location: `engine` under `[runtime]`
 - Meaning: Default crawl engine. `http` is the stable native runtime path. `auto` prefers `playwright` when a local Playwright runtime is installed, otherwise it falls back to `http`. `playwright` requires local Node and the `playwright` package from the repository root.
 
 ## `browser_wait_until`
 
 - Default: `networkidle`
+- Versioned location: `wait_until` under `[runtime]`
 - Meaning: Playwright navigation wait strategy for browser-backed crawl mode.
 
 ## `baseline_file`
 
 - Default: `.aexeo-baseline.json`
+- Versioned location: `baseline_file` under `[output]`
 - Meaning: Default audit baseline path used for verification and diff workflows.
 
 ## `max_workers`
 
 - Default: `4`
+- Versioned location: top level, same name
 - Meaning: Worker count used for parallel file parsing and selected analysis tasks.
 
 ## `crawl_headers`
 
 - Default: (none)
+- Versioned location: `headers` under `[runtime]`
 - Meaning: Extra HTTP headers applied to runtime crawl requests. Like cookies and basic auth, they are sent only to the crawl origin (same scheme, host, and port, with `www.` equivalence).
 
 ## `crawl_cookies`
 
 - Default: (none)
+- Versioned location: `cookies` under `[runtime]`
 - Meaning: Cookies injected into browser/runtime crawl sessions.
 
 ## `crawl_basic_auth`
 
 - Default: (none)
+- Versioned location: `basic_auth` under `[runtime]`
 - Meaning: Basic auth credentials for runtime crawl sessions.
 
 ## `crawl_capture_trace`
 
 - Default: `false`
+- Versioned location: `capture_trace` under `[runtime]`
 - Meaning: Whether browser crawl should capture a Playwright trace artifact.
 
 ## `crawl_seeds`
 
 - Default: (none)
+- Versioned location: `seeds` under `[runtime]`
 - Meaning: Additional route seeds for runtime crawl, such as `/pricing` or `/docs/getting-started`.
 
 ## `crawl_include_patterns`
 
 - Default: (none)
+- Versioned location: `include_patterns` under `[runtime]`
 - Meaning: Optional route substrings used to constrain runtime crawl scope.
 
 ## `crawl_exclude_patterns`
 
 - Default: (none)
+- Versioned location: `exclude_patterns` under `[runtime]`
 - Meaning: Route substrings excluded from runtime crawl.
 
 ## `crawl_use_sitemap`
 
 - Default: `true`
+- Versioned location: `use_sitemap` under `[runtime]`
 - Meaning: Whether runtime crawl should seed additional routes from sitemap.xml when available.
+
+## `crawl_ignore_robots`
+
+- Default: `false`
+- Versioned location: `ignore_robots` under `[runtime]`
+- Meaning: Crawl URLs that robots.txt disallows. Only for auditing a site you own, such as staging.
+
+## `crawl_delay_ms`
+
+- Default: `0`
+- Versioned location: `crawl_delay_ms` under `[runtime]`
+- Meaning: Milliseconds to wait between batches of crawl requests. A batch holds up to `max_workers` requests.
 
 ## `crawl_capture_screenshot`
 
 - Default: `false`
+- Versioned location: `capture_screenshot` under `[runtime]`
 - Meaning: Whether browser crawl should save page screenshots.
 
 ## `crawl_capture_console`
 
 - Default: `false`
+- Versioned location: `capture_console` under `[runtime]`
 - Meaning: Whether browser crawl should persist console output.
 
 ## `crawl_capture_network`
 
 - Default: `false`
+- Versioned location: `capture_network` under `[runtime]`
 - Meaning: Whether browser crawl should persist network request logs.
 
 ## `crawl_artifact_dir`
 
 - Default: `.aexeo-reports/crawl-artifacts`
+- Versioned location: `artifact_dir` under `[runtime]`
 - Meaning: Directory used for crawl artifacts such as traces, screenshots, console logs, and network logs.
 
 ## `crawl_allow_private_network`
 
 - Default: `false`
+- Versioned location: `allow_private_network` under `[runtime]`
 - Meaning: Allow runtime crawl to contact loopback, private, and link-local addresses when the crawl target itself is public. A target that resolves only to non-public addresses (local preview) is allowed without this.
 
 ## `crawl_max_response_bytes`
 
 - Default: `20971520`
+- Versioned location: `max_response_bytes` under `[runtime]`
 - Meaning: Largest response body runtime crawl reads over HTTP, in bytes. A larger response is recorded as a failed fetch.
 
 ## `ignore_rules`
 
 - Default: (none)
+- Versioned location: `ignore_rules` under `[policy]`
 - Meaning: Rule IDs to suppress after evaluation.
 
 ## `ignore_paths`
 
 - Default: (none)
+- Versioned location: `ignore_paths` under `[policy]`
 - Meaning: Glob-like path patterns to suppress after evaluation.
 
 ## `severity_overrides`
 
 - Default: (none)
+- Versioned location: `severity_overrides` under `[policy]`
 - Meaning: Per-rule severity overrides applied after rules run.
 
 ## `editorial`
 
 - Default: (no route briefs)
+- Versioned location: top level, same name
 - Meaning: Route-scoped editorial briefs for EDT001–EDT003. Each brief declares an answer summary element ID, target question headings, and claim IDs that need evidence links.
+
+## `route_kinds`
+
+- Default: (none)
+- Versioned location: top level, same name
+- Meaning: Named route groups under `[route_kinds.<name>]`. Findings for rule IDs in `skip_rules` are dropped on paths containing a `match` substring. Accessibility (A11Y) findings ignore this mask. `noindex` is accepted, but no rule reads it yet.
+
+## `accessibility`
+
+- Default: `strict = false`
+- Versioned location: top level, same name
+- Meaning: Accessibility audit options. `strict = true` makes A11Y001 fire on every `<img>` without `alt`, including ones marked decorative by role or ARIA.
+
+## `agent_discovery`
+
+- Default: `enabled = false`
+- Versioned location: top level, same name
+- Meaning: Agent discovery audit options. `enabled = true` turns on the AGT rules, which are opt-in.
 
 ## `suppressions`
 
 - Default: (none)
+- Versioned location: `suppressions` under `[policy]`
 - Meaning: Explicit reviewable suppressions with rule, path pattern, reason, and optional expiry.
 
 ## `orphan_exclude`
 
 - Default: `404.html`
+- Versioned location: top level, same name
 - Meaning: Routes or filenames excluded from orphan detection.
 
 ## `repeatable_data_ui`
 
 - Default: `["card", "item", "entry", ...]`
+- Versioned location: `repeatable_data_ui` under `[rules.structure]`
 - Meaning: data-ui labels treated as intentionally repeatable list-item markers rather than page-unique identifiers.
 
 ## `utility_route_patterns`
 
 - Default: `["search", "admin", "preview", "internal"]`
+- Versioned location: `utility_route_patterns` under `[rules.structure]`
 - Meaning: Route substrings used to classify utility pages for robots-policy nuance.
 
 ## `route_policy_overrides`
 
 - Default: (none)
+- Versioned location: `route_policy_overrides` under `[policy]`
 - Meaning: Per-route robots policy overrides such as allowing canonical+noindex or nofollow.
 
 ## `min_inbound_links`
 
 - Default: `1`
+- Versioned location: `min_inbound_links` under `[rules.links]`
 - Meaning: Minimum inbound internal links before LNK004 triggers.
 
 ## `link_suggestion_count`
 
 - Default: `3`
+- Versioned location: `link_suggestion_count` under `[rules.links]`
 - Meaning: Number of candidate internal-link suggestions to produce per weakly linked page.
 
 ## `enable_link_autofix`
 
 - Default: `false`
+- Versioned location: `enable_link_autofix` under `[rules.links]`
 - Meaning: Whether safe fix mode may insert a generated related-links section into pages.
 
 ## `related_links_heading`
 
 - Default: `Related pages`
+- Versioned location: `related_links_heading` under `[rules.links]`
 - Meaning: Heading text used when link autofix inserts a related-links section.
 
 ## `min_page_size`
 
 - Default: `500`
+- Versioned location: `min_page_size` under `[rules.content]`
 - Meaning: Minimum visible text length before CNT001 triggers.
 
 ## `required_feature_markers`
 
 - Default: `Related features`
+- Versioned location: `required_feature_markers` under `[rules.content]`
 - Meaning: Literal strings required on feature-like pages before CNT002 triggers.
 
 ## `min_block_text_length`
 
 - Default: `120`
+- Versioned location: `min_block_text_length` under `[rules.structure]`
 - Meaning: Minimum visible text length for a semantic content block before GEO chunk-thinness triggers.
 
 ## `min_answer_blocks`
 
 - Default: `2`
+- Versioned location: `min_answer_blocks` under `[rules.structure]`
 - Meaning: Minimum number of answer-oriented blocks before GEO answerability triggers.
 
 ## `require_fact_consistency`
 
 - Default: `true`
+- Versioned location: `require_fact_consistency` under `[rules.structure]`
 - Meaning: Whether title/H1/OpenGraph/schema facts should align on a page.
 
 ## `required_schema_types`
 
 - Default: (none)
+- Versioned location: `required_types` under `[rules.schema]`
 - Meaning: JSON-LD @type values expected on route pages.
 
 ## `required_schema_families`
 
 - Default: (none)
+- Versioned location: `required_families` under `[rules.schema]`
 - Meaning: Schema families that should be validated when present or required by policy.
 
 ## `require_breadcrumb_schema`
 
 - Default: `false`
+- Versioned location: `require_breadcrumb_schema` under `[rules.schema]`
 - Meaning: Whether nested pages must emit BreadcrumbList schema.
 
 ## `require_schema_title_alignment`
 
 - Default: `true`
+- Versioned location: `require_title_alignment` under `[rules.schema]`
 - Meaning: Whether JSON-LD name/headline values must align with visible title or H1.
 
 ## `require_html_lang`
 
 - Default: `true`
+- Versioned location: `require_html_lang` under `[rules.html]`
 - Meaning: Whether indexable pages must declare a root html lang attribute.
 
 ## `require_hreflang_self`
 
 - Default: `false`
+- Versioned location: `require_hreflang_self` under `[rules.html]`
 - Meaning: Whether pages using hreflang alternates must include a self-referencing hreflang.
 
 ## `require_meta_robots_consistency`
 
 - Default: `true`
+- Versioned location: `require_meta_consistency` under `[rules.robots]`
 - Meaning: Whether noindex pages in sitemap should be reported as inconsistent.
 
 ## `require_open_graph`
 
 - Default: `true`
+- Versioned location: `require_open_graph` under `[rules.social]`
 - Meaning: Whether og:title, og:description, and og:type are required.
 
 ## `require_twitter_card`
 
 - Default: `true`
+- Versioned location: `require_twitter_card` under `[rules.social]`
 - Meaning: Whether twitter:card is required.
 
 ## `default_twitter_card`
 
 - Default: `summary`
+- Versioned location: `default_twitter_card` under `[rules.social]`
 - Meaning: Fallback twitter:card value used by safe HTML autofix.
 
 ## `require_social_images`
 
 - Default: `false`
+- Versioned location: `require_social_images` under `[rules.social]`
 - Meaning: Whether shared pages must provide og:image and optionally twitter:image.
 
 ## `require_twitter_image`
 
 - Default: `false`
+- Versioned location: `require_twitter_image` under `[rules.social]`
 - Meaning: Whether twitter:image is required in addition to og:image.
 
 ## `require_robots_sitemap`
 
 - Default: `true`
+- Versioned location: `require_sitemap` under `[rules.robots]`
 - Meaning: Whether robots.txt must declare the sitemap URL.
 
 ## `weak_anchor_text`
 
 - Default: `click here`, `here`, `learn more`, `more`, `read more`
+- Versioned location: `weak_anchor_text` under `[rules.links]`
 - Meaning: Anchor phrases treated as weak for internal-link quality checks.
 
 ## `plugin_settings`
 
 - Default: (none)
+- Versioned location: top level, same name
 - Meaning: Reserved plugin-specific configuration grouped by plugin namespace. Use quoted TOML tables such as `[plugin_settings."example.plugin"]` only when a plugin publishes a registered settings schema. No built-in plugin settings schemas are currently shipped.
 
 ## `performance_budget_file`
 
 - Default: `performance-budget.json`
+- Versioned location: `performance_budget_file` under `[quality]`
 - Meaning: Path to a JSON file describing runtime performance budgets.
 
 ## `checks`
 
-Built-in rule-group toggles. Unknown plugin rule groups default to enabled unless explicitly disabled.
+Built-in rule-group toggles. Unknown plugin rule groups default to enabled unless explicitly disabled. In a `version = 1` config use `[rules.<group>] enabled = ...` for the groups `[rules]` accepts (`html`, `links`, `sitemap`, `robots`, `social`, `schema`, `llm`, `surfaces`, `content`, `editorial`, `structure`); the others are only reachable through `[checks]`.
 
 - `accessibility`: default `true`
 - `agent_discovery`: default `true`

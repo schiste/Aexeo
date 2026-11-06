@@ -1,3 +1,4 @@
+use aexeo_core::user_bail;
 use anyhow::{Result, bail};
 
 use crate::commands::{
@@ -19,6 +20,23 @@ use crate::commands::{
     },
     static_site::{command_baseline, command_check, command_fix, command_generate},
 };
+
+/// The full subcommand name (`"intelligence facts validate"`) and the output
+/// format of this invocation, for reporting a failure the way the caller asked.
+pub fn invocation(matches: &clap::ArgMatches) -> (String, String) {
+    let mut names = Vec::new();
+    let mut leaf = matches;
+    while let Some((name, submatches)) = leaf.subcommand() {
+        names.push(name);
+        leaf = submatches;
+    }
+    let format = leaf
+        .try_get_one::<String>("format")
+        .ok()
+        .flatten()
+        .map_or("text", String::as_str);
+    (names.join(" "), format.to_string())
+}
 
 pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
     match matches.subcommand() {
@@ -48,19 +66,19 @@ pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
                 required_arg(render_matches, "format")?,
             ),
             Some((other, _)) => bail!("unsupported report subcommand: {}", other),
-            None => bail!("missing report subcommand"),
+            None => user_bail!("missing report subcommand"),
         },
         Some(("doctor", submatches)) => command_doctor(submatches),
         Some(("profile", submatches)) => match submatches.subcommand() {
             Some(("runtime", runtime_matches)) => command_profile_runtime(runtime_matches),
             Some((other, _)) => bail!("unsupported profile subcommand: {}", other),
-            None => bail!("missing profile subcommand"),
+            None => user_bail!("missing profile subcommand"),
         },
         Some(("perf", submatches)) => match submatches.subcommand() {
             Some(("baseline", baseline_matches)) => command_perf_baseline(baseline_matches),
             Some(("diff", diff_matches)) => command_perf_diff(diff_matches),
             Some((other, _)) => bail!("unsupported perf subcommand: {}", other),
-            None => bail!("missing perf subcommand"),
+            None => user_bail!("missing perf subcommand"),
         },
         Some(("trend", submatches)) => command_trend(
             required_arg(submatches, "command_name")?,
@@ -81,6 +99,6 @@ pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
         Some(("plugin-check", submatches)) => command_plugin_check(submatches),
         Some(("facts", submatches)) => command_facts(submatches),
         Some((other, _)) => bail!("unsupported command: {}", other),
-        None => bail!("missing command"),
+        None => user_bail!("missing command"),
     }
 }

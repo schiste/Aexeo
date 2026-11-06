@@ -22,6 +22,7 @@ A crawl fetches URLs chosen by the site it audits, so `aexeo crawl` applies thes
 - Configured credentials (`[runtime] headers`, `cookies`, `basic_auth`) go only to the crawl origin: same scheme, host and port, with `www.` equivalence only when scheme and port match. An `https` to `http` downgrade or a port change drops them, and neither moves the crawl to the new origin. A `cookies` entry with an explicit `domain` or `url` is scoped by the browser engine to what it names.
 - Sitemaps on another site are refused and reported as `CRW001` warnings. Nesting is capped at depth 5 and 1000 sitemaps.
 - Loopback, private, link-local (including `169.254.169.254`) and unique-local addresses are refused after DNS resolution, unless the crawl target itself resolves only to such addresses (local preview) or `[runtime] allow_private_network = true`.
+- These rules cover robots.txt too. A refused robots.txt means everything is disallowed, as RFC 9309 requires for unknown rules.
 - HTTP response bodies are capped by `[runtime] max_response_bytes` (20 MiB by default). A larger response is a recorded fetch failure.
 - Secret-bearing response headers such as `set-cookie` are redacted before capture. New checkpoints and audit artifacts are created with mode 0600 on Unix; an existing file keeps its mode. URL userinfo, queries and fragments are left out of the messages this boundary produces. Playwright traces, when enabled, record request headers, and their directory is created with mode 0700.
 

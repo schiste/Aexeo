@@ -15,6 +15,9 @@ survive the move.
 - `crates/aexeo-core`
 - `crates/aexeo-cli`
 
+Two more crates exist alongside them: `crates/aexeo-emdash-bridge`, the WASM
+bridge used by the EmDash plugin, and `crates/tempfile`, a test-only helper.
+
 ## Target Monorepo Landing Shape
 
 Inside the future `website` repo, the target shape should be:

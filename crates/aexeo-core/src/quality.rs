@@ -66,6 +66,7 @@ pub fn run_repo_quality_checks(root: &Path, cli_reference: &str) -> Result<Vec<F
                 severity: "error".to_string(),
                 suggestion: None,
                 scope: FindingScope::Sitewide,
+                subject: None,
             }),
     );
     findings.extend(tooling_audit::find_static_tooling_issues(root));

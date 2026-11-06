@@ -2,6 +2,7 @@ mod defaults;
 mod docs;
 mod load;
 mod render;
+mod surface_check;
 mod views;
 
 use serde::{Deserialize, Serialize};
@@ -24,9 +25,10 @@ use self::defaults::{
 };
 
 pub use self::defaults::default_rule_switches;
-pub use self::docs::{config_field_docs, render_config_schema};
+pub use self::docs::{config_field_docs, render_config_schema, versioned_location};
 pub use self::load::{ConfigWarning, LoadedConfig, load_config, load_config_with_diagnostics};
 pub use self::render::{render_resolved_config_json, render_resolved_config_toml};
+pub use self::surface_check::{COMPLETE_EXAMPLE, check_config_surface};
 pub use self::views::{OutputConfig, PolicyConfig, RulesConfig, RuntimeConfig, SiteConfig};
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -69,6 +71,10 @@ pub struct Config {
     pub crawl_exclude_patterns: Vec<String>,
     #[serde(default = "default_crawl_use_sitemap")]
     pub crawl_use_sitemap: bool,
+    #[serde(default)]
+    pub crawl_ignore_robots: bool,
+    #[serde(default)]
+    pub crawl_delay_ms: u64,
     #[serde(default)]
     pub crawl_capture_trace: bool,
     #[serde(default)]
@@ -228,9 +234,9 @@ pub struct RouteKind {
     /// Rule IDs that should NOT fire on routes of this kind.
     #[serde(default)]
     pub skip_rules: Vec<String>,
-    /// Marks the route-kind as intentionally noindex; the existing
-    /// `route_policy_overrides.allow_canonical_noindex` machinery
-    /// reads this so editors don't have to declare twice.
+    /// Marks the route-kind as intentionally noindex. Accepted and
+    /// parsed, but no rule reads it yet: use
+    /// `route_policy_overrides.allow_canonical_noindex` for the effect.
     #[serde(default)]
     pub noindex: bool,
 }
@@ -344,6 +350,8 @@ impl Default for Config {
             crawl_include_patterns: Vec::new(),
             crawl_exclude_patterns: Vec::new(),
             crawl_use_sitemap: default_crawl_use_sitemap(),
+            crawl_ignore_robots: false,
+            crawl_delay_ms: 0,
             crawl_capture_trace: false,
             crawl_capture_screenshot: false,
             crawl_capture_console: false,

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use reqwest::blocking::{Client, RequestBuilder, Response};
+use reqwest::blocking::{Client, ClientBuilder, RequestBuilder, Response};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::redirect::Policy;
 use reqwest::{Method, StatusCode};
@@ -12,8 +12,9 @@ use std::time::Duration;
 use url::Url;
 
 use super::egress::{CrawlEgress, FetchRefused, is_refused};
-use super::fetcher::FetchOutcome;
+use super::fetcher::{FetchOutcome, crawl_user_agent};
 use crate::link_graph::redact_url;
+pub(crate) use crate::link_graph::same_site_host;
 
 #[derive(Debug, Clone)]
 pub(crate) struct FetchResult {
@@ -72,30 +73,6 @@ pub(crate) fn host_for_url(url: &str) -> String {
         .unwrap_or_default()
 }
 
-fn comparable_host(host: &str) -> String {
-    let without_userinfo = host.rsplit_once('@').map(|(_, rest)| rest).unwrap_or(host);
-    let without_port = if without_userinfo.starts_with('[') {
-        without_userinfo
-            .split_once(']')
-            .map(|(value, _)| value)
-            .unwrap_or(without_userinfo)
-    } else {
-        without_userinfo
-            .split_once(':')
-            .map(|(value, _)| value)
-            .unwrap_or(without_userinfo)
-    };
-    let normalized = without_port.trim_end_matches('.').to_ascii_lowercase();
-    normalized
-        .strip_prefix("www.")
-        .unwrap_or(&normalized)
-        .to_string()
-}
-
-pub(crate) fn same_site_host(left: &str, right: &str) -> bool {
-    comparable_host(left) == comparable_host(right)
-}
-
 /// Whether two URLs are the same crawl origin: scheme, host and port, treating
 /// `www.` as equivalent only when scheme and port match.
 pub(crate) fn same_crawl_origin(left: &str, right: &str) -> bool {
@@ -140,14 +117,25 @@ impl HttpFetcher {
         runtime: &crate::config::RuntimeConfig<'_>,
         egress: &CrawlEgress,
     ) -> Result<Self> {
+        Self::with_client_options(runtime, egress, |builder| builder)
+    }
+
+    fn with_client_options(
+        runtime: &crate::config::RuntimeConfig<'_>,
+        egress: &CrawlEgress,
+        customize: impl FnOnce(ClientBuilder) -> ClientBuilder,
+    ) -> Result<Self> {
         // Redirects are followed by hand in `send` because credentials and
         // policy are per hop: a reqwest redirect policy can only follow or
         // stop, not strip headers from the next request.
-        let client = Client::builder()
+        // The User-Agent identifies the crawl on every hop, unlike configured
+        // headers, which stop at the crawl origin.
+        let builder = Client::builder()
+            .user_agent(crawl_user_agent(runtime.crawl_headers))
             .redirect(Policy::none())
             .dns_resolver(egress.resolver())
-            .timeout(Duration::from_secs(30))
-            .build()?;
+            .timeout(Duration::from_secs(30));
+        let client = customize(builder).build()?;
         Ok(Self {
             client,
             headers: headers_from_map(runtime.crawl_headers)?,
@@ -262,9 +250,19 @@ impl HttpFetcher {
                 let mut retries = 0usize;
                 let result = loop {
                     match fetcher.fetch(&url) {
-                        Ok(fetched) => break Ok(fetched),
+                        Ok(fetched)
+                            if !super::fetcher::is_retryable_response(&fetched)
+                                || retries >= fetch_retry_budget =>
+                        {
+                            break Ok(fetched);
+                        }
+                        Ok(_) => {
+                            retries += 1;
+                            thread::sleep(super::fetcher::retry_backoff(retries));
+                        }
                         Err(error) if retries < fetch_retry_budget && !is_refused(&error) => {
                             retries += 1;
+                            thread::sleep(super::fetcher::retry_backoff(retries));
                         }
                         Err(error) => break Err(error),
                     }
@@ -714,6 +712,33 @@ mod tests {
             );
         }
         assert!(server.requests().is_empty());
+    }
+
+    /// Simulates a public origin: `public.test` is pinned to a local server by a
+    /// client override, and the egress policy is strict, as for a public target.
+    /// The socket, redirect loop and guarded resolver are real. What is not
+    /// exercised is real DNS or a real public network path for the origin.
+    #[test]
+    fn a_public_origin_cannot_redirect_to_a_name_resolving_privately() {
+        let private = RecordingServer::start(|_| ok("metadata"));
+        let location = format!("http://localhost:{}/latest/meta-data/", private.port);
+        let public = RecordingServer::start(move |_| redirect(&location));
+        let origin = format!("http://public.test:{}/", public.port);
+        let config = credentialed_config();
+        let pinned = std::net::SocketAddr::from(([127, 0, 0, 1], public.port));
+        let fetcher = HttpFetcher::with_client_options(
+            &config.runtime(),
+            &CrawlEgress::new(&origin, false),
+            |builder| builder.no_proxy().resolve("public.test", pinned),
+        )
+        .unwrap();
+
+        let error = fetcher.fetch(&origin).unwrap_err();
+
+        assert!(is_refused(&error), "{error:#}");
+        assert!(error.to_string().contains("non-public"), "{error}");
+        assert_has_credentials(&public.requests()[0]);
+        assert!(private.requests().is_empty(), "{:?}", private.requests());
     }
 
     #[test]

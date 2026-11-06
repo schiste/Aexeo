@@ -85,7 +85,7 @@ fn facts_generate_json_contract_reports_curated_mode() {
 }
 
 #[test]
-fn intelligence_score_json_contract_reports_overall_score() {
+fn intelligence_score_json_contract_reports_facts_and_a_stable_artifact() {
     let temp_dir = tempfile::tempdir().unwrap();
     write(
         &temp_dir.path().join("index.html"),
@@ -95,22 +95,40 @@ fn intelligence_score_json_contract_reports_overall_score() {
         &temp_dir.path().join("facts.json"),
         r#"{"version":1,"organization":{"name":"Aexeo","website":"https://aexeo.com","category":"seo_and_geo_platform","descriptors":["seo","geo"]}}"#,
     );
-    let output = Command::new(bin())
-        .arg("intelligence")
-        .arg("score")
-        .arg(temp_dir.path())
-        .arg("--format")
-        .arg("json")
-        .output()
+    let run = || {
+        let output = Command::new(bin())
+            .arg("intelligence")
+            .arg("score")
+            .arg(temp_dir.path())
+            .arg("--format")
+            .arg("json")
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let artifact = std::fs::read(
+            temp_dir
+                .path()
+                .join(".aexeo-reports/intelligence-score-latest.json"),
+        )
         .unwrap();
-    assert!(output.status.success());
-    let payload = parse_json(&output.stdout);
+        (parse_json(&output.stdout), artifact)
+    };
+    let (payload, artifact) = run();
     assert_eq!(payload["command"], "intelligence score");
+    let score = &payload["result"]["score"];
+    assert!(score.get("overall_score").is_none(), "{score}");
+    assert!(score.get("elapsed_us").is_none(), "{score}");
     assert!(
-        payload["result"]["score"]["overall_score"]
-            .as_u64()
-            .unwrap()
-            > 0
+        score["citation_readiness_score"].as_u64().is_some(),
+        "{score}"
+    );
+    assert_eq!(score["answer_pack"]["routes_analyzed"], 1, "{score}");
+    assert!(score["external_trust_alignment_score"].is_null(), "{score}");
+
+    let (_, second_artifact) = run();
+    assert_eq!(
+        artifact, second_artifact,
+        "identical runs must write identical bytes"
     );
 }
 

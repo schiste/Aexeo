@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "fixture_kind": "synthetic_regression",
+  "description": "Synthetic Markdown regression fixture, written to pin specific adapter and gate behaviour. Labels are the expected tool behaviour, not human-reviewed editorial judgements, and results do not estimate production accuracy.",
+  "preset": "fixture",
+  "preset_toml": "version=1\nname='fixture'\n[[gates]]\nid='g'\nkind='link_destinations'\nallowed_schemes=['https']\nallow_relative=true\n",
+  "gate_id": "g",
+  "input_format": "markdown",
+  "examples": [
+    {
+      "id": "literal-email",
+      "split": "development",
+      "text": "Write to me@example.org today.\n",
+      "expected": "passed",
+      "why": "A literal email address is not an authored link.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "https",
+      "split": "development",
+      "text": "See [docs](https://example.org).\n",
+      "expected": "passed",
+      "why": "Allowed scheme.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "www-autolink",
+      "split": "development",
+      "text": "Go to www.example.org now.\n",
+      "expected": "failed",
+      "why": "GFM renders a bare www address as http.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "angle-email",
+      "split": "holdout",
+      "text": "Write to <me@example.org>.\n",
+      "expected": "failed",
+      "why": "An angle autolink is an authored link.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "mailto-link",
+      "split": "holdout",
+      "text": "[mail](mailto:me@example.org)\n",
+      "expected": "failed",
+      "why": "An explicit mailto link is authored.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "http-autolink",
+      "split": "holdout",
+      "text": "Go to http://example.org now.\n",
+      "expected": "failed",
+      "why": "A bare URL with a written scheme is checked.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "relative",
+      "split": "holdout",
+      "text": "See [docs](/guide).\n",
+      "expected": "passed",
+      "why": "Relative links are allowed by this preset.",
+      "review_status": "not_reviewed"
+    }
+  ]
+}

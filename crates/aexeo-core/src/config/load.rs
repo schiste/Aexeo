@@ -5,16 +5,22 @@ use std::path::{Component, Path, PathBuf};
 use toml::Value;
 
 use super::Config;
+use crate::error::into_user_error;
 use crate::plugin::validate_plugin_settings;
 
 const VERSIONED_TOP_LEVEL_TABLES: &[&str] =
     &["site", "runtime", "policy", "rules", "output", "quality"];
-// `[accessibility]`, `[agent_discovery]`, and `[editorial]` live outside the
-// versioned set because they have no flat-key counterpart — there's
+// `[accessibility]`, `[agent_discovery]`, `[editorial]`, and `[route_kinds]` live
+// outside the versioned set because they have no flat-key counterpart — there's
 // nothing in old configs for the version=1 gate to protect against.
 // Users can adopt these settings on any config shape without needing to
 // migrate to versioned form.
-const UNVERSIONED_NEW_TABLES: &[&str] = &["accessibility", "agent_discovery", "editorial"];
+const UNVERSIONED_NEW_TABLES: &[&str] = &[
+    "accessibility",
+    "agent_discovery",
+    "editorial",
+    "route_kinds",
+];
 const FLAT_TOP_LEVEL_KEYS: &[&str] = &[
     "site_url",
     "source_dir",
@@ -35,6 +41,8 @@ const FLAT_TOP_LEVEL_KEYS: &[&str] = &[
     "crawl_include_patterns",
     "crawl_exclude_patterns",
     "crawl_use_sitemap",
+    "crawl_ignore_robots",
+    "crawl_delay_ms",
     "crawl_capture_trace",
     "crawl_capture_screenshot",
     "crawl_capture_console",
@@ -93,6 +101,8 @@ const DEPRECATED_FLAT_KEYS: &[&str] = &[
     "crawl_include_patterns",
     "crawl_exclude_patterns",
     "crawl_use_sitemap",
+    "crawl_ignore_robots",
+    "crawl_delay_ms",
     "crawl_capture_trace",
     "crawl_capture_screenshot",
     "crawl_capture_console",
@@ -432,6 +442,8 @@ fn validate_versioned_sections(root: &toml::map::Map<String, Value>) -> Result<(
                 "include_patterns",
                 "exclude_patterns",
                 "use_sitemap",
+                "ignore_robots",
+                "crawl_delay_ms",
                 "capture_trace",
                 "capture_screenshot",
                 "capture_console",
@@ -486,6 +498,15 @@ fn validate_versioned_sections(root: &toml::map::Map<String, Value>) -> Result<(
             &["enabled"],
             "[agent_discovery]",
         )?;
+    }
+    if let Some(value) = root.get("route_kinds") {
+        for (name, kind) in expect_table(value, "route_kinds", "config root")? {
+            validate_allowed_keys(
+                expect_table(kind, name, "[route_kinds]")?,
+                &["match", "skip_rules", "noindex"],
+                "[route_kinds.<name>]",
+            )?;
+        }
     }
     if let Some(value) = root.get("editorial") {
         let editorial = expect_table(value, "editorial", "config root")?;
@@ -545,11 +566,7 @@ fn validate_config_surface(value: &Value) -> Result<()> {
 
     match version {
         Some(1) => {
-            let mut allowed_keys = FLAT_TOP_LEVEL_KEYS.to_vec();
-            allowed_keys.extend(VERSIONED_TOP_LEVEL_TABLES);
-            allowed_keys.extend(UNVERSIONED_NEW_TABLES);
-            allowed_keys.push("version");
-            validate_allowed_keys(root, &allowed_keys, "config root")?;
+            validate_allowed_keys(root, &accepted_root_keys(), "config root")?;
             validate_versioned_sections(root)?;
         }
         Some(other) => bail!("unsupported config version {}; expected 1", other),
@@ -637,6 +654,8 @@ fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
             "crawl_exclude_patterns",
         );
         move_table_field_if_absent(root, &mut table, "use_sitemap", "crawl_use_sitemap");
+        move_table_field_if_absent(root, &mut table, "ignore_robots", "crawl_ignore_robots");
+        move_table_field_if_absent(root, &mut table, "crawl_delay_ms", "crawl_delay_ms");
         move_table_field_if_absent(root, &mut table, "capture_trace", "crawl_capture_trace");
         move_table_field_if_absent(
             root,
@@ -863,6 +882,10 @@ pub fn load_config_with_diagnostics(
     root: &Path,
     explicit_path: Option<&Path>,
 ) -> Result<LoadedConfig> {
+    read_config_with_diagnostics(root, explicit_path).map_err(into_user_error)
+}
+
+fn read_config_with_diagnostics(root: &Path, explicit_path: Option<&Path>) -> Result<LoadedConfig> {
     let config_path = explicit_path
         .map(PathBuf::from)
         .unwrap_or_else(|| root.join("aexeo.toml"));
@@ -873,17 +896,28 @@ pub fn load_config_with_diagnostics(
         });
     }
     let merged = load_config_value(&config_path, &mut Vec::new())?;
+    config_from_merged(merged, &config_path.display().to_string())
+}
+
+/// Validates and resolves a config whose `extends` have already been merged.
+pub(super) fn config_from_merged(merged: Value, source: &str) -> Result<LoadedConfig> {
     validate_config_surface(&merged)?;
     let warnings = collect_deprecation_warnings(&merged);
     let merged = normalize_versioned_surface(merged)?;
-    let config = merged.try_into::<Config>().with_context(|| {
-        format!(
-            "failed to deserialize merged config at {}",
-            config_path.display()
-        )
-    })?;
+    let config = merged
+        .try_into::<Config>()
+        .with_context(|| format!("failed to deserialize merged config at {source}"))?;
     validate_plugin_settings(&config.plugins, &config.plugin_settings)?;
     Ok(LoadedConfig { config, warnings })
+}
+
+/// Every key accepted at the root of a `version = 1` config.
+pub(super) fn accepted_root_keys() -> Vec<&'static str> {
+    let mut keys = FLAT_TOP_LEVEL_KEYS.to_vec();
+    keys.extend(VERSIONED_TOP_LEVEL_TABLES);
+    keys.extend(UNVERSIONED_NEW_TABLES);
+    keys.push("version");
+    keys
 }
 
 pub fn load_config(root: &Path, explicit_path: Option<&Path>) -> Result<Config> {
@@ -895,6 +929,33 @@ mod tests {
     use super::{load_config, load_config_with_diagnostics};
     use crate::config::default_rule_switches;
     use std::fs;
+
+    #[test]
+    fn loads_route_kinds_from_a_real_config_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join("aexeo.toml"),
+            "[route_kinds.manifesto]\nmatch = [\"/foundations/\"]\nskip_rules = [\"GEO007\"]\nnoindex = true\n",
+        )
+        .unwrap();
+        let config = load_config(temp_dir.path(), None).unwrap();
+        let kind = &config.route_kinds["manifesto"];
+        assert_eq!(kind.r#match, ["/foundations/"]);
+        assert_eq!(kind.skip_rules, ["GEO007"]);
+        assert!(kind.noindex);
+    }
+
+    #[test]
+    fn rejects_unknown_keys_inside_a_route_kind() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join("aexeo.toml"),
+            "[route_kinds.manifesto]\nskip = [\"GEO007\"]\n",
+        )
+        .unwrap();
+        let error = load_config(temp_dir.path(), None).unwrap_err();
+        assert!(format!("{error:#}").contains("unknown config key 'skip' in [route_kinds.<name>]"));
+    }
 
     #[test]
     fn loads_defaults_when_config_is_missing() {

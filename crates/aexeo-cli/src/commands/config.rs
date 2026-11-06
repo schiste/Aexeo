@@ -1,4 +1,5 @@
 use aexeo_core::config::load_config_with_diagnostics;
+use aexeo_core::user_bail;
 use aexeo_core::{render_resolved_config_json, render_resolved_config_toml};
 use anyhow::{Result, bail};
 use clap::ArgMatches;
@@ -12,7 +13,7 @@ pub fn command_config(submatches: &ArgMatches) -> Result<i32> {
     match submatches.subcommand() {
         Some(("print", print_matches)) => command_config_print(print_matches),
         Some((other, _)) => bail!("unsupported config command: {}", other),
-        None => bail!("missing config subcommand"),
+        None => user_bail!("missing config subcommand"),
     }
 }
 

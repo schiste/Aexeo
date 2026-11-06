@@ -5,9 +5,10 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::time::Instant;
 
-use super::egress::refused_finding;
+use super::fetcher::fetch_error_summary;
 use super::graph::response_report_path;
 use super::http::HttpFetcher;
+use super::robots::RobotsPolicy;
 use crate::site::{
     CrawlMeta, DeploymentModel, Site, SiteArtifacts, SiteBuildInput, build_page_from_source,
     build_site_from_parts,
@@ -27,6 +28,8 @@ pub(crate) struct RuntimeSnapshotState {
     robots_text: Option<String>,
     llms_text: Option<String>,
     sitemap_text: Option<String>,
+    #[serde(default)]
+    failed_responses: Vec<aexeo_contracts::CrawlResponseProvenance>,
 }
 
 pub(crate) struct RuntimeSnapshotBuilder {
@@ -34,6 +37,8 @@ pub(crate) struct RuntimeSnapshotBuilder {
     robots_text: Option<String>,
     llms_text: Option<String>,
     sitemap_text: Option<String>,
+    failed_responses: Vec<aexeo_contracts::CrawlResponseProvenance>,
+    robots_skipped_urls: Vec<String>,
 }
 
 impl RuntimeSnapshotBuilder {
@@ -43,6 +48,8 @@ impl RuntimeSnapshotBuilder {
             robots_text: None,
             llms_text: None,
             sitemap_text: None,
+            failed_responses: Vec::new(),
+            robots_skipped_urls: Vec::new(),
         }
     }
 
@@ -52,6 +59,8 @@ impl RuntimeSnapshotBuilder {
             robots_text: state.robots_text,
             llms_text: state.llms_text,
             sitemap_text: state.sitemap_text,
+            failed_responses: state.failed_responses,
+            robots_skipped_urls: Vec::new(),
         }
     }
 
@@ -61,7 +70,25 @@ impl RuntimeSnapshotBuilder {
             robots_text: self.robots_text.clone(),
             llms_text: self.llms_text.clone(),
             sitemap_text: self.sitemap_text.clone(),
+            failed_responses: self.failed_responses.clone(),
         }
+    }
+
+    /// Record a non-2xx response. It is not a page of the site: its route stays
+    /// out of the snapshot, so broken-link rules report the links pointing at it.
+    pub(crate) fn record_failed_response(
+        &mut self,
+        response: aexeo_contracts::CrawlResponseProvenance,
+    ) {
+        self.failed_responses.push(response);
+    }
+
+    pub(crate) fn set_robots_text(&mut self, text: Option<String>) {
+        self.robots_text = text;
+    }
+
+    pub(crate) fn set_robots_skipped_urls(&mut self, urls: Vec<String>) {
+        self.robots_skipped_urls = urls;
     }
 
     pub(crate) fn write_page(
@@ -82,24 +109,40 @@ impl RuntimeSnapshotBuilder {
         Ok(())
     }
 
+    /// Fetch the optional site artifacts. They are optional: one that cannot be
+    /// fetched is reported as a warning and must not discard the finished crawl.
     pub(crate) fn capture_optional_artifacts(
         &mut self,
         base_url: &str,
         http: &HttpFetcher,
-    ) -> Result<(u64, Vec<Finding>)> {
+        robots: &RobotsPolicy,
+    ) -> (u64, Vec<Finding>) {
         let started_at = Instant::now();
-        let mut findings = Vec::new();
-        for artifact in ["robots.txt", "llms.txt", "sitemap.xml"] {
+        let mut warnings = Vec::new();
+        for artifact in ["llms.txt", "sitemap.xml"] {
             let artifact_url = format!("{}{}", base_url, artifact);
+            if !robots.allows_url(&artifact_url) {
+                continue;
+            }
             let fetched = match http.fetch(&artifact_url) {
                 Ok(fetched) => fetched,
-                Err(error) => match refused_finding(&artifact_url, &error) {
-                    Some(finding) => {
-                        findings.push(finding);
-                        continue;
-                    }
-                    None => return Err(error),
-                },
+                Err(error) => {
+                    warnings.push(Finding {
+                        rule_id: "CRW002".to_string(),
+                        message: format!("could not fetch {artifact}: {}", fetch_error_summary(&error)),
+                        path: format!("crawl/{artifact}"),
+                        line: 1,
+                        column: 1,
+                        severity: "warning".to_string(),
+                        suggestion: Some(
+                            "rules about this artifact did not see it; re-run the crawl to rule out a transient failure"
+                                .to_string(),
+                        ),
+                        scope: FindingScope::Sitewide,
+                        subject: None,
+                    });
+                    continue;
+                }
             };
             if fetched.status_code.unwrap_or(500) >= 400 {
                 continue;
@@ -108,13 +151,12 @@ impl RuntimeSnapshotBuilder {
                 continue;
             };
             match artifact {
-                "robots.txt" => self.robots_text = Some(body),
                 "llms.txt" => self.llms_text = Some(body),
                 "sitemap.xml" => self.sitemap_text = Some(body),
                 _ => {}
             }
         }
-        Ok((started_at.elapsed().as_micros() as u64, findings))
+        (started_at.elapsed().as_micros() as u64, warnings)
     }
 
     pub(crate) fn finalize(
@@ -137,6 +179,8 @@ impl RuntimeSnapshotBuilder {
                 discovered_internal_routes,
                 truncated,
                 probed_artifact_paths: Vec::new(),
+                failed_responses: self.failed_responses,
+                robots_skipped_urls: self.robots_skipped_urls,
             },
         )
     }
@@ -161,6 +205,8 @@ impl RuntimeSnapshotBuilder {
                 discovered_internal_routes,
                 truncated,
                 probed_artifact_paths: Vec::new(),
+                failed_responses: self.failed_responses.clone(),
+                robots_skipped_urls: self.robots_skipped_urls.clone(),
             },
         )
     }
@@ -243,6 +289,7 @@ fn build_runtime_site_from_pages(
                 severity: "warning".to_string(),
                 suggestion: Some("increase --max-pages for a more complete runtime audit".to_string()),
                 scope: FindingScope::Sitewide,
+                subject: None,
             });
     }
     Ok((site, crawl_findings))
@@ -338,6 +385,7 @@ mod tests {
             robots_text: state.robots_text,
             llms_text: state.llms_text,
             sitemap_text: state.sitemap_text,
+            failed_responses: state.failed_responses,
         });
         let (site, _) = restored.finalize(1, 10, 1, false).unwrap();
         assert!(site.has_route("docs"));

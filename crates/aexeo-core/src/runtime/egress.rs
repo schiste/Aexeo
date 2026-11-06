@@ -21,7 +21,7 @@ use std::sync::Arc;
 use url::{Host, Url};
 
 use super::graph::response_report_path;
-use super::http::same_crawl_origin;
+use super::http::{origin_for_url, same_crawl_origin};
 use crate::link_graph::redact_url;
 use crate::site::route_from_urlish;
 
@@ -60,7 +60,8 @@ impl CrawlEgress {
 
     pub(crate) fn new(origin: &str, allow_private: bool) -> Self {
         Self {
-            origin: origin.to_string(),
+            // Without userinfo or path: this also reaches the browser runner.
+            origin: origin_for_url(origin),
             allow_private,
         }
     }
@@ -132,6 +133,7 @@ pub(crate) fn crawl_warning(url: &str, message: String) -> Finding {
         severity: "warning".to_string(),
         suggestion: None,
         scope: FindingScope::Page,
+        subject: None,
     }
 }
 

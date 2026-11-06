@@ -1,5 +1,10 @@
 # Link graph improvement plan
 
+**Status: in progress.** Work merges incrementally; see Progress and the
+remaining integration and validation items below. The checklist near the top
+predates that section and is not ticked as items merge, so read Progress first.
+Shipped behaviour is described in [docs/link-graph.md](../link-graph.md).
+
 The existing orphan rules count incoming page links without distinguishing body
 from navigation and do not resolve all valid URL forms. Do not interpret those
 counts as article-body connectivity. This plan is delivered incrementally; an
@@ -63,6 +68,11 @@ not change their counts or assert confirmed orphans.
 - Normalized URL serialization now matches observed pages to link destinations
   and equivalent URL duplicates prevent inventory/crawl coverage (#80). Query
   variants remain distinct and aliases are not inferred.
+- Near-variant destinations and draft or noindex inventory pages served indexable
+  now withhold eligibility. Audit origins follow observed URLs, `aside` and `header`
+  links inside body content are unknown, and `rel` qualifiers, `googlebot` noindex
+  and links to a page's requested URL are reported. Redirect chains remain
+  unavailable, and these links are still not credited to the redirected page.
 - A synthetic in-process benchmark covers 50 pages and 500 links (#76). No CI
   performance budget has been established for this graph benchmark.
 - A live Aeptus URL returned a generic noindex holding page, not the article
