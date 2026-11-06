@@ -18,7 +18,7 @@ use super::exit_code::{EXIT_FINDINGS, EXIT_SUCCESS, EXIT_UNSUPPORTED};
 use crate::commands::common::{canonicalize_or_keep, required_arg};
 use crate::output::{
     emit_config_warnings, render_audit_command_json, render_data_command_json,
-    render_path_command_json, render_paths_command_json, render_text_command_json,
+    render_fix_command_json, render_path_command_json, render_text_command_json,
 };
 
 pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
@@ -324,36 +324,41 @@ pub fn command_fix(submatches: &ArgMatches) -> Result<i32> {
     let loaded = load_config_with_diagnostics(&root, explicit_config.as_deref())?;
     emit_config_warnings(&loaded.warnings);
     let config = loaded.config;
-    let inject_schema = submatches.get_flag("inject-schema");
-    let fix_options = aexeo_core::FixOptions { inject_schema };
-    let changed = aexeo_core::apply_safe_fixes_with_options(
+    let dry_run = submatches.get_flag("dry-run");
+    let fix_options = aexeo_core::FixOptions {
+        inject_schema: submatches.get_flag("inject-schema"),
+        dry_run,
+    };
+    let report = aexeo_core::apply_safe_fixes_with_options(
         &resolve_static_site_root(&root, &config)?,
         &config,
         fix_options,
     )?;
-    let changed_paths = changed
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect::<Vec<_>>();
-    match submatches
-        .get_one::<String>("format")
-        .map(String::as_str)
-        .unwrap_or("text")
-    {
-        "json" => println!(
+    if submatches.get_one::<String>("format").map(String::as_str) == Some("json") {
+        println!(
             "{}",
-            render_paths_command_json("fix", "apply", true, changed_paths, loaded.warnings)?
-        ),
-        _ if changed.is_empty() => {
-            emit_config_warnings(&loaded.warnings);
-            println!("No safe fixes applied.");
-        }
-        _ => {
-            emit_config_warnings(&loaded.warnings);
-            for path in changed {
-                println!("{}", path.display());
-            }
-        }
+            render_fix_command_json(&report, dry_run, loaded.warnings)?
+        );
+        return Ok(EXIT_SUCCESS);
+    }
+    emit_config_warnings(&loaded.warnings);
+    for skipped in &report.skipped {
+        eprintln!(
+            "warning: skipped {}: {}",
+            skipped.path.display(),
+            skipped.reason
+        );
+    }
+    if dry_run {
+        println!("Dry run: nothing was written.");
+    }
+    if report.changed.is_empty() {
+        println!("No safe fixes applied.");
+    } else if dry_run {
+        println!("Would change:");
+    }
+    for path in &report.changed {
+        println!("{}", path.display());
     }
     Ok(EXIT_SUCCESS)
 }
