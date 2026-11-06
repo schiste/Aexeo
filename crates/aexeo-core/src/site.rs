@@ -527,15 +527,58 @@ pub struct SiteBuildInput {
     pub crawl_meta: Option<CrawlMeta>,
 }
 
+/// Give a crawled page the link targets its observed URL makes resolvable.
+///
+/// The source parser only knows root-relative hrefs, because a static file has
+/// no URL. A crawled page does, so the links the crawl followed must also count
+/// for inbound and broken-link analysis, or a page reached through a relative
+/// link would look orphaned. Links the parser already located keep their line.
+fn apply_crawled_links(page: &mut Page) {
+    let Some(url) = page
+        .crawl_response
+        .as_ref()
+        .and_then(|response| response.observed_url.as_deref())
+    else {
+        return;
+    };
+    for crate::runtime::CrawlLink {
+        href,
+        anchor,
+        route,
+    } in crate::runtime::crawl_links(&page.raw_text, url)
+    {
+        let mut located = false;
+        for link in page.links.iter_mut().filter(|link| link.href == href) {
+            located = true;
+            link.target.get_or_insert_with(|| route.clone());
+        }
+        if !located {
+            page.links.push(Link {
+                href,
+                target: Some(route),
+                text: anchor,
+                line: 1,
+                column: 1,
+            });
+        }
+    }
+    page.internal_links = page
+        .links
+        .iter()
+        .filter_map(|link| link.target.clone())
+        .collect();
+}
+
 pub fn build_site_from_parts(input: SiteBuildInput) -> Result<Site> {
     let SiteBuildInput {
         root,
-        pages,
+        mut pages,
         artifacts,
         deployment_model,
         deployment_markers,
         crawl_meta,
     } = input;
+    pages.iter_mut().for_each(apply_crawled_links);
     let mut route_page_indices = BTreeMap::new();
     for (index, page) in pages.iter().enumerate() {
         let current = route_page_indices

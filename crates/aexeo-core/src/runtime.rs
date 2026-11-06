@@ -25,7 +25,9 @@ use crate::site::{Site, route_from_urlish};
 use crate::static_check::run_checks_for_site_profiled;
 use crate::verification::{DiffResult, diff_finding_sets};
 use fetcher::{FetchOutcome, RuntimeFetcher};
-use graph::{extract_internal_links, read_loc_values, response_report_path, should_enqueue_link};
+pub(crate) use graph::CrawlLink;
+pub(crate) use graph::crawl_links;
+use graph::{read_loc_values, response_report_path, should_enqueue_link};
 use http::{fetch_with_http, host_for_url, is_html_content_type, same_site_host};
 use planner::{CrawlPlanner, CrawlPlannerState};
 pub use playwright::PlaywrightDoctor;
@@ -1749,11 +1751,10 @@ fn materialize_runtime_site(
             );
 
             let extraction_started_at = Instant::now();
-            for target in extract_internal_links(&body, planner.base_host()) {
-                if !should_enqueue_link(&target) {
-                    continue;
+            for link in crawl_links(&body, &fetched.effective_url) {
+                if should_enqueue_link(&link.route) {
+                    planner.discover_link_target(&link.route, &runtime);
                 }
-                planner.discover_link_target(&target, &runtime);
             }
             performance.record(
                 Phase::LinkExtraction,
