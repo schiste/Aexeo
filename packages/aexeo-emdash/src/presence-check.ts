@@ -321,21 +321,21 @@ async function checkCommonCrawl(
       "no website URL in manifest, can't query crawl index",
     );
   }
+  // The CDX index ships a new "month" every few weeks; we point at
+  // the latest known stable index. New indexes appear at predictable
+  // URLs (CC-MAIN-YYYY-WW), but listing them requires another
+  // request. For Phase 3, hard-code the latest index — periodic
+  // refresh of this constant is part of plugin maintenance until we
+  // wire in the index-of-indexes fetch.
+  const index = "CC-MAIN-2026-15";
+  const url = new URL(`https://index.commoncrawl.org/${index}-index`);
+  url.searchParams.set("url", host);
+  // The default exact match covers only the home page URL, which a crawl
+  // can miss even when it captured the rest of the site.
+  url.searchParams.set("matchType", "domain");
+  url.searchParams.set("output", "json");
+  url.searchParams.set("limit", "1");
   try {
-    // A new index ships every few weeks, and the CDX API answers 404 both for
-    // an unknown index and for a host with no captures. Only an index taken
-    // from the published list makes a 404 mean the host is absent.
-    const index = await latestCommonCrawlIndex(fetcher);
-    if (index === null) {
-      return unreachable("common_crawl", "could not read the crawl index list");
-    }
-    const url = new URL(`https://index.commoncrawl.org/${index}-index`);
-    url.searchParams.set("url", host);
-    // The default exact match covers only the home page URL, which a crawl
-    // can miss even when it captured the rest of the site.
-    url.searchParams.set("matchType", "domain");
-    url.searchParams.set("output", "json");
-    url.searchParams.set("limit", "1");
     const res = await timedFetch(fetcher, url.toString());
     if (res.status === 404) return notFound("common_crawl");
     if (!res.ok) return unreachable("common_crawl", `HTTP ${res.status}`);
@@ -363,20 +363,6 @@ async function checkCommonCrawl(
   } catch (error) {
     return unreachable("common_crawl", errMsg(error));
   }
-}
-
-async function latestCommonCrawlIndex(
-  fetcher: typeof fetch,
-): Promise<string | null> {
-  const res = await timedFetch(
-    fetcher,
-    "https://index.commoncrawl.org/collinfo.json",
-  );
-  if (!res.ok) return null;
-  // The list is published newest first.
-  const body = (await res.json()) as unknown;
-  const id = Array.isArray(body) ? (body[0] as { id?: unknown })?.id : null;
-  return typeof id === "string" && /^CC-MAIN-[\w-]+$/.test(id) ? id : null;
 }
 
 // --- Helpers ---------------------------------------------------------

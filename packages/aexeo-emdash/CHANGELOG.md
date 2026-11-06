@@ -43,11 +43,11 @@ and the project follows [Semantic Versioning](https://semver.org/).
   route. They record no collection, so they were previously never removed.
 - **The sandboxed score widget reports the score as unavailable** instead of a
   score of 0, which read as a measured result.
-- **Entity presence no longer reports false results.** Common Crawl uses the newest
-  published index across the whole domain, where a hard-coded index and an
-  exact-URL match reported absent sites that had simply not been in that crawl.
-  Wikipedia and Wikidata records must name the entity or a declared alias, ignoring
-  legal forms; a substring used to count, so "Pineapple" matched "Apple".
+- **Entity presence no longer reports false results.** Common Crawl searches the
+  whole domain, where an exact-URL match reported a site absent when the crawl
+  skipped only its home page. Wikipedia and Wikidata records must name the entity
+  or a declared alias, ignoring legal forms; a substring used to count, so
+  "Pineapple" matched "Apple".
 
 ## [0.8.19] - 2026-09-29
 

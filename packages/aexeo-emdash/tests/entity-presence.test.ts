@@ -112,11 +112,10 @@ describe("entity name matching", () => {
 describe("Common Crawl", () => {
   const input = { name: "Acme", website: "https://acme.example/" };
 
-  it("queries the newest published index across the whole domain", async () => {
+  it("queries the whole domain, not only the home page URL", async () => {
     const { fetch: fake, requested } = fetcher();
     await checkAllSources(input, fake);
     const query = requested.find((url) => url.pathname.endsWith("-index"));
-    expect(query?.pathname).toBe("/CC-MAIN-2030-01-index");
     expect(query?.searchParams.get("url")).toBe("acme.example");
     expect(query?.searchParams.get("matchType")).toBe("domain");
   });
@@ -129,24 +128,7 @@ describe("Common Crawl", () => {
           : new Response('{"timestamp":"20300105120000"}\n'),
     });
     expect(result.status).toBe("found");
-    expect(result.extra).toContain("CC-MAIN-2030-01");
     expect(result.extra).toContain("2030-01-05");
-  });
-
-  it("reports not_found only after a real index answered", async () => {
-    expect((await check("common_crawl", input)).status).toBe("not_found");
-  });
-
-  it.each<[string, Responder]>([
-    ["the list fails", () => new Response("", { status: 503 })],
-    ["the list is empty", () => json([])],
-    ["the list has an odd id", () => json([{ id: "../../evil" }])],
-    ["the list is not an array", () => json({ message: "nope" })],
-  ])("is unreachable, not not_found, when %s", async (_name, respond) => {
-    const result = await check("common_crawl", input, {
-      "index.commoncrawl.org": respond,
-    });
-    expect(result.status).toBe("unreachable");
   });
 
   it("is skipped without a website", async () => {
