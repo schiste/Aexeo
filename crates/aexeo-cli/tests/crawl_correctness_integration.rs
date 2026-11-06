@@ -99,6 +99,15 @@ impl Site {
         }
     }
 
+    fn request_count(&self, path: &str) -> usize {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(seen, _)| seen == path)
+            .count()
+    }
+
     fn requested(&self, path: &str) -> bool {
         self.requests
             .lock()
@@ -209,49 +218,89 @@ fn relative_links_count_for_broken_link_and_inbound_rules() {
     assert!(rule_messages(&payload, "LNK002").is_empty(), "{payload:#}");
 }
 
+fn site_with_linked_response(status: &'static str) -> Site {
+    Site::start(vec![
+        ("/", html(r#"<a href="/bad">bad</a>"#)),
+        (
+            "/bad",
+            (status, "text/html", "<title>Error</title>".to_string()),
+        ),
+    ])
+}
+
+/// A config with only the link rules on, so the exit code answers for the crawl
+/// alone rather than for the metadata the bare fixture pages lack.
+fn link_rules_only(dir: &Path) -> std::path::PathBuf {
+    let path = dir.join("aexeo.toml");
+    let mut text = String::from("[checks]\n");
+    for group in [
+        "html",
+        "sitemap",
+        "robots",
+        "social",
+        "schema",
+        "llm",
+        "surfaces",
+        "content",
+        "editorial",
+        "structure",
+        "accessibility",
+        "agent_discovery",
+        "well_known",
+        "headers",
+    ] {
+        text.push_str(&format!("{group} = false\n"));
+    }
+    write(&path, &text);
+    path
+}
+
+fn assert_recorded_but_not_a_page(payload: &Value, code: u16) {
+    let artifact = &payload["artifact"];
+    let pages = artifact["site"]["pages"].as_array().unwrap();
+    assert!(
+        pages.iter().all(|page| page["route"] != "bad"),
+        "{payload:#}"
+    );
+    let failed = artifact["site"]["crawl_meta"]["failed_responses"]
+        .as_array()
+        .unwrap();
+    assert_eq!(failed.len(), 1, "{payload:#}");
+    assert_eq!(failed[0]["status_code"], code);
+    assert!(rule_messages(payload, "CRW001")[0].contains(&format!("HTTP {code}")));
+}
+
 #[test]
-fn non_2xx_responses_are_recorded_but_are_not_pages() {
-    for (status, code) in [("404 Not Found", 404), ("500 Internal Server Error", 500)] {
-        let site = Site::start(vec![
-            ("/", html(r#"<a href="/bad">bad</a>"#)),
-            (
-                "/bad",
-                (status, "text/html", "<title>Error</title>".to_string()),
-            ),
-        ]);
+fn a_broken_link_is_a_finding_in_a_complete_audit() {
+    for (status, code) in [("404 Not Found", 404), ("410 Gone", 410)] {
+        let site = site_with_linked_response(status);
         let temp = tempfile::tempdir().unwrap();
         let graph = temp.path().join("graph.json");
-        let (_, payload) = crawl(&site, &["--link-graph-output", graph.to_str().unwrap()]);
-        let artifact = &payload["artifact"];
-
-        let routes = artifact["site"]["pages"].as_array().unwrap();
-        assert!(
-            routes.iter().all(|page| page["route"] != "bad"),
-            "{status}: {payload:#}"
+        let config = link_rules_only(temp.path());
+        let (output, payload) = crawl(
+            &site,
+            &[
+                "--config",
+                config.to_str().unwrap(),
+                "--link-graph-output",
+                graph.to_str().unwrap(),
+            ],
         );
-        let failed = artifact["site"]["crawl_meta"]["failed_responses"]
-            .as_array()
-            .unwrap();
-        assert_eq!(failed.len(), 1, "{status}");
-        assert_eq!(failed[0]["status_code"], code);
+
+        assert_recorded_but_not_a_page(&payload, code);
+        assert_eq!(payload["artifact"]["status"], "complete", "{payload:#}");
+        assert!(payload["artifact"]["truncation_reason"].is_null());
+        assert_eq!(output.status.code(), Some(1));
         assert_eq!(
             rule_messages(&payload, "LNK001"),
             ["broken internal link: /bad"]
         );
-        assert!(rule_messages(&payload, "CRW001")[0].contains(&format!("HTTP {code}")));
-        assert!(
-            rule_messages(&payload, "SEO001")
-                .iter()
-                .all(|m| !m.contains("/bad"))
-        );
-
-        assert_eq!(artifact["status"], "partial", "{status}");
-        assert_eq!(artifact["crawl"]["fetch_failures"], 1);
-        assert!(
-            artifact["truncation_reason"]
-                .as_str()
-                .unwrap()
-                .contains("non-2xx")
+        assert_eq!(payload["artifact"]["crawl"]["fetch_failures"], 0);
+        assert_eq!(payload["artifact"]["crawl"]["observed_error_responses"], 1);
+        assert_eq!(
+            site.request_count("/bad"),
+            1,
+            "a definite answer is not retried"
         );
 
         let report: Value = serde_json::from_slice(&std::fs::read(&graph).unwrap()).unwrap();
@@ -262,6 +311,85 @@ fn non_2xx_responses_are_recorded_but_are_not_pages() {
             "{report:#}"
         );
     }
+}
+
+#[test]
+fn a_server_failure_leaves_the_audit_partial_after_retries() {
+    for (status, code) in [
+        ("503 Service Unavailable", 503),
+        ("500 Internal Server Error", 500),
+        ("429 Too Many Requests", 429),
+    ] {
+        let site = site_with_linked_response(status);
+        let temp = tempfile::tempdir().unwrap();
+        let config = link_rules_only(temp.path());
+        let (output, payload) = crawl(
+            &site,
+            &["--retry-budget", "1", "--config", config.to_str().unwrap()],
+        );
+
+        assert_recorded_but_not_a_page(&payload, code);
+        assert_eq!(payload["artifact"]["status"], "partial", "{status}");
+        assert_eq!(payload["artifact"]["crawl"]["fetch_failures"], 1);
+        assert!(
+            payload["artifact"]["truncation_reason"]
+                .as_str()
+                .unwrap()
+                .contains("not audited")
+        );
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(site.request_count("/bad"), 2, "{status} is retried");
+    }
+}
+
+#[test]
+fn denied_access_limits_coverage_without_claiming_the_link_is_broken() {
+    for (status, code) in [("401 Unauthorized", 401), ("403 Forbidden", 403)] {
+        let site = site_with_linked_response(status);
+        let temp = tempfile::tempdir().unwrap();
+        let config = link_rules_only(temp.path());
+        let (output, payload) = crawl(&site, &["--config", config.to_str().unwrap()]);
+
+        assert_recorded_but_not_a_page(&payload, code);
+        assert_eq!(payload["artifact"]["status"], "partial", "{status}");
+        assert_eq!(payload["artifact"]["crawl"]["access_denied"], 1);
+        assert_eq!(payload["artifact"]["crawl"]["fetch_failures"], 0);
+        assert!(rule_messages(&payload, "LNK001").is_empty(), "{payload:#}");
+        assert!(
+            payload["artifact"]["truncation_reason"]
+                .as_str()
+                .unwrap()
+                .contains("denied access")
+        );
+        assert_eq!(output.status.code(), Some(0), "{payload:#}");
+    }
+}
+
+#[test]
+fn a_missing_home_page_means_nothing_was_audited() {
+    let site = Site::start(vec![]);
+    let (output, payload) = crawl(&site, &[]);
+    assert_eq!(payload["artifact"]["status"], "partial", "{payload:#}");
+    assert!(
+        payload["artifact"]["truncation_reason"]
+            .as_str()
+            .unwrap()
+            .contains("nothing was audited")
+    );
+    assert_eq!(output.status.code(), Some(1));
+}
+
+#[test]
+fn the_link_only_config_is_clean_without_a_bad_response() {
+    let site = Site::start(vec![
+        ("/", html(r#"<a href="/ok">ok</a>"#)),
+        ("/ok", html("")),
+    ]);
+    let temp = tempfile::tempdir().unwrap();
+    let config = link_rules_only(temp.path());
+    let (output, payload) = crawl(&site, &["--config", config.to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(0), "{payload:#}");
+    assert_eq!(payload["artifact"]["status"], "complete");
 }
 
 #[test]
@@ -302,24 +430,29 @@ fn a_failed_home_page_yields_a_partial_audit_rather_than_an_error() {
 }
 
 #[test]
-fn failed_fetches_make_content_mode_exit_2_like_any_partial_crawl() {
-    let site = Site::start(vec![("/", html(r#"<a href="/bad">bad</a>"#))]);
-    let temp = tempfile::tempdir().unwrap();
-    let output = Command::new(bin())
-        .current_dir(temp.path())
-        .args([
-            "content",
-            "--crawl-url",
-            &site.base_url,
-            "--preset",
-            "seo-website",
-        ])
-        .args(["--crawl-engine", "http", "--format", "json"])
-        .output()
-        .unwrap();
-    let report = parse_json(&output.stdout);
-    assert_eq!(report["crawl_status"], "partial", "{report:#}");
-    assert_eq!(output.status.code(), Some(2));
+fn content_mode_exits_2_only_for_an_unfinished_audit() {
+    for (status, expected, code) in [
+        ("404 Not Found", "complete", 1),
+        ("503 Service Unavailable", "partial", 2),
+    ] {
+        let site = site_with_linked_response(status);
+        let temp = tempfile::tempdir().unwrap();
+        let output = Command::new(bin())
+            .current_dir(temp.path())
+            .args([
+                "content",
+                "--crawl-url",
+                &site.base_url,
+                "--preset",
+                "seo-website",
+            ])
+            .args(["--crawl-engine", "http", "--format", "json"])
+            .output()
+            .unwrap();
+        let report = parse_json(&output.stdout);
+        assert_eq!(report["crawl_status"], expected, "{report:#}");
+        assert_eq!(output.status.code(), Some(code), "{status}");
+    }
 }
 
 #[test]
@@ -446,7 +579,7 @@ fn a_site_disallowing_everything_is_only_asked_for_robots_txt() {
         payload["artifact"]["truncation_reason"]
             .as_str()
             .unwrap()
-            .contains("robots.txt")
+            .contains("--ignore-robots")
     );
 }
 
@@ -462,7 +595,11 @@ fn an_unreachable_robots_txt_means_the_site_is_not_crawled() {
     let (_, payload) = crawl(&site, &[]);
     assert!(!site.requested("/"));
     assert_eq!(payload["artifact"]["status"], "partial");
-    assert!(rule_messages(&payload, "CRW002")[0].contains("HTTP 503"));
+    let warning = &rule_messages(&payload, "CRW002")[0];
+    assert!(
+        warning.contains("HTTP 503") && warning.contains("--ignore-robots"),
+        "{warning}"
+    );
 }
 
 #[test]

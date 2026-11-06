@@ -170,7 +170,16 @@ impl HttpFetcher {
                 let mut retries = 0usize;
                 let result = loop {
                     match fetcher.fetch(&url) {
-                        Ok(fetched) => break Ok(fetched),
+                        Ok(fetched)
+                            if !super::fetcher::is_retryable_response(&fetched)
+                                || retries >= fetch_retry_budget =>
+                        {
+                            break Ok(fetched);
+                        }
+                        Ok(_) => {
+                            retries += 1;
+                            thread::sleep(super::fetcher::retry_backoff(retries));
+                        }
                         Err(_) if retries < fetch_retry_budget => {
                             retries += 1;
                             thread::sleep(super::fetcher::retry_backoff(retries));

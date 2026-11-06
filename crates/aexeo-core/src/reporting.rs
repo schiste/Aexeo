@@ -396,7 +396,7 @@ fn artifact_status_lines(artifact: &AuditArtifact) -> Vec<String> {
     }
     if let Some(crawl) = artifact.crawl.as_ref() {
         lines.push(format!(
-            "- Crawl stats: engine={} visited={} discovered={} queued={} retries={} fetch_failures={} skipped_non_html={} skipped_by_robots={} elapsed_ms={} pages_per_minute={}",
+            "- Crawl stats: engine={} visited={} discovered={} queued={} retries={} fetch_failures={} skipped_non_html={} skipped_by_robots={} observed_error_responses={} access_denied={} elapsed_ms={} pages_per_minute={}",
             crawl.engine,
             crawl.visited_pages,
             crawl.discovered_internal_routes,
@@ -405,6 +405,8 @@ fn artifact_status_lines(artifact: &AuditArtifact) -> Vec<String> {
             crawl.fetch_failures,
             crawl.skipped_non_html,
             crawl.skipped_by_robots,
+            crawl.observed_error_responses,
+            crawl.access_denied,
             crawl.elapsed_ms,
             crawl.pages_per_minute
         ));
@@ -1122,6 +1124,8 @@ mod tests {
                 fetch_retries: 2,
                 skipped_non_html: 3,
                 skipped_by_robots: 0,
+                observed_error_responses: 0,
+                access_denied: 0,
                 truncated: true,
                 elapsed_ms: 1_200,
                 elapsed_us: 1_200_000,

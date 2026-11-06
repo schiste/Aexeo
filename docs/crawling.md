@@ -26,7 +26,8 @@ RFC 9309, for page, seed and sitemap URLs and for optional artifact probes.
 | --- | --- |
 | 2xx | The rules apply: the group naming the crawler's product token, otherwise `*` |
 | 4xx other than 429 | No restrictions |
-| 429, 5xx or a network failure | Everything is disallowed, with a `CRW002` warning |
+| 5xx or a network failure | Everything is disallowed, with a `CRW002` warning naming `--ignore-robots` |
+| 429 | Treated like a 5xx. RFC 9309 groups it with 4xx; this is deliberately stricter, because 429 asks the client to back off |
 
 Requests send `User-Agent: aexeo/<version>` unless `headers` sets another one. The
 rules are matched against the first token of the effective value, so an overridden
@@ -46,18 +47,28 @@ To audit a site you own, such as staging, pass `--ignore-robots` or set
 
 ## Status
 
-`complete` requires that the crawl was not truncated and that no fetch failed.
-Otherwise the status is `partial` and `truncation_reason` says why.
+`complete` means the audit finished, not that the site is healthy. Exit codes keep
+the two apart: exit 1 reports defects found, and exit 2 from `content --crawl-url`
+reports an audit that did not finish. Otherwise the status is `partial` and
+`truncation_reason` says why.
 
-A fetch fails on a transport error, an unreadable body or a non-2xx status. Each
-failure produces a `CRW001` finding. A non-2xx response is not a page: it is not
-audited, it is recorded in `site.crawl_meta.failed_responses`, and links to its
-route are reported by `LNK001`. Consequently one broken internal link makes a crawl
-`partial`.
+A non-2xx response is never a page. It is not audited and is recorded in
+`site.crawl_meta.failed_responses`, with a `CRW001` finding. What else happens depends
+on the response:
+
+| Response | Status | `CRW001` | Counted in | Links to it |
+| --- | --- | --- | --- | --- |
+| 404, 410, other 4xx, 3xx | Unaffected | error | `crawl.observed_error_responses` | `LNK001` |
+| 401, 403 | `partial` | warning | `crawl.access_denied` | Not broken: the page may exist |
+| 429, 5xx (after retries) | `partial` | error | `crawl.fetch_failures` | `LNK001` |
+| Transport error, unreadable body | `partial` | error | `crawl.fetch_failures` | `LNK001` |
+
+A site with one broken link therefore ends `complete` and exits 1. If every requested
+URL returned an error status, nothing was audited and the status is `partial`.
 
 | Command | Effect of `partial` |
 | --- | --- |
-| `crawl` | Exit code still follows findings; `CRW001` is an error, so a failed fetch exits 1 |
+| `crawl` | Exit code still follows findings: exit 1 on an error finding, exit 0 if only warnings |
 | `content --crawl-url` | Exits 2, whatever the gate results |
 | `verify` | Refuses a partial baseline artifact unless `--allow-partial-baseline` is passed |
 
@@ -67,8 +78,9 @@ then are unvisited routes indistinguishable from missing ones.
 An optional artifact such as `llms.txt` that cannot be fetched produces a `CRW002`
 warning and does not affect the status.
 
-Transport errors are retried up to `--retry-budget` times with exponential backoff
-from 250 ms to at most 5 s. Non-2xx responses are not retried.
+Transport errors, HTTP 429 and 5xx are retried up to `--retry-budget` times with
+exponential backoff from 250 ms to at most 5 s. `Retry-After` is not read. Other
+statuses are not retried.
 
 ## URLs in reports
 

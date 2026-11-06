@@ -4,7 +4,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use url::Url;
 
-use super::http::HttpFetcher;
+use super::http::{FetchResult, HttpFetcher};
 use super::playwright::PlaywrightFetcher;
 use crate::config::RuntimeConfig;
 
@@ -16,6 +16,34 @@ const RETRY_BACKOFF_MAX: Duration = Duration::from_secs(5);
 pub(crate) fn retry_backoff(retry: usize) -> Duration {
     let doublings = retry.saturating_sub(1).min(16) as u32;
     (RETRY_BACKOFF_BASE * 2_u32.pow(doublings)).min(RETRY_BACKOFF_MAX)
+}
+
+/// What a response status means for the audit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResponseClass {
+    Success,
+    /// A finished fetch reporting a site defect, such as a 404 behind a broken link.
+    Observation,
+    /// The page may exist but this crawl may not see it: a limit on coverage.
+    AccessDenied,
+    /// The server could not answer, so nothing is known about the page.
+    Failure,
+}
+
+pub(crate) fn classify_status(status: u16) -> ResponseClass {
+    match status {
+        200..=299 => ResponseClass::Success,
+        401 | 403 => ResponseClass::AccessDenied,
+        429 | 500.. => ResponseClass::Failure,
+        _ => ResponseClass::Observation,
+    }
+}
+
+/// Whether a response may turn out differently if the request is repeated.
+pub(crate) fn is_retryable_response(fetched: &FetchResult) -> bool {
+    fetched
+        .status_code
+        .is_some_and(|status| classify_status(status) == ResponseClass::Failure)
 }
 
 /// A URL safe to record in findings and artifacts, which may be shared. Userinfo,
@@ -118,7 +146,16 @@ impl RuntimeFetcher {
                     let mut retries = 0usize;
                     let result = loop {
                         match fetcher.fetch(url) {
-                            Ok(fetched) => break Ok(fetched),
+                            Ok(fetched)
+                                if !is_retryable_response(&fetched)
+                                    || retries >= fetch_retry_budget =>
+                            {
+                                break Ok(fetched);
+                            }
+                            Ok(_) => {
+                                retries += 1;
+                                thread::sleep(retry_backoff(retries));
+                            }
                             Err(_) if retries < fetch_retry_budget => {
                                 retries += 1;
                                 thread::sleep(retry_backoff(retries));
@@ -179,6 +216,49 @@ mod tests {
             fetch_error_summary(&anyhow::anyhow!("runner failed for http://u:secret@h/")),
             "request failed"
         );
+    }
+
+    #[test]
+    fn statuses_are_classified_by_what_they_mean_for_the_audit() {
+        use super::{ResponseClass::*, classify_status};
+        for (status, class) in [
+            (200, Success),
+            (204, Success),
+            (304, Observation),
+            (400, Observation),
+            (404, Observation),
+            (410, Observation),
+            (401, AccessDenied),
+            (403, AccessDenied),
+            (429, Failure),
+            (500, Failure),
+            (503, Failure),
+        ] {
+            assert_eq!(classify_status(status), class, "{status}");
+        }
+    }
+
+    #[test]
+    fn a_transient_status_is_retried_until_it_recovers() {
+        use std::io::{Read, Write};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            for status in ["503 Service Unavailable", "200 OK"] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let _ = stream.read(&mut [0_u8; 4096]).unwrap();
+                let response =
+                    format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+        });
+        let config = Config::default();
+        let mut fetcher = RuntimeFetcher::new("http", &config.runtime()).unwrap();
+        let outcomes = fetcher.fetch_batch(&[url], 2);
+        server.join().unwrap();
+        assert_eq!(outcomes[0].retries, 1);
+        let status = outcomes[0].result.as_ref().unwrap().status_code;
+        assert_eq!(status, Some(200));
     }
 
     #[test]

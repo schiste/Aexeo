@@ -360,7 +360,8 @@ pub struct AuditCrawlMeta {
     #[serde(default)]
     pub probed_artifact_paths: Vec<String>,
     /// Requests answered with a non-2xx status during the live crawl.
-    /// They are not pages, and their routes count as broken link targets.
+    /// They are not pages. Their routes count as broken link targets, except
+    /// after a 401 or 403, which says nothing about whether the page exists.
     #[serde(default)]
     pub failed_responses: Vec<CrawlResponseProvenance>,
     /// URLs the crawler did not request because robots.txt disallows them.
@@ -426,6 +427,13 @@ pub struct CrawlStats {
     pub skipped_non_html: usize,
     #[serde(default)]
     pub skipped_by_robots: usize,
+    /// Non-2xx answers that are defects of the site, such as a 404. These do not
+    /// make a crawl partial; `fetch_failures` and `access_denied` do.
+    #[serde(default)]
+    pub observed_error_responses: usize,
+    /// URLs answered with HTTP 401 or 403.
+    #[serde(default)]
+    pub access_denied: usize,
     pub truncated: bool,
     #[serde(default)]
     pub elapsed_us: u64,

@@ -31,7 +31,8 @@ use crate::static_check::run_checks_for_site_profiled;
 use crate::verification::{DiffResult, diff_finding_sets};
 pub use fetcher::redact_url;
 use fetcher::{
-    FetchOutcome, RuntimeFetcher, crawl_user_agent, fetch_error_summary, headers_with_user_agent,
+    FetchOutcome, ResponseClass, RuntimeFetcher, classify_status, crawl_user_agent,
+    fetch_error_summary, headers_with_user_agent,
 };
 pub(crate) use graph::CrawlLink;
 pub(crate) use graph::crawl_links;
@@ -1492,14 +1493,27 @@ fn crawl_incomplete_reason(planner: &CrawlPlanner, crawl_stats: &CrawlStats) -> 
     }
     if crawl_stats.fetch_failures > 0 {
         reasons.push(format!(
-            "{} of {} requested URLs failed or returned a non-2xx status and were not audited",
+            "{} of {} requested URLs failed (transport error, HTTP 429 or 5xx) and were not audited",
             crawl_stats.fetch_failures,
             planner.visited_count()
         ));
     }
+    if crawl_stats.access_denied > 0 {
+        reasons.push(format!(
+            "{} requested URLs denied access (HTTP 401 or 403) and were not audited",
+            crawl_stats.access_denied
+        ));
+    }
+    if crawl_stats.observed_error_responses > 0
+        && crawl_stats.observed_error_responses == planner.visited_count()
+    {
+        reasons.push(
+            "every requested URL returned an error status, so nothing was audited".to_string(),
+        );
+    }
     if planner.visited_count() == 0 && planner.robots_skipped_count() > 0 {
         reasons.push(format!(
-            "robots.txt disallowed all {} routes tried, so nothing was audited",
+            "robots.txt disallowed all {} routes tried, so nothing was audited; for a site you own, --ignore-robots overrides this",
             planner.robots_skipped_count()
         ));
     }
@@ -1525,18 +1539,31 @@ fn apply_robots_txt(
         crawl_findings.push(Finding {
             rule_id: "CRW002".to_string(),
             message: format!(
-                "could not fetch robots.txt ({cause}); RFC 9309 requires assuming everything is disallowed, so the site was not crawled"
+                "could not fetch robots.txt ({cause}); RFC 9309 requires assuming everything is disallowed, so the site was not crawled; for a site you own, --ignore-robots overrides this"
             ),
             path: "crawl/robots.txt".to_string(),
             line: 1,
             column: 1,
             severity: "warning".to_string(),
             suggestion: Some(
-                "fix robots.txt or retry; for a site you own, --ignore-robots skips this check"
-                    .to_string(),
+                "make robots.txt reachable and retry the crawl".to_string(),
             ),
             scope: FindingScope::Sitewide,
         });
+    }
+}
+
+fn fetch_finding(url: &str, detail: &str, severity: &str) -> Finding {
+    let route = route_from_urlish(url).unwrap_or_default();
+    Finding {
+        rule_id: "CRW001".to_string(),
+        message: format!("failed to fetch URL: {} ({detail})", redact_url(url)),
+        path: response_report_path(&route),
+        line: 1,
+        column: 1,
+        severity: severity.to_string(),
+        suggestion: None,
+        scope: FindingScope::Page,
     }
 }
 
@@ -1546,18 +1573,8 @@ fn record_failed_fetch(
     url: &str,
     detail: &str,
 ) {
-    let route = route_from_urlish(url).unwrap_or_default();
     crawl_stats.fetch_failures += 1;
-    crawl_findings.push(Finding {
-        rule_id: "CRW001".to_string(),
-        message: format!("failed to fetch URL: {} ({detail})", redact_url(url)),
-        path: response_report_path(&route),
-        line: 1,
-        column: 1,
-        severity: "error".to_string(),
-        suggestion: None,
-        scope: FindingScope::Page,
-    });
+    crawl_findings.push(fetch_finding(url, detail, "error"));
 }
 
 fn build_progress_runtime_artifact(
@@ -1924,17 +1941,34 @@ fn materialize_runtime_site(
                 headers_observed: fetched.headers_observed,
             };
             // An unknown status (a browser runner may not report one) is not
-            // evidence of failure; a known non-2xx is not a page of the site.
+            // evidence of a problem; a known non-2xx is not a page of the site.
             if let Some(status) = fetched
                 .status_code
-                .filter(|status| !(200..300).contains(status))
+                .filter(|status| classify_status(*status) != ResponseClass::Success)
             {
-                record_failed_fetch(
-                    &mut crawl_stats,
-                    &mut crawl_findings,
-                    &current,
-                    &format!("HTTP {status}"),
-                );
+                let detail = format!("HTTP {status}");
+                match classify_status(status) {
+                    ResponseClass::Failure => {
+                        record_failed_fetch(
+                            &mut crawl_stats,
+                            &mut crawl_findings,
+                            &current,
+                            &detail,
+                        );
+                    }
+                    // A limit on coverage, like truncation: partial, and a warning
+                    // because nothing shows that the site is wrong.
+                    ResponseClass::AccessDenied => {
+                        crawl_stats.access_denied += 1;
+                        crawl_findings.push(fetch_finding(&current, &detail, "warning"));
+                    }
+                    // A finished fetch with a clear answer: the audit is complete
+                    // and the defect is reported through its findings.
+                    ResponseClass::Observation | ResponseClass::Success => {
+                        crawl_stats.observed_error_responses += 1;
+                        crawl_findings.push(fetch_finding(&current, &detail, "error"));
+                    }
+                }
                 snapshot.record_failed_response(provenance);
                 performance.apply_to(&mut crawl_stats);
                 continue;

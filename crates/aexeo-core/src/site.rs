@@ -610,10 +610,17 @@ pub fn build_site_from_parts(input: SiteBuildInput) -> Result<Site> {
         for path in &meta.probed_artifact_paths {
             indexed_paths.insert(path.clone());
         }
-        // A route the crawler was told not to request is unknown, not broken.
+        // A route the crawler was told not to request or denied access to is
+        // unknown, not broken.
+        let denied = meta
+            .failed_responses
+            .iter()
+            .filter(|response| matches!(response.status_code, Some(401 | 403)))
+            .map(|response| &response.requested_url);
         indexed_paths.extend(
             meta.robots_skipped_urls
                 .iter()
+                .chain(denied)
                 .filter_map(|url| route_from_urlish(url)),
         );
     }
