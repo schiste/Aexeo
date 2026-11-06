@@ -4,6 +4,24 @@ All notable changes to `@aeptus/aexeo-emdash` are listed here.
 The format follows [Keep a Changelog](https://keepachangelog.com/),
 and the project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **The sandboxed plugin warns when its sidecar is on another version.** The
+  Worker reports its version in the `x-aexeo-version` response header, and the
+  plugin logs a warning when it differs, since a Worker left behind on an upgrade
+  keeps evaluating with older rules.
+
+### Changed
+
+- **`aexeo-crawl-worker` upgrade notes.** The Worker refuses every request when
+  `EVAL_TOKEN` is shorter than 32 characters, so rotate a shorter token before
+  redeploying. It answers `413` above 8 MiB, the limit of emdash's sandbox
+  bridge. Malformed bodies and initialization failures now return JSON errors, and
+  token comparison is constant-time. It is built with Wrangler 4 and a newer
+  compatibility date.
+
 ## [0.8.19] - 2026-09-29
 
 Updates the EmDash integration to the current plugin and content APIs, and

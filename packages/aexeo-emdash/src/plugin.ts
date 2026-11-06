@@ -319,7 +319,7 @@ export async function handleAfterSave(
   await handleAfterSaveConfigured(event, ctx, (documents, context) =>
     evaluateViaSidecar(
       ctx.http,
-      { url: runtime.url, authToken: runtime.token },
+      { url: runtime.url, authToken: runtime.token, log: ctx.log },
       documents,
       context?.collections,
     ),

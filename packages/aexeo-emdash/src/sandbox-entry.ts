@@ -199,7 +199,7 @@ async function handleRefresh(ctx: DispatchCtx): Promise<BlockResponse> {
     }
     return evaluateViaSidecar(
       ctx.ctx.http,
-      { url: runtime.url, authToken: runtime.token },
+      { url: runtime.url, authToken: runtime.token, log: ctx.ctx.log },
       documents,
       context?.collections,
     );
