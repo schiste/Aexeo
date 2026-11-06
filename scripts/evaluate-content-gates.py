@@ -13,6 +13,7 @@ from pathlib import Path
 def validate_corpus(corpus):
     if corpus.get("version") != 1:
         raise ValueError("unsupported corpus version")
+    synthetic = corpus.get("fixture_kind") == "synthetic_regression"
     ids = set()
     text_splits = {}
     for item in corpus["examples"]:
@@ -25,11 +26,13 @@ def validate_corpus(corpus):
         if text in text_splits and text_splits[text] != split:
             raise ValueError("identical example text appears in multiple splits")
         text_splits[text] = split
-        if item["expected"] not in {"passed", "failed"}:
-            raise ValueError("expected status must be passed or failed")
+        if item["expected"] not in {"passed", "failed", "not_checked"}:
+            raise ValueError("expected status must be passed, failed or not_checked")
         status = item.get("review_status", "not_reviewed")
         if status not in {"reviewed", "not_reviewed"}:
             raise ValueError("invalid review status")
+        if synthetic and status == "reviewed":
+            raise ValueError("synthetic regression fixtures cannot declare a human review")
         if status == "reviewed":
             review = item.get("review")
             if not isinstance(review, dict) or any(not isinstance(review.get(key), str) or not review[key].strip() for key in ("reviewer", "method")):
@@ -71,11 +74,14 @@ def aggregate_review_events(corpus, split, review_log):
 
 
 def empty_counts():
-    return {"true_positive": 0, "false_positive": 0, "true_negative": 0, "false_negative": 0, "not_checked": 0}
+    return {"true_positive": 0, "false_positive": 0, "true_negative": 0, "false_negative": 0, "not_checked": 0,
+            "expected_not_checked": 0, "missed_not_checked": 0}
 
 
 def record_result(counts, actual, expected):
-    if actual == "not_checked":
+    if expected == "not_checked":
+        counts["expected_not_checked" if actual == "not_checked" else "missed_not_checked"] += 1
+    elif actual == "not_checked":
         counts["not_checked"] += 1
     elif actual == "failed":
         counts["true_positive" if expected == "failed" else "false_positive"] += 1
@@ -112,6 +118,10 @@ def evaluate(binary, corpus, split, review_log=None):
             preset_path = Path(directory) / "preset.toml"
             preset_path.write_text(corpus["preset_toml"], encoding="utf-8")
             arguments.extend(["--preset-source", f"{corpus['preset']}={preset_path}"])
+        for index, (name, snapshot) in enumerate(corpus.get("evidence_sources", {}).items()):
+            source_path = Path(directory) / f"evidence-{index}.txt"
+            source_path.write_text(snapshot, encoding="utf-8")
+            arguments.extend(["--evidence-source", f"{name}={source_path}"])
         for item in examples:
             started = time.perf_counter()
             result = subprocess.run(arguments, input=item["text"], text=True, capture_output=True, check=False)
@@ -150,7 +160,7 @@ def main():
         review_log = json.loads(args.review_events.read_text(encoding="utf-8")) if args.review_events else None
         result = evaluate(args.binary, corpus, args.split, review_log)
         print(json.dumps(result, indent=2))
-        if args.assert_regression and any(result["counts"][key] for key in ("false_positive", "false_negative", "not_checked")):
+        if args.assert_regression and any(result["counts"][key] for key in ("false_positive", "false_negative", "not_checked", "missed_not_checked")):
             parser.exit(1, "regression check failed: mismatches or unchecked examples\n")
     except (OSError, KeyError, ValueError, TypeError) as error:
         parser.exit(2, f"evaluation failed: {error}\n")
