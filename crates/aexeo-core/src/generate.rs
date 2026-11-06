@@ -194,13 +194,13 @@ fn collect_schema_types(payload: &Value, out: &mut BTreeSet<String>) {
 fn page_summary(page: &Page) -> String {
     let mut fragments = Vec::new();
     if let Some(title) = &page.title {
-        fragments.push(title.clone());
+        fragments.push(markdown_escape_heading(title));
     }
     if let Some(description) = page.meta_description() {
         fragments.push(description.to_string());
     }
     if let Some(h1) = page.h1_texts.first() {
-        fragments.push(h1.clone());
+        fragments.push(markdown_escape_heading(h1));
     }
     let text = if fragments.is_empty() {
         visible_text(&page.raw_text)
@@ -297,7 +297,8 @@ fn render_page_metadata(page: &Page, route: &str) -> Vec<String> {
             "- H1: {}",
             page.h1_texts
                 .first()
-                .map(String::as_str)
+                .map(|h1| markdown_escape_heading(h1))
+                .as_deref()
                 .unwrap_or("(none)")
         ),
         format!(
@@ -421,8 +422,10 @@ fn visible_text(raw_text: &str) -> String {
     collapse_whitespace(&strip_tags(raw_text))
 }
 
+/// Title and h1 text is decoded, so it can hold literal markup. Markdown passes
+/// inline HTML through, so `<` must not reach a renderer unescaped.
 fn markdown_escape_heading(text: &str) -> String {
-    text.replace('\n', " ").trim().to_string()
+    text.replace('\n', " ").trim().replace('<', "&lt;")
 }
 
 fn markdown_path_for_route(route: &str) -> String {
@@ -676,7 +679,7 @@ pub fn render_llms_full_txt(site: &Site, _site_url: Option<&str>) -> String {
                 route.clone()
             }
         });
-        lines.push(format!("## {}", label));
+        lines.push(format!("## {}", markdown_escape_heading(&label)));
         lines.extend(render_page_metadata(page, route));
         lines.push(String::new());
     }
@@ -693,7 +696,7 @@ pub fn render_markdown_mirror(site: &Site) -> String {
                 route.clone()
             }
         });
-        lines.push(format!("## {}", title));
+        lines.push(format!("## {}", markdown_escape_heading(&title)));
         lines.push(String::new());
         lines.extend(render_page_metadata(page, route));
         lines.push(String::new());
@@ -1280,6 +1283,26 @@ mod tests {
 
     /// A heading containing a newline would break the Markdown block
     /// structure, so newlines collapse to spaces.
+    #[test]
+    fn decoded_title_and_h1_do_not_reach_markdown_as_markup() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><title>&lt;script&gt;t&lt;/script&gt;</title></head><body><h1>&lt;img src=x&gt;</h1></body></html>",
+        );
+        let site = load_site(root).unwrap();
+
+        for output in [
+            render_llms_full_txt(&site, None),
+            render_markdown_mirror(&site),
+            render_page_markdown_mirror("", site.page("").unwrap()),
+        ] {
+            assert!(!output.contains("<script"), "{output}");
+            assert!(!output.contains("<img"), "{output}");
+        }
+    }
+
     #[test]
     fn markdown_escape_heading_flattens_newlines() {
         assert_eq!(markdown_escape_heading("a\nb"), "a b");
