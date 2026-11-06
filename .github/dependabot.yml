@@ -32,6 +32,22 @@ updates:
       - dependencies
       - rust
 
+  # Bumps the channel in rust-toolchain.toml; ci.yml and release-internal.yml
+  # read it from there. The cargo tools and the nightly date are not tracked:
+  # they live in scripts/quality-tool-versions.sh and are bumped by hand.
+  - package-ecosystem: rust-toolchain
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    commit-message:
+      prefix: "chore(deps-rust-toolchain)"
+    labels:
+      - dependencies
+      - rust
+
   # The two npm packages are independent trees with their own lockfiles and
   # separate CI jobs, so they get separate entries: a crawl-worker bump must
   # not be blocked behind an emdash bump, and vice versa.

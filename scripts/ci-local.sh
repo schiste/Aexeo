@@ -26,7 +26,7 @@ Options:
 
   --with-audit    Accepted for compatibility with docs/local-quality.md.
                   It is a no-op: the dependency audit (cargo audit,
-                  cargo deny check, cargo +nightly udeps) is already part of
+                  cargo deny check, cargo-udeps on nightly) is already part of
                   the check-repo stage and runs unconditionally through
                   scripts/check-deps.sh. The flag is kept so the documented
                   invocation succeeds instead of exiting 2, and so the
@@ -74,7 +74,7 @@ guard_status="skipped"
 check_repo_status="not reached"
 pre_push_status="not reached"
 check_performance_status="not reached"
-audit_note="cargo audit / cargo deny / cargo +nightly udeps run inside the check-repo stage"
+audit_note="cargo audit / cargo deny / cargo-udeps on the pinned nightly run inside the check-repo stage"
 
 cleanup() {
     finished_at=$(aexeo_now_iso)
@@ -94,7 +94,7 @@ EOF
 trap cleanup EXIT
 
 if [ "$with_audit" -eq 1 ]; then
-    echo "note: --with-audit is accepted but changes nothing; the dependency audit is already part of check-repo (scripts/check-deps.sh runs cargo audit, cargo deny check and cargo +nightly udeps unconditionally)." >&2
+    echo "note: --with-audit is accepted but changes nothing; the dependency audit is already part of check-repo (scripts/check-deps.sh runs cargo audit, cargo deny check and cargo-udeps on the pinned nightly unconditionally)." >&2
 fi
 
 run_staged_guard=0
