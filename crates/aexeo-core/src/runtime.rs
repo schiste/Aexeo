@@ -26,7 +26,10 @@ use crate::reporting::build_audit_artifact;
 use crate::site::{Site, route_from_urlish};
 use crate::static_check::run_checks_for_site_profiled;
 use crate::verification::{DiffResult, diff_finding_sets};
-use fetcher::{FetchOutcome, RuntimeFetcher, crawl_user_agent, headers_with_user_agent};
+pub use fetcher::redact_url;
+use fetcher::{
+    FetchOutcome, RuntimeFetcher, crawl_user_agent, fetch_error_summary, headers_with_user_agent,
+};
 pub(crate) use graph::CrawlLink;
 pub(crate) use graph::crawl_links;
 use graph::{read_loc_values, response_report_path, should_enqueue_link};
@@ -1539,7 +1542,7 @@ fn record_failed_fetch(
     crawl_stats.fetch_failures += 1;
     crawl_findings.push(Finding {
         rule_id: "CRW001".to_string(),
-        message: format!("failed to fetch URL: {url} ({detail})"),
+        message: format!("failed to fetch URL: {} ({detail})", redact_url(url)),
         path: response_report_path(&route),
         line: 1,
         column: 1,
@@ -1794,7 +1797,7 @@ fn materialize_runtime_site(
                         &mut crawl_stats,
                         &mut crawl_findings,
                         &current,
-                        &error.to_string(),
+                        fetch_error_summary(&error),
                     );
                     performance.apply_to(&mut crawl_stats);
                     continue;
@@ -1806,10 +1809,10 @@ fn materialize_runtime_site(
                 continue;
             }
             let provenance = aexeo_contracts::CrawlResponseProvenance {
-                requested_url: current.clone(),
+                requested_url: redact_url(&current),
                 observed_url: fetched
                     .effective_url_observed
-                    .then(|| fetched.effective_url.clone()),
+                    .then(|| redact_url(&fetched.effective_url)),
                 status_code: fetched.status_code,
                 headers_observed: fetched.headers_observed,
             };
@@ -1894,7 +1897,7 @@ fn materialize_runtime_site(
             crawl_stats.truncated = planner.truncated();
             let page_process_us = process_started_at.elapsed().as_micros() as u64;
             performance.record_page_process(
-                &fetched.effective_url,
+                &redact_url(&fetched.effective_url),
                 fetch_elapsed_us,
                 page_process_us,
             );
@@ -1905,7 +1908,7 @@ fn materialize_runtime_site(
                 RuntimeProgressEvent {
                     phase: "progress".to_string(),
                     engine: engine.to_string(),
-                    current_url: Some(fetched.effective_url),
+                    current_url: Some(redact_url(&fetched.effective_url)),
                     visited_pages: crawl_stats.visited_pages,
                     discovered_internal_routes: crawl_stats.discovered_internal_routes,
                     queued_routes_remaining: crawl_stats.queued_routes_remaining,
@@ -2297,7 +2300,7 @@ fn probe_markdown_negotiation_finding(
         message: format!(
             "homepage doesn't honor `Accept: text/markdown` content negotiation; observed `{content_type}` instead of `text/markdown`"
         ),
-        path: format!("{base_url}/"),
+        path: format!("{}/", redact_url(base_url).trim_end_matches('/')),
         line: 1,
         column: 1,
         severity: "warning".to_string(),

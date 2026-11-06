@@ -846,7 +846,7 @@ pub fn command_perf_baseline(submatches: &ArgMatches) -> Result<i32> {
                 "command": "perf baseline",
                 "success": success,
                 "name": baseline_name,
-                "url": target_url,
+                "url": aexeo_core::redact_url(target_url),
                 "audit_path": audit_path.display().to_string(),
                 "baseline_path": timestamped_path.display().to_string(),
                 "latest_path": latest_path.display().to_string(),
@@ -862,7 +862,7 @@ pub fn command_perf_baseline(submatches: &ArgMatches) -> Result<i32> {
             println!("Performance Baseline");
             println!();
             println!("- Name: {}", baseline_name);
-            println!("- URL: {}", target_url);
+            println!("- URL: {}", aexeo_core::redact_url(target_url));
             println!("- Status: {:?}", audit.status);
             println!("- Pages: {}", audit.crawl_stats.visited_pages);
             println!("- Elapsed: {}ms", audit.crawl_stats.elapsed_ms);

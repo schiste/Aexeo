@@ -532,3 +532,74 @@ fn crawl_delay_spaces_out_batches() {
     crawl(&site, &["--config", config.to_str().unwrap()]);
     assert!(started_at.elapsed() >= Duration::from_millis(600));
 }
+
+/// Every byte the crawl writes: stdout, stderr and the artifacts it leaves behind.
+fn all_crawl_output(url: &str) -> String {
+    let temp = tempfile::tempdir().unwrap();
+    let output = Command::new(bin())
+        .current_dir(temp.path())
+        .args(["crawl", url, "--engine", "http", "--format", "json"])
+        .args(["--progress", "json"])
+        .output()
+        .unwrap();
+    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    let mut dirs = vec![temp.path().to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else {
+                text.push_str(&String::from_utf8_lossy(&std::fs::read(path).unwrap()));
+            }
+        }
+    }
+    text
+}
+
+#[test]
+fn url_credentials_never_reach_findings_or_artifacts() {
+    // Exercises every recorded URL: a page, a redirect-free non-2xx response, a
+    // transport failure (CRW001), an optional artifact failure (CRW002) and a
+    // robots.txt skip.
+    let routes = || {
+        vec![
+            (
+                "/",
+                html(
+                    r#"<a href="/ok">a</a> <a href="/bad">b</a> <a href="/dropped">c</a> <a href="/private">d</a>"#,
+                ),
+            ),
+            ("/ok", html("")),
+            (
+                "/bad",
+                ("500 Internal Server Error", "text/html", String::new()),
+            ),
+            ("/dropped", (CLOSE, "", String::new())),
+            ("/llms.txt", (CLOSE, "", String::new())),
+            ("/robots.txt", robots("User-agent: *\nDisallow: /private\n")),
+        ]
+    };
+    let site = Site::start(routes());
+    let authority = site.base_url.trim_start_matches("http://");
+    let text = all_crawl_output(&format!("http://user:s3cret-password@{authority}/"));
+    assert!(
+        text.contains("artifact"),
+        "the crawl produced no output: {text}"
+    );
+    assert!(site.requested("/dropped") && site.requested("/llms.txt"));
+    assert!(!text.contains("s3cret-password"), "password leaked: {text}");
+
+    let site = Site::start(routes());
+    let text = all_crawl_output(&format!("{}/?token=s3cret-token", site.base_url));
+    assert!(!text.contains("s3cret-token"), "query value leaked: {text}");
+
+    // A connection that fails outright, including the robots.txt warning.
+    let closed = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let text = all_crawl_output(&format!("http://user:s3cret-password@{closed}/"));
+    assert!(!text.contains("s3cret-password"), "password leaked: {text}");
+}

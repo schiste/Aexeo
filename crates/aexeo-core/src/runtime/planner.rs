@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashSet, VecDeque};
 
+use super::fetcher::redact_url;
 use super::graph::route_is_allowed;
 use super::http::{host_for_url, normalize_base_url, origin_for_url, same_site_host};
 use super::robots::RobotsPolicy;
@@ -136,7 +137,7 @@ impl CrawlPlanner {
     pub(crate) fn skip_if_disallowed(&mut self, url: &str) -> bool {
         let disallowed = !self.robots.allows_url(url);
         if disallowed {
-            self.robots_skipped_urls.insert(url.to_string());
+            self.robots_skipped_urls.insert(redact_url(url));
         }
         disallowed
     }

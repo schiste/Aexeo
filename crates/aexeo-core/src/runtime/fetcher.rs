@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::collections::BTreeMap;
 use std::thread;
 use std::time::{Duration, Instant};
+use url::Url;
 
 use super::http::HttpFetcher;
 use super::playwright::PlaywrightFetcher;
@@ -15,6 +16,46 @@ const RETRY_BACKOFF_MAX: Duration = Duration::from_secs(5);
 pub(crate) fn retry_backoff(retry: usize) -> Duration {
     let doublings = retry.saturating_sub(1).min(16) as u32;
     (RETRY_BACKOFF_BASE * 2_u32.pow(doublings)).min(RETRY_BACKOFF_MAX)
+}
+
+/// A URL safe to record in findings and artifacts, which may be shared. Userinfo,
+/// query and fragment are dropped because they can carry credentials and tokens.
+/// Routes never include a query, so this loses nothing the audit depends on.
+pub fn redact_url(url: &str) -> String {
+    // `user:pass@host` parses as a URL with the scheme `user`, so the scheme matters.
+    let Some(mut parsed) = Url::parse(url)
+        .ok()
+        .filter(|parsed| matches!(parsed.scheme(), "http" | "https"))
+    else {
+        return "[invalid URL]".to_string();
+    };
+    let _ = parsed.set_username("");
+    let _ = parsed.set_password(None);
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+    parsed.into()
+}
+
+/// A fixed description of a failed fetch. Error text is not reused because it
+/// embeds the request URL, in `reqwest` errors and in our own context alike.
+pub(crate) fn fetch_error_summary(error: &anyhow::Error) -> &'static str {
+    let Some(error) = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<reqwest::Error>())
+    else {
+        return "request failed";
+    };
+    if error.is_timeout() {
+        "request timed out"
+    } else if error.is_connect() {
+        "connection failed"
+    } else if error.is_redirect() {
+        "too many redirects"
+    } else if error.is_body() || error.is_decode() {
+        "response body could not be read"
+    } else {
+        "request failed"
+    }
 }
 
 /// The User-Agent the crawl presents: the configured one, or a generic identifier.
@@ -99,11 +140,46 @@ impl RuntimeFetcher {
 
 #[cfg(test)]
 mod tests {
-    use super::{RuntimeFetcher, crawl_user_agent, headers_with_user_agent, retry_backoff};
+    use super::{
+        RuntimeFetcher, crawl_user_agent, fetch_error_summary, headers_with_user_agent, redact_url,
+        retry_backoff,
+    };
     use crate::config::Config;
     use std::collections::BTreeMap;
     use std::net::TcpListener;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn redacted_urls_keep_only_scheme_host_port_and_path() {
+        assert_eq!(
+            redact_url("https://user:pass@example.org:8443/a/b?token=x#frag"),
+            "https://example.org:8443/a/b"
+        );
+        assert_eq!(redact_url("user:pass@example.org"), "[invalid URL]");
+        assert_eq!(redact_url("not a url with secret"), "[invalid URL]");
+    }
+
+    #[test]
+    fn error_summaries_never_contain_the_url() {
+        let closed_port = TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let config = Config::default();
+        let mut fetcher = RuntimeFetcher::new("http", &config.runtime()).unwrap();
+        let url = format!("http://user:secret@{closed_port}/?token=secret");
+        let mut outcomes = fetcher.fetch_batch(&[url], 0);
+        let error = outcomes.remove(0).result.unwrap_err();
+        assert!(
+            format!("{error:#}").contains("secret"),
+            "premise of this test"
+        );
+        assert_eq!(fetch_error_summary(&error), "connection failed");
+        assert_eq!(
+            fetch_error_summary(&anyhow::anyhow!("runner failed for http://u:secret@h/")),
+            "request failed"
+        );
+    }
 
     #[test]
     fn backoff_doubles_up_to_a_cap() {

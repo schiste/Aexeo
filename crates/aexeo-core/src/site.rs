@@ -653,7 +653,7 @@ fn deployment_model_from_label(label: &str) -> DeploymentModel {
 pub fn audit_site_snapshot(site: &Site, site_url: Option<&str>) -> AuditSiteSnapshot {
     AuditSiteSnapshot {
         version: 1,
-        site_url: site_url.map(str::to_string),
+        site_url: site_url.map(crate::runtime::redact_url),
         root: site.root.to_string_lossy().to_string(),
         deployment_model: deployment_model_label(&site.deployment_model).to_string(),
         deployment_markers: site.deployment_markers.clone(),

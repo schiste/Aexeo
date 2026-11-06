@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::time::Instant;
 
+use super::fetcher::fetch_error_summary;
 use super::graph::response_report_path;
 use super::http::fetch_with_http;
 use super::robots::RobotsPolicy;
@@ -134,7 +135,7 @@ impl RuntimeSnapshotBuilder {
                 Err(error) => {
                     warnings.push(Finding {
                         rule_id: "CRW002".to_string(),
-                        message: format!("could not fetch {artifact}: {error:#}"),
+                        message: format!("could not fetch {artifact}: {}", fetch_error_summary(&error)),
                         path: format!("crawl/{artifact}"),
                         line: 1,
                         column: 1,

@@ -115,8 +115,9 @@ pub use robots_rules::run_robots_rules;
 #[cfg(feature = "net")]
 pub use runtime::{
     PlaywrightDoctor, RuntimeAudit, RuntimeAuditOptions, RuntimeProgressEvent, RuntimeProgressMode,
-    diff_performance_artifacts, evaluate_performance_budget, render_performance_diff_text,
-    run_runtime_audit, run_runtime_audit_with_options, runtime_doctor, verify_runtime_audit,
+    diff_performance_artifacts, evaluate_performance_budget, redact_url,
+    render_performance_diff_text, run_runtime_audit, run_runtime_audit_with_options,
+    runtime_doctor, verify_runtime_audit,
 };
 pub use schema_rules::run_schema_rules;
 pub use site::{

@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use url::Url;
 
-use super::fetcher::crawl_user_agent;
+use super::fetcher::{crawl_user_agent, fetch_error_summary};
 use super::http::{FetchResult, fetch_with_http};
 use crate::config::RuntimeConfig;
 
@@ -78,12 +78,9 @@ impl RobotsPolicy {
     fn allows_path(&self, path: &str) -> bool {
         let rules = match self {
             Self::AllowAll => return true,
-            Self::DenyAll => return path == "/robots.txt",
+            Self::DenyAll => return false,
             Self::Rules(rules) => rules,
         };
-        if path == "/robots.txt" {
-            return true;
-        }
         rules
             .iter()
             .filter(|rule| pattern_matches(&rule.pattern, path))
@@ -99,6 +96,9 @@ impl RobotsPolicy {
             return !matches!(self, Self::DenyAll);
         };
         let path = parsed.path();
+        if path == "/robots.txt" {
+            return true;
+        }
         let bare = path.trim_end_matches('/');
         self.allows_path(path)
             && self.allows_path(&format!("{bare}/"))
@@ -192,7 +192,7 @@ fn interpret_response(
             return LoadedRobots {
                 policy: RobotsPolicy::DenyAll,
                 text: None,
-                unreachable: Some(format!("{error:#}")),
+                unreachable: Some(fetch_error_summary(&error).to_string()),
             };
         }
     };
@@ -335,6 +335,6 @@ mod tests {
         }
         let failed = check(Err(anyhow::anyhow!("timed out")));
         assert_eq!(failed.policy, RobotsPolicy::DenyAll);
-        assert!(failed.unreachable.unwrap().contains("timed out"));
+        assert_eq!(failed.unreachable.as_deref(), Some("request failed"));
     }
 }
