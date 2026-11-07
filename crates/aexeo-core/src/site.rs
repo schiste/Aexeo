@@ -1,3 +1,5 @@
+#[path = "site/markup.rs"]
+pub(crate) mod markup;
 #[path = "site/parser.rs"]
 mod parser;
 #[path = "site/sitemap.rs"]
@@ -362,30 +364,26 @@ pub(crate) fn collapse_whitespace(text: &str) -> String {
 
 pub(crate) fn strip_tags(raw: &str) -> String {
     let mut result = String::new();
-    let mut in_tag = false;
-    for ch in raw.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => result.push(ch),
-            _ => {}
+    let mut rest = raw;
+    while let Some(open) = rest.find('<') {
+        result.push_str(&rest[..open]);
+        let tag = &rest[open + 1..];
+        let name = tag.trim_start_matches('/');
+        let name_end = name
+            .find(|ch: char| !ch.is_ascii_alphanumeric())
+            .unwrap_or(name.len());
+        if markup::tag_breaks_text(&name[..name_end]) {
+            result.push(' ');
         }
+        // An unclosed `<` drops the rest, as it did when scanning by character.
+        let Some(close) = tag.find('>') else {
+            rest = "";
+            break;
+        };
+        rest = &tag[close + 1..];
     }
+    result.push_str(rest);
     collapse_whitespace(&result)
-}
-
-fn line_column_for(raw: &str, index: usize) -> (usize, usize) {
-    let mut line = 1;
-    let mut column = 1;
-    for ch in raw[..index.min(raw.len())].chars() {
-        if ch == '\n' {
-            line += 1;
-            column = 1;
-        } else {
-            column += 1;
-        }
-    }
-    (line, column)
 }
 
 fn build_site_index(root: &Path) -> Result<BTreeSet<String>> {
@@ -960,5 +958,66 @@ mod tests {
         let site = load_site(root).unwrap();
 
         assert!(site.robots_text.is_some());
+    }
+
+    /// React and Next.js write `hrefLang`, and the attribute must still be read.
+    #[test]
+    fn a_page_reads_camel_case_attributes_and_ignores_script_text() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("index.html"),
+            concat!(
+                r#"<html LANG="en"><head><title>x</title>"#,
+                r#"<link rel="alternate" hrefLang="x-default" href="/"/>"#,
+                r#"<link data-rel="canonical" rel="canonical" href="/real"/>"#,
+                r#"<meta property="og:title" content="a > b"/>"#,
+                r#"<script>var a = '<a href="/in-script">x</a><img src="/in-script.png">';</script>"#,
+                r#"<!-- <a href="/in-comment">x</a> --></head><body><h1>x</h1>"#,
+                r#"<article><p>text</p></article>"#,
+                r#"<section>before<script>var t = "code";</script><style>.a{}</style></section>"#,
+                r#"<a data-href="/wrong" href="/right">y</a></body></html>"#,
+            ),
+        )
+        .unwrap();
+        let site = load_site(dir.path()).unwrap();
+        let page = site.page("").unwrap();
+
+        assert_eq!(
+            page.alternate_links[0].hreflang.as_deref(),
+            Some("x-default")
+        );
+        assert_eq!(page.html_lang.as_deref(), Some("en"));
+        assert_eq!(page.canonical.as_deref(), Some("/real"));
+        assert_eq!(page.meta_by_property["og:title"], "a > b");
+        let hrefs: Vec<_> = page.links.iter().map(|link| link.href.as_str()).collect();
+        assert_eq!(hrefs, ["/right"]);
+        assert!(page.images.is_empty());
+        let section = page
+            .blocks
+            .iter()
+            .find(|block| block.tag == "section")
+            .unwrap();
+        assert_eq!(section.text, "before");
+    }
+
+    #[test]
+    fn block_and_break_tags_separate_words_but_inline_tags_do_not() {
+        assert_eq!(
+            super::strip_tags("document<br>eligibility"),
+            "document eligibility"
+        );
+        assert_eq!(super::strip_tags("<div>a</div><div>b</div>"), "a b");
+        assert_eq!(super::strip_tags("<li>a</li><LI>b</LI>"), "a b");
+        assert_eq!(super::strip_tags("wo<b>r</b>d <span>x</span>"), "word x");
+        assert_eq!(super::strip_tags("a < b"), "a");
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("index.html"),
+            "<html><head><title>x</title></head><body><h1>Secure your<br/>wo<b>r</b>ld<div>today</div></h1></body></html>",
+        )
+        .unwrap();
+        let site = load_site(dir.path()).unwrap();
+        assert_eq!(site.page("").unwrap().h1_texts, ["Secure your world today"]);
     }
 }

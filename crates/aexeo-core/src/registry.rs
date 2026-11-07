@@ -728,7 +728,7 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                 RuleDescriptor {
                     rule_id: "LLM003",
                     sitewide: true,
-                    summary: "missing expected page sections in llms.txt",
+                    summary: "generated llms.txt is missing expected page sections",
                 },
                 RuleDescriptor {
                     rule_id: "LLM004",
@@ -775,7 +775,7 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                 RuleDescriptor {
                     rule_id: "SRF004",
                     sitewide: true,
-                    summary: "route has no discovered Markdown mirror",
+                    summary: "route has no Markdown mirror, on a site that has some",
                 },
                 RuleDescriptor {
                     rule_id: "SRF005",
@@ -911,12 +911,12 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                 RuleDescriptor {
                     rule_id: "GEO001",
                     sitewide: false,
-                    summary: "<section> missing data-ui",
+                    summary: "<section> missing data-ui, on a site that uses data-ui",
                 },
                 RuleDescriptor {
                     rule_id: "GEO002",
                     sitewide: false,
-                    summary: "<article> missing data-ui",
+                    summary: "<article> missing data-ui, on a site that uses data-ui",
                 },
                 RuleDescriptor {
                     rule_id: "GEO003",

@@ -71,7 +71,12 @@ pub fn run_surface_rules(site: &Site, config: &Config) -> Vec<Finding> {
         ));
     }
 
+    // With no mirror anywhere, SRF002 already says it once for the whole site.
+    let site_has_mirrors = graph.coverage.routes_with_markdown_mirror > 0;
     for route in &graph.routes {
+        if route.markdown_mirrors.is_empty() && !site_has_mirrors {
+            continue;
+        }
         if route.markdown_mirrors.is_empty() {
             findings.push(Finding {
                 rule_id: "SRF004".to_string(),
@@ -164,7 +169,7 @@ mod tests {
         let findings = run_surface_rules(&site, &Config::default());
         assert!(findings.iter().any(|finding| finding.rule_id == "SRF001"));
         assert!(findings.iter().any(|finding| finding.rule_id == "SRF002"));
-        assert!(findings.iter().any(|finding| finding.rule_id == "SRF004"));
+        assert!(!findings.iter().any(|finding| finding.rule_id == "SRF004"));
     }
 
     #[test]
@@ -210,5 +215,22 @@ mod tests {
         let site = load_site(root).unwrap();
         let findings = run_surface_rules(&site, &Config::default());
         assert!(findings.iter().any(|finding| finding.rule_id == "SRF006"));
+    }
+
+    #[test]
+    fn a_route_without_a_mirror_is_reported_once_the_site_has_mirrors() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        let page = "<html><head><title>x</title><meta name=\"description\" content=\"y\"></head><body><h1>x</h1></body></html>";
+        write(&root.join("index.html"), page);
+        write(&root.join("about/index.html"), page);
+        write(&root.join("index.md.txt"), "# x\n");
+        let findings = run_surface_rules(&load_site(root).unwrap(), &Config::default());
+        let srf004: Vec<_> = findings
+            .iter()
+            .filter(|finding| finding.rule_id == "SRF004")
+            .collect();
+        assert_eq!(srf004.len(), 1, "{findings:?}");
+        assert!(srf004[0].path.contains("about"), "{}", srf004[0].path);
     }
 }
