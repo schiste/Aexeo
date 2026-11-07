@@ -47,7 +47,7 @@ not change their counts or assert confirmed orphans.
   an orphan from an observation alone.
 - Runtime captures preserve optional requested/final URLs, response status and
   response-header availability across checkpoints and audit artifacts (#66).
-  Redirect chains remain unavailable. An audit artifact adapter is merged (#67);
+  Redirect chains were not yet captured. An audit artifact adapter is merged (#67);
   the qualified legacy LNK002 message preserves baseline fingerprints (#68).
   The audit adapter intentionally withholds coverage completeness without a
   matching inventory and surface identity.
@@ -71,8 +71,15 @@ not change their counts or assert confirmed orphans.
 - Near-variant destinations and draft or noindex inventory pages served indexable
   now withhold eligibility. Audit origins follow observed URLs, `aside` and `header`
   links inside body content are unknown, and `rel` qualifiers, `googlebot` noindex
-  and links to a page's requested URL are reported. Redirect chains remain
-  unavailable, and these links are still not credited to the redirected page.
+  and links to a page's requested URL are reported. Redirect chains were not
+  yet captured, and these links are not credited to the redirected page.
+- HTTP-engine runtime crawls record each followed redirect hop (redacted URL and
+  status) in the page response provenance, across checkpoints and audit
+  artifacts; the link report shows the ordered chain on the redirected page.
+  Browser-engine crawls and older artifacts still raise
+  `audit_redirect_chain_unavailable`. Links to the requested URL or an
+  intermediate hop remain reported separately and are not credited to the final
+  page; redirects still withhold eligibility.
 - A synthetic in-process benchmark covers 50 pages and 500 links (#76). No CI
   performance budget has been established for this graph benchmark.
 - A live Aeptus URL returned a generic noindex holding page, not the article

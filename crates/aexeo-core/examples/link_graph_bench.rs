@@ -15,6 +15,7 @@ fn main() -> anyhow::Result<()> {
                 status_code: Some(200),
                 response_headers: Some(Default::default()),
                 requested_url: None,
+                redirect_chain: Vec::new(),
             }
         })
         .collect();

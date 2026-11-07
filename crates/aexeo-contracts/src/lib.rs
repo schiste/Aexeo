@@ -384,6 +384,20 @@ pub struct CrawlResponseProvenance {
     pub status_code: Option<u16>,
     #[serde(default)]
     pub headers_observed: bool,
+    /// Redirect responses followed before this one, in request order. Each
+    /// hop is the redacted URL that answered with a redirect and its status;
+    /// the response itself is `observed_url`. Empty when nothing redirected or
+    /// when the producer did not record hops (browser runs, older artifacts).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redirect_chain: Vec<RedirectHop>,
+}
+
+/// One redirect response in a crawl fetch: the URL requested at that hop,
+/// redacted like every persisted URL, and the 3xx status it answered with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RedirectHop {
+    pub url: String,
+    pub status_code: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]

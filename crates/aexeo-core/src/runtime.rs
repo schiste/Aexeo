@@ -1960,6 +1960,7 @@ fn materialize_runtime_site(
                     .then(|| redact_url(&fetched.effective_url)),
                 status_code: fetched.status_code,
                 headers_observed: fetched.headers_observed,
+                redirect_chain: fetched.redirect_chain.clone(),
             };
             // An unknown status (a browser runner may not report one) is not
             // evidence of a problem; a known non-2xx is not a page of the site.

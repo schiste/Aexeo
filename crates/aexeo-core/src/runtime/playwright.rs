@@ -947,6 +947,8 @@ fn fetch_result_from_payload(url: &str, payload: &serde_json::Value) -> FetchRes
         headers_observed: payload["headers"]
             .as_object()
             .is_some_and(|headers| headers.values().all(serde_json::Value::is_string)),
+        // The browser follows redirects itself and does not report the hops.
+        redirect_chain: Vec::new(),
     }
 }
 
