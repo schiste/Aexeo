@@ -122,7 +122,8 @@ pub fn inventory_seed(inventory: &InventorySnapshot, target_url: &str) -> Invent
 
 /// Record which seeded URLs the artifact holds a page or response for. A URL
 /// counts as fetched when it was requested, answered as the final response or
-/// answered as a redirect hop. A seed with a query or fragment never counts:
+/// answered as a redirect hop, including by another request that ended on an
+/// already captured page (`redirected_arrivals`). A seed with a query or fragment never counts:
 /// the crawler requests only its path, and persisted URLs drop the query.
 pub fn attest_crawl(seed: &InventorySeed, artifact: &AuditArtifact) -> CrawlAttestation {
     let site = artifact.site.as_ref();
@@ -143,6 +144,10 @@ pub fn attest_crawl(seed: &InventorySeed, artifact: &AuditArtifact) -> CrawlAtte
             std::iter::once(response.requested_url.as_str())
                 .chain(response.observed_url.as_deref())
                 .chain(response.redirect_chain.iter().map(|hop| hop.url.as_str()))
+                .chain(response.redirected_arrivals.iter().flat_map(|arrival| {
+                    std::iter::once(arrival.requested_url.as_str())
+                        .chain(arrival.redirect_chain.iter().map(|hop| hop.url.as_str()))
+                }))
         })
         .filter_map(|url| Url::parse(url).ok().map(String::from))
         .collect::<BTreeSet<_>>();
@@ -310,5 +315,27 @@ mod tests {
             attestation.robots_skipped_urls,
             ["https://example.org/private"]
         );
+    }
+    #[test]
+    fn a_redirected_arrival_on_a_captured_page_counts_as_fetched() {
+        let seed = inventory_seed(
+            &inventory(&[
+                "https://example.org/new",
+                "https://example.org/old",
+                "https://example.org/middle",
+            ]),
+            "https://example.org/",
+        );
+        let artifact: AuditArtifact = serde_json::from_value(serde_json::json!({
+            "command": "crawl",
+            "site": {"site_url": "https://example.org/", "root": "crawl", "deployment_model": "runtime_snapshot",
+                "pages": [{"path": "", "relative_path": "new/index.html", "route": "new", "crawl_response": {
+                    "requested_url": "https://example.org/new", "observed_url": "https://example.org/new",
+                    "redirected_arrivals": [{"requested_url": "https://example.org/old", "redirect_chain": [
+                        {"url": "https://example.org/old", "status_code": 301},
+                        {"url": "https://example.org/middle", "status_code": 302}]}]}}]}
+        }))
+        .unwrap();
+        assert!(attest_crawl(&seed, &artifact).unfetched_urls.is_empty());
     }
 }

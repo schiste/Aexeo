@@ -54,7 +54,9 @@ snapshot is correct.
 it differs from `url`. `redirect_chain` is also optional: the redirect responses
 followed from `requested_url` to `url`, in request order, each as
 `{"url": "...", "status_code": 301}`. An absent or empty chain means no hops
-were recorded, not that none happened.
+were recorded, not that none happened. `redirected_arrivals` is optional too:
+other requests that were redirected to the same page, each as
+`{"requested_url": "...", "redirect_chain": [...], "status_code": 200}`.
 
 The report lists every observed page, including pages with zero observed links,
 and counts distinct source URLs separately for each context. It preserves
@@ -86,9 +88,16 @@ to the page's other counts. When hops were recorded the page also reports them,
 in order, as `redirect_chain`; the field is omitted otherwise, so a report
 without redirects is unchanged.
 
-When the recorded chain is consistent (it starts at `requested_url` and every
+Other requests redirected to the same page are listed, sorted by requested
+URL, as `redirected_arrivals`, each with its recorded `redirect_chain`. Each is
+treated like `redirected_from` and checked on its own. They also raise
+`redirect_observed` unless aliases account for every one of them, and the field
+is omitted when there are none.
+
+When a recorded chain is consistent (it starts at its requested URL and every
 hop has a 3xx status), other pages linking to the requested URL or to any hop
-are credited to the final page in a separate `via_redirect` count:
+are credited to the final page in a separate `via_redirect` count. That covers
+the chain of `redirected_from` and the chain of every redirected arrival:
 
 ```json
 "via_redirect": {
@@ -165,19 +174,22 @@ longer raises `alias_resolution_required`, and the redirect or canonical link
 it accounts for no longer raises `redirect_observed` or
 `canonical_target_unresolved`. A redirect is accounted for only when the
 recorded chain is consistent and the requested URL and every hop are resolved
-aliases. Resolution never makes a
+aliases, for each request redirected to the page. Resolution never makes a
 page eligible by itself: only `published` entries can be eligible, so the alias
 URL never is, and every other condition still applies. A verified alias whose
 target is outside the inventory stays unresolved. Aliases are not separate
-pages: a redirect alias appears only as `redirected_from` or `redirect_chain`
-on its final page, links to it count only in `via_redirect`, and an alias page
+pages: a redirect alias appears only as `redirected_from`, `redirect_chain` or
+`redirected_arrivals` on its final page, links to it count only in `via_redirect`, and an alias page
 that answered itself keeps its own counts, which are never credited to the
 target.
 
-A runtime crawl keeps one capture per final route. When a seeded redirect
-alias is fetched before a direct fetch of its target, the later capture
-replaces the redirect's provenance: the alias seed is reported in
-`unfetched_urls` and the alias stays unresolved, so the error fails closed.
+A runtime crawl keeps one capture per final route, but not one provenance.
+When several requests end on the same route, such as a seeded redirect alias
+and a direct fetch of its target, the capture comes from the request answered
+without a redirect, or else from the lowest requested URL. Every other request
+is kept in `crawl_response.redirected_arrivals` with its requested URL, hops
+and status. The result does not depend on fetch order, survives checkpoints
+and resume, and adds nothing when only one request reached a page.
 
 `noindex` entries are treated through `inventory_indexability_mismatch` only:
 a `noindex` entry served with a 2xx status, captured headers and no noindex
@@ -192,7 +204,8 @@ artifacts and pages without response provenance are reported as missing rather
 than assigned an inferred URL. HTTP-engine runtime crawls record each
 redirect hop (URL redacted like every persisted URL, so without query or
 credentials, and status) in the page's `crawl_response.redirect_chain`, which
-the adapter reports on the page. Requested and effective URLs that differ
+the adapter reports on the page. Hops of other requests redirected to the same
+page go in `crawl_response.redirected_arrivals` and are checked the same way. Requested and effective URLs that differ
 without a recorded chain raise `audit_redirect_chain_unavailable`: older
 artifacts, and browser-engine crawls, which do not report hops. A chain that
 does not start at the requested URL, or holds a non-3xx status, is dropped and
@@ -255,7 +268,8 @@ counts as seeded.
 `inventory_identity` is the seed inventory's own identity, or `null`;
 `url_count` counts the distinct same-origin URLs seeded. `unfetched_urls` lists
 seeded URLs for which the artifact holds no page and no response: requested,
-final or redirect-hop URL, compared exactly after parsing. Filtered, robots-
+final or redirect-hop URL, including those of `redirected_arrivals`, compared
+exactly after parsing. Filtered, robots-
 skipped, non-HTML and unreached seeds all land there, and so does any seed with
 a query, because the crawler requests only its path. `robots_skipped_urls` lists
 every URL the crawl did not request because of robots.txt. Listed URLs are

@@ -2011,6 +2011,7 @@ fn materialize_runtime_site(
                 headers_observed: fetched.headers_observed,
                 redirect_chain: fetched.redirect_chain.clone(),
                 release_marker: None,
+                redirected_arrivals: Vec::new(),
             };
             // An unknown status (a browser runner may not report one) is not
             // evidence of a problem; a known non-2xx is not a page of the site.

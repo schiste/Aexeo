@@ -101,6 +101,10 @@ impl RuntimeSnapshotBuilder {
         self.robots_skipped_urls = urls;
     }
 
+    /// Capture a page under its final route. A route reached by several
+    /// requests keeps one capture, chosen by [`arrival_rank`] whatever the
+    /// fetch order, and the provenance of every other request in
+    /// `redirected_arrivals`.
     pub(crate) fn write_page(
         &mut self,
         route: &str,
@@ -108,14 +112,16 @@ impl RuntimeSnapshotBuilder {
         headers: &BTreeMap<String, String>,
         crawl_response: Option<aexeo_contracts::CrawlResponseProvenance>,
     ) -> Result<()> {
-        self.pages.insert(
-            route.to_string(),
-            CapturedPage {
-                body: body.to_string(),
-                headers: headers.clone(),
-                crawl_response,
-            },
-        );
+        let incoming = CapturedPage {
+            body: body.to_string(),
+            headers: headers.clone(),
+            crawl_response,
+        };
+        let page = match self.pages.remove(route) {
+            Some(existing) => merge_captures(existing, incoming),
+            None => incoming,
+        };
+        self.pages.insert(route.to_string(), page);
         Ok(())
     }
 
@@ -220,6 +226,49 @@ impl RuntimeSnapshotBuilder {
             },
         )
     }
+}
+
+/// Merge two captures of one route. The capture with the lower
+/// [`arrival_rank`] is kept; the other request, and every arrival either
+/// already held, become `redirected_arrivals`, sorted and deduplicated by
+/// requested URL so the result does not depend on fetch order. Without
+/// provenance on both sides there is nothing to keep: the later capture wins.
+fn merge_captures(existing: CapturedPage, incoming: CapturedPage) -> CapturedPage {
+    let keep_existing = match (&existing.crawl_response, &incoming.crawl_response) {
+        (Some(old), Some(new)) => arrival_rank(old) <= arrival_rank(new),
+        _ => return incoming,
+    };
+    let (mut kept, other) = if keep_existing {
+        (existing, incoming)
+    } else {
+        (incoming, existing)
+    };
+    if let (Some(primary), Some(mut other)) = (kept.crawl_response.as_mut(), other.crawl_response) {
+        let mut arrivals = std::mem::take(&mut primary.redirected_arrivals);
+        arrivals.append(&mut other.redirected_arrivals);
+        arrivals.push(aexeo_contracts::RedirectedArrival {
+            requested_url: other.requested_url,
+            redirect_chain: other.redirect_chain,
+            status_code: other.status_code,
+        });
+        arrivals.retain(|arrival| arrival.requested_url != primary.requested_url);
+        arrivals.sort_by(|left, right| left.requested_url.cmp(&right.requested_url));
+        arrivals.dedup_by(|later, earlier| later.requested_url == earlier.requested_url);
+        primary.redirected_arrivals = arrivals;
+    }
+    kept
+}
+
+/// Which of two requests reaching one route keeps the capture: a request
+/// answered directly, without redirect, before a redirected one, then the
+/// lower requested URL.
+fn arrival_rank(response: &aexeo_contracts::CrawlResponseProvenance) -> (bool, &str) {
+    let direct = response.redirect_chain.is_empty()
+        && response
+            .observed_url
+            .as_deref()
+            .is_none_or(|observed| observed == response.requested_url);
+    (!direct, response.requested_url.as_str())
 }
 
 fn build_runtime_site_from_owned_pages(
@@ -351,6 +400,7 @@ mod tests {
                 status_code: 301,
             }],
             release_marker: Some("r1".into()),
+            ..Default::default()
         };
         let mut builder = RuntimeSnapshotBuilder::new();
         builder
@@ -371,6 +421,103 @@ mod tests {
         assert_eq!(
             restored_site.pages[0].crawl_response.as_ref(),
             Some(&provenance)
+        );
+    }
+
+    fn arrival(requested: &str, chain: &[&str]) -> aexeo_contracts::CrawlResponseProvenance {
+        aexeo_contracts::CrawlResponseProvenance {
+            requested_url: format!("https://example.test/{requested}"),
+            observed_url: Some("https://example.test/new".into()),
+            status_code: Some(200),
+            headers_observed: true,
+            redirect_chain: chain
+                .iter()
+                .map(|hop| aexeo_contracts::RedirectHop {
+                    url: format!("https://example.test/{hop}"),
+                    status_code: 301,
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn every_request_reaching_a_route_keeps_its_provenance_in_any_order() {
+        let fetches = [
+            arrival("aold", &["aold"]),
+            arrival("new", &[]),
+            arrival("zold", &["zold", "middle"]),
+        ];
+        let orders = [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ];
+        let merged = orders.map(|order| {
+            let mut builder = RuntimeSnapshotBuilder::new();
+            for index in order {
+                let body = format!("<html>{index}</html>");
+                let response = fetches[index].clone();
+                builder
+                    .write_page("new", &body, &Default::default(), Some(response))
+                    .unwrap();
+            }
+            let page = builder.checkpoint_state().pages.remove("new").unwrap();
+            (page.body, page.crawl_response.unwrap())
+        });
+        let (body, provenance) = &merged[0];
+        assert_eq!(body, "<html>1</html>", "the direct fetch keeps the capture");
+        assert_eq!(provenance.requested_url, "https://example.test/new");
+        assert_eq!(
+            provenance.redirected_arrivals,
+            [&fetches[0], &fetches[2]].map(|fetch| aexeo_contracts::RedirectedArrival {
+                requested_url: fetch.requested_url.clone(),
+                redirect_chain: fetch.redirect_chain.clone(),
+                status_code: Some(200),
+            })
+        );
+        assert!(merged.iter().all(|result| result == &merged[0]));
+
+        // Without a direct fetch, the lowest requested URL keeps the capture.
+        let mut builder = RuntimeSnapshotBuilder::new();
+        for index in [2, 0] {
+            let response = fetches[index].clone();
+            builder
+                .write_page("new", "<html></html>", &Default::default(), Some(response))
+                .unwrap();
+        }
+        let state = builder.checkpoint_state();
+        let provenance = state.pages["new"].crawl_response.as_ref().unwrap();
+        assert_eq!(provenance.requested_url, "https://example.test/aold");
+        assert_eq!(provenance.redirected_arrivals.len(), 1);
+    }
+
+    #[test]
+    fn redirected_arrivals_survive_checkpoints_and_audit_snapshots() {
+        let mut builder = RuntimeSnapshotBuilder::new();
+        for fetch in [arrival("old", &["old"]), arrival("new", &[])] {
+            builder
+                .write_page("new", "<html></html>", &Default::default(), Some(fetch))
+                .unwrap();
+        }
+        let state = serde_json::to_string(&builder.checkpoint_state()).unwrap();
+        let restored = RuntimeSnapshotBuilder::from_state(serde_json::from_str(&state).unwrap());
+        let (site, _) = restored.finalize(1, 10, 1, false).unwrap();
+        let artifact = crate::site::audit_site_snapshot(&site, Some("https://example.test"));
+        let serialized = serde_json::to_value(&artifact).unwrap();
+        assert_eq!(
+            serialized["pages"][0]["crawl_response"]["redirected_arrivals"],
+            serde_json::json!([{"requested_url": "https://example.test/old", "status_code": 200,
+                "redirect_chain": [{"url": "https://example.test/old", "status_code": 301}]}])
+        );
+        let parsed = serde_json::from_value(serialized).unwrap();
+        let restored_site = crate::site::build_site_from_audit_snapshot(&parsed).unwrap();
+        assert_eq!(
+            restored_site.pages[0].crawl_response,
+            site.pages[0].crawl_response
         );
     }
 
