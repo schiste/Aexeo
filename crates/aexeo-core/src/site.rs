@@ -1,3 +1,5 @@
+#[path = "site/markup.rs"]
+pub(crate) mod markup;
 #[path = "site/parser.rs"]
 mod parser;
 #[path = "site/sitemap.rs"]
@@ -372,20 +374,6 @@ pub(crate) fn strip_tags(raw: &str) -> String {
         }
     }
     collapse_whitespace(&result)
-}
-
-fn line_column_for(raw: &str, index: usize) -> (usize, usize) {
-    let mut line = 1;
-    let mut column = 1;
-    for ch in raw[..index.min(raw.len())].chars() {
-        if ch == '\n' {
-            line += 1;
-            column = 1;
-        } else {
-            column += 1;
-        }
-    }
-    (line, column)
 }
 
 fn build_site_index(root: &Path) -> Result<BTreeSet<String>> {
@@ -960,5 +948,45 @@ mod tests {
         let site = load_site(root).unwrap();
 
         assert!(site.robots_text.is_some());
+    }
+
+    /// React and Next.js write `hrefLang`, and the attribute must still be read.
+    #[test]
+    fn a_page_reads_camel_case_attributes_and_ignores_script_text() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("index.html"),
+            concat!(
+                r#"<html LANG="en"><head><title>x</title>"#,
+                r#"<link rel="alternate" hrefLang="x-default" href="/"/>"#,
+                r#"<link data-rel="canonical" rel="canonical" href="/real"/>"#,
+                r#"<meta property="og:title" content="a > b"/>"#,
+                r#"<script>var a = '<a href="/in-script">x</a><img src="/in-script.png">';</script>"#,
+                r#"<!-- <a href="/in-comment">x</a> --></head><body><h1>x</h1>"#,
+                r#"<article><p>text</p></article>"#,
+                r#"<section>before<script>var t = "code";</script><style>.a{}</style></section>"#,
+                r#"<a data-href="/wrong" href="/right">y</a></body></html>"#,
+            ),
+        )
+        .unwrap();
+        let site = load_site(dir.path()).unwrap();
+        let page = site.page("").unwrap();
+
+        assert_eq!(
+            page.alternate_links[0].hreflang.as_deref(),
+            Some("x-default")
+        );
+        assert_eq!(page.html_lang.as_deref(), Some("en"));
+        assert_eq!(page.canonical.as_deref(), Some("/real"));
+        assert_eq!(page.meta_by_property["og:title"], "a > b");
+        let hrefs: Vec<_> = page.links.iter().map(|link| link.href.as_str()).collect();
+        assert_eq!(hrefs, ["/right"]);
+        assert!(page.images.is_empty());
+        let section = page
+            .blocks
+            .iter()
+            .find(|block| block.tag == "section")
+            .unwrap();
+        assert_eq!(section.text, "before");
     }
 }
