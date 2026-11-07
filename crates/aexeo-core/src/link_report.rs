@@ -9,7 +9,7 @@ use crate::link_evidence::{HtmlLinkMetadata, LinkContext, extract_document};
 use crate::link_graph::{LinkResolution, resolve_link};
 use crate::link_inventory::{
     CrawlSurface, InventoryDisposition, InventoryReconciliation, InventorySnapshot,
-    SurfaceIdentity, reconcile,
+    SurfaceIdentity, reconcile_with_verified_aliases,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,6 +80,42 @@ pub struct ObservedPageLinks {
     /// a basis for eligibility. Omitted when nothing is credited.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub via_redirect: Option<RedirectCredit>,
+    /// Inventory redirects, canonical aliases and locale fallbacks whose URL
+    /// this page answered, checked against their inventory target. Omitted
+    /// when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inventory_aliases: Vec<InventoryAliasObservation>,
+}
+
+/// What the crawl showed reaching an inventory alias target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AliasEvidence {
+    /// Requesting the alias URL redirected, directly or through hops, to the target.
+    Redirect,
+    /// The alias URL answered itself with a single canonical link to the target.
+    Canonical,
+}
+
+/// An inventory alias checked against the page that answered its URL.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InventoryAliasObservation {
+    /// The alias URL, as the inventory lists it.
+    pub url: String,
+    pub disposition: InventoryDisposition,
+    /// The inventory target, resolved against the alias URL, without fragment.
+    pub expected_target: String,
+    /// How the observation reached `expected_target`, or `null` when it did not.
+    pub verified_by: Option<AliasEvidence>,
+    /// `inventory_alias_unobserved` when the observation did not reach the target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issue: Option<String>,
+    /// The URL that finally answered the request for the alias.
+    pub observed_url: String,
+    /// Canonical links the alias URL declared when it answered without a
+    /// redirect, resolved without fragments; unresolvable ones kept verbatim.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observed_canonicals: Vec<String>,
 }
 
 /// Distinct source pages credited to a page through its recorded redirects.
@@ -580,6 +616,96 @@ fn redirect_credit(
     })
 }
 
+fn normalized_url(value: &str) -> Option<String> {
+    Url::parse(value).ok().map(String::from)
+}
+
+/// The URLs a response passed through, after parsing: the requested URL, the
+/// hops of a consistent recorded chain, then the final URL.
+fn response_path(page: &RenderedPage) -> Vec<String> {
+    let mut path = Vec::new();
+    if let Some(requested) = page.requested_url.as_deref() {
+        path.push(requested);
+        if redirect_chain_consistent(requested, &page.redirect_chain) {
+            path.extend(page.redirect_chain.iter().map(|hop| hop.url.as_str()));
+        }
+    }
+    path.push(page.url.as_str());
+    let mut path = path
+        .into_iter()
+        .filter_map(normalized_url)
+        .collect::<Vec<_>>();
+    path.dedup();
+    path
+}
+
+/// Check each inventory alias against the page that answered its URL. A
+/// `redirect` must redirect to its target; a `canonical_alias` or
+/// `locale_fallback` may also answer itself with a single canonical link to
+/// it. Serving the target's content is never inferred. Aliases without a
+/// target, or whose URL no page answered, are left to the reconciliation.
+fn observe_aliases(
+    inventory: Option<&InventorySnapshot>,
+    pages: &[RenderedPage],
+    canonicals: &[Vec<String>],
+) -> Vec<(usize, InventoryAliasObservation)> {
+    let paths = pages.iter().map(response_path).collect::<Vec<_>>();
+    let mut observed = Vec::new();
+    for entry in inventory.iter().flat_map(|inventory| &inventory.pages) {
+        let redirect_only = match entry.disposition {
+            InventoryDisposition::Redirect => true,
+            InventoryDisposition::CanonicalAlias | InventoryDisposition::LocaleFallback => false,
+            _ => continue,
+        };
+        let target = entry
+            .target
+            .as_deref()
+            .filter(|target| !target.trim().is_empty())
+            .and_then(|target| Url::parse(&entry.url).ok()?.join(target).ok());
+        let (Some(alias), Some(mut target)) = (normalized_url(&entry.url), target) else {
+            continue;
+        };
+        target.set_fragment(None);
+        let target = String::from(target);
+        let Some((index, position)) = paths
+            .iter()
+            .enumerate()
+            .find_map(|(index, path)| Some((index, path.iter().position(|url| *url == alias)?)))
+        else {
+            continue;
+        };
+        let served_directly = position + 1 == paths[index].len();
+        let verified_by = if !served_directly {
+            paths[index][position + 1..]
+                .contains(&target)
+                .then_some(AliasEvidence::Redirect)
+        } else if !redirect_only && canonicals[index] == [target.clone()] {
+            Some(AliasEvidence::Canonical)
+        } else {
+            None
+        };
+        observed.push((
+            index,
+            InventoryAliasObservation {
+                url: entry.url.clone(),
+                disposition: entry.disposition,
+                expected_target: target,
+                verified_by,
+                issue: verified_by
+                    .is_none()
+                    .then(|| "inventory_alias_unobserved".to_string()),
+                observed_url: pages[index].url.clone(),
+                observed_canonicals: if served_directly {
+                    canonicals[index].clone()
+                } else {
+                    Vec::new()
+                },
+            },
+        ));
+    }
+    observed
+}
+
 /// The serialized requested URL, when it differs from the observed page URL.
 fn redirected_from(page: &RenderedPage) -> Option<String> {
     let requested = String::from(Url::parse(page.requested_url.as_deref()?).ok()?);
@@ -632,6 +758,8 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
     let mut evidence = Vec::new();
     let mut observations = Vec::<(HtmlLinkMetadata, bool, Option<String>)>::new();
     let mut coverage_issues = std::collections::BTreeSet::new();
+    let (mut page_redirects, mut canonical_unresolved, mut canonicals) =
+        (Vec::new(), Vec::new(), Vec::<Vec<String>>::new());
     let inventory_dispositions = input
         .inventory
         .iter()
@@ -729,19 +857,28 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
             }
             _ => {}
         }
-        if redirected_from(page).is_some() || !page.redirect_chain.is_empty() {
-            coverage_issues.insert("redirect_observed");
-        }
-        if metadata.canonical_hrefs.len() > 1
-            || metadata.canonical_hrefs.iter().any(|href| {
-                !matches!(
-                    resolve_link(href, &page.url, origin, metadata.base_href.as_deref()),
-                    LinkResolution::SameDocument { .. }
-                )
+        let resolutions = metadata
+            .canonical_hrefs
+            .iter()
+            .map(|href| {
+                let resolution =
+                    resolve_link(href, &page.url, origin, metadata.base_href.as_deref());
+                let self_reference = matches!(resolution, LinkResolution::SameDocument { .. });
+                let resolved = match resolution {
+                    LinkResolution::SameDocument { url }
+                    | LinkResolution::Internal { url }
+                    | LinkResolution::External { url } => url,
+                    _ => href.clone(),
+                };
+                (resolved, self_reference)
             })
-        {
-            coverage_issues.insert("canonical_target_unresolved");
-        }
+            .collect::<Vec<_>>();
+        // Redirects and canonical targets are reported once aliases are known:
+        // a verified inventory alias accounts for them.
+        page_redirects.push(redirected_from(page).is_some() || !page.redirect_chain.is_empty());
+        canonical_unresolved
+            .push(resolutions.len() > 1 || resolutions.iter().any(|(_, same)| !same));
+        canonicals.push(resolutions.into_iter().map(|(url, _)| url).collect());
         observations.push((metadata, noindex, redirect_target));
     }
     if evidence
@@ -778,14 +915,61 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
             coverage_issues.insert("destination_unmatched_near_variant");
         }
     }
+    let mut aliases = observe_aliases(input.inventory.as_ref(), &input.pages, &canonicals);
+    // A verified alias resolves only when its target is itself an inventory
+    // page, so the inventory accounts for where the alias leads.
+    let inventory_urls = inventory_dispositions
+        .keys()
+        .filter_map(|url| normalized_url(url))
+        .collect::<std::collections::BTreeSet<_>>();
+    let resolved = |alias: &InventoryAliasObservation| {
+        alias.verified_by.is_some() && inventory_urls.contains(&alias.expected_target)
+    };
+    let verified_aliases = aliases
+        .iter()
+        .map(|(_, alias)| alias)
+        .filter(|alias| resolved(alias))
+        .map(|alias| alias.url.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    for (index, page) in input.pages.iter().enumerate() {
+        let resolved_here = aliases
+            .iter()
+            .filter(|(at, alias)| *at == index && resolved(alias))
+            .map(|(_, alias)| alias)
+            .collect::<Vec<_>>();
+        let path = response_path(page);
+        let redirect_resolved = path.len() > 1
+            && page.requested_url.as_deref().is_some_and(|requested| {
+                page.redirect_chain.is_empty()
+                    || redirect_chain_consistent(requested, &page.redirect_chain)
+            })
+            && path[..path.len() - 1].iter().all(|url| {
+                resolved_here
+                    .iter()
+                    .any(|alias| normalized_url(&alias.url).as_ref() == Some(url))
+            });
+        if page_redirects[index] && !redirect_resolved {
+            coverage_issues.insert("redirect_observed");
+        }
+        let canonical_resolved = resolved_here
+            .iter()
+            .any(|alias| alias.verified_by == Some(AliasEvidence::Canonical));
+        if canonical_unresolved[index] && !canonical_resolved {
+            coverage_issues.insert("canonical_target_unresolved");
+        }
+    }
+    if aliases.iter().any(|(_, alias)| alias.issue.is_some()) {
+        coverage_issues.insert("inventory_alias_unobserved");
+    }
     let mut reconciliation = input.inventory.as_ref().map(|inventory| {
-        reconcile(
+        reconcile_with_verified_aliases(
             inventory,
             &CrawlSurface {
                 identity: input.identity.clone(),
                 complete: input.crawl_complete,
                 pages: input.pages.iter().map(|page| page.url.clone()).collect(),
             },
+            &verified_aliases,
         )
     });
     issues.extend(coverage_issues.iter().map(|issue| (*issue).to_string()));
@@ -817,7 +1001,8 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
         .pages
         .iter()
         .zip(observations)
-        .map(|(page, (metadata, noindex, redirect_target))| {
+        .enumerate()
+        .map(|(index, (page, (metadata, noindex, redirect_target)))| {
             // Link resolution serializes parsed URLs (normalizing host case and
             // default ports), while page observations preserve the input spelling.
             let normalized_url = Url::parse(&page.url).ok().map(String::from);
@@ -878,6 +1063,10 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
                 redirected_from: redirected,
                 redirect_chain: page.redirect_chain.clone(),
                 via_redirect: redirect_credit(page, &by_destination),
+                inventory_aliases: aliases
+                    .extract_if(.., |(at, _)| *at == index)
+                    .map(|(_, alias)| alias)
+                    .collect(),
             }
         })
         .collect();
@@ -1568,5 +1757,263 @@ mod tests {
             assert_eq!(page.redirected_source_pages, 2);
             assert!(report.issues.contains(&"redirect_observed".to_string()));
         }
+    }
+
+    const ALIAS: &str = "https://example.org/alias";
+    const GUIDE: &str = "https://example.org/guide";
+
+    fn served(url: &str, html: &str) -> RenderedPage {
+        RenderedPage {
+            url: url.into(),
+            html: html.into(),
+            status_code: Some(200),
+            response_headers: Some(Default::default()),
+            requested_url: Some(url.into()),
+            redirect_chain: Vec::new(),
+        }
+    }
+
+    /// The guide, reached by requesting `from` and following one redirect.
+    fn guide_via(from: &str) -> RenderedPage {
+        RenderedPage {
+            requested_url: Some(from.into()),
+            redirect_chain: vec![hop(from, 301)],
+            ..served(GUIDE, "<main>Guide</main>")
+        }
+    }
+
+    /// An otherwise complete, matching report whose inventory lists the
+    /// published guide and one alias at `ALIAS`.
+    fn alias_report(
+        disposition: InventoryDisposition,
+        target: Option<&str>,
+        pages: Vec<RenderedPage>,
+    ) -> LinkReport {
+        let identity = SurfaceIdentity {
+            origin: "https://example.org".into(),
+            release: "r1".into(),
+            surface: "public".into(),
+            snapshot: "s1".into(),
+        };
+        let entry =
+            |url: &str, disposition, target: Option<&str>| crate::link_inventory::InventoryPage {
+                url: url.into(),
+                disposition,
+                target: target.map(Into::into),
+                locale: None,
+            };
+        build_link_report(&LinkReportInput {
+            version: 1,
+            identity: Some(identity.clone()),
+            snapshot_date: Some("2026-11-07".into()),
+            crawl_complete: true,
+            pages,
+            inventory: Some(InventorySnapshot {
+                identity: Some(identity),
+                complete: true,
+                pages: vec![
+                    entry(GUIDE, InventoryDisposition::Published, None),
+                    entry(ALIAS, disposition, target),
+                ],
+            }),
+        })
+        .unwrap()
+    }
+
+    fn reconciliation(report: &LinkReport) -> &InventoryReconciliation {
+        report.reconciliation.as_ref().expect("reconciliation")
+    }
+
+    /// A verified alias leaves only the published target eligible.
+    fn assert_verified(report: &LinkReport, page: usize, evidence: AliasEvidence) {
+        let alias = &report.pages[page].inventory_aliases[0];
+        assert_eq!(alias.verified_by, Some(evidence), "{report:#?}");
+        assert_eq!(alias.issue, None);
+        assert_eq!(alias.expected_target, GUIDE);
+        let result = reconciliation(report);
+        assert!(result.comparable, "{report:#?}");
+        assert_eq!(result.eligible_pages, vec![GUIDE.to_string()]);
+        assert_eq!(
+            report
+                .pages
+                .iter()
+                .map(|page| page.inventory_aliases.len())
+                .sum::<usize>(),
+            1
+        );
+    }
+
+    fn assert_unobserved(report: &LinkReport, page: usize) -> &InventoryAliasObservation {
+        let alias = &report.pages[page].inventory_aliases[0];
+        assert_eq!(alias.verified_by, None, "{report:#?}");
+        assert_eq!(alias.issue.as_deref(), Some("inventory_alias_unobserved"));
+        assert!(
+            report
+                .issues
+                .contains(&"inventory_alias_unobserved".to_string())
+        );
+        let result = reconciliation(report);
+        assert!(!result.comparable);
+        assert!(result.eligible_pages.is_empty());
+        assert!(
+            result
+                .issues
+                .contains(&"inventory_alias_unobserved".to_string())
+        );
+        alias
+    }
+
+    #[test]
+    fn a_redirect_alias_is_verified_only_by_redirecting_to_its_target() {
+        let report = alias_report(
+            InventoryDisposition::Redirect,
+            Some(GUIDE),
+            vec![guide_via(ALIAS)],
+        );
+        assert_verified(&report, 0, AliasEvidence::Redirect);
+        assert!(!report.issues.contains(&"redirect_observed".to_string()));
+
+        // A canonical link is not a redirect.
+        let report = alias_report(
+            InventoryDisposition::Redirect,
+            Some(GUIDE),
+            vec![
+                served(GUIDE, "<main>Guide</main>"),
+                served(ALIAS, "<link rel='canonical' href='/guide'>"),
+            ],
+        );
+        let alias = assert_unobserved(&report, 1);
+        assert_eq!(alias.observed_url, ALIAS);
+        assert_eq!(alias.observed_canonicals, vec![GUIDE.to_string()]);
+    }
+
+    #[test]
+    fn a_canonical_alias_is_verified_by_a_relative_canonical_with_a_fragment() {
+        let report = alias_report(
+            InventoryDisposition::CanonicalAlias,
+            Some(GUIDE),
+            vec![
+                served(GUIDE, "<main>Guide</main>"),
+                served(
+                    ALIAS,
+                    "<link rel='canonical' href='guide#intro'><main>Copy</main>",
+                ),
+            ],
+        );
+        assert_verified(&report, 1, AliasEvidence::Canonical);
+        assert_eq!(
+            report.pages[1].inventory_aliases[0].observed_canonicals,
+            vec![GUIDE.to_string()]
+        );
+        assert!(
+            !report
+                .issues
+                .contains(&"canonical_target_unresolved".to_string())
+        );
+
+        let report = alias_report(
+            InventoryDisposition::CanonicalAlias,
+            Some(GUIDE),
+            vec![
+                served(GUIDE, "<main>Guide</main>"),
+                served(ALIAS, "<link rel='canonical' href='/elsewhere'>"),
+            ],
+        );
+        let alias = assert_unobserved(&report, 1);
+        assert_eq!(
+            alias.observed_canonicals,
+            vec!["https://example.org/elsewhere".to_string()]
+        );
+        assert!(
+            report
+                .issues
+                .contains(&"canonical_target_unresolved".to_string())
+        );
+    }
+
+    #[test]
+    fn a_locale_fallback_serving_its_own_page_is_unobserved() {
+        let report = alias_report(
+            InventoryDisposition::LocaleFallback,
+            Some(GUIDE),
+            vec![guide_via(ALIAS)],
+        );
+        assert_verified(&report, 0, AliasEvidence::Redirect);
+
+        // The same content at the alias URL is not inferred to be the target.
+        let report = alias_report(
+            InventoryDisposition::LocaleFallback,
+            Some(GUIDE),
+            vec![
+                served(GUIDE, "<main>Guide</main>"),
+                served(ALIAS, "<main>Guide</main>"),
+            ],
+        );
+        let alias = assert_unobserved(&report, 1);
+        assert_eq!(alias.observed_url, ALIAS);
+        assert!(alias.observed_canonicals.is_empty());
+    }
+
+    #[test]
+    fn missing_targets_and_uncrawled_aliases_keep_their_reconciliation_issues() {
+        let missing = alias_report(
+            InventoryDisposition::CanonicalAlias,
+            None,
+            vec![
+                served(GUIDE, "<main>Guide</main>"),
+                served(ALIAS, "<link rel='canonical' href='/guide'>"),
+            ],
+        );
+        let uncrawled = alias_report(
+            InventoryDisposition::Redirect,
+            Some(GUIDE),
+            vec![served(GUIDE, "<main>Guide</main>")],
+        );
+        for (report, issue) in [
+            (&missing, "alias_target_missing"),
+            (&uncrawled, "alias_resolution_required"),
+        ] {
+            assert!(
+                report
+                    .pages
+                    .iter()
+                    .all(|page| page.inventory_aliases.is_empty())
+            );
+            assert!(
+                !report
+                    .issues
+                    .contains(&"inventory_alias_unobserved".to_string())
+            );
+            let result = reconciliation(report);
+            assert!(result.issues.contains(&issue.to_string()), "{report:#?}");
+            assert!(result.eligible_pages.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_verified_alias_to_a_page_outside_the_inventory_stays_unresolved() {
+        let report = alias_report(
+            InventoryDisposition::CanonicalAlias,
+            Some("/elsewhere"),
+            vec![
+                served(GUIDE, "<main>Guide</main>"),
+                served(ALIAS, "<link rel='canonical' href='/elsewhere'>"),
+            ],
+        );
+        let alias = &report.pages[1].inventory_aliases[0];
+        assert_eq!(alias.verified_by, Some(AliasEvidence::Canonical));
+        assert_eq!(alias.expected_target, "https://example.org/elsewhere");
+        let result = reconciliation(&report);
+        assert!(
+            result
+                .issues
+                .contains(&"alias_resolution_required".to_string())
+        );
+        assert!(
+            result
+                .issues
+                .contains(&"canonical_target_unresolved".to_string())
+        );
+        assert!(result.eligible_pages.is_empty());
     }
 }

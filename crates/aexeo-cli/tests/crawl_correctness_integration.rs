@@ -1528,3 +1528,93 @@ fn a_credential_header_is_refused_as_a_release_marker() {
     );
     assert!(site.requests.lock().unwrap().is_empty());
 }
+
+#[test]
+fn inventory_aliases_are_checked_against_what_the_seeded_crawl_observed() {
+    let site = Site::start(vec![
+        ("/", html(r#"<main><a href="/guide">Guide</a></main>"#)),
+        (
+            "/old",
+            (
+                "301 Moved Permanently\r\nLocation: /new",
+                "text/html",
+                String::new(),
+            ),
+        ),
+        ("/new", html("<main>New</main>")),
+        ("/guide", html("<main>Guide</main>")),
+        (
+            "/alias",
+            html(r#"<link rel="canonical" href="guide#top"><main>Copy</main>"#),
+        ),
+        ("/fr/guide", html("<main>Guide</main>")),
+    ]);
+    let temp = tempfile::tempdir().unwrap();
+    let base = &site.base_url;
+    // `/new` is fetched before `/old` here. The snapshot keeps one capture per
+    // final route, so a redirect fetched before a direct fetch of its target
+    // loses its provenance and leaves the seed unfetched.
+    let mut context = inventory_context(&site, &["/", "/new", "/guide"], &[]);
+    let aliases = [
+        ("/old", "redirect", "/new"),
+        ("/alias", "canonical_alias", "/guide"),
+        ("/fr/guide", "locale_fallback", "/guide"),
+    ];
+    for (path, disposition, target) in aliases {
+        context["inventory"]["pages"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+            "url": format!("{base}{path}"), "disposition": disposition,
+            "target": format!("{base}{target}"), "locale": null}));
+    }
+    let (_, audit) = seeded_crawl(&site, temp.path(), &context, &[]);
+    let report = audit_link_report(temp.path(), &audit);
+    assert_eq!(report["crawl_complete"], true, "{report:#}");
+    let alias_at = |url: String| {
+        report["pages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|page| page["url"] == url)
+            .unwrap_or_else(|| panic!("{report:#}"))["inventory_aliases"][0]
+            .clone()
+    };
+    let redirect = alias_at(format!("{base}/new"));
+    assert_eq!(redirect["url"], format!("{base}/old"), "{report:#}");
+    assert_eq!(redirect["verified_by"], "redirect", "{report:#}");
+    assert_eq!(
+        alias_at(format!("{base}/alias"))["verified_by"],
+        "canonical"
+    );
+    let fallback = alias_at(format!("{base}/fr/guide"));
+    assert_eq!(
+        fallback,
+        serde_json::json!({"url": format!("{base}/fr/guide"), "disposition": "locale_fallback",
+            "expected_target": format!("{base}/guide"), "verified_by": null,
+            "issue": "inventory_alias_unobserved", "observed_url": format!("{base}/fr/guide")})
+    );
+    let reconciliation = &report["reconciliation"];
+    assert_eq!(reconciliation["comparable"], false);
+    assert_eq!(reconciliation["eligible_pages"], serde_json::json!([]));
+    let issues = reconciliation["issues"].to_string();
+    assert!(issues.contains("inventory_alias_unobserved"), "{report:#}");
+    assert!(!issues.contains("redirect_observed"), "{report:#}");
+    assert!(
+        !issues.contains("canonical_target_unresolved"),
+        "{report:#}"
+    );
+
+    // Once the fallback is published in its own right, the verified aliases
+    // leave the inventory's own pages eligible, and never themselves.
+    context["inventory"]["pages"][5]["disposition"] = "published".into();
+    write(&temp.path().join("context.json"), &context.to_string());
+    let report = audit_link_report(temp.path(), &audit);
+    let reconciliation = &report["reconciliation"];
+    assert_eq!(reconciliation["comparable"], true, "{report:#}");
+    let eligible = ["/", "/fr/guide", "/guide", "/new"].map(|path| format!("{base}{path}"));
+    assert_eq!(
+        reconciliation["eligible_pages"],
+        serde_json::json!(eligible)
+    );
+}

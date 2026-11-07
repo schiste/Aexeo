@@ -38,7 +38,8 @@ object means the headers were captured and none were present. The report flags
 missing information and inventory mismatches. Inventory dispositions are
 `published`, `draft`, `noindex`, `redirect`, `canonical_alias`,
 `locale_fallback` and `unknown`. Alias records require an explicit target;
-any unresolved alias prevents coverage eligibility. Observed noindex directives
+any unresolved alias prevents coverage eligibility (see
+[Inventory aliases](#inventory-aliases)). Observed noindex directives
 (`robots` and `googlebot` meta tags, `X-Robots-Tag`), redirects and canonical
 targets are reported; missing response metadata or unresolved targets also
 withhold eligibility. `inventory_indexability_mismatch` also withholds it, in
@@ -79,7 +80,8 @@ page-level `nofollow` robots directive does not change these counts.
 
 A page whose `requested_url` differs reports it as `redirected_from`, with the
 other pages linking to it as `redirected_source_pages`, and raises
-`redirect_observed`, which withholds eligibility. These sources are not added
+`redirect_observed`, which withholds eligibility unless an inventory alias
+accounts for the redirect (below). These sources are not added
 to the page's other counts. When hops were recorded the page also reports them,
 in order, as `redirect_chain`; the field is omitted otherwise, so a report
 without redirects is unchanged.
@@ -97,10 +99,9 @@ are credited to the final page in a separate `via_redirect` count:
 
 A source linking to several URLs of the chain counts once, and the page's own
 links are excluded. These sources are never added to `distinct_source_pages`,
-`source_pages_by_context` or the other page counts, and `redirect_observed`
-still withholds eligibility, so this credit never makes a page eligible or
-decides whether it is an orphan. `via_redirect` is omitted when nothing is
-credited: when no source links to the chain, when no chain was recorded (older
+`source_pages_by_context` or the other page counts, and this credit never
+makes a page eligible or decides whether it is an orphan. `via_redirect` is
+omitted when nothing is credited: when no source links to the chain, when no chain was recorded (older
 artifacts and browser-engine crawls), and when the chain is inconsistent.
 Hop URLs are matched exactly after parsing, like every destination.
 
@@ -121,6 +122,67 @@ Add `--telemetry` to write a single JSON event containing only duration, page,
 link and issue counts to standard error. It is opt-in and does not include page
 URLs or content. The normal report contains the evidence and should be handled
 accordingly.
+
+## Inventory aliases
+
+Each inventory `redirect`, `canonical_alias` and `locale_fallback` entry with
+a target is checked against the page that answered its URL. The target is
+resolved against the alias URL and its fragment dropped; URLs are compared after
+parsing, like every destination.
+
+| Disposition | Verified when |
+| --- | --- |
+| `redirect` | Requesting the alias redirected to the target: the target follows the alias in the recorded chain, or is the final URL |
+| `canonical_alias` | That redirect, or the alias URL answered itself with exactly one `<link rel="canonical">` resolving to the target |
+| `locale_fallback` | The same as `canonical_alias`. Serving the target's content is not proof: it is never inferred |
+
+The page that answered the alias (the final page of a redirect, or the alias
+page itself) lists it in `inventory_aliases`; the field is omitted otherwise.
+An unmet expectation raises `inventory_alias_unobserved` on the entry and in the
+report, and withholds eligibility like the other page-level issues:
+
+```json
+"inventory_aliases": [{
+  "url": "https://example.org/fr/guide",
+  "disposition": "locale_fallback",
+  "expected_target": "https://example.org/guide",
+  "verified_by": null,
+  "issue": "inventory_alias_unobserved",
+  "observed_url": "https://example.org/fr/guide"
+}]
+```
+
+`verified_by` is `redirect` or `canonical` when verified. `observed_canonicals`
+lists the canonical links of an alias URL that answered without a redirect,
+resolved, or verbatim when they cannot be resolved; it is omitted when empty.
+An alias without a target keeps `alias_target_missing` and
+`alias_resolution_required`, and an alias URL no page answered (uncrawled) keeps
+`alias_resolution_required` and whatever coverage issues apply, such as
+`audit_seed_unfetched`; neither raises `inventory_alias_unobserved`.
+
+A verified alias whose target is itself an inventory URL is resolved: it no
+longer raises `alias_resolution_required`, and the redirect or canonical link
+it accounts for no longer raises `redirect_observed` or
+`canonical_target_unresolved`. A redirect is accounted for only when the
+recorded chain is consistent and the requested URL and every hop are resolved
+aliases. Resolution never makes a
+page eligible by itself: only `published` entries can be eligible, so the alias
+URL never is, and every other condition still applies. A verified alias whose
+target is outside the inventory stays unresolved. Aliases are not separate
+pages: a redirect alias appears only as `redirected_from` or `redirect_chain`
+on its final page, links to it count only in `via_redirect`, and an alias page
+that answered itself keeps its own counts, which are never credited to the
+target.
+
+A runtime crawl keeps one capture per final route. When a seeded redirect
+alias is fetched before a direct fetch of its target, the later capture
+replaces the redirect's provenance: the alias seed is reported in
+`unfetched_urls` and the alias stays unresolved, so the error fails closed.
+
+`noindex` entries are treated through `inventory_indexability_mismatch` only:
+a `noindex` entry served with a 2xx status, captured headers and no noindex
+directive raises it, as does a `published` entry observed noindex. A `noindex`
+entry needs no target and is never eligible.
 
 ## Runtime audit artifacts
 
