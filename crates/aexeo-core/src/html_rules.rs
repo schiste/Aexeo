@@ -462,7 +462,10 @@ mod tests {
     fn runs_static_html_audit_from_configured_source_dir() {
         let temp_dir = tempfile::tempdir().unwrap();
         let root = temp_dir.path();
-        write(&root.join("aexeo.toml"), "source_dir = \"dist\"\n");
+        write(
+            &root.join("aexeo.toml"),
+            "version = 1\n[site]\nsource_dir = \"dist\"\n",
+        );
         write(
             &root.join("dist/index.html"),
             "<html lang=\"en\"><head><title>x</title><meta name=\"description\" content=\"y\"><link rel=\"canonical\" href=\"https://example.com/\"></head><body><h1>x</h1></body></html>",

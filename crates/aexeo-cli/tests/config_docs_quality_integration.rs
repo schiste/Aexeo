@@ -51,34 +51,21 @@ adapter = "astro-dist"
 }
 
 #[test]
-fn config_print_json_contract_reports_deprecation_warnings() {
+fn config_print_rejects_a_removed_flat_key_and_names_its_new_location() {
     let temp_dir = tempfile::tempdir().unwrap();
     write(
         &temp_dir.path().join("aexeo.toml"),
-        r#"
-site_url = "https://example.com"
-browser_engine = "http"
-"#,
+        "site_url = \"https://example.com\"\n",
     );
     let output = Command::new(bin())
         .arg("config")
         .arg("print")
         .arg(temp_dir.path())
-        .arg("--format")
-        .arg("json")
         .output()
         .unwrap();
-    assert!(output.status.success());
-    let payload = parse_json(&output.stdout);
-    assert!(payload["warnings"].is_array());
-    assert!(
-        payload["warnings"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|warning| warning["code"] == "CFGDEP001"
-                && warning["message"].as_str().unwrap().contains("site_url"))
-    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("use `url` under `[site]`"), "{stderr}");
 }
 
 #[test]

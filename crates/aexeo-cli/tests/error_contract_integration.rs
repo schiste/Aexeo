@@ -233,23 +233,6 @@ fn non_json_failures_leave_stdout_empty() {
 
 // --- warnings -------------------------------------------------------------
 
-#[test]
-fn text_fix_emits_each_config_warning_once() {
-    let temp = site();
-    write(
-        &temp.path().join("aexeo.toml"),
-        "site_url = \"https://example.com\"\n",
-    );
-    let output = run(&["fix", &temp.path().to_string_lossy()]);
-    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
-    let message = stderr(&output);
-    assert_eq!(
-        message.matches("site_url").count(),
-        1,
-        "expected a single warning: {message}"
-    );
-}
-
 // --- report location ------------------------------------------------------
 
 /// `.aexeo-reports` inside build output would be deployed with the site.

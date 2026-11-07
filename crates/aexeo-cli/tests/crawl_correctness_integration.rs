@@ -232,7 +232,7 @@ fn site_with_linked_response(status: &'static str) -> Site {
 /// alone rather than for the metadata the bare fixture pages lack.
 fn link_rules_only(dir: &Path) -> std::path::PathBuf {
     let path = dir.join("aexeo.toml");
-    let mut text = String::from("[checks]\n");
+    let mut text = String::from("version = 1\n");
     for group in [
         "html",
         "sitemap",
@@ -249,7 +249,7 @@ fn link_rules_only(dir: &Path) -> std::path::PathBuf {
         "well_known",
         "headers",
     ] {
-        text.push_str(&format!("{group} = false\n"));
+        text.push_str(&format!("[rules.{group}]\nenabled = false\n"));
     }
     write(&path, &text);
     path

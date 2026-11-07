@@ -13,13 +13,6 @@ profile = "chau7"
 plugins = ["example-plugin"]
 extends = ["aexeo.v1.toml"]
 max_workers = 2
-# `orphan_exclude` and `[checks]` have no complete nested form yet, so they stay
-# at the root and warn with CFGDEP001.
-orphan_exclude = ["offline.html"]
-
-[checks]
-headers = false
-
 [site]
 url = "https://example.com"
 source_dir = "dist"
@@ -81,6 +74,7 @@ link_suggestion_count = 5
 enable_link_autofix = true
 related_links_heading = "See also"
 weak_anchor_text = ["here"]
+orphan_exclude = ["offline.html"]
 
 [rules.schema]
 enabled = true
@@ -126,6 +120,9 @@ utility_route_patterns = ["account"]
 min_block_text_length = 200
 min_answer_blocks = 3
 require_fact_consistency = false
+
+[rules.headers]
+enabled = false
 
 [output]
 baseline_file = ".example-baseline.json"

@@ -78,6 +78,10 @@ struct RulesSection {
     content: ContentRulesSection,
     structure: StructureRulesSection,
     editorial: EnabledRuleSection,
+    headers: EnabledRuleSection,
+    well_known: EnabledRuleSection,
+    accessibility: EnabledRuleSection,
+    agent_discovery: EnabledRuleSection,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -100,6 +104,7 @@ struct LinkRulesSection {
     enable_link_autofix: bool,
     related_links_heading: String,
     weak_anchor_text: Vec<String>,
+    orphan_exclude: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -218,6 +223,7 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
                 enable_link_autofix: config.enable_link_autofix,
                 related_links_heading: config.related_links_heading.clone(),
                 weak_anchor_text: config.weak_anchor_text.clone(),
+                orphan_exclude: config.orphan_exclude.clone(),
             },
             sitemap: EnabledRuleSection {
                 enabled: is_enabled(config, "sitemap"),
@@ -264,6 +270,18 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
             editorial: EnabledRuleSection {
                 enabled: is_enabled(config, "editorial"),
             },
+            headers: EnabledRuleSection {
+                enabled: is_enabled(config, "headers"),
+            },
+            well_known: EnabledRuleSection {
+                enabled: is_enabled(config, "well_known"),
+            },
+            accessibility: EnabledRuleSection {
+                enabled: is_enabled(config, "accessibility"),
+            },
+            agent_discovery: EnabledRuleSection {
+                enabled: is_enabled(config, "agent_discovery"),
+            },
         },
         output: OutputSection {
             baseline_file: config.baseline_file.clone(),
@@ -287,6 +305,7 @@ pub fn render_resolved_config_toml(config: &Config) -> anyhow::Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::load::config_from_merged;
     use super::{render_resolved_config_json, render_resolved_config_toml};
     use crate::config::Config;
 
@@ -309,6 +328,26 @@ mod tests {
         assert!(again.accessibility.strict);
         assert!(again.agent_discovery.enabled);
         assert_eq!(again.checks.get("surfaces"), Some(&false));
+    }
+
+    /// `config print` output is a config: nothing may be lost when it is reloaded.
+    #[test]
+    fn resolved_config_keeps_orphan_exclude_and_every_rule_group() {
+        let mut config = Config {
+            orphan_exclude: vec!["offline.html".to_string()],
+            ..Config::default()
+        };
+        for group in ["headers", "well_known", "accessibility", "agent_discovery"] {
+            config.checks.insert(group.to_string(), false);
+        }
+        let rendered = render_resolved_config_toml(&config).unwrap();
+        let reloaded = config_from_merged(toml::from_str(&rendered).unwrap(), "rendered")
+            .unwrap()
+            .config;
+        assert_eq!(reloaded.orphan_exclude, ["offline.html"]);
+        for group in ["headers", "well_known", "accessibility", "agent_discovery"] {
+            assert_eq!(reloaded.checks.get(group), Some(&false), "{group}");
+        }
     }
 
     #[test]

@@ -335,7 +335,7 @@ mod tests {
             Some(&["runtime", "headers"][..])
         );
         let reference = crate::docs::render_config_reference();
-        assert!(reference.contains("- Versioned location: `headers` under `[runtime]`"));
+        assert!(reference.contains("## `headers` under `[runtime]`"));
 
         let nested_flat_name: toml::Value =
             toml::from_str("version = 1\n[runtime]\ncrawl_headers = { A = \"1\" }\n").unwrap();
@@ -350,9 +350,9 @@ mod tests {
     #[test]
     fn the_schema_accepts_the_tables_it_used_to_reject() {
         for toml_text in [
-            "[accessibility]\nstrict = true\n",
-            "[agent_discovery]\nenabled = true\n",
-            "[route_kinds.a]\nmatch = [\"/a\"]\nskip_rules = [\"GEO007\"]\nnoindex = true\n",
+            "version = 1\n[accessibility]\nstrict = true\n",
+            "version = 1\n[agent_discovery]\nenabled = true\n",
+            "version = 1\n[route_kinds.a]\nmatch = [\"/a\"]\nskip_rules = [\"GEO007\"]\nnoindex = true\n",
             "version = 1\n[rules.surfaces]\nenabled = false\n",
         ] {
             let value: toml::Value = toml::from_str(toml_text).unwrap();
