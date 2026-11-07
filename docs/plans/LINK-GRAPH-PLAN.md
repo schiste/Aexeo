@@ -106,6 +106,18 @@ not change their counts or assert confirmed orphans.
   release. The report's snapshot date defaults to the crawl start. Item 2 below
   stays open: locale-fallback treatment and canonical alias observation are not
   done.
+- Inventory `redirect`, `canonical_alias` and `locale_fallback` entries are
+  checked against the page that answered their URL: a redirect must reach its
+  target, and the other two may instead answer with a single canonical link to
+  it; content equivalence is never inferred. An unmet expectation raises a
+  per-page `inventory_alias_unobserved` that withholds eligibility. A verified
+  alias whose target is an inventory URL lifts `alias_resolution_required` and
+  the redirect or canonical issue it accounts for, but never makes its own URL
+  eligible. Noindex treatment stays `inventory_indexability_mismatch`, now
+  documented. Item 2 below stays open: the runtime snapshot keeps one capture
+  per final route, so a seeded redirect alias fetched before its target loses
+  its provenance (failing closed as an unfetched seed), and browser-engine
+  crawls still record no redirect chains.
 - A synthetic in-process benchmark covers 50 pages and 500 links (#76). No CI
   performance budget has been established for this graph benchmark.
 - A live Aeptus URL returned a generic noindex holding page, not the article
