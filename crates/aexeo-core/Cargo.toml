@@ -17,8 +17,8 @@ anyhow.workspace = true
 base64.workspace = true
 csv.workspace = true
 encoding_rs = { version = "0.8", optional = true }
-html5ever = "0.27"
-markup5ever_rcdom = "0.3"
+html5ever = "0.40"
+markup5ever_rcdom = "0.39"
 markdown = "1.0"
 reqwest = { workspace = true, optional = true }
 serde.workspace = true
