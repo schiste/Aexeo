@@ -364,15 +364,25 @@ pub(crate) fn collapse_whitespace(text: &str) -> String {
 
 pub(crate) fn strip_tags(raw: &str) -> String {
     let mut result = String::new();
-    let mut in_tag = false;
-    for ch in raw.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => result.push(ch),
-            _ => {}
+    let mut rest = raw;
+    while let Some(open) = rest.find('<') {
+        result.push_str(&rest[..open]);
+        let tag = &rest[open + 1..];
+        let name = tag.trim_start_matches('/');
+        let name_end = name
+            .find(|ch: char| !ch.is_ascii_alphanumeric())
+            .unwrap_or(name.len());
+        if markup::tag_breaks_text(&name[..name_end]) {
+            result.push(' ');
         }
+        // An unclosed `<` drops the rest, as it did when scanning by character.
+        let Some(close) = tag.find('>') else {
+            rest = "";
+            break;
+        };
+        rest = &tag[close + 1..];
     }
+    result.push_str(rest);
     collapse_whitespace(&result)
 }
 
@@ -988,5 +998,26 @@ mod tests {
             .find(|block| block.tag == "section")
             .unwrap();
         assert_eq!(section.text, "before");
+    }
+
+    #[test]
+    fn block_and_break_tags_separate_words_but_inline_tags_do_not() {
+        assert_eq!(
+            super::strip_tags("document<br>eligibility"),
+            "document eligibility"
+        );
+        assert_eq!(super::strip_tags("<div>a</div><div>b</div>"), "a b");
+        assert_eq!(super::strip_tags("<li>a</li><LI>b</LI>"), "a b");
+        assert_eq!(super::strip_tags("wo<b>r</b>d <span>x</span>"), "word x");
+        assert_eq!(super::strip_tags("a < b"), "a");
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("index.html"),
+            "<html><head><title>x</title></head><body><h1>Secure your<br/>wo<b>r</b>ld<div>today</div></h1></body></html>",
+        )
+        .unwrap();
+        let site = load_site(dir.path()).unwrap();
+        assert_eq!(site.page("").unwrap().h1_texts, ["Secure your world today"]);
     }
 }

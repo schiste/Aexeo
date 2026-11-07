@@ -5,6 +5,46 @@
 //! whole name, and a `>` inside a quoted value does not end a tag. Every scan is
 //! a single forward pass.
 
+/// Whether a tag separates words when rendered, unlike `<b>` or `<span>`.
+/// `<br>` joined "document" and "eligibility" when tags were simply dropped.
+pub(crate) fn tag_breaks_text(name: &str) -> bool {
+    const BREAKING: &[&str] = &[
+        "address",
+        "article",
+        "aside",
+        "blockquote",
+        "br",
+        "dd",
+        "div",
+        "dl",
+        "dt",
+        "figcaption",
+        "figure",
+        "footer",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "header",
+        "hr",
+        "li",
+        "main",
+        "nav",
+        "ol",
+        "p",
+        "pre",
+        "section",
+        "table",
+        "td",
+        "th",
+        "tr",
+        "ul",
+    ];
+    BREAKING.iter().any(|tag| name.eq_ignore_ascii_case(tag))
+}
+
 /// Replaces comments and the contents of `<script>` and `<style>` with spaces.
 /// Byte offsets and line numbers still match `raw`, and the element's own tags
 /// remain.
