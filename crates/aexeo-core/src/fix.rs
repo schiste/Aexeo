@@ -310,7 +310,7 @@ fn render_related_links_section(
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "\n  <section data-ui=\"related-links\" data-source-route=\"{}\">\n    <h2>{}</h2>\n    <ul>\n{}\n    </ul>\n  </section>\n",
+        "\n  <section data-ui=\"related-links\" data-aexeo-link-context=\"related\" data-source-route=\"{}\">\n    <h2>{}</h2>\n    <ul>\n{}\n    </ul>\n  </section>\n",
         escape_html_attr(if source_route.is_empty() {
             "/"
         } else {
@@ -676,6 +676,7 @@ mod tests {
     };
     use crate::config::Config;
     use crate::generate::LLMS_GENERATED_MARKER;
+    use crate::link_evidence::{LinkContext, extract_links};
     use anyhow::Result;
     use std::fs;
 
@@ -931,6 +932,17 @@ mod tests {
             "discovery link must not be duplicated on second run"
         );
         Ok(())
+    }
+
+    /// The block lands before `</body>`, outside any landmark, so without the
+    /// marker the link graph would report its links as `unknown`.
+    #[test]
+    fn related_links_are_attributed_as_related_by_the_link_graph() {
+        let section = render_related_links_section("", &["guide".to_string()], "Related");
+        let html = format!("<html><body><main><p>x</p></main>{section}</body></html>");
+        let links = extract_links(&html, "https://example.com/", "https://example.com", None);
+        assert_eq!(links.len(), 1, "{links:?}");
+        assert_eq!(links[0].context, LinkContext::RelatedContent);
     }
 
     /// Routes come from file names, which may hold any HTML metacharacter.
