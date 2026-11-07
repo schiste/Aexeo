@@ -15,6 +15,25 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate timings and counts as JSON on stderr")),
         )
         .subcommand(
+            Command::new("feedback-capture")
+                .about("Capture explicitly reported human feedback in a private local note")
+                .arg(Arg::new("text").long("text").required(true))
+                .arg(Arg::new("report").long("report").required(true))
+                .arg(Arg::new("gate").long("gate").required(true))
+                .arg(Arg::new("example").long("example").required(true))
+                .arg(Arg::new("human-status").long("human-status").value_parser(["passed", "failed", "uncertain"]))
+                .arg(Arg::new("reviewer").long("reviewer"))
+                .arg(Arg::new("method").long("method"))
+                .arg(Arg::new("reason-file").long("reason-file"))
+                .arg(Arg::new("language").long("language"))
+                .arg(Arg::new("content-type").long("content-type"))
+                .arg(Arg::new("preset").long("preset"))
+                .arg(Arg::new("config-version").long("config-version"))
+                .arg(Arg::new("tool-version").long("tool-version"))
+                .arg(Arg::new("output").long("output").required(true))
+                .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue)),
+        )
+        .subcommand(
             Command::new("content")
                 .about("Run a portable content preset on a UTF-8 file or stdin")
                 .arg(Arg::new("path").default_value("-"))

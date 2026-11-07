@@ -34,6 +34,65 @@ Options:
           Print help
 ```
 
+## `feedback-capture`
+
+Capture explicitly reported human feedback in a private local note
+
+```text
+Capture explicitly reported human feedback in a private local note
+
+Usage: feedback-capture [OPTIONS] --text <text> --report <report> --gate <gate> --example <example> --output <output>
+
+Options:
+      --text <text>
+
+
+      --report <report>
+
+
+      --gate <gate>
+
+
+      --example <example>
+
+
+      --human-status <human-status>
+          [possible values: passed, failed, uncertain]
+
+      --reviewer <reviewer>
+
+
+      --method <method>
+
+
+      --reason-file <reason-file>
+
+
+      --language <language>
+
+
+      --content-type <content-type>
+
+
+      --preset <preset>
+
+
+      --config-version <config-version>
+
+
+      --tool-version <tool-version>
+
+
+      --output <output>
+
+
+      --telemetry
+
+
+  -h, --help
+          Print help
+```
+
 ## `content`
 
 Run a portable content preset on a UTF-8 file or stdin
