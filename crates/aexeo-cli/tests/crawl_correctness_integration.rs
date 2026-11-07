@@ -1015,3 +1015,243 @@ fn checkpoints_do_not_store_url_credentials() {
         "complete"
     );
 }
+
+/// A link inventory context for `site`, usable both as `--seed-file` and as
+/// `link-graph --context`: `paths` are published pages on the site, `extra`
+/// are absolute URLs added verbatim.
+fn inventory_context(site: &Site, paths: &[&str], extra: &[&str]) -> Value {
+    let identity = serde_json::json!({"origin": site.base_url, "release": "r1", "surface": "public", "snapshot": "s1"});
+    let pages = paths
+        .iter()
+        .map(|path| format!("{}{path}", site.base_url))
+        .chain(extra.iter().map(|url| url.to_string()))
+        .map(|url| serde_json::json!({"url": url, "disposition": "published", "target": null, "locale": null}))
+        .collect::<Vec<_>>();
+    serde_json::json!({"identity": identity, "snapshot_date": "2026-11-07",
+        "inventory": {"identity": identity, "complete": true, "pages": pages}})
+}
+
+/// Crawl `site` from `dir` seeded with `context`, returning the command output
+/// and the saved audit artifact path.
+fn seeded_crawl(site: &Site, dir: &Path, context: &Value, extra: &[&str]) -> (Value, String) {
+    let seed = dir.join("context.json");
+    write(&seed, &context.to_string());
+    let output = Command::new(bin())
+        .current_dir(dir)
+        .args([
+            "crawl",
+            &site.base_url,
+            "--engine",
+            "http",
+            "--progress",
+            "off",
+        ])
+        .args(["--format", "json", "--no-sitemap-seed", "--seed-file"])
+        .arg(&seed)
+        .args(extra)
+        .output()
+        .unwrap();
+    let payload = parse_json(&output.stdout);
+    let audit = payload["audit_path"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{payload:#}"))
+        .to_string();
+    (payload, audit)
+}
+
+fn audit_link_report(dir: &Path, audit: &str) -> Value {
+    let output = Command::new(bin())
+        .current_dir(dir)
+        .args(["link-graph", audit, "--audit", "--context", "context.json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    parse_json(&output.stdout)
+}
+
+fn orphan_site() -> Site {
+    Site::start(vec![
+        ("/", html(r#"<main><a href="/a">A</a></main>"#)),
+        ("/a", html("<main>A</main>")),
+        ("/orphan", html("<main>Nothing links here</main>")),
+    ])
+}
+
+#[test]
+fn an_inventory_seeded_crawl_reaches_an_unlinked_page_and_attests_completeness() {
+    let site = orphan_site();
+    let temp = tempfile::tempdir().unwrap();
+    let context = inventory_context(&site, &["/", "/a", "/orphan"], &[]);
+    let (payload, audit) = seeded_crawl(&site, temp.path(), &context, &[]);
+    assert!(
+        site.requested("/orphan"),
+        "the seed reaches the unlinked page"
+    );
+    let attestation = &payload["artifact"]["crawl_attestation"];
+    assert_eq!(
+        *attestation,
+        serde_json::json!({"seeded_from": {"inventory_identity": context["identity"], "url_count": 3},
+            "engine": "http", "out_of_origin_urls": [], "unfetched_urls": [], "robots_skipped_urls": []}),
+        "{payload:#}"
+    );
+    let saved: Value = serde_json::from_slice(&std::fs::read(&audit).unwrap()).unwrap();
+    assert_eq!(saved["crawl_attestation"], *attestation);
+
+    let report = audit_link_report(temp.path(), &audit);
+    assert_eq!(report["crawl_complete"], true, "{report:#}");
+    assert!(
+        !report["issues"].to_string().contains("audit_"),
+        "{report:#}"
+    );
+    let reconciliation = &report["reconciliation"];
+    assert_eq!(reconciliation["comparable"], true, "{report:#}");
+    let orphan = format!("{}/orphan", site.base_url);
+    assert!(
+        reconciliation["eligible_pages"]
+            .as_array()
+            .unwrap()
+            .contains(&Value::String(orphan.clone())),
+        "{report:#}"
+    );
+    let page = report["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|page| page["url"] == orphan)
+        .unwrap();
+    assert_eq!(page["distinct_source_pages"], 0);
+}
+
+#[test]
+fn a_crawl_without_a_seed_file_records_no_attestation_and_is_never_complete() {
+    let site = orphan_site();
+    let temp = tempfile::tempdir().unwrap();
+    let (_, payload) = crawl(&site, &["--no-sitemap-seed"]);
+    assert!(payload["artifact"].get("crawl_attestation").is_none());
+    assert!(!site.requested("/orphan"));
+
+    // The same crawl with a matching context still cannot claim coverage.
+    let context = inventory_context(&site, &["/", "/a", "/orphan"], &[]);
+    write(&temp.path().join("context.json"), &context.to_string());
+    let output = Command::new(bin())
+        .current_dir(temp.path())
+        .args([
+            "crawl",
+            &site.base_url,
+            "--engine",
+            "http",
+            "--progress",
+            "off",
+        ])
+        .args(["--format", "json", "--no-sitemap-seed"])
+        .output()
+        .unwrap();
+    let audit = parse_json(&output.stdout)["audit_path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let report = audit_link_report(temp.path(), &audit);
+    assert_eq!(report["crawl_complete"], false);
+    assert!(
+        report["issues"]
+            .to_string()
+            .contains("audit_not_inventory_seeded")
+    );
+}
+
+#[test]
+fn a_seed_entry_outside_the_crawl_origin_is_reported_and_never_requested() {
+    let site = orphan_site();
+    let temp = tempfile::tempdir().unwrap();
+    // The crawler maps a seed to a path on the target, so a foreign URL with
+    // a path the site serves must still never be requested.
+    let context = inventory_context(
+        &site,
+        &["/", "/a"],
+        &["http://other.example/orphan?token=secret"],
+    );
+    let (payload, _) = seeded_crawl(&site, temp.path(), &context, &[]);
+    assert!(!site.requested("/orphan"), "{payload:#}");
+    let attestation = &payload["artifact"]["crawl_attestation"];
+    assert_eq!(
+        attestation["out_of_origin_urls"],
+        serde_json::json!(["http://other.example/orphan"])
+    );
+    assert_eq!(attestation["seeded_from"]["url_count"], 2);
+    assert_eq!(attestation["unfetched_urls"], serde_json::json!([]));
+}
+
+#[test]
+fn seeded_urls_skipped_by_robots_are_attested_as_unfetched() {
+    let site = Site::start(vec![
+        ("/", html("<main>home</main>")),
+        ("/robots.txt", robots("User-agent: *\nDisallow: /private\n")),
+        ("/private", html("secret")),
+    ]);
+    let temp = tempfile::tempdir().unwrap();
+    let context = inventory_context(&site, &["/", "/private"], &[]);
+    let (payload, audit) = seeded_crawl(&site, temp.path(), &context, &[]);
+    assert!(!site.requested("/private"));
+    let private = format!("{}/private", site.base_url);
+    let attestation = &payload["artifact"]["crawl_attestation"];
+    assert_eq!(attestation["unfetched_urls"], serde_json::json!([private]));
+    assert_eq!(
+        attestation["robots_skipped_urls"],
+        serde_json::json!([private])
+    );
+    let report = audit_link_report(temp.path(), &audit);
+    assert_eq!(report["crawl_complete"], false);
+    for issue in ["audit_robots_skipped", "audit_seed_unfetched"] {
+        assert!(report["issues"].to_string().contains(issue), "{report:#}");
+    }
+}
+
+#[test]
+fn inventory_seeds_survive_a_checkpoint_and_resume() {
+    let site = orphan_site();
+    let temp = tempfile::tempdir().unwrap();
+    let checkpoint = temp.path().join("checkpoint.json");
+    let context = inventory_context(&site, &["/", "/a", "/orphan"], &[]);
+    let checkpoint_args = [
+        "--checkpoint",
+        checkpoint.to_str().unwrap(),
+        "--checkpoint-every",
+        "1",
+    ];
+    let mut interrupted = vec!["--max-pages", "1"];
+    interrupted.extend(checkpoint_args);
+    let (payload, _) = seeded_crawl(&site, temp.path(), &context, &interrupted);
+    assert_eq!(payload["artifact"]["status"], "partial");
+    assert!(!site.requested("/orphan"));
+    assert_eq!(
+        payload["artifact"]["crawl_attestation"]["unfetched_urls"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let (payload, audit) = seeded_crawl(
+        &site,
+        temp.path(),
+        &context,
+        &["--resume", checkpoint.to_str().unwrap()],
+    );
+    assert!(
+        site.requested("/orphan"),
+        "the seed was kept in the checkpoint"
+    );
+    assert_eq!(payload["artifact"]["status"], "complete");
+    assert_eq!(
+        payload["artifact"]["crawl_attestation"]["unfetched_urls"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        audit_link_report(temp.path(), &audit)["crawl_complete"],
+        true
+    );
+}

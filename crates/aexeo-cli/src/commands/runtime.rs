@@ -2,7 +2,9 @@ use aexeo_contracts::AuditStatus;
 use aexeo_contracts::PerformanceBudget;
 use aexeo_contracts::PerformanceDiffThresholds;
 use aexeo_core::config::load_config_with_diagnostics;
+use aexeo_core::crawl_attestation::{InventorySeed, attest_crawl, inventory_seed};
 use aexeo_core::error::UserContext;
+use aexeo_core::link_inventory::InventorySnapshot;
 use aexeo_core::user_bail;
 use aexeo_core::{
     RuntimeAudit, RuntimeAuditOptions, RuntimeProgressEvent, RuntimeProgressMode,
@@ -84,6 +86,21 @@ fn apply_cf_access_credentials(config: &mut aexeo_core::Config, submatches: &Arg
             .crawl_headers
             .insert("CF-Access-Client-Secret".to_string(), secret);
     }
+}
+
+/// Read a link inventory and keep the URLs a crawl of `target_url` may seed.
+fn load_inventory_seed(path: &str, target_url: &str) -> Result<InventorySeed> {
+    let data = fs::read(path).user_context(format!("cannot read seed file: {path}"))?;
+    let inventory = InventorySnapshot::from_json_document(&data)
+        .user_context(format!("invalid link inventory in seed file: {path}"))?;
+    Ok(inventory_seed(&inventory, target_url))
+}
+
+/// Seed the crawl with the inventory's URLs alongside any `--seed`. They take
+/// the same path: once planned they live in checkpoints, so a resumed crawl
+/// keeps them without re-seeding.
+fn add_inventory_seeds(config: &mut aexeo_core::Config, seed: &InventorySeed) {
+    config.crawl_seeds.extend(seed.urls.iter().cloned());
 }
 
 fn selected_runtime_engine<'a>(
@@ -399,6 +416,13 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
         aexeo_core::runtime::RuntimeArtifactMode::Callback(&mut partial_writer),
     );
     let target_url = required_arg(submatches, "url")?;
+    let seed = submatches
+        .get_one::<String>("seed-file")
+        .map(|path| load_inventory_seed(path, target_url))
+        .transpose()?;
+    if let Some(seed) = &seed {
+        add_inventory_seeds(&mut config, seed);
+    }
 
     let audit = match run_runtime_audit_with_options(
         target_url,
@@ -412,6 +436,9 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     };
     let mut full_audit_artifact =
         runtime_output_artifact("crawl", &audit, &audit.findings, Some(target_url));
+    full_audit_artifact.crawl_attestation = seed
+        .as_ref()
+        .map(|seed| attest_crawl(seed, &full_audit_artifact));
     let performance_budget_passed =
         apply_performance_budget(&mut full_audit_artifact, performance_budget.as_ref());
     let audit_path = write_audit_artifact(
@@ -456,6 +483,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     let mut render_artifact =
         runtime_output_artifact("crawl", &audit, &findings_to_render, Some(target_url));
     copy_performance_budget(&mut render_artifact, &full_audit_artifact);
+    render_artifact.crawl_attestation = full_audit_artifact.crawl_attestation.clone();
     let findings_success = if regressions_only {
         findings_to_render.is_empty() && audit.status != AuditStatus::Failed
     } else {

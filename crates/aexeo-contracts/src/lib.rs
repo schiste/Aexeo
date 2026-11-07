@@ -541,6 +541,59 @@ pub struct AuditArtifact {
     pub site: Option<AuditSiteSnapshot>,
     #[serde(default)]
     pub findings: Vec<Finding>,
+    /// Present only when a runtime crawl was seeded from an inventory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crawl_attestation: Option<CrawlAttestation>,
+}
+
+/// Origin, release, surface and snapshot of a publication surface, as supplied
+/// by whoever produced the inventory or crawl. Never inferred.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SurfaceIdentity {
+    pub origin: String,
+    pub release: String,
+    pub surface: String,
+    pub snapshot: String,
+}
+
+impl SurfaceIdentity {
+    /// True when every component is non-blank.
+    pub fn is_complete(&self) -> bool {
+        [&self.origin, &self.release, &self.surface, &self.snapshot]
+            .iter()
+            .all(|value| !value.trim().is_empty())
+    }
+}
+
+/// Facts a runtime crawl records about its coverage of the inventory it was
+/// seeded from. They are observations, not a completeness verdict: the link
+/// report decides that from these and the rest of the artifact.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct CrawlAttestation {
+    pub seeded_from: CrawlSeedSource,
+    /// The effective runtime engine, `http` or `playwright`.
+    pub engine: String,
+    /// Inventory URLs outside the crawl origin, or not valid page URLs, which
+    /// were not seeded and never requested. Redacted like every persisted URL.
+    #[serde(default)]
+    pub out_of_origin_urls: Vec<String>,
+    /// Seeded URLs with no page or response provenance in the artifact, for
+    /// whatever reason: filtered, skipped by robots.txt, non-HTML or unreached.
+    #[serde(default)]
+    pub unfetched_urls: Vec<String>,
+    /// Every URL the crawl did not request because robots.txt disallows it,
+    /// seeded or discovered.
+    #[serde(default)]
+    pub robots_skipped_urls: Vec<String>,
+}
+
+/// The inventory a crawl was seeded from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct CrawlSeedSource {
+    /// The inventory's own identity; `None` when the inventory declared none.
+    pub inventory_identity: Option<SurfaceIdentity>,
+    /// Number of distinct same-origin URLs seeded.
+    pub url_count: usize,
 }
 
 /// Identity of a finding across runs (fingerprint version 2). Message wording
@@ -653,6 +706,7 @@ impl Default for AuditArtifact {
             performance: None,
             site: None,
             findings: Vec::new(),
+            crawl_attestation: None,
         }
     }
 }
@@ -686,7 +740,8 @@ impl RuleMetadata {
 #[cfg(test)]
 mod tests {
     use super::{
-        AuditArtifact, AuditPageSnapshot, AuditSiteSnapshot, AuditStatus, Finding, FindingScope,
+        AuditArtifact, AuditPageSnapshot, AuditSiteSnapshot, AuditStatus, CrawlAttestation,
+        CrawlSeedSource, Finding, FindingScope, SurfaceIdentity,
     };
 
     #[test]
@@ -758,6 +813,46 @@ mod tests {
         reworded.line = 9;
         assert_eq!(old.fingerprint(), reworded.fingerprint());
         assert_ne!(old.fingerprint(), reworded.with_subject("b").fingerprint());
+    }
+
+    #[test]
+    fn an_artifact_without_attestation_loads_and_serializes_unchanged() {
+        let old = r#"{"version":2,"command":"crawl","status":"complete","generated_at":1,"summary":{"total":0,"errors":0,"warnings":0,"actionable":0,"heuristic":0},"completion_ratio":null,"truncation_reason":null,"crawl":null,"performance":null,"site":null,"findings":[]}"#;
+        let artifact: AuditArtifact = serde_json::from_str(old).unwrap();
+        assert!(artifact.crawl_attestation.is_none());
+        assert_eq!(serde_json::to_string(&artifact).unwrap(), old);
+    }
+
+    #[test]
+    fn a_crawl_attestation_round_trips() {
+        let artifact = AuditArtifact {
+            command: "crawl".into(),
+            crawl_attestation: Some(CrawlAttestation {
+                seeded_from: CrawlSeedSource {
+                    inventory_identity: Some(SurfaceIdentity {
+                        origin: "https://example.org".into(),
+                        release: "r1".into(),
+                        surface: "public".into(),
+                        snapshot: "s1".into(),
+                    }),
+                    url_count: 2,
+                },
+                engine: "http".into(),
+                unfetched_urls: vec!["https://example.org/b".into()],
+                ..CrawlAttestation::default()
+            }),
+            ..AuditArtifact::default()
+        };
+        let json = serde_json::to_value(&artifact).unwrap();
+        assert_eq!(
+            json["crawl_attestation"],
+            serde_json::json!({"seeded_from":{"inventory_identity":{"origin":"https://example.org","release":"r1","surface":"public","snapshot":"s1"},"url_count":2},
+                "engine":"http","out_of_origin_urls":[],"unfetched_urls":["https://example.org/b"],"robots_skipped_urls":[]})
+        );
+        assert_eq!(
+            serde_json::from_value::<AuditArtifact>(json).unwrap(),
+            artifact
+        );
     }
 
     #[test]

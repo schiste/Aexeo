@@ -140,23 +140,90 @@ target's origin count as external in that case. Several observed origins are not
 resolved: `audit_observed_origins_ambiguous` is raised, the site URL is kept and
 links on pages from other origins are indeterminate. This adapter
 cannot establish the CMS inventory, release, publication surface or snapshot
-date, and therefore always reports incomplete coverage; it does not confirm
+date. It reports complete crawl coverage only for an attested, inventory-seeded
+crawl (below); otherwise `crawl_complete` is `false`, and it does not confirm
 orphans. `--telemetry` retains the same opt-in, aggregate-only behavior.
 
 To compare an audit with an explicitly captured inventory, pass
 `--audit --context context.json`. The context has the shape
 `{"identity": {"origin":"https://example.org", "release":"r", "surface":"public", "snapshot":"s"}, "snapshot_date":"2026-01-01T00:00:00Z", "inventory": { ... }}`;
 the inventory object uses the same schema as above. Identity and date are
-caller-supplied, not independently established by the audit. Even when the
-identities match, audit-based reports retain incomplete crawl coverage until
-it can be attested from a complete, equivalent surface.
+caller-supplied, not independently established by the audit. A context never
+makes the crawl complete on its own: matching identities still leave
+`crawl_complete` `false` unless the audit carries a crawl attestation that
+meets every condition below.
+
+### Inventory-seeded crawl attestation
+
+A crawl that follows links never reaches a page nothing links to, which is
+exactly the page an orphan report is about. `aexeo-cli crawl URL --seed-file
+inventory.json` therefore also requests every inventory page URL on the target
+URL's exact origin (scheme, host and port), alongside any `--seed`. The file
+holds an inventory object with the schema above, either on its own or under an
+`inventory` key, so a `--context` file or an EmDash export can be passed as is.
+Entries on another origin, including the `www.` variant of the target, and
+entries that are not HTTP(S) page URLs are never requested and are listed as
+`out_of_origin_urls`. Seeds are queued like `--seed` and kept in checkpoints, so
+a resumed crawl keeps them; pass the same `--seed-file` when resuming so the
+attestation is recorded again. Include and exclude patterns still apply to seeds.
+
+The audit artifact then carries a `crawl_attestation`, computed from what the
+finished crawl recorded rather than from what it queued. It is omitted when no
+seed file is given, so other artifacts are unchanged, and older artifacts load
+without it.
+
+```json
+"crawl_attestation": {
+  "seeded_from": {
+    "inventory_identity": {"origin": "https://example.org", "release": "r1", "surface": "public", "snapshot": "s1"},
+    "url_count": 120
+  },
+  "engine": "http",
+  "out_of_origin_urls": [],
+  "unfetched_urls": [],
+  "robots_skipped_urls": []
+}
+```
+
+`inventory_identity` is the seed inventory's own identity, or `null`;
+`url_count` counts the distinct same-origin URLs seeded. `unfetched_urls` lists
+seeded URLs for which the artifact holds no page and no response: requested,
+final or redirect-hop URL, compared exactly after parsing. Filtered, robots-
+skipped, non-HTML and unreached seeds all land there, and so does any seed with
+a query, because the crawler requests only its path. `robots_skipped_urls` lists
+every URL the crawl did not request because of robots.txt. Listed URLs are
+redacted like every persisted URL.
+
+`link-graph --audit` sets `crawl_complete` to `true` only when every condition
+holds, and otherwise raises one issue per unmet condition:
+
+| Condition | Issue when unmet |
+| --- | --- |
+| Audit status `complete`, no truncation | `audit_crawl_partial` |
+| No failed (non-2xx) response | `audit_failed_responses` |
+| No URL skipped by robots.txt | `audit_robots_skipped` |
+| HTTP engine, which records redirect chains | `audit_browser_engine` |
+| Seeded from an inventory with at least one URL | `audit_not_inventory_seeded` |
+| Every seeded URL has a page or response | `audit_seed_unfetched` |
+| The `--context` inventory has the seed inventory's identity | `audit_seed_inventory_mismatch` |
+
+A seed inventory without identity matches nothing. Static exports never report
+these issues and never complete coverage. A complete crawl is one input to
+inventory reconciliation, not a conclusion: pages become eligible only through
+the reconciliation rules above, so the surface identity, snapshot date,
+inventory completeness and every page-level condition still apply. Every
+inventory URL is seeded, whatever its disposition, so a `draft` entry that
+answers 404 fails the crawl through `audit_failed_responses`. Release and
+snapshot identity are still supplied by the caller and not verified.
 
 To write a graph alongside a runtime crawl in one command, pass
 `--link-graph-output graph.json` to `aexeo-cli crawl URL`. The normal audit
 output and exit status remain unchanged. Add `--link-graph-telemetry` to emit
 the same aggregate-only event to stderr. This is opt-in; graph evidence in the
-output file can include URLs and page text. The result retains incomplete
-coverage because the crawl does not independently attest a matching inventory.
+output file can include URLs and page text. That report is built without a
+context, so it has no inventory to reconcile against and keeps incomplete
+coverage even with `--seed-file`; run `link-graph --audit --context` on the saved
+artifact to use the attestation.
 Add `--link-graph-summary` alongside `--link-graph-output` to include aggregate
 observations and coverage issues in the text or JSON command output. The JSON
 field `link_graph_summary` is omitted unless requested. SARIF does not support
