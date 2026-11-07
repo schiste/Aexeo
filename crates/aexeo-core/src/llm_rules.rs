@@ -125,7 +125,12 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
     if has_feature_routes && !has_feature_pages {
         missing_sections.push("## Feature Pages");
     }
-    if !missing_sections.is_empty() {
+    // These headings are what `aexeo generate` writes. The llms.txt format does
+    // not require them, so only a generated file can have drifted from them.
+    let is_generated = text
+        .lines()
+        .any(|line| line.trim() == crate::generate::LLMS_GENERATED_MARKER);
+    if is_generated && !missing_sections.is_empty() {
         findings.push(Finding {
             rule_id: "LLM003".to_string(),
             message: format!(
@@ -285,7 +290,10 @@ mod tests {
         );
         write(
             &root.join("llms.txt"),
-            "# Site\n\n## Key Facts\n- 1 features across 1 categories\n",
+            &format!(
+                "# Site\n\n## Key Facts\n- 1 features across 1 categories\n{}\n",
+                crate::generate::LLMS_GENERATED_MARKER
+            ),
         );
 
         let findings = run_llm_rules(&load_site(root).unwrap(), &Config::default());
@@ -305,5 +313,21 @@ mod tests {
                 .contains("regenerate llms.txt from site inventory"),
             "suggestion should point to regeneration from inventory"
         );
+    }
+
+    #[test]
+    fn a_hand_written_llms_txt_may_use_its_own_sections() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><title>x</title></head><body><h1>x</h1></body></html>",
+        );
+        write(
+            &root.join("llms.txt"),
+            "# Site\n\n## What is Site?\nA product.\n",
+        );
+        let findings = run_llm_rules(&load_site(root).unwrap(), &Config::default());
+        assert!(!findings.iter().any(|finding| finding.rule_id == "LLM003"));
     }
 }

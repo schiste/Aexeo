@@ -228,10 +228,11 @@ fn collect_semantic_block_findings(
     config: &Config,
     seen_data_ui: &mut BTreeSet<String>,
     strong_answer_blocks: usize,
+    site_uses_data_ui: bool,
 ) -> (Vec<Finding>, Option<String>) {
     let mut findings = Vec::new();
     let mut answer_like = None;
-    if block.tag == "section" && block.data_ui.is_none() {
+    if site_uses_data_ui && block.tag == "section" && block.data_ui.is_none() {
         findings.push(finding(
             "GEO001",
             "<section> is missing data-ui",
@@ -241,7 +242,7 @@ fn collect_semantic_block_findings(
             "warning",
         ));
     }
-    if block.tag == "article" && block.data_ui.is_none() {
+    if site_uses_data_ui && block.tag == "article" && block.data_ui.is_none() {
         findings.push(finding(
             "GEO002",
             "<article> is missing data-ui",
@@ -498,7 +499,13 @@ fn collect_fact_consistency_findings(page: &crate::site::Page, config: &Config) 
     let all_drift_is_primary_entity_noise = identity.drift.iter().all(|drift| {
         let canonical = strip_primary_entities(&drift.canonical, &primary_entities);
         let observed = strip_primary_entities(&drift.observed, &primary_entities);
-        !fact_values_conflict(&canonical, &observed)
+        // A headline may rephrase the title, so an H1 only conflicts when it is
+        // about something else. OpenGraph and schema are meant to restate it.
+        if drift.dimension == "h1" || identity.canonical_source == "h1" {
+            !headline_is_unrelated(&canonical, &observed)
+        } else {
+            !fact_values_conflict(&canonical, &observed)
+        }
     });
     if all_drift_is_primary_entity_noise {
         return Vec::new();
@@ -511,6 +518,20 @@ fn collect_fact_consistency_findings(page: &crate::site::Page, config: &Config) 
         1,
         "warning",
     )]
+}
+
+/// Words of three letters or more, lowercase and without a plural `s`.
+fn significant_words(text: &str) -> BTreeSet<String> {
+    text.split(|ch: char| !ch.is_alphanumeric())
+        .filter(|word| word.chars().count() >= 3)
+        .map(|word| word.to_lowercase().trim_end_matches('s').to_string())
+        .collect()
+}
+
+fn headline_is_unrelated(left: &str, right: &str) -> bool {
+    let left = significant_words(left);
+    let right = significant_words(right);
+    !left.is_empty() && !right.is_empty() && left.is_disjoint(&right)
 }
 
 fn fact_values_conflict(left: &str, right: &str) -> bool {
@@ -531,6 +552,11 @@ fn fact_values_conflict(left: &str, right: &str) -> bool {
 
 pub fn run_structure_rules(site: &Site, config: &Config) -> Vec<Finding> {
     let mut findings = Vec::new();
+    // `data-ui` is a convention a site opts into. Without any, GEO001 and GEO002
+    // would report every block on the site and drown the other findings.
+    let site_uses_data_ui = site
+        .route_pages()
+        .any(|page| page.blocks.iter().any(|block| block.data_ui.is_some()));
     for page in site.route_pages() {
         let mut seen_data_ui = BTreeSet::new();
         let mut answer_like_blocks = Vec::new();
@@ -542,6 +568,7 @@ pub fn run_structure_rules(site: &Site, config: &Config) -> Vec<Finding> {
                 config,
                 &mut seen_data_ui,
                 strong_answer_blocks,
+                site_uses_data_ui,
             );
             findings.extend(block_findings);
             if let Some(answer_like) = answer_like {
@@ -715,5 +742,63 @@ mod tests {
         );
         let findings = run_structure_rules(&load_site(root).unwrap(), &Config::default());
         assert!(!findings.iter().any(|finding| finding.rule_id == "GEO009"));
+    }
+
+    fn structure_rule_ids(html: &str) -> BTreeSet<String> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        write(&temp_dir.path().join("index.html"), html);
+        run_structure_rules(&load_site(temp_dir.path()).unwrap(), &Config::default())
+            .into_iter()
+            .map(|finding| finding.rule_id)
+            .collect()
+    }
+
+    #[test]
+    fn missing_data_ui_is_only_reported_on_sites_that_use_it() {
+        let without =
+            "<html><body><section><h2>a</h2></section><article><h2>b</h2></article></body></html>";
+        let ids = structure_rule_ids(without);
+        assert!(
+            !ids.contains("GEO001") && !ids.contains("GEO002"),
+            "{ids:?}"
+        );
+
+        let with = "<html><body><section data-ui=\"hero\"><h2>a</h2></section><section><h2>b</h2></section><article><h2>c</h2></article></body></html>";
+        let ids = structure_rule_ids(with);
+        assert!(ids.contains("GEO001") && ids.contains("GEO002"), "{ids:?}");
+    }
+
+    fn page_with_title_and_h1(title: &str, h1: &str) -> String {
+        format!(
+            r#"<html><head><title>{title}</title><meta property="og:title" content="{title}"></head><body><h1>{h1}</h1></body></html>"#
+        )
+    }
+
+    #[test]
+    fn a_rephrased_headline_is_not_a_fact_conflict() {
+        for (title, h1) in [
+            ("Legal notices", "Legal information"),
+            ("Customer stories", "Customers"),
+            ("Detect forged documents", "Automate document analysis"),
+        ] {
+            let ids = structure_rule_ids(&page_with_title_and_h1(title, h1));
+            assert!(!ids.contains("GEO009"), "{title} / {h1}");
+        }
+    }
+
+    #[test]
+    fn an_unrelated_headline_is_still_a_fact_conflict() {
+        let ids = structure_rule_ids(&page_with_title_and_h1(
+            "Pricing guide",
+            "Careers at the company",
+        ));
+        assert!(ids.contains("GEO009"), "{ids:?}");
+    }
+
+    /// OpenGraph restates the title, so it gets no rephrasing allowance.
+    #[test]
+    fn opengraph_drift_stays_strict() {
+        let html = r#"<html><head><title>Legal notices</title><meta property="og:title" content="Legal information"></head><body><h1>Legal notices</h1></body></html>"#;
+        assert!(structure_rule_ids(html).contains("GEO009"));
     }
 }

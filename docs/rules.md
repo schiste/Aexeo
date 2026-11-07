@@ -94,7 +94,7 @@
 
 - `LLM001`: missing llms.txt
 - `LLM002`: empty llms.txt
-- `LLM003`: missing expected page sections in llms.txt
+- `LLM003`: generated llms.txt is missing expected page sections
 - `LLM004`: broken internal reference in llms.txt
 - `LLM005`: noncanonical .html links in llms.txt when extensionless canonicals are expected
 - `LLM006`: feature/category claim drift against feature-data.json
@@ -107,7 +107,7 @@ Machine-readable discovery, citation, and agent-retrieval surfaces.
 - `SRF001`: missing facts.json machine-readable facts manifest
 - `SRF002`: no per-page Markdown mirrors discovered
 - `SRF003`: larger site is missing llms-full.txt compiled context
-- `SRF004`: route has no discovered Markdown mirror
+- `SRF004`: route has no Markdown mirror, on a site that has some
 - `SRF005`: route has Markdown mirror but no static discovery link
 - `SRF006`: llms.txt references missing machine-readable artifact
 - `SRF010`: agent-skills index missing despite tool-bearing manifest
@@ -147,8 +147,8 @@ Deterministic checks for route briefs that declare answer summaries, target ques
 
 Reusable GEO rules extracted from the Chau7 website guidelines.
 
-- `GEO001`: <section> missing data-ui
-- `GEO002`: <article> missing data-ui
+- `GEO001`: <section> missing data-ui, on a site that uses data-ui
+- `GEO002`: <article> missing data-ui, on a site that uses data-ui
 - `GEO003`: duplicate data-ui on a page
 - `GEO004`: <section> missing a heading
 - `GEO005`: <details> missing <summary>
