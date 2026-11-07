@@ -14,7 +14,10 @@ use support::{bin, parse_json, write};
 
 #[test]
 fn crawl_and_verify_commands_work_end_to_end() {
-    let (base_url, handle) = spawn_server(16);
+    // Several commands run against one server: an idle timeout could stop it
+    // between them on a slow runner.
+    let server = spawn_server_with_explicit_shutdown();
+    let base_url = server.base_url().to_string();
     let temp_dir = tempfile::tempdir().unwrap();
     let crawl_output = Command::new(bin())
         .current_dir(temp_dir.path())
@@ -55,7 +58,7 @@ fn crawl_and_verify_commands_work_end_to_end() {
     );
     let verify_stdout = String::from_utf8_lossy(&verify_output.stdout);
     assert!(verify_stdout.contains("New findings: 0"));
-    handle.join().unwrap();
+    server.shutdown();
 }
 
 #[test]
@@ -193,7 +196,10 @@ fn crawl_json_contract_reports_summary_and_exit_code() {
 
 #[test]
 fn crawl_artifact_can_drive_intelligence_commands_without_scanning_cwd() {
-    let (base_url, handle) = spawn_server(8);
+    // Several commands run against one server: an idle timeout could stop it
+    // between them on a slow runner.
+    let server = spawn_server_with_explicit_shutdown();
+    let base_url = server.base_url().to_string();
     let crawl_dir = tempfile::tempdir().unwrap();
     let crawl_output = Command::new(bin())
         .current_dir(crawl_dir.path())
@@ -263,12 +269,15 @@ fn crawl_artifact_can_drive_intelligence_commands_without_scanning_cwd() {
     );
     assert_eq!(fanout_payload["result"]["assessment"]["routes_analyzed"], 2);
 
-    handle.join().unwrap();
+    server.shutdown();
 }
 
 #[test]
 fn verify_json_contract_reports_diff_summary() {
-    let (base_url, handle) = spawn_server(16);
+    // Several commands run against one server: an idle timeout could stop it
+    // between them on a slow runner.
+    let server = spawn_server_with_explicit_shutdown();
+    let base_url = server.base_url().to_string();
     let temp_dir = tempfile::tempdir().unwrap();
     let crawl_output = Command::new(bin())
         .current_dir(temp_dir.path())
@@ -304,7 +313,7 @@ fn verify_json_contract_reports_diff_summary() {
     assert_eq!(payload["success"], true);
     assert_eq!(payload["summary"]["new"], 0);
     assert!(payload["diff"]["new_findings"].is_array());
-    handle.join().unwrap();
+    server.shutdown();
 }
 
 fn assert_http_test_server_responds(base_url: &str) {
@@ -960,7 +969,10 @@ fn crawl_graph_summary_rejects_sarif_before_fetching() {
 
 #[test]
 fn crawl_graph_summary_is_visible_in_text() {
-    let (base_url, handle) = spawn_server(8);
+    // Several commands run against one server: an idle timeout could stop it
+    // between them on a slow runner.
+    let server = spawn_server_with_explicit_shutdown();
+    let base_url = server.base_url().to_string();
     let temp = tempfile::tempdir().unwrap();
     let output = Command::new(bin())
         .current_dir(temp.path())
@@ -983,7 +995,7 @@ fn crawl_graph_summary_is_visible_in_text() {
     assert!(text.contains("Link graph observations:"), "{text}");
     assert!(text.contains("inventory_missing"), "{text}");
     assert!(text.contains("crawl complete: false"), "{text}");
-    handle.join().unwrap();
+    server.shutdown();
 }
 
 /// A local HTTP server that records every request head, so a test can assert
