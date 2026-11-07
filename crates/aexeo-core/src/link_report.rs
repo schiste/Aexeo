@@ -72,9 +72,21 @@ pub struct ObservedPageLinks {
     #[serde(default)]
     pub redirected_source_pages: usize,
     /// The recorded redirect hops from `redirected_from` to this page, in
-    /// order. Reported only; links to a hop are never credited to this page.
+    /// order. Links to a hop are credited only in `via_redirect`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub redirect_chain: Vec<RedirectHop>,
+    /// Other pages linking to the requested URL or to any hop of a recorded,
+    /// consistent `redirect_chain`. Never added to the counts above and never
+    /// a basis for eligibility. Omitted when nothing is credited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via_redirect: Option<RedirectCredit>,
+}
+
+/// Distinct source pages credited to a page through its recorded redirects.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RedirectCredit {
+    pub distinct_source_pages: usize,
+    pub source_pages_by_context: std::collections::BTreeMap<LinkContext, usize>,
 }
 
 fn has_noindex(value: &str) -> bool {
@@ -322,16 +334,62 @@ fn recorded_redirect_chain(
     if chain.is_empty() {
         return Vec::new();
     }
-    let consistent = chain[0].url == response.requested_url
-        && chain
-            .iter()
-            .all(|hop| (300..400).contains(&hop.status_code));
-    if consistent {
+    if redirect_chain_consistent(&response.requested_url, chain) {
         chain.clone()
     } else {
         issues.insert("audit_redirect_chain_inconsistent");
         Vec::new()
     }
+}
+
+/// A chain is evidence only when it starts at the requested URL and every hop
+/// is a redirect status.
+fn redirect_chain_consistent(requested_url: &str, chain: &[RedirectHop]) -> bool {
+    chain.first().is_some_and(|hop| hop.url == requested_url)
+        && chain
+            .iter()
+            .all(|hop| (300..400).contains(&hop.status_code))
+}
+
+/// Sources linking to any URL of the page's recorded, consistent redirect
+/// chain, the requested URL included. Without such a chain nothing is credited.
+fn redirect_credit(
+    page: &RenderedPage,
+    by_destination: &std::collections::BTreeMap<&str, &crate::link_counts::DestinationLinks>,
+) -> Option<RedirectCredit> {
+    let requested = page.requested_url.as_deref()?;
+    if !redirect_chain_consistent(requested, &page.redirect_chain) {
+        return None;
+    }
+    let own = Url::parse(&page.url).ok().map(String::from);
+    let chain_urls = page
+        .redirect_chain
+        .iter()
+        .filter_map(|hop| Url::parse(&hop.url).ok().map(String::from))
+        .filter(|url| own.as_ref() != Some(url))
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut sources = std::collections::BTreeSet::new();
+    let mut contexts =
+        std::collections::BTreeMap::<LinkContext, std::collections::BTreeSet<&str>>::new();
+    for link in chain_urls
+        .iter()
+        .filter_map(|url| by_destination.get(url.as_str()))
+        .flat_map(|destination| &destination.evidence)
+        .filter(|link| link.source != page.url)
+    {
+        sources.insert(link.source.as_str());
+        contexts
+            .entry(link.context)
+            .or_default()
+            .insert(link.source.as_str());
+    }
+    (!sources.is_empty()).then(|| RedirectCredit {
+        distinct_source_pages: sources.len(),
+        source_pages_by_context: contexts
+            .into_iter()
+            .map(|(context, sources)| (context, sources.len()))
+            .collect(),
+    })
 }
 
 /// The serialized requested URL, when it differs from the observed page URL.
@@ -623,6 +681,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
                     }),
                 redirected_from: redirected,
                 redirect_chain: page.redirect_chain.clone(),
+                via_redirect: redirect_credit(page, &by_destination),
             }
         })
         .collect();
@@ -729,8 +788,14 @@ mod tests {
             ]
         );
         // Links to the requested URL and to an intermediate hop stay outside
-        // the page's own counts.
+        // the page's own counts and are credited only through the redirect.
         assert_eq!(page.distinct_source_pages, 0);
+        assert_eq!(
+            page.via_redirect
+                .as_ref()
+                .map(|credit| credit.distinct_source_pages),
+            Some(1)
+        );
         assert_eq!(
             page.redirected_from.as_deref(),
             Some("https://example.org/old")
@@ -749,6 +814,7 @@ mod tests {
     fn an_artifact_without_recorded_hops_keeps_the_unavailable_issue() {
         let report = build_link_report_from_audit(&redirected_audit(None)).unwrap();
         assert!(report.pages[1].redirect_chain.is_empty());
+        assert!(report.pages[1].via_redirect.is_none());
         assert!(
             report
                 .issues
@@ -765,11 +831,138 @@ mod tests {
         ]))))
         .unwrap();
         assert!(report.pages[1].redirect_chain.is_empty());
+        assert!(report.pages[1].via_redirect.is_none());
         for issue in [
             "audit_redirect_chain_inconsistent",
             "audit_redirect_chain_unavailable",
         ] {
             assert!(report.issues.contains(&issue.to_string()), "{issue}");
+        }
+    }
+
+    fn redirect_report(chain: Vec<RedirectHop>) -> LinkReport {
+        let page = |url: &str, html: &str| RenderedPage {
+            url: url.into(),
+            html: html.into(),
+            status_code: Some(200),
+            response_headers: Some(Default::default()),
+            requested_url: Some(url.into()),
+            redirect_chain: Vec::new(),
+        };
+        let mut redirected = page(
+            "https://example.org/new",
+            "<main><a href='/old'>Self through redirect</a></main>",
+        );
+        redirected.requested_url = Some("https://example.org/old".into());
+        redirected.redirect_chain = chain;
+        build_link_report(&LinkReportInput {
+            version: 1,
+            identity: Some(SurfaceIdentity {
+                origin: "https://example.org".into(),
+                release: "r1".into(),
+                surface: "public".into(),
+                snapshot: "s1".into(),
+            }),
+            snapshot_date: Some("2026-11-07".into()),
+            crawl_complete: true,
+            pages: vec![
+                page(
+                    "https://example.org/a",
+                    "<main><a href='/old'>Requested</a></main>",
+                ),
+                page(
+                    "https://example.org/b",
+                    "<nav><a href='/middle'>Hop</a></nav><main><a href='/old'>Requested</a></main>",
+                ),
+                page(
+                    "https://example.org/c",
+                    "<nav><a href='/middle'>Hop</a></nav>",
+                ),
+                redirected,
+            ],
+            // An otherwise matching, complete inventory: only the redirect
+            // withholds eligibility.
+            inventory: Some(InventorySnapshot {
+                identity: Some(SurfaceIdentity {
+                    origin: "https://example.org".into(),
+                    release: "r1".into(),
+                    surface: "public".into(),
+                    snapshot: "s1".into(),
+                }),
+                complete: true,
+                pages: ["a", "b", "c", "new"]
+                    .map(|path| crate::link_inventory::InventoryPage {
+                        url: format!("https://example.org/{path}"),
+                        disposition: InventoryDisposition::Published,
+                        target: None,
+                        locale: None,
+                    })
+                    .to_vec(),
+            }),
+        })
+        .unwrap()
+    }
+
+    fn hop(url: &str, status_code: u16) -> RedirectHop {
+        RedirectHop {
+            url: url.into(),
+            status_code,
+        }
+    }
+
+    #[test]
+    fn links_to_a_consistent_redirect_chain_are_credited_separately() {
+        let report = redirect_report(vec![
+            hop("https://example.org/old", 301),
+            hop("https://example.org/middle", 302),
+        ]);
+        let page = &report.pages[3];
+        let credit = page.via_redirect.as_ref().expect("redirect credit");
+        // a and b link to the requested URL, b and c to the intermediate hop;
+        // the page's own link through the redirect is not credited.
+        assert_eq!(credit.distinct_source_pages, 3);
+        assert_eq!(credit.source_pages_by_context[&LinkContext::Body], 2);
+        assert_eq!(credit.source_pages_by_context[&LinkContext::Navigation], 2);
+        // The page's own counts and the requested-URL count are unchanged.
+        assert_eq!(page.distinct_source_pages, 0);
+        assert!(
+            page.source_pages_by_context
+                .values()
+                .all(|count| *count == 0)
+        );
+        assert_eq!(page.redirected_source_pages, 2);
+        // Redirects still withhold eligibility.
+        assert!(report.issues.contains(&"redirect_observed".to_string()));
+        let reconciliation = report.reconciliation.as_ref().unwrap();
+        assert!(!reconciliation.comparable);
+        assert!(reconciliation.eligible_pages.is_empty());
+        assert_eq!(reconciliation.issues, ["redirect_observed"]);
+        let json = serde_json::to_value(page).unwrap();
+        assert_eq!(
+            json["via_redirect"],
+            serde_json::json!({"distinct_source_pages":3, "source_pages_by_context":{"body":2, "navigation":2}})
+        );
+        assert!(report.pages[0].via_redirect.is_none());
+        let unredirected = serde_json::to_value(&report.pages[0]).unwrap();
+        assert!(unredirected.get("via_redirect").is_none(), "{unredirected}");
+    }
+
+    #[test]
+    fn missing_or_inconsistent_redirect_chains_credit_nothing() {
+        for chain in [
+            Vec::new(),
+            vec![hop("https://example.org/elsewhere", 301)],
+            vec![
+                hop("https://example.org/old", 301),
+                hop("https://example.org/middle", 200),
+            ],
+        ] {
+            let report = redirect_report(chain.clone());
+            let page = &report.pages[3];
+            assert!(page.via_redirect.is_none(), "{chain:?}");
+            assert_eq!(page.distinct_source_pages, 0);
+            assert_eq!(page.redirected_source_pages, 2);
+            assert!(report.issues.contains(&"redirect_observed".to_string()));
         }
     }
 }

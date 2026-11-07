@@ -80,6 +80,11 @@ not change their counts or assert confirmed orphans.
   `audit_redirect_chain_unavailable`. Links to the requested URL or an
   intermediate hop remain reported separately and are not credited to the final
   page; redirects still withhold eligibility.
+- Links to the requested URL or to any hop of a recorded, consistent redirect
+  chain are credited to the final page in a separate `via_redirect` count of
+  distinct source pages by context. They are never mixed into the body or
+  navigation counts, redirects still withhold eligibility, and pages without a
+  recorded chain or with an inconsistent one are credited nothing.
 - A synthetic in-process benchmark covers 50 pages and 500 links (#76). No CI
   performance budget has been established for this graph benchmark.
 - A live Aeptus URL returned a generic noindex holding page, not the article

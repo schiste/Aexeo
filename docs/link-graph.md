@@ -80,9 +80,27 @@ other pages linking to it as `redirected_source_pages`, and raises
 `redirect_observed`, which withholds eligibility. These sources are not added
 to the page's other counts. When hops were recorded the page also reports them,
 in order, as `redirect_chain`; the field is omitted otherwise, so a report
-without redirects is unchanged. A recorded chain is reported only: links to
-the requested URL or to an intermediate hop are not credited to the final page,
-and `redirect_observed` still withholds eligibility.
+without redirects is unchanged.
+
+When the recorded chain is consistent (it starts at `requested_url` and every
+hop has a 3xx status), other pages linking to the requested URL or to any hop
+are credited to the final page in a separate `via_redirect` count:
+
+```json
+"via_redirect": {
+  "distinct_source_pages": 2,
+  "source_pages_by_context": {"body": 1, "navigation": 1}
+}
+```
+
+A source linking to several URLs of the chain counts once, and the page's own
+links are excluded. These sources are never added to `distinct_source_pages`,
+`source_pages_by_context` or the other page counts, and `redirect_observed`
+still withholds eligibility, so this credit never makes a page eligible or
+decides whether it is an orphan. `via_redirect` is omitted when nothing is
+credited: when no source links to the chain, when no chain was recorded (older
+artifacts and browser-engine crawls), and when the chain is inconsistent.
+Hop URLs are matched exactly after parsing, like every destination.
 
 Semantic `main`, `article`, `nav` and `footer` elements provide some contexts;
 `aria-label="breadcrumb"`, `"breadcrumbs"` or `"pagination"` distinguish

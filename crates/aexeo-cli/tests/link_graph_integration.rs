@@ -765,6 +765,8 @@ fn requested_url_links_are_credited_separately_on_the_redirected_page() {
     assert_eq!(page["distinct_source_pages"], 0);
     assert_eq!(page["redirected_from"], "https://example.org/old");
     assert_eq!(page["redirected_source_pages"], 1);
+    // Without a recorded chain nothing is credited through the redirect.
+    assert!(page.get("via_redirect").is_none(), "{page}");
     assert!(report["pages"][0]["redirected_from"].is_null());
     assert_eq!(report["pages"][0]["redirected_source_pages"], 0);
     assert!(has_issue(
@@ -775,7 +777,7 @@ fn requested_url_links_are_credited_separately_on_the_redirected_page() {
 }
 
 #[test]
-fn a_recorded_redirect_chain_is_reported_in_order_without_crediting_the_page() {
+fn a_recorded_redirect_chain_is_reported_in_order_and_credited_separately() {
     let mut redirected = audit_page(
         "https://example.org/old",
         "https://example.org/new",
@@ -788,6 +790,7 @@ fn a_recorded_redirect_chain_is_reported_in_order_without_crediting_the_page() {
     let audit = serde_json::json!({"command":"crawl", "site":{"site_url":"https://example.org/", "root":"crawl", "deployment_model":"runtime_snapshot", "pages":[
         audit_page("https://example.org/", "https://example.org/", "<main><a href='/old'>Old</a></main>"),
         redirected,
+        audit_page("https://example.org/about", "https://example.org/about", "<nav><a href='/middle'>Middle</a></nav>"),
     ]}});
     let report = run_report(&audit, true);
     let page = &report["pages"][1];
@@ -798,11 +801,20 @@ fn a_recorded_redirect_chain_is_reported_in_order_without_crediting_the_page() {
             {"url":"https://example.org/middle", "status_code":302},
         ])
     );
+    // Links to the requested URL and to the intermediate hop are credited
+    // only in their own count, never in the page's body or navigation counts.
     assert_eq!(page["distinct_source_pages"], 0);
+    assert_eq!(page["source_pages_by_context"]["body"], 0);
+    assert_eq!(page["source_pages_by_context"]["navigation"], 0);
+    assert_eq!(
+        page["via_redirect"],
+        serde_json::json!({"distinct_source_pages":2, "source_pages_by_context":{"body":1, "navigation":1}})
+    );
     assert_eq!(page["redirected_from"], "https://example.org/old");
     assert_eq!(page["redirected_source_pages"], 1);
     // A page without redirects keeps its previous JSON shape.
     assert!(report["pages"][0].get("redirect_chain").is_none());
+    assert!(report["pages"][0].get("via_redirect").is_none());
     assert!(!has_issue(
         &report["issues"],
         "audit_redirect_chain_unavailable"
