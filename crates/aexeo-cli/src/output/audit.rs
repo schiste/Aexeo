@@ -19,9 +19,26 @@ struct AuditCommandOutput<'a> {
     summary: &'a aexeo_contracts::AuditSummary,
     findings: &'a [aexeo_contracts::Finding],
     artifact: &'a AuditArtifact,
+    priorities: Vec<aexeo_core::PriorityIssue>,
     warnings: Vec<ConfigWarning>,
     #[serde(skip_serializing_if = "Option::is_none")]
     link_graph_summary: Option<&'a serde_json::Value>,
+}
+
+/// The page HTML is in the saved artifact at `audit_path`. Repeating it here made
+/// a 100-page crawl print about 15 MB.
+fn without_page_html(artifact: &AuditArtifact) -> Option<AuditArtifact> {
+    let site = artifact.site.as_ref()?;
+    if site.pages.iter().all(|page| page.raw_html.is_empty()) {
+        return None;
+    }
+    let mut slim = artifact.clone();
+    if let Some(site) = slim.site.as_mut() {
+        for page in &mut site.pages {
+            page.raw_html.clear();
+        }
+    }
+    Some(slim)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,13 +84,15 @@ pub fn render_audit_command_json_with_graph(
     warnings: Vec<ConfigWarning>,
     link_graph_summary: Option<&serde_json::Value>,
 ) -> Result<String> {
+    let slim = without_page_html(artifact);
     Ok(serde_json::to_string_pretty(&AuditCommandOutput {
         command,
         success,
         audit_path,
         summary: &artifact.summary,
         findings: &artifact.findings,
-        artifact,
+        artifact: slim.as_ref().unwrap_or(artifact),
+        priorities: aexeo_core::prioritize_findings(&artifact.findings, 10),
         warnings,
         link_graph_summary,
     })?)

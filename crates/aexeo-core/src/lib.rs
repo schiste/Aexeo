@@ -109,11 +109,11 @@ pub use registry::{
     list_adapter_names, list_rule_group_names, rule_layers_for_id,
 };
 pub use reporting::{
-    DEFAULT_AUDIT_LOG_LIMIT, LayerBreakdown, build_audit_artifact, build_recap_lines,
-    is_reports_dir, render_audit_artifact_json, render_markdown_artifact, render_sarif,
-    render_text, render_text_artifact, reports_dir, rule_group_name, summarize_findings,
-    summarize_findings_by_layer, write_audit_artifact, write_partial_audit_artifact,
-    write_private_file, write_progress_audit_artifact,
+    DEFAULT_AUDIT_LOG_LIMIT, LayerBreakdown, PriorityIssue, build_audit_artifact,
+    build_recap_lines, is_reports_dir, prioritize_findings, render_audit_artifact_json,
+    render_markdown_artifact, render_sarif, render_text, render_text_artifact, reports_dir,
+    rule_group_name, summarize_findings, summarize_findings_by_layer, write_audit_artifact,
+    write_partial_audit_artifact, write_private_file, write_progress_audit_artifact,
 };
 pub use robots_rules::run_robots_rules;
 #[cfg(feature = "net")]

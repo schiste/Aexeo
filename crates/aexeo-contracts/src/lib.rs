@@ -391,6 +391,9 @@ pub struct AuditPageSnapshot {
     pub path: String,
     pub relative_path: String,
     pub route: String,
+    /// Kept in the saved artifact, which `verify` replays; left out of command
+    /// output, where it was most of the payload.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub raw_html: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crawl_response: Option<CrawlResponseProvenance>,

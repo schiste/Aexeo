@@ -1,6 +1,7 @@
 use anyhow::Result;
+use serde::Serialize;
 use serde_json::json;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -61,6 +62,121 @@ impl FindingCluster {
     fn confidence_tag(&self) -> String {
         rule_metadata_for_id(&self.rule_id).render_tag()
     }
+}
+
+/// One distinct problem: findings that share a rule, message and severity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PriorityIssue {
+    pub rule_id: String,
+    pub message: String,
+    pub severity: String,
+    /// Distinct report paths the problem appears on.
+    pub pages: usize,
+    pub findings: usize,
+    pub examples: Vec<String>,
+}
+
+/// Distinct problems in the order to fix them: errors first, then problems
+/// that are not heuristic, then by how many pages each one fixes.
+pub fn prioritize_findings(findings: &[Finding], limit: usize) -> Vec<PriorityIssue> {
+    // Per (rule, message, severity): the paths seen, the finding count and
+    // whether the rule is heuristic.
+    type Tally<'a> = (BTreeSet<&'a str>, usize, bool);
+    let mut grouped: BTreeMap<(&str, &str, &str), Tally> = BTreeMap::new();
+    for finding in findings {
+        let entry = grouped
+            .entry((&finding.rule_id, &finding.message, &finding.severity))
+            .or_insert_with(|| (BTreeSet::new(), 0, is_heuristic_finding(finding)));
+        entry.0.insert(&finding.path);
+        entry.1 += 1;
+    }
+    let mut issues: Vec<(bool, PriorityIssue)> = grouped
+        .into_iter()
+        .map(
+            |((rule_id, message, severity), (paths, count, heuristic))| {
+                (
+                    heuristic,
+                    PriorityIssue {
+                        rule_id: rule_id.to_string(),
+                        message: message.to_string(),
+                        severity: severity.to_string(),
+                        pages: paths.len(),
+                        findings: count,
+                        examples: paths.iter().take(3).map(|path| path.to_string()).collect(),
+                    },
+                )
+            },
+        )
+        .collect();
+    issues.sort_by(|(a_heuristic, a), (b_heuristic, b)| {
+        (b.severity == "error")
+            .cmp(&(a.severity == "error"))
+            .then_with(|| a_heuristic.cmp(b_heuristic))
+            .then_with(|| b.pages.cmp(&a.pages))
+            .then_with(|| b.findings.cmp(&a.findings))
+            .then_with(|| a.rule_id.cmp(&b.rule_id))
+            .then_with(|| a.message.cmp(&b.message))
+    });
+    issues
+        .into_iter()
+        .take(limit)
+        .map(|(_, issue)| issue)
+        .collect()
+}
+
+/// How many priorities the text and Markdown reports lead with.
+const PRIORITY_LIMIT: usize = 10;
+
+fn priority_lines(findings: &[Finding], markdown: bool) -> Vec<String> {
+    let distinct = prioritize_findings(findings, usize::MAX).len();
+    let issues = prioritize_findings(findings, PRIORITY_LIMIT);
+    if issues.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![if markdown {
+        format!(
+            "## Start here ({} of {} distinct problems)",
+            issues.len(),
+            distinct
+        )
+    } else {
+        format!(
+            "Start here ({} of {} distinct problems):",
+            issues.len(),
+            distinct
+        )
+    }];
+    if markdown {
+        lines.push(String::new());
+    }
+    for (rank, issue) in issues.iter().enumerate() {
+        let reach = if issue.pages == 1 {
+            format!("on {}", issue.examples.first().map_or("", String::as_str))
+        } else {
+            format!("on {} pages", issue.pages)
+        };
+        lines.push(if markdown {
+            format!(
+                "{}. `{}` {} — {}: {}",
+                rank + 1,
+                issue.rule_id,
+                issue.severity,
+                reach,
+                issue.message
+            )
+        } else {
+            format!(
+                "  {:>2}. [{}] {} {} ({})",
+                rank + 1,
+                issue.severity,
+                issue.rule_id,
+                issue.message,
+                reach
+            )
+        });
+    }
+    lines.push(String::new());
+    lines
 }
 
 pub fn summarize_findings(findings: &[Finding]) -> AuditSummary {
@@ -578,6 +694,7 @@ pub fn render_text_artifact(
     if !lines.last().is_some_and(|line| line.is_empty()) {
         lines.push(String::new());
     }
+    lines.extend(priority_lines(&artifact.findings, false));
 
     // Per-layer breakdown — gives the editor a one-glance read of which
     // GEO layer needs attention before they dive into the per-scope
@@ -682,6 +799,7 @@ pub fn render_markdown_artifact(artifact: &AuditArtifact, audit_path: Option<&Pa
         lines.push(format!("- Audit artifact: `{}`", path.display()));
     }
     lines.push(String::new());
+    lines.extend(priority_lines(&artifact.findings, true));
     lines.push("## Summary".to_string());
     lines.push(format!("- Total findings: `{}`", artifact.summary.total));
     lines.push(format!("- Errors: `{}`", artifact.summary.errors));
@@ -1046,7 +1164,7 @@ pub fn write_progress_audit_artifact(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_audit_artifact, build_recap_lines, render_audit_artifact_json,
+        build_audit_artifact, build_recap_lines, prioritize_findings, render_audit_artifact_json,
         render_markdown_artifact, render_sarif, render_text, render_text_artifact, rule_group_name,
         write_audit_artifact, write_partial_audit_artifact, write_progress_audit_artifact,
     };
@@ -1546,5 +1664,67 @@ mod tests {
             text, "crawl complete",
             "a partial run must not use the success form"
         );
+    }
+
+    fn priority_finding(rule_id: &str, message: &str, severity: &str, path: &str) -> Finding {
+        Finding {
+            rule_id: rule_id.to_string(),
+            message: message.to_string(),
+            path: path.to_string(),
+            line: 1,
+            column: 1,
+            severity: severity.to_string(),
+            suggestion: None,
+            scope: FindingScope::Page,
+            subject: None,
+        }
+    }
+
+    #[test]
+    fn priorities_rank_errors_then_reach_and_count_pages_once() {
+        let mut findings = Vec::new();
+        for page in ["a", "b", "c"] {
+            findings.push(priority_finding(
+                "SOC006",
+                "missing og:image",
+                "warning",
+                page,
+            ));
+        }
+        for page in ["a", "b"] {
+            findings.push(priority_finding(
+                "SEO002",
+                "missing meta description",
+                "error",
+                page,
+            ));
+            findings.push(priority_finding(
+                "SEO002",
+                "missing meta description",
+                "error",
+                page,
+            ));
+        }
+        findings.push(priority_finding("SEO005", "missing <h1>", "error", "z"));
+
+        let issues = prioritize_findings(&findings, 10);
+        let order: Vec<_> = issues.iter().map(|issue| issue.rule_id.as_str()).collect();
+        assert_eq!(order, ["SEO002", "SEO005", "SOC006"]);
+        assert_eq!((issues[0].pages, issues[0].findings), (2, 4));
+        assert_eq!(prioritize_findings(&findings, 1).len(), 1);
+    }
+
+    #[test]
+    fn the_text_report_leads_with_priorities() {
+        let findings = vec![priority_finding("SEO005", "missing <h1>", "error", "home")];
+        let artifact = build_audit_artifact("check", &findings, AuditStatus::Complete, None, None);
+        let text = render_text_artifact(&artifact, "ok", None);
+        let start = text.find("Start here (1 of 1 distinct problems):").unwrap();
+        assert!(
+            text[start..].contains("[error] SEO005 missing <h1> (on home)"),
+            "{text}"
+        );
+        assert!(start < text.find("By layer:").unwrap_or(usize::MAX));
+        assert!(render_markdown_artifact(&artifact, None).contains("## Start here"));
     }
 }
