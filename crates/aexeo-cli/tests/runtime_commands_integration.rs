@@ -64,7 +64,7 @@ fn crawl_uses_configured_runtime_engine_when_flag_is_omitted() {
     let temp_dir = tempfile::tempdir().unwrap();
     write(
         &temp_dir.path().join("aexeo.toml"),
-        "browser_engine = \"http\"\n",
+        "version = 1\n[runtime]\nengine = \"http\"\n",
     );
     let output = Command::new(bin())
         .current_dir(temp_dir.path())
@@ -158,30 +158,6 @@ fn crawl_accepts_playwright_with_custom_runner() {
     assert!(payload["artifact"]["crawl"]["engine"].as_str().is_some());
     assert!(payload.get("link_graph_summary").is_none());
     assert!(payload.get("error").is_none());
-    handle.join().unwrap();
-}
-
-#[test]
-fn crawl_sarif_emits_config_warnings_on_stderr() {
-    let (base_url, handle) = spawn_server(8);
-    let temp_dir = tempfile::tempdir().unwrap();
-    write(
-        &temp_dir.path().join("aexeo.toml"),
-        "browser_engine = \"http\"\n",
-    );
-    let output = Command::new(bin())
-        .current_dir(temp_dir.path())
-        .arg("crawl")
-        .arg(&base_url)
-        .arg("--max-pages")
-        .arg("10")
-        .arg("--format")
-        .arg("sarif")
-        .output()
-        .unwrap();
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("CFGDEP001"));
     handle.join().unwrap();
 }
 

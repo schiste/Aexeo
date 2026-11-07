@@ -5,144 +5,36 @@ use std::path::{Component, Path, PathBuf};
 use toml::Value;
 
 use super::Config;
+use super::docs::versioned_location;
 use crate::error::into_user_error;
 use crate::plugin::validate_plugin_settings;
 
 const VERSIONED_TOP_LEVEL_TABLES: &[&str] =
     &["site", "runtime", "policy", "rules", "output", "quality"];
-// `[accessibility]`, `[agent_discovery]`, `[editorial]`, and `[route_kinds]` live
-// outside the versioned set because they have no flat-key counterpart — there's
-// nothing in old configs for the version=1 gate to protect against.
-// Users can adopt these settings on any config shape without needing to
-// migrate to versioned form.
-const UNVERSIONED_NEW_TABLES: &[&str] = &[
+const OTHER_TOP_LEVEL_TABLES: &[&str] = &[
     "accessibility",
     "agent_discovery",
     "editorial",
     "route_kinds",
 ];
-const FLAT_TOP_LEVEL_KEYS: &[&str] = &[
-    "site_url",
-    "source_dir",
+/// Settings that belong to the config as a whole, not to one section.
+const TOP_LEVEL_KEYS: &[&str] = &[
     "profile",
-    "adapter",
     "plugins",
-    "canonical_style",
     "extends",
-    "audit_log_limit",
-    "browser_engine",
-    "browser_wait_until",
-    "baseline_file",
     "max_workers",
-    "crawl_headers",
-    "crawl_cookies",
-    "crawl_basic_auth",
-    "crawl_seeds",
-    "crawl_include_patterns",
-    "crawl_exclude_patterns",
-    "crawl_use_sitemap",
-    "crawl_ignore_robots",
-    "crawl_delay_ms",
-    "crawl_capture_trace",
-    "crawl_capture_screenshot",
-    "crawl_capture_console",
-    "crawl_capture_network",
-    "crawl_artifact_dir",
-    "crawl_allow_private_network",
-    "crawl_max_response_bytes",
-    "ignore_rules",
-    "ignore_paths",
-    "severity_overrides",
-    "suppressions",
-    "checks",
-    "orphan_exclude",
-    "repeatable_data_ui",
-    "utility_route_patterns",
-    "route_policy_overrides",
-    "min_inbound_links",
-    "link_suggestion_count",
-    "enable_link_autofix",
-    "related_links_heading",
-    "min_page_size",
-    "required_feature_markers",
-    "min_block_text_length",
-    "min_answer_blocks",
-    "require_fact_consistency",
-    "required_schema_types",
-    "required_schema_families",
-    "require_breadcrumb_schema",
-    "require_schema_title_alignment",
-    "require_html_lang",
-    "require_hreflang_self",
-    "require_meta_robots_consistency",
-    "require_open_graph",
-    "require_twitter_card",
-    "default_twitter_card",
-    "require_social_images",
-    "require_twitter_image",
-    "require_robots_sitemap",
-    "weak_anchor_text",
     "plugin_settings",
-    "performance_budget_file",
 ];
-const DEPRECATED_FLAT_KEYS: &[&str] = &[
-    "site_url",
-    "source_dir",
-    "adapter",
-    "canonical_style",
-    "audit_log_limit",
-    "browser_engine",
-    "browser_wait_until",
-    "baseline_file",
-    "crawl_headers",
-    "crawl_cookies",
-    "crawl_basic_auth",
-    "crawl_seeds",
-    "crawl_include_patterns",
-    "crawl_exclude_patterns",
-    "crawl_use_sitemap",
-    "crawl_ignore_robots",
-    "crawl_delay_ms",
-    "crawl_capture_trace",
-    "crawl_capture_screenshot",
-    "crawl_capture_console",
-    "crawl_capture_network",
-    "crawl_artifact_dir",
-    "crawl_allow_private_network",
-    "crawl_max_response_bytes",
-    "ignore_rules",
-    "ignore_paths",
-    "severity_overrides",
-    "suppressions",
-    "checks",
-    "orphan_exclude",
-    "repeatable_data_ui",
-    "utility_route_patterns",
-    "route_policy_overrides",
-    "min_inbound_links",
-    "link_suggestion_count",
-    "enable_link_autofix",
-    "related_links_heading",
-    "min_page_size",
-    "required_feature_markers",
-    "min_block_text_length",
-    "min_answer_blocks",
-    "require_fact_consistency",
-    "required_schema_types",
-    "required_schema_families",
-    "require_breadcrumb_schema",
-    "require_schema_title_alignment",
-    "require_html_lang",
-    "require_hreflang_self",
-    "require_meta_robots_consistency",
-    "require_open_graph",
-    "require_twitter_card",
-    "default_twitter_card",
-    "require_social_images",
-    "require_twitter_image",
-    "require_robots_sitemap",
-    "weak_anchor_text",
-    "performance_budget_file",
+/// Rule groups that only have an on/off switch under `[rules.<group>]`.
+const ENABLE_ONLY_RULE_GROUPS: &[&str] = &[
+    "sitemap",
+    "llm",
+    "surfaces",
+    "editorial",
+    "headers",
+    "well_known",
+    "accessibility",
+    "agent_discovery",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -266,37 +158,6 @@ fn move_table_field_if_absent(
     }
 }
 
-fn merge_bool_rule_toggles(
-    root: &mut toml::map::Map<String, Value>,
-    rules_table: &mut toml::map::Map<String, Value>,
-) {
-    let checks_value = root
-        .entry("checks".to_string())
-        .or_insert_with(|| Value::Table(toml::map::Map::new()));
-    let Some(checks_table) = checks_value.as_table_mut() else {
-        return;
-    };
-    for key in [
-        "html",
-        "links",
-        "sitemap",
-        "robots",
-        "social",
-        "schema",
-        "llm",
-        "surfaces",
-        "content",
-        "editorial",
-        "structure",
-    ] {
-        if matches!(rules_table.get(key), Some(Value::Boolean(_)))
-            && let Some(value) = rules_table.remove(key)
-        {
-            checks_table.entry(key.to_string()).or_insert(value);
-        }
-    }
-}
-
 fn validate_allowed_keys(
     table: &toml::map::Map<String, Value>,
     allowed: &[&str],
@@ -335,13 +196,17 @@ fn validate_rules_table(table: &toml::map::Map<String, Value>) -> Result<()> {
             "content",
             "editorial",
             "structure",
+            "headers",
+            "well_known",
+            "accessibility",
+            "agent_discovery",
         ],
         "[rules]",
     )?;
 
     for (key, value) in table {
         if matches!(value, Value::Boolean(_)) {
-            continue;
+            bail!("`rules.{key}` must be a table: use `[rules.{key}]` with `enabled = ...`");
         }
         match key.as_str() {
             "content" => validate_allowed_keys(
@@ -358,6 +223,7 @@ fn validate_rules_table(table: &toml::map::Map<String, Value>) -> Result<()> {
                     "enable_link_autofix",
                     "related_links_heading",
                     "weak_anchor_text",
+                    "orphan_exclude",
                 ],
                 "[rules.links]",
             )?,
@@ -406,13 +272,13 @@ fn validate_rules_table(table: &toml::map::Map<String, Value>) -> Result<()> {
                 ],
                 "[rules.structure]",
             )?,
-            "sitemap" | "llm" | "surfaces" | "editorial" => validate_allowed_keys(
+            group if ENABLE_ONLY_RULE_GROUPS.contains(&group) => validate_allowed_keys(
                 expect_table(value, key, "[rules]")?,
                 &["enabled"],
                 &format!("[rules.{}]", key),
             )?,
             _ => bail!(
-                "config key '{}' in [rules] must be a boolean or nested TOML table",
+                "config key '{}' in [rules] must be a nested TOML table",
                 key
             ),
         }
@@ -551,73 +417,38 @@ fn validate_versioned_sections(root: &toml::map::Map<String, Value>) -> Result<(
     Ok(())
 }
 
+/// Names the new home of a key from the removed flat format, so an old config
+/// fails with the fix instead of a bare "unknown key".
+fn reject_removed_keys(root: &toml::map::Map<String, Value>) -> Result<()> {
+    for key in root.keys() {
+        if key == "checks" {
+            bail!("`[checks]` was removed: use `[rules.<group>]` with `enabled = ...`");
+        }
+        if let Some([table @ .., name]) = versioned_location(key) {
+            bail!(
+                "config key '{key}' was removed: use `{name}` under `[{}]`",
+                table.join(".")
+            );
+        }
+    }
+    Ok(())
+}
+
 fn validate_config_surface(value: &Value) -> Result<()> {
     let root = value
         .as_table()
         .ok_or_else(|| anyhow::anyhow!("config root must be a TOML table"))?;
-    let version = match root.get("version") {
-        None => None,
-        Some(Value::Integer(version)) => Some(*version),
+    reject_removed_keys(root)?;
+    match root.get("version") {
+        // An empty file is the same as no file: every default applies.
+        None if root.is_empty() => return Ok(()),
+        None => bail!("config must declare `version = 1`"),
+        Some(Value::Integer(1)) => {}
+        Some(Value::Integer(other)) => bail!("unsupported config version {other}; expected 1"),
         Some(_) => bail!("config version must be an integer"),
-    };
-    let has_versioned_tables = VERSIONED_TOP_LEVEL_TABLES
-        .iter()
-        .any(|key| root.contains_key(*key));
-
-    match version {
-        Some(1) => {
-            validate_allowed_keys(root, &accepted_root_keys(), "config root")?;
-            validate_versioned_sections(root)?;
-        }
-        Some(other) => bail!("unsupported config version {}; expected 1", other),
-        None => {
-            if has_versioned_tables {
-                bail!("nested config tables require `version = 1`");
-            }
-            let mut allowed_keys = FLAT_TOP_LEVEL_KEYS.to_vec();
-            allowed_keys.extend(UNVERSIONED_NEW_TABLES);
-            validate_allowed_keys(root, &allowed_keys, "config root")?;
-            validate_versioned_sections(root)?;
-        }
     }
-
-    Ok(())
-}
-
-fn deprecation_warning(message: impl Into<String>) -> ConfigWarning {
-    ConfigWarning {
-        code: "CFGDEP001".to_string(),
-        message: message.into(),
-    }
-}
-
-fn collect_deprecation_warnings(value: &Value) -> Vec<ConfigWarning> {
-    let Some(root) = value.as_table() else {
-        return Vec::new();
-    };
-    let mut warnings = Vec::new();
-
-    for key in DEPRECATED_FLAT_KEYS {
-        if root.contains_key(*key) {
-            warnings.push(deprecation_warning(format!(
-                "legacy flat config key '{}' is deprecated; prefer the versioned nested surface with `version = 1`",
-                key
-            )));
-        }
-    }
-
-    if let Some(Value::Table(rules)) = root.get("rules") {
-        for (rule_name, rule_value) in rules {
-            if matches!(rule_value, Value::Boolean(_)) {
-                warnings.push(deprecation_warning(format!(
-                    "legacy rule toggle `rules.{}` is deprecated; prefer `[rules.{}] enabled = ...`",
-                    rule_name, rule_name
-                )));
-            }
-        }
-    }
-
-    warnings
+    validate_allowed_keys(root, &accepted_root_keys(), "config root")?;
+    validate_versioned_sections(root)
 }
 
 fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
@@ -708,8 +539,6 @@ fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
     }
 
     if let Some(Value::Table(mut rules_table)) = root.remove("rules") {
-        merge_bool_rule_toggles(root, &mut rules_table);
-
         if let Some(Value::Table(mut table)) = rules_table.remove("content") {
             move_table_field_if_absent_checks(root, &mut table, "content");
             move_table_field_if_absent(root, &mut table, "min_page_size", "min_page_size");
@@ -742,6 +571,7 @@ fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
                 "related_links_heading",
             );
             move_table_field_if_absent(root, &mut table, "weak_anchor_text", "weak_anchor_text");
+            move_table_field_if_absent(root, &mut table, "orphan_exclude", "orphan_exclude");
         }
         if let Some(Value::Table(mut table)) = rules_table.remove("schema") {
             move_table_field_if_absent_checks(root, &mut table, "schema");
@@ -851,8 +681,8 @@ fn normalize_versioned_surface(mut merged: Value) -> Result<Value> {
                 "require_fact_consistency",
             );
         }
-        for key in ["sitemap", "llm", "surfaces", "editorial"] {
-            if let Some(Value::Table(mut table)) = rules_table.remove(key) {
+        for key in ENABLE_ONLY_RULE_GROUPS {
+            if let Some(Value::Table(mut table)) = rules_table.remove(*key) {
                 move_table_field_if_absent_checks(root, &mut table, key);
             }
         }
@@ -902,20 +732,22 @@ fn read_config_with_diagnostics(root: &Path, explicit_path: Option<&Path>) -> Re
 /// Validates and resolves a config whose `extends` have already been merged.
 pub(super) fn config_from_merged(merged: Value, source: &str) -> Result<LoadedConfig> {
     validate_config_surface(&merged)?;
-    let warnings = collect_deprecation_warnings(&merged);
     let merged = normalize_versioned_surface(merged)?;
     let config = merged
         .try_into::<Config>()
         .with_context(|| format!("failed to deserialize merged config at {source}"))?;
     validate_plugin_settings(&config.plugins, &config.plugin_settings)?;
-    Ok(LoadedConfig { config, warnings })
+    Ok(LoadedConfig {
+        config,
+        warnings: Vec::new(),
+    })
 }
 
 /// Every key accepted at the root of a `version = 1` config.
 pub(super) fn accepted_root_keys() -> Vec<&'static str> {
-    let mut keys = FLAT_TOP_LEVEL_KEYS.to_vec();
+    let mut keys = TOP_LEVEL_KEYS.to_vec();
     keys.extend(VERSIONED_TOP_LEVEL_TABLES);
-    keys.extend(UNVERSIONED_NEW_TABLES);
+    keys.extend(OTHER_TOP_LEVEL_TABLES);
     keys.push("version");
     keys
 }
@@ -926,7 +758,7 @@ pub fn load_config(root: &Path, explicit_path: Option<&Path>) -> Result<Config> 
 
 #[cfg(test)]
 mod tests {
-    use super::{load_config, load_config_with_diagnostics};
+    use super::load_config;
     use crate::config::default_rule_switches;
     use std::fs;
 
@@ -935,7 +767,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         fs::write(
             temp_dir.path().join("aexeo.toml"),
-            "[route_kinds.manifesto]\nmatch = [\"/foundations/\"]\nskip_rules = [\"GEO007\"]\nnoindex = true\n",
+            "version = 1\n[route_kinds.manifesto]\nmatch = [\"/foundations/\"]\nskip_rules = [\"GEO007\"]\nnoindex = true\n",
         )
         .unwrap();
         let config = load_config(temp_dir.path(), None).unwrap();
@@ -950,7 +782,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         fs::write(
             temp_dir.path().join("aexeo.toml"),
-            "[route_kinds.manifesto]\nskip = [\"GEO007\"]\n",
+            "version = 1\n[route_kinds.manifesto]\nskip = [\"GEO007\"]\n",
         )
         .unwrap();
         let error = load_config(temp_dir.path(), None).unwrap_err();
@@ -978,14 +810,18 @@ mod tests {
         fs::write(
             temp_dir.path().join("aexeo.toml"),
             r#"
-site_url = "https://example.com"
+version = 1
 profile = "chau7"
+[site]
+url = "https://example.com"
+[output]
 audit_log_limit = 9
-[severity_overrides]
+[policy.severity_overrides]
 SEO001 = "warning"
-[checks]
-html = true
-links = false
+[rules.html]
+enabled = true
+[rules.links]
+enabled = false
 "#,
         )
         .unwrap();
@@ -1006,24 +842,28 @@ links = false
         fs::write(
             temp_dir.path().join("base.toml"),
             r#"
+version = 1
 profile = "chau7"
-[severity_overrides]
+[policy.severity_overrides]
 SEO001 = "warning"
-[checks]
-html = false
-links = true
+[rules.html]
+enabled = false
+[rules.links]
+enabled = true
 "#,
         )
         .unwrap();
         fs::write(
             temp_dir.path().join("aexeo.toml"),
             r#"
+version = 1
 extends = ["base.toml"]
-site_url = "https://example.com"
-[severity_overrides]
+[site]
+url = "https://example.com"
+[policy.severity_overrides]
 SEO002 = "warning"
-[checks]
-links = false
+[rules.links]
+enabled = false
 "#,
         )
         .unwrap();
@@ -1148,13 +988,9 @@ url = "https://example.com"
         )
         .unwrap();
 
-        let error = load_config(temp_dir.path(), None)
-            .expect_err("nested config without version should fail");
-        assert!(
-            error
-                .to_string()
-                .contains("nested config tables require `version = 1`")
-        );
+        let error =
+            load_config(temp_dir.path(), None).expect_err("config without version should fail");
+        assert!(error.to_string().contains("must declare `version = 1`"));
     }
 
     #[test]
@@ -1163,7 +999,7 @@ url = "https://example.com"
         fs::write(
             temp_dir.path().join("aexeo.toml"),
             r#"
-site_url = "https://example.com"
+version = 1
 unknown_key = true
 "#,
         )
@@ -1200,58 +1036,82 @@ unexpected = true
         );
     }
 
-    #[test]
-    fn reports_flat_key_deprecation_warnings() {
+    fn load_error(text: &str) -> String {
         let temp_dir = tempfile::tempdir().unwrap();
-        fs::write(
-            temp_dir.path().join("aexeo.toml"),
-            r#"
-site_url = "https://example.com"
-browser_engine = "http"
-"#,
-        )
-        .unwrap();
-
-        let loaded = load_config_with_diagnostics(temp_dir.path(), None).unwrap();
-        let messages = loaded
-            .warnings
-            .iter()
-            .map(|warning| warning.message.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            loaded
-                .warnings
-                .iter()
-                .filter(|warning| warning.code == "CFGDEP001")
-                .count(),
-            2
-        );
-        assert!(messages.iter().any(|message| message.contains("site_url")));
-        assert!(
-            messages
-                .iter()
-                .any(|message| message.contains("browser_engine"))
-        );
+        fs::write(temp_dir.path().join("aexeo.toml"), text).unwrap();
+        load_config(temp_dir.path(), None)
+            .expect_err("config should be rejected")
+            .to_string()
     }
 
     #[test]
-    fn reports_legacy_rule_toggle_deprecation_warnings() {
+    fn a_removed_flat_key_fails_and_names_its_new_location() {
+        for (text, expected) in [
+            (
+                "site_url = \"https://example.com\"\n",
+                "use `url` under `[site]`",
+            ),
+            ("crawl_headers = {}\n", "use `headers` under `[runtime]`"),
+            (
+                "orphan_exclude = []\n",
+                "use `orphan_exclude` under `[rules.links]`",
+            ),
+            ("[checks]\nhtml = false\n", "use `[rules.<group>]`"),
+            ("version = 1\n[rules]\nhtml = true\n", "use `[rules.html]`"),
+        ] {
+            let message = load_error(text);
+            assert!(message.contains(expected), "{text}: {message}");
+        }
+    }
+
+    #[test]
+    fn a_config_without_a_version_is_rejected_but_an_empty_one_is_not() {
+        assert!(load_error("profile = \"chau7\"\n").contains("must declare `version = 1`"));
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("aexeo.toml"), "").unwrap();
+        load_config(temp_dir.path(), None).unwrap();
+    }
+
+    #[test]
+    fn a_child_config_inherits_the_version_of_its_parent() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("base.toml"), "version = 1\n").unwrap();
+        fs::write(
+            temp_dir.path().join("aexeo.toml"),
+            "extends = [\"base.toml\"]\nprofile = \"chau7\"\n",
+        )
+        .unwrap();
+        assert_eq!(load_config(temp_dir.path(), None).unwrap().profile, "chau7");
+    }
+
+    /// `orphan_exclude` and these groups had no nested form before the flat format
+    /// was removed.
+    #[test]
+    fn every_rule_group_and_orphan_exclude_have_a_nested_form() {
         let temp_dir = tempfile::tempdir().unwrap();
         fs::write(
             temp_dir.path().join("aexeo.toml"),
             r#"
 version = 1
-
-[rules]
-html = true
+[rules.links]
+orphan_exclude = ["offline.html"]
+[rules.headers]
+enabled = false
+[rules.well_known]
+enabled = false
+[rules.accessibility]
+enabled = false
+[rules.agent_discovery]
+enabled = false
 "#,
         )
         .unwrap();
-
-        let loaded = load_config_with_diagnostics(temp_dir.path(), None).unwrap();
-        assert!(loaded.warnings.iter().any(|warning| {
-            warning.code == "CFGDEP001" && warning.message.contains("rules.html")
-        }));
+        let config = load_config(temp_dir.path(), None).unwrap();
+        assert_eq!(config.orphan_exclude, ["offline.html"]);
+        for group in ["headers", "well_known", "accessibility", "agent_discovery"] {
+            assert_eq!(config.checks.get(group), Some(&false), "{group}");
+        }
     }
 
     #[test]
@@ -1293,6 +1153,7 @@ enabled = true
         fs::write(
             temp_dir.path().join("aexeo.toml"),
             r#"
+version = 1
 [accessibility]
 strict = true
 "#,

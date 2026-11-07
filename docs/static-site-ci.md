@@ -142,14 +142,16 @@ config.
 Minimum config for a static site:
 
 ```toml
+version = 1
+
 [site]
 url = "https://example.com"
 
 [output]
 baseline_file = ".aexeo-baseline.json"
 
-[ignore]
-paths = [
+[policy]
+ignore_paths = [
   "404.html",        # excluded from sitemap by convention; here for static check
   "_redirects",      # Cloudflare/Netlify control file
   "_headers",
@@ -188,8 +190,8 @@ files, generated reports, draft directories outside the published
 site:
 
 ```toml
-[ignore]
-paths = [
+[policy]
+ignore_paths = [
   "drafts/**",
   "internal/**",
   "**/*.preview.html",
@@ -209,8 +211,8 @@ indexed but should still self-canonical), use a route-policy
 override in `aexeo.toml`:
 
 ```toml
-[[ignore.route_overrides]]
-route = "search"
+[[policy.route_policy_overrides]]
+pattern = "search"
 allow_canonical_noindex = true
 ```
 
@@ -234,7 +236,7 @@ listing page don't trigger the rule. Add your own component names
 when your design system uses different vocabulary:
 
 ```toml
-[checks]
+[rules.structure]
 repeatable_data_ui = [
   "card",
   "item",

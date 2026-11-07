@@ -342,7 +342,7 @@ mod tests {
         let root = temp_dir.path();
         fs::write(
             root.join("aexeo.toml"),
-            "[checks]\nhtml = true\nlinks = true\nsitemap = true\nrobots = false\nsocial = false\nschema = false\nllm = false\ncontent = false\nstructure = false\n",
+            "version = 1\n[rules.robots]\nenabled = false\n[rules.social]\nenabled = false\n[rules.schema]\nenabled = false\n[rules.llm]\nenabled = false\n[rules.content]\nenabled = false\n[rules.structure]\nenabled = false\n",
         )
         .unwrap();
         fs::write(
