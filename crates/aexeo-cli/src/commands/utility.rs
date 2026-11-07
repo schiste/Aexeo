@@ -7,6 +7,7 @@ use crate::commands::{
     content::command_content,
     docs::{command_diff, command_docs, command_quality, command_report_render, command_trend},
     facts::command_facts,
+    feedback::command_feedback,
     integrations::{
         command_bing_ai, command_indexnow, command_publish_hook, command_search_console,
         command_snippet,
@@ -42,6 +43,7 @@ pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
     match matches.subcommand() {
         Some(("link-graph", submatches)) => command_link_graph(submatches),
         Some(("content", submatches)) => command_content(submatches),
+        Some(("feedback-capture", submatches)) => command_feedback(submatches),
         Some(("rules", submatches)) => command_rules(submatches),
         Some(("adapters", submatches)) => command_adapters(submatches),
         Some(("config", submatches)) => command_config(submatches),
