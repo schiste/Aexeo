@@ -115,7 +115,11 @@ fn meta_content(html: &str, name: &str) -> Option<String> {
 /// Count the markers of the artifact's pages, which are its successfully
 /// fetched HTML pages. A value is attested only when every one of them
 /// served the same non-empty marker.
-pub fn attest_release(spec: &ReleaseMarkerSpec, artifact: &AuditArtifact) -> ReleaseAttestation {
+pub fn attest_release(
+    spec: &ReleaseMarkerSpec,
+    artifact: &AuditArtifact,
+    spans_segments: bool,
+) -> ReleaseAttestation {
     let mut pages_with_marker = 0;
     let mut pages_without_marker = 0;
     let mut values = BTreeSet::new();
@@ -156,6 +160,7 @@ pub fn attest_release(spec: &ReleaseMarkerSpec, artifact: &AuditArtifact) -> Rel
             .take(RELEASE_DISTINCT_VALUES_CAP)
             .collect(),
         distinct_value_count: (count > RELEASE_DISTINCT_VALUES_CAP).then_some(count),
+        spans_segments,
     }
 }
 
@@ -254,23 +259,23 @@ mod tests {
         let spec = ReleaseMarkerSpec::new(Some("x-release"), None)
             .unwrap()
             .unwrap();
-        let agreed = attest_release(&spec, &artifact(&[Some("r1"), Some("r1")]));
+        let agreed = attest_release(&spec, &artifact(&[Some("r1"), Some("r1")]), false);
         assert_eq!(agreed.value.as_deref(), Some("r1"));
         assert_eq!(agreed.distinct_values, ["r1"]);
 
-        let missing = attest_release(&spec, &artifact(&[Some("r1"), None]));
+        let missing = attest_release(&spec, &artifact(&[Some("r1"), None]), false);
         assert_eq!(missing.value, None);
         assert_eq!(
             (missing.pages_with_marker, missing.pages_without_marker),
             (1, 1)
         );
 
-        let mixed = attest_release(&spec, &artifact(&[Some("r1"), Some("r2")]));
+        let mixed = attest_release(&spec, &artifact(&[Some("r1"), Some("r2")]), false);
         assert_eq!(mixed.value, None);
         assert_eq!(mixed.distinct_values, ["r1", "r2"]);
         assert_eq!(mixed.distinct_value_count, None);
 
-        assert_eq!(attest_release(&spec, &artifact(&[])).value, None);
+        assert_eq!(attest_release(&spec, &artifact(&[]), false).value, None);
     }
 
     #[test]
@@ -285,7 +290,7 @@ mod tests {
             .iter()
             .map(|value| Some(value.as_str()))
             .collect::<Vec<_>>();
-        let attested = attest_release(&spec, &artifact(&markers));
+        let attested = attest_release(&spec, &artifact(&markers), false);
         assert_eq!(attested.source, ReleaseMarkerSource::Meta);
         assert_eq!(attested.distinct_values.len(), RELEASE_DISTINCT_VALUES_CAP);
         assert_eq!(

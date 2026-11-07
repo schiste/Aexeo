@@ -455,8 +455,12 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     };
     let mut full_audit_artifact =
         runtime_output_artifact("crawl", &audit, &audit.findings, Some(target_url));
-    full_audit_artifact.crawl_attestation =
-        attest_runtime_crawl(seed.as_ref(), release_marker.as_ref(), &full_audit_artifact);
+    full_audit_artifact.crawl_attestation = attest_runtime_crawl(
+        seed.as_ref(),
+        release_marker.as_ref(),
+        &audit.crawl_run,
+        &full_audit_artifact,
+    );
     let performance_budget_passed =
         apply_performance_budget(&mut full_audit_artifact, performance_budget.as_ref());
     let audit_path = write_audit_artifact(

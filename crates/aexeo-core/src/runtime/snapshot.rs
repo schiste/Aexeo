@@ -32,6 +32,16 @@ pub(crate) struct RuntimeSnapshotState {
     failed_responses: Vec<aexeo_contracts::CrawlResponseProvenance>,
 }
 
+impl RuntimeSnapshotState {
+    /// Distinct release markers of the pages captured so far.
+    pub(crate) fn release_markers(&self) -> std::collections::BTreeSet<String> {
+        self.pages
+            .values()
+            .filter_map(|page| page.crawl_response.as_ref()?.release_marker.clone())
+            .collect()
+    }
+}
+
 pub(crate) struct RuntimeSnapshotBuilder {
     pages: HashMap<String, CapturedPage>,
     robots_text: Option<String>,

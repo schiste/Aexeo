@@ -5,12 +5,47 @@
 
 use std::collections::BTreeSet;
 
-use aexeo_contracts::{AuditArtifact, CrawlAttestation, CrawlSeedSource, SurfaceIdentity};
+use aexeo_contracts::{
+    AuditArtifact, CrawlAttestation, CrawlSeedSource, CrawlSnapshotWindow, SurfaceIdentity,
+};
 use url::Url;
 
+use crate::intelligence::presence::iso_from_unix_seconds;
 use crate::link_graph::redact_url;
 use crate::link_inventory::InventorySnapshot;
 use crate::release_marker::{ReleaseMarkerSpec, attest_release};
+
+/// When a runtime crawl ran and which release markers its segments saw.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CrawlRun {
+    /// Start of the first segment, in Unix seconds; `None` when resumed from
+    /// a checkpoint that did not record it.
+    pub started_at: Option<i64>,
+    pub finished_at: i64,
+    pub resumed: bool,
+    /// Markers of the pages a resumed checkpoint already held.
+    pub earlier_release_values: BTreeSet<String>,
+    /// Markers of the pages fetched by this segment.
+    pub segment_release_values: BTreeSet<String>,
+}
+
+impl CrawlRun {
+    /// A resumed segment saw a release value the earlier segments did not.
+    pub fn spans_releases(&self) -> bool {
+        !self.earlier_release_values.is_empty()
+            && !self
+                .segment_release_values
+                .is_subset(&self.earlier_release_values)
+    }
+
+    pub fn snapshot_window(&self) -> CrawlSnapshotWindow {
+        CrawlSnapshotWindow {
+            started_at: self.started_at.map(iso_from_unix_seconds),
+            finished_at: iso_from_unix_seconds(self.finished_at),
+            resumed: self.resumed,
+        }
+    }
+}
 
 /// The attestation of a runtime crawl, when it was seeded from an inventory
 /// or asked for a release marker; `None` otherwise, so an artifact made
@@ -19,6 +54,7 @@ use crate::release_marker::{ReleaseMarkerSpec, attest_release};
 pub fn attest_runtime_crawl(
     seed: Option<&InventorySeed>,
     release: Option<&ReleaseMarkerSpec>,
+    run: &CrawlRun,
     artifact: &AuditArtifact,
 ) -> Option<CrawlAttestation> {
     if seed.is_none() && release.is_none() {
@@ -31,7 +67,8 @@ pub fn attest_runtime_crawl(
         },
         |seed| attest_crawl(seed, artifact),
     );
-    attestation.release = release.map(|spec| attest_release(spec, artifact));
+    attestation.release = release.map(|spec| attest_release(spec, artifact, run.spans_releases()));
+    attestation.snapshot = Some(run.snapshot_window());
     Some(attestation)
 }
 
@@ -132,6 +169,7 @@ pub fn attest_crawl(seed: &InventorySeed, artifact: &AuditArtifact) -> CrawlAtte
             .map(|meta| meta.robots_skipped_urls.clone())
             .unwrap_or_default(),
         release: None,
+        snapshot: None,
     }
 }
 
@@ -156,18 +194,49 @@ mod tests {
         }
     }
 
+    fn run(earlier: &[&str], segment: &[&str]) -> CrawlRun {
+        CrawlRun {
+            started_at: Some(0),
+            finished_at: 61,
+            resumed: !earlier.is_empty(),
+            earlier_release_values: earlier.iter().map(|value| value.to_string()).collect(),
+            segment_release_values: segment.iter().map(|value| value.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn only_a_new_value_after_a_resume_spans_releases() {
+        assert!(!run(&[], &["r1", "r2"]).spans_releases());
+        assert!(!run(&["r1"], &["r1"]).spans_releases());
+        assert!(!run(&["r1", "r2"], &["r2"]).spans_releases());
+        assert!(!run(&["r1"], &[]).spans_releases());
+        assert!(run(&["r1"], &["r1", "r2"]).spans_releases());
+    }
+
     #[test]
     fn no_seed_and_no_marker_means_no_attestation() {
         let artifact = AuditArtifact {
             command: "crawl".into(),
             ..AuditArtifact::default()
         };
-        assert_eq!(attest_runtime_crawl(None, None, &artifact), None);
+        assert_eq!(
+            attest_runtime_crawl(None, None, &run(&[], &[]), &artifact),
+            None
+        );
         let spec = ReleaseMarkerSpec::new(Some("x-release"), None)
             .unwrap()
             .unwrap();
-        let attestation = attest_runtime_crawl(None, Some(&spec), &artifact).unwrap();
+        let attestation =
+            attest_runtime_crawl(None, Some(&spec), &run(&[], &[]), &artifact).unwrap();
         assert_eq!(attestation.seeded_from.url_count, 0);
+        assert_eq!(
+            attestation.snapshot,
+            Some(CrawlSnapshotWindow {
+                started_at: Some("1970-01-01T00:00:00Z".into()),
+                finished_at: "1970-01-01T00:01:01Z".into(),
+                resumed: false,
+            })
+        );
         assert_eq!(attestation.release.unwrap().value, None);
     }
 

@@ -594,6 +594,9 @@ pub struct CrawlAttestation {
     /// the crawl was asked to record one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release: Option<ReleaseAttestation>,
+    /// When the crawl actually ran, across every resumed segment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<CrawlSnapshotWindow>,
 }
 
 /// Where a crawl read each page's release marker.
@@ -626,10 +629,26 @@ pub struct ReleaseAttestation {
     /// was capped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub distinct_value_count: Option<usize>,
+    /// A resumed segment observed a release value the earlier segments did
+    /// not: the snapshot spans releases.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub spans_segments: bool,
 }
 
 /// Most distinct release values an attestation lists.
 pub const RELEASE_DISTINCT_VALUES_CAP: usize = 8;
+
+/// Wall-clock bounds of a crawl, RFC 3339 UTC at second resolution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct CrawlSnapshotWindow {
+    /// Start of the first segment; `None` when resumed from a checkpoint
+    /// that did not record it.
+    pub started_at: Option<String>,
+    pub finished_at: String,
+    /// The crawl was resumed from a checkpoint at least once.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub resumed: bool,
+}
 
 /// The inventory a crawl was seeded from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -900,18 +919,20 @@ mod tests {
     }
 
     #[test]
-    fn a_release_attestation_and_marker_are_additive() {
+    fn release_and_snapshot_attestations_are_additive() {
         let json = serde_json::json!({"seeded_from":{"inventory_identity":null,"url_count":0},"engine":"http",
-            "release":{"source":"meta","name":"release","value":null,"pages_with_marker":1,"pages_without_marker":1,"distinct_values":["r1"]}});
+            "release":{"source":"meta","name":"release","value":null,"pages_with_marker":1,"pages_without_marker":1,"distinct_values":["r1"]},
+            "snapshot":{"started_at":null,"finished_at":"2026-11-07T00:00:00Z"}});
         let attestation: CrawlAttestation = serde_json::from_value(json).unwrap();
         let release = attestation.release.as_ref().unwrap();
         assert_eq!(release.source, super::ReleaseMarkerSource::Meta);
-        assert!(release.distinct_value_count.is_none());
+        assert!(!release.spans_segments && release.distinct_value_count.is_none());
         let reserialized = serde_json::to_value(&attestation).unwrap();
-        assert!(
-            reserialized["release"]
-                .get("distinct_value_count")
-                .is_none()
+        assert!(reserialized["release"].get("spans_segments").is_none());
+        assert!(reserialized["snapshot"].get("resumed").is_none());
+        assert_eq!(
+            reserialized["snapshot"]["started_at"],
+            serde_json::Value::Null
         );
         let legacy =
             r#"{"requested_url":"https://example.org/","status_code":200,"headers_observed":true}"#;

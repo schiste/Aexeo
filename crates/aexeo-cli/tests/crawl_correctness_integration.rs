@@ -1102,12 +1102,20 @@ fn an_inventory_seeded_crawl_reaches_an_unlinked_page_and_attests_completeness()
         "the seed reaches the unlinked page"
     );
     let attestation = &payload["artifact"]["crawl_attestation"];
+    let mut observed = attestation.clone();
+    let snapshot = observed
+        .as_object_mut()
+        .unwrap()
+        .remove("snapshot")
+        .unwrap();
     assert_eq!(
-        *attestation,
+        observed,
         serde_json::json!({"seeded_from": {"inventory_identity": context["identity"], "url_count": 3},
             "engine": "http", "out_of_origin_urls": [], "unfetched_urls": [], "robots_skipped_urls": []}),
         "{payload:#}"
     );
+    assert!(snapshot["started_at"].as_str().unwrap() <= snapshot["finished_at"].as_str().unwrap());
+    assert!(snapshot.get("resumed").is_none());
     let saved: Value = serde_json::from_slice(&std::fs::read(&audit).unwrap()).unwrap();
     assert_eq!(saved["crawl_attestation"], *attestation);
 
@@ -1428,6 +1436,85 @@ fn release_meta_markers_that_disagree_or_are_missing_are_not_attested() {
     }
     // The caller's release stands when the crawl attests none.
     assert_eq!(report["identity"]["release"], "r1");
+}
+
+fn resume_with(url: &str, checkpoint: &Path, extra: &[&str]) -> Output {
+    Command::new(bin())
+        .args(["crawl", url, "--engine", "http", "--progress", "off"])
+        .args(["--format", "json", "--resume", checkpoint.to_str().unwrap()])
+        .args(extra)
+        .current_dir(checkpoint.parent().unwrap())
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn a_resumed_crawl_keeps_its_start_and_reports_a_release_change() {
+    let site = resumable_site();
+    site.serve_header("X-Release", "r1");
+    let temp = tempfile::tempdir().unwrap();
+    let checkpoint = temp.path().join("checkpoint.json");
+    let (_, payload) = crawl(
+        &site,
+        &[
+            "--max-pages",
+            "1",
+            "--checkpoint",
+            checkpoint.to_str().unwrap(),
+            "--checkpoint-every",
+            "1",
+            "--release-header",
+            "x-release",
+        ],
+    );
+    assert_eq!(payload["artifact"]["status"], "partial");
+    let mut saved: Value = serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
+    assert!(saved["started_at"].is_i64(), "{saved:#}");
+    assert_eq!(saved["release_marker"]["header"], "x-release");
+    saved["started_at"] = 0.into();
+    std::fs::write(&checkpoint, saved.to_string()).unwrap();
+
+    // A resume must ask for the same marker.
+    let refused = resume_with(&site.base_url, &checkpoint, &[]);
+    assert_ne!(refused.status.code(), Some(0));
+    let text = String::from_utf8_lossy(&refused.stdout).to_string()
+        + &String::from_utf8_lossy(&refused.stderr);
+    assert!(text.contains("different release marker"), "{text}");
+
+    site.serve_header("X-Release", "r2");
+    let output = resume_with(
+        &site.base_url,
+        &checkpoint,
+        &["--release-header", "x-release"],
+    );
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["artifact"]["status"], "complete", "{payload:#}");
+    let attestation = &payload["artifact"]["crawl_attestation"];
+    assert_eq!(
+        attestation["snapshot"]["started_at"],
+        "1970-01-01T00:00:00Z"
+    );
+    assert_eq!(attestation["snapshot"]["resumed"], true);
+    let release = release_attestation(&payload);
+    assert_eq!(release["spans_segments"], true, "{payload:#}");
+    assert_eq!(release["value"], Value::Null);
+    assert_eq!(release["distinct_values"], serde_json::json!(["r1", "r2"]));
+}
+
+#[test]
+fn a_checkpoint_from_before_release_markers_still_resumes_unchanged() {
+    let site = resumable_site();
+    let temp = tempfile::tempdir().unwrap();
+    let checkpoint = temp.path().join("checkpoint.json");
+    interrupted_crawl(&site, &checkpoint);
+    let mut saved: Value = serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
+    assert!(saved.get("release_marker").is_none());
+    saved.as_object_mut().unwrap().remove("started_at");
+    std::fs::write(&checkpoint, saved.to_string()).unwrap();
+    let payload = parse_json(&resume_with(&site.base_url, &checkpoint, &[]).stdout);
+    assert_eq!(payload["artifact"]["status"], "complete");
+    assert!(payload["artifact"].get("crawl_attestation").is_none());
+    assert!(!payload.to_string().contains("release_marker"));
 }
 
 #[test]

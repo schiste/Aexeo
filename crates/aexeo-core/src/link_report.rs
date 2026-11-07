@@ -340,10 +340,18 @@ pub fn build_link_report_from_audit_with_static_urls(
     if let Some(release) = observed_release {
         identity.release = release;
     }
+    let snapshot_date = context
+        .and_then(|value| value.snapshot_date.clone())
+        .or_else(|| {
+            attestation
+                .and_then(|value| value.snapshot.as_ref()?.started_at.as_deref())
+                .and_then(|started_at| started_at.get(..10))
+                .map(str::to_string)
+        });
     let input = LinkReportInput {
         version: 1,
         identity: Some(identity),
-        snapshot_date: context.and_then(|value| value.snapshot_date.clone()),
+        snapshot_date,
         crawl_complete,
         pages,
         inventory: context.and_then(|value| value.inventory.clone()),
@@ -406,6 +414,9 @@ fn crawl_release(
                 issues.push("audit_release_unattested");
             }
         }
+    }
+    if release.spans_segments {
+        issues.push("audit_snapshot_spans_releases");
     }
     (observed.map(str::to_string), issues)
 }
@@ -1276,10 +1287,13 @@ mod tests {
         assert!(!report.crawl_complete);
     }
 
-    /// `attested_audit` whose crawl recorded `release`.
+    /// `attested_audit` whose crawl recorded `release` and a snapshot window.
     fn audit_with_release(release: serde_json::Value) -> (serde_json::Value, AuditLinkContext) {
-        let (mut artifact, context) = attested_audit();
+        let (mut artifact, mut context) = attested_audit();
         artifact["crawl_attestation"]["release"] = release;
+        artifact["crawl_attestation"]["snapshot"] = serde_json::json!(
+            {"started_at":"2026-11-06T23:59:00Z", "finished_at":"2026-11-07T00:01:00Z"});
+        context.snapshot_date = None;
         (artifact, context)
     }
 
@@ -1293,18 +1307,20 @@ mod tests {
             "pages_with_marker":with, "pages_without_marker":without, "distinct_values":distinct})
     }
 
-    const RELEASE_ISSUES: [&str; 3] = [
+    const RELEASE_ISSUES: [&str; 4] = [
         "audit_release_inconsistent",
         "audit_release_mismatch",
         "audit_release_unattested",
+        "audit_snapshot_spans_releases",
     ];
 
     #[test]
-    fn an_attested_release_fills_the_identity_and_keeps_eligibility() {
+    fn an_attested_release_and_crawl_start_fill_the_identity_and_keep_eligibility() {
         let (artifact, mut context) = audit_with_release(release(Some("r1"), 3, 0, &["r1"]));
         context.identity.as_mut().unwrap().release = String::new();
         let report = attested_report(&artifact, &context);
         assert_eq!(report.identity.as_ref().unwrap().release, "r1");
+        assert_eq!(report.snapshot_date.as_deref(), Some("2026-11-06"));
         assert!(report.crawl_complete, "{:?}", report.issues);
         assert!(
             !report
@@ -1315,6 +1331,10 @@ mod tests {
         let reconciliation = report.reconciliation.as_ref().unwrap();
         assert!(reconciliation.comparable, "{:?}", reconciliation.issues);
         assert!(!reconciliation.eligible_pages.is_empty());
+        // A date the caller supplies still wins over the crawl's start.
+        context.snapshot_date = Some("2026-11-05".into());
+        let report = attested_report(&artifact, &context);
+        assert_eq!(report.snapshot_date.as_deref(), Some("2026-11-05"));
         // An attested release never makes an unseeded crawl complete.
         let (mut artifact, context) = audit_with_release(release(Some("r1"), 3, 0, &["r1"]));
         artifact["crawl_attestation"]["seeded_from"]["url_count"] = 0.into();
@@ -1329,7 +1349,7 @@ mod tests {
 
     #[test]
     fn an_unconfirmed_release_raises_its_issue_and_keeps_pages_ineligible() {
-        let cases: [(&str, Mutation); 4] = [
+        let cases: [(&str, Mutation); 5] = [
             ("audit_release_inconsistent", |artifact, _| {
                 artifact["crawl_attestation"]["release"] = release(None, 3, 0, &["r1", "r2"]);
             }),
@@ -1341,6 +1361,9 @@ mod tests {
             }),
             ("audit_release_mismatch", |_, context| {
                 context.identity.as_mut().unwrap().release = "r0".into();
+            }),
+            ("audit_snapshot_spans_releases", |artifact, _| {
+                artifact["crawl_attestation"]["release"]["spans_segments"] = true.into();
             }),
         ];
         for (expected, mutate) in cases {
