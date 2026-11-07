@@ -63,7 +63,9 @@ and counts distinct source URLs separately for each context. It preserves
 individual link evidence, and separates same-document jumps, external URLs,
 unsupported schemes and indeterminate references. The same source may count
 in several contexts. URL aliases are not inferred. No orphan conclusion is
-produced by this command, even with a matching inventory.
+produced from this input, even with a matching inventory; only a report built
+from an audit qualifies that audit's orphan findings (see
+[Legacy inbound-link findings](#legacy-inbound-link-findings)).
 
 Destinations are matched to pages by exact URL, after parsing. A destination
 that matches no page, but would match one if a trailing slash, percent-encoding
@@ -377,6 +379,59 @@ Add `--link-graph-summary` alongside `--link-graph-output` to include aggregate
 observations and coverage issues in the text or JSON command output. The JSON
 field `link_graph_summary` is omitted unless requested. SARIF does not support
 this option. The summary does not identify confirmed orphans or include evidence.
+Its `legacy_link_findings` object counts the run's `LNK002` and `LNK004`
+findings per conclusion (below), and the text output adds one
+`Link graph coverage of LNK002/LNK004 findings:` line. Since this report has
+no context, none of them is `confirmed`.
+
+## Legacy inbound-link findings
+
+The site audit rules `LNK002` (no inbound links observed in the analyzed pages)
+and `LNK004` (fewer inbound links than `min_inbound_links`) count the other
+analyzed pages linking to a route. They count every link the same way, whatever
+its context, and know nothing of coverage: they are suppressed only when the
+crawl was truncated. So a page reached only through a sitemap or a seed, a page
+that links reach only through a redirect, and an alias page all raise `LNK002`,
+and a navigation link counts as much as a body link.
+
+A link report built from an audit (`link-graph --audit`, or
+`crawl --link-graph-output`) qualifies these findings in `legacy_findings`,
+omitted when the audit has none. The findings themselves are unchanged: rule
+ID, severity, message, position and fingerprint stay as the rules produced
+them, so baselines and `diff` results do not depend on whether a report was
+built. Without a report, nothing changes at all.
+
+```json
+"legacy_findings": [{
+  "rule_id": "LNK002",
+  "path": "crawl/new/index.html",
+  "url": "https://example.org/new",
+  "conclusion": "inbound_observed",
+  "source_pages_by_context": {},
+  "via_redirect_source_pages": 1,
+  "navigation_only": false
+}]
+```
+
+`path` is the finding's path. The page is matched through the audit page with
+that path: its observed URL, or its `--static-url-map` URL. The first matching
+conclusion applies:
+
+| Conclusion | When |
+| --- | --- |
+| `not_in_report` | The report has no page for the path, such as a page without response provenance |
+| `inventory_alias` | The page answered as a verified inventory `canonical_alias` or `locale_fallback` with a canonical link to its target |
+| `inbound_observed` | `LNK002` only: the report credits other sources, directly or through `via_redirect` |
+| `confirmed` | The crawl is complete, the reconciliation comparable and the URL eligible |
+| `not_eligible` | Otherwise; the report's `issues` say why coverage falls short |
+
+`source_pages_by_context` counts distinct other source pages per context,
+excluding the page's links to itself as the rules do, and omits empty contexts.
+`via_redirect_source_pages` repeats the page's `via_redirect` count.
+`navigation_only` is `true` when every source links only from navigation,
+footer, breadcrumb or pagination components. A `confirmed` `LNK002` is a page
+the complete, attested crawl reached and nothing linked to. A `confirmed`
+`LNK004` with `navigation_only` is linked to only from site structure.
 
 ## Static audit artifacts
 

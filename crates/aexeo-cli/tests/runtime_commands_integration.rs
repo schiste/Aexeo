@@ -927,6 +927,30 @@ fn crawl_can_write_observational_link_graph_with_private_telemetry() {
             .unwrap()
             .contains(&serde_json::json!("inventory_missing"))
     );
+    // Each legacy inbound-link finding is qualified once; without an attested
+    // crawl none of them is confirmed.
+    let inbound_findings = payload["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|finding| matches!(finding["rule_id"].as_str(), Some("LNK002" | "LNK004")))
+        .count();
+    let conclusions = payload["link_graph_summary"]["legacy_link_findings"]
+        .as_object()
+        .unwrap();
+    assert_eq!(conclusions.len(), 5);
+    assert_eq!(
+        conclusions
+            .values()
+            .map(|count| count.as_u64().unwrap())
+            .sum::<u64>(),
+        inbound_findings as u64
+    );
+    assert_eq!(conclusions["confirmed"], 0);
+    assert_eq!(
+        report["legacy_findings"].as_array().map_or(0, Vec::len),
+        inbound_findings
+    );
     assert_eq!(report["crawl_complete"], false);
     assert!(!report["pages"].as_array().unwrap().is_empty());
     assert!(
@@ -995,6 +1019,10 @@ fn crawl_graph_summary_is_visible_in_text() {
     assert!(text.contains("Link graph observations:"), "{text}");
     assert!(text.contains("inventory_missing"), "{text}");
     assert!(text.contains("crawl complete: false"), "{text}");
+    assert!(
+        text.contains("Link graph coverage of LNK002/LNK004 findings: 0 confirmed,"),
+        "{text}"
+    );
     server.shutdown();
 }
 

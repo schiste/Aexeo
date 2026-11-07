@@ -131,6 +131,18 @@ not change their counts or assert confirmed orphans.
   locale-fallback treatment are all in place. Browser-engine crawls still
   record no redirect chains. That limitation is documented and stated per
   report: it raises `audit_browser_engine`, so such a crawl is never complete.
+- Audit link reports qualify the legacy `LNK002` and `LNK004` findings in an
+  additive `legacy_findings` list: `confirmed` only for an eligible page of a
+  complete, comparable crawl, otherwise `not_eligible`, `inbound_observed`
+  (redirect credit the rule missed), `inventory_alias` or `not_in_report`, with
+  per-context sources and a `navigation_only` flag. `crawl --link-graph-summary`
+  counts them in one text line and a JSON object. Findings, severities,
+  messages and fingerprints are unchanged, and nothing changes without a
+  report. Tests confirm the legacy semantics this corrects: `LNK002` fires on a
+  redirect target and an alias page, and navigation links count as inbound.
+  Item 3 below stays open: the default audit text, Markdown and priority list
+  do not show the qualification, the static `audit` command builds no report,
+  and a crawl's own report has no context, so it can never confirm.
 - A synthetic in-process benchmark covers 50 pages and 500 links (#76). No CI
   performance budget has been established for this graph benchmark.
 - A live Aeptus URL returned a generic noindex holding page, not the article
