@@ -952,6 +952,40 @@ mod tests {
     }
 
     #[test]
+    fn crafted_figure_markup_neither_panics_nor_invents_a_caption() {
+        // (markup, whether the image is inside a figure)
+        for (html, inside_figure) in [
+            (
+                "<figure title=\"</figure>\"><img src=\"/a.jpg\" alt=\"A\"></figure>",
+                true,
+            ),
+            (
+                "<figure title=\"</figure><figcaption>Fake</figcaption>\"><img src=\"/a.jpg\" alt=\"A\">",
+                true,
+            ),
+            (
+                "<img src=\"/a.jpg\" alt=\"<figure>\"></figure><figcaption>Fake</figcaption>",
+                false,
+            ),
+            ("</figure><img src=\"/a.jpg\" alt=\"A\"><figure", false),
+            (
+                "<figure><img src=\"/a.jpg\" alt=\"A\"><figcaption title=\"</figcaption>\">",
+                true,
+            ),
+        ] {
+            let page = super::parser::build_page_from_source(
+                std::path::PathBuf::from("index.html"),
+                "index.html".to_string(),
+                format!("<html><body>{html}</body></html>"),
+                std::collections::BTreeMap::new(),
+            );
+            assert_eq!(page.images.len(), 1, "{html}");
+            assert_eq!(page.images[0].inside_figure, inside_figure, "{html}");
+            assert_eq!(page.images[0].figure_caption, None, "{html}");
+        }
+    }
+
+    #[test]
     fn ignores_script_markup_and_figure_tag_prefixes_when_associating_images() {
         let temp_dir = tempfile::tempdir().unwrap();
         let root = temp_dir.path();

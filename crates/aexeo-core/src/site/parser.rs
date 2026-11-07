@@ -250,6 +250,18 @@ fn image_markup_events(raw: &str) -> Vec<(usize, ImageMarkup)> {
         }
     }
     events.sort_by_key(|(offset, _)| *offset);
+    // A match inside an earlier tag, such as `<figure title="</figure>">`, is
+    // attribute text, not markup.
+    let mut tag_end = None;
+    events.retain(|(offset, event)| {
+        if tag_end.is_some_and(|end| *offset <= end) {
+            return false;
+        }
+        if let ImageMarkup::Open(_, _, end) = event {
+            tag_end = Some(*end);
+        }
+        true
+    });
     events
 }
 
@@ -335,7 +347,7 @@ fn visible_text(fragment: &str) -> String {
 
 /// First non-empty, visible `<figcaption>` text between `start` and `end`.
 fn figure_caption(raw: &str, start: usize, end: usize) -> Option<String> {
-    let content = &raw[start..end];
+    let content = raw.get(start..end)?;
     let mut offset = 0;
     while let Some(open) = next_open_tag(content, "figcaption", offset) {
         let open_end = open_tag_end(content, open)?;
@@ -344,7 +356,7 @@ fn figure_caption(raw: &str, start: usize, end: usize) -> Option<String> {
         if is_hidden_element(&content[open..=open_end]) {
             continue;
         }
-        let caption = visible_text(&content[open_end + 1..close_start]);
+        let caption = visible_text(content.get(open_end + 1..close_start)?);
         if !caption.trim().is_empty() {
             return Some(caption);
         }
@@ -642,4 +654,20 @@ fn tag_snippets<'a>(raw: &'a str, tag: &str) -> Vec<&'a str> {
         offset = end + 1;
     }
     snippets
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{figure_content_ranges, image_markup_events};
+
+    #[test]
+    fn a_close_tag_inside_an_attribute_gives_no_inverted_figure_range() {
+        let raw = r#"<figure title="</figure>"><img src="/a.jpg"></figure><figure"#;
+        let ranges = figure_content_ranges(&image_markup_events(raw));
+        assert!(
+            ranges.values().all(|(start, end)| start <= end),
+            "{ranges:?}"
+        );
+        assert_eq!(ranges.len(), 1);
+    }
 }
