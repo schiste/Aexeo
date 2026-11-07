@@ -185,7 +185,8 @@ counts as seeded.
   "engine": "http",
   "out_of_origin_urls": [],
   "unfetched_urls": [],
-  "robots_skipped_urls": []
+  "robots_skipped_urls": [],
+  "snapshot": {"started_at": "2026-11-07T09:00:00Z", "finished_at": "2026-11-07T09:04:12Z"}
 }
 ```
 
@@ -227,7 +228,12 @@ such as 5xx or 403, still raises `audit_failed_responses`. `noindex` entries get
 no such exemption: the inventory says they are served with a noindex directive,
 not that they are absent.
 
-### Release marker
+### Release marker and snapshot window
+
+`snapshot` records when the crawl actually ran, in UTC at second resolution.
+A crawl resumed from a checkpoint keeps the first segment's `started_at` and
+adds `"resumed": true`; a checkpoint written before this field existed resumes
+with `started_at` `null`.
 
 `crawl --release-header NAME` and `crawl --release-meta NAME` record the
 release marker each successfully fetched HTML page serves: the value of
@@ -259,13 +265,16 @@ marker, and is `null` otherwise. `meta_fallback` names the meta tag when both
 flags are given. `distinct_values` lists at most 8 values; when there are more,
 `distinct_value_count` gives the true count. Pages restored from a checkpoint
 keep the marker they were fetched with, so a resumed crawl that meets another
-release reports more than one value.
+release reports more than one value. A resume must pass the same marker flags
+as the checkpointed crawl, or it is refused. When a resumed segment observes a
+value the earlier segments did not, `spans_segments` is `true`.
 
 `link-graph --audit` then treats the crawl-observed release as the report's
 `identity.release`, whatever `--context` declares, so reconciliation compares
 the inventory's release with what the pages served: a different inventory
-release raises `surface_identity_mismatch` there. These issues are raised only
-when a release marker was requested, and each one also makes the
+release raises `surface_identity_mismatch` there. When no context date is
+given, `snapshot_date` is the date of `snapshot.started_at`. These issues are
+raised only when a release marker was requested, and each one also makes the
 reconciliation not comparable, so no page is eligible:
 
 | Condition | Issue |
@@ -273,6 +282,7 @@ reconciliation not comparable, so no page is eligible:
 | `--context` declares a release other than the attested one | `audit_release_mismatch` |
 | Pages served more than one marker value | `audit_release_inconsistent` |
 | A page served no marker, or none did | `audit_release_unattested` |
+| A resumed segment saw a new release value | `audit_snapshot_spans_releases` |
 
 When no release is attested, the context's release, if any, stays in the
 identity. A release never grants completeness: `crawl_complete` still follows

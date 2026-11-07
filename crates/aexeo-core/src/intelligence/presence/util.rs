@@ -20,7 +20,7 @@ pub fn iso_now() -> String {
     iso_from_unix_seconds(total)
 }
 
-pub(super) fn iso_from_unix_seconds(unix_seconds: i64) -> String {
+pub(crate) fn iso_from_unix_seconds(unix_seconds: i64) -> String {
     let date = civil_from_unix_seconds(unix_seconds);
     let secs_in_day = unix_seconds.rem_euclid(86_400);
     let h = secs_in_day / 3_600;

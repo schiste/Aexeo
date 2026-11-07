@@ -31,6 +31,7 @@ pub use types::{
     DEFAULT_WIKIPEDIA_LANGUAGE, EntityInput, SOURCE_ORDER, SourceResult, SourceStatus,
     entity_from_manifest, is_wikipedia_language, source_label,
 };
+pub(crate) use util::iso_from_unix_seconds;
 pub use util::{
     days_since, extract_host, format_age, format_cdx_timestamp, fuzzy_match, iso_now,
     sanitize_github_handle,
