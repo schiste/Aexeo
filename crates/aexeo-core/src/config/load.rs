@@ -15,6 +15,7 @@ const OTHER_TOP_LEVEL_TABLES: &[&str] = &[
     "accessibility",
     "agent_discovery",
     "editorial",
+    "images",
     "route_kinds",
 ];
 /// Settings that belong to the config as a whole, not to one section.
@@ -35,6 +36,7 @@ const ENABLE_ONLY_RULE_GROUPS: &[&str] = &[
     "well_known",
     "accessibility",
     "agent_discovery",
+    "images",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -194,6 +196,7 @@ fn validate_rules_table(table: &toml::map::Map<String, Value>) -> Result<()> {
             "llm",
             "surfaces",
             "content",
+            "images",
             "editorial",
             "structure",
             "headers",
@@ -349,6 +352,21 @@ fn validate_versioned_sections(root: &toml::map::Map<String, Value>) -> Result<(
             expect_table(value, "quality", "config root")?,
             &["performance_budget_file"],
             "[quality]",
+        )?;
+    }
+    if let Some(value) = root.get("images") {
+        validate_allowed_keys(
+            expect_table(value, "images", "config root")?,
+            &[
+                "max_bytes",
+                "max_alt_characters",
+                "prefer_modern_formats",
+                "require_dimensions",
+                "require_image_sitemap",
+                "require_image_object_metadata",
+                "recommend_figure_captions",
+            ],
+            "[images]",
         )?;
     }
     if let Some(value) = root.get("accessibility") {
@@ -805,6 +823,36 @@ mod tests {
     }
 
     #[test]
+    fn loads_image_quality_policy_options() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join("aexeo.toml"),
+            r#"
+version = 1
+[images]
+max_bytes = 140000
+max_alt_characters = 150
+prefer_modern_formats = false
+require_dimensions = false
+require_image_sitemap = true
+require_image_object_metadata = true
+recommend_figure_captions = false
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(temp_dir.path(), None).unwrap();
+
+        assert_eq!(config.images.max_bytes, 140_000);
+        assert_eq!(config.images.max_alt_characters, 150);
+        assert!(!config.images.prefer_modern_formats);
+        assert!(!config.images.require_dimensions);
+        assert!(config.images.require_image_sitemap);
+        assert!(config.images.require_image_object_metadata);
+        assert!(!config.images.recommend_figure_captions);
+    }
+
+    #[test]
     fn loads_simple_toml_config() {
         let temp_dir = tempfile::tempdir().unwrap();
         fs::write(
@@ -964,6 +1012,64 @@ performance_budget_file = "custom-budget.json"
         assert_eq!(config.baseline_file, "baseline.json");
         assert_eq!(config.audit_log_limit, 9);
         assert_eq!(config.performance_budget_file, "custom-budget.json");
+    }
+
+    #[test]
+    fn loads_versioned_images_rule_group_toggle() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join("aexeo.toml"),
+            r#"
+version = 1
+
+[rules.images]
+enabled = false
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(temp_dir.path(), None).unwrap();
+
+        assert_eq!(config.checks.get("images").copied(), Some(false));
+    }
+
+    #[test]
+    fn rejects_the_boolean_images_rule_group_shorthand() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join("aexeo.toml"),
+            r#"
+version = 1
+
+[rules]
+images = false
+"#,
+        )
+        .unwrap();
+
+        let error = load_config(temp_dir.path(), None).unwrap_err();
+
+        assert!(
+            format!("{error:#}").contains("use `[rules.images]` with `enabled = ...`"),
+            "{error:#}"
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_image_settings() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join("aexeo.toml"),
+            "version = 1\n[images]\nmax_kilobytes = 10\n",
+        )
+        .unwrap();
+
+        let error = load_config(temp_dir.path(), None).unwrap_err();
+
+        assert!(
+            format!("{error:#}").contains("unknown config key 'max_kilobytes' in [images]"),
+            "{error:#}"
+        );
     }
 
     #[test]
