@@ -28,6 +28,7 @@ use std::time::{Duration, Instant};
 use crate::config::Config;
 use crate::link_evidence::crawl_links;
 use crate::link_graph::redact_url;
+use crate::release_marker::ReleaseMarkerSpec;
 use crate::reporting::build_audit_artifact;
 use crate::site::{Site, route_from_urlish};
 use crate::static_check::run_checks_for_site_profiled;
@@ -108,6 +109,8 @@ pub struct RuntimeAuditOptions<'a> {
     pub artifact_command: &'a str,
     pub progress_artifact: RuntimeArtifactMode<'a>,
     pub partial_audit_artifact: RuntimeArtifactMode<'a>,
+    /// Record each HTML page's release marker in its response provenance.
+    pub release_marker: Option<&'a ReleaseMarkerSpec>,
 }
 
 #[derive(Default)]
@@ -139,6 +142,7 @@ impl<'a> Default for RuntimeAuditOptions<'a> {
             artifact_command: "crawl",
             progress_artifact: RuntimeArtifactMode::Off,
             partial_audit_artifact: RuntimeArtifactMode::Off,
+            release_marker: None,
         }
     }
 }
@@ -1953,7 +1957,7 @@ fn materialize_runtime_site(
                 performance.apply_to(&mut crawl_stats);
                 continue;
             }
-            let provenance = aexeo_contracts::CrawlResponseProvenance {
+            let mut provenance = aexeo_contracts::CrawlResponseProvenance {
                 requested_url: redact_url(&current),
                 observed_url: fetched
                     .effective_url_observed
@@ -1961,6 +1965,7 @@ fn materialize_runtime_site(
                 status_code: fetched.status_code,
                 headers_observed: fetched.headers_observed,
                 redirect_chain: fetched.redirect_chain.clone(),
+                release_marker: None,
             };
             // An unknown status (a browser runner may not report one) is not
             // evidence of a problem; a known non-2xx is not a page of the site.
@@ -2032,6 +2037,9 @@ fn materialize_runtime_site(
                 continue;
             }
             let route = route_from_urlish(&fetched.effective_url).unwrap_or_default();
+            provenance.release_marker = options
+                .release_marker
+                .and_then(|spec| spec.observe(&fetched.headers, &body));
             let snapshot_write_started_at = Instant::now();
             snapshot.write_page(&route, &body, &fetched.headers, Some(provenance))?;
             performance.record(

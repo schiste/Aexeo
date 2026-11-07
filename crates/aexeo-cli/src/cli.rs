@@ -102,6 +102,8 @@ pub fn build_cli() -> Command {
                         .action(ArgAction::Append),
                 )
                 .arg(Arg::new("seed-file").long("seed-file").num_args(1).help("Seed every page URL on the target's origin from a link inventory JSON file and record a crawl attestation in the audit artifact"))
+                .arg(Arg::new("release-header").long("release-header").num_args(1).help("Record each HTML page's release marker from this response header and attest it in the audit artifact; takes precedence over --release-meta"))
+                .arg(Arg::new("release-meta").long("release-meta").num_args(1).help("Record each HTML page's release marker from the content of <meta name=NAME> and attest it in the audit artifact"))
                 .arg(
                     Arg::new("include-pattern")
                         .long("include-pattern")

@@ -31,6 +31,8 @@ struct Site {
     base_url: String,
     /// `(path, user agent)` of every request, in arrival order.
     requests: Arc<Mutex<Vec<(String, String)>>>,
+    /// Raw header lines, each ending in CRLF, added to every response.
+    headers: Arc<Mutex<String>>,
     stop: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
 }
@@ -43,7 +45,8 @@ impl Site {
         let base_url = format!("http://{}", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
         let stop = Arc::new(AtomicBool::new(false));
-        let (log, stopping) = (requests.clone(), stop.clone());
+        let headers = Arc::new(Mutex::new(String::new()));
+        let (log, stopping, extra) = (requests.clone(), stop.clone(), headers.clone());
         let handle = thread::spawn(move || {
             while !stopping.load(Ordering::Relaxed) {
                 let mut stream = match listener.accept() {
@@ -85,8 +88,9 @@ impl Site {
                 let (status, content_type, body) = routes.get(path.as_str()).unwrap_or(&not_found);
                 log.lock().unwrap().push((path, agent));
                 let response = format!(
-                    "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
+                    "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n{}Connection: close\r\n\r\n{body}",
+                    body.len(),
+                    extra.lock().unwrap()
                 );
                 let _ = stream.write_all(response.as_bytes());
             }
@@ -94,9 +98,15 @@ impl Site {
         Self {
             base_url,
             requests,
+            headers,
             stop,
             handle: Some(handle),
         }
+    }
+
+    /// Answer every later request with `name: value` as well.
+    fn serve_header(&self, name: &str, value: &str) {
+        *self.headers.lock().unwrap() = format!("{name}: {value}\r\n");
     }
 
     fn request_count(&self, path: &str) -> usize {
@@ -1309,4 +1319,125 @@ fn a_seeded_draft_answering_500_leaves_the_crawl_incomplete() {
             .contains("audit_failed_responses"),
         "{report:#}"
     );
+}
+
+fn release_attestation(payload: &Value) -> &Value {
+    &payload["artifact"]["crawl_attestation"]["release"]
+}
+
+fn page_markers(payload: &Value) -> Vec<Value> {
+    payload["artifact"]["site"]["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|page| page["crawl_response"]["release_marker"].clone())
+        .collect()
+}
+
+#[test]
+fn a_release_header_is_recorded_per_page_and_becomes_the_report_release() {
+    let site = orphan_site();
+    site.serve_header("X-Release", " r1 ");
+    let temp = tempfile::tempdir().unwrap();
+    let context = inventory_context(&site, &["/", "/a", "/orphan"], &[]);
+    let (payload, audit) = seeded_crawl(
+        &site,
+        temp.path(),
+        &context,
+        &["--release-header", "x-release"],
+    );
+    assert_eq!(page_markers(&payload), vec![Value::from("r1"); 3]);
+    assert_eq!(
+        *release_attestation(&payload),
+        serde_json::json!({"source": "header", "name": "x-release", "value": "r1",
+            "pages_with_marker": 3, "pages_without_marker": 0, "distinct_values": ["r1"]})
+    );
+    let report = audit_link_report(temp.path(), &audit);
+    assert_eq!(report["identity"]["release"], "r1");
+    assert_eq!(report["crawl_complete"], true, "{report:#}");
+    assert!(
+        !report["issues"].to_string().contains("audit_"),
+        "{report:#}"
+    );
+    assert_eq!(report["reconciliation"]["comparable"], true, "{report:#}");
+
+    // The site serves another release than the caller and the inventory say.
+    site.serve_header("X-Release", "r2");
+    let temp = tempfile::tempdir().unwrap();
+    let (_, audit) = seeded_crawl(
+        &site,
+        temp.path(),
+        &context,
+        &["--release-header", "X-Release"],
+    );
+    let report = audit_link_report(temp.path(), &audit);
+    assert_eq!(report["identity"]["release"], "r2");
+    let issues = report["issues"].to_string();
+    assert!(issues.contains("audit_release_mismatch"), "{report:#}");
+    let reconciliation = &report["reconciliation"];
+    assert_eq!(reconciliation["comparable"], false);
+    assert!(
+        reconciliation["issues"]
+            .to_string()
+            .contains("surface_identity_mismatch")
+    );
+    assert_eq!(reconciliation["eligible_pages"], serde_json::json!([]));
+}
+
+#[test]
+fn release_meta_markers_that_disagree_or_are_missing_are_not_attested() {
+    let meta = |release: &str| format!(r#"<meta name="release" content="{release}">"#);
+    let site = Site::start(vec![
+        (
+            "/",
+            html(&format!(
+                r#"{}<a href="/a">A</a><a href="/b">B</a>"#,
+                meta("r1")
+            )),
+        ),
+        ("/a", html(&meta("r2"))),
+        (
+            "/b",
+            html("<!-- <meta name=\"release\" content=\"r1\"> -->"),
+        ),
+    ]);
+    let temp = tempfile::tempdir().unwrap();
+    let (_, payload) = crawl(&site, &["--no-sitemap-seed", "--release-meta", "release"]);
+    let attestation = &payload["artifact"]["crawl_attestation"];
+    assert_eq!(attestation["seeded_from"]["url_count"], 0);
+    assert_eq!(
+        *release_attestation(&payload),
+        serde_json::json!({"source": "meta", "name": "release", "value": null,
+            "pages_with_marker": 2, "pages_without_marker": 1, "distinct_values": ["r1", "r2"]})
+    );
+    let context = inventory_context(&site, &["/", "/a", "/b"], &[]);
+    write(&temp.path().join("context.json"), &context.to_string());
+    // The crawl's own directory is gone; its artifact is in the output.
+    write(
+        &temp.path().join("audit.json"),
+        &payload["artifact"].to_string(),
+    );
+    let report = audit_link_report(temp.path(), "audit.json");
+    let issues = report["issues"].to_string();
+    for issue in [
+        "audit_release_inconsistent",
+        "audit_release_unattested",
+        "audit_not_inventory_seeded",
+    ] {
+        assert!(issues.contains(issue), "{issue}: {report:#}");
+    }
+    // The caller's release stands when the crawl attests none.
+    assert_eq!(report["identity"]["release"], "r1");
+}
+
+#[test]
+fn a_credential_header_is_refused_as_a_release_marker() {
+    let site = resumable_site();
+    let (output, _) = crawl(&site, &["--release-header", "Set-Cookie"]);
+    assert_ne!(output.status.code(), Some(0));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("credentials")
+            || String::from_utf8_lossy(&output.stdout).contains("credentials")
+    );
+    assert!(site.requests.lock().unwrap().is_empty());
 }
