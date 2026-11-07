@@ -73,6 +73,9 @@ pub struct PriorityIssue {
     /// Distinct report paths the problem appears on.
     pub pages: usize,
     pub findings: usize,
+    /// Messages folded into this problem because they reach the same pages, as
+    /// six duplicate ids from one navigation template do. `message` is the first.
+    pub variants: usize,
     pub examples: Vec<String>,
 }
 
@@ -90,24 +93,39 @@ pub fn prioritize_findings(findings: &[Finding], limit: usize) -> Vec<PriorityIs
         entry.0.insert(&finding.path);
         entry.1 += 1;
     }
-    let mut issues: Vec<(bool, PriorityIssue)> = grouped
-        .into_iter()
-        .map(
-            |((rule_id, message, severity), (paths, count, heuristic))| {
-                (
-                    heuristic,
-                    PriorityIssue {
-                        rule_id: rule_id.to_string(),
-                        message: message.to_string(),
-                        severity: severity.to_string(),
-                        pages: paths.len(),
-                        findings: count,
-                        examples: paths.iter().take(3).map(|path| path.to_string()).collect(),
-                    },
-                )
-            },
-        )
-        .collect();
+    // Same rule and severity on exactly the same pages, at least two of them,
+    // points at one template: one fix, so one priority.
+    type TemplateKey<'a> = (&'a str, &'a str, bool, Vec<&'a str>);
+    let mut templates: BTreeMap<TemplateKey, PriorityIssue> = BTreeMap::new();
+    let mut issues: Vec<(bool, PriorityIssue)> = Vec::new();
+    for ((rule_id, message, severity), (paths, count, heuristic)) in grouped {
+        let issue = PriorityIssue {
+            rule_id: rule_id.to_string(),
+            message: message.to_string(),
+            severity: severity.to_string(),
+            pages: paths.len(),
+            findings: count,
+            variants: 1,
+            examples: paths.iter().take(3).map(|path| path.to_string()).collect(),
+        };
+        if paths.len() < 2 {
+            issues.push((heuristic, issue));
+            continue;
+        }
+        let key = (rule_id, severity, heuristic, paths.into_iter().collect());
+        templates
+            .entry(key)
+            .and_modify(|merged| {
+                merged.findings += issue.findings;
+                merged.variants += 1;
+            })
+            .or_insert(issue);
+    }
+    issues.extend(
+        templates
+            .into_iter()
+            .map(|((_, _, heuristic, _), issue)| (heuristic, issue)),
+    );
     issues.sort_by(|(a_heuristic, a), (b_heuristic, b)| {
         (b.severity == "error")
             .cmp(&(a.severity == "error"))
@@ -150,6 +168,11 @@ fn priority_lines(findings: &[Finding], markdown: bool) -> Vec<String> {
         lines.push(String::new());
     }
     for (rank, issue) in issues.iter().enumerate() {
+        let message = if issue.variants > 1 {
+            format!("{} (+{} similar)", issue.message, issue.variants - 1)
+        } else {
+            issue.message.clone()
+        };
         let reach = if issue.pages == 1 {
             format!("on {}", issue.examples.first().map_or("", String::as_str))
         } else {
@@ -162,7 +185,7 @@ fn priority_lines(findings: &[Finding], markdown: bool) -> Vec<String> {
                 issue.rule_id,
                 issue.severity,
                 reach,
-                issue.message
+                message
             )
         } else {
             format!(
@@ -170,7 +193,7 @@ fn priority_lines(findings: &[Finding], markdown: bool) -> Vec<String> {
                 rank + 1,
                 issue.severity,
                 issue.rule_id,
-                issue.message,
+                message,
                 reach
             )
         });
@@ -1726,5 +1749,55 @@ mod tests {
         );
         assert!(start < text.find("By layer:").unwrap_or(usize::MAX));
         assert!(render_markdown_artifact(&artifact, None).contains("## Start here"));
+    }
+
+    #[test]
+    fn messages_on_the_same_pages_are_one_template_problem() {
+        let mut findings = Vec::new();
+        for id in ["nav-a", "nav-b", "nav-c"] {
+            for page in ["p1", "p2", "p3"] {
+                findings.push(priority_finding(
+                    "A11Y003",
+                    &format!("duplicate id=\"{id}\""),
+                    "error",
+                    page,
+                ));
+            }
+        }
+        // Same rule on other pages, or on a single page, stays separate.
+        findings.push(priority_finding(
+            "A11Y003",
+            "duplicate id=\"x\"",
+            "error",
+            "p1",
+        ));
+        findings.push(priority_finding(
+            "A11Y003",
+            "duplicate id=\"y\"",
+            "error",
+            "p1",
+        ));
+        findings.push(priority_finding(
+            "A11Y003",
+            "duplicate id=\"y\"",
+            "error",
+            "p4",
+        ));
+
+        let issues = prioritize_findings(&findings, 10);
+        assert_eq!(issues.len(), 3, "{issues:?}");
+        let template = &issues[0];
+        assert_eq!(
+            (template.pages, template.variants, template.findings),
+            (3, 3, 9)
+        );
+        assert_eq!(template.message, "duplicate id=\"nav-a\"");
+
+        let artifact = build_audit_artifact("check", &findings, AuditStatus::Complete, None, None);
+        let text = render_text_artifact(&artifact, "ok", None);
+        assert!(
+            text.contains("duplicate id=\"nav-a\" (+2 similar) (on 3 pages)"),
+            "{text}"
+        );
     }
 }
