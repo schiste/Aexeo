@@ -1255,3 +1255,58 @@ fn inventory_seeds_survive_a_checkpoint_and_resume() {
         true
     );
 }
+
+/// `orphan_site` plus `/draft`, listed as a draft and answered with `status`.
+fn crawl_with_draft(status: Option<&'static str>) -> (Site, Value, Value) {
+    let mut routes = vec![
+        ("/", html(r#"<main><a href="/a">A</a></main>"#)),
+        ("/a", html("<main>A</main>")),
+        ("/orphan", html("<main>Nothing links here</main>")),
+    ];
+    if let Some(status) = status {
+        routes.push(("/draft", (status, "text/html", "error".to_string())));
+    }
+    let site = Site::start(routes);
+    let temp = tempfile::tempdir().unwrap();
+    let mut context = inventory_context(&site, &["/", "/a", "/orphan", "/draft"], &[]);
+    context["inventory"]["pages"][3]["disposition"] = "draft".into();
+    let (payload, audit) = seeded_crawl(&site, temp.path(), &context, &[]);
+    assert!(site.requested("/draft"), "drafts are seeded too");
+    let report = audit_link_report(temp.path(), &audit);
+    (site, payload, report)
+}
+
+#[test]
+fn a_seeded_draft_answering_404_keeps_the_crawl_complete() {
+    // The fixture answers unknown paths with 404.
+    let (site, payload, report) = crawl_with_draft(None);
+    assert_eq!(
+        payload["artifact"]["crawl_attestation"]["unfetched_urls"],
+        serde_json::json!([])
+    );
+    assert_eq!(report["crawl_complete"], true, "{report:#}");
+    assert!(
+        !report["issues"].to_string().contains("audit_"),
+        "{report:#}"
+    );
+    assert_eq!(report["reconciliation"]["comparable"], true, "{report:#}");
+    let orphan = Value::String(format!("{}/orphan", site.base_url));
+    assert!(
+        report["reconciliation"]["eligible_pages"]
+            .as_array()
+            .unwrap()
+            .contains(&orphan)
+    );
+}
+
+#[test]
+fn a_seeded_draft_answering_500_leaves_the_crawl_incomplete() {
+    let (_, _, report) = crawl_with_draft(Some("500 Internal Server Error"));
+    assert_eq!(report["crawl_complete"], false);
+    assert!(
+        report["issues"]
+            .to_string()
+            .contains("audit_failed_responses"),
+        "{report:#}"
+    );
+}

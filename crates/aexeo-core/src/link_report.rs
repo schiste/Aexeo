@@ -359,7 +359,17 @@ fn crawl_audit_completeness_issues(
     {
         issues.push("audit_crawl_partial");
     }
-    if meta.is_some_and(|meta| !meta.failed_responses.is_empty()) {
+    let drafts = inventory
+        .iter()
+        .flat_map(|inventory| &inventory.pages)
+        .filter(|page| page.disposition == InventoryDisposition::Draft)
+        .filter_map(|page| Url::parse(&page.url).ok().map(String::from))
+        .collect::<std::collections::BTreeSet<_>>();
+    if meta.is_some_and(|meta| {
+        meta.failed_responses
+            .iter()
+            .any(|response| !unserved_draft(response, &drafts))
+    }) {
         issues.push("audit_failed_responses");
     }
     if crawl.is_some_and(|crawl| crawl.skipped_by_robots > 0)
@@ -387,6 +397,31 @@ fn crawl_audit_completeness_issues(
         }
     }
     issues
+}
+
+/// A draft is not published, so a 404 or 410 for it is the expected answer
+/// rather than a failure. Any other status keeps its usual treatment.
+fn draft_absence_expected(disposition: Option<InventoryDisposition>, status: u16) -> bool {
+    disposition == Some(InventoryDisposition::Draft) && matches!(status, 404 | 410)
+}
+
+/// A failed response that is a draft answering 404 or 410 directly, with no
+/// redirect, at the exact URL the inventory lists.
+fn unserved_draft(
+    response: &aexeo_contracts::CrawlResponseProvenance,
+    drafts: &std::collections::BTreeSet<String>,
+) -> bool {
+    let parse = |url: &str| Url::parse(url).ok().map(String::from);
+    let requested = parse(&response.requested_url);
+    response.redirect_chain.is_empty()
+        && response
+            .observed_url
+            .as_deref()
+            .is_none_or(|observed| parse(observed) == requested)
+        && requested.is_some_and(|url| drafts.contains(&url))
+        && response
+            .status_code
+            .is_some_and(|status| draft_absence_expected(Some(InventoryDisposition::Draft), status))
 }
 
 /// The crawl's recorded hops, when they start at the requested URL and every
@@ -548,7 +583,15 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
         );
         evidence.extend(links);
         let headers = page.response_headers.as_ref();
-        if headers.is_none() {
+        // An unserved draft is the expected outcome; its headers cannot make
+        // it indexable, so neither its status nor missing headers is a gap.
+        let unserved_draft = page.status_code.is_some_and(|status| {
+            draft_absence_expected(
+                inventory_dispositions.get(page.url.as_str()).copied(),
+                status,
+            )
+        });
+        if headers.is_none() && !unserved_draft {
             coverage_issues.insert("response_headers_missing");
         }
         match page.status_code {
@@ -558,7 +601,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
             Some(status) if (300..400).contains(&status) => {
                 coverage_issues.insert("redirect_observed");
             }
-            Some(status) if !(200..300).contains(&status) => {
+            Some(status) if !(200..300).contains(&status) && !unserved_draft => {
                 coverage_issues.insert("non_success_response");
             }
             _ => {}
@@ -1039,6 +1082,84 @@ mod tests {
                     .is_empty()
             );
         }
+    }
+
+    /// `attested_audit` with a seeded draft at `/draft` answering `status`.
+    fn audit_with_draft(status: u16) -> (serde_json::Value, AuditLinkContext) {
+        let (mut artifact, mut context) = attested_audit();
+        artifact["site"]["crawl_meta"]["failed_responses"] = serde_json::json!([
+            {"requested_url":"https://example.org/draft", "observed_url":"https://example.org/draft", "status_code":status, "headers_observed":true}
+        ]);
+        artifact["crawl_attestation"]["seeded_from"]["url_count"] = 4.into();
+        context
+            .inventory
+            .as_mut()
+            .unwrap()
+            .pages
+            .push(crate::link_inventory::InventoryPage {
+                url: "https://example.org/draft".into(),
+                disposition: InventoryDisposition::Draft,
+                target: None,
+                locale: None,
+            });
+        (artifact, context)
+    }
+
+    #[test]
+    fn a_draft_answering_404_or_410_keeps_the_crawl_complete_and_eligible() {
+        for status in [404, 410] {
+            let (artifact, context) = audit_with_draft(status);
+            let report = attested_report(&artifact, &context);
+            assert!(report.crawl_complete, "{status}: {:?}", report.issues);
+            assert!(
+                !report
+                    .issues
+                    .iter()
+                    .any(|issue| issue.starts_with("audit_"))
+            );
+            assert!(!report.issues.contains(&"non_success_response".to_string()));
+            let reconciliation = report.reconciliation.as_ref().unwrap();
+            assert!(reconciliation.comparable, "{:?}", reconciliation.issues);
+            assert!(
+                reconciliation
+                    .eligible_pages
+                    .contains(&"https://example.org/orphan".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn a_draft_answering_another_error_or_a_published_page_answering_404_fails() {
+        for status in [500, 403] {
+            let (artifact, context) = audit_with_draft(status);
+            let report = attested_report(&artifact, &context);
+            assert!(!report.crawl_complete, "{status}");
+            assert!(
+                report
+                    .issues
+                    .contains(&"audit_failed_responses".to_string())
+            );
+        }
+        // The exemption follows the inventory disposition, not the status alone.
+        let (artifact, mut context) = audit_with_draft(404);
+        context.inventory.as_mut().unwrap().pages[3].disposition = InventoryDisposition::Published;
+        let report = attested_report(&artifact, &context);
+        assert!(!report.crawl_complete);
+        assert!(
+            report
+                .issues
+                .contains(&"audit_failed_responses".to_string())
+        );
+        // So does a draft reached only through a redirect.
+        let (mut artifact, context) = audit_with_draft(404);
+        artifact["site"]["crawl_meta"]["failed_responses"][0]["observed_url"] =
+            "https://example.org/elsewhere".into();
+        let report = attested_report(&artifact, &context);
+        assert!(
+            report
+                .issues
+                .contains(&"audit_failed_responses".to_string())
+        );
     }
 
     #[test]

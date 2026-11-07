@@ -43,7 +43,9 @@ any unresolved alias prevents coverage eligibility. Observed noindex directives
 targets are reported; missing response metadata or unresolved targets also
 withhold eligibility. `inventory_indexability_mismatch` also withholds it, in
 both directions: a `published` page observed noindex, and a `draft` or `noindex`
-page served with a 2xx status and no noindex directive. Matching caller-provided
+page served with a 2xx status and no noindex directive. A `draft` page observed
+with a 404 or 410 status is expected to be unserved: that status and its missing
+headers do not withhold eligibility. Matching caller-provided
 identities and completeness attestations cannot independently prove that a
 snapshot is correct.
 
@@ -200,7 +202,7 @@ holds, and otherwise raises one issue per unmet condition:
 | Condition | Issue when unmet |
 | --- | --- |
 | Audit status `complete`, no truncation | `audit_crawl_partial` |
-| No failed (non-2xx) response | `audit_failed_responses` |
+| No failed (non-2xx) response, except an unserved draft | `audit_failed_responses` |
 | No URL skipped by robots.txt | `audit_robots_skipped` |
 | HTTP engine, which records redirect chains | `audit_browser_engine` |
 | Seeded from an inventory with at least one URL | `audit_not_inventory_seeded` |
@@ -212,9 +214,17 @@ these issues and never complete coverage. A complete crawl is one input to
 inventory reconciliation, not a conclusion: pages become eligible only through
 the reconciliation rules above, so the surface identity, snapshot date,
 inventory completeness and every page-level condition still apply. Every
-inventory URL is seeded, whatever its disposition, so a `draft` entry that
-answers 404 fails the crawl through `audit_failed_responses`. Release and
-snapshot identity are still supplied by the caller and not verified.
+inventory URL is seeded, whatever its disposition, so a draft that is served
+is detected. A `draft` entry of the `--context` inventory that answers 404 or
+410 directly, at its exact URL and without a redirect, is the expected outcome:
+it raises neither `audit_failed_responses` nor, because it was answered,
+`audit_seed_unfetched`, and its status and missing headers do not withhold
+eligibility (`non_success_response`, `response_headers_missing`). A draft
+answering 2xx is checked by `inventory_indexability_mismatch`; any other status,
+such as 5xx or 403, still raises `audit_failed_responses`. `noindex` entries get
+no such exemption: the inventory says they are served with a noindex directive,
+not that they are absent. Release and snapshot identity are still supplied by
+the caller and not verified.
 
 To write a graph alongside a runtime crawl in one command, pass
 `--link-graph-output graph.json` to `aexeo-cli crawl URL`. The normal audit
