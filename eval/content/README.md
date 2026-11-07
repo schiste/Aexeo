@@ -119,14 +119,14 @@ it, use a saved UTF-8 content snapshot and the corresponding Aexeo JSON report:
 aexeo-cli feedback-capture --text draft.md --report report.json \
   --gate editorial.sentence_length --example example-1 --human-status failed \
   --reviewer reviewer-1 --method manual --output feedback.json
-python3 scripts/content-review-note.py export-review --note feedback.json \
+aexeo-cli feedback-export --note feedback.json \
   --corpus corpus.json --output review-events.json
 ```
 
-The native capture command is available in the standalone CLI; exporting still requires
-the repository checkout and Python 3. The Python capture command remains available
-as `python3 scripts/content-review-note.py capture` with the same options. Both
-commands support opt-in `--telemetry`, reporting only operation and elapsed time.
+Both native commands are available in the standalone CLI. The Python equivalents
+remain available as `python3 scripts/content-review-note.py capture` and
+`python3 scripts/content-review-note.py export-review`. Both implementations
+support opt-in `--telemetry`, reporting only operation and elapsed time.
 
 Use the actual gate ID from the report. `--human-status`, `--reviewer` and
 `--method` may be omitted during capture; use `uncertain` or omit the verdict

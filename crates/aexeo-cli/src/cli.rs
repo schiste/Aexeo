@@ -15,6 +15,14 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate timings and counts as JSON on stderr")),
         )
         .subcommand(
+            Command::new("feedback-export")
+                .about("Export validated human feedback as a historical review event")
+                .arg(Arg::new("corpus").long("corpus").required(true))
+                .arg(Arg::new("note").long("note").required(true))
+                .arg(Arg::new("output").long("output").required(true))
+                .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue)),
+        )
+        .subcommand(
             Command::new("feedback-capture")
                 .about("Capture explicitly reported human feedback in a private local note")
                 .arg(Arg::new("text").long("text").required(true))
