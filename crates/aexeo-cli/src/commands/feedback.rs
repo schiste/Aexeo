@@ -4,6 +4,7 @@ use std::{
     time::Instant,
 };
 
+use aexeo_core::error::UserContext;
 use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
 use ring::digest::{SHA256, digest};
@@ -73,14 +74,15 @@ pub fn command_feedback(args: &ArgMatches) -> Result<i32> {
     let text = fs::read(required_arg(args, "text")?).context("reading text")?;
     let report: Value =
         serde_json::from_slice(&fs::read(required_arg(args, "report")?).context("reading report")?)
-            .context("parsing report")?;
+            .user_context("parsing report")?;
     let note = build_note(
         &text,
         &report,
         required_arg(args, "gate")?,
         required_arg(args, "example")?,
         args,
-    )?;
+    )
+    .user_context("invalid feedback input")?;
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
