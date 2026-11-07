@@ -6,6 +6,7 @@ pub use aexeo_contracts::{RedirectHop, RedirectedArrival};
 
 use crate::link_counts::{LinkCounts, count_links};
 use crate::link_evidence::{HtmlLinkMetadata, LinkContext, extract_document};
+use crate::link_findings::{LegacyLinkFinding, qualify_legacy_link_findings};
 use crate::link_graph::{LinkResolution, resolve_link};
 use crate::link_inventory::{
     CrawlSurface, InventoryDisposition, InventoryReconciliation, InventorySnapshot,
@@ -209,6 +210,10 @@ pub struct LinkReport {
     pub reconciliation: Option<InventoryReconciliation>,
     pub pages: Vec<ObservedPageLinks>,
     pub links: LinkCounts,
+    /// The audit's legacy `LNK002` and `LNK004` findings, qualified by this
+    /// report. Only audit reports have them; omitted when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub legacy_findings: Vec<LegacyLinkFinding>,
 }
 
 /// Caller-supplied identity and inventory for comparison with an audit.
@@ -445,6 +450,8 @@ pub fn build_link_report_from_audit_with_static_urls(
     report.issues.extend(issues.into_iter().map(str::to_string));
     report.issues.sort();
     report.issues.dedup();
+    report.legacy_findings =
+        qualify_legacy_link_findings(&artifact.findings, &site.pages, static_urls, &report);
     Ok(report)
 }
 
@@ -1155,6 +1162,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
         reconciliation,
         pages,
         links,
+        legacy_findings: Vec::new(),
     })
 }
 

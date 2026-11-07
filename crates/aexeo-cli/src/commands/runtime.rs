@@ -482,6 +482,9 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
                 "same_document_count": graph.links.same_document.len(),
                 "indeterminate_count": graph.links.indeterminate.len(),
                 "issues": graph.issues,
+                "legacy_link_findings": aexeo_core::link_findings::count_conclusions(
+                    &graph.legacy_findings
+                ),
             }));
         }
         let bytes = serde_json::to_vec_pretty(&graph)?;
@@ -550,6 +553,16 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
                 println!(
                     "Link graph crawl complete: {}; issues: {}",
                     summary["crawl_complete"], summary["issues"]
+                );
+                println!(
+                    "Link graph coverage of LNK002/LNK004 findings: {}",
+                    summary["legacy_link_findings"]
+                        .as_object()
+                        .into_iter()
+                        .flatten()
+                        .map(|(conclusion, count)| format!("{count} {conclusion}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 );
             }
         }

@@ -21,6 +21,7 @@ pub mod integrations;
 pub mod intelligence;
 pub mod link_counts;
 pub mod link_evidence;
+pub mod link_findings;
 pub mod link_graph;
 pub mod link_report;
 pub mod link_rules;
