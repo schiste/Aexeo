@@ -2,6 +2,8 @@
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+pub use aexeo_contracts::RedirectHop;
+
 use crate::link_counts::{LinkCounts, count_links};
 use crate::link_evidence::{HtmlLinkMetadata, LinkContext, extract_document};
 use crate::link_graph::{LinkResolution, resolve_link};
@@ -21,6 +23,10 @@ pub struct RenderedPage {
     /// The URL fetched when it differs from `url`, if the producer captured it.
     #[serde(default)]
     pub requested_url: Option<String>,
+    /// Redirect responses between `requested_url` and `url`, in request order,
+    /// if the producer recorded them. Empty means none recorded, not none seen.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redirect_chain: Vec<RedirectHop>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +71,10 @@ pub struct ObservedPageLinks {
     /// Other pages linking to `redirected_from`; not included in the counts above.
     #[serde(default)]
     pub redirected_source_pages: usize,
+    /// The recorded redirect hops from `redirected_from` to this page, in
+    /// order. Reported only; links to a hop are never credited to this page.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redirect_chain: Vec<RedirectHop>,
 }
 
 fn has_noindex(value: &str) -> bool {
@@ -235,6 +245,7 @@ pub fn build_link_report_from_audit_with_static_urls(
                     status_code: None,
                     response_headers: None,
                     requested_url: None,
+                    redirect_chain: Vec::new(),
                 });
             }
             let Some(response) = &page.crawl_response else {
@@ -245,7 +256,8 @@ pub fn build_link_report_from_audit_with_static_urls(
                 issues.insert("audit_page_observed_url_missing");
                 return None;
             };
-            if response.requested_url != *url {
+            let redirect_chain = recorded_redirect_chain(response, &mut issues);
+            if response.requested_url != *url && redirect_chain.is_empty() {
                 issues.insert("audit_redirect_chain_unavailable");
             }
             Some(RenderedPage {
@@ -256,6 +268,7 @@ pub fn build_link_report_from_audit_with_static_urls(
                     .headers_observed
                     .then(|| page.response_headers.clone()),
                 requested_url: Some(response.requested_url.clone()),
+                redirect_chain,
             })
         })
         .collect();
@@ -273,6 +286,7 @@ pub fn build_link_report_from_audit_with_static_urls(
                 status_code: response.status_code,
                 response_headers: None,
                 requested_url: Some(response.requested_url.clone()),
+                redirect_chain: recorded_redirect_chain(response, &mut issues),
             }),
     );
     let input = LinkReportInput {
@@ -295,6 +309,29 @@ pub fn build_link_report_from_audit_with_static_urls(
     report.issues.sort();
     report.issues.dedup();
     Ok(report)
+}
+
+/// The crawl's recorded hops, when they start at the requested URL and every
+/// hop is a redirect status. A chain failing that is reported and dropped
+/// rather than shown as evidence.
+fn recorded_redirect_chain(
+    response: &aexeo_contracts::CrawlResponseProvenance,
+    issues: &mut std::collections::BTreeSet<&'static str>,
+) -> Vec<RedirectHop> {
+    let chain = &response.redirect_chain;
+    if chain.is_empty() {
+        return Vec::new();
+    }
+    let consistent = chain[0].url == response.requested_url
+        && chain
+            .iter()
+            .all(|hop| (300..400).contains(&hop.status_code));
+    if consistent {
+        chain.clone()
+    } else {
+        issues.insert("audit_redirect_chain_inconsistent");
+        Vec::new()
+    }
 }
 
 /// The serialized requested URL, when it differs from the observed page URL.
@@ -438,7 +475,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
             }
             _ => {}
         }
-        if redirected_from(page).is_some() {
+        if redirected_from(page).is_some() || !page.redirect_chain.is_empty() {
             coverage_issues.insert("redirect_observed");
         }
         if metadata.canonical_hrefs.len() > 1
@@ -585,6 +622,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
                             .len()
                     }),
                 redirected_from: redirected,
+                redirect_chain: page.redirect_chain.clone(),
             }
         })
         .collect();
@@ -623,6 +661,7 @@ mod tests {
                     status_code: Some(200),
                     response_headers: Some(Default::default()),
                     requested_url: None,
+                    redirect_chain: Vec::new(),
                 },
                 RenderedPage {
                     url: "https://EXAMPLE.org:443/target?lang=fr".into(),
@@ -630,6 +669,7 @@ mod tests {
                     status_code: Some(200),
                     response_headers: Some(Default::default()),
                     requested_url: None,
+                    redirect_chain: Vec::new(),
                 },
                 RenderedPage {
                     url: "https://example.org/target?lang=en".into(),
@@ -637,6 +677,7 @@ mod tests {
                     status_code: Some(200),
                     response_headers: Some(Default::default()),
                     requested_url: None,
+                    redirect_chain: Vec::new(),
                 },
             ],
             inventory: None,
@@ -652,5 +693,83 @@ mod tests {
             1
         );
         assert_eq!(report.pages[2].distinct_source_pages, 0);
+    }
+
+    fn redirected_audit(chain: Option<serde_json::Value>) -> aexeo_contracts::AuditArtifact {
+        let mut response = serde_json::json!({"requested_url":"https://example.org/old", "observed_url":"https://example.org/new", "status_code":200, "headers_observed":true});
+        if let Some(chain) = chain {
+            response["redirect_chain"] = chain;
+        }
+        serde_json::from_value(serde_json::json!({"command":"crawl", "site":{"site_url":"https://example.org/", "root":"crawl", "deployment_model":"runtime_snapshot", "pages":[
+            {"path":"crawl/index.html", "relative_path":"index.html", "route":"", "raw_html":"<main><a href='/old'>Old</a><a href='/moved'>Moved</a></main>", "response_headers":{}, "crawl_response":{"requested_url":"https://example.org/", "observed_url":"https://example.org/", "status_code":200, "headers_observed":true}},
+            {"path":"crawl/new/index.html", "relative_path":"new/index.html", "route":"new", "raw_html":"<main>New</main>", "response_headers":{}, "crawl_response":response},
+        ]}}))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_recorded_redirect_chain_replaces_the_unavailable_issue() {
+        let report = build_link_report_from_audit(&redirected_audit(Some(serde_json::json!([
+            {"url":"https://example.org/old", "status_code":301},
+            {"url":"https://example.org/moved", "status_code":302},
+        ]))))
+        .unwrap();
+        let page = &report.pages[1];
+        assert_eq!(
+            page.redirect_chain,
+            [
+                RedirectHop {
+                    url: "https://example.org/old".into(),
+                    status_code: 301
+                },
+                RedirectHop {
+                    url: "https://example.org/moved".into(),
+                    status_code: 302
+                },
+            ]
+        );
+        // Links to the requested URL and to an intermediate hop stay outside
+        // the page's own counts.
+        assert_eq!(page.distinct_source_pages, 0);
+        assert_eq!(
+            page.redirected_from.as_deref(),
+            Some("https://example.org/old")
+        );
+        assert_eq!(page.redirected_source_pages, 1);
+        assert!(report.pages[0].redirect_chain.is_empty());
+        assert!(
+            !report
+                .issues
+                .contains(&"audit_redirect_chain_unavailable".to_string())
+        );
+        assert!(report.issues.contains(&"redirect_observed".to_string()));
+    }
+
+    #[test]
+    fn an_artifact_without_recorded_hops_keeps_the_unavailable_issue() {
+        let report = build_link_report_from_audit(&redirected_audit(None)).unwrap();
+        assert!(report.pages[1].redirect_chain.is_empty());
+        assert!(
+            report
+                .issues
+                .contains(&"audit_redirect_chain_unavailable".to_string())
+        );
+        let page = serde_json::to_value(&report.pages[1]).unwrap();
+        assert!(page.get("redirect_chain").is_none(), "{page}");
+    }
+
+    #[test]
+    fn a_chain_not_starting_at_the_requested_url_is_not_evidence() {
+        let report = build_link_report_from_audit(&redirected_audit(Some(serde_json::json!([
+            {"url":"https://example.org/elsewhere", "status_code":301},
+        ]))))
+        .unwrap();
+        assert!(report.pages[1].redirect_chain.is_empty());
+        for issue in [
+            "audit_redirect_chain_inconsistent",
+            "audit_redirect_chain_unavailable",
+        ] {
+            assert!(report.issues.contains(&issue.to_string()), "{issue}");
+        }
     }
 }

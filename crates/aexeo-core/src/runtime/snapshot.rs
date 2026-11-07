@@ -336,6 +336,10 @@ mod tests {
             observed_url: Some("https://example.test/new".into()),
             status_code: Some(200),
             headers_observed: true,
+            redirect_chain: vec![aexeo_contracts::RedirectHop {
+                url: "https://example.test/old".into(),
+                status_code: 301,
+            }],
         };
         let mut builder = RuntimeSnapshotBuilder::new();
         builder
@@ -357,6 +361,15 @@ mod tests {
             restored_site.pages[0].crawl_response.as_ref(),
             Some(&provenance)
         );
+    }
+
+    #[test]
+    fn provenance_without_redirects_serializes_as_before() {
+        let legacy = r#"{"requested_url":"https://example.test/a","observed_url":"https://example.test/a","status_code":200,"headers_observed":true}"#;
+        let provenance: aexeo_contracts::CrawlResponseProvenance =
+            serde_json::from_str(legacy).unwrap();
+        assert!(provenance.redirect_chain.is_empty());
+        assert_eq!(serde_json::to_string(&provenance).unwrap(), legacy);
     }
 
     #[test]

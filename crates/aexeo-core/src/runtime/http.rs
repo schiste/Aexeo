@@ -11,6 +11,8 @@ use std::thread;
 use std::time::Duration;
 use url::Url;
 
+use aexeo_contracts::RedirectHop;
+
 use super::egress::{CrawlEgress, FetchRefused, is_refused};
 use super::fetcher::{FetchOutcome, crawl_user_agent};
 use crate::link_graph::redact_url;
@@ -25,6 +27,9 @@ pub(crate) struct FetchResult {
     pub(crate) effective_url: String,
     pub(crate) effective_url_observed: bool,
     pub(crate) headers_observed: bool,
+    /// Redirects followed before the final response, in order. Empty when the
+    /// first response was final or the engine does not report hops.
+    pub(crate) redirect_chain: Vec<RedirectHop>,
 }
 
 #[derive(Debug, Clone)]
@@ -146,15 +151,19 @@ impl HttpFetcher {
         })
     }
 
+    /// The final response and the redirect hops followed to reach it. Each hop
+    /// is recorded only after its response, so the chain never holds a URL
+    /// the egress policy refused.
     fn send(
         &self,
         method: Method,
         url: &str,
         credentials: bool,
         customize: &dyn Fn(RequestBuilder) -> RequestBuilder,
-    ) -> Result<Response> {
+    ) -> Result<(Response, Vec<RedirectHop>)> {
         let mut current =
             Url::parse(url).with_context(|| format!("failed to fetch URL: {}", redact_url(url)))?;
+        let mut chain = Vec::new();
         for _ in 0..=MAX_REDIRECTS {
             self.egress.check_url(&current)?;
             let mut request = customize(self.client.request(method.clone(), current.clone()));
@@ -169,8 +178,14 @@ impl HttpFetcher {
                 .send()
                 .map_err(|error| send_error(error, &current))?;
             match redirect_target(&response, &current) {
-                Some(next) => current = next,
-                None => return Ok(response),
+                Some(next) => {
+                    chain.push(RedirectHop {
+                        url: redact_url(current.as_str()),
+                        status_code: response.status().as_u16(),
+                    });
+                    current = next;
+                }
+                None => return Ok((response, chain)),
             }
         }
         Err(FetchRefused(format!(
@@ -190,7 +205,8 @@ impl HttpFetcher {
 
     /// Status of a HEAD request carrying the crawl credentials where allowed.
     pub(crate) fn head_status(&self, url: &str, timeout: Duration) -> Result<StatusCode> {
-        let response = self.send(Method::HEAD, url, true, &|request| request.timeout(timeout))?;
+        let (response, _) =
+            self.send(Method::HEAD, url, true, &|request| request.timeout(timeout))?;
         Ok(response.status())
     }
 
@@ -202,7 +218,7 @@ impl HttpFetcher {
         accept: &str,
         timeout: Duration,
     ) -> Result<(StatusCode, Option<String>)> {
-        let response = self.send(Method::GET, url, false, &|request| {
+        let (response, _) = self.send(Method::GET, url, false, &|request| {
             request
                 .header(reqwest::header::ACCEPT, accept)
                 .timeout(timeout)
@@ -215,7 +231,7 @@ impl HttpFetcher {
         url: &str,
         customize: &dyn Fn(RequestBuilder) -> RequestBuilder,
     ) -> Result<FetchResult> {
-        let response = self.send(Method::GET, url, true, customize)?;
+        let (response, redirect_chain) = self.send(Method::GET, url, true, customize)?;
         let status_code = Some(response.status().as_u16());
         let effective_url = response.url().to_string();
         let content_type = content_type_of(&response);
@@ -233,6 +249,7 @@ impl HttpFetcher {
             effective_url,
             effective_url_observed: true,
             headers_observed,
+            redirect_chain,
         })
     }
 
@@ -530,8 +547,12 @@ mod tests {
     }
 
     fn redirect(location: &str) -> String {
+        redirect_with(302, "Found", location)
+    }
+
+    fn redirect_with(status: u16, reason: &str, location: &str) -> String {
         format!(
-            "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            "HTTP/1.1 {status} {reason}\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
         )
     }
 
@@ -764,6 +785,61 @@ mod tests {
             .fetch(&origin)
             .unwrap_err();
         assert!(is_refused(&error), "{error:#}");
+        assert_eq!(crawl.requests().len(), super::MAX_REDIRECTS + 1);
+    }
+
+    #[test]
+    fn a_page_fetch_records_each_redirect_hop_in_order() {
+        let crawl = RecordingServer::start(|path| match path {
+            "/start?token=secret" => redirect_with(301, "Moved Permanently", "/middle"),
+            "/middle" => redirect_with(302, "Found", "/final"),
+            _ => ok("final"),
+        });
+        let origin = format!("http://127.0.0.1:{}", crawl.port);
+
+        let fetched = fetcher(&Config::default(), &origin, true)
+            .fetch(&format!("{origin}/start?token=secret"))
+            .unwrap();
+
+        assert_eq!(fetched.body.as_deref(), Some("final"));
+        assert_eq!(fetched.effective_url, format!("{origin}/final"));
+        let hops = fetched
+            .redirect_chain
+            .iter()
+            .map(|hop| (hop.url.as_str(), hop.status_code))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            hops,
+            [
+                (format!("{origin}/start").as_str(), 301),
+                (format!("{origin}/middle").as_str(), 302),
+            ]
+        );
+        assert_eq!(crawl.requests().len(), 3);
+    }
+
+    #[test]
+    fn a_direct_response_has_no_redirect_chain() {
+        let crawl = RecordingServer::start(|_| ok("direct"));
+        let origin = format!("http://127.0.0.1:{}", crawl.port);
+        let fetched = fetcher(&Config::default(), &origin, true)
+            .fetch(&origin)
+            .unwrap();
+        assert!(fetched.redirect_chain.is_empty());
+    }
+
+    #[test]
+    fn more_redirects_than_the_limit_are_refused_without_a_result() {
+        let crawl = RecordingServer::start(|path| {
+            let hop = path.trim_start_matches('/').parse::<usize>().unwrap_or(0);
+            redirect(&format!("/{}", hop + 1))
+        });
+        let origin = format!("http://127.0.0.1:{}", crawl.port);
+        let error = fetcher(&Config::default(), &origin, true)
+            .fetch(&format!("{origin}/0"))
+            .unwrap_err();
+        assert!(is_refused(&error), "{error:#}");
+        assert!(error.to_string().contains("redirects"), "{error}");
         assert_eq!(crawl.requests().len(), super::MAX_REDIRECTS + 1);
     }
 

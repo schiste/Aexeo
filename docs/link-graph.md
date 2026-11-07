@@ -48,7 +48,10 @@ identities and completeness attestations cannot independently prove that a
 snapshot is correct.
 
 `requested_url` is optional on an input page and records the URL fetched when
-it differs from `url`.
+it differs from `url`. `redirect_chain` is also optional: the redirect responses
+followed from `requested_url` to `url`, in request order, each as
+`{"url": "...", "status_code": 301}`. An absent or empty chain means no hops
+were recorded, not that none happened.
 
 The report lists every observed page, including pages with zero observed links,
 and counts distinct source URLs separately for each context. It preserves
@@ -75,8 +78,11 @@ page-level `nofollow` robots directive does not change these counts.
 A page whose `requested_url` differs reports it as `redirected_from`, with the
 other pages linking to it as `redirected_source_pages`, and raises
 `redirect_observed`, which withholds eligibility. These sources are not added
-to the page's other counts: only the first and last URL of a redirect chain are
-known, and links to an intermediate URL are not attributed.
+to the page's other counts. When hops were recorded the page also reports them,
+in order, as `redirect_chain`; the field is omitted otherwise, so a report
+without redirects is unchanged. A recorded chain is reported only: links to
+the requested URL or to an intermediate hop are not credited to the final page,
+and `redirect_observed` still withholds eligibility.
 
 Semantic `main`, `article`, `nav` and `footer` elements provide some contexts;
 `aria-label="breadcrumb"`, `"breadcrumbs"` or `"pagination"` distinguish
@@ -101,8 +107,14 @@ accordingly.
 Run `aexeo-cli link-graph audit.json --audit` to analyze pages in an Aexeo
 crawl artifact. Only pages with a captured effective URL are included. Older
 artifacts and pages without response provenance are reported as missing rather
-than assigned an inferred URL. Requested and effective URLs that differ are
-flagged because the intermediate redirect chain is unavailable. The site URL
+than assigned an inferred URL. HTTP-engine runtime crawls record each
+redirect hop (URL redacted like every persisted URL, so without query or
+credentials, and status) in the page's `crawl_response.redirect_chain`, which
+the adapter reports on the page. Requested and effective URLs that differ
+without a recorded chain raise `audit_redirect_chain_unavailable`: older
+artifacts, and browser-engine crawls, which do not report hops. A chain that
+does not start at the requested URL, or holds a non-3xx status, is dropped and
+raises `audit_redirect_chain_inconsistent`. The site URL
 gives the origin unless every observed URL shares a different one, as when
 `example.com` redirects to `www.example.com`: that origin is then used and
 `audit_observed_origin_differs_from_target` is raised. Links written with the

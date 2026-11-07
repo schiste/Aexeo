@@ -314,6 +314,77 @@ fn a_broken_link_is_a_finding_in_a_complete_audit() {
 }
 
 #[test]
+fn a_followed_redirect_chain_reaches_the_artifact_and_the_link_report() {
+    // The status line carries the Location header: the fixture server has no
+    // other way to add one.
+    let site = Site::start(vec![
+        ("/", html(r#"<a href="/old">old</a>"#)),
+        (
+            "/old",
+            (
+                "301 Moved Permanently\r\nLocation: /middle",
+                "text/html",
+                String::new(),
+            ),
+        ),
+        (
+            "/middle",
+            ("302 Found\r\nLocation: /new", "text/html", String::new()),
+        ),
+        ("/new", html("new")),
+    ]);
+    let temp = tempfile::tempdir().unwrap();
+    let graph = temp.path().join("graph.json");
+    let config = link_rules_only(temp.path());
+    let (_, payload) = crawl(
+        &site,
+        &[
+            "--config",
+            config.to_str().unwrap(),
+            "--link-graph-output",
+            graph.to_str().unwrap(),
+        ],
+    );
+    let base = &site.base_url;
+    let expected_chain = serde_json::json!([
+        {"url": format!("{base}/old"), "status_code": 301},
+        {"url": format!("{base}/middle"), "status_code": 302},
+    ]);
+
+    let pages = payload["artifact"]["site"]["pages"].as_array().unwrap();
+    let redirected = pages
+        .iter()
+        .find(|page| page["crawl_response"]["requested_url"] == format!("{base}/old"))
+        .unwrap_or_else(|| panic!("{payload:#}"));
+    assert_eq!(
+        redirected["crawl_response"]["redirect_chain"], expected_chain,
+        "{payload:#}"
+    );
+    let home = pages
+        .iter()
+        .find(|page| page["crawl_response"]["requested_url"] == format!("{base}/"))
+        .unwrap();
+    assert!(home["crawl_response"].get("redirect_chain").is_none());
+
+    let report: Value = serde_json::from_slice(&std::fs::read(&graph).unwrap()).unwrap();
+    let page = report["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|page| page["url"] == format!("{base}/new"))
+        .unwrap_or_else(|| panic!("{report:#}"));
+    assert_eq!(page["redirect_chain"], expected_chain, "{report:#}");
+    assert_eq!(page["distinct_source_pages"], 0);
+    assert_eq!(page["redirected_source_pages"], 1);
+    assert!(
+        !report["issues"]
+            .to_string()
+            .contains("audit_redirect_chain_unavailable"),
+        "{report:#}"
+    );
+}
+
+#[test]
 fn a_server_failure_leaves_the_audit_partial_after_retries() {
     for (status, code) in [
         ("503 Service Unavailable", 503),
