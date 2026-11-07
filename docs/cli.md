@@ -254,6 +254,9 @@ Options:
       --seed <seed>
 
 
+      --seed-file <seed-file>
+          Seed every page URL on the target's origin from a link inventory JSON file and record a crawl attestation in the audit artifact
+
       --include-pattern <include-pattern>
 
 

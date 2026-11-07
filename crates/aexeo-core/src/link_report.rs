@@ -172,8 +172,8 @@ pub struct AuditLinkContext {
 }
 
 /// Analyze only pages whose effective URL was actually captured in an audit.
-/// Audit artifacts do not attest the publication surface or CMS inventory, so
-/// this adapter deliberately never claims complete graph coverage.
+/// Crawl coverage is claimed only as `crawl_audit_completeness_issues` allows:
+/// without a supplied inventory matching the crawl's seed, never.
 pub fn build_link_report_from_audit(
     artifact: &aexeo_contracts::AuditArtifact,
 ) -> anyhow::Result<LinkReport> {
@@ -181,7 +181,8 @@ pub fn build_link_report_from_audit(
 }
 
 /// Compare an audit with an explicitly supplied inventory. The caller's
-/// identity does not prove a complete crawl or a coherent snapshot.
+/// identity does not prove a complete crawl or a coherent snapshot, and the
+/// context never makes the crawl complete on its own.
 pub fn build_link_report_from_audit_with_context(
     artifact: &aexeo_contracts::AuditArtifact,
     context: Option<&AuditLinkContext>,
@@ -301,6 +302,16 @@ pub fn build_link_report_from_audit_with_static_urls(
                 redirect_chain: recorded_redirect_chain(response, &mut issues),
             }),
     );
+    // A static export is not a crawl: its coverage is never attested.
+    let crawl_complete = static_urls.is_none() && {
+        let incomplete = crawl_audit_completeness_issues(
+            artifact,
+            context.and_then(|value| value.inventory.as_ref()),
+        );
+        let complete = incomplete.is_empty();
+        issues.extend(incomplete);
+        complete
+    };
     let input = LinkReportInput {
         version: 1,
         identity: context
@@ -312,7 +323,7 @@ pub fn build_link_report_from_audit_with_static_urls(
                 snapshot: String::new(),
             })),
         snapshot_date: context.and_then(|value| value.snapshot_date.clone()),
-        crawl_complete: false,
+        crawl_complete,
         pages,
         inventory: context.and_then(|value| value.inventory.clone()),
     };
@@ -321,6 +332,96 @@ pub fn build_link_report_from_audit_with_static_urls(
     report.issues.sort();
     report.issues.dedup();
     Ok(report)
+}
+
+/// Why a runtime audit does not attest complete crawl coverage, one issue per
+/// unmet condition; empty only when every condition holds. The crawl must
+/// have finished complete and untruncated with the HTTP engine (which records
+/// redirect chains), with no failed response and no URL skipped by robots.txt.
+/// It must have been seeded from an inventory, every seeded URL must have a
+/// page or response, and `inventory`, the one used for reconciliation, must
+/// carry the seed inventory's identity.
+fn crawl_audit_completeness_issues(
+    artifact: &aexeo_contracts::AuditArtifact,
+    inventory: Option<&InventorySnapshot>,
+) -> Vec<&'static str> {
+    let mut issues = Vec::new();
+    let crawl = artifact.crawl.as_ref();
+    let meta = artifact
+        .site
+        .as_ref()
+        .and_then(|site| site.crawl_meta.as_ref());
+    let attestation = artifact.crawl_attestation.as_ref();
+    if artifact.status != aexeo_contracts::AuditStatus::Complete
+        || artifact.truncation_reason.is_some()
+        || crawl.is_none_or(|crawl| crawl.truncated)
+        || meta.is_some_and(|meta| meta.truncated)
+    {
+        issues.push("audit_crawl_partial");
+    }
+    let drafts = inventory
+        .iter()
+        .flat_map(|inventory| &inventory.pages)
+        .filter(|page| page.disposition == InventoryDisposition::Draft)
+        .filter_map(|page| Url::parse(&page.url).ok().map(String::from))
+        .collect::<std::collections::BTreeSet<_>>();
+    if meta.is_some_and(|meta| {
+        meta.failed_responses
+            .iter()
+            .any(|response| !unserved_draft(response, &drafts))
+    }) {
+        issues.push("audit_failed_responses");
+    }
+    if crawl.is_some_and(|crawl| crawl.skipped_by_robots > 0)
+        || meta.is_some_and(|meta| !meta.robots_skipped_urls.is_empty())
+        || attestation.is_some_and(|value| !value.robots_skipped_urls.is_empty())
+    {
+        issues.push("audit_robots_skipped");
+    }
+    if crawl.is_some_and(|crawl| crawl.engine != "http")
+        || attestation.is_some_and(|value| value.engine != "http")
+    {
+        issues.push("audit_browser_engine");
+    }
+    match attestation.filter(|value| value.seeded_from.url_count > 0) {
+        None => issues.push("audit_not_inventory_seeded"),
+        Some(attestation) => {
+            if !attestation.unfetched_urls.is_empty() {
+                issues.push("audit_seed_unfetched");
+            }
+            let seeded = attestation.seeded_from.inventory_identity.as_ref();
+            let reconciled = inventory.and_then(|inventory| inventory.identity.as_ref());
+            if seeded.is_none() || seeded != reconciled {
+                issues.push("audit_seed_inventory_mismatch");
+            }
+        }
+    }
+    issues
+}
+
+/// A draft is not published, so a 404 or 410 for it is the expected answer
+/// rather than a failure. Any other status keeps its usual treatment.
+fn draft_absence_expected(disposition: Option<InventoryDisposition>, status: u16) -> bool {
+    disposition == Some(InventoryDisposition::Draft) && matches!(status, 404 | 410)
+}
+
+/// A failed response that is a draft answering 404 or 410 directly, with no
+/// redirect, at the exact URL the inventory lists.
+fn unserved_draft(
+    response: &aexeo_contracts::CrawlResponseProvenance,
+    drafts: &std::collections::BTreeSet<String>,
+) -> bool {
+    let parse = |url: &str| Url::parse(url).ok().map(String::from);
+    let requested = parse(&response.requested_url);
+    response.redirect_chain.is_empty()
+        && response
+            .observed_url
+            .as_deref()
+            .is_none_or(|observed| parse(observed) == requested)
+        && requested.is_some_and(|url| drafts.contains(&url))
+        && response
+            .status_code
+            .is_some_and(|status| draft_absence_expected(Some(InventoryDisposition::Draft), status))
 }
 
 /// The crawl's recorded hops, when they start at the requested URL and every
@@ -482,7 +583,15 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
         );
         evidence.extend(links);
         let headers = page.response_headers.as_ref();
-        if headers.is_none() {
+        // An unserved draft is the expected outcome; its headers cannot make
+        // it indexable, so neither its status nor missing headers is a gap.
+        let unserved_draft = page.status_code.is_some_and(|status| {
+            draft_absence_expected(
+                inventory_dispositions.get(page.url.as_str()).copied(),
+                status,
+            )
+        });
+        if headers.is_none() && !unserved_draft {
             coverage_issues.insert("response_headers_missing");
         }
         match page.status_code {
@@ -492,7 +601,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
             Some(status) if (300..400).contains(&status) => {
                 coverage_issues.insert("redirect_observed");
             }
-            Some(status) if !(200..300).contains(&status) => {
+            Some(status) if !(200..300).contains(&status) && !unserved_draft => {
                 coverage_issues.insert("non_success_response");
             }
             _ => {}
@@ -838,6 +947,257 @@ mod tests {
         ] {
             assert!(report.issues.contains(&issue.to_string()), "{issue}");
         }
+    }
+
+    const ATTESTED_ISSUES: [&str; 7] = [
+        "audit_browser_engine",
+        "audit_crawl_partial",
+        "audit_failed_responses",
+        "audit_not_inventory_seeded",
+        "audit_robots_skipped",
+        "audit_seed_inventory_mismatch",
+        "audit_seed_unfetched",
+    ];
+
+    fn attested_identity() -> serde_json::Value {
+        serde_json::json!({"origin":"https://example.org", "release":"r1", "surface":"public", "snapshot":"s1"})
+    }
+
+    /// A complete HTTP crawl seeded from the context inventory; `/orphan` was
+    /// reached only through the seed.
+    fn attested_audit() -> (serde_json::Value, AuditLinkContext) {
+        let page = |route: &str, html: &str| {
+            let url = format!("https://example.org/{route}");
+            serde_json::json!({"path":"", "relative_path":"", "route":route, "raw_html":html, "response_headers":{},
+                "crawl_response":{"requested_url":url, "observed_url":url, "status_code":200, "headers_observed":true}})
+        };
+        let artifact = serde_json::json!({"command":"crawl", "status":"complete",
+            "crawl":{"engine":"http", "visited_pages":3, "discovered_internal_routes":3, "queued_routes_remaining":0, "max_pages":10, "fetch_failures":0, "fetch_retries":0, "skipped_non_html":0, "truncated":false, "elapsed_ms":0, "pages_per_minute":0, "checkpoints_written":0, "partial_artifacts_written":0, "total_fetch_ms":0, "average_fetch_ms":0, "total_page_process_ms":0, "average_page_process_ms":0, "total_partial_audit_ms":0, "average_partial_audit_ms":0, "slowest_paths":[]},
+            "site":{"site_url":"https://example.org/", "root":"crawl", "deployment_model":"runtime_snapshot",
+                "crawl_meta":{"visited_pages":3, "max_pages":10, "discovered_internal_routes":3, "truncated":false},
+                "pages":[page("", "<main><a href='/a'>A</a></main>"), page("a", "<main>A</main>"), page("orphan", "<main>Orphan</main>")]},
+            "crawl_attestation":{"seeded_from":{"inventory_identity":attested_identity(), "url_count":3}, "engine":"http"}});
+        let inventory_pages = ["", "a", "orphan"].map(|route| {
+            serde_json::json!({"url":format!("https://example.org/{route}"), "disposition":"published", "target":null, "locale":null})
+        });
+        let context = serde_json::from_value(serde_json::json!({"identity":attested_identity(), "snapshot_date":"2026-11-07",
+            "inventory":{"identity":attested_identity(), "complete":true, "pages":inventory_pages}}))
+        .unwrap();
+        (artifact, context)
+    }
+
+    /// Breaks one completeness condition of `attested_audit`.
+    type Mutation = fn(&mut serde_json::Value, &mut AuditLinkContext);
+
+    fn attested_report(artifact: &serde_json::Value, context: &AuditLinkContext) -> LinkReport {
+        build_link_report_from_audit_with_context(
+            &serde_json::from_value(artifact.clone()).unwrap(),
+            Some(context),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_seeded_complete_http_crawl_attests_coverage_and_reaches_eligibility() {
+        let (artifact, context) = attested_audit();
+        let report = attested_report(&artifact, &context);
+        assert!(report.crawl_complete, "{:?}", report.issues);
+        for issue in ATTESTED_ISSUES.iter().chain(&["crawl_incomplete"]) {
+            assert!(!report.issues.iter().any(|value| value == issue), "{issue}");
+        }
+        let reconciliation = report.reconciliation.as_ref().unwrap();
+        assert!(reconciliation.comparable, "{:?}", reconciliation.issues);
+        assert!(
+            reconciliation
+                .eligible_pages
+                .contains(&"https://example.org/orphan".to_string())
+        );
+        let orphan = &report.pages[2];
+        assert_eq!(orphan.url, "https://example.org/orphan");
+        assert_eq!(orphan.distinct_source_pages, 0);
+    }
+
+    #[test]
+    fn each_unmet_condition_raises_exactly_its_own_issue() {
+        let cases: [(&str, Mutation); 9] = [
+            ("audit_crawl_partial", |artifact, _| {
+                artifact["status"] = "partial".into()
+            }),
+            ("audit_crawl_partial", |artifact, _| {
+                artifact["crawl"]["truncated"] = true.into()
+            }),
+            ("audit_failed_responses", |artifact, _| {
+                artifact["site"]["crawl_meta"]["failed_responses"] = serde_json::json!([{"requested_url":"https://example.org/gone", "status_code":404}]);
+            }),
+            ("audit_robots_skipped", |artifact, _| {
+                artifact["site"]["crawl_meta"]["robots_skipped_urls"] =
+                    serde_json::json!(["https://example.org/private"]);
+            }),
+            ("audit_browser_engine", |artifact, _| {
+                artifact["crawl"]["engine"] = "playwright".into();
+                artifact["crawl_attestation"]["engine"] = "playwright".into();
+            }),
+            ("audit_not_inventory_seeded", |artifact, _| {
+                artifact
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("crawl_attestation");
+            }),
+            ("audit_not_inventory_seeded", |artifact, _| {
+                artifact["crawl_attestation"]["seeded_from"]["url_count"] = 0.into();
+            }),
+            ("audit_seed_unfetched", |artifact, _| {
+                artifact["crawl_attestation"]["unfetched_urls"] =
+                    serde_json::json!(["https://example.org/b"]);
+            }),
+            ("audit_seed_inventory_mismatch", |_, context| {
+                context
+                    .inventory
+                    .as_mut()
+                    .unwrap()
+                    .identity
+                    .as_mut()
+                    .unwrap()
+                    .snapshot = "s2".into();
+            }),
+        ];
+        for (expected, mutate) in cases {
+            let (mut artifact, mut context) = attested_audit();
+            mutate(&mut artifact, &mut context);
+            let report = attested_report(&artifact, &context);
+            assert!(!report.crawl_complete, "{expected}");
+            assert!(report.issues.contains(&"crawl_incomplete".to_string()));
+            let raised = ATTESTED_ISSUES
+                .iter()
+                .filter(|issue| report.issues.iter().any(|value| value == *issue))
+                .copied()
+                .collect::<Vec<_>>();
+            assert_eq!(raised, [expected], "{:?}", report.issues);
+            assert!(
+                report
+                    .reconciliation
+                    .as_ref()
+                    .unwrap()
+                    .eligible_pages
+                    .is_empty()
+            );
+        }
+    }
+
+    /// `attested_audit` with a seeded draft at `/draft` answering `status`.
+    fn audit_with_draft(status: u16) -> (serde_json::Value, AuditLinkContext) {
+        let (mut artifact, mut context) = attested_audit();
+        artifact["site"]["crawl_meta"]["failed_responses"] = serde_json::json!([
+            {"requested_url":"https://example.org/draft", "observed_url":"https://example.org/draft", "status_code":status, "headers_observed":true}
+        ]);
+        artifact["crawl_attestation"]["seeded_from"]["url_count"] = 4.into();
+        context
+            .inventory
+            .as_mut()
+            .unwrap()
+            .pages
+            .push(crate::link_inventory::InventoryPage {
+                url: "https://example.org/draft".into(),
+                disposition: InventoryDisposition::Draft,
+                target: None,
+                locale: None,
+            });
+        (artifact, context)
+    }
+
+    #[test]
+    fn a_draft_answering_404_or_410_keeps_the_crawl_complete_and_eligible() {
+        for status in [404, 410] {
+            let (artifact, context) = audit_with_draft(status);
+            let report = attested_report(&artifact, &context);
+            assert!(report.crawl_complete, "{status}: {:?}", report.issues);
+            assert!(
+                !report
+                    .issues
+                    .iter()
+                    .any(|issue| issue.starts_with("audit_"))
+            );
+            assert!(!report.issues.contains(&"non_success_response".to_string()));
+            let reconciliation = report.reconciliation.as_ref().unwrap();
+            assert!(reconciliation.comparable, "{:?}", reconciliation.issues);
+            assert!(
+                reconciliation
+                    .eligible_pages
+                    .contains(&"https://example.org/orphan".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn a_draft_answering_another_error_or_a_published_page_answering_404_fails() {
+        for status in [500, 403] {
+            let (artifact, context) = audit_with_draft(status);
+            let report = attested_report(&artifact, &context);
+            assert!(!report.crawl_complete, "{status}");
+            assert!(
+                report
+                    .issues
+                    .contains(&"audit_failed_responses".to_string())
+            );
+        }
+        // The exemption follows the inventory disposition, not the status alone.
+        let (artifact, mut context) = audit_with_draft(404);
+        context.inventory.as_mut().unwrap().pages[3].disposition = InventoryDisposition::Published;
+        let report = attested_report(&artifact, &context);
+        assert!(!report.crawl_complete);
+        assert!(
+            report
+                .issues
+                .contains(&"audit_failed_responses".to_string())
+        );
+        // So does a draft reached only through a redirect.
+        let (mut artifact, context) = audit_with_draft(404);
+        artifact["site"]["crawl_meta"]["failed_responses"][0]["observed_url"] =
+            "https://example.org/elsewhere".into();
+        let report = attested_report(&artifact, &context);
+        assert!(
+            report
+                .issues
+                .contains(&"audit_failed_responses".to_string())
+        );
+    }
+
+    #[test]
+    fn a_context_never_makes_an_unseeded_or_mismatched_crawl_complete() {
+        let (mut artifact, context) = attested_audit();
+        // A context identical to the seed inventory, but no seed recorded.
+        artifact
+            .as_object_mut()
+            .unwrap()
+            .remove("crawl_attestation");
+        assert!(!attested_report(&artifact, &context).crawl_complete);
+        // A seed recorded, but no inventory to reconcile against.
+        let (artifact, mut context) = attested_audit();
+        context.inventory = None;
+        let report = attested_report(&artifact, &context);
+        assert!(!report.crawl_complete);
+        assert!(
+            report
+                .issues
+                .contains(&"audit_seed_inventory_mismatch".to_string())
+        );
+        // A seed inventory without identity matches nothing, even another one without.
+        let (mut artifact, mut context) = attested_audit();
+        artifact["crawl_attestation"]["seeded_from"]["inventory_identity"] =
+            serde_json::Value::Null;
+        context.inventory.as_mut().unwrap().identity = None;
+        let report = attested_report(&artifact, &context);
+        assert!(!report.crawl_complete);
+        assert!(
+            report
+                .issues
+                .contains(&"audit_seed_inventory_mismatch".to_string())
+        );
+        // Without any context the crawl stays incomplete too.
+        let (artifact, _) = attested_audit();
+        let report =
+            build_link_report_from_audit(&serde_json::from_value(artifact).unwrap()).unwrap();
+        assert!(!report.crawl_complete);
     }
 
     fn redirect_report(chain: Vec<RedirectHop>) -> LinkReport {

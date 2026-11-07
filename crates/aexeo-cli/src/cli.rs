@@ -101,6 +101,7 @@ pub fn build_cli() -> Command {
                         .num_args(1)
                         .action(ArgAction::Append),
                 )
+                .arg(Arg::new("seed-file").long("seed-file").num_args(1).help("Seed every page URL on the target's origin from a link inventory JSON file and record a crawl attestation in the audit artifact"))
                 .arg(
                     Arg::new("include-pattern")
                         .long("include-pattern")

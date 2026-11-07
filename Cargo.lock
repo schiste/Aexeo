@@ -22,6 +22,7 @@ name = "aexeo-contracts"
 version = "0.0.21"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]

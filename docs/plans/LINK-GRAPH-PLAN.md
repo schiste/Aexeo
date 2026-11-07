@@ -85,6 +85,15 @@ not change their counts or assert confirmed orphans.
   distinct source pages by context. They are never mixed into the body or
   navigation counts, redirects still withhold eligibility, and pages without a
   recorded chain or with an inconsistent one are credited nothing.
+- `crawl --seed-file` seeds every same-origin inventory URL (foreign entries are
+  reported, never requested) and records an additive `crawl_attestation` in the
+  audit artifact: seed inventory identity and URL count, engine, unfetched seeds
+  and robots-skipped URLs. The audit adapter reports `crawl_complete` only for a
+  complete, untruncated HTTP crawl with no failed response or robots skip,
+  seeded from an inventory whose identity matches the reconciliation inventory
+  and with every seed fetched; each unmet condition raises its own `audit_*`
+  issue, and a `--context` alone never completes coverage. Release and snapshot
+  identity remain caller-supplied, so item 2 below stays open.
 - A synthetic in-process benchmark covers 50 pages and 500 links (#76). No CI
   performance budget has been established for this graph benchmark.
 - A live Aeptus URL returned a generic noindex holding page, not the article
