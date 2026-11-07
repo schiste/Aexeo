@@ -34,6 +34,32 @@ Options:
           Print help
 ```
 
+## `feedback-export`
+
+Export validated human feedback as a historical review event
+
+```text
+Export validated human feedback as a historical review event
+
+Usage: feedback-export [OPTIONS] --corpus <corpus> --note <note> --output <output>
+
+Options:
+      --corpus <corpus>
+
+
+      --note <note>
+
+
+      --output <output>
+
+
+      --telemetry
+
+
+  -h, --help
+          Print help
+```
+
 ## `feedback-capture`
 
 Capture explicitly reported human feedback in a private local note

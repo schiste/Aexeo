@@ -83,18 +83,7 @@ pub fn command_feedback(args: &ArgMatches) -> Result<i32> {
         args,
     )
     .user_context("invalid feedback input")?;
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut output = options
-        .open(required_arg(args, "output")?)
-        .context("creating feedback note")?;
-    serde_json::to_writer_pretty(&mut output, &note)?;
-    output.write_all(b"\n")?;
+    write_new(required_arg(args, "output")?, &note)?;
     if args.get_flag("telemetry") {
         eprintln!(
             "{}",
@@ -102,6 +91,157 @@ pub fn command_feedback(args: &ArgMatches) -> Result<i32> {
         );
     }
     Ok(0)
+}
+
+fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
+    use std::collections::{HashMap, HashSet};
+    if corpus.get("version") != Some(&json!(1)) {
+        bail!("unsupported corpus version");
+    }
+    let gate = corpus.get("gate_id").context("missing corpus gate")?;
+    let examples = corpus
+        .get("examples")
+        .and_then(Value::as_array)
+        .context("missing examples")?;
+    let mut ids = HashSet::new();
+    let mut splits = HashMap::new();
+    let mut matching = None;
+    let synthetic =
+        corpus.get("fixture_kind").and_then(Value::as_str) == Some("synthetic_regression");
+    for item in examples {
+        let id = item
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .context("invalid example ID")?;
+        if !ids.insert(id) {
+            bail!("duplicate example ID");
+        }
+        let split = item
+            .get("split")
+            .and_then(Value::as_str)
+            .context("missing split")?;
+        if !["development", "holdout"].contains(&split) {
+            bail!("invalid split");
+        }
+        let text = item
+            .get("text")
+            .and_then(Value::as_str)
+            .context("invalid text")?;
+        if splits
+            .insert(text, split)
+            .is_some_and(|previous| previous != split)
+        {
+            bail!("identical example text appears in multiple splits");
+        }
+        let expected = item
+            .get("expected")
+            .and_then(Value::as_str)
+            .context("missing expected status")?;
+        if !["passed", "failed", "not_checked"].contains(&expected) {
+            bail!("invalid expected status");
+        }
+        let review_status = item
+            .get("review_status")
+            .map_or(Some("not_reviewed"), Value::as_str)
+            .context("invalid review status")?;
+        if !["reviewed", "not_reviewed"].contains(&review_status)
+            || (synthetic && review_status == "reviewed")
+        {
+            bail!("invalid review status");
+        }
+        if review_status == "reviewed" {
+            let review = item.get("review").context("missing review provenance")?;
+            for key in ["reviewer", "method"] {
+                if !review
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .is_some_and(|v| !v.trim().is_empty())
+                {
+                    bail!("missing review provenance");
+                }
+            }
+        }
+        if note.get("example_id").and_then(Value::as_str) == Some(id) {
+            matching = Some(text);
+        }
+    }
+    if note.get("version") != Some(&json!(1))
+        || note.get("kind").and_then(Value::as_str) != Some("reported_human_feedback")
+    {
+        bail!("unsupported feedback note");
+    }
+    if note.get("gate_id") != Some(gate) {
+        bail!("feedback gate does not match corpus");
+    }
+    let status = note
+        .get("human_status")
+        .and_then(Value::as_str)
+        .context("missing human status")?;
+    if !["passed", "failed"].contains(&status) {
+        bail!("an explicit human pass or fail is required");
+    }
+    for key in ["reviewer", "method"] {
+        if !note
+            .get(key)
+            .and_then(Value::as_str)
+            .is_some_and(|v| !v.trim().is_empty())
+        {
+            bail!("reviewer and method provenance are required");
+        }
+    }
+    let text = matching.context("review log references an unknown example")?;
+    let hash = digest(&SHA256, text.as_bytes())
+        .as_ref()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    if note.get("text_sha256").and_then(Value::as_str) != Some(hash.as_str()) {
+        bail!("review event does not match the current example text");
+    }
+    let model = note
+        .get("model_status")
+        .and_then(Value::as_str)
+        .context("missing model status")?;
+    if !["passed", "failed", "not_checked"].contains(&model) {
+        bail!("invalid model status");
+    }
+    Ok(
+        json!({"version":1,"gate_id":gate,"events":[{"example_id":note["example_id"],"text_sha256":hash,"model_status":model,"reviewer_status":status,"reviewer":note["reviewer"],"method":note["method"]}]}),
+    )
+}
+
+pub fn command_feedback_export(args: &ArgMatches) -> Result<i32> {
+    let started = Instant::now();
+    let read = |name| -> Result<Value> {
+        serde_json::from_slice(&fs::read(required_arg(args, name)?)?)
+            .user_context("invalid JSON input")
+    };
+    let corpus = read("corpus")?;
+    let note = read("note")?;
+    let event = export_review(&corpus, &note).user_context("invalid feedback export")?;
+    write_new(required_arg(args, "output")?, &event)?;
+    if args.get_flag("telemetry") {
+        eprintln!(
+            "{}",
+            json!({"event":"content_review_note","version":1,"operation":"export-review","elapsed_ms":started.elapsed().as_secs_f64()*1000.0})
+        );
+    }
+    Ok(0)
+}
+
+fn write_new(path: &str, value: &Value) -> Result<()> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut output = options.open(path).context("creating feedback output")?;
+    serde_json::to_writer_pretty(&mut output, value)?;
+    output.write_all(b"\n")?;
+    Ok(())
 }
 
 #[cfg(test)]
