@@ -181,6 +181,11 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
             description: "Agent discovery audit options. `enabled = true` turns on the AGT rules, which are opt-in.",
         },
         ConfigFieldDoc {
+            key: "images",
+            default_value: "advisory budgets; optional metadata checks disabled",
+            description: "Image-quality budgets and opt-in discovery metadata checks. The 100,000-byte and 125-character defaults are configurable advisory targets, not universal requirements.",
+        },
+        ConfigFieldDoc {
             key: "suppressions",
             default_value: "(none)",
             description: "Explicit reviewable suppressions with rule, path pattern, reason, and optional expiry.",
@@ -595,6 +600,22 @@ fn root_properties() -> Map<String, Value> {
             }
         }),
     );
+    properties.insert(
+        "images".to_string(),
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "max_bytes": integer_schema("Advisory maximum encoded size of a local image, in bytes (IMG003)."),
+                "max_alt_characters": integer_schema("Advisory maximum length of informative alt text, in characters (IMG006)."),
+                "prefer_modern_formats": boolean_schema("Suggest WebP or AVIF sources for JPEG and PNG images (IMG005)."),
+                "require_dimensions": boolean_schema("Report images without positive width and height attributes (IMG007)."),
+                "require_image_sitemap": boolean_schema("Opt in: report informative local images missing from the image sitemap (IMG009)."),
+                "require_image_object_metadata": boolean_schema("Opt in: require ImageObject contentUrl, creator and license metadata (IMG010)."),
+                "recommend_figure_captions": boolean_schema("Suggest a visible caption for informative images inside a figure (IMG008).")
+            }
+        }),
+    );
     properties.insert("plugin_settings".to_string(), plugin_settings_schema());
     properties
 }
@@ -763,6 +784,13 @@ fn nested_properties() -> Map<String, Value> {
                         "required_feature_markers": { "type": "array", "items": { "type": "string" } }
                     }
                 },
+                "images": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": { "type": "boolean" }
+                    }
+                },
                 "editorial": {
                     "type": "object",
                     "additionalProperties": false,
@@ -857,4 +885,37 @@ pub fn render_config_schema() -> anyhow::Result<String> {
         "properties": properties,
         "required": ["version"]
     }))?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_config_schema;
+    use serde_json::Value;
+
+    #[test]
+    fn schema_documents_image_quality_settings() {
+        let schema: Value = serde_json::from_str(&render_config_schema().unwrap()).unwrap();
+        let image_properties = schema["properties"]["images"]["properties"]
+            .as_object()
+            .expect("images config schema");
+
+        assert_eq!(image_properties["max_bytes"]["type"], "integer");
+        assert_eq!(image_properties["max_alt_characters"]["type"], "integer");
+        assert_eq!(image_properties["require_image_sitemap"]["type"], "boolean");
+        assert_eq!(
+            image_properties["require_image_object_metadata"]["type"],
+            "boolean"
+        );
+    }
+
+    #[test]
+    fn schema_documents_images_rule_group_toggle() {
+        let schema: Value = serde_json::from_str(&render_config_schema().unwrap()).unwrap();
+        let images = &schema["properties"]["rules"]["properties"]["images"];
+
+        assert_eq!(images["type"], "object");
+        assert_eq!(images["properties"]["enabled"]["type"], "boolean");
+        assert_eq!(images["additionalProperties"], false);
+        assert!(images.get("oneOf").is_none(), "no boolean shorthand");
+    }
 }

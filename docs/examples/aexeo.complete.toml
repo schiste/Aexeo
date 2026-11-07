@@ -62,6 +62,15 @@ strict = true
 [agent_discovery]
 enabled = true
 
+[images]
+max_bytes = 150000
+max_alt_characters = 100
+prefer_modern_formats = false
+require_dimensions = false
+require_image_sitemap = true
+require_image_object_metadata = true
+recommend_figure_captions = false
+
 [rules.html]
 enabled = true
 require_html_lang = false
@@ -109,6 +118,9 @@ enabled = true
 enabled = true
 min_page_size = 800
 required_feature_markers = ["Example marker"]
+
+[rules.images]
+enabled = true
 
 [rules.editorial]
 enabled = true

@@ -314,11 +314,12 @@ mod tests {
             weak_anchor_text: _,
             accessibility: _,
             agent_discovery: _,
+            images: _,
             plugin_settings: _,
             performance_budget_file: _,
         } = Config::default();
         // `checks` has its own reference section; every other field has a doc entry.
-        const FIELDS_ABOVE: usize = 66;
+        const FIELDS_ABOVE: usize = 67;
         assert_eq!(
             config_field_docs().len() + 1,
             FIELDS_ABOVE,

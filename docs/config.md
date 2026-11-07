@@ -41,6 +41,9 @@ enabled = true
 enabled = true
 min_inbound_links = 1
 
+[rules.images]
+enabled = true
+
 [rules.schema]
 enabled = true
 require_title_alignment = true
@@ -50,6 +53,16 @@ baseline_file = ".aexeo-baseline.json"
 
 [quality]
 performance_budget_file = "performance-budget.json"
+
+[images]
+# Advisory budgets, not universal requirements; assets are never rewritten.
+max_bytes = 100_000
+max_alt_characters = 125
+prefer_modern_formats = true
+require_dimensions = true
+require_image_sitemap = false
+require_image_object_metadata = false
+recommend_figure_captions = true
 ```
 
 ## Editor And CI Consumption
@@ -237,6 +250,11 @@ Each key is listed where it goes. Nested names are often shorter than the intern
 - Default: `enabled = false`
 - Meaning: Agent discovery audit options. `enabled = true` turns on the AGT rules, which are opt-in.
 
+## `images`
+
+- Default: advisory budgets; optional metadata checks disabled
+- Meaning: Image-quality budgets and opt-in discovery metadata checks. The 100,000-byte and 125-character defaults are configurable advisory targets, not universal requirements.
+
 ## `suppressions` under `[policy]`
 
 - Default: (none)
@@ -397,6 +415,7 @@ Each group is on unless `[rules.<group>]` sets `enabled = false`.
 - `editorial`: default `true`
 - `headers`: default `true`
 - `html`: default `true`
+- `images`: default `true`
 - `links`: default `true`
 - `llm`: default `true`
 - `robots`: default `true`

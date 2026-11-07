@@ -2,7 +2,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 
 use super::{
-    Accessibility, AgentDiscovery, Config, Editorial, RouteKind, RoutePolicyOverride,
+    Accessibility, AgentDiscovery, Config, Editorial, ImageQuality, RouteKind, RoutePolicyOverride,
     SuppressionRule,
 };
 
@@ -18,6 +18,7 @@ struct ResolvedConfigDocument {
     route_kinds: BTreeMap<String, RouteKind>,
     accessibility: Accessibility,
     agent_discovery: AgentDiscovery,
+    images: ImageQuality,
     site: SiteSection,
     runtime: RuntimeSection,
     policy: PolicySection,
@@ -76,6 +77,7 @@ struct RulesSection {
     llm: EnabledRuleSection,
     surfaces: EnabledRuleSection,
     content: ContentRulesSection,
+    images: EnabledRuleSection,
     structure: StructureRulesSection,
     editorial: EnabledRuleSection,
     headers: EnabledRuleSection,
@@ -177,6 +179,7 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
         route_kinds: config.route_kinds.clone(),
         accessibility: config.accessibility.clone(),
         agent_discovery: config.agent_discovery.clone(),
+        images: config.images.clone(),
         site: SiteSection {
             url: config.site_url.clone(),
             source_dir: config.source_dir.clone(),
@@ -259,6 +262,9 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
                 min_page_size: config.min_page_size,
                 required_feature_markers: config.required_feature_markers.clone(),
             },
+            images: EnabledRuleSection {
+                enabled: is_enabled(config, "images"),
+            },
             structure: StructureRulesSection {
                 enabled: is_enabled(config, "structure"),
                 repeatable_data_ui: config.repeatable_data_ui.clone(),
@@ -307,7 +313,29 @@ pub fn render_resolved_config_toml(config: &Config) -> anyhow::Result<String> {
 mod tests {
     use super::super::load::config_from_merged;
     use super::{render_resolved_config_json, render_resolved_config_toml};
-    use crate::config::Config;
+    use crate::config::{Config, load_config};
+    use std::fs;
+
+    #[test]
+    fn renders_and_round_trips_the_images_switch_and_settings() {
+        let mut config = Config::default();
+        config.checks.insert("images".to_string(), false);
+        config.images.max_bytes = 1234;
+        config.images.require_image_sitemap = true;
+        let rendered = render_resolved_config_toml(&config).unwrap();
+        let document: toml::Value = toml::from_str(&rendered).unwrap();
+
+        assert_eq!(
+            document["rules"]["images"]["enabled"].as_bool(),
+            Some(false)
+        );
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("aexeo.toml"), rendered).unwrap();
+        let loaded = load_config(temp_dir.path(), None).unwrap();
+        assert_eq!(loaded.checks.get("images").copied(), Some(false));
+        assert_eq!(loaded.images, config.images);
+    }
 
     #[test]
     fn resolved_config_keeps_route_kinds_accessibility_discovery_and_surfaces() {
@@ -363,7 +391,10 @@ mod tests {
         assert!(toml.contains("version = 1"));
         assert!(toml.contains("[rules.links]"));
         assert!(toml.contains("enabled = false"));
+        assert!(toml.contains("[images]"));
+        assert!(toml.contains("max_bytes = 100000"));
         assert!(json.contains("\"version\": 1"));
         assert!(json.contains("\"links\""));
+        assert!(json.contains("\"images\""));
     }
 }

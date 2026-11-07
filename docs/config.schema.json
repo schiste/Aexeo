@@ -80,6 +80,42 @@
         }
       ]
     },
+    "images": {
+      "additionalProperties": false,
+      "properties": {
+        "max_alt_characters": {
+          "description": "Advisory maximum length of informative alt text, in characters (IMG006).",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_bytes": {
+          "description": "Advisory maximum encoded size of a local image, in bytes (IMG003).",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "prefer_modern_formats": {
+          "description": "Suggest WebP or AVIF sources for JPEG and PNG images (IMG005).",
+          "type": "boolean"
+        },
+        "recommend_figure_captions": {
+          "description": "Suggest a visible caption for informative images inside a figure (IMG008).",
+          "type": "boolean"
+        },
+        "require_dimensions": {
+          "description": "Report images without positive width and height attributes (IMG007).",
+          "type": "boolean"
+        },
+        "require_image_object_metadata": {
+          "description": "Opt in: require ImageObject contentUrl, creator and license metadata (IMG010).",
+          "type": "boolean"
+        },
+        "require_image_sitemap": {
+          "description": "Opt in: report informative local images missing from the image sitemap (IMG009).",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "max_workers": {
       "description": "Worker count used for parallel analysis tasks.",
       "minimum": 0,
@@ -294,6 +330,15 @@
               "type": "boolean"
             },
             "require_html_lang": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "images": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
               "type": "boolean"
             }
           },
