@@ -16,6 +16,7 @@ fn main() -> anyhow::Result<()> {
                 response_headers: Some(Default::default()),
                 requested_url: None,
                 redirect_chain: Vec::new(),
+                redirected_arrivals: Vec::new(),
             }
         })
         .collect();

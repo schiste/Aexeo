@@ -1529,19 +1529,23 @@ fn a_credential_header_is_refused_as_a_release_marker() {
     assert!(site.requests.lock().unwrap().is_empty());
 }
 
+/// A permanent redirect to `/new`, its Location carried by the status line.
+fn moved_to_new() -> Route {
+    (
+        "301 Moved Permanently\r\nLocation: /new",
+        "text/html",
+        String::new(),
+    )
+}
+
 #[test]
 fn inventory_aliases_are_checked_against_what_the_seeded_crawl_observed() {
     let site = Site::start(vec![
         ("/", html(r#"<main><a href="/guide">Guide</a></main>"#)),
-        (
-            "/old",
-            (
-                "301 Moved Permanently\r\nLocation: /new",
-                "text/html",
-                String::new(),
-            ),
-        ),
+        // Seeds are fetched in order: one alias before its target, one after.
+        ("/aold", moved_to_new()),
         ("/new", html("<main>New</main>")),
+        ("/zold", moved_to_new()),
         ("/guide", html("<main>Guide</main>")),
         (
             "/alias",
@@ -1551,12 +1555,10 @@ fn inventory_aliases_are_checked_against_what_the_seeded_crawl_observed() {
     ]);
     let temp = tempfile::tempdir().unwrap();
     let base = &site.base_url;
-    // `/new` is fetched before `/old` here. The snapshot keeps one capture per
-    // final route, so a redirect fetched before a direct fetch of its target
-    // loses its provenance and leaves the seed unfetched.
     let mut context = inventory_context(&site, &["/", "/new", "/guide"], &[]);
     let aliases = [
-        ("/old", "redirect", "/new"),
+        ("/aold", "redirect", "/new"),
+        ("/zold", "redirect", "/new"),
         ("/alias", "canonical_alias", "/guide"),
         ("/fr/guide", "locale_fallback", "/guide"),
     ];
@@ -1568,26 +1570,40 @@ fn inventory_aliases_are_checked_against_what_the_seeded_crawl_observed() {
             "url": format!("{base}{path}"), "disposition": disposition,
             "target": format!("{base}{target}"), "locale": null}));
     }
-    let (_, audit) = seeded_crawl(&site, temp.path(), &context, &[]);
+    let (payload, audit) = seeded_crawl(&site, temp.path(), &context, &[]);
+    assert_eq!(site.request_count("/new"), 3, "two redirects and the seed");
+    let attestation = &payload["artifact"]["crawl_attestation"];
+    assert_eq!(attestation["unfetched_urls"], serde_json::json!([]));
     let report = audit_link_report(temp.path(), &audit);
     assert_eq!(report["crawl_complete"], true, "{report:#}");
-    let alias_at = |url: String| {
+    let aliases_at = |url: String| {
         report["pages"]
             .as_array()
             .unwrap()
             .iter()
             .find(|page| page["url"] == url)
-            .unwrap_or_else(|| panic!("{report:#}"))["inventory_aliases"][0]
+            .unwrap_or_else(|| panic!("{report:#}"))["inventory_aliases"]
             .clone()
     };
-    let redirect = alias_at(format!("{base}/new"));
-    assert_eq!(redirect["url"], format!("{base}/old"), "{report:#}");
-    assert_eq!(redirect["verified_by"], "redirect", "{report:#}");
+    // Whichever side of the direct fetch an alias was fetched on, it keeps
+    // its own provenance and is verified.
+    let redirects = aliases_at(format!("{base}/new"));
+    let verified = redirects
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|alias| (alias["url"].clone(), alias["verified_by"].clone()))
+        .collect::<Vec<_>>();
     assert_eq!(
-        alias_at(format!("{base}/alias"))["verified_by"],
+        verified,
+        ["/aold", "/zold"].map(|path| (format!("{base}{path}").into(), "redirect".into())),
+        "{report:#}"
+    );
+    assert_eq!(
+        aliases_at(format!("{base}/alias"))[0]["verified_by"],
         "canonical"
     );
-    let fallback = alias_at(format!("{base}/fr/guide"));
+    let fallback = aliases_at(format!("{base}/fr/guide"))[0].clone();
     assert_eq!(
         fallback,
         serde_json::json!({"url": format!("{base}/fr/guide"), "disposition": "locale_fallback",
@@ -1607,7 +1623,7 @@ fn inventory_aliases_are_checked_against_what_the_seeded_crawl_observed() {
 
     // Once the fallback is published in its own right, the verified aliases
     // leave the inventory's own pages eligible, and never themselves.
-    context["inventory"]["pages"][5]["disposition"] = "published".into();
+    context["inventory"]["pages"][6]["disposition"] = "published".into();
     write(&temp.path().join("context.json"), &context.to_string());
     let report = audit_link_report(temp.path(), &audit);
     let reconciliation = &report["reconciliation"];

@@ -395,6 +395,24 @@ pub struct CrawlResponseProvenance {
     /// characters and bounded in length. `None` when not requested or absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_marker: Option<String>,
+    /// Other fetches that ended on this same page: each requested a different
+    /// URL and was redirected here. The page is captured once; these keep the
+    /// provenance of the other requests, sorted by `requested_url`. Empty when
+    /// only one request reached the page, and in older artifacts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redirected_arrivals: Vec<RedirectedArrival>,
+}
+
+/// A fetch that requested `requested_url` and ended on a page captured from
+/// another request, with the redirect hops it followed, as in
+/// [`CrawlResponseProvenance`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RedirectedArrival {
+    pub requested_url: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redirect_chain: Vec<RedirectHop>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_code: Option<u16>,
 }
 
 /// One redirect response in a crawl fetch: the URL requested at that hop,

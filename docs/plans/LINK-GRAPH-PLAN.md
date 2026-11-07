@@ -118,6 +118,19 @@ not change their counts or assert confirmed orphans.
   per final route, so a seeded redirect alias fetched before its target loses
   its provenance (failing closed as an unfetched seed), and browser-engine
   crawls still record no redirect chains.
+- The runtime snapshot still keeps one capture per final route, but every other
+  request that ended on it keeps its requested URL, hops and status in an
+  additive `redirected_arrivals` list. The capture is chosen independently of
+  fetch order, and the list survives checkpoints, resume and audit artifacts.
+  Seed attestation, the audit adapter's redirect credit and consistency checks,
+  and alias verification read every arrival, each checked on its own. An
+  end-to-end crawl verifies one redirect alias fetched before its target and one
+  fetched after it. This ticks item 2 below: release and snapshot identity
+  (release markers, snapshot window, segment checks), completeness (seeded
+  attestation), HTTP-engine redirect chains and the noindex, canonical and
+  locale-fallback treatment are all in place. Browser-engine crawls still
+  record no redirect chains. That limitation is documented and stated per
+  report: it raises `audit_browser_engine`, so such a crawl is never complete.
 - A synthetic in-process benchmark covers 50 pages and 500 links (#76). No CI
   performance budget has been established for this graph benchmark.
 - A live Aeptus URL returned a generic noindex holding page, not the article
@@ -135,7 +148,7 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
 - [ ] Validate the EmDash inventory exporter with an explicit publication, route,
   locale, status and surface mapping on a real matching site; do not infer
   completeness from `routable` or from a non-transactional export.
-- [ ] Capture matching release and snapshot identity, reliable crawl completeness,
+- [x] Capture matching release and snapshot identity, reliable crawl completeness,
   redirect chains and explicit noindex/canonical/locale-fallback treatment.
 - [ ] Integrate coverage-aware graph observations into existing site reports;
   validate legacy rule semantics and preserve contracts and baseline compatibility.
