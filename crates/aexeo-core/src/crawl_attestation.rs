@@ -10,6 +10,38 @@ use url::Url;
 
 use crate::link_graph::redact_url;
 use crate::link_inventory::InventorySnapshot;
+use crate::release_marker::{ReleaseMarkerSpec, attest_release};
+
+/// The attestation of a runtime crawl, when it was seeded from an inventory
+/// or asked for a release marker; `None` otherwise, so an artifact made
+/// without those options is unchanged. Without a seed, `seeded_from` stays
+/// empty, which never counts as seeded.
+pub fn attest_runtime_crawl(
+    seed: Option<&InventorySeed>,
+    release: Option<&ReleaseMarkerSpec>,
+    artifact: &AuditArtifact,
+) -> Option<CrawlAttestation> {
+    if seed.is_none() && release.is_none() {
+        return None;
+    }
+    let mut attestation = seed.map_or_else(
+        || CrawlAttestation {
+            engine: crawl_engine(artifact),
+            ..CrawlAttestation::default()
+        },
+        |seed| attest_crawl(seed, artifact),
+    );
+    attestation.release = release.map(|spec| attest_release(spec, artifact));
+    Some(attestation)
+}
+
+fn crawl_engine(artifact: &AuditArtifact) -> String {
+    artifact
+        .crawl
+        .as_ref()
+        .map(|crawl| crawl.engine.clone())
+        .unwrap_or_default()
+}
 
 /// The same-origin URLs of an inventory, ready to seed a crawl.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,17 +124,14 @@ pub fn attest_crawl(seed: &InventorySeed, artifact: &AuditArtifact) -> CrawlAtte
             inventory_identity: seed.inventory_identity.clone(),
             url_count: seed.urls.len(),
         },
-        engine: artifact
-            .crawl
-            .as_ref()
-            .map(|crawl| crawl.engine.clone())
-            .unwrap_or_default(),
+        engine: crawl_engine(artifact),
         out_of_origin_urls: seed.out_of_origin_urls.clone(),
         unfetched_urls,
         robots_skipped_urls: site
             .and_then(|site| site.crawl_meta.as_ref())
             .map(|meta| meta.robots_skipped_urls.clone())
             .unwrap_or_default(),
+        release: None,
     }
 }
 
@@ -125,6 +154,21 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn no_seed_and_no_marker_means_no_attestation() {
+        let artifact = AuditArtifact {
+            command: "crawl".into(),
+            ..AuditArtifact::default()
+        };
+        assert_eq!(attest_runtime_crawl(None, None, &artifact), None);
+        let spec = ReleaseMarkerSpec::new(Some("x-release"), None)
+            .unwrap()
+            .unwrap();
+        let attestation = attest_runtime_crawl(None, Some(&spec), &artifact).unwrap();
+        assert_eq!(attestation.seeded_from.url_count, 0);
+        assert_eq!(attestation.release.unwrap().value, None);
     }
 
     #[test]

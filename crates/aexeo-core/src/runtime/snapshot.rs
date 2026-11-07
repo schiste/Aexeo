@@ -340,6 +340,7 @@ mod tests {
                 url: "https://example.test/old".into(),
                 status_code: 301,
             }],
+            release_marker: Some("r1".into()),
         };
         let mut builder = RuntimeSnapshotBuilder::new();
         builder

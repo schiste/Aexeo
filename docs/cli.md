@@ -257,6 +257,12 @@ Options:
       --seed-file <seed-file>
           Seed every page URL on the target's origin from a link inventory JSON file and record a crawl attestation in the audit artifact
 
+      --release-header <release-header>
+          Record each HTML page's release marker from this response header and attest it in the audit artifact; takes precedence over --release-meta
+
+      --release-meta <release-meta>
+          Record each HTML page's release marker from the content of <meta name=NAME> and attest it in the audit artifact
+
       --include-pattern <include-pattern>
 
 

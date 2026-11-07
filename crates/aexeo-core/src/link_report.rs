@@ -302,7 +302,21 @@ pub fn build_link_report_from_audit_with_static_urls(
                 redirect_chain: recorded_redirect_chain(response, &mut issues),
             }),
     );
-    // A static export is not a crawl: its coverage is never attested.
+    // A static export is not a crawl: neither its coverage nor its release
+    // is ever attested.
+    let attestation = artifact
+        .crawl_attestation
+        .as_ref()
+        .filter(|_| static_urls.is_none());
+    let declared_release = context
+        .and_then(|value| value.identity.as_ref())
+        .map(|identity| identity.release.trim())
+        .filter(|release| !release.is_empty());
+    let (observed_release, release_issues) = crawl_release(
+        attestation.and_then(|value| value.release.as_ref()),
+        declared_release,
+    );
+    issues.extend(release_issues.iter().copied());
     let crawl_complete = static_urls.is_none() && {
         let incomplete = crawl_audit_completeness_issues(
             artifact,
@@ -312,26 +326,88 @@ pub fn build_link_report_from_audit_with_static_urls(
         issues.extend(incomplete);
         complete
     };
-    let input = LinkReportInput {
-        version: 1,
-        identity: context
+    let mut identity =
+        context
             .and_then(|value| value.identity.clone())
-            .or(Some(SurfaceIdentity {
+            .unwrap_or(SurfaceIdentity {
                 origin,
                 release: String::new(),
                 surface: String::new(),
                 snapshot: String::new(),
-            })),
+            });
+    // The release the pages served outranks the one the caller declared, so
+    // reconciliation compares the inventory's release with what was crawled.
+    if let Some(release) = observed_release {
+        identity.release = release;
+    }
+    let input = LinkReportInput {
+        version: 1,
+        identity: Some(identity),
         snapshot_date: context.and_then(|value| value.snapshot_date.clone()),
         crawl_complete,
         pages,
         inventory: context.and_then(|value| value.inventory.clone()),
     };
     let mut report = build_link_report(&input)?;
+    // An unconfirmed release, like a coverage gap, keeps every page ineligible.
+    if let Some(result) = report
+        .reconciliation
+        .as_mut()
+        .filter(|_| !release_issues.is_empty())
+    {
+        result.comparable = false;
+        result.eligible_pages.clear();
+        result
+            .issues
+            .extend(release_issues.iter().map(|issue| (*issue).to_string()));
+        result.issues.sort();
+        result.issues.dedup();
+        issues.insert("inventory_not_comparable");
+    }
     report.issues.extend(issues.into_iter().map(str::to_string));
     report.issues.sort();
     report.issues.dedup();
     Ok(report)
+}
+
+/// The release the crawl attests, and why it does not when one was asked for.
+/// A crawl attests a release only when every fetched HTML page served the
+/// same marker; a declared release that differs from it is a mismatch.
+/// Without a requested marker there is nothing to report.
+fn crawl_release(
+    release: Option<&aexeo_contracts::ReleaseAttestation>,
+    declared: Option<&str>,
+) -> (Option<String>, Vec<&'static str>) {
+    let Some(release) = release else {
+        return (None, Vec::new());
+    };
+    let mut issues = Vec::new();
+    let observed = release
+        .value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match observed {
+        Some(value) if declared.is_some_and(|declared| declared != value) => {
+            issues.push("audit_release_mismatch");
+        }
+        Some(_) => {}
+        None => {
+            let inconsistent = release
+                .distinct_value_count
+                .unwrap_or(release.distinct_values.len())
+                > 1;
+            if inconsistent {
+                issues.push("audit_release_inconsistent");
+            }
+            // Anything else that leaves no value, such as a page without a
+            // marker, means the release is not attested.
+            if !inconsistent || release.pages_without_marker > 0 {
+                issues.push("audit_release_unattested");
+            }
+        }
+    }
+    (observed.map(str::to_string), issues)
 }
 
 /// Why a runtime audit does not attest complete crawl coverage, one issue per
@@ -1198,6 +1274,151 @@ mod tests {
         let report =
             build_link_report_from_audit(&serde_json::from_value(artifact).unwrap()).unwrap();
         assert!(!report.crawl_complete);
+    }
+
+    /// `attested_audit` whose crawl recorded `release`.
+    fn audit_with_release(release: serde_json::Value) -> (serde_json::Value, AuditLinkContext) {
+        let (mut artifact, context) = attested_audit();
+        artifact["crawl_attestation"]["release"] = release;
+        (artifact, context)
+    }
+
+    fn release(
+        value: Option<&str>,
+        with: usize,
+        without: usize,
+        distinct: &[&str],
+    ) -> serde_json::Value {
+        serde_json::json!({"source":"header", "name":"x-release", "value":value,
+            "pages_with_marker":with, "pages_without_marker":without, "distinct_values":distinct})
+    }
+
+    const RELEASE_ISSUES: [&str; 3] = [
+        "audit_release_inconsistent",
+        "audit_release_mismatch",
+        "audit_release_unattested",
+    ];
+
+    #[test]
+    fn an_attested_release_fills_the_identity_and_keeps_eligibility() {
+        let (artifact, mut context) = audit_with_release(release(Some("r1"), 3, 0, &["r1"]));
+        context.identity.as_mut().unwrap().release = String::new();
+        let report = attested_report(&artifact, &context);
+        assert_eq!(report.identity.as_ref().unwrap().release, "r1");
+        assert!(report.crawl_complete, "{:?}", report.issues);
+        assert!(
+            !report
+                .issues
+                .iter()
+                .any(|issue| RELEASE_ISSUES.contains(&issue.as_str()))
+        );
+        let reconciliation = report.reconciliation.as_ref().unwrap();
+        assert!(reconciliation.comparable, "{:?}", reconciliation.issues);
+        assert!(!reconciliation.eligible_pages.is_empty());
+        // An attested release never makes an unseeded crawl complete.
+        let (mut artifact, context) = audit_with_release(release(Some("r1"), 3, 0, &["r1"]));
+        artifact["crawl_attestation"]["seeded_from"]["url_count"] = 0.into();
+        let report = attested_report(&artifact, &context);
+        assert!(!report.crawl_complete);
+        assert!(
+            report
+                .issues
+                .contains(&"audit_not_inventory_seeded".to_string())
+        );
+    }
+
+    #[test]
+    fn an_unconfirmed_release_raises_its_issue_and_keeps_pages_ineligible() {
+        let cases: [(&str, Mutation); 4] = [
+            ("audit_release_inconsistent", |artifact, _| {
+                artifact["crawl_attestation"]["release"] = release(None, 3, 0, &["r1", "r2"]);
+            }),
+            ("audit_release_unattested", |artifact, _| {
+                artifact["crawl_attestation"]["release"] = release(None, 2, 1, &["r1"]);
+            }),
+            ("audit_release_unattested", |artifact, _| {
+                artifact["crawl_attestation"]["release"] = release(None, 0, 3, &[]);
+            }),
+            ("audit_release_mismatch", |_, context| {
+                context.identity.as_mut().unwrap().release = "r0".into();
+            }),
+        ];
+        for (expected, mutate) in cases {
+            let (mut artifact, mut context) =
+                audit_with_release(release(Some("r1"), 3, 0, &["r1"]));
+            mutate(&mut artifact, &mut context);
+            let report = attested_report(&artifact, &context);
+            let raised = RELEASE_ISSUES
+                .iter()
+                .filter(|issue| report.issues.iter().any(|value| value == *issue))
+                .copied()
+                .collect::<Vec<_>>();
+            assert_eq!(raised, [expected], "{:?}", report.issues);
+            // Coverage is a separate question; the release only withholds eligibility.
+            assert!(report.crawl_complete, "{expected}: {:?}", report.issues);
+            let reconciliation = report.reconciliation.as_ref().unwrap();
+            assert!(!reconciliation.comparable, "{expected}");
+            assert!(reconciliation.eligible_pages.is_empty());
+            assert!(reconciliation.issues.contains(&expected.to_string()));
+            assert!(
+                report
+                    .issues
+                    .contains(&"inventory_not_comparable".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn the_crawled_release_wins_and_is_compared_with_the_inventory() {
+        // The caller declares r0, the pages serve r1: r1 is the report's release.
+        let (artifact, mut context) = audit_with_release(release(Some("r1"), 3, 0, &["r1"]));
+        context.identity.as_mut().unwrap().release = "r0".into();
+        let report = attested_report(&artifact, &context);
+        assert_eq!(report.identity.as_ref().unwrap().release, "r1");
+        // An inventory of another release does not reconcile with the crawl,
+        // even when the caller declares that release too.
+        let (artifact, mut context) = audit_with_release(release(Some("r1"), 3, 0, &["r1"]));
+        context
+            .inventory
+            .as_mut()
+            .unwrap()
+            .identity
+            .as_mut()
+            .unwrap()
+            .release = "r0".into();
+        context.identity.as_mut().unwrap().release = "r0".into();
+        let report = attested_report(&artifact, &context);
+        let reconciliation = report.reconciliation.as_ref().unwrap();
+        assert!(
+            reconciliation
+                .issues
+                .contains(&"surface_identity_mismatch".to_string())
+        );
+        assert!(reconciliation.eligible_pages.is_empty());
+        // Without a crawled release, the declared one is compared as before.
+        let (mut artifact, mut context) = attested_audit();
+        artifact["crawl_attestation"]["seeded_from"]["inventory_identity"]["release"] = "r0".into();
+        context
+            .inventory
+            .as_mut()
+            .unwrap()
+            .identity
+            .as_mut()
+            .unwrap()
+            .release = "r0".into();
+        let report = attested_report(&artifact, &context);
+        let reconciliation = report.reconciliation.as_ref().unwrap();
+        assert!(
+            reconciliation
+                .issues
+                .contains(&"surface_identity_mismatch".to_string())
+        );
+        assert!(
+            !report
+                .issues
+                .iter()
+                .any(|issue| RELEASE_ISSUES.contains(&issue.as_str()))
+        );
     }
 
     fn redirect_report(chain: Vec<RedirectHop>) -> LinkReport {

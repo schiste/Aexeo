@@ -94,6 +94,14 @@ not change their counts or assert confirmed orphans.
   and with every seed fetched; each unmet condition raises its own `audit_*`
   issue, and a `--context` alone never completes coverage. Release and snapshot
   identity remain caller-supplied, so item 2 below stays open.
+- `crawl --release-header` / `--release-meta` record the release marker each
+  fetched HTML page serves, and the crawl attestation adds the release, attested
+  only when every page serves the same value. The audit adapter uses the
+  attested release as the report identity, compares it with the inventory's,
+  and raises `audit_release_mismatch`, `audit_release_inconsistent` or
+  `audit_release_unattested`, each withholding eligibility. Snapshot timing
+  and resumed crawls are not covered yet, and item 2 below stays open:
+  locale-fallback treatment and canonical alias observation are not done.
 - A synthetic in-process benchmark covers 50 pages and 500 links (#76). No CI
   performance budget has been established for this graph benchmark.
 - A live Aeptus URL returned a generic noindex holding page, not the article

@@ -2,9 +2,10 @@ use aexeo_contracts::AuditStatus;
 use aexeo_contracts::PerformanceBudget;
 use aexeo_contracts::PerformanceDiffThresholds;
 use aexeo_core::config::load_config_with_diagnostics;
-use aexeo_core::crawl_attestation::{InventorySeed, attest_crawl, inventory_seed};
+use aexeo_core::crawl_attestation::{InventorySeed, attest_runtime_crawl, inventory_seed};
 use aexeo_core::error::UserContext;
 use aexeo_core::link_inventory::InventorySnapshot;
+use aexeo_core::release_marker::ReleaseMarkerSpec;
 use aexeo_core::user_bail;
 use aexeo_core::{
     RuntimeAudit, RuntimeAuditOptions, RuntimeProgressEvent, RuntimeProgressMode,
@@ -353,6 +354,22 @@ fn runtime_options_from_cli<'a>(
         artifact_command,
         progress_artifact,
         partial_audit_artifact: partial_artifact,
+        release_marker: None,
+    }
+}
+
+/// The release marker `--release-header` and `--release-meta` ask for, if any.
+fn release_marker_from_cli(submatches: &ArgMatches) -> Result<Option<ReleaseMarkerSpec>> {
+    let flag = |name: &str| {
+        submatches
+            .try_get_one::<String>(name)
+            .ok()
+            .flatten()
+            .map(String::as_str)
+    };
+    match ReleaseMarkerSpec::new(flag("release-header"), flag("release-meta")) {
+        Ok(spec) => Ok(spec),
+        Err(reason) => user_bail!("{reason}"),
     }
 }
 
@@ -392,6 +409,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     if submatches.get_flag("link-graph-summary") && format == "sarif" {
         user_bail!("--link-graph-summary is supported only with text or json output");
     }
+    let release_marker = release_marker_from_cli(submatches)?;
     let progress_mode = submatches
         .get_one::<String>("progress")
         .map(String::as_str)
@@ -415,6 +433,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
         aexeo_core::runtime::RuntimeArtifactMode::Callback(&mut progress_writer),
         aexeo_core::runtime::RuntimeArtifactMode::Callback(&mut partial_writer),
     );
+    options.release_marker = release_marker.as_ref();
     let target_url = required_arg(submatches, "url")?;
     let seed = submatches
         .get_one::<String>("seed-file")
@@ -436,9 +455,8 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     };
     let mut full_audit_artifact =
         runtime_output_artifact("crawl", &audit, &audit.findings, Some(target_url));
-    full_audit_artifact.crawl_attestation = seed
-        .as_ref()
-        .map(|seed| attest_crawl(seed, &full_audit_artifact));
+    full_audit_artifact.crawl_attestation =
+        attest_runtime_crawl(seed.as_ref(), release_marker.as_ref(), &full_audit_artifact);
     let performance_budget_passed =
         apply_performance_budget(&mut full_audit_artifact, performance_budget.as_ref());
     let audit_path = write_audit_artifact(

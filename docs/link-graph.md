@@ -170,9 +170,11 @@ a resumed crawl keeps them; pass the same `--seed-file` when resuming so the
 attestation is recorded again. Include and exclude patterns still apply to seeds.
 
 The audit artifact then carries a `crawl_attestation`, computed from what the
-finished crawl recorded rather than from what it queued. It is omitted when no
-seed file is given, so other artifacts are unchanged, and older artifacts load
-without it.
+finished crawl recorded rather than from what it queued. It is omitted when
+neither a seed file nor a release marker (below) is given, so other artifacts
+are unchanged, and older artifacts load without it. Without a seed file,
+`seeded_from` is `{"inventory_identity": null, "url_count": 0}`, which never
+counts as seeded.
 
 ```json
 "crawl_attestation": {
@@ -223,8 +225,59 @@ eligibility (`non_success_response`, `response_headers_missing`). A draft
 answering 2xx is checked by `inventory_indexability_mismatch`; any other status,
 such as 5xx or 403, still raises `audit_failed_responses`. `noindex` entries get
 no such exemption: the inventory says they are served with a noindex directive,
-not that they are absent. Release and snapshot identity are still supplied by
-the caller and not verified.
+not that they are absent.
+
+### Release marker
+
+`crawl --release-header NAME` and `crawl --release-meta NAME` record the
+release marker each successfully fetched HTML page serves: the value of
+response header `NAME`, or the `content` of the first `<meta name="NAME">`
+outside scripts, styles and comments. Either or both may be given. With both,
+the header takes precedence: a page's usable header value is recorded, and its
+meta tag is read only when the header is absent or empty. Values are trimmed,
+control characters are dropped and at most 128 characters are kept. Header
+names are matched without regard to case; `Set-Cookie`, `Cookie`,
+`Authorization`, `Proxy-Authorization`, `WWW-Authenticate` and
+`Proxy-Authenticate` are refused, so a credential is never recorded.
+`--crawl-header` sets request headers and plays no part here. Each page keeps
+its marker as `release_marker` in its response provenance, and the attestation
+gains:
+
+```json
+"release": {
+  "source": "header",
+  "name": "x-release",
+  "value": "r1",
+  "pages_with_marker": 120,
+  "pages_without_marker": 0,
+  "distinct_values": ["r1"]
+}
+```
+
+`value` is set only when every fetched HTML page served the same non-empty
+marker, and is `null` otherwise. `meta_fallback` names the meta tag when both
+flags are given. `distinct_values` lists at most 8 values; when there are more,
+`distinct_value_count` gives the true count. Pages restored from a checkpoint
+keep the marker they were fetched with, so a resumed crawl that meets another
+release reports more than one value.
+
+`link-graph --audit` then treats the crawl-observed release as the report's
+`identity.release`, whatever `--context` declares, so reconciliation compares
+the inventory's release with what the pages served: a different inventory
+release raises `surface_identity_mismatch` there. These issues are raised only
+when a release marker was requested, and each one also makes the
+reconciliation not comparable, so no page is eligible:
+
+| Condition | Issue |
+| --- | --- |
+| `--context` declares a release other than the attested one | `audit_release_mismatch` |
+| Pages served more than one marker value | `audit_release_inconsistent` |
+| A page served no marker, or none did | `audit_release_unattested` |
+
+When no release is attested, the context's release, if any, stays in the
+identity. A release never grants completeness: `crawl_complete` still follows
+only the coverage conditions above. An inventory exporter, such as the EmDash
+one, must therefore put the marker the site serves in its `identity.release`.
 
 To write a graph alongside a runtime crawl in one command, pass
 `--link-graph-output graph.json` to `aexeo-cli crawl URL`. The normal audit

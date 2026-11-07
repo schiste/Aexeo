@@ -150,3 +150,4 @@ pub use well_known_rules::run_well_known_rules;
 
 pub mod crawl_attestation;
 pub mod link_inventory;
+pub mod release_marker;
