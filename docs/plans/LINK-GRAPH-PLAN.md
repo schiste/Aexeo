@@ -151,8 +151,13 @@ not change their counts or assert confirmed orphans.
   Baselines see them as resolved, as accepted. `LNK001` no longer fires on a
   link to the requested URL or a hop of a consistent recorded redirect chain
   that ended on an analyzed page; redirects to an error response stay broken.
-- A synthetic in-process benchmark covers 50 pages and 500 links (#76). No CI
-  performance budget has been established for this graph benchmark.
+- A synthetic in-process benchmark covers 50 pages and 500 links (#76) and now
+  a second tier of 1,000 pages and 20,000 links. `scripts/check-performance.sh`
+  runs both tiers in the CI `validate` job against average and p95 ceilings in
+  `performance-budget.json`. The large tier measured 52 to 92 ms average on CI
+  and is capped at 300 ms, about 3x the slower run. A deliberate 4x slowdown,
+  tried locally and not committed, fails the check. The calibration is in
+  [the link graph benchmark](../link-graph.md#benchmark).
 - A live Aeptus URL returned a generic noindex holding page, not the article
   visible in the CMS preview. An end-to-end HTTP crawl and audit adapter report
   captured the URL and noindex and flagged incomplete coverage. This sample does
@@ -183,7 +188,8 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
 - [ ] Run end-to-end fixtures and real-site comparisons for static and runtime
   sources, multiple locales, incomplete crawls, redirects and cross-origin URLs.
 - [x] Benchmark graph parsing independently and retain opt-in, aggregate-only
-  operational telemetry. A calibrated CI budget remains outstanding.
+  operational telemetry. A calibrated CI budget enforces it in the perf budget
+  step.
 - [ ] Finish the independent, diverse human-reviewed evaluation corpus and the
   outstanding broader content-quality roadmap. Fact/source verification remains
   later in that roadmap and must not be presented as already validated.
