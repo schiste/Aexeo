@@ -206,8 +206,12 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
   completeness from `routable` or from a non-transactional export.
 - [x] Capture matching release and snapshot identity, reliable crawl completeness,
   redirect chains and explicit noindex/canonical/locale-fallback treatment.
-- [ ] Integrate coverage-aware graph observations into existing site reports;
+- [x] Integrate coverage-aware graph observations into existing site reports;
   validate legacy rule semantics and preserve contracts and baseline compatibility.
+  Crawl and `report render --link-graph` carry the qualified findings and link
+  graph notes. The static `audit` command is out of scope: it reads local files
+  without a crawl, so it has no release, snapshot or completeness evidence to
+  qualify LNK001/LNK002 against, and its findings stay unqualified.
 - [ ] Run end-to-end fixtures and real-site comparisons for static and runtime
   sources, multiple locales, incomplete crawls, redirects and cross-origin URLs.
 - [x] Benchmark graph parsing independently and retain opt-in, aggregate-only
