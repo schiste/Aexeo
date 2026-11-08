@@ -86,6 +86,15 @@ pub enum ContentGate {
         blocking: bool,
         max_words: usize,
     },
+    /// Limits Unicode scalar values in adapter-supplied paragraphs.
+    ParagraphCharacterLength {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+        max_chars: usize,
+    },
     /// Requires a minimum number of hyperlinks; does not validate destinations.
     LinkCount {
         id: String,
@@ -294,6 +303,7 @@ impl ContentGate {
             | Self::LinkDestinations { severity, .. }
             | Self::SentenceLength { severity, .. }
             | Self::ParagraphLength { severity, .. }
+            | Self::ParagraphCharacterLength { severity, .. }
             | Self::RepeatedTerms { severity, .. }
             | Self::ForbiddenTerms { severity, .. }
             | Self::RequiredMetadata { severity, .. }
@@ -316,6 +326,7 @@ impl ContentGate {
             | Self::LinkDestinations { blocking, .. }
             | Self::SentenceLength { blocking, .. }
             | Self::ParagraphLength { blocking, .. }
+            | Self::ParagraphCharacterLength { blocking, .. }
             | Self::RepeatedTerms { blocking, .. }
             | Self::ForbiddenTerms { blocking, .. }
             | Self::RequiredMetadata { blocking, .. }
@@ -341,7 +352,7 @@ impl ContentGate {
             Self::LinkCount { .. } => "links",
             Self::LinkDestinations { .. } => "link_destinations",
             Self::RequiredMetadata { .. } => "metadata",
-            Self::ParagraphLength { .. } => "paragraphs",
+            Self::ParagraphLength { .. } | Self::ParagraphCharacterLength { .. } => "paragraphs",
             Self::RequiredHeadings { .. }
             | Self::DuplicateHeadings { .. }
             | Self::HeadingLength { .. } => "headings",
@@ -361,6 +372,7 @@ impl ContentGate {
             | Self::LinkDestinations { id, .. }
             | Self::SentenceLength { id, .. }
             | Self::ParagraphLength { id, .. }
+            | Self::ParagraphCharacterLength { id, .. }
             | Self::RepeatedTerms { id, .. }
             | Self::ForbiddenTerms { id, .. }
             | Self::RequiredMetadata { id, .. }
@@ -778,6 +790,12 @@ impl ContentPreset {
                 ContentGate::ParagraphLength { max_words, .. } if *max_words == 0 => {
                     bail!("paragraph length needs a positive limit for {}", gate.id())
                 }
+                ContentGate::ParagraphCharacterLength { max_chars, .. } if *max_chars == 0 => {
+                    bail!(
+                        "paragraph character length needs a positive limit for {}",
+                        gate.id()
+                    )
+                }
                 ContentGate::SentenceLength {
                     max_words,
                     delimiters,
@@ -1159,26 +1177,39 @@ impl ContentPreset {
                         reason = Some("link destinations are unavailable from this adapter".into())
                     }
                 },
-                ContentGate::ParagraphLength { max_words, .. } => {
-                    measurements.insert("max_words".into(), *max_words);
+                ContentGate::ParagraphLength {
+                    max_words: limit, ..
+                }
+                | ContentGate::ParagraphCharacterLength {
+                    max_chars: limit, ..
+                } => {
+                    let chars = matches!(gate, ContentGate::ParagraphCharacterLength { .. });
+                    let (limit_key, longest_key, unit) = if chars {
+                        ("max_chars", "longest_paragraph_chars", "characters")
+                    } else {
+                        ("max_words", "longest_paragraph_words", "words")
+                    };
+                    measurements.insert(limit_key.into(), *limit);
                     match context.and_then(|c| c.paragraphs.as_ref()) {
                         Some(paragraphs) => {
                             let mut longest = 0;
                             for paragraph in paragraphs {
-                                let count = paragraph.text.split_whitespace().count();
+                                let count = if chars {
+                                    paragraph.text.chars().count()
+                                } else {
+                                    paragraph.text.split_whitespace().count()
+                                };
                                 longest = longest.max(count);
-                                if count > *max_words {
+                                if count > *limit {
                                     emit(
-                                        format!(
-                                            "Paragraph has {count} words; maximum is {max_words}"
-                                        ),
+                                        format!("Paragraph has {count} {unit}; maximum is {limit}"),
                                         paragraph.line,
                                         paragraph.column,
                                     );
                                 }
                             }
                             measurements.insert("paragraph_count".into(), paragraphs.len());
-                            measurements.insert("longest_paragraph_words".into(), longest);
+                            measurements.insert(longest_key.into(), longest);
                         }
                         None => {
                             reason = Some("paragraphs are unavailable from this adapter".into())

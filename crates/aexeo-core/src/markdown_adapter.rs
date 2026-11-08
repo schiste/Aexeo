@@ -654,6 +654,28 @@ min = 2
     }
 
     #[test]
+    fn paragraph_character_limit_counts_unicode_scalars() {
+        use crate::content_gate::GateStatus;
+        let gate = "kind='paragraph_character_length'\nmax_chars=4";
+        let result = report("中文文章測試\n", gate);
+        assert_eq!(result.status, GateStatus::Failed);
+        assert_eq!(result.measurements["longest_paragraph_chars"], 6);
+        assert_eq!(result.measurements["max_chars"], 4);
+        assert_eq!(report("é😀中文\n", gate).status, GateStatus::Passed);
+        let preset = crate::content_gate::ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='g'\nkind='paragraph_character_length'\nmax_chars=4\n").unwrap();
+        let input = crate::content_gate::ContentInput {
+            id: "t".into(),
+            text: Some("中文".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            preset.evaluate(&input).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+        assert!(crate::content_gate::ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='g'\nkind='paragraph_character_length'\nmax_chars=0\n").is_err());
+    }
+
+    #[test]
     fn inline_code_stays_in_headings_and_prose_and_maps_to_source() {
         use crate::content_gate::GateStatus;
         let source = "## Option `a`\n\n## Option `b`\n\nUse `` x ``.\n";
