@@ -1,6 +1,6 @@
 //! Extract attributable links from rendered HTML without guessing unknown contexts.
 use crate::site::markup::tag_breaks_text;
-use html5ever::{parse_document, tendril::TendrilSink};
+use html5ever::{ParseOpts, parse_document, tendril::TendrilSink, tree_builder::TreeBuilderOpts};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -125,14 +125,44 @@ pub fn extract_links(
     extract_document(html, source_url, site_origin, snapshot_date).0
 }
 
+/// Children of `node` in document order, followed by the contents of a
+/// `<template>`, which the DOM keeps apart from its children.
+fn children_with_template_contents(node: &Handle) -> Vec<Handle> {
+    let mut children = node.children.borrow().clone();
+    if let NodeData::Element {
+        template_contents, ..
+    } = &node.data
+        && let Some(contents) = template_contents.borrow().as_ref()
+    {
+        children.push(contents.clone());
+    }
+    children
+}
+
+fn is_element(node: &Handle, tag: &str) -> bool {
+    matches!(&node.data, NodeData::Element { name, .. } if name.local.as_ref() == tag)
+}
+
 /// Extract link evidence and document-level metadata in the same DOM parse.
+///
+/// Links inside `<template>` and `<noscript>` count, as they do for the audit
+/// and the crawl: the document is parsed with scripting off, so `<noscript>`
+/// content is markup rather than text, and template contents are walked.
+/// Document metadata ignores both, since a scripting browser applies neither.
 pub fn extract_document(
     html: &str,
     source_url: &str,
     site_origin: &str,
     snapshot_date: Option<&str>,
 ) -> (Vec<LinkEvidence>, HtmlLinkMetadata) {
-    let dom = parse_document(RcDom::default(), Default::default()).one(html);
+    let opts = ParseOpts {
+        tree_builder: TreeBuilderOpts {
+            scripting_enabled: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let dom = parse_document(RcDom::default(), opts).one(html);
     let mut base = None;
     let mut metadata = HtmlLinkMetadata::default();
     let mut nodes = vec![dom.document.clone()];
@@ -165,7 +195,9 @@ pub fn extract_document(
         if let Some(href) = canonical {
             metadata.canonical_hrefs.push(href);
         }
-        nodes.extend(node.children.borrow().iter().rev().cloned());
+        if !is_element(&node, "noscript") {
+            nodes.extend(node.children.borrow().iter().rev().cloned());
+        }
     }
     let initial = Scope {
         context: LinkContext::Unknown,
@@ -252,11 +284,9 @@ pub fn extract_document(
             }
         }
         stack.extend(
-            node.children
-                .borrow()
-                .iter()
+            children_with_template_contents(&node)
+                .into_iter()
                 .rev()
-                .cloned()
                 .map(|child| (child, scope.clone())),
         );
     }
@@ -366,6 +396,27 @@ mod tests {
         assert_eq!(routes(html, "https://example.org/fr/page"), ["en/intro"]);
         let foreign = r#"<head><base href="https://cdn.example.net/"></head><a href="x">X</a>"#;
         assert!(routes(foreign, "https://example.org/").is_empty());
+    }
+
+    #[test]
+    fn template_and_noscript_links_count_with_their_surrounding_context() {
+        let html = r#"<html><head><noscript><meta name="robots" content="noindex"></noscript></head><body><main><noscript><p><a href="/plain">plain</a></p></noscript></main><footer><template><a href="/legal-notice">Legal</a></template></footer></body></html>"#;
+        let (links, metadata) =
+            extract_document(html, "https://example.org/", "https://example.org", None);
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| (link.href.as_str(), link.context, link.anchor.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("/plain", LinkContext::Body, "plain"),
+                ("/legal-notice", LinkContext::Footer, "Legal")
+            ]
+        );
+        assert!(
+            metadata.robots_directives.is_empty(),
+            "a scripting browser ignores <noscript> metadata"
+        );
     }
 
     #[test]
