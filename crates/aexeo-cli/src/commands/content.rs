@@ -346,6 +346,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                     | ContentGate::RepeatedTerms { .. }
                     | ContentGate::SentenceLength { .. }
                     | ContentGate::ParagraphLength { .. }
+                    | ContentGate::ParagraphCharacterLength { .. }
             ) {
                 for (finding_index, finding) in result.findings.iter().enumerate() {
                     positional_findings += 1;

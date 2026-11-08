@@ -29,6 +29,13 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [x] Opt-in per-gate timing telemetry for local content and crawls in resolved preset
   order; the event excludes gate IDs and content.
 - [x] Configurable sentence-length heuristic and opt-in composed preset ([PR #29](https://github.com/schiste/Aexeo/pull/29)).
+- [x] Optional, exact case-sensitive abbreviation exceptions for sentence length
+  ([PR #125](https://github.com/schiste/Aexeo/pull/125)); they do not provide
+  linguistic segmentation and can hide a true sentence end.
+- [x] Optional paragraph character-length gate for text without whitespace word
+  boundaries ([PR #126](https://github.com/schiste/Aexeo/pull/126)), with
+  Markdown/EmDash parity and explicit `not_checked` for missing paragraphs.
+  It counts Unicode scalar values, not grapheme clusters or words.
 - [x] Bounded agent lint-and-revise workflow and local telemetry guidance ([PR #30](https://github.com/schiste/Aexeo/pull/30)).
 - [x] Configurable paragraph-length gate with Markdown and EmDash adapter
   capabilities ([PR #33](https://github.com/schiste/Aexeo/pull/33)).

@@ -387,3 +387,15 @@ universal SEO rule. Finding coordinates remain placeholders (1:1); Markdown
 JSON reports include a separate source location at the start of the heading node.
 EmDash reports map heading findings to the first non-empty span of the matching
 heading block (offset zero), in the evaluated Portable Text snapshot.
+
+### Paragraph length in characters
+
+The opt-in `paragraph_character_length` gate limits each adapter-provided paragraph independently, useful when whitespace-separated word counts do not fit the content. Configure `max_chars` as a positive integer. It counts Unicode scalar values, including whitespace and punctuation; this is not a count of visual grapheme clusters or words. Measurements include `max_chars`, `paragraph_count`, and `longest_paragraph_chars`. Missing paragraph capability is `not_checked`.
+
+```toml
+[[gates]]
+id = "editorial.paragraph_characters"
+kind = "paragraph_character_length"
+max_chars = 200
+blocking = false
+```
