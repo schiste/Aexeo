@@ -2,7 +2,7 @@ use anyhow::Result;
 use html5ever::driver::ParseOpts;
 use html5ever::tendril::TendrilSink;
 use html5ever::tree_builder::TreeBuilderOpts;
-use html5ever::{namespace_url, ns, parse_document};
+use html5ever::{ns, parse_document};
 use markup5ever_rcdom::{NodeData, RcDom};
 use std::collections::BTreeMap;
 use std::fs;

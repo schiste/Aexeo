@@ -23,6 +23,7 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - Run the fastest relevant test command first.
 - Check likely entrypoints and impacted callers before finishing.
 - Re-run lint/build only after the focused validation passes.
+- Run `sh scripts/check-code.sh` for code changes before claiming the repository gate passes; it includes `scripts/clippy-strict.sh`, whose production-code lint policy is stricter than generic workspace Clippy.
 - After changing CLI commands or options, run `cargo run -q -p aexeo-cli -- docs generate .` and `cargo run -q -p aexeo-cli -- docs check .`; include the generated `docs/cli.md` changes.
 - Document any override-based maintainer note that affected the change plan.
 
