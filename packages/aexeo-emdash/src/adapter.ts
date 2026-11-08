@@ -2,7 +2,8 @@ import type { EmdashDocument, PortableTextBlock } from "./types.js";
 
 /** Ordered fields that the host declares constitute a custom block's content. */
 export type CustomBlockField =
-  | { kind: "paragraph" | "heading" | "richText"; field: string; optional?: boolean }
+  | { kind: "paragraph" | "richText"; field: string; optional?: boolean }
+  | { kind: "heading"; field: string; level?: 1 | 2 | 3 | 4 | 5 | 6; optional?: boolean }
   | { kind: "link"; field: string; hrefField: string; optional?: boolean }
   | { kind: "repeat"; field: string; fields: readonly CustomBlockField[]; optional?: boolean };
 export type CustomBlockMappings = Record<string, readonly CustomBlockField[]>;
@@ -308,6 +309,7 @@ function mapCustomBlocks(
     for (const entry of fields) {
       if (!entry || typeof entry.field !== "string" || !entry.field ||
         !["heading", "paragraph", "richText", "link", "repeat"].includes(entry.kind)) return false;
+      if (entry.kind === "heading" && entry.level !== undefined && ![1, 2, 3, 4, 5, 6].includes(entry.level)) return false;
       if (entry.kind === "link" && (typeof entry.hrefField !== "string" || !entry.hrefField)) return false;
       if (entry.kind === "repeat" && (!Array.isArray(entry.fields) || entry.fields.length === 0)) return false;
       const value = record[entry.field];
@@ -321,7 +323,7 @@ function mapCustomBlocks(
         result.push(...value);
       } else if (entry.kind === "heading" || entry.kind === "paragraph") {
         if (typeof value !== "string") return false;
-        result.push({ ...portableTextBlock(value, ""), style: entry.kind === "heading" ? "h2" : "normal" });
+        result.push({ ...portableTextBlock(value, ""), style: entry.kind === "heading" ? `h${entry.level ?? 2}` : "normal" });
       } else if (entry.kind === "link") {
         const href = record[entry.hrefField];
         if (typeof value !== "string" || typeof href !== "string" || !href) return false;

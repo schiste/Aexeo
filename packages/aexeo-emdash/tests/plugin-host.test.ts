@@ -75,8 +75,10 @@ describe("EmDash content adaptation", () => {
     expect(contentItemToEmdashDocument({ ...item, data: { blocks: [...(item.data.blocks as object[]), { _type: "unknown", _key: "u", _version: 1 }] } }, mappings).body_capabilities).toEqual([]);
     expect(contentItemToEmdashDocument(item, { hero: [{ kind: "paragraph", field: "missing" }] }).body_capabilities).toEqual([]);
     const faq = { ...item, data: { blocks: [{ _type: "faq", _key: "f", _version: 1, heading: "Questions", faqs: [{ question: "Why?", answer: "Because." }] }] } };
-    const faqMapping = { faq: [{ kind: "heading" as const, field: "heading" }, { kind: "paragraph" as const, field: "subtitle", optional: true }, { kind: "repeat" as const, field: "faqs", fields: [{ kind: "heading" as const, field: "question" }, { kind: "paragraph" as const, field: "answer" }] }] };
-    expect(contentItemToEmdashDocument(faq, faqMapping).body?.map((block) => block.children[0]?.text)).toEqual(["Questions", "Why?", "Because."]);
+    const faqMapping = { faq: [{ kind: "heading" as const, field: "heading" }, { kind: "paragraph" as const, field: "subtitle", optional: true }, { kind: "repeat" as const, field: "faqs", fields: [{ kind: "heading" as const, field: "question", level: 3 as const }, { kind: "paragraph" as const, field: "answer" }] }] };
+    const mappedFaq = contentItemToEmdashDocument(faq, faqMapping);
+    expect(mappedFaq.body?.map((block) => block.children[0]?.text)).toEqual(["Questions", "Why?", "Because."]);
+    expect(mappedFaq.body?.[1]?.style).toBe("h3");
     const badFaq = { ...faq, data: { blocks: [{ _type: "faq", _key: "f", _version: 1, heading: "Questions", faqs: ["bad"] }] } };
     expect(contentItemToEmdashDocument(badFaq, faqMapping).body_capabilities).toEqual([]);
     expect(contentItemToEmdashDocument({ ...item, data: { blocks: [{ _type: "hero", _key: "h", _version: 1, href: "/missing-label" }] } }, { hero: [{ kind: "link", field: "label", hrefField: "href", optional: true }] }).body_capabilities).toEqual([]);
