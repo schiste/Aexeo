@@ -27,7 +27,6 @@ use std::time::{Duration, Instant};
 
 use crate::config::Config;
 use crate::crawl_attestation::CrawlRun;
-use crate::link_evidence::crawl_links;
 use crate::link_graph::redact_url;
 use crate::release_marker::ReleaseMarkerSpec;
 use crate::reporting::build_audit_artifact;
@@ -39,7 +38,7 @@ use fetcher::{
     FetchOutcome, ResponseClass, RuntimeFetcher, classify_status, fetch_error_summary,
     headers_with_user_agent,
 };
-use graph::{read_loc_values, response_report_path, should_enqueue_link};
+use graph::{page_link_routes, read_loc_values, response_report_path};
 use http::{
     HttpFetcher, host_for_url, is_html_content_type, normalize_base_url, origin_for_url,
     same_site_host,
@@ -2096,10 +2095,8 @@ fn materialize_runtime_site(
             );
 
             let extraction_started_at = Instant::now();
-            for link in crawl_links(&body, &fetched.effective_url) {
-                if should_enqueue_link(&link.route) {
-                    planner.discover_link_target(&link.route, &runtime);
-                }
+            for route in page_link_routes(&body, &fetched.effective_url) {
+                planner.discover_link_target(&route, &runtime);
             }
             performance.record(
                 Phase::LinkExtraction,

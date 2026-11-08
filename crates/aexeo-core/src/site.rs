@@ -13,6 +13,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use url::Url;
 
+pub(crate) use parser::audited_link_targets;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AlternateLink {
     pub href: String,

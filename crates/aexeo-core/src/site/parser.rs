@@ -183,34 +183,66 @@ fn capture_alternate_links(raw: &str) -> Vec<AlternateLink> {
     links
 }
 
-fn capture_links(raw: &str, lines: &LineIndex) -> Vec<Link> {
-    let mut links = Vec::new();
+/// One `<a href>` of masked markup: where it opens, its href, and the byte range
+/// of its content.
+struct Anchor {
+    start: usize,
+    href: String,
+    content: std::ops::Range<usize>,
+}
+
+/// Every closed `<a href>` of masked markup, in source order. This textual scan
+/// sees anchors in `<template>` and `<noscript>`, which a DOM parse with
+/// scripting on keeps out of the tree.
+fn scan_anchors(markup: &str) -> Vec<Anchor> {
+    let mut anchors = Vec::new();
     let mut offset = 0;
-    while let Some(start) = next_open_tag(raw, "a", offset) {
-        let Some(open_end) = open_tag_end(raw, start) else {
+    while let Some(start) = next_open_tag(markup, "a", offset) {
+        let Some(open_end) = open_tag_end(markup, start) else {
             break;
         };
-        let snippet = &raw[start..=open_end];
-        let Some(href) = attr_value(snippet, "href") else {
+        let Some(href) = attr_value(&markup[start..=open_end], "href") else {
             offset = open_end + 1;
             continue;
         };
-        let Some((close_start, close_end)) = next_close_tag(raw, "a", open_end + 1) else {
+        let Some((close_start, close_end)) = next_close_tag(markup, "a", open_end + 1) else {
             offset = open_end + 1;
             continue;
         };
-        let text = strip_tags(&raw[open_end + 1..close_start]);
-        let (line, column) = lines.line_column(start);
-        links.push(Link {
-            href: href.clone(),
-            target: normalize_internal_href(&href),
-            text,
-            line,
-            column,
+        anchors.push(Anchor {
+            start,
+            href,
+            content: open_end + 1..close_start,
         });
         offset = close_end;
     }
-    links
+    anchors
+}
+
+fn capture_links(markup: &str, lines: &LineIndex) -> Vec<Link> {
+    scan_anchors(markup)
+        .into_iter()
+        .map(|anchor| {
+            let (line, column) = lines.line_column(anchor.start);
+            Link {
+                target: normalize_internal_href(&anchor.href),
+                text: strip_tags(&markup[anchor.content]),
+                href: anchor.href,
+                line,
+                column,
+            }
+        })
+        .collect()
+}
+
+/// Routes of the root-relative links the audit reads from a page, exactly as
+/// [`build_page_from_source`] targets them for the broken-link rule. A crawl
+/// enqueues these too, so it never reports a link broken without requesting it.
+pub(crate) fn audited_link_targets(raw: &str) -> Vec<String> {
+    scan_anchors(&mask_non_markup(raw))
+        .into_iter()
+        .filter_map(|anchor| normalize_internal_href(&anchor.href))
+        .collect()
 }
 
 fn capture_html_lang(raw: &str) -> Option<String> {

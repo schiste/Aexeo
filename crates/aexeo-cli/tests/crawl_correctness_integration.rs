@@ -228,6 +228,39 @@ fn relative_links_count_for_broken_link_and_inbound_rules() {
     assert!(rule_messages(&payload, "LNK002").is_empty(), "{payload:#}");
 }
 
+#[test]
+fn every_link_the_audit_checks_is_requested_by_the_crawl() {
+    // The audit reads anchors in `<template>` and `<noscript>`, which a DOM
+    // parse with scripting on keeps out of the tree. The crawl must still
+    // request them, or a complete crawl reports them broken without asking.
+    let site = Site::start(vec![
+        (
+            "/",
+            html(
+                r#"<template><a href="/legal-notice">Legal</a></template><noscript><a href="/privacy-policy">Privacy</a></noscript>"#,
+            ),
+        ),
+        (
+            "/legal-notice",
+            (
+                "302 Found\r\nLocation: /fr/legal-notice",
+                "text/html",
+                String::new(),
+            ),
+        ),
+        ("/fr/legal-notice", html("")),
+        ("/privacy-policy", html("")),
+    ]);
+    let temp = tempfile::tempdir().unwrap();
+    let config = link_rules_only(temp.path());
+    let (_, payload) = crawl(&site, &["--config", config.to_str().unwrap()]);
+    for path in ["/legal-notice", "/fr/legal-notice", "/privacy-policy"] {
+        assert!(site.requested(path), "{path} was never requested");
+    }
+    assert!(rule_messages(&payload, "LNK001").is_empty(), "{payload:#}");
+    assert_eq!(payload["artifact"]["status"], "complete", "{payload:#}");
+}
+
 fn site_with_linked_response(status: &'static str) -> Site {
     Site::start(vec![
         ("/", html(r#"<a href="/bad">bad</a>"#)),
