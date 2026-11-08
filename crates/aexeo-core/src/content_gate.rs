@@ -116,6 +116,9 @@ pub enum ContentGate {
         max_words: usize,
         #[serde(default = "default_sentence_delimiters")]
         delimiters: String,
+        /// Exact whitespace-delimited abbreviations whose final period is not a boundary.
+        #[serde(default)]
+        abbreviations: Vec<String>,
     },
     /// Limits exact occurrences of user-configured terms.
     RepeatedTerms {
@@ -785,6 +788,21 @@ impl ContentPreset {
                         gate.id()
                     )
                 }
+                ContentGate::SentenceLength { abbreviations, .. }
+                    if abbreviations.iter().any(|abbr| {
+                        abbr.strip_suffix('.').is_none_or(|word| {
+                            word.is_empty()
+                                || word.contains('.')
+                                || word.chars().any(char::is_whitespace)
+                        })
+                    }) || abbreviations.iter().collect::<BTreeSet<_>>().len()
+                        != abbreviations.len() =>
+                {
+                    bail!(
+                        "sentence abbreviations must be unique single tokens ending in a period for {}",
+                        gate.id()
+                    )
+                }
                 ContentGate::RepeatedTerms { terms, .. }
                     if terms.is_empty()
                         || terms.iter().any(|s| s.trim().is_empty())
@@ -1170,6 +1188,7 @@ impl ContentPreset {
                 ContentGate::SentenceLength {
                     max_words,
                     delimiters,
+                    abbreviations,
                     ..
                 } => {
                     measurements.insert("max_words".into(), *max_words);
@@ -1196,12 +1215,24 @@ impl ContentPreset {
                                         .chars()
                                         .next()
                                         .is_some_and(|c| c.is_ascii_digit());
+                                let abbreviation = ch == Some('.')
+                                    && !abbreviations.is_empty()
+                                    && text[segment_start..offset]
+                                        .split_whitespace()
+                                        .next_back()
+                                        .is_some_and(|word| {
+                                            abbreviations
+                                                .iter()
+                                                .any(|abbr| abbr.strip_suffix('.') == Some(word))
+                                        });
                                 while block_ends.get(next_block).is_some_and(|&end| end < offset) {
                                     next_block += 1;
                                 }
                                 let block_end = block_ends.get(next_block) == Some(&offset);
                                 if block_end
-                                    || !decimal_point && ch.is_none_or(|ch| delimiters.contains(ch))
+                                    || !decimal_point
+                                        && !abbreviation
+                                        && ch.is_none_or(|ch| delimiters.contains(ch))
                                 {
                                     let count =
                                         text[segment_start..offset].split_whitespace().count();
