@@ -486,12 +486,13 @@ tiers against `performance-budget.json`:
 
 | Tier | `max_avg_ms` | `max_p95_ms` | CI measured (avg / p95) |
 | --- | --- | --- | --- |
-| 50 pages, 500 links | 15 | 50 | 2.47 / 2.51 ms |
-| 1,000 pages, 20,000 links | 300 | 600 | 91.5 / 92.5 ms |
+| 50 pages, 500 links | 15 | 50 | 1.28 to 2.47 / 1.29 to 2.51 ms |
+| 1,000 pages, 20,000 links | 300 | 600 | 52.3 to 91.5 / 55.4 to 92.5 ms |
 
-The CI figures come from one `ubuntu-latest` run (2026-11-08). The large tier is
-the regression signal: its average ceiling is about 3x the CI measurement, and
-its p95 ceiling about 6x, to absorb a few slow samples on a shared runner. The
+The CI ranges come from two `ubuntu-latest` runs (2026-11-08), whose runners
+differed by about 1.75x. The large tier is the regression signal: its average
+ceiling is about 3x the slower CI run, and its p95 ceiling about 6x, to absorb
+a few slow samples on a shared runner. The
 small tier finishes in a few milliseconds, so timer and scheduler jitter
 dominate it; its ceilings are about 6x and 20x the CI figures and only catch
 gross regressions. On a laptop running other builds, thirteen local runs
