@@ -509,6 +509,43 @@ fn heading_and_term_measurements_distinguish_absent_inputs() {
 }
 
 #[test]
+fn sentence_character_gate_runs_from_stdin_with_a_portable_preset() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    std::fs::write(&preset, "version=1\nname='Sentences'\n[[gates]]\nid='sentence'\nkind='sentence_character_length'\nmax_chars=4\ndelimiters='。'\nblocking=false\n").unwrap();
+    let source = format!("custom={}", preset.display());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "-",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &source,
+            "--format",
+            "json",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all("中文文章測試。".as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "failed");
+    assert_eq!(
+        report["gates"][0]["measurements"]["longest_sentence_chars"],
+        6
+    );
+}
+
+#[test]
 fn sentence_length_gate_uses_configured_delimiters_and_reports_position() {
     let dir = tempfile::tempdir().unwrap();
     let preset = dir.path().join("preset.toml");
