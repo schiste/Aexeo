@@ -112,7 +112,7 @@ It enforces release-mode benchmark budgets through:
 sh scripts/check-performance.sh
 ```
 
-This compares the static and runtime benchmark fixtures against `performance-budget.json` and writes `.aexeo-reports/benchmarks-latest.json`.
+This compares the static audit, runtime audit, content and link graph benchmark fixtures, plus a fresh-process CLI run, against `performance-budget.json` and writes `.aexeo-reports/benchmarks-latest.json`. The link graph budget and its calibration are described in [the link graph benchmark](link-graph.md#benchmark).
 
 Runtime audit artifacts can also be compared directly:
 

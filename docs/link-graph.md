@@ -472,10 +472,34 @@ It does not establish routing, redirects, indexing or publication equivalence.
 
 ## Benchmark
 
-Run `cargo run --release -p aexeo-core --example link_graph_bench` to measure
-in-process graph construction on a synthetic fixture of 50 pages and 500 links.
-The JSON output reports average, p50 and p95 over 30 warmed iterations; fixture
-construction, process startup and I/O are excluded. The fixture first verifies
-that every page has ten distinct incoming sources. Results depend on hardware
-and load; no CI budget is claimed until release-mode measurements are calibrated
-on CI runners.
+Run `cargo run --release -p aexeo-core --example link_graph_bench -- --json 20`
+to measure in-process graph construction on two synthetic ring fixtures: 50
+pages with 500 links, and 1,000 pages with 20,000 links. Each tier runs three
+warm-up builds, then reports the input size, average, nearest-rank p50 and p95
+over the requested iterations (30 by default) as one JSON object per line.
+Without `--json` it prints the same figures as text. Fixture construction,
+process startup and I/O are excluded. Each fixture first verifies that every
+page has the expected number of distinct incoming sources.
+
+`scripts/check-performance.sh`, which the CI `validate` job runs, checks both
+tiers against `performance-budget.json`:
+
+| Tier | `max_avg_ms` | `max_p95_ms` | CI measured (avg / p95) |
+| --- | --- | --- | --- |
+| 50 pages, 500 links | 15 | 50 | 1.28 to 2.47 / 1.29 to 2.51 ms |
+| 1,000 pages, 20,000 links | 300 | 600 | 52.3 to 91.5 / 55.4 to 92.5 ms |
+
+The CI ranges come from two `ubuntu-latest` runs (2026-11-08), whose runners
+differed by about 1.75x. The large tier is the regression signal: its average
+ceiling is about 3x the slower CI run, and its p95 ceiling about 6x, to absorb
+a few slow samples on a shared runner. The
+small tier finishes in a few milliseconds, so timer and scheduler jitter
+dominate it; its ceilings are about 6x and 20x the CI figures and only catch
+gross regressions. On a laptop running other builds, thirteen local runs
+measured 1.8 to 4.3 ms on average for the small tier, with one 26.9 ms
+outlier, and 87 to 727 ms for the large tier: 87 ms at load average 19, which
+matches CI, and 175 to 727 ms at load average 27 to 41. A local
+`check-performance.sh` run on a machine that busy can therefore exceed the
+large-tier ceiling without a code regression. Rerun it on a quieter machine
+before treating a local failure as real. These ceilings are regression
+tripwires, not latency guarantees for real sites.
