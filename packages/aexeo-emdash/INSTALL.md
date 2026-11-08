@@ -25,9 +25,16 @@ aexeoPlugin({
   blockMappings: {
     hero: [
       { kind: "heading", field: "headline" },
-      { kind: "paragraph", field: "description" },
-      { kind: "link", field: "linkLabel", hrefField: "linkUrl" },
+      { kind: "paragraph", field: "description", optional: true },
+      { kind: "link", field: "linkLabel", hrefField: "linkUrl", optional: true },
       { kind: "richText", field: "body" },
+    ],
+    faq: [
+      { kind: "heading", field: "heading" },
+      { kind: "repeat", field: "faqs", fields: [
+        { kind: "heading", field: "question" },
+        { kind: "paragraph", field: "answer" },
+      ] },
     ],
   },
 })
@@ -35,7 +42,9 @@ aexeoPlugin({
 
 A mapping is the site's assertion that those fields cover the rendered content,
 in order. `richText` accepts Portable Text arrays and preserves their headings
-and links; `heading` represents an h2. Every encountered block type must be
+and links; `heading` represents an h2. `repeat` maps each item in an array;
+`optional: true` permits an absent field without inventing content. Every
+encountered block type must be
 mapped and every mapped field must have the expected type. If not, capabilities
 remain unverified. These options apply to configured-mode saves and both
 refresh routes. In sandboxed mode, enter the same JSON object in the plugin

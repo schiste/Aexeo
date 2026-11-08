@@ -2,8 +2,9 @@ import type { EmdashDocument, PortableTextBlock } from "./types.js";
 
 /** Ordered fields that the host declares constitute a custom block's content. */
 export type CustomBlockField =
-  | { kind: "paragraph" | "heading" | "richText"; field: string }
-  | { kind: "link"; field: string; hrefField: string };
+  | { kind: "paragraph" | "heading" | "richText"; field: string; optional?: boolean }
+  | { kind: "link"; field: string; hrefField: string; optional?: boolean }
+  | { kind: "repeat"; field: string; fields: readonly CustomBlockField[]; optional?: boolean };
 export type CustomBlockMappings = Record<string, readonly CustomBlockField[]>;
 
 export interface EmdashContentItem {
@@ -260,33 +261,47 @@ function mapCustomBlocks(
 ): { blocks: PortableTextBlock[]; capabilities?: [] } {
   const unavailable = () => ({ blocks: blocksToPortableText(blocks), capabilities: [] as [] });
   const result: PortableTextBlock[] = [];
-  for (const block of blocks) {
-    const fields = mappings?.[String(block["_type"])];
-    if (!Array.isArray(fields) || fields.length === 0) return unavailable();
+  const mapFields = (record: Record<string, unknown>, fields: readonly CustomBlockField[], depth: number): boolean => {
+    if (depth > 8 || fields.length === 0) return false;
     for (const entry of fields) {
-      if (!entry || typeof entry.field !== "string" || !entry.field) return unavailable();
-      const value = block[entry.field];
+      if (!entry || typeof entry.field !== "string" || !entry.field ||
+        !["heading", "paragraph", "richText", "link", "repeat"].includes(entry.kind)) return false;
+      if (entry.kind === "link" && (typeof entry.hrefField !== "string" || !entry.hrefField)) return false;
+      if (entry.kind === "repeat" && (!Array.isArray(entry.fields) || entry.fields.length === 0)) return false;
+      const value = record[entry.field];
+      if ((value === undefined || value === null || value === "") && entry.optional) {
+        // Optional links must not silently discard a destination without its label.
+        if (entry.kind === "link" && record[entry.hrefField] != null && record[entry.hrefField] !== "") return false;
+        continue;
+      }
       if (entry.kind === "richText") {
-        if (!Array.isArray(value) || (value.length > 0 && !isPortableTextArray(value))) return unavailable();
+        if (!Array.isArray(value) || (value.length > 0 && !isPortableTextArray(value))) return false;
         result.push(...value);
       } else if (entry.kind === "heading" || entry.kind === "paragraph") {
-        if (typeof value !== "string") return unavailable();
-        result.push({
-          ...portableTextBlock(value, ""),
-          style: entry.kind === "heading" ? "h2" : "normal",
-        });
+        if (typeof value !== "string") return false;
+        result.push({ ...portableTextBlock(value, ""), style: entry.kind === "heading" ? "h2" : "normal" });
       } else if (entry.kind === "link") {
-        const href = block[entry.hrefField];
-        if (typeof value !== "string" || typeof href !== "string") return unavailable();
+        const href = record[entry.hrefField];
+        if (typeof value !== "string" || typeof href !== "string" || !href) return false;
         result.push({
           _type: "block",
           children: [{ _type: "span", text: value, marks: ["link"] }],
           markDefs: [{ _key: "link", _type: "link", href }],
         });
+      } else if (entry.kind === "repeat") {
+        if (!Array.isArray(value) || !Array.isArray(entry.fields)) return false;
+        for (const item of value) {
+          if (!isRecord(item) || !mapFields(item, entry.fields, depth + 1)) return false;
+        }
       } else {
-        return unavailable();
+        return false;
       }
     }
+    return true;
+  };
+  for (const block of blocks) {
+    const fields = mappings?.[String(block["_type"])];
+    if (!Array.isArray(fields) || !mapFields(block, fields, 0)) return unavailable();
   }
   return { blocks: result };
 }
