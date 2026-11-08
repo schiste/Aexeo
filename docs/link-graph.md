@@ -113,7 +113,7 @@ links are excluded. These sources are never added to `distinct_source_pages`,
 `source_pages_by_context` or the other page counts, and this credit never
 makes a page eligible or decides whether it is an orphan. `via_redirect` is
 omitted when nothing is credited: when no source links to the chain, when no chain was recorded (older
-artifacts and browser-engine crawls), and when the chain is inconsistent.
+artifacts and custom browser runners without hops), and when the chain is inconsistent.
 Hop URLs are matched exactly after parsing, like every destination.
 
 Semantic `main`, `article`, `nav` and `footer` elements provide some contexts;
@@ -209,7 +209,7 @@ credentials, and status) in the page's `crawl_response.redirect_chain`, which
 the adapter reports on the page. Hops of other requests redirected to the same
 page go in `crawl_response.redirected_arrivals` and are checked the same way. Requested and effective URLs that differ
 without a recorded chain raise `audit_redirect_chain_unavailable`: older
-artifacts, and browser-engine crawls, which do not report hops. A chain that
+artifacts and browser runners without hop data. A chain that
 does not start at the requested URL, or holds a non-3xx status, is dropped and
 raises `audit_redirect_chain_inconsistent`. The site URL
 gives the origin unless every observed URL shares a different one, as when
@@ -285,7 +285,7 @@ holds, and otherwise raises one issue per unmet condition:
 | Audit status `complete`, no truncation | `audit_crawl_partial` |
 | No failed (non-2xx) response, except an unserved draft | `audit_failed_responses` |
 | No URL skipped by robots.txt | `audit_robots_skipped` |
-| HTTP engine, which records redirect chains | `audit_browser_engine` |
+| HTTP engine, or built-in Playwright with observed consistent chains for every response and arrival | `audit_browser_engine` |
 | Seeded from an inventory with at least one URL | `audit_not_inventory_seeded` |
 | Every seeded URL has a page or response | `audit_seed_unfetched` |
 | The context inventory has the seed inventory's identity | `audit_seed_inventory_mismatch` |
@@ -515,7 +515,7 @@ analyzed page, on that page's host. A link to `/old` that answers
 `301 -> /new` is therefore not broken. A redirect that ends in an error
 response or off the site leaves no analyzed page, so links to it remain
 `LNK001`, as do links to a redirect without a recorded, consistent chain, such
-as one from a browser-engine crawl. Static exports record no redirects and are
+as one from an older browser artifact or custom runner without hop data. Static exports record no redirects and are
 unchanged. This does not depend on a link report.
 
 ## Static audit artifacts
@@ -561,3 +561,11 @@ matches CI, and 175 to 727 ms at load average 27 to 41. A local
 large-tier ceiling without a code regression. Rerun it on a quieter machine
 before treating a local failure as real. These ceilings are regression
 tripwires, not latency guarantees for real sites.
+
+### Browser redirect provenance
+
+Built-in Playwright runners now record HTTP redirect hops from the final navigation,
+with URLs redacted in persisted artifacts. Client-side navigations, custom runners
+without hop data, and older artifacts do not establish a redirect chain. Browser crawls establish completeness only when provenance is observed and
+consistent for every response and redirected arrival. All other coverage and
+inventory requirements still apply before an orphan conclusion is reliable.

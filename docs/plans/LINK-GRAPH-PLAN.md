@@ -128,9 +128,12 @@ not change their counts or assert confirmed orphans.
   fetched after it. This ticks item 2 below: release and snapshot identity
   (release markers, snapshot window, segment checks), completeness (seeded
   attestation), HTTP-engine redirect chains and the noindex, canonical and
-  locale-fallback treatment are all in place. Browser-engine crawls still
-  record no redirect chains. That limitation is documented and stated per
-  report: it raises `audit_browser_engine`, so such a crawl is never complete.
+  locale-fallback treatment are all in place. At that stage browser-engine
+  crawls did not record redirect chains and remained incomplete.
+- Built-in browser runners now capture HTTP redirect hops for the final navigation,
+  with redacted URLs. Browser coverage requires observed, consistent provenance
+  for every response and arrival; older artifacts and
+  custom runners cannot attest that every navigation recorded its chain.
 - Audit link reports qualify the legacy `LNK002` and `LNK004` findings in an
   additive `legacy_findings` list: `confirmed` only for an eligible page of a
   complete, comparable crawl, otherwise `not_eligible`, `inbound_observed`

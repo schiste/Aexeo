@@ -387,9 +387,12 @@ pub struct CrawlResponseProvenance {
     /// Redirect responses followed before this one, in request order. Each
     /// hop is the redacted URL that answered with a redirect and its status;
     /// the response itself is `observed_url`. Empty when nothing redirected or
-    /// when the producer did not record hops (browser runs, older artifacts).
+    /// when the producer did not record hops (older artifacts or custom runners).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub redirect_chain: Vec<RedirectHop>,
+    /// Whether the producer observed the complete HTTP chain, including a direct response.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub redirect_chain_observed: bool,
     /// The release marker the page served, when the crawl was asked for one
     /// (`crawl --release-header` / `--release-meta`): trimmed, without control
     /// characters and bounded in length. `None` when not requested or absent.
@@ -411,6 +414,9 @@ pub struct RedirectedArrival {
     pub requested_url: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub redirect_chain: Vec<RedirectHop>,
+    /// Whether the producer observed the complete HTTP chain for this arrival.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub redirect_chain_observed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_code: Option<u16>,
 }
