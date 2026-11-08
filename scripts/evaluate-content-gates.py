@@ -114,7 +114,9 @@ def classification_metrics(counts, examples):
     return {"examples": examples, "counts": counts,
             "precision": tp / (tp + fp) if tp + fp else None,
             "recall": tp / (tp + fn) if tp + fn else None,
-            "unchecked_rate": counts["not_checked"] / examples if examples else None}
+            # Preserve the historical unexpected-only rate for existing consumers.
+            "unchecked_rate": counts["not_checked"] / examples if examples else None,
+            "actual_unchecked_rate": (counts["not_checked"] + counts["expected_not_checked"]) / examples if examples else None}
 
 
 def evaluate(binary, corpus, split, review_log=None):

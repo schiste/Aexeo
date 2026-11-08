@@ -76,10 +76,14 @@ class EvaluateTests(unittest.TestCase):
         ]}
         results = [SimpleNamespace(returncode=2, stdout=json.dumps({"gates": [{"gate_id": "g", "status": status}]})) for status in ("not_checked", "passed", "not_checked")]
         with patch.object(eval_module.subprocess, "run", side_effect=results):
-            counts = eval_module.evaluate("cli", corpus, "holdout")["counts"]
+            result = eval_module.evaluate("cli", corpus, "holdout")
+            counts = result["counts"]
         self.assertEqual(counts["expected_not_checked"], 1)
         self.assertEqual(counts["missed_not_checked"], 1)
         self.assertEqual(counts["not_checked"], 1)
+        self.assertEqual(result["unchecked_rate"], 1 / 3)
+        self.assertEqual(result["actual_unchecked_rate"], 2 / 3)
+        self.assertIsNone(result["reviewed_metrics"]["actual_unchecked_rate"])
 
     def test_synthetic_fixture_rejects_declared_review(self):
         corpus = {"version": 1, "fixture_kind": "synthetic_regression", "examples": [

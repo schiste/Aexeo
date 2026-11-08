@@ -45,8 +45,10 @@ values are strings. The runner supplies that example's metadata through the
 CLI's `--metadata` option; omitting it is distinct from providing `{}`. Do not
 put sensitive metadata into a corpus intended for publication.
 The runner invokes the local CLI once per example and does not contact a remote
-service. Its precision and recall use checked examples only; `unchecked_rate`
-is reported separately. `reviewed_metrics` separately reports the same counts,
+service. Its precision and recall use checked examples only. The legacy
+`unchecked_rate` counts unexpected unchecked cases; `actual_unchecked_rate`
+counts all unchecked cases, including those expected by the corpus. Both divide
+by the number of examples and are null when there are none. `reviewed_metrics` separately reports the same counts,
 precision, recall and unchecked rate for examples declared reviewed; rates are
 null when their denominator is zero. Overall metrics still include all examples.
 Declared review is not proof of independent or correct review.
