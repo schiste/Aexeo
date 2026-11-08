@@ -143,6 +143,14 @@ not change their counts or assert confirmed orphans.
   Item 3 below stays open: the default audit text, Markdown and priority list
   do not show the qualification, the static `audit` command builds no report,
   and a crawl's own report has no context, so it can never confirm.
+- Legacy findings the report proves false (`inbound_observed`,
+  `inventory_alias`) are now suppressed: listed in an additive
+  `suppressed_legacy_findings` array with their reason, and removed from the
+  findings, summary and stored audit of `crawl --link-graph-output`.
+  `link-graph --audit` lists them; runs without a report are unchanged.
+  Baselines see them as resolved, as accepted. `LNK001` no longer fires on a
+  link to the requested URL or a hop of a consistent recorded redirect chain
+  that ended on an analyzed page; redirects to an error response stay broken.
 - A synthetic in-process benchmark covers 50 pages and 500 links (#76). No CI
   performance budget has been established for this graph benchmark.
 - A live Aeptus URL returned a generic noindex holding page, not the article

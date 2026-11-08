@@ -1634,3 +1634,93 @@ fn inventory_aliases_are_checked_against_what_the_seeded_crawl_observed() {
         serde_json::json!(eligible)
     );
 }
+
+/// Findings for `rule_id` of an audit, as `(message, path)`.
+fn rule_findings(findings: &Value, rule_id: &str) -> Vec<(String, String)> {
+    findings
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|finding| finding["rule_id"] == rule_id)
+        .map(|finding| {
+            (
+                finding["message"].as_str().unwrap().to_string(),
+                finding["path"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn links_through_a_redirect_are_neither_broken_nor_orphaned_once_the_report_proves_it() {
+    let site = Site::start(vec![
+        (
+            "/",
+            html(r#"<main><a href="/old">Old</a> <a href="/dead">Dead</a></main>"#),
+        ),
+        ("/old", moved_to_new()),
+        (
+            "/dead",
+            (
+                "301 Moved Permanently\r\nLocation: /missing",
+                "text/html",
+                String::new(),
+            ),
+        ),
+        ("/new", html("<main>New</main>")),
+    ]);
+    let temp = tempfile::tempdir().unwrap();
+    let config = link_rules_only(temp.path());
+    let run = |extra: &[&str]| {
+        let output = Command::new(bin())
+            .current_dir(temp.path())
+            .args(["crawl", &site.base_url, "--engine", "http"])
+            .args(["--progress", "off", "--format", "json", "--config"])
+            .arg(&config)
+            .args(extra)
+            .output()
+            .unwrap();
+        parse_json(&output.stdout)
+    };
+
+    // Without a report, the redirect still keeps `/old` from being broken; the
+    // legacy orphan finding on `/new` stays, since nothing proves it false.
+    let plain = run(&[]);
+    assert_eq!(
+        rule_messages(&plain, "LNK001"),
+        ["broken internal link: /dead"],
+        "{plain:#}"
+    );
+    let orphan = rule_findings(&plain["artifact"]["findings"], "LNK002");
+    assert_eq!(orphan.len(), 1, "{plain:#}");
+    assert!(orphan[0].0.ends_with("/new"));
+
+    let graph = temp.path().join("graph.json");
+    let payload = run(&[
+        "--link-graph-output",
+        graph.to_str().unwrap(),
+        "--link-graph-summary",
+    ]);
+    // A redirect ending in a 404 is still a broken link.
+    assert_eq!(
+        rule_messages(&payload, "LNK001"),
+        ["broken internal link: /dead"],
+        "{payload:#}"
+    );
+    assert!(rule_messages(&payload, "LNK002").is_empty(), "{payload:#}");
+    let expected = serde_json::json!([{"rule_id": "LNK002", "path": orphan[0].1,
+        "url": format!("{}/new", site.base_url), "conclusion": "inbound_observed",
+        "source_pages_by_context": {}, "via_redirect_source_pages": 1, "navigation_only": false}]);
+    assert_eq!(
+        payload["link_graph_summary"]["suppressed_legacy_findings"],
+        expected
+    );
+    let report: Value = serde_json::from_slice(&std::fs::read(&graph).unwrap()).unwrap();
+    assert_eq!(report["suppressed_legacy_findings"], expected, "{report:#}");
+    // The stored audit, which later runs use as a baseline, leaves it out too.
+    let stored: Value =
+        serde_json::from_slice(&std::fs::read(payload["audit_path"].as_str().unwrap()).unwrap())
+            .unwrap();
+    assert!(rule_findings(&stored["findings"], "LNK002").is_empty());
+    assert_eq!(stored["summary"], payload["artifact"]["summary"]);
+}

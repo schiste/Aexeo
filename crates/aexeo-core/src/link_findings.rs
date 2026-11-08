@@ -1,7 +1,9 @@
 //! Qualify the legacy inbound-link findings of an audit with the coverage-aware
-//! link report built from the same audit. Findings themselves never change:
-//! the qualification is a separate observation, so rule IDs, severities,
-//! messages and fingerprints stay as the legacy rules produced them.
+//! link report built from the same audit. A finding the report proves false
+//! (`inbound_observed`, `inventory_alias`) is suppressed: listed in the
+//! report's `suppressed_legacy_findings` and removed from a run that built the
+//! report. Every other finding stays as the legacy rules produced it, its rule
+//! ID, severity, message and fingerprint unchanged.
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
@@ -62,6 +64,12 @@ impl LegacyLinkConclusion {
         Self::NotInReport,
     ];
 
+    /// The report shows the finding's claim is false, so a run holding both
+    /// removes it rather than reporting it.
+    pub fn proves_finding_false(self) -> bool {
+        matches!(self, Self::InboundObserved | Self::InventoryAlias)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Confirmed => "confirmed",
@@ -86,6 +94,21 @@ pub fn count_conclusions(findings: &[LegacyLinkFinding]) -> BTreeMap<&'static st
             (conclusion.as_str(), count)
         })
         .collect()
+}
+
+/// Remove from `findings` each legacy finding `report` suppressed, matched by
+/// rule ID and path. Without suppressed findings nothing changes.
+pub fn remove_suppressed_findings(findings: &mut Vec<Finding>, report: &LinkReport) {
+    if report.suppressed_legacy_findings.is_empty() {
+        return;
+    }
+    let suppressed = report
+        .suppressed_legacy_findings
+        .iter()
+        .map(|finding| (finding.rule_id.as_str(), finding.path.as_str()))
+        .collect::<BTreeSet<_>>();
+    findings
+        .retain(|finding| !suppressed.contains(&(finding.rule_id.as_str(), finding.path.as_str())));
 }
 
 /// Qualify each `LNK002` and `LNK004` finding of `findings` against `report`.
@@ -303,6 +326,34 @@ mod tests {
             .unwrap_or_else(|| panic!("{rule_id} {path}: {:?}", report.legacy_findings))
     }
 
+    fn suppressed<'a>(report: &'a LinkReport, rule_id: &str, route: &str) -> &'a LegacyLinkFinding {
+        let path = format!("crawl/{route}/index.html");
+        assert!(
+            !report
+                .legacy_findings
+                .iter()
+                .any(|finding| finding.path == path),
+            "{:?}",
+            report.legacy_findings
+        );
+        report
+            .suppressed_legacy_findings
+            .iter()
+            .find(|finding| finding.rule_id == rule_id && finding.path == path)
+            .unwrap_or_else(|| panic!("{rule_id} {path}: {:?}", report.suppressed_legacy_findings))
+    }
+
+    /// The rule IDs and paths of `artifact`'s findings once `report` has
+    /// removed those it suppressed.
+    fn kept(artifact: &AuditArtifact, report: &LinkReport) -> Vec<(String, String)> {
+        let mut findings = artifact.findings.clone();
+        remove_suppressed_findings(&mut findings, report);
+        findings
+            .into_iter()
+            .map(|finding| (finding.rule_id, finding.path))
+            .collect()
+    }
+
     fn orphan_site() -> Vec<serde_json::Value> {
         vec![
             page("", "<main><a href='/a'>A</a></main>"),
@@ -323,6 +374,11 @@ mod tests {
         // The page's link to itself is not an incoming source.
         assert!(orphan.source_pages_by_context.is_empty());
         assert_eq!(report.legacy_findings.len(), 1);
+        assert!(report.suppressed_legacy_findings.is_empty());
+        let findings = artifact.findings.clone();
+        let mut kept = findings.clone();
+        remove_suppressed_findings(&mut kept, &report);
+        assert_eq!(kept, findings);
     }
 
     #[test]
@@ -333,9 +389,12 @@ mod tests {
         assert!(!report.crawl_complete);
         let orphan = qualified(&report, "LNK002", "orphan");
         assert_eq!(orphan.conclusion, LegacyLinkConclusion::NotEligible);
-        // The finding itself, and so every baseline built from it, is untouched.
-        assert_eq!(artifact.findings, before);
-        let diff = diff_finding_sets(&before, &artifact.findings);
+        // A finding the report cannot prove false is kept, and so is every
+        // baseline built from it.
+        let mut findings = artifact.findings.clone();
+        remove_suppressed_findings(&mut findings, &report);
+        assert_eq!(findings, before);
+        let diff = diff_finding_sets(&before, &findings);
         assert!(diff.new_findings.is_empty() && diff.resolved_findings.is_empty());
     }
 
@@ -392,9 +451,25 @@ mod tests {
             )
         );
         let report = build_link_report_from_audit(&artifact).unwrap();
-        let moved = qualified(&report, "LNK002", "new");
+        let moved = suppressed(&report, "LNK002", "new");
         assert_eq!(moved.conclusion, LegacyLinkConclusion::InboundObserved);
         assert_eq!(moved.via_redirect_source_pages, 1);
+        assert!(
+            !kept(&artifact, &report).contains(&("LNK002".into(), "crawl/new/index.html".into()))
+        );
+        // Baselines see the removed finding as resolved.
+        let mut after = artifact.findings.clone();
+        remove_suppressed_findings(&mut after, &report);
+        let diff = diff_finding_sets(&artifact.findings, &after);
+        assert_eq!(diff.resolved_findings.len(), 1);
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(
+            json["suppressed_legacy_findings"],
+            serde_json::json!([{"rule_id":"LNK002", "path":"crawl/new/index.html", "url":"https://example.org/new",
+                "conclusion":"inbound_observed", "source_pages_by_context":{}, "via_redirect_source_pages":1,
+                "navigation_only":false}])
+        );
+        assert!(json.get("legacy_findings").is_none());
     }
 
     #[test]
@@ -414,8 +489,13 @@ mod tests {
         entries.push(("fr-a", "canonical_alias", Some("a")));
         let report =
             build_link_report_from_audit_with_context(&artifact, Some(&context(&entries))).unwrap();
-        let alias = qualified(&report, "LNK002", "fr-a");
+        let alias = suppressed(&report, "LNK002", "fr-a");
         assert_eq!(alias.conclusion, LegacyLinkConclusion::InventoryAlias);
+        assert!(
+            kept(&artifact, &report)
+                .iter()
+                .all(|(rule_id, _)| rule_id != "LNK002")
+        );
     }
 
     #[test]
@@ -427,6 +507,7 @@ mod tests {
         let orphan = qualified(&report, "LNK002", "orphan");
         assert_eq!(orphan.conclusion, LegacyLinkConclusion::NotInReport);
         assert_eq!(orphan.url, None);
+        assert_eq!(kept(&artifact, &report).len(), artifact.findings.len());
     }
 
     #[test]
@@ -447,5 +528,6 @@ mod tests {
         let report = build_link_report_from_audit(&artifact).unwrap();
         let json = serde_json::to_value(&report).unwrap();
         assert!(json.get("legacy_findings").is_none());
+        assert!(json.get("suppressed_legacy_findings").is_none());
     }
 }
