@@ -9,6 +9,11 @@ Links are read from the parsed DOM and resolved against the observed page URL, a
 a browser would: relative and parent paths, unquoted attributes and `<base href>`
 all work. Only `<a href>` is followed; `data-href` and markup inside scripts are not.
 
+Every root-relative link the broken-link rule checks is also requested, including
+anchors in `<template>` and `<noscript>` that the DOM keeps inert. A complete crawl
+therefore never reports `LNK001` for a link it did not ask the server about. These
+anchors are followed for discovery only; they are not link-graph evidence.
+
 Query strings are not part of a route. `?page=2` resolves to the route of its path,
 so query variants, including query pagination, are never requested separately. This
 prevents faceted URLs from becoming a crawl trap. A page linked only through a query

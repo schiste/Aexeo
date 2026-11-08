@@ -183,6 +183,16 @@ not change their counts or assert confirmed orphans.
   report, so its site reports carry no coverage-aware observation; it would
   need a link report built from a `--static-url-map`, whose mapped pages can
   never be complete, so wiring it is not a one-line change.
+- A real-site comparison (finovox.com, 574 pages, complete and untruncated)
+  found 2,142 false `LNK001` findings for `/legal-notice` and
+  `/privacy-policy`, both redirects to live pages. Their only anchors sat in
+  `<template>` elements: the audit's textual link scan read them, but crawl
+  discovery used the DOM, where template contents are inert, so the routes
+  were never requested. Discovery now also enqueues every root-relative link
+  the audit checks (`<template>` and `<noscript>` included), so a complete
+  crawl attests every link `LNK001` judges. Link-graph evidence is unchanged.
+  Re-run: 576 routes visited (was 574), `LNK001` 5,418 (was 7,560), and every
+  remaining `LNK001` target was requested and answered 404.
 
 A live EmDash schema inspection showed that one CMS can contain multiple
 publications and non-page collections even when a collection is marked

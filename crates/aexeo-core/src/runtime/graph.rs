@@ -1,6 +1,8 @@
 use std::path::Path;
 
 use crate::config::RuntimeConfig;
+use crate::link_evidence::crawl_links;
+use crate::site::audited_link_targets;
 
 const ASSET_EXTENSIONS: &[&str] = &[
     ".css", ".gif", ".html", ".ico", ".jpeg", ".jpg", ".js", ".json", ".mjs", ".png", ".svg",
@@ -22,6 +24,20 @@ pub(crate) fn should_enqueue_link(target: &str) -> bool {
         .map(|ext| format!(".{}", ext.to_ascii_lowercase()))
         .unwrap_or_default();
     suffix.is_empty() || !ASSET_EXTENSIONS.contains(&suffix.as_str()) || suffix == ".html"
+}
+
+/// Routes a fetched page offers the planner: the links a browser would resolve
+/// from the page URL, and every root-relative link the audit checks. The audit
+/// also reads anchors inert in the DOM, such as `<template>` and `<noscript>`
+/// contents; leaving them out let a complete crawl report a link broken that it
+/// never requested.
+pub(crate) fn page_link_routes(body: &str, page_url: &str) -> Vec<String> {
+    crawl_links(body, page_url)
+        .into_iter()
+        .map(|link| link.route)
+        .chain(audited_link_targets(body))
+        .filter(|route| should_enqueue_link(route))
+        .collect()
 }
 
 pub(crate) fn read_loc_values(text: &str) -> Vec<String> {
@@ -60,7 +76,7 @@ pub(crate) fn route_is_allowed(route: &str, runtime: &RuntimeConfig<'_>) -> bool
 
 #[cfg(test)]
 mod tests {
-    use super::route_is_allowed;
+    use super::{page_link_routes, route_is_allowed};
     use crate::config::Config;
 
     #[test]
@@ -69,5 +85,23 @@ mod tests {
         let runtime = config.runtime();
         assert!(!route_is_allowed("cdn-cgi/l/email-protection", &runtime));
         assert!(route_is_allowed("features/terminal-search", &runtime));
+    }
+
+    #[test]
+    fn page_links_include_every_route_the_audit_checks() {
+        let html = r#"<html><body><a href="docs">Docs</a>
+            <template><a href="/legal-notice">Legal</a></template>
+            <noscript><a href="/privacy-policy">Privacy</a></noscript>
+            <script>var a = '<a href="/scripted">x</a>';</script>
+            <a href="/logo.png">logo</a></body></html>"#;
+        let routes = page_link_routes(html, "https://www.example.com/en/article");
+        for route in ["en/docs", "legal-notice", "privacy-policy"] {
+            assert!(
+                routes.iter().any(|seen| seen == route),
+                "{route}: {routes:?}"
+            );
+        }
+        assert!(!routes.iter().any(|seen| seen == "scripted"), "{routes:?}");
+        assert!(!routes.iter().any(|seen| seen == "logo.png"), "{routes:?}");
     }
 }
