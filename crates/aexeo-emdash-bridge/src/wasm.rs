@@ -193,6 +193,17 @@ pub fn evaluate_content_js(
     let raw_document: serde_json::Value = serde_json::from_str(document_json)
         .map_err(|error| JsError::new(&format!("failed to parse document: {error}")))?;
     let body_available = raw_document.get("body").is_some();
+    let capabilities = if !body_available {
+        [false; 4]
+    } else if let Some(value) = raw_document.get("body_capabilities") {
+        ["text", "headings", "paragraphs", "links"].map(|name| {
+            value
+                .as_array()
+                .is_some_and(|values| values.iter().any(|item| item.as_str() == Some(name)))
+        })
+    } else {
+        [true; 4]
+    };
     let document: EmdashDocument = serde_json::from_value(raw_document)
         .map_err(|error| JsError::new(&format!("failed to parse document: {error}")))?;
     let preset = resolve_content_preset_js(preset_name, sources_json.as_deref())?;
@@ -205,11 +216,11 @@ pub fn evaluate_content_js(
             })
         })
         .transpose()?;
-    let report = crate::content::evaluate_content_with_body_availability(
+    let report = crate::content::evaluate_content_with_body_capabilities(
         &document,
         &preset,
         evidence,
-        body_available,
+        capabilities,
     )
     .map_err(|error| JsError::new(&format!("content evaluation failed: {error:#}")))?;
     let locations = crate::content::source_locations(&document, &preset, &report);

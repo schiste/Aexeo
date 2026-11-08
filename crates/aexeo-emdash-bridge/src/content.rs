@@ -419,15 +419,31 @@ pub fn evaluate_content_with_body_availability(
     evidence_sources: Option<BTreeMap<String, String>>,
     body_available: bool,
 ) -> anyhow::Result<ContentReport> {
+    evaluate_content_with_body_capabilities(document, preset, evidence_sources, [body_available; 4])
+}
+
+/// Capabilities in order: text, headings, paragraphs, links. Partial adapters
+/// must not imply that a missing structure is an empty structure.
+pub fn evaluate_content_with_body_capabilities(
+    document: &EmdashDocument,
+    preset: &ContentPreset,
+    evidence_sources: Option<BTreeMap<String, String>>,
+    capabilities: [bool; 4],
+) -> anyhow::Result<ContentReport> {
+    let [text, headings, paragraphs, links] = capabilities;
     let (mut input, mut context, link_count) = content_input_with_context(document);
     input.evidence_sources = evidence_sources;
-    if !body_available {
+    if !text {
         input.text = None;
+    }
+    if !headings {
         input.headings = None;
+    }
+    if !paragraphs {
         context.paragraphs = None;
         context.block_ends = None;
     }
-    let destinations = (body_available
+    let destinations = (links
         && preset
             .gates
             .iter()
@@ -437,7 +453,7 @@ pub fn evaluate_content_with_body_availability(
         &input,
         &ContentEvaluationContext {
             adapter: Some(&context),
-            link_count: body_available.then_some(link_count),
+            link_count: links.then_some(link_count),
             ..Default::default()
         },
         destinations.as_deref(),
@@ -555,6 +571,19 @@ mod tests {
         assert!(
             missing
                 .gates
+                .iter()
+                .all(|gate| gate.status == GateStatus::NotChecked)
+        );
+        let partial = evaluate_content_with_body_capabilities(
+            &document,
+            &preset,
+            None,
+            [true, false, false, false],
+        )
+        .unwrap();
+        assert_eq!(partial.gates[0].status, GateStatus::Failed);
+        assert!(
+            partial.gates[1..]
                 .iter()
                 .all(|gate| gate.status == GateStatus::NotChecked)
         );

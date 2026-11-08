@@ -56,6 +56,8 @@ export interface EmdashDocument {
   meta?: Record<string, string>;
   schema?: unknown[];
   body?: PortableTextBlock[];
+  /** Body features faithfully represented by an adapter; omitted means all. */
+  body_capabilities?: ("text" | "headings" | "paragraphs" | "links")[];
 }
 
 export type FindingSeverity = "error" | "warning";

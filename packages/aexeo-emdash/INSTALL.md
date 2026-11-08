@@ -5,6 +5,21 @@ site. Findings show up as a Block Kit admin page; a sidebar widget
 shows the site's current intelligence score; saves auto-evaluate the
 changed document.
 
+## Content coverage
+
+Portable Text bodies provide text, headings, paragraphs and links to content
+presets. A plain text body provides text only. EmDash custom blocks are
+project-specific; their flattened text is available to the legacy site audit,
+but content-preset gates that require body capabilities are reported as
+`not_checked` until a faithful mapping is provided. This avoids treating
+unobserved headings, paragraphs or links as absent. An explicitly empty body
+is distinct from an unavailable body.
+
+Adapters supplying an `EmdashDocument` can set `body_capabilities` to a subset
+of `text`, `headings`, `paragraphs` and `links`. Omit it only when all four
+are faithfully represented. These capability declarations describe input
+coverage; they do not validate the content itself.
+
 ## Two install paths
 
 The package exports two factories:

@@ -61,3 +61,7 @@ assert.equal(missingBodyReport.gates[0].status, "not_checked");
 const emptyBodyReport = await evaluateContent({ route: "/empty", title: "Empty", body: [] }, "test", { test: linkPreset });
 assert.equal(emptyBodyReport.gates[0].status, "passed");
 console.log("WASM body availability smoke test passed");
+
+const partialBodyReport = await evaluateContent({ route: "/partial", title: "Partial", body: [{ children: [{ _type: "span", text: "some text" }] }], body_capabilities: ["text"] }, "test", { test: linkPreset });
+assert.equal(partialBodyReport.gates[0].status, "not_checked");
+console.log("WASM partial body capability smoke test passed");
