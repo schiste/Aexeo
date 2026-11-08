@@ -77,7 +77,8 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
   ([PR #44](https://github.com/schiste/Aexeo/pull/44)); coordinates refer to the
   evaluated snapshot and use UTF-16 offsets.
 - [x] Count reused EmDash link marks as separate destination occurrences, matching
-  link counting and Markdown; emit opt-in aggregate destination-check telemetry.
+  link counting and Markdown; emit opt-in aggregate destination-check telemetry
+  ([PR #138](https://github.com/schiste/Aexeo/pull/138)).
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
 - [ ] Independently reviewed, diverse evaluation corpus and held-out metrics.
   A synthetic, explicitly unreviewed starter and evaluator were delivered in
