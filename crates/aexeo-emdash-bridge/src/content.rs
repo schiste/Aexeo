@@ -157,8 +157,9 @@ fn positional_gate(gate: &ContentGate) -> bool {
     )
 }
 
-/// Map prose and heading findings to spans. Synthetic block separators have no
-/// location. Heading locations identify the first non-empty span of the block.
+/// Map prose, heading and invalid link findings to spans. Synthetic block
+/// separators have no location. Heading locations identify the first non-empty
+/// span of the block; link locations identify the first span of the occurrence.
 /// Indices apply only to this exact document snapshot.
 pub fn source_locations(
     document: &EmdashDocument,
@@ -180,7 +181,14 @@ pub fn source_locations(
                 ContentGate::HeadingLength { .. } | ContentGate::DuplicateHeadings { .. }
             ) && !result.findings.is_empty()
         });
-    if !needs_prose && !needs_headings {
+    let needs_links = preset
+        .gates
+        .iter()
+        .zip(&report.gates)
+        .any(|(gate, result)| {
+            matches!(gate, ContentGate::LinkDestinations { .. }) && !result.findings.is_empty()
+        });
+    if !needs_prose && !needs_headings && !needs_links {
         return Vec::new();
     }
     let mut projection = String::new();
@@ -224,8 +232,45 @@ pub fn source_locations(
         })
         .map(|heading| collapse_whitespace(&heading))
         .collect();
+    let links = needs_links.then(|| content_links(document));
     let mut result = Vec::new();
     for (gate, evaluated) in preset.gates.iter().zip(&report.gates) {
+        if let ContentGate::LinkDestinations {
+            allowed_schemes,
+            allow_relative,
+            ..
+        } = gate
+        {
+            if let Some(links) = &links {
+                let invalid: Vec<_> = links
+                    .iter()
+                    .filter(|(destination, _, _)| {
+                        !aexeo_core::content_gate::valid_link_destination(
+                            destination,
+                            allowed_schemes,
+                            *allow_relative,
+                        )
+                    })
+                    .collect();
+                // Do not attach locations when the number of findings disagrees.
+                if invalid.len() == evaluated.total_findings() {
+                    for (finding_index, (_, block_index, span_index)) in invalid
+                        .into_iter()
+                        .take(evaluated.findings.len())
+                        .enumerate()
+                    {
+                        result.push(EmdashSourceLocation {
+                            gate_id: evaluated.gate_id.clone(),
+                            finding_index,
+                            block_index: *block_index,
+                            span_index: *span_index,
+                            utf16_offset: 0,
+                        });
+                    }
+                }
+            }
+            continue;
+        }
         if let Some(indices) = aexeo_core::content_gate::heading_finding_indices(gate, &headings) {
             if indices.len() == evaluated.total_findings() {
                 for (finding_index, index) in indices
@@ -315,9 +360,9 @@ pub fn evaluate_collection(
     )
 }
 
-fn content_link_destinations(document: &EmdashDocument) -> Vec<String> {
+fn content_links(document: &EmdashDocument) -> Vec<(&str, usize, usize)> {
     let mut links = Vec::new();
-    for block in &document.body {
+    for (block_index, block) in document.body.iter().enumerate() {
         let definitions: BTreeMap<_, _> = block
             .mark_defs
             .iter()
@@ -325,7 +370,7 @@ fn content_link_destinations(document: &EmdashDocument) -> Vec<String> {
             .map(|definition| (definition.key.as_str(), definition))
             .collect();
         let mut previous = std::collections::BTreeSet::new();
-        for child in &block.children {
+        for (span_index, child) in block.children.iter().enumerate() {
             let PortableTextChild::Span(span) = child;
             let current: std::collections::BTreeSet<_> = span
                 .marks
@@ -334,19 +379,27 @@ fn content_link_destinations(document: &EmdashDocument) -> Vec<String> {
                 .filter(|key| definitions.contains_key(key))
                 .collect();
             for key in current.difference(&previous) {
-                links.push(
+                links.push((
                     definitions[key]
                         .data
                         .get("href")
                         .and_then(|value| value.as_str())
-                        .unwrap_or("")
-                        .to_owned(),
-                );
+                        .unwrap_or(""),
+                    block_index,
+                    span_index,
+                ));
             }
             previous = current;
         }
     }
     links
+}
+
+fn content_link_destinations(document: &EmdashDocument) -> Vec<String> {
+    content_links(document)
+        .into_iter()
+        .map(|(destination, _, _)| destination.to_owned())
+        .collect()
 }
 
 /// Evaluate with caller-supplied source snapshots; no source is fetched here.
@@ -496,6 +549,51 @@ mod tests {
         assert_eq!(emdash.gates[0].measurements["checked_destinations"], 2);
         assert_eq!(emdash.gates[0].measurements["invalid_destinations"], 2);
         assert_eq!(emdash.gates[0].total_findings(), 2);
+    }
+
+    #[test]
+    fn invalid_link_locations_follow_occurrences_and_gate_policy() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"markDefs":[{"_key":"bad","_type":"link","href":"javascript:bad"},{"_key":"good","_type":"link","href":"https://example.org"}],"children":[{"_type":"span","text":"😀 ","marks":["good"]},{"_type":"span","text":"one","marks":["bad"]},{"_type":"span","text":" link","marks":["bad","strong"]},{"_type":"span","text":" and "},{"_type":"span","text":"again","marks":["bad"]}]},{"markDefs":[{"_key":"bad","_type":"link","href":"javascript:bad"}],"children":[{"_type":"span","text":"another","marks":["bad"]}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='links'\n[[gates]]\nid='https'\nkind='link_destinations'\nallowed_schemes=['https']\n[[gates]]\nid='javascript'\nkind='link_destinations'\nallowed_schemes=['javascript']\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        let locations = source_locations(&document, &preset, &report);
+        let positions: Vec<_> = locations
+            .iter()
+            .map(|location| {
+                (
+                    location.gate_id.as_str(),
+                    location.finding_index,
+                    location.block_index,
+                    location.span_index,
+                    location.utf16_offset,
+                )
+            })
+            .collect();
+        assert_eq!(
+            positions,
+            vec![
+                ("https", 0, 0, 1, 0),
+                ("https", 1, 0, 4, 0),
+                ("https", 2, 1, 0, 0),
+                ("javascript", 0, 0, 0, 0)
+            ]
+        );
+    }
+
+    #[test]
+    fn invalid_link_locations_respect_finding_cap() {
+        let mut children = Vec::new();
+        for _ in 0..1001 {
+            children.push(serde_json::json!({"_type":"span", "text":"bad", "marks":["bad"]}));
+            children.push(serde_json::json!({"_type":"span", "text":" "}));
+        }
+        let document: EmdashDocument = serde_json::from_value(serde_json::json!({"route":"/test", "title":"Test", "body":[{"markDefs":[{"_key":"bad", "_type":"link", "href":"javascript:bad"}], "children":children}]})).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].total_findings(), 1001);
+        let locations = source_locations(&document, &preset, &report);
+        assert_eq!(locations.len(), report.gates[0].findings.len());
+        assert_eq!(locations.last().unwrap().span_index, 1998);
     }
 
     #[test]

@@ -28,7 +28,7 @@ export interface ContentReport {
   gates: ContentGateResult[];
   summary?: { passed: number; failed: number; not_checked: number; blocking_failed: number; blocking_not_checked: number };
   applied_fixes: string[];
-  /** Omitted for collection reports; only reliable positional findings are mapped. */
+  /** Omitted for collection reports; link findings point to the first marked span. */
   source_locations?: EmdashSourceLocation[];
 }
 

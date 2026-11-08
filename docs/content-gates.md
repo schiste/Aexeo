@@ -307,14 +307,17 @@ unmapped counts and mapping duration, without positions or content.
 ### EmDash source locations and telemetry
 
 The EmDash `evaluateContent` result includes `source_locations` for positional
-prose findings. Each entry identifies a `gate_id`, zero-based `finding_index`,
+prose, heading and invalid link destination findings. Link locations identify the
+first marked span of each occurrence. Each entry identifies a `gate_id`, zero-based `finding_index`,
 `block_index`, `span_index`, and `utf16_offset` within that span. Coordinates
 refer only to the exact Portable Text snapshot evaluated; recompute after edits.
 A missing entry means there is no usable location. Other finding types are not
 mapped. Existing projected finding coordinates remain unchanged.
 
 A host may supply the optional `onTelemetry` callback to `evaluateContent` to
-receive aggregate `evaluation_ms` and `source_locations_mapped`. Duration covers
+receive aggregate `evaluation_ms`, `source_locations_mapped`, and, when measured,
+`link_destinations` counts. Counts sum gate measurements, so multiple gates can
+check the same occurrence. Duration covers
 the complete JavaScript wrapper, including serialization and WASM initialization.
 No text, paths or identifiers are included; Aexeo does not transmit the event.
 
