@@ -40,6 +40,36 @@ class FeedbackTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "metadata"):
             module.export_review(self.corpus, note)
 
+    def test_bind_review_requires_matching_explicit_human_verdict_and_keeps_source(self):
+        metadata = {"title": "Private title"}
+        self.corpus["examples"][0]["metadata"] = metadata
+        note = module.capture(self.text, self.report, "length", "e1", "passed", "r", "manual", metadata=metadata)
+        bound = module.bind_review(self.corpus, note)
+        self.assertNotIn("review_status", self.corpus["examples"][0])
+        review = bound["examples"][0]["review"]
+        self.assertEqual(review["text_sha256"], note["text_sha256"])
+        self.assertEqual(review["metadata_sha256"], note["metadata_sha256"])
+        self.assertEqual(review["expected"], "passed")
+        self.assertNotIn("Private title", json.dumps(review))
+        with self.assertRaisesRegex(ValueError, "already has a review"):
+            module.bind_review(bound, note)
+        note["human_status"] = "failed"
+        with self.assertRaisesRegex(ValueError, "differs"):
+            module.bind_review(self.corpus, note)
+        note["human_status"] = "uncertain"
+        with self.assertRaisesRegex(ValueError, "explicit human"):
+            module.bind_review(self.corpus, note)
+        note["human_status"] = "passed"
+        self.corpus["examples"][0]["metadata"]["title"] = "Changed"
+        with self.assertRaisesRegex(ValueError, "metadata"):
+            module.bind_review(self.corpus, note)
+
+    def test_bind_review_rejects_synthetic_fixture(self):
+        self.corpus["fixture_kind"] = "synthetic_regression"
+        note = module.capture(self.text, self.report, "length", "e1", "passed", "r", "manual")
+        with self.assertRaisesRegex(ValueError, "synthetic"):
+            module.bind_review(self.corpus, note)
+
     def test_unresolved_stale_wrong_gate_and_missing_provenance_are_rejected(self):
         note = module.capture(self.text, self.report, "length", "e1")
         with self.assertRaisesRegex(ValueError, "explicit human"):
@@ -91,6 +121,12 @@ class FeedbackTests(unittest.TestCase):
             export = [sys.executable, str(SCRIPT), "export-review", "--note", str(root / "note"), "--corpus", str(root / "corpus"), "--output", str(root / "review")]
             self.assertEqual(subprocess.run(export, capture_output=True).returncode, 0)
             self.assertNotIn("Private text", (root / "review").read_text())
+            bind = [sys.executable, str(SCRIPT), "bind-review", "--note", str(root / "note"), "--corpus", str(root / "corpus"), "--output", str(root / "bound")]
+            output = subprocess.run(bind + ["--telemetry"], capture_output=True, text=True)
+            self.assertEqual(output.returncode, 0)
+            self.assertEqual(json.loads(output.stderr)["operation"], "bind-review")
+            self.assertEqual(json.loads((root / "bound").read_text())["examples"][0]["review_status"], "reviewed")
+            self.assertEqual(subprocess.run(bind, capture_output=True).returncode, 2)
 
 
 if __name__ == "__main__":
