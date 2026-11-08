@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { EmdashContentItem } from "../src/adapter.js";
 import {
+  CONFIG_URL_KEY,
+  SETTINGS_BLOCK_MAPPINGS_KEY,
+  SETTINGS_TOKEN_KEY,
+  handleAfterSave,
   documentKey,
   evaluateAndPersistAll,
   type EvaluatorFn,
@@ -231,6 +235,24 @@ describe("content:afterDelete", () => {
 });
 
 describe("custom block mappings", () => {
+  it("forwards sandbox settings into the sidecar document", async () => {
+    const content = item("mapped-sandbox", NEW);
+    content.data.blocks = [{ _type: "hero", _key: "one", _version: 1, headline: "Mapped" }];
+    const { ctx } = host([content]);
+    await ctx.kv.set(CONFIG_URL_KEY, "https://example.org");
+    ctx.settings = {
+      get: async <T>(key: string) => (key === SETTINGS_TOKEN_KEY ? "token" : key === SETTINGS_BLOCK_MAPPINGS_KEY ? JSON.stringify({ hero: [{ kind: "heading", field: "headline" }] }) : null) as T | null,
+      set: async () => {},
+    };
+    let captured: unknown;
+    ctx.http = { fetch: async (_url, init) => {
+      captured = JSON.parse(init?.body ?? "{}");
+      return { status: 200, ok: true, text: async () => "[]" };
+    } };
+    await handleAfterSave({ content, collection: "pages", isNew: false }, ctx);
+    expect(captured).toMatchObject({ documents: [{ body: [{ style: "h2", children: [{ text: "Mapped" }] }] }] });
+  });
+
   it("uses the same mapping for afterSave and refresh", async () => {
     const content = item("mapped", NEW);
     content.data.blocks = [{ _type: "hero", _key: "one", _version: 1, headline: "Mapped" }];
