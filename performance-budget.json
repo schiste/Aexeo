@@ -30,11 +30,11 @@
     "max_p95_ms": 2000
   },
   "link_graph/rendered_50_pages_500_links": {
-    "max_avg_ms": 30,
-    "max_p95_ms": 100
+    "max_avg_ms": 15,
+    "max_p95_ms": 50
   },
   "link_graph/rendered_1000_pages_20000_links": {
-    "max_avg_ms": 2000,
-    "max_p95_ms": 4000
+    "max_avg_ms": 300,
+    "max_p95_ms": 600
   }
 }
