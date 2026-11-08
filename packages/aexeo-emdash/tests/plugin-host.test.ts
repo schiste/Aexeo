@@ -40,6 +40,7 @@ describe("EmDash content adaptation", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: {} };
     expect(contentItemToEmdashDocument(item).body).toBeUndefined();
     expect(contentItemToEmdashDocument({ ...item, data: { body: [] } }).body).toEqual([]);
+    expect(contentItemToEmdashDocument({ ...item, data: { body: "  " } }).body).toEqual([]);
     expect(contentItemToEmdashDocument({ ...item, data: { body: [], content: body("actual text") } }).body?.[0]?.children[0]?.text).toBe("actual text");
   });
 

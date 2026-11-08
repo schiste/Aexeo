@@ -187,7 +187,7 @@ function extractPortableText(
   let foundEmptyBody = false;
   for (const slug of ["body", "content"]) {
     const value = data[slug];
-    if (Array.isArray(value) && value.length === 0) foundEmptyBody = true;
+    if ((Array.isArray(value) && value.length === 0) || (typeof value === "string" && value.trim().length === 0)) foundEmptyBody = true;
     if (isPortableTextArray(value)) return value;
     if (isEmdashBlocksArray(value, slug)) return blocksToPortableText(value);
     if (typeof value === "string" && value.trim().length > 0) {
