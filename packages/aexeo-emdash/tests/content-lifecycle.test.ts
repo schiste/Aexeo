@@ -229,3 +229,21 @@ describe("content:afterDelete", () => {
     expect(store.has(documentKey("/a"))).toBe(true);
   });
 });
+
+describe("custom block mappings", () => {
+  it("uses the same mapping for afterSave and refresh", async () => {
+    const content = item("mapped", NEW);
+    content.data.blocks = [{ _type: "hero", _key: "one", _version: 1, headline: "Mapped" }];
+    const { ctx } = host([content]);
+    const seen: string[] = [];
+    const evaluator: EvaluatorFn = async (documents) => {
+      seen.push(documents[0]?.body?.[0]?.children[0]?.text ?? "missing");
+      expect(documents[0]?.body_capabilities).toBeUndefined();
+      return { ok: true, findings: [] };
+    };
+    const mappings = { hero: [{ kind: "heading" as const, field: "headline" }] };
+    await handleAfterSaveConfigured({ content, collection: "pages", isNew: false }, ctx, evaluator, undefined, mappings);
+    await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator, blockMappings: mappings });
+    expect(seen).toEqual(["Mapped", "Mapped"]);
+  });
+});

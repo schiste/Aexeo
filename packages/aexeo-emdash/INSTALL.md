@@ -17,6 +17,29 @@ fail-closed behavior. This avoids treating unobserved headings, paragraphs or
 links as absent. An explicitly empty body
 is distinct from an unavailable body.
 
+For custom blocks in configured mode, declare the ordered rendered content
+fields for each block type in the plugin configuration:
+
+```js
+aexeoPlugin({
+  blockMappings: {
+    hero: [
+      { kind: "heading", field: "headline" },
+      { kind: "paragraph", field: "description" },
+      { kind: "link", field: "linkLabel", hrefField: "linkUrl" },
+      { kind: "richText", field: "body" },
+    ],
+  },
+})
+```
+
+A mapping is the site's assertion that those fields cover the rendered content,
+in order. `richText` accepts Portable Text arrays and preserves their headings
+and links; `heading` represents an h2. Every encountered block type must be
+mapped and every mapped field must have the expected type. If not, capabilities
+remain unverified. These options apply to configured-mode saves and both
+refresh routes; the sandboxed plugin does not accept block mappings.
+
 Adapters supplying an `EmdashDocument` can set `body_capabilities` to a subset
 of `text`, `headings`, `paragraphs` and `links`. Omit it only when all four
 are faithfully represented. These capability declarations describe input

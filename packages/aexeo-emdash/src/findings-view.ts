@@ -1,3 +1,4 @@
+import type { CustomBlockMappings } from "./adapter.js";
 // Shared Block Kit view layer for both plugin entrypoints.
 //
 // `configured.ts` (in-process, the production-hit path) and
@@ -169,6 +170,7 @@ export interface AdminViewTuning {
 }
 
 export interface RefreshOptions {
+  blockMappings?: CustomBlockMappings | undefined;
   /**
    * Host context. `evaluateAndPersistAll` needs kv/http/content/log, and
    * the follow-up `renderFindingsPage` needs kv.
@@ -212,6 +214,7 @@ export async function handleRefresh(
     summary = await evaluateAndPersistAll(options.ctx, {
       collections: options.collections,
       evaluator: options.evaluator,
+      blockMappings: options.blockMappings,
       // Always forwarded. See RefreshOptions.suppressionFilter.
       suppressionFilter: options.suppressionFilter,
     });

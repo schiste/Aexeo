@@ -1,3 +1,4 @@
+import type { CustomBlockMappings } from "./adapter.js";
 import type { SuppressionFilter } from "./suppressions.js";
 import type { EmdashDocument, Finding } from "./types.js";
 import {
@@ -413,11 +414,13 @@ export async function handleAfterSaveConfigured(
   ctx: SandboxCtx,
   evaluator: EvaluatorFn,
   suppressionFilter?: SuppressionFilter,
+  blockMappings?: CustomBlockMappings,
 ): Promise<void> {
   const adapted = await adaptContentItemWithContext(
     event.content,
     ctx.content,
     ctx.site?.locale,
+    blockMappings,
   );
   const document = adapted.document;
   const { kv, log } = ctx;
@@ -529,6 +532,7 @@ export async function evaluateAndPersistAll(
     collections?: readonly string[];
     evaluator: EvaluatorFn;
     suppressionFilter?: SuppressionFilter;
+    blockMappings?: CustomBlockMappings | undefined;
   },
 ): Promise<RefreshSummary> {
   const collections = options.collections ?? DEFAULT_COLLECTIONS;
@@ -566,6 +570,7 @@ export async function evaluateAndPersistAll(
             item,
             ctx.content,
             ctx.site?.locale,
+            options.blockMappings,
           );
           documents.push(adapted.document);
           documentCollections.push(adapted.meta.collection);

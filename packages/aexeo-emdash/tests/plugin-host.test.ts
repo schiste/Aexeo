@@ -11,6 +11,7 @@ import {
   type EmdashContentItem,
 } from "../src/adapter.js";
 import { buildAllowedHosts, buildCapabilities } from "../src/plugin.js";
+import { aexeoPlugin } from "../src/index.js";
 
 let host: PluginRuntimeTestHost | undefined;
 
@@ -53,6 +54,21 @@ describe("EmDash content adaptation", () => {
       "network:request",
     ]);
     expect(buildAllowedHosts("evaluator.test")).toEqual(["evaluator.test"]);
+  });
+
+  it("maps declared custom block fields and rejects partial mappings", () => {
+    const item: EmdashContentItem = { id: "a", type: "pages", slug: "a", status: "draft", locale: "en", data: { blocks: [{ _type: "hero", _key: "h", _version: 1, heading: "Title", body: "Body", label: "Read", href: "https://example.org" }] } };
+    const mappings = { hero: [{ kind: "heading" as const, field: "heading" }, { kind: "paragraph" as const, field: "body" }, { kind: "link" as const, field: "label", hrefField: "href" }] };
+    const document = contentItemToEmdashDocument(item, mappings);
+    expect(document.body_capabilities).toBeUndefined();
+    expect(document.body?.map((block) => block.children[0]?.text)).toEqual(["Title", "Body", "Read"]);
+    expect(document.body?.[0]?.style).toBe("h2");
+    expect(document.body?.[2]?.markDefs?.[0]?.href).toBe("https://example.org");
+    expect(contentItemToEmdashDocument({ ...item, data: { blocks: [...(item.data.blocks as object[]), { _type: "unknown", _key: "u", _version: 1 }] } }, mappings).body_capabilities).toEqual([]);
+    expect(contentItemToEmdashDocument(item, { hero: [{ kind: "paragraph", field: "missing" }] }).body_capabilities).toEqual([]);
+    const rich = { ...item, data: { blocks: [{ _type: "hero", _key: "h", _version: 1, body: body("Nested") }] } };
+    expect(contentItemToEmdashDocument(rich, { hero: [{ kind: "richText", field: "body" }] }).body?.[0]?.children[0]?.text).toBe("Nested");
+    expect(JSON.parse(JSON.stringify(aexeoPlugin({ blockMappings: mappings }).options)).blockMappings).toEqual(mappings);
   });
 
   it("keeps typed block text and resolves exact URLs and translation alternates", async () => {
