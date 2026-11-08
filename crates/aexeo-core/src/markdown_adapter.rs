@@ -613,6 +613,47 @@ min = 2
     }
 
     #[test]
+    fn sentence_abbreviations_are_explicit_and_preserve_block_boundaries() {
+        use crate::content_gate::GateStatus;
+        let preset = crate::content_gate::ContentPreset::from_toml(
+            "version=1\nname='t'\n[[gates]]\nid='g'\nkind='sentence_length'\nmax_words=4\n",
+        )
+        .unwrap();
+        let gate_json = serde_json::to_value(&preset.gates[0]).unwrap();
+        assert!(gate_json.get("abbreviations").is_none());
+        let plain = "kind='sentence_length'\nmax_words=4";
+        let configured = "kind='sentence_length'\nmax_words=4\nabbreviations=['Dr.', 'M.']";
+        let source = "Dr. Martin writes clear notes.\n";
+        assert_eq!(report(source, plain).status, GateStatus::Passed);
+        let result = report(source, configured);
+        assert_eq!(result.status, GateStatus::Failed);
+        assert_eq!(result.measurements["sentence_count"], 1);
+        assert_eq!(result.measurements["longest_sentence_words"], 5);
+        let blocks = report("Dr.\n\nM. Martin writes.\n", configured);
+        assert_eq!(blocks.measurements["sentence_count"], 2);
+        let exact = report("Mrs. Martin writes.\n", configured);
+        assert_eq!(exact.measurements["sentence_count"], 2);
+    }
+
+    #[test]
+    fn sentence_abbreviation_configuration_rejects_unusable_tokens() {
+        use crate::content_gate::ContentPreset;
+        for entries in [
+            "['']",
+            "['Dr']",
+            "['.']",
+            "['e.g.']",
+            "['Dr Smith.']",
+            "['Dr.', 'Dr.']",
+        ] {
+            let preset = format!(
+                "version=1\nname='t'\n[[gates]]\nid='g'\nkind='sentence_length'\nmax_words=10\nabbreviations={entries}\n"
+            );
+            assert!(ContentPreset::from_toml(&preset).is_err(), "{entries}");
+        }
+    }
+
+    #[test]
     fn inline_code_stays_in_headings_and_prose_and_maps_to_source() {
         use crate::content_gate::GateStatus;
         let source = "## Option `a`\n\n## Option `b`\n\nUse `` x ``.\n";
