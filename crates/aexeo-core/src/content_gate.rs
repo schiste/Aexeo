@@ -1216,6 +1216,7 @@ impl ContentPreset {
                     match context.and_then(|c| c.paragraphs.as_ref()) {
                         Some(paragraphs) => {
                             let mut longest = 0;
+                            let mut exceeding = 0;
                             for paragraph in paragraphs {
                                 let count = if chars {
                                     paragraph.text.chars().count()
@@ -1224,6 +1225,7 @@ impl ContentPreset {
                                 };
                                 longest = longest.max(count);
                                 if count > *limit {
+                                    exceeding += 1;
                                     emit(
                                         format!("Paragraph has {count} {unit}; maximum is {limit}"),
                                         paragraph.line,
@@ -1232,6 +1234,7 @@ impl ContentPreset {
                                 }
                             }
                             measurements.insert("paragraph_count".into(), paragraphs.len());
+                            measurements.insert("paragraphs_exceeding_limit".into(), exceeding);
                             measurements.insert(longest_key.into(), longest);
                         }
                         None => {
@@ -1263,6 +1266,7 @@ impl ContentPreset {
                             let mut segment_start = 0;
                             let mut sentence_count = 0;
                             let mut longest = 0;
+                            let mut exceeding = 0;
                             let mut line = 1;
                             let mut column = 1;
                             let mut first_position = None;
@@ -1310,6 +1314,7 @@ impl ContentPreset {
                                         sentence_count += 1;
                                         longest = longest.max(count);
                                         if count > *limit {
+                                            exceeding += 1;
                                             let (start_line, start_column) =
                                                 first_position.unwrap_or((line, column));
                                             emit(
@@ -1336,6 +1341,7 @@ impl ContentPreset {
                                 }
                             }
                             measurements.insert("sentence_count".into(), sentence_count);
+                            measurements.insert("sentences_exceeding_limit".into(), exceeding);
                             measurements.insert(longest_key.into(), longest);
                         }
                         None => reason = Some("text is unavailable from this adapter".into()),
@@ -1835,6 +1841,72 @@ mod tests {
                 })
                 .unwrap();
             assert_eq!(report.gates[0].status, GateStatus::Passed, "{gate}");
+        }
+    }
+
+    #[test]
+    fn length_measurements_count_all_violations_and_distinguish_unavailable() {
+        for (kind, limit, key) in [
+            (
+                "paragraph_length",
+                "max_words",
+                "paragraphs_exceeding_limit",
+            ),
+            (
+                "paragraph_character_length",
+                "max_chars",
+                "paragraphs_exceeding_limit",
+            ),
+            ("sentence_length", "max_words", "sentences_exceeding_limit"),
+            (
+                "sentence_character_length",
+                "max_chars",
+                "sentences_exceeding_limit",
+            ),
+        ] {
+            let preset = ContentPreset::from_toml(&format!(
+                "version=1\nname='t'\n[[gates]]\nid='g'\nkind='{kind}'\n{limit}=1\n"
+            ))
+            .unwrap();
+            let count = MAX_FINDINGS_PER_GATE + 5;
+            let context = ContentContext {
+                paragraphs: Some(
+                    (0..count)
+                        .map(|_| ContentParagraph {
+                            text: "two words".into(),
+                            line: 1,
+                            column: 1,
+                        })
+                        .collect(),
+                ),
+                ..Default::default()
+            };
+            let text = "two words. ".repeat(count);
+            let input = literal_input(&text);
+            let report = preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap();
+            let result = &report.gates[0];
+            assert_eq!(result.measurements[key], count, "{kind}");
+            assert_eq!(result.findings.len(), MAX_FINDINGS_PER_GATE, "{kind}");
+            assert_eq!(result.measurements[FINDINGS_OMITTED], 5, "{kind}");
+
+            let empty = literal_input("");
+            let empty_context = ContentContext {
+                paragraphs: Some(vec![]),
+                ..Default::default()
+            };
+            let report = preset
+                .evaluate_with_context(&empty, None, None, Some(&empty_context))
+                .unwrap();
+            assert_eq!(report.gates[0].measurements[key], 0, "{kind}");
+            let missing = ContentInput {
+                text: None,
+                ..literal_input("")
+            };
+            let report = preset.evaluate(&missing).unwrap();
+            assert_eq!(report.gates[0].status, GateStatus::NotChecked, "{kind}");
+            assert!(!report.gates[0].measurements.contains_key(key), "{kind}");
         }
     }
 
