@@ -330,6 +330,24 @@ export interface SandboxCtx {
   };
 }
 
+// Aggregate operational coverage only: never include article text, URLs or IDs.
+function recordContentCoverage(ctx: SandboxCtx, documents: readonly EmdashDocument[]): void {
+  const counts = { documents: documents.length, complete: 0, partial: 0, unavailable: 0 };
+  for (const document of documents) {
+    if (document.body === undefined || document.body_capabilities?.length === 0) counts.unavailable++;
+    else if (document.body_capabilities === undefined ||
+      ["text", "headings", "paragraphs", "links"].every((capability) =>
+        document.body_capabilities?.includes(capability as "text" | "headings" | "paragraphs" | "links"),
+      )) counts.complete++;
+    else counts.partial++;
+  }
+  try {
+    ctx.log?.info?.("aexeo.content_coverage", counts);
+  } catch {
+    // Optional diagnostics must never break an editor workflow.
+  }
+}
+
 // Shape emdash's runtime hands to content:afterSave handlers. The
 // host invokes hooks with `{content, collection, isNew}` (see
 // emdash/dist/astro/middleware.mjs `runAfterSaveHooks`). content is
@@ -456,6 +474,7 @@ export async function handleAfterSaveConfigured(
     blockMappings,
   );
   const document = adapted.document;
+  recordContentCoverage(ctx, [document]);
   const { kv, log } = ctx;
 
   // Persist the WASM-shaped document and metadata, including the exact
@@ -622,6 +641,7 @@ export async function evaluateAndPersistAll(
     } while (cursor !== undefined);
   }
   summary.documentsScanned = documents.length;
+  recordContentCoverage(ctx, documents);
 
   // 2. Persist documents (with metadata) in KV — the score widget
   //    and admin findings page both read these. Metadata carries the

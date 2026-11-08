@@ -235,6 +235,17 @@ describe("content:afterDelete", () => {
 });
 
 describe("custom block mappings", () => {
+  it("emits aggregate coverage without content or identifiers", async () => {
+    const content = item("private-id", NEW, "private title");
+    content.data.blocks = [{ _type: "unknown", _key: "one", _version: 1, body: "private text" }];
+    const { ctx } = host([content]);
+    const events: unknown[] = [];
+    ctx.log = { info: (message, data) => { if (message === "aexeo.content_coverage") events.push(data); }, warn: () => {}, error: () => {} };
+    await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator: returning() });
+    expect(events).toEqual([{ documents: 1, complete: 0, partial: 0, unavailable: 1 }]);
+    expect(JSON.stringify(events)).not.toContain("private");
+  });
+
   it("forwards sandbox settings into the sidecar document", async () => {
     const content = item("mapped-sandbox", NEW);
     content.data.blocks = [{ _type: "hero", _key: "one", _version: 1, headline: "Mapped" }];
