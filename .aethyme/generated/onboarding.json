@@ -1,0 +1,519 @@
+{
+  "schema_version": "aethyme-onboarding-v2",
+  "repo": {
+    "name": "Aexeo",
+    "root": ".",
+    "kind": "monorepo",
+    "languages": [
+      "rust",
+      "typescript"
+    ],
+    "primary_language": "rust",
+    "package_manager": "cargo",
+    "manifests": [
+      "Cargo.toml",
+      "crates/aexeo-cli/Cargo.toml",
+      "crates/aexeo-contracts/Cargo.toml",
+      "crates/aexeo-core/Cargo.toml",
+      "crates/aexeo-emdash-bridge/Cargo.toml",
+      "crates/tempfile/Cargo.toml",
+      "package.json",
+      "packages/aexeo-crawl-worker/package.json",
+      "packages/aexeo-emdash/package.json",
+      "packages/aexeo-emdash/tests/fixtures/plugin-host/package.json"
+    ]
+  },
+  "workspaces": [
+    {
+      "root": ".",
+      "manifest": {
+        "path": "Cargo.toml",
+        "kind": "cargo"
+      },
+      "package_manager": "cargo",
+      "languages": [
+        "rust"
+      ],
+      "members": [
+        "crates/aexeo-cli",
+        "crates/aexeo-contracts",
+        "crates/aexeo-core",
+        "crates/aexeo-emdash-bridge",
+        "crates/tempfile"
+      ],
+      "lockfiles": [
+        "Cargo.lock"
+      ],
+      "candidate_commands": [
+        {
+          "kind": "fast_test",
+          "command": "cargo test --workspace",
+          "source": "Cargo.toml",
+          "confidence": "high"
+        },
+        {
+          "kind": "build",
+          "command": "cargo build --workspace",
+          "source": "Cargo.toml",
+          "confidence": "high"
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "tracked_manifest",
+          "detail": "Cargo.toml",
+          "confidence": "high"
+        },
+        {
+          "kind": "root_manifest",
+          "detail": "manifest is at repository root",
+          "confidence": "high"
+        },
+        {
+          "kind": "workspace_members",
+          "detail": "5 tracked member roots",
+          "confidence": "high"
+        }
+      ],
+      "confidence": "high",
+      "primary": true,
+      "ranking": {
+        "root_manifest": true,
+        "declares_workspace": true,
+        "member_count": 5,
+        "ci_mentions": 0,
+        "executable_entrypoints": 2,
+        "source_files": 233
+      }
+    },
+    {
+      "root": ".",
+      "manifest": {
+        "path": "package.json",
+        "kind": "node"
+      },
+      "package_manager": "npm",
+      "languages": [
+        "typescript"
+      ],
+      "members": [],
+      "lockfiles": [
+        "package-lock.json",
+        "packages/aexeo-crawl-worker/package-lock.json",
+        "packages/aexeo-emdash/package-lock.json"
+      ],
+      "candidate_commands": [],
+      "evidence": [
+        {
+          "kind": "tracked_manifest",
+          "detail": "package.json",
+          "confidence": "high"
+        },
+        {
+          "kind": "root_manifest",
+          "detail": "manifest is at repository root",
+          "confidence": "high"
+        }
+      ],
+      "confidence": "high",
+      "primary": false,
+      "ranking": {
+        "root_manifest": true,
+        "declares_workspace": false,
+        "member_count": 0,
+        "ci_mentions": 0,
+        "executable_entrypoints": 2,
+        "source_files": 233
+      }
+    },
+    {
+      "root": "packages/aexeo-crawl-worker",
+      "manifest": {
+        "path": "packages/aexeo-crawl-worker/package.json",
+        "kind": "node"
+      },
+      "package_manager": "npm",
+      "languages": [
+        "typescript"
+      ],
+      "members": [],
+      "lockfiles": [
+        "packages/aexeo-crawl-worker/package-lock.json"
+      ],
+      "candidate_commands": [
+        {
+          "kind": "fast_test",
+          "command": "npm --prefix packages/aexeo-crawl-worker run test",
+          "source": "packages/aexeo-crawl-worker/package.json",
+          "confidence": "high"
+        },
+        {
+          "kind": "dev",
+          "command": "npm --prefix packages/aexeo-crawl-worker run dev",
+          "source": "packages/aexeo-crawl-worker/package.json",
+          "confidence": "high"
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "tracked_manifest",
+          "detail": "packages/aexeo-crawl-worker/package.json",
+          "confidence": "high"
+        },
+        {
+          "kind": "ci_usage",
+          "detail": "workspace root mentioned 10 time(s) in CI",
+          "confidence": "medium"
+        }
+      ],
+      "confidence": "high",
+      "primary": false,
+      "ranking": {
+        "root_manifest": false,
+        "declares_workspace": false,
+        "member_count": 0,
+        "ci_mentions": 10,
+        "executable_entrypoints": 0,
+        "source_files": 6
+      }
+    },
+    {
+      "root": "packages/aexeo-emdash",
+      "manifest": {
+        "path": "packages/aexeo-emdash/package.json",
+        "kind": "node"
+      },
+      "package_manager": "npm",
+      "languages": [
+        "typescript"
+      ],
+      "members": [],
+      "lockfiles": [
+        "packages/aexeo-emdash/package-lock.json"
+      ],
+      "candidate_commands": [
+        {
+          "kind": "fast_test",
+          "command": "npm --prefix packages/aexeo-emdash run test",
+          "source": "packages/aexeo-emdash/package.json",
+          "confidence": "high"
+        },
+        {
+          "kind": "build",
+          "command": "npm --prefix packages/aexeo-emdash run build",
+          "source": "packages/aexeo-emdash/package.json",
+          "confidence": "high"
+        }
+      ],
+      "evidence": [
+        {
+          "kind": "tracked_manifest",
+          "detail": "packages/aexeo-emdash/package.json",
+          "confidence": "high"
+        },
+        {
+          "kind": "ci_usage",
+          "detail": "workspace root mentioned 9 time(s) in CI",
+          "confidence": "medium"
+        }
+      ],
+      "confidence": "high",
+      "primary": false,
+      "ranking": {
+        "root_manifest": false,
+        "declares_workspace": false,
+        "member_count": 0,
+        "ci_mentions": 9,
+        "executable_entrypoints": 1,
+        "source_files": 53
+      }
+    },
+    {
+      "root": "packages/aexeo-emdash/tests/fixtures/plugin-host",
+      "manifest": {
+        "path": "packages/aexeo-emdash/tests/fixtures/plugin-host/package.json",
+        "kind": "node"
+      },
+      "package_manager": "npm",
+      "languages": [
+        "typescript"
+      ],
+      "members": [],
+      "lockfiles": [],
+      "candidate_commands": [],
+      "evidence": [
+        {
+          "kind": "tracked_manifest",
+          "detail": "packages/aexeo-emdash/tests/fixtures/plugin-host/package.json",
+          "confidence": "high"
+        }
+      ],
+      "confidence": "high",
+      "primary": false,
+      "ranking": {
+        "root_manifest": false,
+        "declares_workspace": false,
+        "member_count": 0,
+        "ci_mentions": 0,
+        "executable_entrypoints": 0,
+        "source_files": 1
+      }
+    }
+  ],
+  "primary_workspace": {
+    "root": ".",
+    "manifest": {
+      "path": "Cargo.toml",
+      "kind": "cargo"
+    },
+    "package_manager": "cargo",
+    "languages": [
+      "rust"
+    ],
+    "members": [
+      "crates/aexeo-cli",
+      "crates/aexeo-contracts",
+      "crates/aexeo-core",
+      "crates/aexeo-emdash-bridge",
+      "crates/tempfile"
+    ],
+    "lockfiles": [
+      "Cargo.lock"
+    ],
+    "candidate_commands": [
+      {
+        "kind": "fast_test",
+        "command": "cargo test --workspace",
+        "source": "Cargo.toml",
+        "confidence": "high"
+      },
+      {
+        "kind": "build",
+        "command": "cargo build --workspace",
+        "source": "Cargo.toml",
+        "confidence": "high"
+      }
+    ],
+    "evidence": [
+      {
+        "kind": "tracked_manifest",
+        "detail": "Cargo.toml",
+        "confidence": "high"
+      },
+      {
+        "kind": "root_manifest",
+        "detail": "manifest is at repository root",
+        "confidence": "high"
+      },
+      {
+        "kind": "workspace_members",
+        "detail": "5 tracked member roots",
+        "confidence": "high"
+      }
+    ],
+    "confidence": "high",
+    "primary": true,
+    "ranking": {
+      "root_manifest": true,
+      "declares_workspace": true,
+      "member_count": 5,
+      "ci_mentions": 0,
+      "executable_entrypoints": 2,
+      "source_files": 233
+    }
+  },
+  "commands": [
+    {
+      "kind": "dev",
+      "command": "npm --prefix packages/aexeo-crawl-worker run dev",
+      "source": "packages/aexeo-crawl-worker/package.json",
+      "confidence": "high",
+      "workspace_root": "packages/aexeo-crawl-worker",
+      "provenance": "derived from tracked workspace manifest"
+    },
+    {
+      "kind": "dev",
+      "command": "cargo run",
+      "source": "Cargo.toml",
+      "confidence": "medium"
+    },
+    {
+      "kind": "fast_test",
+      "command": "cargo test",
+      "source": "Cargo.toml",
+      "confidence": "high"
+    },
+    {
+      "kind": "fast_test",
+      "command": "cargo test --workspace",
+      "source": "Cargo.toml",
+      "confidence": "high",
+      "workspace_root": ".",
+      "provenance": "derived from tracked workspace manifest"
+    },
+    {
+      "kind": "fast_test",
+      "command": "npm --prefix packages/aexeo-crawl-worker run test",
+      "source": "packages/aexeo-crawl-worker/package.json",
+      "confidence": "high",
+      "workspace_root": "packages/aexeo-crawl-worker",
+      "provenance": "derived from tracked workspace manifest"
+    },
+    {
+      "kind": "fast_test",
+      "command": "npm --prefix packages/aexeo-emdash run test",
+      "source": "packages/aexeo-emdash/package.json",
+      "confidence": "high",
+      "workspace_root": "packages/aexeo-emdash",
+      "provenance": "derived from tracked workspace manifest"
+    },
+    {
+      "kind": "build",
+      "command": "cargo build",
+      "source": "Cargo.toml",
+      "confidence": "high"
+    },
+    {
+      "kind": "build",
+      "command": "cargo build --workspace",
+      "source": "Cargo.toml",
+      "confidence": "high",
+      "workspace_root": ".",
+      "provenance": "derived from tracked workspace manifest"
+    },
+    {
+      "kind": "build",
+      "command": "npm --prefix packages/aexeo-emdash run build",
+      "source": "packages/aexeo-emdash/package.json",
+      "confidence": "high",
+      "workspace_root": "packages/aexeo-emdash",
+      "provenance": "derived from tracked workspace manifest"
+    }
+  ],
+  "primary_commands": {
+    "dev": "cargo run",
+    "fast_test": "cargo test --workspace",
+    "build": "cargo build --workspace"
+  },
+  "areas": [
+    {
+      "path": ".github",
+      "role": "automation",
+      "reason": "automation and CI configuration",
+      "confidence": "high"
+    },
+    {
+      "path": "docs",
+      "role": "docs",
+      "reason": "documentation area",
+      "confidence": "high"
+    },
+    {
+      "path": "packages",
+      "role": "workspace",
+      "reason": "workspace-style package container",
+      "confidence": "high"
+    },
+    {
+      "path": "scripts",
+      "role": "tooling",
+      "reason": "developer tooling or scripts",
+      "confidence": "high"
+    }
+  ],
+  "entrypoints": [],
+  "primary_entrypoints": {},
+  "caution_zones": [],
+  "generated_paths": [
+    {
+      "path": ".aethyme/generated",
+      "reason": "tracked generated or vendored surface; verify ownership before editing",
+      "provenance": "tracked path classification"
+    }
+  ],
+  "dangerous_paths": [
+    {
+      "path": ".github/workflows",
+      "reason": "repository automation; changes can affect publication or shared CI",
+      "provenance": "tracked path classification"
+    }
+  ],
+  "navigation_recipes": [
+    {
+      "purpose": "Broad repository orientation for a user request",
+      "command": "aethyme explore --repo \"$PWD\" --request \"<task>\" --format answer-json"
+    },
+    {
+      "purpose": "Quick deterministic repo summary",
+      "command": "aethyme repo inspect \"$PWD\" --mode brief --json-output"
+    },
+    {
+      "purpose": "Trace likely impact before editing",
+      "command": "aethyme graph callers \"$PWD\" \"<symbol-or-file>\" --json-output"
+    }
+  ],
+  "summon": {
+    "description": "Use when starting work in an unfamiliar repository, when the task asks for repo overview, setup, architecture, entrypoints, test commands, or where to begin. Skip for narrow file-scoped edits once the relevant paths are already known.",
+    "recommended_when": [
+      "first task in repo",
+      "repo overview",
+      "setup or run instructions",
+      "architecture or entrypoints",
+      "where should I start",
+      "broad debugging or feature-localization request"
+    ],
+    "skip_when": [
+      "known file-scoped edit",
+      "follow-up inside already identified area",
+      "task already localized to concrete files"
+    ],
+    "task_signals": [
+      "unfamiliar repository",
+      "broad task with no path named",
+      "user asks how the repo is organized"
+    ]
+  },
+  "freshness": {
+    "source_digest": "e03c4efc957bb6064a9c50e3f4f848d694a0ffb3d7a9b48eb502ce83d9a24ea3",
+    "source_commit": null,
+    "source_file_count": 378,
+    "generator": "deterministic"
+  },
+  "notes": [
+    "EmDash WASM integration: run `npm ci --prefix packages/aexeo-emdash`, then `npm run build --prefix packages/aexeo-emdash` before `npm run test:wasm --prefix packages/aexeo-emdash`. The smoke tests import the bundled `dist/content.js`; building TypeScript and WASM alone does not create it.",
+    "Run `cargo fmt --all -- --check` after adding or moving a module: it also checks the parent `mod` declarations, which a focused test run does not.",
+    "For a broker-coordinated `gh pr merge --match-head-commit`, pass the full `headRefOid` from `gh pr view --json headRefOid`; an abbreviated SHA is rejected.",
+    "If a broker push fails with an internal remote hook error, keep the commit and read the error, then retry through the broker without force. If it persists, report the rejection and keep the session for recovery.",
+    "A refused preparation-status command does not mean every broker operation is blocked: report the exact refusal and check each authorized operation separately. Review an upgrade plan before applying it. Lease coordination and migration preconditions are separate: a migration can treat any live or stale session, including your own, as a blocker, so apply it from the main checkout with no session open and carry the result into a session for the pull request."
+  ],
+  "telemetry": {
+    "sections": [
+      "repo",
+      "workspaces",
+      "primary_workspace",
+      "commands",
+      "areas",
+      "entrypoints",
+      "caution_zones",
+      "generated_paths",
+      "dangerous_paths",
+      "navigation_recipes",
+      "summon",
+      "freshness"
+    ],
+    "counts": {
+      "workspaces": 5,
+      "commands": 9,
+      "areas": 4,
+      "entrypoints": 0,
+      "caution_zones": 0,
+      "generated_paths": 1,
+      "dangerous_paths": 1,
+      "navigation_recipes": 3,
+      "notes": 5
+    },
+    "overrides_applied": true,
+    "override_source": ".aethyme/overrides/onboarding.json",
+    "override_invalid": false
+  }
+}
