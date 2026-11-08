@@ -15,7 +15,7 @@ aexeo_run_timed "${prefix}cargo-test-workspace" "cache-sensitive" cargo test --w
 # Synthetic integration fixtures are regression checks, not accuracy estimates.
 aexeo_run_timed "${prefix}content-corpus-cli" "cache-sensitive" cargo build -p aexeo-cli
 # The markdown-* fixtures run through --input-format markdown.
-for fixture in duplicate-headings heading-length link-destinations \
+for fixture in duplicate-headings heading-length link-destinations required-metadata \
     markdown-duplicate-headings markdown-evidence-anchors markdown-forbidden-terms \
     markdown-forbidden-terms-options markdown-heading-length markdown-input-limits \
     markdown-link-count markdown-link-destinations markdown-required-headings \

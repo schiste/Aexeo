@@ -27,6 +27,9 @@ use aexeo_contracts::{Finding, FindingScope};
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use crate::site::markup::{
+    LineIndex, attr_value, mask_non_markup, next_close_tag, next_open_tag, open_tag_end,
+};
 use crate::site::{Page, Site};
 
 /// Configuration knob for accessibility rules. Mirrors the CLI's
@@ -67,10 +70,12 @@ pub fn run_accessibility_rules(site: &Site, options: AccessibilityOptions) -> Ve
     let mut findings = Vec::new();
     for page in site.route_pages() {
         findings.extend(rule_a11y001_missing_alt(page, options));
-        findings.extend(rule_a11y002_empty_link_or_button(page));
-        findings.extend(rule_a11y003_duplicate_id(page));
-        findings.extend(rule_a11y004_heading_jump(page));
-        findings.extend(rule_a11y005_missing_main_landmark(page));
+        let markup = mask_non_markup(&page.raw_text);
+        let lines = LineIndex::new(&markup);
+        findings.extend(rule_a11y002_empty_link_or_button(page, &markup, &lines));
+        findings.extend(rule_a11y003_duplicate_id(page, &markup, &lines));
+        findings.extend(rule_a11y004_heading_jump(page, &markup, &lines));
+        findings.extend(rule_a11y005_missing_main_landmark(page, &markup));
         findings.extend(rule_a11y006_alt_equals_filename(page));
     }
     findings
@@ -106,73 +111,50 @@ fn rule_a11y001_missing_alt(page: &Page, options: AccessibilityOptions) -> Vec<F
     findings
 }
 
-/// A11Y002 — anchor or button with no accessible text content.
-/// Matches `<a ...></a>` and `<button ...></button>` tags whose
-/// inner content is empty or whitespace-only AND that don't carry
-/// `aria-label`, `aria-labelledby`, or a `title` attribute.
-/// Pure regex-style matching; misses cases where the only inner
-/// content is an `<img>` whose alt provides the label — that's a
-/// known limitation of static analysis without a real DOM.
-fn rule_a11y002_empty_link_or_button(page: &Page) -> Vec<Finding> {
+/// A11Y002 — anchor or button with no accessible name: no visible text, no
+/// labelled child, no labelling attribute. Elements hidden from assistive
+/// technology need no name.
+fn rule_a11y002_empty_link_or_button(page: &Page, markup: &str, lines: &LineIndex) -> Vec<Finding> {
     let mut findings = Vec::new();
     for tag in ["a", "button"] {
-        findings.extend(scan_empty_interactive(page, tag));
+        findings.extend(scan_empty_interactive(page, markup, lines, tag));
     }
     findings
 }
 
-fn scan_empty_interactive(page: &Page, tag: &str) -> Vec<Finding> {
-    let raw = &page.raw_text;
+fn scan_empty_interactive(page: &Page, raw: &str, lines: &LineIndex, tag: &str) -> Vec<Finding> {
     let mut out = Vec::new();
-    let open_marker = format!("<{} ", tag);
-    let open_marker_self = format!("<{}>", tag);
-    let close_marker = format!("</{}>", tag);
     let mut offset = 0;
-    while let Some(rel) = find_open_tag(&raw[offset..], &open_marker, &open_marker_self) {
-        let start = offset + rel;
-        let Some(open_end_rel) = raw[start..].find('>') else {
+    while let Some(start) = next_open_tag(raw, tag, offset) {
+        let Some(open_tag_close) = open_tag_end(raw, start) else {
             break;
         };
-        let open_end = start + open_end_rel + 1;
-        let Some(close_rel) = raw[open_end..].find(&close_marker) else {
+        let open_end = open_tag_close + 1;
+        let Some((inner_end, close_end)) = next_close_tag(raw, tag, open_end) else {
             offset = open_end;
             continue;
         };
-        let inner_end = open_end + close_rel;
+        offset = close_end;
         let open_tag = &raw[start..open_end];
         let inner = &raw[open_end..inner_end];
-        // Skip when there's any accessible label: visible text,
-        // an aria-label/title attribute, or an inner <img alt="...">
-        // (per ARIA accessible-name calculation, an alt'd image is
-        // a valid label for both <a> and <button>).
-        if !is_visually_empty(inner) || contains_image_with_alt(inner) || has_label_attr(open_tag) {
-            offset = inner_end + close_marker.len();
+        if !is_visually_empty(inner)
+            || contains_labelled_child(inner)
+            || has_label_attr(open_tag)
+            || is_aria_hidden(open_tag)
+        {
             continue;
         }
-        let (line, column) = line_column_for(raw, start);
-        let kind = if tag == "a" { "link" } else { "button" };
+        let (line, column) = lines.line_column(start);
         out.push(finding(
             "A11Y002",
-            format!("<{}> with no accessible text or label", kind),
+            format!("<{tag}> with no accessible text or label"),
             &page.path,
             line,
             column,
             "error",
         ));
-        offset = inner_end + close_marker.len();
     }
     out
-}
-
-fn find_open_tag(raw: &str, with_attrs: &str, self_close: &str) -> Option<usize> {
-    let a = raw.find(with_attrs);
-    let b = raw.find(self_close);
-    match (a, b) {
-        (Some(x), Some(y)) => Some(x.min(y)),
-        (Some(x), None) => Some(x),
-        (None, Some(y)) => Some(y),
-        (None, None) => None,
-    }
 }
 
 fn is_visually_empty(inner: &str) -> bool {
@@ -180,28 +162,36 @@ fn is_visually_empty(inner: &str) -> bool {
     stripped.trim().is_empty()
 }
 
-fn contains_image_with_alt(inner: &str) -> bool {
+/// A child contributes to the name through an `alt` or an `aria-label`, for
+/// example `<img alt="Home">` or `<svg aria-label="LinkedIn">`.
+fn contains_labelled_child(inner: &str) -> bool {
     let mut offset = 0;
-    while let Some(idx) = inner[offset..].find("<img") {
-        let start = offset + idx;
-        let Some(end_rel) = inner[start..].find('>') else {
+    while let Some(relative) = inner[offset..].find('<') {
+        let start = offset + relative;
+        let Some(end) = open_tag_end(inner, start) else {
             break;
         };
-        let snippet = &inner[start..=start + end_rel];
-        if let Some(alt) = attr_value(snippet, "alt")
-            && !alt.trim().is_empty()
-        {
+        let tag = &inner[start..=end];
+        if has_text_attr(tag, "alt") || has_text_attr(tag, "aria-label") {
             return true;
         }
-        offset = start + end_rel + 1;
+        offset = end + 1;
     }
     false
 }
 
+fn has_text_attr(tag: &str, name: &str) -> bool {
+    attr_value(tag, name).is_some_and(|value| !value.is_empty())
+}
+
 fn has_label_attr(open_tag: &str) -> bool {
-    open_tag.contains("aria-label=")
-        || open_tag.contains("aria-labelledby=")
-        || open_tag.contains("title=")
+    ["aria-label", "aria-labelledby", "title"]
+        .into_iter()
+        .any(|name| has_text_attr(open_tag, name))
+}
+
+fn is_aria_hidden(open_tag: &str) -> bool {
+    attr_value(open_tag, "aria-hidden").is_some_and(|value| value.eq_ignore_ascii_case("true"))
 }
 
 fn strip_html_tags(s: &str) -> String {
@@ -223,27 +213,30 @@ fn strip_html_tags(s: &str) -> String {
 /// raw HTML and reports any value seen more than once. Skips
 /// `<script>` and `<style>` blocks (where `id` may appear in JS or
 /// CSS string literals).
-fn rule_a11y003_duplicate_id(page: &Page) -> Vec<Finding> {
-    let cleaned = strip_script_style(&page.raw_text);
+fn rule_a11y003_duplicate_id(page: &Page, markup: &str, lines: &LineIndex) -> Vec<Finding> {
     let mut seen: BTreeMap<String, (usize, usize)> = BTreeMap::new(); // id -> (count, first_offset)
     let mut offset = 0;
-    while let Some(idx) = cleaned[offset..].find("id=\"") {
-        let start = offset + idx + 4; // past id="
-        let Some(end_rel) = cleaned[start..].find('"') else {
+    while let Some(relative) = markup[offset..].find('<') {
+        let start = offset + relative;
+        offset = start + 1;
+        // Not an opening tag: a closing tag, a doctype, or a stray `<`.
+        if !markup[start + 1..].starts_with(|ch: char| ch.is_ascii_alphabetic()) {
+            continue;
+        }
+        let Some(end) = open_tag_end(markup, start) else {
             break;
         };
-        let value = &cleaned[start..start + end_rel];
-        if !value.is_empty() {
-            seen.entry(value.to_string())
+        offset = end + 1;
+        if let Some(id) = attr_value(&markup[start..=end], "id").filter(|id| !id.is_empty()) {
+            seen.entry(id)
                 .and_modify(|(count, _)| *count += 1)
                 .or_insert((1, start));
         }
-        offset = start + end_rel + 1;
     }
     let mut findings = Vec::new();
     for (id, (count, first_offset)) in seen {
         if count >= 2 {
-            let (line, column) = line_column_for(&cleaned, first_offset);
+            let (line, column) = lines.line_column(first_offset);
             findings.push(
                 finding(
                     "A11Y003",
@@ -263,38 +256,20 @@ fn rule_a11y003_duplicate_id(page: &Page) -> Vec<Finding> {
     findings
 }
 
-fn strip_script_style(raw: &str) -> String {
-    let mut cleaned = raw.to_string();
-    for (start_tag, end_tag) in [("<script", "</script>"), ("<style", "</style>")] {
-        while let Some(start) = cleaned.find(start_tag) {
-            let Some(end_rel) = cleaned[start..].find(end_tag) else {
-                cleaned.truncate(start);
-                break;
-            };
-            let end = start + end_rel + end_tag.len();
-            // Replace with same-length whitespace so line numbers stay aligned.
-            let placeholder = " ".repeat(end - start);
-            cleaned.replace_range(start..end, &placeholder);
-        }
-    }
-    cleaned
-}
-
 /// A11Y004 — heading hierarchy jump (h2 → h4 with no h3 between).
 /// Heuristic: pure regex-style scan for `<hN>` tags 1–6, in document
 /// order. A jump of more than one level is flagged. Within reason
 /// h1→h3 may be intentional in a template, so this is a `warn`,
 /// not an `error`.
-fn rule_a11y004_heading_jump(page: &Page) -> Vec<Finding> {
-    let cleaned = strip_script_style(&page.raw_text);
+fn rule_a11y004_heading_jump(page: &Page, markup: &str, lines: &LineIndex) -> Vec<Finding> {
     let mut findings = Vec::new();
     let mut last_level: Option<u8> = None;
     let mut offset = 0;
-    while let Some((level, position)) = next_heading(&cleaned, offset) {
+    while let Some((level, position)) = next_heading(markup, offset) {
         if let Some(prev) = last_level
             && level > prev + 1
         {
-            let (line, column) = line_column_for(&cleaned, position);
+            let (line, column) = lines.line_column(position);
             findings.push(
                 finding(
                     "A11Y004",
@@ -317,31 +292,29 @@ fn rule_a11y004_heading_jump(page: &Page) -> Vec<Finding> {
 }
 
 fn next_heading(raw: &str, from: usize) -> Option<(u8, usize)> {
-    let mut best: Option<(u8, usize)> = None;
-    for level in 1u8..=6 {
-        let needle = format!("<h{}", level);
-        if let Some(rel) = raw[from..].find(&needle) {
-            let position = from + rel;
-            // Confirm next char is space, '>', or '/'
-            let after = raw.as_bytes().get(position + needle.len()).copied();
-            let is_real_open = matches!(after, Some(b' ' | b'>' | b'/' | b'\n' | b'\t'));
-            if !is_real_open {
-                continue;
-            }
-            best = match best {
-                Some((_, prior_pos)) if prior_pos < position => best,
-                _ => Some((level, position)),
-            };
+    let mut offset = from;
+    while let Some(relative) = raw.get(offset..)?.find('<') {
+        let start = offset + relative;
+        offset = start + 1;
+        let bytes = raw.as_bytes();
+        if matches!(bytes.get(start + 1), Some(b'h' | b'H'))
+            && let Some(level @ b'1'..=b'6') = bytes.get(start + 2).copied()
+            && matches!(
+                bytes.get(start + 3),
+                Some(b' ' | b'>' | b'/' | b'\n' | b'\t' | b'\r')
+            )
+        {
+            return Some((level - b'0', start));
         }
     }
-    best
+    None
 }
 
 /// A11Y005 — missing `<main>` landmark on a content-bearing page.
 /// Skipped for non-content page kinds (search, admin, feed, utility,
 /// notfound, legal). Heuristic — some templates use
 /// `<div role="main">`; we accept either form.
-fn rule_a11y005_missing_main_landmark(page: &Page) -> Vec<Finding> {
+fn rule_a11y005_missing_main_landmark(page: &Page, markup: &str) -> Vec<Finding> {
     use crate::site::PageKind;
     if matches!(
         page.page_kind,
@@ -354,8 +327,7 @@ fn rule_a11y005_missing_main_landmark(page: &Page) -> Vec<Finding> {
     ) {
         return Vec::new();
     }
-    let cleaned = strip_script_style(&page.raw_text);
-    let lower = cleaned.to_ascii_lowercase();
+    let lower = markup.to_ascii_lowercase();
     let has_main_tag = lower.contains("<main") && lower.contains("</main>");
     let has_main_role = lower.contains("role=\"main\"") || lower.contains("role='main'");
     if has_main_tag || has_main_role {
@@ -436,47 +408,31 @@ fn normalize_alt_compare(s: &str) -> String {
 // --- shared utilities (kept module-private so they don't leak into
 //     unrelated callers; keep the public surface tight) -----------
 
-fn attr_value(snippet: &str, name: &str) -> Option<String> {
-    let needle = format!("{}=\"", name);
-    if let Some(start) = snippet.find(&needle) {
-        let after = start + needle.len();
-        if let Some(end) = snippet[after..].find('"') {
-            return Some(snippet[after..after + end].to_string());
-        }
-    }
-    let needle = format!("{}='", name);
-    if let Some(start) = snippet.find(&needle) {
-        let after = start + needle.len();
-        if let Some(end) = snippet[after..].find('\'') {
-            return Some(snippet[after..after + end].to_string());
-        }
-    }
-    None
-}
-
-fn line_column_for(raw: &str, byte_offset: usize) -> (usize, usize) {
-    let mut line = 1usize;
-    let mut column = 1usize;
-    for (i, ch) in raw.char_indices() {
-        if i >= byte_offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            column = 1;
-        } else {
-            column += 1;
-        }
-    }
-    (line, column)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::site::{ImageReference, Page, PageKind};
     use std::collections::BTreeMap;
     use std::path::PathBuf;
+
+    fn a11y002(page: &Page) -> Vec<Finding> {
+        let markup = mask_non_markup(&page.raw_text);
+        rule_a11y002_empty_link_or_button(page, &markup, &LineIndex::new(&markup))
+    }
+
+    fn a11y003(page: &Page) -> Vec<Finding> {
+        let markup = mask_non_markup(&page.raw_text);
+        rule_a11y003_duplicate_id(page, &markup, &LineIndex::new(&markup))
+    }
+
+    fn a11y004(page: &Page) -> Vec<Finding> {
+        let markup = mask_non_markup(&page.raw_text);
+        rule_a11y004_heading_jump(page, &markup, &LineIndex::new(&markup))
+    }
+
+    fn a11y005(page: &Page) -> Vec<Finding> {
+        rule_a11y005_missing_main_landmark(page, &mask_non_markup(&page.raw_text))
+    }
 
     fn page(raw_html: &str, images: Vec<ImageReference>, kind: PageKind) -> Page {
         Page {
@@ -509,11 +465,18 @@ mod tests {
     fn image(src: &str, alt: Option<&str>) -> ImageReference {
         ImageReference {
             src: src.to_string(),
+            asset_sources: Vec::new(),
+            modern_sources: Vec::new(),
             alt: alt.map(str::to_string),
             line: 1,
             column: 1,
             role: None,
             aria_hidden: false,
+            width: None,
+            height: None,
+            has_modern_source: false,
+            inside_figure: false,
+            figure_caption: None,
         }
     }
 
@@ -581,7 +544,7 @@ mod tests {
     #[test]
     fn a11y002_flags_empty_button_no_label() {
         let p = page("<button></button>", Vec::new(), PageKind::Generic);
-        let findings = rule_a11y002_empty_link_or_button(&p);
+        let findings = a11y002(&p);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "A11Y002");
     }
@@ -593,7 +556,7 @@ mod tests {
             Vec::new(),
             PageKind::Generic,
         );
-        let findings = rule_a11y002_empty_link_or_button(&p);
+        let findings = a11y002(&p);
         assert!(findings.is_empty());
     }
 
@@ -604,7 +567,7 @@ mod tests {
             Vec::new(),
             PageKind::Generic,
         );
-        let findings = rule_a11y002_empty_link_or_button(&p);
+        let findings = a11y002(&p);
         assert!(findings.is_empty());
     }
 
@@ -612,7 +575,7 @@ mod tests {
     fn a11y003_flags_duplicate_ids() {
         let html = r#"<div id="content">a</div><div id="content">b</div>"#;
         let p = page(html, Vec::new(), PageKind::Generic);
-        let findings = rule_a11y003_duplicate_id(&p);
+        let findings = a11y003(&p);
         assert_eq!(findings.len(), 1);
         assert!(findings[0].message.contains("content"));
     }
@@ -621,7 +584,7 @@ mod tests {
     fn a11y003_ignores_id_in_script_block() {
         let html = r#"<div id="x">1</div><script>document.querySelector('[id="x"]')</script>"#;
         let p = page(html, Vec::new(), PageKind::Generic);
-        let findings = rule_a11y003_duplicate_id(&p);
+        let findings = a11y003(&p);
         assert!(findings.is_empty());
     }
 
@@ -629,7 +592,7 @@ mod tests {
     fn a11y004_flags_h2_to_h4_jump() {
         let html = "<h1>Top</h1><h2>Sec</h2><h4>Skip</h4>";
         let p = page(html, Vec::new(), PageKind::Generic);
-        let findings = rule_a11y004_heading_jump(&p);
+        let findings = a11y004(&p);
         assert_eq!(findings.len(), 1);
         assert!(findings[0].message.contains("h2 to h4"));
     }
@@ -638,7 +601,7 @@ mod tests {
     fn a11y004_clean_hierarchy_passes() {
         let html = "<h1>A</h1><h2>B</h2><h3>C</h3>";
         let p = page(html, Vec::new(), PageKind::Generic);
-        let findings = rule_a11y004_heading_jump(&p);
+        let findings = a11y004(&p);
         assert!(findings.is_empty());
     }
 
@@ -649,21 +612,21 @@ mod tests {
             Vec::new(),
             PageKind::Generic,
         );
-        let findings = rule_a11y005_missing_main_landmark(&p);
+        let findings = a11y005(&p);
         assert_eq!(findings.len(), 1);
     }
 
     #[test]
     fn a11y005_passes_with_main_role() {
         let p = page("<div role=\"main\">x</div>", Vec::new(), PageKind::Generic);
-        let findings = rule_a11y005_missing_main_landmark(&p);
+        let findings = a11y005(&p);
         assert!(findings.is_empty());
     }
 
     #[test]
     fn a11y005_skips_legal_pages() {
         let p = page("<div>terms</div>", Vec::new(), PageKind::Legal);
-        let findings = rule_a11y005_missing_main_landmark(&p);
+        let findings = a11y005(&p);
         assert!(findings.is_empty());
     }
 
@@ -751,5 +714,76 @@ mod tests {
             "expected A11Y001, got {:?}",
             findings.iter().map(|f| &f.rule_id).collect::<Vec<_>>()
         );
+    }
+
+    fn content_page(html: &str) -> Page {
+        page(html, Vec::new(), PageKind::Generic)
+    }
+
+    /// Webflow writes `data-w-id` on repeated components: not an `id`.
+    #[test]
+    fn a_data_attribute_ending_in_id_is_not_an_id() {
+        let p = content_page(r#"<div data-w-id="a"></div><div data-w-id="a"></div>"#);
+        assert!(a11y003(&p).is_empty());
+    }
+
+    #[test]
+    fn duplicate_ids_are_found_in_every_quoting_style() {
+        let p = content_page(r#"<div id="a"></div><div id='a'></div><div ID=a></div>"#);
+        let findings = a11y003(&p);
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].message.contains("appears 3 times"));
+    }
+
+    #[test]
+    fn links_in_scripts_and_comments_are_not_empty_links() {
+        let p = content_page(
+            "<script>var t = '<a href=\"/x\"></a>';</script><!-- <a href=\"/y\"></a> -->",
+        );
+        assert!(a11y002(&p).is_empty());
+    }
+
+    #[test]
+    fn a_named_or_hidden_link_is_not_empty() {
+        for html in [
+            r#"<a href="/x"><svg aria-label="LinkedIn"></svg></a>"#,
+            r#"<a href="/x"><img src="/a.png" alt="Home"></a>"#,
+            r#"<a href="/x" aria-hidden="true"></a>"#,
+            r#"<a href="/x" TITLE="Home"></a>"#,
+        ] {
+            assert!(a11y002(&content_page(html)).is_empty(), "{html}");
+        }
+    }
+
+    /// `data-title` does not name a link, and an icon alone does not either.
+    #[test]
+    fn an_unnamed_link_is_still_reported() {
+        for html in [
+            r#"<a href="/x" data-title="Home"></a>"#,
+            r#"<a href="/x"><svg></svg></a>"#,
+            r#"<a href="/x" aria-label=""></a>"#,
+        ] {
+            let findings = a11y002(&content_page(html));
+            assert_eq!(findings.len(), 1, "{html}");
+            assert!(
+                findings[0].message.starts_with("<a>"),
+                "{}",
+                findings[0].message
+            );
+        }
+    }
+
+    #[test]
+    fn uppercase_headings_count_and_lookalike_tags_do_not() {
+        let p = content_page("<h1>a</h1><HEADER></HEADER><H3>b</H3>");
+        assert_eq!(a11y004(&p).len(), 1);
+    }
+
+    #[test]
+    fn a_finding_after_a_script_keeps_its_source_line() {
+        let p = content_page("<script>\n'<a></a>'\n</script>\n<a href=\"/x\"></a>");
+        let findings = a11y002(&p);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].line, 4);
     }
 }

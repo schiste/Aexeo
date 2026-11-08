@@ -29,6 +29,17 @@ class FeedbackTests(unittest.TestCase):
         self.assertEqual(exported["events"][0]["reviewer_status"], "passed")
         self.assertNotIn("private justification", json.dumps(exported))
 
+    def test_metadata_is_bound_without_being_recorded(self):
+        metadata = {"titre": "Été", "lang": "fr"}
+        self.corpus["examples"][0]["metadata"] = metadata
+        note = module.capture(self.text, self.report, "length", "e1", "passed", "r", "manual", metadata=metadata)
+        self.assertEqual(note["metadata_sha256"], "c2dd6ca92cc1c5c1a1208812e55ddfac14cbdbcb54ef0f9441d0deb31e3d541e")
+        self.assertNotIn("Été", json.dumps(note, ensure_ascii=False))
+        self.assertEqual(module.export_review(self.corpus, note)["events"][0]["metadata_sha256"], note["metadata_sha256"])
+        metadata["lang"] = "en"
+        with self.assertRaisesRegex(ValueError, "metadata"):
+            module.export_review(self.corpus, note)
+
     def test_unresolved_stale_wrong_gate_and_missing_provenance_are_rejected(self):
         note = module.capture(self.text, self.report, "length", "e1")
         with self.assertRaisesRegex(ValueError, "explicit human"):

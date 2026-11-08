@@ -2,6 +2,7 @@ mod defaults;
 mod docs;
 mod load;
 mod render;
+mod surface_check;
 mod views;
 
 use serde::{Deserialize, Serialize};
@@ -11,21 +12,23 @@ use self::defaults::{
     default_accessibility_strict, default_adapter, default_agent_discovery_enabled,
     default_audit_log_limit, default_baseline_file, default_browser_engine,
     default_browser_wait_until, default_canonical_style, default_checks,
-    default_crawl_artifact_dir, default_crawl_use_sitemap, default_default_twitter_card,
-    default_link_suggestion_count, default_max_workers, default_min_answer_blocks,
-    default_min_block_text_length, default_min_inbound_links, default_min_page_size,
-    default_orphan_exclude, default_performance_budget_file, default_profile,
-    default_related_links_heading, default_repeatable_data_ui, default_require_fact_consistency,
-    default_require_html_lang, default_require_meta_robots_consistency, default_require_open_graph,
+    default_crawl_artifact_dir, default_crawl_max_response_bytes, default_crawl_use_sitemap,
+    default_default_twitter_card, default_link_suggestion_count, default_max_workers,
+    default_min_answer_blocks, default_min_block_text_length, default_min_inbound_links,
+    default_min_page_size, default_orphan_exclude, default_performance_budget_file,
+    default_profile, default_related_links_heading, default_repeatable_data_ui,
+    default_require_fact_consistency, default_require_html_lang,
+    default_require_meta_robots_consistency, default_require_open_graph,
     default_require_robots_sitemap, default_require_schema_title_alignment,
     default_require_social_images, default_require_twitter_card, default_required_feature_markers,
     default_source_dir, default_utility_route_patterns, default_weak_anchor_text,
 };
 
 pub use self::defaults::default_rule_switches;
-pub use self::docs::{config_field_docs, render_config_schema};
+pub use self::docs::{config_field_docs, render_config_schema, versioned_location};
 pub use self::load::{ConfigWarning, LoadedConfig, load_config, load_config_with_diagnostics};
 pub use self::render::{render_resolved_config_json, render_resolved_config_toml};
+pub use self::surface_check::{COMPLETE_EXAMPLE, check_config_surface};
 pub use self::views::{OutputConfig, PolicyConfig, RulesConfig, RuntimeConfig, SiteConfig};
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -82,6 +85,10 @@ pub struct Config {
     pub crawl_capture_network: bool,
     #[serde(default = "default_crawl_artifact_dir")]
     pub crawl_artifact_dir: String,
+    #[serde(default)]
+    pub crawl_allow_private_network: bool,
+    #[serde(default = "default_crawl_max_response_bytes")]
+    pub crawl_max_response_bytes: u64,
     #[serde(default)]
     pub ignore_rules: Vec<String>,
     #[serde(default)]
@@ -165,6 +172,9 @@ pub struct Config {
     /// decorative-image detection).
     #[serde(default)]
     pub accessibility: Accessibility,
+    /// Advisory image-quality budgets and opt-in discovery metadata policies.
+    #[serde(default)]
+    pub images: ImageQuality,
     /// Agent-discovery audit configuration. Nested
     /// `[agent_discovery]` block in TOML; defaults to disabled
     /// because the underlying specs (RFC 9727 api-catalog,
@@ -227,9 +237,9 @@ pub struct RouteKind {
     /// Rule IDs that should NOT fire on routes of this kind.
     #[serde(default)]
     pub skip_rules: Vec<String>,
-    /// Marks the route-kind as intentionally noindex; the existing
-    /// `route_policy_overrides.allow_canonical_noindex` machinery
-    /// reads this so editors don't have to declare twice.
+    /// Marks the route-kind as intentionally noindex. Accepted and
+    /// parsed, but no rule reads it yet: use
+    /// `route_policy_overrides.allow_canonical_noindex` for the effect.
     #[serde(default)]
     pub noindex: bool,
 }
@@ -283,6 +293,40 @@ impl Default for AgentDiscovery {
     fn default() -> Self {
         Self {
             enabled: default_agent_discovery_enabled(),
+        }
+    }
+}
+
+/// Image-management budgets and optional metadata requirements.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ImageQuality {
+    /// Advisory maximum encoded size for local image assets, in bytes.
+    pub max_bytes: u64,
+    /// Preferred maximum length for informative alt text, in Unicode characters.
+    pub max_alt_characters: usize,
+    /// Recommend WebP/AVIF for JPEG and PNG assets without rewriting files.
+    pub prefer_modern_formats: bool,
+    /// Warn when an image lacks valid intrinsic width and height attributes.
+    pub require_dimensions: bool,
+    /// Require every informative local image to appear in an image sitemap.
+    pub require_image_sitemap: bool,
+    /// Opt in to requiring matching ImageObject creator and license metadata.
+    pub require_image_object_metadata: bool,
+    /// Recommend visible captions for informative images inside <figure>.
+    pub recommend_figure_captions: bool,
+}
+
+impl Default for ImageQuality {
+    fn default() -> Self {
+        Self {
+            max_bytes: 100_000,
+            max_alt_characters: 125,
+            prefer_modern_formats: true,
+            require_dimensions: true,
+            require_image_sitemap: false,
+            require_image_object_metadata: false,
+            recommend_figure_captions: true,
         }
     }
 }
@@ -350,6 +394,8 @@ impl Default for Config {
             crawl_capture_console: false,
             crawl_capture_network: false,
             crawl_artifact_dir: default_crawl_artifact_dir(),
+            crawl_allow_private_network: false,
+            crawl_max_response_bytes: default_crawl_max_response_bytes(),
             ignore_rules: Vec::new(),
             ignore_paths: Vec::new(),
             severity_overrides: BTreeMap::new(),
@@ -385,6 +431,7 @@ impl Default for Config {
             require_robots_sitemap: default_require_robots_sitemap(),
             weak_anchor_text: default_weak_anchor_text(),
             accessibility: Accessibility::default(),
+            images: ImageQuality::default(),
             agent_discovery: AgentDiscovery::default(),
             plugin_settings: BTreeMap::new(),
             performance_budget_file: default_performance_budget_file(),

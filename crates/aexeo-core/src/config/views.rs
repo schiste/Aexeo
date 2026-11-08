@@ -28,6 +28,8 @@ pub struct RuntimeConfig<'a> {
     pub crawl_capture_console: bool,
     pub crawl_capture_network: bool,
     pub crawl_artifact_dir: &'a str,
+    pub crawl_allow_private_network: bool,
+    pub crawl_max_response_bytes: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -104,6 +106,8 @@ impl Config {
             crawl_capture_console: self.crawl_capture_console,
             crawl_capture_network: self.crawl_capture_network,
             crawl_artifact_dir: &self.crawl_artifact_dir,
+            crawl_allow_private_network: self.crawl_allow_private_network,
+            crawl_max_response_bytes: self.crawl_max_response_bytes,
         }
     }
 

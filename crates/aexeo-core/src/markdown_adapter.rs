@@ -613,6 +613,92 @@ min = 2
     }
 
     #[test]
+    fn sentence_abbreviations_are_explicit_and_preserve_block_boundaries() {
+        use crate::content_gate::GateStatus;
+        let preset = crate::content_gate::ContentPreset::from_toml(
+            "version=1\nname='t'\n[[gates]]\nid='g'\nkind='sentence_length'\nmax_words=4\n",
+        )
+        .unwrap();
+        let gate_json = serde_json::to_value(&preset.gates[0]).unwrap();
+        assert!(gate_json.get("abbreviations").is_none());
+        let plain = "kind='sentence_length'\nmax_words=4";
+        let configured = "kind='sentence_length'\nmax_words=4\nabbreviations=['Dr.', 'M.']";
+        let source = "Dr. Martin writes clear notes.\n";
+        assert_eq!(report(source, plain).status, GateStatus::Passed);
+        let result = report(source, configured);
+        assert_eq!(result.status, GateStatus::Failed);
+        assert_eq!(result.measurements["sentence_count"], 1);
+        assert_eq!(result.measurements["longest_sentence_words"], 5);
+        let blocks = report("Dr.\n\nM. Martin writes.\n", configured);
+        assert_eq!(blocks.measurements["sentence_count"], 2);
+        let exact = report("Mrs. Martin writes.\n", configured);
+        assert_eq!(exact.measurements["sentence_count"], 2);
+    }
+
+    #[test]
+    fn sentence_abbreviation_configuration_rejects_unusable_tokens() {
+        use crate::content_gate::ContentPreset;
+        for entries in [
+            "['']",
+            "['Dr']",
+            "['.']",
+            "['e.g.']",
+            "['Dr Smith.']",
+            "['Dr.', 'Dr.']",
+        ] {
+            let preset = format!(
+                "version=1\nname='t'\n[[gates]]\nid='g'\nkind='sentence_length'\nmax_words=10\nabbreviations={entries}\n"
+            );
+            assert!(ContentPreset::from_toml(&preset).is_err(), "{entries}");
+        }
+    }
+
+    #[test]
+    fn paragraph_character_limit_counts_unicode_scalars() {
+        use crate::content_gate::GateStatus;
+        let gate = "kind='paragraph_character_length'\nmax_chars=4";
+        let result = report("中文文章測試\n", gate);
+        assert_eq!(result.status, GateStatus::Failed);
+        assert_eq!(result.measurements["longest_paragraph_chars"], 6);
+        assert_eq!(result.measurements["max_chars"], 4);
+        assert_eq!(report("é😀中文\n", gate).status, GateStatus::Passed);
+        let preset = crate::content_gate::ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='g'\nkind='paragraph_character_length'\nmax_chars=4\n").unwrap();
+        let input = crate::content_gate::ContentInput {
+            id: "t".into(),
+            text: Some("中文".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            preset.evaluate(&input).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+        assert!(crate::content_gate::ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='g'\nkind='paragraph_character_length'\nmax_chars=0\n").is_err());
+    }
+
+    #[test]
+    fn sentence_character_gate_counts_unicode_without_punctuation_or_edge_whitespace() {
+        use crate::content_gate::{ContentInput, ContentPreset, GateStatus};
+        let gate = "kind='sentence_character_length'\nmax_chars=4\ndelimiters='。！？'";
+        let result = report("中文文章測試。 好文。\n", gate);
+        assert_eq!(result.status, GateStatus::Failed);
+        assert_eq!(result.measurements["sentence_count"], 2);
+        assert_eq!(result.measurements["longest_sentence_chars"], 6);
+        assert_eq!(result.measurements["max_chars"], 4);
+        assert_eq!((result.findings[0].line, result.findings[0].column), (1, 1));
+        let abbreviations = "kind='sentence_character_length'\nmax_chars=3\nabbreviations=['Dr.']";
+        assert_eq!(
+            report("Dr. X y.\n", abbreviations).status,
+            GateStatus::Failed
+        );
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='g'\nkind='sentence_character_length'\nmax_chars=4\n").unwrap();
+        assert_eq!(
+            preset.evaluate(&ContentInput::default()).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+        assert!(ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='g'\nkind='sentence_character_length'\nmax_chars=0\n").is_err());
+    }
+
+    #[test]
     fn inline_code_stays_in_headings_and_prose_and_maps_to_source() {
         use crate::content_gate::GateStatus;
         let source = "## Option `a`\n\n## Option `b`\n\nUse `` x ``.\n";

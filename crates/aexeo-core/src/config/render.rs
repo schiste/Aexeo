@@ -1,7 +1,10 @@
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-use super::{Config, Editorial, RoutePolicyOverride, SuppressionRule};
+use super::{
+    Accessibility, AgentDiscovery, Config, Editorial, ImageQuality, RouteKind, RoutePolicyOverride,
+    SuppressionRule,
+};
 
 #[derive(Debug, Clone, Serialize)]
 struct ResolvedConfigDocument {
@@ -12,6 +15,10 @@ struct ResolvedConfigDocument {
     max_workers: usize,
     plugin_settings: BTreeMap<String, BTreeMap<String, toml::Value>>,
     editorial: Editorial,
+    route_kinds: BTreeMap<String, RouteKind>,
+    accessibility: Accessibility,
+    agent_discovery: AgentDiscovery,
+    images: ImageQuality,
     site: SiteSection,
     runtime: RuntimeSection,
     policy: PolicySection,
@@ -46,6 +53,8 @@ struct RuntimeSection {
     capture_console: bool,
     capture_network: bool,
     artifact_dir: String,
+    allow_private_network: bool,
+    max_response_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -66,9 +75,15 @@ struct RulesSection {
     social: SocialRulesSection,
     schema: SchemaRulesSection,
     llm: EnabledRuleSection,
+    surfaces: EnabledRuleSection,
     content: ContentRulesSection,
+    images: EnabledRuleSection,
     structure: StructureRulesSection,
     editorial: EnabledRuleSection,
+    headers: EnabledRuleSection,
+    well_known: EnabledRuleSection,
+    accessibility: EnabledRuleSection,
+    agent_discovery: EnabledRuleSection,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -91,6 +106,7 @@ struct LinkRulesSection {
     enable_link_autofix: bool,
     related_links_heading: String,
     weak_anchor_text: Vec<String>,
+    orphan_exclude: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -160,6 +176,10 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
         max_workers: config.max_workers,
         plugin_settings: config.plugin_settings.clone(),
         editorial: config.editorial.clone(),
+        route_kinds: config.route_kinds.clone(),
+        accessibility: config.accessibility.clone(),
+        agent_discovery: config.agent_discovery.clone(),
+        images: config.images.clone(),
         site: SiteSection {
             url: config.site_url.clone(),
             source_dir: config.source_dir.clone(),
@@ -183,6 +203,8 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
             capture_console: config.crawl_capture_console,
             capture_network: config.crawl_capture_network,
             artifact_dir: config.crawl_artifact_dir.clone(),
+            allow_private_network: config.crawl_allow_private_network,
+            max_response_bytes: config.crawl_max_response_bytes,
         },
         policy: PolicySection {
             ignore_rules: config.ignore_rules.clone(),
@@ -204,6 +226,7 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
                 enable_link_autofix: config.enable_link_autofix,
                 related_links_heading: config.related_links_heading.clone(),
                 weak_anchor_text: config.weak_anchor_text.clone(),
+                orphan_exclude: config.orphan_exclude.clone(),
             },
             sitemap: EnabledRuleSection {
                 enabled: is_enabled(config, "sitemap"),
@@ -231,10 +254,16 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
             llm: EnabledRuleSection {
                 enabled: is_enabled(config, "llm"),
             },
+            surfaces: EnabledRuleSection {
+                enabled: is_enabled(config, "surfaces"),
+            },
             content: ContentRulesSection {
                 enabled: is_enabled(config, "content"),
                 min_page_size: config.min_page_size,
                 required_feature_markers: config.required_feature_markers.clone(),
+            },
+            images: EnabledRuleSection {
+                enabled: is_enabled(config, "images"),
             },
             structure: StructureRulesSection {
                 enabled: is_enabled(config, "structure"),
@@ -246,6 +275,18 @@ fn resolved_config_document(config: &Config) -> ResolvedConfigDocument {
             },
             editorial: EnabledRuleSection {
                 enabled: is_enabled(config, "editorial"),
+            },
+            headers: EnabledRuleSection {
+                enabled: is_enabled(config, "headers"),
+            },
+            well_known: EnabledRuleSection {
+                enabled: is_enabled(config, "well_known"),
+            },
+            accessibility: EnabledRuleSection {
+                enabled: is_enabled(config, "accessibility"),
+            },
+            agent_discovery: EnabledRuleSection {
+                enabled: is_enabled(config, "agent_discovery"),
             },
         },
         output: OutputSection {
@@ -270,8 +311,72 @@ pub fn render_resolved_config_toml(config: &Config) -> anyhow::Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::load::config_from_merged;
     use super::{render_resolved_config_json, render_resolved_config_toml};
-    use crate::config::Config;
+    use crate::config::{Config, load_config};
+    use std::fs;
+
+    #[test]
+    fn renders_and_round_trips_the_images_switch_and_settings() {
+        let mut config = Config::default();
+        config.checks.insert("images".to_string(), false);
+        config.images.max_bytes = 1234;
+        config.images.require_image_sitemap = true;
+        let rendered = render_resolved_config_toml(&config).unwrap();
+        let document: toml::Value = toml::from_str(&rendered).unwrap();
+
+        assert_eq!(
+            document["rules"]["images"]["enabled"].as_bool(),
+            Some(false)
+        );
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("aexeo.toml"), rendered).unwrap();
+        let loaded = load_config(temp_dir.path(), None).unwrap();
+        assert_eq!(loaded.checks.get("images").copied(), Some(false));
+        assert_eq!(loaded.images, config.images);
+    }
+
+    #[test]
+    fn resolved_config_keeps_route_kinds_accessibility_discovery_and_surfaces() {
+        let toml_text = "version = 1\n[route_kinds.a]\nskip_rules = [\"GEO007\"]\n\
+                         [accessibility]\nstrict = true\n[agent_discovery]\nenabled = true\n\
+                         [rules.surfaces]\nenabled = false\n";
+        let merged: toml::Value = toml::from_str(toml_text).unwrap();
+        let config = crate::config::load::config_from_merged(merged, "test")
+            .unwrap()
+            .config;
+
+        let rendered = render_resolved_config_toml(&config).unwrap();
+        let reloaded: toml::Value = toml::from_str(&rendered).unwrap();
+        let again = crate::config::load::config_from_merged(reloaded, "rendered")
+            .unwrap()
+            .config;
+        assert_eq!(again.route_kinds, config.route_kinds);
+        assert!(again.accessibility.strict);
+        assert!(again.agent_discovery.enabled);
+        assert_eq!(again.checks.get("surfaces"), Some(&false));
+    }
+
+    /// `config print` output is a config: nothing may be lost when it is reloaded.
+    #[test]
+    fn resolved_config_keeps_orphan_exclude_and_every_rule_group() {
+        let mut config = Config {
+            orphan_exclude: vec!["offline.html".to_string()],
+            ..Config::default()
+        };
+        for group in ["headers", "well_known", "accessibility", "agent_discovery"] {
+            config.checks.insert(group.to_string(), false);
+        }
+        let rendered = render_resolved_config_toml(&config).unwrap();
+        let reloaded = config_from_merged(toml::from_str(&rendered).unwrap(), "rendered")
+            .unwrap()
+            .config;
+        assert_eq!(reloaded.orphan_exclude, ["offline.html"]);
+        for group in ["headers", "well_known", "accessibility", "agent_discovery"] {
+            assert_eq!(reloaded.checks.get(group), Some(&false), "{group}");
+        }
+    }
 
     #[test]
     fn renders_canonical_resolved_config() {
@@ -286,7 +391,10 @@ mod tests {
         assert!(toml.contains("version = 1"));
         assert!(toml.contains("[rules.links]"));
         assert!(toml.contains("enabled = false"));
+        assert!(toml.contains("[images]"));
+        assert!(toml.contains("max_bytes = 100000"));
         assert!(json.contains("\"version\": 1"));
         assert!(json.contains("\"links\""));
+        assert!(json.contains("\"images\""));
     }
 }

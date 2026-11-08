@@ -15,6 +15,34 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate timings and counts as JSON on stderr")),
         )
         .subcommand(
+            Command::new("feedback-export")
+                .about("Export validated human feedback as a historical review event")
+                .arg(Arg::new("corpus").long("corpus").required(true))
+                .arg(Arg::new("note").long("note").required(true))
+                .arg(Arg::new("output").long("output").required(true))
+                .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue)),
+        )
+        .subcommand(
+            Command::new("feedback-capture")
+                .about("Capture explicitly reported human feedback in a private local note")
+                .arg(Arg::new("text").long("text").required(true))
+                .arg(Arg::new("report").long("report").required(true))
+                .arg(Arg::new("metadata").long("metadata").help("JSON metadata supplied to the evaluated gate"))
+                .arg(Arg::new("gate").long("gate").required(true))
+                .arg(Arg::new("example").long("example").required(true))
+                .arg(Arg::new("human-status").long("human-status").value_parser(["passed", "failed", "uncertain"]))
+                .arg(Arg::new("reviewer").long("reviewer"))
+                .arg(Arg::new("method").long("method"))
+                .arg(Arg::new("reason-file").long("reason-file"))
+                .arg(Arg::new("language").long("language"))
+                .arg(Arg::new("content-type").long("content-type"))
+                .arg(Arg::new("preset").long("preset"))
+                .arg(Arg::new("config-version").long("config-version"))
+                .arg(Arg::new("tool-version").long("tool-version"))
+                .arg(Arg::new("output").long("output").required(true))
+                .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue)),
+        )
+        .subcommand(
             Command::new("content")
                 .about("Run a portable content preset on a UTF-8 file or stdin")
                 .arg(Arg::new("path").default_value("-"))
@@ -74,6 +102,9 @@ pub fn build_cli() -> Command {
                         .num_args(1)
                         .action(ArgAction::Append),
                 )
+                .arg(Arg::new("seed-file").long("seed-file").num_args(1).help("Seed every page URL on the target's origin from a link inventory JSON file and record a crawl attestation in the audit artifact"))
+                .arg(Arg::new("release-header").long("release-header").num_args(1).help("Record each HTML page's release marker from this response header and attest it in the audit artifact; takes precedence over --release-meta"))
+                .arg(Arg::new("release-meta").long("release-meta").num_args(1).help("Record each HTML page's release marker from the content of <meta name=NAME> and attest it in the audit artifact"))
                 .arg(
                     Arg::new("include-pattern")
                         .long("include-pattern")
@@ -104,6 +135,7 @@ pub fn build_cli() -> Command {
                         .default_value("200"),
                 )
                 .arg(Arg::new("link-graph-output").long("link-graph-output").num_args(1).help("Write an observational link graph report to this JSON file"))
+                .arg(Arg::new("link-graph-context").long("link-graph-context").requires("link-graph-output").num_args(1).help("Compare the link graph report with this audit link context file instead of the --seed-file inventory"))
                 .arg(Arg::new("link-graph-summary").long("link-graph-summary").requires("link-graph-output").action(ArgAction::SetTrue).help("Include an observational link graph coverage summary in the crawl output"))
                 .arg(Arg::new("link-graph-telemetry").long("link-graph-telemetry").requires("link-graph-output").action(ArgAction::SetTrue).help("Emit aggregate link graph timing and counts to stderr"))
                 .arg(Arg::new("checkpoint").long("checkpoint").num_args(1))
@@ -1028,6 +1060,12 @@ pub fn build_cli() -> Command {
                                 .long("format")
                                 .value_parser(["text", "md", "json", "sarif"])
                                 .default_value("text"),
+                        )
+                        .arg(
+                            Arg::new("link-graph")
+                                .long("link-graph")
+                                .num_args(1)
+                                .help("Qualify LNK002/LNK004 findings in text or md output with this crawl link graph report"),
                         ),
                 ),
         )

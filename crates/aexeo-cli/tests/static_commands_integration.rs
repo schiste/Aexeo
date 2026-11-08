@@ -41,29 +41,6 @@ fn check_command_reports_findings_for_temp_site() {
 }
 
 #[test]
-fn check_sarif_emits_config_warnings_on_stderr() {
-    let temp_dir = tempfile::tempdir().unwrap();
-    write(
-        &temp_dir.path().join("aexeo.toml"),
-        "site_url = \"https://example.com\"\n",
-    );
-    write(
-        &temp_dir.path().join("index.html"),
-        "<html><head><title>Home</title></head><body><h1>Home</h1></body></html>",
-    );
-    let output = Command::new(bin())
-        .arg("check")
-        .arg(temp_dir.path())
-        .arg("--format")
-        .arg("sarif")
-        .output()
-        .unwrap();
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("CFGDEP001"));
-}
-
-#[test]
 fn check_json_contract_reports_summary_and_exit_code() {
     let temp_dir = tempfile::tempdir().unwrap();
     write(

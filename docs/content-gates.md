@@ -238,7 +238,7 @@ delimiters = ".!?。！？"
 blocking = false
 ```
 
-`delimiters` lists the characters that end a sentence and defaults to `.!?`. A decimal point between ASCII digits does not end one, and neither do Markdown hard breaks. Adapter block ends always do, so unpunctuated bullets, headings and table cells are measured separately. This is a heuristic, not linguistic segmentation: abbreviations end a sentence, and languages without whitespace-separated words need tailored rules. Measurements report the limit, sentence count and longest sentence; absent text is `not_checked`.
+`delimiters` lists the characters that end a sentence and defaults to `.!?`. A decimal point between ASCII digits does not end one, and neither do Markdown hard breaks. Adapter block ends always do, so unpunctuated bullets, headings and table cells are measured separately. This is a heuristic, not linguistic segmentation. By default abbreviations end a sentence. Optionally set `abbreviations = ["Dr.", "M."]` to keep the period of an exact, case-sensitive, whitespace-delimited abbreviation inside a sentence. This also applies at a true sentence end, so choose exceptions for the content carefully; adapter block boundaries still end sentences. Multi-period abbreviations and words attached to opening punctuation are not recognized by this option. Languages without whitespace-separated words need tailored rules. Measurements report the limit, sentence count and longest sentence; absent text is `not_checked`.
 
 ### Repeated terms
 
@@ -387,3 +387,28 @@ universal SEO rule. Finding coordinates remain placeholders (1:1); Markdown
 JSON reports include a separate source location at the start of the heading node.
 EmDash reports map heading findings to the first non-empty span of the matching
 heading block (offset zero), in the evaluated Portable Text snapshot.
+
+### Paragraph length in characters
+
+The opt-in `paragraph_character_length` gate limits each adapter-provided paragraph independently, useful when whitespace-separated word counts do not fit the content. Configure `max_chars` as a positive integer. It counts Unicode scalar values, including whitespace and punctuation; this is not a count of visual grapheme clusters or words. Measurements include `max_chars`, `paragraph_count`, and `longest_paragraph_chars`. Missing paragraph capability is `not_checked`.
+
+```toml
+[[gates]]
+id = "editorial.paragraph_characters"
+kind = "paragraph_character_length"
+max_chars = 200
+blocking = false
+```
+
+### Sentence length in characters
+
+The opt-in `sentence_character_length` gate uses the same sentence-boundary heuristic, delimiters and optional abbreviation exceptions as `sentence_length`, but limits Unicode scalar values instead of whitespace-separated words. It excludes sentence delimiters and leading/trailing whitespace while counting internal whitespace and punctuation. It does not count visual grapheme clusters and is not linguistic sentence segmentation. Measurements include `max_chars`, `sentence_count` and `longest_sentence_chars`; missing text is `not_checked`.
+
+```toml
+[[gates]]
+id = "editorial.sentence_characters"
+kind = "sentence_character_length"
+max_chars = 100
+delimiters = ".!?。！？"
+blocking = false
+```

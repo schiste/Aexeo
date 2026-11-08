@@ -162,7 +162,7 @@ Validate the manifest contract explicitly before relying on it for scoring:
 cargo run -p aexeo-cli -- intelligence facts validate .
 ```
 
-The manifest contract is documented in [docs/schemas/facts.schema.json](/Users/christophehenner/Downloads/Repositories/Aexeo/docs/schemas/facts.schema.json).
+The manifest contract is documented in [docs/schemas/facts.schema.json](schemas/facts.schema.json).
 
 The score is intentionally capped when no structured truth source is present:
 
@@ -244,8 +244,8 @@ cargo run -p aexeo-cli -- intelligence trust-surface import trust-surfaces.csv -
 
 For a realistic fixture-driven workflow, see:
 
-- [crates/aexeo-cli/tests/fixtures/chau7-trust-surfaces.json](/Users/christophehenner/Downloads/Repositories/Aexeo/crates/aexeo-cli/tests/fixtures/chau7-trust-surfaces.json)
-- [crates/aexeo-cli/tests/fixtures/chau7-mini-site](/Users/christophehenner/Downloads/Repositories/Aexeo/crates/aexeo-cli/tests/fixtures/chau7-mini-site)
+- [crates/aexeo-cli/tests/fixtures/chau7-trust-surfaces.json](../crates/aexeo-cli/tests/fixtures/chau7-trust-surfaces.json)
+- [crates/aexeo-cli/tests/fixtures/chau7-mini-site](../crates/aexeo-cli/tests/fixtures/chau7-mini-site)
 
 Supported columns:
 

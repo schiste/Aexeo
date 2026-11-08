@@ -138,7 +138,7 @@ export interface AexeoPluginOptions {
    *
    * Suppressions are plugin-only by design. The CLI's `check` is the
    * canonical strict audit; if you want to silence findings at the
-   * CLI layer, use `aexeo.toml`'s `[ignore]` block instead. The two
+   * CLI layer, use `ignore_paths` under `[policy]` in `aexeo.toml` instead. The two
    * surfaces serve different audiences: the plugin is editorial
    * workflow, the CLI is build-gating.
    */

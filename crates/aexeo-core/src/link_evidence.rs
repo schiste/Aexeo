@@ -1,4 +1,5 @@
 //! Extract attributable links from rendered HTML without guessing unknown contexts.
+use crate::site::markup::tag_breaks_text;
 use html5ever::{parse_document, tendril::TendrilSink};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use serde::{Deserialize, Serialize};
@@ -79,6 +80,9 @@ pub(crate) fn text_content(root: &Handle) -> String {
         }
         if let NodeData::Text { contents } = &node.data {
             result.push_str(&contents.borrow());
+        }
+        if matches!(&node.data, NodeData::Element { name, .. } if tag_breaks_text(&name.local)) {
+            result.push(' ');
         }
         stack.extend(node.children.borrow().iter().rev().cloned());
     }

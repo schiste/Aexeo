@@ -68,7 +68,7 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
         ConfigFieldDoc {
             key: "crawl_headers",
             default_value: "(none)",
-            description: "Extra HTTP headers applied to runtime crawl requests.",
+            description: "Extra HTTP headers applied to runtime crawl requests. Like cookies and basic auth, they are sent only to the crawl origin (same scheme, host, and port, with `www.` equivalence).",
         },
         ConfigFieldDoc {
             key: "crawl_cookies",
@@ -136,6 +136,16 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
             description: "Directory used for crawl artifacts such as traces, screenshots, console logs, and network logs.",
         },
         ConfigFieldDoc {
+            key: "crawl_allow_private_network",
+            default_value: "`false`",
+            description: "Allow runtime crawl to contact loopback, private, and link-local addresses when the crawl target itself is public. A target that resolves only to non-public addresses (local preview) is allowed without this.",
+        },
+        ConfigFieldDoc {
+            key: "crawl_max_response_bytes",
+            default_value: "`20971520`",
+            description: "Largest response body runtime crawl reads over HTTP, in bytes. A larger response is recorded as a failed fetch.",
+        },
+        ConfigFieldDoc {
             key: "ignore_rules",
             default_value: "(none)",
             description: "Rule IDs to suppress after evaluation.",
@@ -154,6 +164,26 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
             key: "editorial",
             default_value: "(no route briefs)",
             description: "Route-scoped editorial briefs for EDT001–EDT003. Each brief declares an answer summary element ID, target question headings, and claim IDs that need evidence links.",
+        },
+        ConfigFieldDoc {
+            key: "route_kinds",
+            default_value: "(none)",
+            description: "Named route groups under `[route_kinds.<name>]`. Findings for rule IDs in `skip_rules` are dropped on paths containing a `match` substring. Accessibility (A11Y) findings ignore this mask. `noindex` is accepted, but no rule reads it yet.",
+        },
+        ConfigFieldDoc {
+            key: "accessibility",
+            default_value: "`strict = false`",
+            description: "Accessibility audit options. `strict = true` makes A11Y001 fire on every `<img>` without `alt`, including ones marked decorative by role or ARIA.",
+        },
+        ConfigFieldDoc {
+            key: "agent_discovery",
+            default_value: "`enabled = false`",
+            description: "Agent discovery audit options. `enabled = true` turns on the AGT rules, which are opt-in.",
+        },
+        ConfigFieldDoc {
+            key: "images",
+            default_value: "advisory budgets; optional metadata checks disabled",
+            description: "Image-quality budgets and opt-in discovery metadata checks. The 100,000-byte and 125-character defaults are configurable advisory targets, not universal requirements.",
         },
         ConfigFieldDoc {
             key: "suppressions",
@@ -308,6 +338,71 @@ pub fn config_field_docs() -> &'static [ConfigFieldDoc] {
     ]
 }
 
+/// Where a `Config` field lives in a config file, as a path from the root.
+/// `None` means it stays at the root under its own name. Nested names are often
+/// shorter than flat ones, so `crawl_headers` is `headers` under `[runtime]`.
+pub fn versioned_location(key: &str) -> Option<&'static [&'static str]> {
+    Some(match key {
+        "site_url" => &["site", "url"],
+        "source_dir" => &["site", "source_dir"],
+        "adapter" => &["site", "adapter"],
+        "canonical_style" => &["site", "canonical_style"],
+        "browser_engine" => &["runtime", "engine"],
+        "browser_wait_until" => &["runtime", "wait_until"],
+        "crawl_headers" => &["runtime", "headers"],
+        "crawl_cookies" => &["runtime", "cookies"],
+        "crawl_basic_auth" => &["runtime", "basic_auth"],
+        "crawl_seeds" => &["runtime", "seeds"],
+        "crawl_include_patterns" => &["runtime", "include_patterns"],
+        "crawl_exclude_patterns" => &["runtime", "exclude_patterns"],
+        "crawl_use_sitemap" => &["runtime", "use_sitemap"],
+        "crawl_ignore_robots" => &["runtime", "ignore_robots"],
+        "crawl_delay_ms" => &["runtime", "crawl_delay_ms"],
+        "crawl_capture_trace" => &["runtime", "capture_trace"],
+        "crawl_capture_screenshot" => &["runtime", "capture_screenshot"],
+        "crawl_capture_console" => &["runtime", "capture_console"],
+        "crawl_capture_network" => &["runtime", "capture_network"],
+        "crawl_artifact_dir" => &["runtime", "artifact_dir"],
+        "crawl_allow_private_network" => &["runtime", "allow_private_network"],
+        "crawl_max_response_bytes" => &["runtime", "max_response_bytes"],
+        "ignore_rules" => &["policy", "ignore_rules"],
+        "ignore_paths" => &["policy", "ignore_paths"],
+        "severity_overrides" => &["policy", "severity_overrides"],
+        "suppressions" => &["policy", "suppressions"],
+        "route_policy_overrides" => &["policy", "route_policy_overrides"],
+        "baseline_file" => &["output", "baseline_file"],
+        "audit_log_limit" => &["output", "audit_log_limit"],
+        "performance_budget_file" => &["quality", "performance_budget_file"],
+        "min_inbound_links" => &["rules", "links", "min_inbound_links"],
+        "link_suggestion_count" => &["rules", "links", "link_suggestion_count"],
+        "enable_link_autofix" => &["rules", "links", "enable_link_autofix"],
+        "related_links_heading" => &["rules", "links", "related_links_heading"],
+        "weak_anchor_text" => &["rules", "links", "weak_anchor_text"],
+        "orphan_exclude" => &["rules", "links", "orphan_exclude"],
+        "required_schema_types" => &["rules", "schema", "required_types"],
+        "required_schema_families" => &["rules", "schema", "required_families"],
+        "require_breadcrumb_schema" => &["rules", "schema", "require_breadcrumb_schema"],
+        "require_schema_title_alignment" => &["rules", "schema", "require_title_alignment"],
+        "require_open_graph" => &["rules", "social", "require_open_graph"],
+        "require_twitter_card" => &["rules", "social", "require_twitter_card"],
+        "default_twitter_card" => &["rules", "social", "default_twitter_card"],
+        "require_social_images" => &["rules", "social", "require_social_images"],
+        "require_twitter_image" => &["rules", "social", "require_twitter_image"],
+        "require_robots_sitemap" => &["rules", "robots", "require_sitemap"],
+        "require_meta_robots_consistency" => &["rules", "robots", "require_meta_consistency"],
+        "require_html_lang" => &["rules", "html", "require_html_lang"],
+        "require_hreflang_self" => &["rules", "html", "require_hreflang_self"],
+        "repeatable_data_ui" => &["rules", "structure", "repeatable_data_ui"],
+        "utility_route_patterns" => &["rules", "structure", "utility_route_patterns"],
+        "min_block_text_length" => &["rules", "structure", "min_block_text_length"],
+        "min_answer_blocks" => &["rules", "structure", "min_answer_blocks"],
+        "require_fact_consistency" => &["rules", "structure", "require_fact_consistency"],
+        "min_page_size" => &["rules", "content", "min_page_size"],
+        "required_feature_markers" => &["rules", "content", "required_feature_markers"],
+        _ => return None,
+    })
+}
+
 fn string_schema(description: &str) -> Value {
     json!({
         "type": "string",
@@ -373,14 +468,6 @@ fn route_policy_override_schema() -> Value {
     })
 }
 
-fn rule_switch_schema() -> Value {
-    json!({
-        "type": "object",
-        "additionalProperties": { "type": "boolean" },
-        "description": "Built-in rule-group toggles."
-    })
-}
-
 fn plugin_settings_schema() -> Value {
     let schemas = registered_plugin_settings_schemas();
     if schemas.is_empty() {
@@ -417,31 +504,15 @@ fn plugin_settings_schema() -> Value {
     })
 }
 
-fn flat_properties() -> Map<String, Value> {
+fn root_properties() -> Map<String, Value> {
     let mut properties = Map::new();
-    properties.insert(
-        "site_url".to_string(),
-        string_schema("Canonical base URL used for generation and runtime verification."),
-    );
-    properties.insert(
-        "source_dir".to_string(),
-        string_schema("Optional build-output directory beneath the repository root."),
-    );
     properties.insert(
         "profile".to_string(),
         string_schema("Built-in policy profile."),
     );
     properties.insert(
-        "adapter".to_string(),
-        string_schema("Adapter selection mode."),
-    );
-    properties.insert(
         "plugins".to_string(),
         string_array_schema("Plugins that extend rules or adapters."),
-    );
-    properties.insert(
-        "canonical_style".to_string(),
-        string_schema("Preferred internal canonical style."),
     );
     properties.insert(
         "extends".to_string(),
@@ -454,113 +525,9 @@ fn flat_properties() -> Map<String, Value> {
         }),
     );
     properties.insert(
-        "audit_log_limit".to_string(),
-        integer_schema("Number of audit artifacts retained per command."),
-    );
-    properties.insert(
-        "browser_engine".to_string(),
-        string_schema("Default crawl engine."),
-    );
-    properties.insert(
-        "browser_wait_until".to_string(),
-        string_schema("Browser navigation wait strategy."),
-    );
-    properties.insert(
-        "baseline_file".to_string(),
-        string_schema("Default audit baseline path."),
-    );
-    properties.insert(
         "max_workers".to_string(),
         integer_schema("Worker count used for parallel analysis tasks."),
     );
-    properties.insert(
-        "crawl_headers".to_string(),
-        string_map_schema("Extra HTTP headers applied to runtime crawl requests."),
-    );
-    properties.insert(
-        "crawl_cookies".to_string(),
-        json!({
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": { "type": "string" }
-            },
-            "description": "Cookies injected into runtime crawl sessions."
-        }),
-    );
-    properties.insert(
-        "crawl_basic_auth".to_string(),
-        json!({
-            "type": "object",
-            "additionalProperties": { "type": "string" },
-            "description": "Basic auth credentials for runtime crawl sessions."
-        }),
-    );
-    properties.insert(
-        "crawl_seeds".to_string(),
-        string_array_schema("Additional route seeds for runtime crawl."),
-    );
-    properties.insert(
-        "crawl_include_patterns".to_string(),
-        string_array_schema("Route substrings used to constrain runtime crawl scope."),
-    );
-    properties.insert(
-        "crawl_exclude_patterns".to_string(),
-        string_array_schema("Route substrings excluded from runtime crawl."),
-    );
-    properties.insert(
-        "crawl_use_sitemap".to_string(),
-        boolean_schema("Whether runtime crawl should seed routes from sitemap.xml."),
-    );
-    properties.insert(
-        "crawl_ignore_robots".to_string(),
-        boolean_schema("Crawl URLs that robots.txt disallows. Only for a site you own."),
-    );
-    properties.insert(
-        "crawl_delay_ms".to_string(),
-        integer_schema("Milliseconds to wait between batches of crawl requests."),
-    );
-    properties.insert(
-        "crawl_capture_trace".to_string(),
-        boolean_schema("Whether browser crawl should capture a trace artifact."),
-    );
-    properties.insert(
-        "crawl_capture_screenshot".to_string(),
-        boolean_schema("Whether browser crawl should save screenshots."),
-    );
-    properties.insert(
-        "crawl_capture_console".to_string(),
-        boolean_schema("Whether browser crawl should persist console output."),
-    );
-    properties.insert(
-        "crawl_capture_network".to_string(),
-        boolean_schema("Whether browser crawl should persist network logs."),
-    );
-    properties.insert(
-        "crawl_artifact_dir".to_string(),
-        string_schema("Directory used for crawl artifacts."),
-    );
-    properties.insert(
-        "ignore_rules".to_string(),
-        string_array_schema("Rule IDs to suppress after evaluation."),
-    );
-    properties.insert(
-        "ignore_paths".to_string(),
-        string_array_schema("Path patterns to suppress after evaluation."),
-    );
-    properties.insert(
-        "severity_overrides".to_string(),
-        string_map_schema("Per-rule severity overrides applied after rules run."),
-    );
-    properties.insert(
-        "suppressions".to_string(),
-        json!({
-            "type": "array",
-            "items": suppression_rule_schema(),
-            "description": "Explicit reviewable suppressions."
-        }),
-    );
-    properties.insert("checks".to_string(), rule_switch_schema());
     properties.insert(
         "editorial".to_string(),
         json!({
@@ -598,122 +565,58 @@ fn flat_properties() -> Map<String, Value> {
         }),
     );
     properties.insert(
-        "orphan_exclude".to_string(),
-        string_array_schema("Routes or filenames excluded from orphan detection."),
-    );
-    properties.insert(
-        "repeatable_data_ui".to_string(),
-        string_array_schema("data-ui labels treated as intentionally repeatable."),
-    );
-    properties.insert(
-        "utility_route_patterns".to_string(),
-        string_array_schema("Route substrings treated as utility routes."),
-    );
-    properties.insert(
-        "route_policy_overrides".to_string(),
+        "route_kinds".to_string(),
         json!({
-            "type": "array",
-            "items": route_policy_override_schema(),
-            "description": "Per-route robots policy overrides."
+            "type": "object",
+            "description": "Named route groups whose matching paths skip the listed rules.",
+            "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "match": string_array_schema("Path substrings selecting this route kind."),
+                    "skip_rules": string_array_schema("Rule IDs dropped on matching paths."),
+                    "noindex": boolean_schema("Accepted, but not read by any rule yet.")
+                }
+            }
         }),
     );
     properties.insert(
-        "min_inbound_links".to_string(),
-        integer_schema("Minimum inbound internal links before LNK004 triggers."),
+        "accessibility".to_string(),
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "strict": boolean_schema("Fire A11Y001 on every image without alt.")
+            }
+        }),
     );
     properties.insert(
-        "link_suggestion_count".to_string(),
-        integer_schema("Candidate internal-link suggestions per weakly linked page."),
+        "agent_discovery".to_string(),
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": boolean_schema("Enable the opt-in AGT rules.")
+            }
+        }),
     );
     properties.insert(
-        "enable_link_autofix".to_string(),
-        boolean_schema("Whether safe fix mode may insert related-links sections."),
-    );
-    properties.insert(
-        "related_links_heading".to_string(),
-        string_schema("Heading text used when related-links autofix inserts content."),
-    );
-    properties.insert(
-        "min_page_size".to_string(),
-        integer_schema("Minimum visible text length before CNT001 triggers."),
-    );
-    properties.insert(
-        "required_feature_markers".to_string(),
-        string_array_schema("Literal strings required on feature-like pages."),
-    );
-    properties.insert(
-        "min_block_text_length".to_string(),
-        integer_schema("Minimum visible text length for a semantic content block."),
-    );
-    properties.insert(
-        "min_answer_blocks".to_string(),
-        integer_schema("Minimum answer-oriented blocks required for a page."),
-    );
-    properties.insert(
-        "require_fact_consistency".to_string(),
-        boolean_schema("Whether visible and structured page facts should align."),
-    );
-    properties.insert(
-        "required_schema_types".to_string(),
-        string_array_schema("JSON-LD @type values expected on route pages."),
-    );
-    properties.insert(
-        "required_schema_families".to_string(),
-        string_array_schema("Schema families that should be validated."),
-    );
-    properties.insert(
-        "require_breadcrumb_schema".to_string(),
-        boolean_schema("Whether nested pages must emit BreadcrumbList schema."),
-    );
-    properties.insert(
-        "require_schema_title_alignment".to_string(),
-        boolean_schema("Whether JSON-LD title fields must align with visible titles."),
-    );
-    properties.insert(
-        "require_html_lang".to_string(),
-        boolean_schema("Whether indexable pages must declare html lang."),
-    );
-    properties.insert(
-        "require_hreflang_self".to_string(),
-        boolean_schema("Whether pages with hreflang alternates require a self-reference."),
-    );
-    properties.insert(
-        "require_meta_robots_consistency".to_string(),
-        boolean_schema("Whether sitemap/indexability robots inconsistencies should be flagged."),
-    );
-    properties.insert(
-        "require_open_graph".to_string(),
-        boolean_schema("Whether core Open Graph tags are required."),
-    );
-    properties.insert(
-        "require_twitter_card".to_string(),
-        boolean_schema("Whether twitter:card is required."),
-    );
-    properties.insert(
-        "default_twitter_card".to_string(),
-        string_schema("Default twitter:card value used by safe fixes."),
-    );
-    properties.insert(
-        "require_social_images".to_string(),
-        boolean_schema("Whether og:image is required."),
-    );
-    properties.insert(
-        "require_twitter_image".to_string(),
-        boolean_schema("Whether twitter:image is required."),
-    );
-    properties.insert(
-        "require_robots_sitemap".to_string(),
-        boolean_schema("Whether robots.txt must declare a sitemap."),
-    );
-    properties.insert(
-        "weak_anchor_text".to_string(),
-        string_array_schema("Anchor texts treated as weak generic phrasing."),
+        "images".to_string(),
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "max_bytes": integer_schema("Advisory maximum encoded size of a local image, in bytes (IMG003)."),
+                "max_alt_characters": integer_schema("Advisory maximum length of informative alt text, in characters (IMG006)."),
+                "prefer_modern_formats": boolean_schema("Suggest WebP or AVIF sources for JPEG and PNG images (IMG005)."),
+                "require_dimensions": boolean_schema("Report images without positive width and height attributes (IMG007)."),
+                "require_image_sitemap": boolean_schema("Opt in: report informative local images missing from the image sitemap (IMG009)."),
+                "require_image_object_metadata": boolean_schema("Opt in: require ImageObject contentUrl, creator and license metadata (IMG010)."),
+                "recommend_figure_captions": boolean_schema("Suggest a visible caption for informative images inside a figure (IMG008).")
+            }
+        }),
     );
     properties.insert("plugin_settings".to_string(), plugin_settings_schema());
-    properties.insert(
-        "performance_budget_file".to_string(),
-        string_schema("Performance budget file checked by repo quality."),
-    );
     properties
 }
 
@@ -762,7 +665,9 @@ fn nested_properties() -> Map<String, Value> {
                 "capture_screenshot": { "type": "boolean" },
                 "capture_console": { "type": "boolean" },
                 "capture_network": { "type": "boolean" },
-                "artifact_dir": { "type": "string" }
+                "artifact_dir": { "type": "string" },
+                "allow_private_network": { "type": "boolean" },
+                "max_response_bytes": { "type": "integer", "minimum": 1 }
             }
         }),
     );
@@ -795,7 +700,7 @@ fn nested_properties() -> Map<String, Value> {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "html": { "oneOf": [{ "type": "boolean" }, {
+                "html": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
@@ -803,8 +708,8 @@ fn nested_properties() -> Map<String, Value> {
                         "require_html_lang": { "type": "boolean" },
                         "require_hreflang_self": { "type": "boolean" }
                     }
-                }]},
-                "links": { "oneOf": [{ "type": "boolean" }, {
+                },
+                "links": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
@@ -813,17 +718,18 @@ fn nested_properties() -> Map<String, Value> {
                         "link_suggestion_count": { "type": "integer", "minimum": 0 },
                         "enable_link_autofix": { "type": "boolean" },
                         "related_links_heading": { "type": "string" },
-                        "weak_anchor_text": { "type": "array", "items": { "type": "string" } }
+                        "weak_anchor_text": { "type": "array", "items": { "type": "string" } },
+                        "orphan_exclude": { "type": "array", "items": { "type": "string" } }
                     }
-                }]},
-                "sitemap": { "oneOf": [{ "type": "boolean" }, {
+                },
+                "sitemap": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
                         "enabled": { "type": "boolean" }
                     }
-                }]},
-                "robots": { "oneOf": [{ "type": "boolean" }, {
+                },
+                "robots": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
@@ -831,8 +737,8 @@ fn nested_properties() -> Map<String, Value> {
                         "require_sitemap": { "type": "boolean" },
                         "require_meta_consistency": { "type": "boolean" }
                     }
-                }]},
-                "social": { "oneOf": [{ "type": "boolean" }, {
+                },
+                "social": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
@@ -843,8 +749,8 @@ fn nested_properties() -> Map<String, Value> {
                         "require_social_images": { "type": "boolean" },
                         "require_twitter_image": { "type": "boolean" }
                     }
-                }]},
-                "schema": { "oneOf": [{ "type": "boolean" }, {
+                },
+                "schema": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
@@ -854,15 +760,22 @@ fn nested_properties() -> Map<String, Value> {
                         "require_breadcrumb_schema": { "type": "boolean" },
                         "require_title_alignment": { "type": "boolean" }
                     }
-                }]},
-                "llm": { "oneOf": [{ "type": "boolean" }, {
+                },
+                "llm": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
                         "enabled": { "type": "boolean" }
                     }
-                }]},
-                "content": { "oneOf": [{ "type": "boolean" }, {
+                },
+                "surfaces": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": { "type": "boolean" }
+                    }
+                },
+                "content": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
@@ -870,15 +783,22 @@ fn nested_properties() -> Map<String, Value> {
                         "min_page_size": { "type": "integer", "minimum": 0 },
                         "required_feature_markers": { "type": "array", "items": { "type": "string" } }
                     }
-                }]},
-                "editorial": { "oneOf": [{ "type": "boolean" }, {
+                },
+                "images": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
                         "enabled": { "type": "boolean" }
                     }
-                }]},
-                "structure": { "oneOf": [{ "type": "boolean" }, {
+                },
+                "editorial": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": { "type": "boolean" }
+                    }
+                },
+                "structure": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
@@ -889,7 +809,35 @@ fn nested_properties() -> Map<String, Value> {
                         "min_answer_blocks": { "type": "integer", "minimum": 0 },
                         "require_fact_consistency": { "type": "boolean" }
                     }
-                }]}
+                },
+                "headers": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": { "type": "boolean" }
+                    }
+                },
+                "well_known": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": { "type": "boolean" }
+                    }
+                },
+                "accessibility": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": { "type": "boolean" }
+                    }
+                },
+                "agent_discovery": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": { "type": "boolean" }
+                    }
+                }
             }
         }),
     );
@@ -918,7 +866,7 @@ fn nested_properties() -> Map<String, Value> {
 }
 
 pub fn render_config_schema() -> anyhow::Result<String> {
-    let mut properties = flat_properties();
+    let mut properties = root_properties();
     properties.insert(
         "version".to_string(),
         json!({
@@ -935,25 +883,39 @@ pub fn render_config_schema() -> anyhow::Result<String> {
         "type": "object",
         "additionalProperties": false,
         "properties": properties,
-        "allOf": [
-            {
-                "if": {
-                    "anyOf": [
-                        { "required": ["site"] },
-                        { "required": ["runtime"] },
-                        { "required": ["policy"] },
-                        { "required": ["rules"] },
-                        { "required": ["output"] },
-                        { "required": ["quality"] }
-                    ]
-                },
-                "then": {
-                    "required": ["version"],
-                    "properties": {
-                        "version": { "const": 1 }
-                    }
-                }
-            }
-        ]
+        "required": ["version"]
     }))?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_config_schema;
+    use serde_json::Value;
+
+    #[test]
+    fn schema_documents_image_quality_settings() {
+        let schema: Value = serde_json::from_str(&render_config_schema().unwrap()).unwrap();
+        let image_properties = schema["properties"]["images"]["properties"]
+            .as_object()
+            .expect("images config schema");
+
+        assert_eq!(image_properties["max_bytes"]["type"], "integer");
+        assert_eq!(image_properties["max_alt_characters"]["type"], "integer");
+        assert_eq!(image_properties["require_image_sitemap"]["type"], "boolean");
+        assert_eq!(
+            image_properties["require_image_object_metadata"]["type"],
+            "boolean"
+        );
+    }
+
+    #[test]
+    fn schema_documents_images_rule_group_toggle() {
+        let schema: Value = serde_json::from_str(&render_config_schema().unwrap()).unwrap();
+        let images = &schema["properties"]["rules"]["properties"]["images"];
+
+        assert_eq!(images["type"], "object");
+        assert_eq!(images["properties"]["enabled"]["type"], "boolean");
+        assert_eq!(images["additionalProperties"], false);
+        assert!(images.get("oneOf").is_none(), "no boolean shorthand");
+    }
 }

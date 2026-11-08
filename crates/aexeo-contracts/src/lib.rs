@@ -384,6 +384,43 @@ pub struct CrawlResponseProvenance {
     pub status_code: Option<u16>,
     #[serde(default)]
     pub headers_observed: bool,
+    /// Redirect responses followed before this one, in request order. Each
+    /// hop is the redacted URL that answered with a redirect and its status;
+    /// the response itself is `observed_url`. Empty when nothing redirected or
+    /// when the producer did not record hops (browser runs, older artifacts).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redirect_chain: Vec<RedirectHop>,
+    /// The release marker the page served, when the crawl was asked for one
+    /// (`crawl --release-header` / `--release-meta`): trimmed, without control
+    /// characters and bounded in length. `None` when not requested or absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_marker: Option<String>,
+    /// Other fetches that ended on this same page: each requested a different
+    /// URL and was redirected here. The page is captured once; these keep the
+    /// provenance of the other requests, sorted by `requested_url`. Empty when
+    /// only one request reached the page, and in older artifacts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redirected_arrivals: Vec<RedirectedArrival>,
+}
+
+/// A fetch that requested `requested_url` and ended on a page captured from
+/// another request, with the redirect hops it followed, as in
+/// [`CrawlResponseProvenance`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RedirectedArrival {
+    pub requested_url: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redirect_chain: Vec<RedirectHop>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_code: Option<u16>,
+}
+
+/// One redirect response in a crawl fetch: the URL requested at that hop,
+/// redacted like every persisted URL, and the 3xx status it answered with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RedirectHop {
+    pub url: String,
+    pub status_code: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -391,6 +428,9 @@ pub struct AuditPageSnapshot {
     pub path: String,
     pub relative_path: String,
     pub route: String,
+    /// Kept in the saved artifact, which `verify` replays; left out of command
+    /// output, where it was most of the payload.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub raw_html: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crawl_response: Option<CrawlResponseProvenance>,
@@ -524,6 +564,117 @@ pub struct AuditArtifact {
     pub site: Option<AuditSiteSnapshot>,
     #[serde(default)]
     pub findings: Vec<Finding>,
+    /// Present only when a runtime crawl was seeded from an inventory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crawl_attestation: Option<CrawlAttestation>,
+}
+
+/// Origin, release, surface and snapshot of a publication surface, as supplied
+/// by whoever produced the inventory or crawl. Never inferred.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SurfaceIdentity {
+    pub origin: String,
+    pub release: String,
+    pub surface: String,
+    pub snapshot: String,
+}
+
+impl SurfaceIdentity {
+    /// True when every component is non-blank.
+    pub fn is_complete(&self) -> bool {
+        [&self.origin, &self.release, &self.surface, &self.snapshot]
+            .iter()
+            .all(|value| !value.trim().is_empty())
+    }
+}
+
+/// Facts a runtime crawl records about its coverage of the inventory it was
+/// seeded from. They are observations, not a completeness verdict: the link
+/// report decides that from these and the rest of the artifact.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct CrawlAttestation {
+    pub seeded_from: CrawlSeedSource,
+    /// The effective runtime engine, `http` or `playwright`.
+    pub engine: String,
+    /// Inventory URLs outside the crawl origin, or not valid page URLs, which
+    /// were not seeded and never requested. Redacted like every persisted URL.
+    #[serde(default)]
+    pub out_of_origin_urls: Vec<String>,
+    /// Seeded URLs with no page or response provenance in the artifact, for
+    /// whatever reason: filtered, skipped by robots.txt, non-HTML or unreached.
+    #[serde(default)]
+    pub unfetched_urls: Vec<String>,
+    /// Every URL the crawl did not request because robots.txt disallows it,
+    /// seeded or discovered.
+    #[serde(default)]
+    pub robots_skipped_urls: Vec<String>,
+    /// The release marker each fetched HTML page served. Present only when
+    /// the crawl was asked to record one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release: Option<ReleaseAttestation>,
+    /// When the crawl actually ran, across every resumed segment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<CrawlSnapshotWindow>,
+}
+
+/// Where a crawl read each page's release marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ReleaseMarkerSource {
+    #[default]
+    Header,
+    Meta,
+}
+
+/// What the release markers of the fetched HTML pages show. `value` is set
+/// only when every such page served the same non-empty marker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ReleaseAttestation {
+    /// The primary source: the header when `--release-header` was given.
+    pub source: ReleaseMarkerSource,
+    /// The header or meta name read from the primary source.
+    pub name: String,
+    /// The `<meta name>` read when the page has no usable header marker;
+    /// set only when both a header and a meta marker were requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta_fallback: Option<String>,
+    pub value: Option<String>,
+    pub pages_with_marker: usize,
+    pub pages_without_marker: usize,
+    /// Distinct observed values, sorted, at most `RELEASE_DISTINCT_VALUES_CAP`.
+    pub distinct_values: Vec<String>,
+    /// The true number of distinct values, set only when `distinct_values`
+    /// was capped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distinct_value_count: Option<usize>,
+    /// A resumed segment observed a release value the earlier segments did
+    /// not: the snapshot spans releases.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub spans_segments: bool,
+}
+
+/// Most distinct release values an attestation lists.
+pub const RELEASE_DISTINCT_VALUES_CAP: usize = 8;
+
+/// Wall-clock bounds of a crawl, RFC 3339 UTC at second resolution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct CrawlSnapshotWindow {
+    /// Start of the first segment; `None` when resumed from a checkpoint
+    /// that did not record it.
+    pub started_at: Option<String>,
+    pub finished_at: String,
+    /// The crawl was resumed from a checkpoint at least once.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub resumed: bool,
+}
+
+/// The inventory a crawl was seeded from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct CrawlSeedSource {
+    /// The inventory's own identity; `None` when the inventory declared none.
+    pub inventory_identity: Option<SurfaceIdentity>,
+    /// Number of distinct same-origin URLs seeded.
+    pub url_count: usize,
 }
 
 /// Identity of a finding across runs (fingerprint version 2). Message wording
@@ -636,6 +787,7 @@ impl Default for AuditArtifact {
             performance: None,
             site: None,
             findings: Vec::new(),
+            crawl_attestation: None,
         }
     }
 }
@@ -669,7 +821,8 @@ impl RuleMetadata {
 #[cfg(test)]
 mod tests {
     use super::{
-        AuditArtifact, AuditPageSnapshot, AuditSiteSnapshot, AuditStatus, Finding, FindingScope,
+        AuditArtifact, AuditPageSnapshot, AuditSiteSnapshot, AuditStatus, CrawlAttestation,
+        CrawlSeedSource, Finding, FindingScope, SurfaceIdentity,
     };
 
     #[test]
@@ -741,6 +894,73 @@ mod tests {
         reworded.line = 9;
         assert_eq!(old.fingerprint(), reworded.fingerprint());
         assert_ne!(old.fingerprint(), reworded.with_subject("b").fingerprint());
+    }
+
+    #[test]
+    fn an_artifact_without_attestation_loads_and_serializes_unchanged() {
+        let old = r#"{"version":2,"command":"crawl","status":"complete","generated_at":1,"summary":{"total":0,"errors":0,"warnings":0,"actionable":0,"heuristic":0},"completion_ratio":null,"truncation_reason":null,"crawl":null,"performance":null,"site":null,"findings":[]}"#;
+        let artifact: AuditArtifact = serde_json::from_str(old).unwrap();
+        assert!(artifact.crawl_attestation.is_none());
+        assert_eq!(serde_json::to_string(&artifact).unwrap(), old);
+    }
+
+    #[test]
+    fn a_crawl_attestation_round_trips() {
+        let artifact = AuditArtifact {
+            command: "crawl".into(),
+            crawl_attestation: Some(CrawlAttestation {
+                seeded_from: CrawlSeedSource {
+                    inventory_identity: Some(SurfaceIdentity {
+                        origin: "https://example.org".into(),
+                        release: "r1".into(),
+                        surface: "public".into(),
+                        snapshot: "s1".into(),
+                    }),
+                    url_count: 2,
+                },
+                engine: "http".into(),
+                unfetched_urls: vec!["https://example.org/b".into()],
+                ..CrawlAttestation::default()
+            }),
+            ..AuditArtifact::default()
+        };
+        let json = serde_json::to_value(&artifact).unwrap();
+        assert_eq!(
+            json["crawl_attestation"],
+            serde_json::json!({"seeded_from":{"inventory_identity":{"origin":"https://example.org","release":"r1","surface":"public","snapshot":"s1"},"url_count":2},
+                "engine":"http","out_of_origin_urls":[],"unfetched_urls":["https://example.org/b"],"robots_skipped_urls":[]})
+        );
+        assert_eq!(
+            serde_json::from_value::<AuditArtifact>(json).unwrap(),
+            artifact
+        );
+    }
+
+    #[test]
+    fn release_and_snapshot_attestations_are_additive() {
+        let json = serde_json::json!({"seeded_from":{"inventory_identity":null,"url_count":0},"engine":"http",
+            "release":{"source":"meta","name":"release","value":null,"pages_with_marker":1,"pages_without_marker":1,"distinct_values":["r1"]},
+            "snapshot":{"started_at":null,"finished_at":"2026-11-07T00:00:00Z"}});
+        let attestation: CrawlAttestation = serde_json::from_value(json).unwrap();
+        let release = attestation.release.as_ref().unwrap();
+        assert_eq!(release.source, super::ReleaseMarkerSource::Meta);
+        assert!(!release.spans_segments && release.distinct_value_count.is_none());
+        let reserialized = serde_json::to_value(&attestation).unwrap();
+        assert!(reserialized["release"].get("spans_segments").is_none());
+        assert!(reserialized["snapshot"].get("resumed").is_none());
+        assert_eq!(
+            reserialized["snapshot"]["started_at"],
+            serde_json::Value::Null
+        );
+        let legacy =
+            r#"{"requested_url":"https://example.org/","status_code":200,"headers_observed":true}"#;
+        let provenance: super::CrawlResponseProvenance = serde_json::from_str(legacy).unwrap();
+        assert!(provenance.release_marker.is_none());
+        assert!(
+            !serde_json::to_string(&provenance)
+                .unwrap()
+                .contains("release_marker")
+        );
     }
 
     #[test]

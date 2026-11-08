@@ -10,6 +10,19 @@ import time
 from pathlib import Path
 
 
+def metadata_hash(metadata):
+    """Hash a string map with sorted keys and length-framed UTF-8 values."""
+    if not isinstance(metadata, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in metadata.items()):
+        raise ValueError("metadata must be an object of string fields")
+    digest = hashlib.sha256()
+    for key, value in sorted(metadata.items()):
+        for field in (key, value):
+            encoded = field.encode("utf-8")
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+    return digest.hexdigest()
+
+
 def validate_corpus(corpus):
     if corpus.get("version") != 1:
         raise ValueError("unsupported corpus version")
@@ -21,6 +34,8 @@ def validate_corpus(corpus):
         if not isinstance(identifier, str) or not identifier or identifier in ids:
             raise ValueError("example IDs must be nonempty and unique across the corpus")
         ids.add(identifier)
+        if "metadata" in item:
+            metadata_hash(item["metadata"])
         if split not in {"development", "holdout"} or not isinstance(text, str):
             raise ValueError("invalid example split or text")
         if text in text_splits and text_splits[text] != split:
@@ -55,6 +70,11 @@ def aggregate_review_events(corpus, split, review_log):
         digest = hashlib.sha256(item["text"].encode("utf-8")).hexdigest()
         if event.get("text_sha256") != digest:
             raise ValueError("review event does not match the current example text")
+        if "metadata" in item:
+            if event.get("metadata_sha256") != metadata_hash(item["metadata"]):
+                raise ValueError("review event does not match the current example metadata")
+        elif "metadata_sha256" in event:
+            raise ValueError("review event contains metadata absent from the example")
         model, reviewer = event["model_status"], event["reviewer_status"]
         if model not in {"passed", "failed", "not_checked"} or reviewer not in {"passed", "failed"}:
             raise ValueError("invalid review event status")
@@ -94,7 +114,9 @@ def classification_metrics(counts, examples):
     return {"examples": examples, "counts": counts,
             "precision": tp / (tp + fp) if tp + fp else None,
             "recall": tp / (tp + fn) if tp + fn else None,
-            "unchecked_rate": counts["not_checked"] / examples if examples else None}
+            # Preserve the historical unexpected-only rate for existing consumers.
+            "unchecked_rate": counts["not_checked"] / examples if examples else None,
+            "actual_unchecked_rate": (counts["not_checked"] + counts["expected_not_checked"]) / examples if examples else None}
 
 
 def evaluate(binary, corpus, split, review_log=None):
@@ -123,8 +145,13 @@ def evaluate(binary, corpus, split, review_log=None):
             source_path.write_text(snapshot, encoding="utf-8")
             arguments.extend(["--evidence-source", f"{name}={source_path}"])
         for item in examples:
+            item_arguments = list(arguments)
+            if "metadata" in item:
+                metadata_path = Path(directory) / "metadata.json"
+                metadata_path.write_text(json.dumps(item["metadata"], ensure_ascii=False), encoding="utf-8")
+                item_arguments.extend(["--metadata", str(metadata_path)])
             started = time.perf_counter()
-            result = subprocess.run(arguments, input=item["text"], text=True, capture_output=True, check=False)
+            result = subprocess.run(item_arguments, input=item["text"], text=True, capture_output=True, check=False)
             durations.append((time.perf_counter() - started) * 1000)
             if result.returncode not in (0, 1, 2):
                 raise ValueError(f"CLI failed for {item['id']}: exit {result.returncode}")

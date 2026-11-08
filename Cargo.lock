@@ -11,6 +11,7 @@ dependencies = [
  "anyhow",
  "clap",
  "csv",
+ "ring",
  "serde",
  "serde_json",
  "tempfile",
@@ -21,6 +22,7 @@ name = "aexeo-contracts"
 version = "0.0.21"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -31,6 +33,7 @@ dependencies = [
  "anyhow",
  "base64",
  "csv",
+ "encoding_rs",
  "html5ever",
  "markdown",
  "markup5ever_rcdom",
@@ -38,6 +41,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
  "toml",
  "url",
 ]
@@ -1374,9 +1378,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.51.1"
+version = "1.51.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f66bf9585cda4b724d3e78ab34b73fb2bbaba9011b9bfdf69dc836382ea13b8c"
+checksum = "a13e32eacd0222f9658be2ccbd83b718bfd9bfb0d54b5921913c184cb86124a5"
 dependencies = [
  "bytes",
  "libc",

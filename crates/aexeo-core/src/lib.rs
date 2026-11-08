@@ -15,12 +15,15 @@ pub mod fix;
 pub mod generate;
 pub mod header_rules;
 pub mod html_rules;
+pub mod image_rules;
 #[cfg(feature = "net")]
 pub mod integrations;
 pub mod intelligence;
 pub mod link_counts;
 pub mod link_evidence;
+pub mod link_findings;
 pub mod link_graph;
+pub mod link_notes;
 pub mod link_report;
 pub mod link_rules;
 pub mod llm_rules;
@@ -70,6 +73,7 @@ pub use generate::{
 };
 pub use header_rules::run_header_rules;
 pub use html_rules::{run_html_rules, run_static_html_audit};
+pub use image_rules::run_image_rules;
 #[cfg(feature = "net")]
 pub use integrations::{
     BingAiImportReport, BingAiOpportunity, BingAiOpportunityReport, BingAiRecord, BingAiTrendDelta,
@@ -109,11 +113,12 @@ pub use registry::{
     list_adapter_names, list_rule_group_names, rule_layers_for_id,
 };
 pub use reporting::{
-    DEFAULT_AUDIT_LOG_LIMIT, LayerBreakdown, build_audit_artifact, build_recap_lines,
-    is_reports_dir, render_audit_artifact_json, render_markdown_artifact, render_sarif,
-    render_text, render_text_artifact, reports_dir, rule_group_name, summarize_findings,
-    summarize_findings_by_layer, write_audit_artifact, write_partial_audit_artifact,
-    write_progress_audit_artifact,
+    DEFAULT_AUDIT_LOG_LIMIT, LayerBreakdown, PriorityIssue, build_audit_artifact,
+    build_recap_lines, is_reports_dir, prioritize_findings, prioritize_findings_with_links,
+    render_audit_artifact_json, render_markdown_artifact, render_markdown_artifact_with_links,
+    render_sarif, render_text, render_text_artifact, render_text_artifact_with_links, reports_dir,
+    rule_group_name, summarize_findings, summarize_findings_by_layer, write_audit_artifact,
+    write_partial_audit_artifact, write_private_file, write_progress_audit_artifact,
 };
 pub use robots_rules::run_robots_rules;
 #[cfg(feature = "net")]
@@ -146,4 +151,6 @@ pub use verification::{
 };
 pub use well_known_rules::run_well_known_rules;
 
+pub mod crawl_attestation;
 pub mod link_inventory;
+pub mod release_marker;

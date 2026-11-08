@@ -301,12 +301,16 @@ fn render_related_links_section(
                 })
                 .collect::<Vec<_>>()
                 .join(" ");
-            format!("      <li><a href=\"/{}\">{}</a></li>", target, label)
+            format!(
+                "      <li><a href=\"/{}\">{}</a></li>",
+                escape_html_attr(target),
+                escape_html_attr(&label)
+            )
         })
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "\n  <section data-ui=\"related-links\" data-source-route=\"{}\">\n    <h2>{}</h2>\n    <ul>\n{}\n    </ul>\n  </section>\n",
+        "\n  <section data-ui=\"related-links\" data-aexeo-link-context=\"related\" data-source-route=\"{}\">\n    <h2>{}</h2>\n    <ul>\n{}\n    </ul>\n  </section>\n",
         escape_html_attr(if source_route.is_empty() {
             "/"
         } else {
@@ -549,7 +553,7 @@ fn plan_discovery_link_fixes(plan: &mut FixPlan, root: &Path) -> Result<()> {
         // Match on the href specifically rather than just the rel/type
         // string so a different mirror path doesn't get silently
         // duplicated. The mirror path is the canonical signal.
-        let href = format!("/{mirror_path}");
+        let href = format!("/{}", escape_html_attr(mirror_path));
         let needle = format!("href=\"{href}\"");
         if raw_text.contains(&needle) {
             continue;
@@ -667,9 +671,12 @@ pub fn apply_safe_fixes_with_options(
 
 #[cfg(test)]
 mod tests {
-    use super::{FixOptions, apply_safe_fixes, apply_safe_fixes_with_options};
+    use super::{
+        FixOptions, apply_safe_fixes, apply_safe_fixes_with_options, render_related_links_section,
+    };
     use crate::config::Config;
     use crate::generate::LLMS_GENERATED_MARKER;
+    use crate::link_evidence::{LinkContext, extract_links};
     use anyhow::Result;
     use std::fs;
 
@@ -923,6 +930,62 @@ mod tests {
             home2.matches(r#"href="/index.md.txt""#).count(),
             1,
             "discovery link must not be duplicated on second run"
+        );
+        Ok(())
+    }
+
+    /// The block lands before `</body>`, outside any landmark, so without the
+    /// marker the link graph would report its links as `unknown`.
+    #[test]
+    fn related_links_are_attributed_as_related_by_the_link_graph() {
+        let section = render_related_links_section("", &["guide".to_string()], "Related");
+        let html = format!("<html><body><main><p>x</p></main>{section}</body></html>");
+        let links = extract_links(&html, "https://example.com/", "https://example.com", None);
+        assert_eq!(links.len(), 1, "{links:?}");
+        assert_eq!(links[0].context, LinkContext::RelatedContent);
+    }
+
+    /// Routes come from file names, which may hold any HTML metacharacter.
+    #[test]
+    fn related_links_escape_routes_in_href_and_label() {
+        let section = render_related_links_section(
+            "",
+            &["b\"><img src=x onerror=alert(1)>".to_string()],
+            "Related",
+        );
+        assert!(
+            !section.contains("<img"),
+            "route must not open an element: {section}"
+        );
+        assert!(
+            section.contains("href=\"/b&quot;&gt;&lt;img src=x onerror=alert(1)&gt;\""),
+            "route must stay inside the href attribute: {section}"
+        );
+    }
+
+    #[test]
+    fn discovery_link_escapes_manifest_path_and_stays_idempotent() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(&root.join("index.html"), &make_html_page("", ""));
+        write(
+            &root.join("manifest.json"),
+            r#"{"artifacts": [{"kind": "markdown_mirror", "path": "x\"><script>alert(1)</script>.md", "source_route": "/"}]}"#,
+        );
+        let escaped = r#"href="/x&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;.md""#;
+        let config = Config::default();
+
+        apply_safe_fixes(root, &config)?;
+        let page = fs::read_to_string(root.join("index.html"))?;
+        assert!(!page.contains("<script>"), "script injected: {page}");
+        assert!(page.contains(escaped), "link missing: {page}");
+
+        apply_safe_fixes(root, &config)?;
+        let page = fs::read_to_string(root.join("index.html"))?;
+        assert_eq!(
+            page.matches(escaped).count(),
+            1,
+            "an escaped path must still be recognised on the second run: {page}"
         );
         Ok(())
     }
