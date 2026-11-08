@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   adaptContentItemWithContext,
+  contentItemToEmdashDocument,
   type ContentUrlApi,
   type EmdashContentItem,
 } from "../src/adapter.js";
@@ -35,6 +36,14 @@ function body(text: string): Array<Record<string, unknown>> {
 }
 
 describe("EmDash content adaptation", () => {
+  it("distinguishes an absent body from an explicitly empty one without hiding another rich text field", () => {
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: {} };
+    expect(contentItemToEmdashDocument(item).body).toBeUndefined();
+    expect(contentItemToEmdashDocument({ ...item, data: { body: [] } }).body).toEqual([]);
+    expect(contentItemToEmdashDocument({ ...item, data: { body: "  " } }).body).toEqual([]);
+    expect(contentItemToEmdashDocument({ ...item, data: { body: [], content: body("actual text") } }).body?.[0]?.children[0]?.text).toBe("actual text");
+  });
+
   it("declares only the current capabilities and configured sidecar host", () => {
     expect(buildCapabilities(null)).toEqual(["content:read"]);
     expect(buildAllowedHosts(null)).toEqual([]);

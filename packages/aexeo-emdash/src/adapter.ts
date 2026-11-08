@@ -184,8 +184,10 @@ function extractPortableText(
   // Prefer established rich-text fields. EmDash's typed `blocks` field is a
   // separate composition format: its _type/_version/_key envelope does not
   // contain Portable Text's `children`, so passing it through loses the text.
+  let foundEmptyBody = false;
   for (const slug of ["body", "content"]) {
     const value = data[slug];
+    if ((Array.isArray(value) && value.length === 0) || (typeof value === "string" && value.trim().length === 0)) foundEmptyBody = true;
     if (isPortableTextArray(value)) return value;
     if (isEmdashBlocksArray(value, slug)) return blocksToPortableText(value);
     if (typeof value === "string" && value.trim().length > 0) {
@@ -194,6 +196,7 @@ function extractPortableText(
   }
 
   const blocks = data["blocks"];
+  if (Array.isArray(blocks) && blocks.length === 0) foundEmptyBody = true;
   if (isPortableTextArray(blocks)) return blocks;
   if (isEmdashBlocksArray(blocks, "blocks")) return blocksToPortableText(blocks);
 
@@ -202,7 +205,7 @@ function extractPortableText(
     if (isPortableTextArray(value)) return value;
     if (isEmdashBlocksArray(value, field)) return blocksToPortableText(value);
   }
-  return null;
+  return foundEmptyBody ? [] : null;
 }
 
 function isPortableTextArray(value: unknown): value is PortableTextBlock[] {
