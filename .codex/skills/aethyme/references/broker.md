@@ -74,6 +74,13 @@ blocked.
    verified and integrated. Never switch branches inside someone else's
    worktree; never edit files outside your own worktree.
 
+   If `broker commit` reports that an embedded upgrade is required and
+   explicitly directs pending work through the managed pre-commit lane, use
+   the repository's normal `git commit` with its managed hook enabled, then
+   push the session with `broker push`. Do not bypass hooks. Review
+   `aethyme upgrade plan` before applying a migration; it can require active
+   sessions to finish before shared policy or gate files are migrated.
+
    **If `.aethyme/config.toml`, as committed on the default branch, sets
    `[delivery] push_session_branches = true`, push your session branch as you
    go.** Work that exists only in a worktree
