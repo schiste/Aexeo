@@ -171,6 +171,22 @@ function redactUrl(urlString) {
   }
 }
 
+// Only HTTP redirects belonging to the final navigation are recorded. A
+// client-side navigation after goto is not evidence of an HTTP redirect chain.
+async function navigationRedirectChain(response, effectiveUrl) {
+  if (!response || response.url() !== effectiveUrl) return null;
+  const hops = [];
+  let request = response.request().redirectedFrom();
+  while (request) {
+    let prior;
+    try { prior = await request.response(); } catch { return null; }
+    if (!prior || prior.status() < 300 || prior.status() >= 400) return null;
+    hops.push({ url: redactUrl(request.url()), status_code: prior.status() });
+    request = request.redirectedFrom();
+  }
+  return hops.reverse();
+}
+
 function fetchFailure(guard, error) {
   if (guard.blockedDocument) {
     const blocked = redactUrl(guard.blockedDocument);
@@ -259,6 +275,7 @@ try {
     body: html,
     headers,
     effectiveUrl,
+    redirectChain: await navigationRedirectChain(mainResponse, effectiveUrl),
     artifacts: {
       screenshotPath,
       tracePath,
@@ -357,6 +374,7 @@ async function fetchUrl(url) {
       body: html,
       headers,
       effectiveUrl,
+      redirectChain: await navigationRedirectChain(mainResponse, effectiveUrl),
       artifacts: {
         screenshotPath,
         tracePath,
@@ -916,7 +934,13 @@ fn fetch_with_playwright_spec(
             redact_url(spec.url)
         )
     })?;
-    Ok(fetch_result_from_payload(spec.url, &payload))
+    let mut result = fetch_result_from_payload(spec.url, &payload);
+    // Custom runners can provide useful hops, but cannot attest the built-in
+    // runner’s observation contract. Keep coverage conservative.
+    if executable.is_some() {
+        result.redirect_chain_observed = false;
+    }
+    Ok(result)
 }
 
 fn fetch_result_from_payload(url: &str, payload: &serde_json::Value) -> FetchResult {
@@ -932,6 +956,25 @@ fn fetch_result_from_payload(url: &str, payload: &serde_json::Value) -> FetchRes
         })
         .unwrap_or_default();
     redact_sensitive_headers(&mut headers);
+    let redirect_chain = payload["redirectChain"].as_array().and_then(|hops| {
+        hops.iter()
+            .map(|hop| {
+                let url = hop["url"].as_str()?;
+                let parsed = url::Url::parse(url).ok()?;
+                if !matches!(parsed.scheme(), "http" | "https") {
+                    return None;
+                }
+                let status = hop["status_code"].as_u64()?;
+                if !(300..400).contains(&status) {
+                    return None;
+                }
+                Some(aexeo_contracts::RedirectHop {
+                    url: redact_url(url),
+                    status_code: status as u16,
+                })
+            })
+            .collect::<Option<Vec<_>>>()
+    });
     FetchResult {
         status_code: payload["statusCode"].as_u64().map(|value| value as u16),
         content_type: payload["contentType"].as_str().map(str::to_string),
@@ -947,8 +990,8 @@ fn fetch_result_from_payload(url: &str, payload: &serde_json::Value) -> FetchRes
         headers_observed: payload["headers"]
             .as_object()
             .is_some_and(|headers| headers.values().all(serde_json::Value::is_string)),
-        // The browser follows redirects itself and does not report the hops.
-        redirect_chain: Vec::new(),
+        redirect_chain_observed: redirect_chain.is_some(),
+        redirect_chain: redirect_chain.unwrap_or_default(),
     }
 }
 
@@ -963,6 +1006,32 @@ mod tests {
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn browser_redirect_provenance_is_redacted_and_rejects_partial_chains() {
+        let payload = serde_json::json!({"redirectChain":[
+            {"url":"https://user:secret@example.org/old?token=secret#part","status_code":301},
+            {"url":"https://example.org/next?private=1","status_code":302}
+        ]});
+        let fetched = super::fetch_result_from_payload("https://example.org/old", &payload);
+        assert!(fetched.redirect_chain_observed);
+        assert_eq!(fetched.redirect_chain.len(), 2);
+        assert_eq!(fetched.redirect_chain[0].url, "https://example.org/old");
+        assert_eq!(fetched.redirect_chain[1].url, "https://example.org/next");
+        let invalid = serde_json::json!({"redirectChain":[
+            {"url":"https://example.org/old","status_code":301},
+            {"url":"https://example.org/next","status_code":200}
+        ]});
+        assert!(
+            !super::fetch_result_from_payload("https://example.org/old", &invalid)
+                .redirect_chain_observed
+        );
+        assert!(
+            super::fetch_result_from_payload("https://example.org/old", &serde_json::json!({}))
+                .redirect_chain
+                .is_empty()
+        );
+    }
 
     #[test]
     fn missing_browser_response_metadata_is_not_treated_as_observed() {
@@ -1282,6 +1351,42 @@ mod tests {
         for request in &other {
             assert!(!request.contains("x-secret"), "{request}");
             assert!(!request.contains("authorization"), "{request}");
+        }
+    }
+
+    #[test]
+    fn browser_records_http_redirects_in_both_runner_modes() {
+        if !probe_playwright_runtime_with(None).available {
+            eprintln!("skipped: Playwright is not installed");
+            return;
+        }
+        let (port, _) = recording_server(|path| match path {
+            "/old?token=secret" => found("/middle?token=other"),
+            "/middle?token=other" => found("/final"),
+            _ => html("<h1>done</h1>"),
+        });
+        let origin = format!("http://127.0.0.1:{port}");
+        let url = format!("{origin}/old?token=secret");
+        let mut session =
+            super::PlaywrightSession::spawn_from_config(browser_config(&origin, true)).unwrap();
+        let session_result = session.fetch(&url).unwrap();
+        drop(session);
+        let inline_result =
+            fetch_with_playwright_using(None, &url, &Config::default().runtime()).unwrap();
+        for fetched in [session_result, inline_result] {
+            assert_eq!(fetched.effective_url, format!("{origin}/final"));
+            let hops: Vec<_> = fetched
+                .redirect_chain
+                .iter()
+                .map(|hop| (hop.url.as_str(), hop.status_code))
+                .collect();
+            assert_eq!(
+                hops,
+                vec![
+                    (format!("{origin}/old").as_str(), 302),
+                    (format!("{origin}/middle").as_str(), 302)
+                ]
+            );
         }
     }
 

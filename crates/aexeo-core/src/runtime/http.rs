@@ -30,6 +30,7 @@ pub(crate) struct FetchResult {
     /// Redirects followed before the final response, in order. Empty when the
     /// first response was final or the engine does not report hops.
     pub(crate) redirect_chain: Vec<RedirectHop>,
+    pub(crate) redirect_chain_observed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -250,6 +251,7 @@ impl HttpFetcher {
             effective_url_observed: true,
             headers_observed,
             redirect_chain,
+            redirect_chain_observed: true,
         })
     }
 

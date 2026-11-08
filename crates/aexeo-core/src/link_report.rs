@@ -529,8 +529,8 @@ fn crawl_release(
 
 /// Why a runtime audit does not attest complete crawl coverage, one issue per
 /// unmet condition; empty only when every condition holds. The crawl must
-/// have finished complete and untruncated with the HTTP engine (which records
-/// redirect chains), with no failed response and no URL skipped by robots.txt.
+/// have finished complete and untruncated with an engine that records
+/// redirect chains, with no failed response and no URL skipped by robots.txt.
 /// It must have been seeded from an inventory, every seeded URL must have a
 /// page or response, and `inventory`, the one used for reconciliation, must
 /// carry the seed inventory's identity.
@@ -571,10 +571,46 @@ fn crawl_audit_completeness_issues(
     {
         issues.push("audit_robots_skipped");
     }
-    if crawl.is_some_and(|crawl| crawl.engine != "http")
-        || attestation.is_some_and(|value| value.engine != "http")
-    {
-        issues.push("audit_browser_engine");
+    let browser_engine = crawl.is_some_and(|crawl| crawl.engine != "http")
+        || attestation.is_some_and(|value| value.engine != "http");
+    if browser_engine {
+        let observed = |response: &aexeo_contracts::CrawlResponseProvenance| {
+            let Some(final_url) = response.observed_url.as_deref() else {
+                return false;
+            };
+            let valid_chain = |requested: &str, chain: &[RedirectHop], recorded: bool| {
+                recorded
+                    && if requested == final_url {
+                        chain.is_empty()
+                    } else {
+                        redirect_chain_consistent(requested, chain)
+                    }
+            };
+            valid_chain(
+                &response.requested_url,
+                &response.redirect_chain,
+                response.redirect_chain_observed,
+            ) && response.redirected_arrivals.iter().all(|arrival| {
+                valid_chain(
+                    &arrival.requested_url,
+                    &arrival.redirect_chain,
+                    arrival.redirect_chain_observed,
+                )
+            })
+        };
+        let pages_observed = artifact.site.as_ref().is_some_and(|site| {
+            !site.pages.is_empty()
+                && site
+                    .pages
+                    .iter()
+                    .all(|page| page.crawl_response.as_ref().is_some_and(observed))
+        });
+        let failures_observed = meta.is_none_or(|meta| meta.failed_responses.iter().all(observed));
+        let known_browser = crawl.is_none_or(|value| value.engine == "playwright")
+            && attestation.is_none_or(|value| value.engine == "playwright");
+        if !known_browser || !pages_observed || !failures_observed {
+            issues.push("audit_browser_engine");
+        }
     }
     match attestation.filter(|value| value.seeded_from.url_count > 0) {
         None => issues.push("audit_not_inventory_seeded"),
@@ -1470,6 +1506,29 @@ mod tests {
     }
 
     #[test]
+    fn browser_coverage_requires_observed_redirect_provenance_for_every_arrival() {
+        let (mut artifact, context) = attested_audit();
+        artifact["crawl"]["engine"] = "playwright".into();
+        artifact["crawl_attestation"]["engine"] = "playwright".into();
+        assert!(
+            !attested_report(&artifact, &context).crawl_complete,
+            "old artifacts are unknown"
+        );
+        for page in artifact["site"]["pages"].as_array_mut().unwrap() {
+            page["crawl_response"]["redirect_chain_observed"] = true.into();
+        }
+        assert!(attested_report(&artifact, &context).crawl_complete);
+        artifact["site"]["pages"][1]["crawl_response"]["redirected_arrivals"] = serde_json::json!([{"requested_url":"https://example.org/alias", "redirect_chain":[{"url":"https://example.org/alias","status_code":301}], "status_code":200}]);
+        assert!(
+            !attested_report(&artifact, &context).crawl_complete,
+            "unknown arrival must withhold coverage"
+        );
+        artifact["site"]["pages"][1]["crawl_response"]["redirected_arrivals"][0]["redirect_chain_observed"] =
+            true.into();
+        assert!(attested_report(&artifact, &context).crawl_complete);
+    }
+
+    #[test]
     fn each_unmet_condition_raises_exactly_its_own_issue() {
         let cases: [(&str, Mutation); 9] = [
             ("audit_crawl_partial", |artifact, _| {
@@ -2071,6 +2130,7 @@ mod tests {
         let arrival = RedirectedArrival {
             requested_url: ALIAS.into(),
             redirect_chain: vec![hop(ALIAS, 301)],
+            redirect_chain_observed: true,
             status_code: Some(200),
         };
         let guide = RenderedPage {
@@ -2085,6 +2145,7 @@ mod tests {
         let other = RedirectedArrival {
             requested_url: "https://example.org/other".into(),
             redirect_chain: vec![hop("https://example.org/other", 301)],
+            redirect_chain_observed: true,
             status_code: Some(200),
         };
         let guide = RenderedPage {

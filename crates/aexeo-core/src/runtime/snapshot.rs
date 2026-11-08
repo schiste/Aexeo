@@ -249,6 +249,7 @@ fn merge_captures(existing: CapturedPage, incoming: CapturedPage) -> CapturedPag
         arrivals.push(aexeo_contracts::RedirectedArrival {
             requested_url: other.requested_url,
             redirect_chain: other.redirect_chain,
+            redirect_chain_observed: other.redirect_chain_observed,
             status_code: other.status_code,
         });
         arrivals.retain(|arrival| arrival.requested_url != primary.requested_url);
@@ -476,6 +477,7 @@ mod tests {
             [&fetches[0], &fetches[2]].map(|fetch| aexeo_contracts::RedirectedArrival {
                 requested_url: fetch.requested_url.clone(),
                 redirect_chain: fetch.redirect_chain.clone(),
+                redirect_chain_observed: fetch.redirect_chain_observed,
                 status_code: Some(200),
             })
         );

@@ -2009,6 +2009,7 @@ fn materialize_runtime_site(
                 status_code: fetched.status_code,
                 headers_observed: fetched.headers_observed,
                 redirect_chain: fetched.redirect_chain.clone(),
+                redirect_chain_observed: fetched.redirect_chain_observed,
                 release_marker: None,
                 redirected_arrivals: Vec::new(),
             };

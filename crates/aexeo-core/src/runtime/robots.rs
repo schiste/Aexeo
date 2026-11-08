@@ -319,6 +319,7 @@ mod tests {
             effective_url_observed: true,
             headers_observed: true,
             redirect_chain: Vec::new(),
+            redirect_chain_observed: true,
         })
     }
 
