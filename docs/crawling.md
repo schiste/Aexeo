@@ -69,6 +69,9 @@ on the response:
 A site with one broken link therefore ends `complete` and exits 1. If every requested
 URL returned an error status, nothing was audited and the status is `partial`.
 
+A link to a URL that redirected to an audited page, through a recorded chain, is
+not broken (see [legacy findings](link-graph.md#legacy-inbound-link-findings)).
+
 | Command | Effect of `partial` |
 | --- | --- |
 | `crawl` | Exit code still follows findings: exit 1 on an error finding, exit 0 if only warnings |

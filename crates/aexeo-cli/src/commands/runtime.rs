@@ -443,7 +443,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
         add_inventory_seeds(&mut config, seed);
     }
 
-    let audit = match run_runtime_audit_with_options(
+    let mut audit = match run_runtime_audit_with_options(
         target_url,
         *submatches.get_one::<usize>("max-pages").unwrap_or(&200),
         selected_runtime_engine(&config, submatches),
@@ -463,16 +463,21 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     );
     let performance_budget_passed =
         apply_performance_budget(&mut full_audit_artifact, performance_budget.as_ref());
-    let audit_path = write_audit_artifact(
-        &full_audit_artifact,
-        &cwd,
-        "crawl",
-        config.output().audit_log_limit,
-    )?;
     let mut graph_summary = None;
     if let Some(path) = submatches.get_one::<String>("link-graph-output") {
         let started = std::time::Instant::now();
         let graph = aexeo_core::link_report::build_link_report_from_audit(&full_audit_artifact)?;
+        // Findings the report proves false leave every output of this run,
+        // the stored audit included; the report lists them.
+        if !graph.suppressed_legacy_findings.is_empty() {
+            aexeo_core::link_findings::remove_suppressed_findings(&mut audit.findings, &graph);
+            aexeo_core::link_findings::remove_suppressed_findings(
+                &mut full_audit_artifact.findings,
+                &graph,
+            );
+            full_audit_artifact.summary =
+                aexeo_core::reporting::summarize_findings(&full_audit_artifact.findings);
+        }
         if submatches.get_flag("link-graph-summary") {
             graph_summary = Some(serde_json::json!({
                 "version": 1,
@@ -485,6 +490,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
                 "legacy_link_findings": aexeo_core::link_findings::count_conclusions(
                     &graph.legacy_findings
                 ),
+                "suppressed_legacy_findings": graph.suppressed_legacy_findings,
             }));
         }
         let bytes = serde_json::to_vec_pretty(&graph)?;
@@ -494,6 +500,12 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
             super::link_graph::emit_link_graph_telemetry(&graph, started);
         }
     }
+    let audit_path = write_audit_artifact(
+        &full_audit_artifact,
+        &cwd,
+        "crawl",
+        config.output().audit_log_limit,
+    )?;
     let findings_to_render = if let Some(baseline_path) = baseline_path {
         let baseline_findings = load_findings_from_audit(Path::new(baseline_path))?;
         let diff = diff_finding_sets(&baseline_findings, &audit.findings);
@@ -563,6 +575,12 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
                         .map(|(conclusion, count)| format!("{count} {conclusion}"))
                         .collect::<Vec<_>>()
                         .join(", ")
+                );
+                println!(
+                    "Link graph suppressed LNK002/LNK004 findings it proves false: {} (listed in the link graph report)",
+                    summary["suppressed_legacy_findings"]
+                        .as_array()
+                        .map_or(0, Vec::len)
                 );
             }
         }
