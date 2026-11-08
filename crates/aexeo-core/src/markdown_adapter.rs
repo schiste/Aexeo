@@ -676,6 +676,29 @@ min = 2
     }
 
     #[test]
+    fn sentence_character_gate_counts_unicode_without_punctuation_or_edge_whitespace() {
+        use crate::content_gate::{ContentInput, ContentPreset, GateStatus};
+        let gate = "kind='sentence_character_length'\nmax_chars=4\ndelimiters='。！？'";
+        let result = report("中文文章測試。 好文。\n", gate);
+        assert_eq!(result.status, GateStatus::Failed);
+        assert_eq!(result.measurements["sentence_count"], 2);
+        assert_eq!(result.measurements["longest_sentence_chars"], 6);
+        assert_eq!(result.measurements["max_chars"], 4);
+        assert_eq!((result.findings[0].line, result.findings[0].column), (1, 1));
+        let abbreviations = "kind='sentence_character_length'\nmax_chars=3\nabbreviations=['Dr.']";
+        assert_eq!(
+            report("Dr. X y.\n", abbreviations).status,
+            GateStatus::Failed
+        );
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='g'\nkind='sentence_character_length'\nmax_chars=4\n").unwrap();
+        assert_eq!(
+            preset.evaluate(&ContentInput::default()).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+        assert!(ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='g'\nkind='sentence_character_length'\nmax_chars=0\n").is_err());
+    }
+
+    #[test]
     fn inline_code_stays_in_headings_and_prose_and_maps_to_source() {
         use crate::content_gate::GateStatus;
         let source = "## Option `a`\n\n## Option `b`\n\nUse `` x ``.\n";

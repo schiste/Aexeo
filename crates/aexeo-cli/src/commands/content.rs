@@ -345,6 +345,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 ContentGate::ForbiddenTerms { .. }
                     | ContentGate::RepeatedTerms { .. }
                     | ContentGate::SentenceLength { .. }
+                    | ContentGate::SentenceCharacterLength { .. }
                     | ContentGate::ParagraphLength { .. }
                     | ContentGate::ParagraphCharacterLength { .. }
             ) {

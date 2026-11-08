@@ -36,6 +36,9 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
   boundaries ([PR #126](https://github.com/schiste/Aexeo/pull/126)), with
   Markdown/EmDash parity and explicit `not_checked` for missing paragraphs.
   It counts Unicode scalar values, not grapheme clusters or words.
+- [x] Optional sentence character-length gate ([PR #128](https://github.com/schiste/Aexeo/pull/128))
+  uses the same configurable sentence boundaries and abbreviation exceptions;
+  its Unicode scalar counts are not linguistic segmentation.
 - [x] Bounded agent lint-and-revise workflow and local telemetry guidance ([PR #30](https://github.com/schiste/Aexeo/pull/30)).
 - [x] Configurable paragraph-length gate with Markdown and EmDash adapter
   capabilities ([PR #33](https://github.com/schiste/Aexeo/pull/33)).
