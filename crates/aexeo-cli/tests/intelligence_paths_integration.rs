@@ -84,16 +84,31 @@ fn surfaces_discover_text_output_reports_coverage() {
 }
 
 #[test]
-fn score_text_output_reports_the_overall_score() {
+fn score_text_output_reports_facts_without_a_composite() {
     let temp = site_fixture();
     let output = run(&["intelligence", "score", &temp.path().to_string_lossy()]);
 
     assert!(output.status.success(), "{}", stderr(&output));
     let text = stdout(&output);
-    assert!(text.contains("Intelligence Score"), "{text}");
-    assert!(text.contains("Overall score:"), "{text}");
-    // With no trust data the optional score must read n/a, not 0.
-    assert!(text.contains("External trust alignment: n/a"), "{text}");
+    assert!(text.contains("Intelligence Facts and Blockers"), "{text}");
+    assert!(!text.contains("Overall"), "{text}");
+    // With no trust data the dimension must read unknown, not a number.
+    assert!(text.contains("External trust alignment: unknown"), "{text}");
+}
+
+#[test]
+fn presence_rejects_a_wikipedia_language_that_is_not_an_edition_code() {
+    let temp = site_fixture();
+    let output = run(&[
+        "intelligence",
+        "presence",
+        &temp.path().to_string_lossy(),
+        "--wikipedia-language",
+        "en.evil.com",
+    ]);
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("Wikipedia edition code"));
 }
 
 #[test]

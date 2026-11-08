@@ -63,6 +63,15 @@ export function validateSidecarUrl(
   }
 
   const host = parsed.hostname.toLowerCase();
+  // A trailing dot is the fully-qualified spelling of the same name, so
+  // `localhost.` reaches the local machine while comparing unequal to every
+  // name below. A deployed Worker URL has no reason to use it.
+  if (host.endsWith(".")) {
+    return {
+      ok: false,
+      error: `Sidecar URL host must not end with a dot: ${host}`,
+    };
+  }
   if (isBlockedHost(host)) {
     return {
       ok: false,

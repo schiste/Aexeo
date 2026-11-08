@@ -34,6 +34,94 @@ Options:
           Print help
 ```
 
+## `feedback-export`
+
+Export validated human feedback as a historical review event
+
+```text
+Export validated human feedback as a historical review event
+
+Usage: feedback-export [OPTIONS] --corpus <corpus> --note <note> --output <output>
+
+Options:
+      --corpus <corpus>
+
+
+      --note <note>
+
+
+      --output <output>
+
+
+      --telemetry
+
+
+  -h, --help
+          Print help
+```
+
+## `feedback-capture`
+
+Capture explicitly reported human feedback in a private local note
+
+```text
+Capture explicitly reported human feedback in a private local note
+
+Usage: feedback-capture [OPTIONS] --text <text> --report <report> --gate <gate> --example <example> --output <output>
+
+Options:
+      --text <text>
+
+
+      --report <report>
+
+
+      --metadata <metadata>
+          JSON metadata supplied to the evaluated gate
+
+      --gate <gate>
+
+
+      --example <example>
+
+
+      --human-status <human-status>
+          [possible values: passed, failed, uncertain]
+
+      --reviewer <reviewer>
+
+
+      --method <method>
+
+
+      --reason-file <reason-file>
+
+
+      --language <language>
+
+
+      --content-type <content-type>
+
+
+      --preset <preset>
+
+
+      --config-version <config-version>
+
+
+      --tool-version <tool-version>
+
+
+      --output <output>
+
+
+      --telemetry
+
+
+  -h, --help
+          Print help
+```
+
 ## `content`
 
 Run a portable content preset on a UTF-8 file or stdin
@@ -169,6 +257,15 @@ Options:
       --seed <seed>
 
 
+      --seed-file <seed-file>
+          Seed every page URL on the target's origin from a link inventory JSON file and record a crawl attestation in the audit artifact
+
+      --release-header <release-header>
+          Record each HTML page's release marker from this response header and attest it in the audit artifact; takes precedence over --release-meta
+
+      --release-meta <release-meta>
+          Record each HTML page's release marker from the content of <meta name=NAME> and attest it in the audit artifact
+
       --include-pattern <include-pattern>
 
 
@@ -178,11 +275,17 @@ Options:
       --no-sitemap-seed
 
 
+      --ignore-robots
+          Crawl URLs that robots.txt disallows; only for auditing a site you own
+
       --max-pages <max-pages>
           [default: 200]
 
       --link-graph-output <link-graph-output>
           Write an observational link graph report to this JSON file
+
+      --link-graph-context <link-graph-context>
+          Compare the link graph report with this audit link context file instead of the --seed-file inventory
 
       --link-graph-summary
           Include an observational link graph coverage summary in the crawl output
@@ -360,7 +463,7 @@ Commands:
   presence       Surface what the open web shows about the manifest's organization (5 sources, no scoring)
   trust-surface  Import and reconcile trusted external surfaces against site truth
   surfaces       Discover machine-readable website surfaces and retrieval paths
-  score          Compute site and route intelligence scores
+  score          Report site and route intelligence facts and blockers (no composite score)
   help           Print this message or the help of the given subcommand(s)
 
 Options:
@@ -524,6 +627,9 @@ Options:
 
       --no-sitemap-seed
 
+
+      --ignore-robots
+          Crawl URLs that robots.txt disallows; only for auditing a site you own
 
       --config <config>
 
@@ -740,6 +846,9 @@ Options:
 
       --inject-schema
           Read schema-suggestions.json from the path and inject suggested JSON-LD into HTML <head> blocks (per-type augmentation; existing types are skipped).
+
+      --dry-run
+          List the files fix would change or skip without writing anything.
 
       --format <format>
           [default: text]

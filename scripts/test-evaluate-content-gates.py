@@ -17,6 +17,34 @@ spec.loader.exec_module(eval_module)
 
 
 class EvaluateTests(unittest.TestCase):
+    def test_example_metadata_is_isolated_and_reviews_bind_it(self):
+        items = [
+            {"id": "a", "split": "holdout", "text": "one", "metadata": {"titre": "Été", "lang": "fr"}, "expected": "passed"},
+            {"id": "b", "split": "holdout", "text": "two", "expected": "not_checked"},
+            {"id": "c", "split": "holdout", "text": "three", "metadata": {}, "expected": "failed"},
+        ]
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": items}
+        observed = []
+        def run(arguments, **_):
+            observed.append(json.loads(Path(arguments[arguments.index("--metadata") + 1]).read_text()) if "--metadata" in arguments else None)
+            status = ("passed", "not_checked", "failed")[len(observed) - 1]
+            return SimpleNamespace(returncode=0, stdout=json.dumps({"gates": [{"gate_id": "g", "status": status}]}))
+        with patch.object(eval_module.subprocess, "run", side_effect=run):
+            eval_module.evaluate("cli", corpus, "holdout")
+        self.assertEqual(observed, [items[0]["metadata"], None, {}])
+        digest = eval_module.metadata_hash(items[0]["metadata"])
+        self.assertEqual(digest, "c2dd6ca92cc1c5c1a1208812e55ddfac14cbdbcb54ef0f9441d0deb31e3d541e")
+        event = {"example_id": "a", "text_sha256": hashlib.sha256(b"one").hexdigest(), "metadata_sha256": digest,
+                 "model_status": "passed", "reviewer_status": "passed", "reviewer": "r", "method": "manual"}
+        log = {"version": 1, "gate_id": "g", "events": [event]}
+        self.assertEqual(eval_module.aggregate_review_events(corpus, "holdout", log)["events"], 1)
+        items[0]["metadata"]["lang"] = "en"
+        with self.assertRaisesRegex(ValueError, "metadata"):
+            eval_module.aggregate_review_events(corpus, "holdout", log)
+        items[0]["metadata"] = {"lang": 1}
+        with self.assertRaisesRegex(ValueError, "string"):
+            eval_module.validate_corpus(corpus)
+
     def test_metrics_include_unchecked_without_counting_it_as_a_pass(self):
         corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": [
             {"id": "a", "split": "holdout", "text": "a", "expected": "failed", "review_status": "reviewed", "review": {"reviewer": "reviewer-1", "method": "manual"}},
@@ -39,6 +67,43 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(report["reviewed_metrics"]["precision"], 1)
         self.assertEqual(report["reviewed_metrics"]["recall"], 1)
         self.assertEqual(report["reviewed_metrics"]["unchecked_rate"], 0)
+
+    def test_expected_not_checked_is_separate_from_an_unexpected_one(self):
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": [
+            {"id": "a", "split": "holdout", "text": "a", "expected": "not_checked"},
+            {"id": "b", "split": "holdout", "text": "b", "expected": "not_checked"},
+            {"id": "c", "split": "holdout", "text": "c", "expected": "passed"},
+        ]}
+        results = [SimpleNamespace(returncode=2, stdout=json.dumps({"gates": [{"gate_id": "g", "status": status}]})) for status in ("not_checked", "passed", "not_checked")]
+        with patch.object(eval_module.subprocess, "run", side_effect=results):
+            result = eval_module.evaluate("cli", corpus, "holdout")
+            counts = result["counts"]
+        self.assertEqual(counts["expected_not_checked"], 1)
+        self.assertEqual(counts["missed_not_checked"], 1)
+        self.assertEqual(counts["not_checked"], 1)
+        self.assertEqual(result["unchecked_rate"], 1 / 3)
+        self.assertEqual(result["actual_unchecked_rate"], 2 / 3)
+        self.assertIsNone(result["reviewed_metrics"]["actual_unchecked_rate"])
+
+    def test_synthetic_fixture_rejects_declared_review(self):
+        corpus = {"version": 1, "fixture_kind": "synthetic_regression", "examples": [
+            {"id": "a", "split": "holdout", "text": "a", "expected": "passed", "review_status": "reviewed",
+             "review": {"reviewer": "reviewer-1", "method": "manual"}},
+        ]}
+        with self.assertRaisesRegex(ValueError, "synthetic"):
+            eval_module.validate_corpus(corpus)
+
+    def test_evidence_sources_reach_the_cli_as_local_files(self):
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "evidence_sources": {"s": "snapshot"}, "examples": [
+            {"id": "a", "split": "holdout", "text": "a", "expected": "passed"},
+        ]}
+        seen = []
+        def run(arguments, **_):
+            seen.append(Path(arguments[arguments.index("--evidence-source") + 1].split("=", 1)[1]).read_text(encoding="utf-8"))
+            return SimpleNamespace(returncode=0, stdout='{"gates":[{"gate_id":"g","status":"passed"}]}')
+        with patch.object(eval_module.subprocess, "run", side_effect=run):
+            eval_module.evaluate("cli", corpus, "holdout")
+        self.assertEqual(seen, ["snapshot"])
 
     def test_reviewed_metrics_are_null_without_reviewed_examples(self):
         corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": [

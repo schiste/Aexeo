@@ -14,17 +14,19 @@
 //! Successful 2xx paths are recorded on `CrawlMeta.probed_artifact_paths`
 //! and folded into `Site::indexed_paths` at site-build time.
 //!
-//! Privacy: probes follow the existing crawl_headers / crawl_basic_auth
-//! / Cloudflare Access flags so authenticated origins still respond
-//! correctly. Probes are time-boxed (3-second per-request timeout)
+//! Privacy: probes go through the crawl's `HttpFetcher`, so credentials
+//! reach only the crawl origin and private-network policy applies. Probes are time-boxed (3-second per-request timeout)
 //! and bounded (no more than 64 paths probed per crawl) so a
 //! manifest with thousands of entries can't blow up the audit budget.
 
+use aexeo_contracts::Finding;
 use std::time::Duration;
 
-use crate::config::RuntimeConfig;
+use super::egress::refused_finding;
+use super::http::HttpFetcher;
+use super::robots::RobotsPolicy;
 
-const PER_PROBE_TIMEOUT_SECS: u64 = 3;
+const PER_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_PROBES_PER_CRAWL: usize = 64;
 
 /// Default canonical artifact paths probed even when manifest.json
@@ -57,19 +59,18 @@ const FALLBACK_ARTIFACT_PATHS: &[&str] = &[
 /// have rotted out from under the manifest).
 ///
 /// Network failures, non-JSON manifests, manifest entries without
-/// `path`, and non-2xx HEAD responses are all silently skipped.
+/// `path`, and non-2xx HEAD responses are all silently skipped; fetches
+/// the crawl policy refused are returned as findings.
 /// The function never errors — at worst it returns an empty Vec
 /// and the caller sees the same false-negative pre-fix behavior
 /// (no regression vs not probing at all).
 pub(crate) fn probe_well_known_artifacts(
     base_url: &str,
-    runtime: &RuntimeConfig<'_>,
-) -> Vec<String> {
+    http: &HttpFetcher,
+    robots: &RobotsPolicy,
+) -> (Vec<String>, Vec<Finding>) {
     let normalized_base = base_url.trim_end_matches('/');
-    let client = match build_client(runtime) {
-        Some(client) => client,
-        None => return Vec::new(),
-    };
+    let mut findings = Vec::new();
 
     let mut candidates: Vec<String> = FALLBACK_ARTIFACT_PATHS
         .iter()
@@ -78,7 +79,10 @@ pub(crate) fn probe_well_known_artifacts(
 
     // Manifest-first: if it's reachable, fold every artifact path
     // it lists into the candidate set. Dedupe on insertion.
-    if let Some(manifest_paths) = fetch_manifest_paths(&client, normalized_base, runtime) {
+    let manifest_allowed = robots.allows_url(&format!("{normalized_base}/manifest.json"));
+    if manifest_allowed
+        && let Some(manifest_paths) = fetch_manifest_paths(http, normalized_base, &mut findings)
+    {
         for path in manifest_paths {
             if !candidates.contains(&path) {
                 candidates.push(path);
@@ -90,53 +94,35 @@ pub(crate) fn probe_well_known_artifacts(
 
     let mut verified = Vec::new();
     for path in &candidates {
-        if probe_artifact_head(&client, normalized_base, path, runtime) {
+        if robots.allows_url(&format!("{normalized_base}/{path}"))
+            && probe_artifact_head(http, normalized_base, path, &mut findings)
+        {
             verified.push(path.clone());
         }
     }
-    verified
-}
-
-fn build_client(runtime: &RuntimeConfig<'_>) -> Option<reqwest::blocking::Client> {
-    let mut builder = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(PER_PROBE_TIMEOUT_SECS))
-        .redirect(reqwest::redirect::Policy::limited(5));
-
-    if let Some(headers) = build_default_header_map(runtime) {
-        builder = builder.default_headers(headers);
-    }
-    builder.build().ok()
-}
-
-fn build_default_header_map(runtime: &RuntimeConfig<'_>) -> Option<reqwest::header::HeaderMap> {
-    use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-    let mut map = HeaderMap::new();
-    let mut wrote_any = false;
-    for (name, value) in runtime.crawl_headers {
-        let Ok(header_name) = HeaderName::from_bytes(name.as_bytes()) else {
-            continue;
-        };
-        let Ok(header_value) = HeaderValue::from_str(value) else {
-            continue;
-        };
-        map.insert(header_name, header_value);
-        wrote_any = true;
-    }
-    if wrote_any { Some(map) } else { None }
+    (verified, findings)
 }
 
 fn fetch_manifest_paths(
-    client: &reqwest::blocking::Client,
+    http: &HttpFetcher,
     base_url: &str,
-    runtime: &RuntimeConfig<'_>,
+    findings: &mut Vec<Finding>,
 ) -> Option<Vec<String>> {
     let url = format!("{base_url}/manifest.json");
-    let request = apply_basic_auth(client.get(&url), runtime);
-    let response = request.send().ok()?;
-    if !response.status().is_success() {
+    let fetched = match http.fetch_with_timeout(&url, PER_PROBE_TIMEOUT) {
+        Ok(fetched) => fetched,
+        Err(error) => {
+            findings.extend(refused_finding(&url, &error));
+            return None;
+        }
+    };
+    if !fetched
+        .status_code
+        .is_some_and(|code| (200..300).contains(&code))
+    {
         return None;
     }
-    let body = response.text().ok()?;
+    let body = fetched.body?;
     let parsed: serde_json::Value = serde_json::from_str(&body).ok()?;
     let entries = parsed.get("artifacts")?.as_array()?;
     let paths = entries
@@ -147,41 +133,39 @@ fn fetch_manifest_paths(
 }
 
 fn probe_artifact_head(
-    client: &reqwest::blocking::Client,
+    http: &HttpFetcher,
     base_url: &str,
     path: &str,
-    runtime: &RuntimeConfig<'_>,
+    findings: &mut Vec<Finding>,
 ) -> bool {
     let trimmed = path.trim_start_matches('/');
     let url = format!("{base_url}/{trimmed}");
-    let request = apply_basic_auth(client.head(&url), runtime);
-    match request.send() {
-        Ok(response) => response.status().is_success(),
-        Err(_) => false,
+    match http.head_status(&url, PER_PROBE_TIMEOUT) {
+        Ok(status) => status.is_success(),
+        Err(error) => {
+            findings.extend(refused_finding(&url, &error));
+            false
+        }
     }
-}
-
-fn apply_basic_auth(
-    mut request: reqwest::blocking::RequestBuilder,
-    runtime: &RuntimeConfig<'_>,
-) -> reqwest::blocking::RequestBuilder {
-    if let (Some(user), pass) = (
-        runtime.crawl_basic_auth.get("username"),
-        runtime.crawl_basic_auth.get("password"),
-    ) {
-        request = request.basic_auth(user, pass);
-    }
-    request
 }
 
 #[cfg(test)]
 mod tests {
     use super::probe_well_known_artifacts;
     use crate::config::Config;
+    use crate::runtime::egress::CrawlEgress;
+    use crate::runtime::http::HttpFetcher;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::{Arc, Mutex};
     use std::thread;
+
+    fn probe(base_url: &str) -> Vec<String> {
+        let config = Config::default();
+        let egress = CrawlEgress::new(base_url, true);
+        let http = HttpFetcher::new(&config.runtime(), &egress).unwrap();
+        probe_well_known_artifacts(base_url, &http, &Default::default()).0
+    }
 
     /// Tiny single-thread HTTP server used by the probe tests. Each
     /// recorded path responds with the configured status; unknown
@@ -275,9 +259,7 @@ mod tests {
         );
         let (base_url, keep, handle) = spawn_probe_server(responses);
 
-        let config = Config::default();
-        let runtime = config.runtime();
-        let probed = probe_well_known_artifacts(&base_url, &runtime);
+        let probed = probe(&base_url);
 
         *keep.lock().unwrap() = false;
         let _ = handle.join();
@@ -305,9 +287,7 @@ mod tests {
         responses.insert("about.md.txt".to_string(), (200, "text/plain", "# About"));
         let (base_url, keep, handle) = spawn_probe_server(responses);
 
-        let config = Config::default();
-        let runtime = config.runtime();
-        let probed = probe_well_known_artifacts(&base_url, &runtime);
+        let probed = probe(&base_url);
 
         *keep.lock().unwrap() = false;
         let _ = handle.join();

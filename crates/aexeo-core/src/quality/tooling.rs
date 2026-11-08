@@ -46,6 +46,7 @@ pub(super) fn find_static_tooling_issues(root: &Path) -> Vec<Finding> {
                 severity: "error".to_string(),
                 suggestion: None,
                 scope: FindingScope::Sitewide,
+                subject: None,
             });
         }
     }
@@ -59,6 +60,7 @@ pub(super) fn find_static_tooling_issues(root: &Path) -> Vec<Finding> {
             severity: "error".to_string(),
             suggestion: Some("run `npm install` in the repository root to capture a reproducible Playwright runtime".to_string()),
             scope: FindingScope::Sitewide,
+            subject: None,
         });
     }
     findings
@@ -136,6 +138,7 @@ pub(super) fn find_unread_config_keys(root: &Path) -> Vec<Finding> {
                  default, its doc entry, and its schema property"
             )),
             scope: FindingScope::Sitewide,
+            subject: None,
         });
     }
     unread
@@ -205,5 +208,6 @@ pub(super) fn find_missing_rust_integration_coverage(root: &Path) -> Vec<Finding
         severity: "error".to_string(),
         suggestion: None,
         scope: FindingScope::Sitewide,
+        subject: None,
     }]
 }

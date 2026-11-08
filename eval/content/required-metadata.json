@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "fixture_kind": "synthetic_regression",
+  "description": "Synthetic metadata examples; labels are not independent reviews.",
+  "preset": "metadata-test",
+  "preset_toml": "version=1\nname='metadata regression'\n[[gates]]\nid='metadata'\nkind='required_metadata'\nfields=['title','description']\nblocking=false\n",
+  "gate_id": "metadata",
+  "examples": [
+    {"id":"dev-complete", "split":"development", "text":"One.", "metadata":{"title":"Titre","description":"Résumé"}, "expected":"passed"},
+    {"id":"dev-missing-field", "split":"development", "text":"Two.", "metadata":{"title":"Titre"}, "expected":"failed"},
+    {"id":"dev-no-metadata", "split":"development", "text":"Three.", "expected":"not_checked"},
+    {"id":"holdout-empty", "split":"holdout", "text":"Four.", "metadata":{}, "expected":"failed"},
+    {"id":"holdout-complete", "split":"holdout", "text":"Five.", "metadata":{"title":"Title","description":"Description"}, "expected":"passed"},
+    {"id":"holdout-absent", "split":"holdout", "text":"Six.", "expected":"not_checked"}
+  ]
+}

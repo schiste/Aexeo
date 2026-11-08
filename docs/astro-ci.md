@@ -56,7 +56,7 @@ If browser-backed verification becomes available in your environment, add it as 
 
 ## GitHub Actions Example
 
-See [docs/examples/astro-aexeo-ci.yml](docs/examples/astro-aexeo-ci.yml) for a copyable workflow.
+See [docs/examples/astro-aexeo-ci.yml](examples/astro-aexeo-ci.yml) for a copyable workflow.
 
 ## Operational Notes
 

@@ -1,8 +1,9 @@
 # Per-user Cloudflare Worker that runs runtime document evaluation for
 # the emdash plugin.
-# Copy this file into your own repo and fill in the placeholders before
-# running `wrangler deploy`. Each plugin user owns their own Worker and
-# their own auth token; nothing here is shared across sites.
+# Fill in the placeholders in your checkout or fork of this repository before
+# running `npm run deploy`; the WASM build needs the rest of the repository.
+# Each plugin user owns their own Worker and their own auth token; nothing here
+# is shared across sites.
 #
 # There is deliberately no R2 binding: the Worker used to serve aexeo-cli
 # crawl artifacts from a bucket, but nothing ever called those routes
@@ -11,7 +12,7 @@
 
 name = "aexeo-crawl-worker"
 main = "src/worker.ts"
-compatibility_date = "2024-09-23"
+compatibility_date = "2026-10-01"
 workers_dev = true
 
 # Note on WASM: modules-based Workers (this script is ESM) consume
@@ -32,4 +33,4 @@ SITE_URL = "https://example.com"
 # For LOCAL development with `wrangler dev`, secrets aren't fetched —
 # put the value in .dev.vars (gitignored) instead:
 #   echo "EVAL_TOKEN=<your-token>" > .dev.vars
-# Use the SAME value in the emdash plugin config (AEXEO_EVAL_TOKEN env).
+# Use the SAME value on the plugin's Setup admin page.

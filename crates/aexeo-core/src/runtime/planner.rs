@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeSet, HashSet, VecDeque};
 
 use super::graph::route_is_allowed;
-use super::http::{host_for_url, normalize_base_url, origin_for_url, same_site_host};
+use super::http::{host_for_url, normalize_base_url, origin_for_url, same_crawl_origin};
+use super::robots::RobotsPolicy;
 use crate::config::RuntimeConfig;
+use crate::link_graph::redact_url;
 use crate::site::{normalize_internal_href, route_from_urlish};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +17,8 @@ pub(crate) struct CrawlPlannerState {
     pub(crate) discovered_routes: Vec<String>,
     pub(crate) max_pages: usize,
     pub(crate) truncated: bool,
+    #[serde(default)]
+    pub(crate) robots_skipped_urls: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -27,6 +31,8 @@ pub(crate) struct CrawlPlanner {
     discovered_routes: HashSet<String>,
     max_pages: usize,
     truncated: bool,
+    robots: RobotsPolicy,
+    robots_skipped_urls: BTreeSet<String>,
 }
 
 impl CrawlPlanner {
@@ -41,6 +47,8 @@ impl CrawlPlanner {
             discovered_routes: HashSet::from([String::new()]),
             max_pages,
             truncated: false,
+            robots: RobotsPolicy::default(),
+            robots_skipped_urls: BTreeSet::new(),
         }
     }
 
@@ -70,25 +78,34 @@ impl CrawlPlanner {
 
     pub(crate) fn checkpoint_state(&self) -> CrawlPlannerState {
         CrawlPlannerState {
-            normalized_base: self.normalized_base.clone(),
+            normalized_base: redact_url(&self.normalized_base),
             base_host: self.base_host.clone(),
             queue: self.queue.iter().cloned().collect(),
             visited: sorted_vec(&self.visited),
             discovered_routes: sorted_vec(&self.discovered_routes),
             max_pages: self.max_pages,
             truncated: self.truncated,
+            robots_skipped_urls: self.robots_skipped_urls(),
         }
     }
 
-    pub(crate) fn from_checkpoint(state: CrawlPlannerState, max_pages: usize) -> Self {
+    /// Restore a crawl. Where requests go comes only from `base_url`, which the
+    /// current run supplies: a checkpoint is a file, and the persisted base must
+    /// not be able to send this run's credentials elsewhere. Routes are relative
+    /// to the origin, and redirects re-establish any alignment the crawl had.
+    pub(crate) fn from_checkpoint(
+        state: CrawlPlannerState,
+        base_url: &str,
+        max_pages: usize,
+    ) -> Self {
         let queue_routes = state
             .queue
             .iter()
             .filter_map(|entry| canonicalize_route_entry(entry))
             .collect::<Vec<_>>();
         Self {
-            normalized_base: state.normalized_base,
-            base_host: state.base_host,
+            normalized_base: origin_for_url(base_url),
+            base_host: host_for_url(base_url),
             queue: VecDeque::from(queue_routes.clone()),
             queued: HashSet::from_iter(queue_routes),
             visited: state
@@ -103,7 +120,34 @@ impl CrawlPlanner {
                 .collect(),
             max_pages,
             truncated: false,
+            robots: RobotsPolicy::default(),
+            robots_skipped_urls: state.robots_skipped_urls.into_iter().collect(),
         }
+    }
+
+    pub(crate) fn set_robots_policy(&mut self, robots: RobotsPolicy) {
+        self.robots = robots;
+    }
+
+    pub(crate) fn robots(&self) -> &RobotsPolicy {
+        &self.robots
+    }
+
+    pub(crate) fn robots_skipped_urls(&self) -> Vec<String> {
+        self.robots_skipped_urls.iter().cloned().collect()
+    }
+
+    pub(crate) fn robots_skipped_count(&self) -> usize {
+        self.robots_skipped_urls.len()
+    }
+
+    /// Record `url` as skipped when robots.txt disallows it.
+    pub(crate) fn skip_if_disallowed(&mut self, url: &str) -> bool {
+        let disallowed = !self.robots.allows_url(url);
+        if disallowed {
+            self.robots_skipped_urls.insert(redact_url(url));
+        }
+        disallowed
     }
 
     pub(crate) fn seed_from_user_input(&mut self, seed: &str, runtime: &RuntimeConfig<'_>) {
@@ -121,20 +165,23 @@ impl CrawlPlanner {
     }
 
     pub(crate) fn next_url(&mut self, runtime: &RuntimeConfig<'_>) -> Option<String> {
-        while let Some(route) = self.queue.pop_front() {
-            self.queued.remove(&route);
-            if self.visited.len() >= self.max_pages {
+        // The limit is checked before a route is removed: a route that does not
+        // fit stays queued, so a checkpoint can resume it.
+        while let Some(route) = self.queue.front().cloned() {
+            let url = self.url_for_route(&route);
+            let skip = self.visited.contains(&route)
+                || (!route.is_empty() && !route_is_allowed(&route, runtime))
+                || self.skip_if_disallowed(&url);
+            if !skip && self.visited.len() >= self.max_pages {
                 self.truncated = true;
                 return None;
             }
-            if self.visited.contains(&route) {
-                continue;
+            self.queue.pop_front();
+            self.queued.remove(&route);
+            if !skip {
+                self.visited.insert(route);
+                return Some(url);
             }
-            if !route.is_empty() && !route_is_allowed(&route, runtime) {
-                continue;
-            }
-            self.visited.insert(route.clone());
-            return Some(self.url_for_route(&route));
         }
         None
     }
@@ -147,8 +194,11 @@ impl CrawlPlanner {
     }
 
     pub(crate) fn align_with_effective_url(&mut self, effective_url: &str) {
+        // Only `www.` canonicalization rebases the crawl. A scheme or port
+        // change must not: a redirect would otherwise move every later request
+        // to an origin the user never named.
         let effective_host = host_for_url(effective_url);
-        if effective_host.is_empty() || !same_site_host(&self.base_host, &effective_host) {
+        if effective_host.is_empty() || !same_crawl_origin(&self.normalized_base, effective_url) {
             return;
         }
         self.base_host = effective_host;
@@ -197,7 +247,7 @@ fn sorted_vec(values: &HashSet<String>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CrawlPlanner, CrawlPlannerState};
+    use super::{CrawlPlanner, CrawlPlannerState, RobotsPolicy};
     use crate::config::Config;
 
     #[test]
@@ -214,6 +264,64 @@ mod tests {
         assert!(planner.next_url(&runtime).is_none());
         assert!(planner.truncated());
         assert_eq!(planner.discovered_route_count(), 2);
+    }
+
+    #[test]
+    fn a_route_beyond_the_limit_stays_queued_for_resume() {
+        let config = Config::default();
+        let runtime = config.runtime();
+        let mut planner = CrawlPlanner::new("https://example.com", 1);
+        planner.seed_from_user_input("/docs", &runtime);
+        planner.next_url(&runtime);
+        assert!(planner.next_url(&runtime).is_none());
+        assert!(planner.truncated());
+        assert_eq!(planner.checkpoint_state().queue, ["docs"]);
+
+        let mut resumed =
+            CrawlPlanner::from_checkpoint(planner.checkpoint_state(), "https://example.com", 2);
+        assert_eq!(
+            resumed.next_url(&runtime).as_deref(),
+            Some("https://example.com/docs")
+        );
+    }
+
+    #[test]
+    fn exhausting_the_queue_exactly_at_the_limit_is_not_truncation() {
+        let config = Config::default();
+        let runtime = config.runtime();
+        let mut planner = CrawlPlanner::new("https://example.com", 1);
+        planner.seed_from_user_input("/", &runtime);
+        planner.next_url(&runtime);
+        assert!(planner.next_url(&runtime).is_none());
+        assert!(!planner.truncated());
+    }
+
+    #[test]
+    fn disallowed_routes_are_recorded_and_never_returned_including_after_resume() {
+        let config = Config::default();
+        let runtime = config.runtime();
+        let robots = RobotsPolicy::parse("User-agent: *\nDisallow: /private\n", "aexeo");
+        let mut planner = CrawlPlanner::new("https://example.com", 5);
+        planner.set_robots_policy(robots.clone());
+        planner.seed_from_user_input("/private", &runtime);
+        planner.seed_from_user_input("/docs", &runtime);
+        assert_eq!(
+            planner.next_url(&runtime).as_deref(),
+            Some("https://example.com/")
+        );
+        let mut resumed =
+            CrawlPlanner::from_checkpoint(planner.checkpoint_state(), "https://example.com", 5);
+        resumed.set_robots_policy(robots);
+        assert_eq!(
+            resumed.next_url(&runtime).as_deref(),
+            Some("https://example.com/docs")
+        );
+        assert!(resumed.next_url(&runtime).is_none());
+        assert_eq!(
+            resumed.robots_skipped_urls(),
+            ["https://example.com/private"]
+        );
+        assert!(!resumed.truncated());
     }
 
     #[test]
@@ -237,6 +345,25 @@ mod tests {
     }
 
     #[test]
+    fn planner_does_not_rebase_on_scheme_or_port_change() {
+        for effective in [
+            "http://example.com/",
+            "http://example.com:81/",
+            "https://example.com:8443/",
+            "http://www.example.com/",
+        ] {
+            let mut planner = CrawlPlanner::new("https://example.com", 10);
+            planner.align_with_effective_url(effective);
+            assert_eq!(
+                planner.normalized_base(),
+                "https://example.com/",
+                "{effective}"
+            );
+            assert_eq!(planner.base_host(), "example.com", "{effective}");
+        }
+    }
+
+    #[test]
     fn planner_round_trips_checkpoint_state() {
         let config = Config::default();
         let runtime = config.runtime();
@@ -250,11 +377,43 @@ mod tests {
                 max_pages: 20,
                 ..state
             },
+            "https://example.com",
             20,
         );
         assert_eq!(restored.base_host(), "example.com");
         assert_eq!(restored.discovered_route_count(), 2);
         assert_eq!(restored.visited_count(), 1);
+    }
+
+    #[test]
+    fn a_resumed_planner_targets_the_given_url_not_the_persisted_one() {
+        let config = Config::default();
+        let runtime = config.runtime();
+        let mut planner = CrawlPlanner::new("https://www.example.com/start", 10);
+        planner.align_with_effective_url("https://www.example.com/start");
+        planner.seed_from_user_input("/docs", &runtime);
+        let tampered = CrawlPlannerState {
+            normalized_base: "http://evil.test:8080/".to_string(),
+            base_host: "evil.test:8080".to_string(),
+            ..planner.checkpoint_state()
+        };
+        let mut resumed =
+            CrawlPlanner::from_checkpoint(tampered, "https://www.example.com/start", 10);
+        assert_eq!(resumed.normalized_base(), "https://www.example.com/");
+        assert_eq!(resumed.base_host(), "www.example.com");
+        assert_eq!(
+            resumed.next_url(&runtime).as_deref(),
+            Some("https://www.example.com/")
+        );
+    }
+
+    #[test]
+    fn a_checkpoint_does_not_persist_url_credentials() {
+        let planner = CrawlPlanner::new("https://user:secret@example.com", 10);
+        assert_eq!(
+            planner.checkpoint_state().normalized_base,
+            "https://example.com/"
+        );
     }
 
     #[test]

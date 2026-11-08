@@ -1,4 +1,5 @@
 use aexeo_core::config::load_config_with_diagnostics;
+use aexeo_core::user_bail;
 use aexeo_core::{
     BingAiImportReport, BingAiOpportunityReport, BingAiTrendReport, BingAiTrendSnapshot,
     IndexNowLedger, IndexNowRetryReport, PublishHookReport, SearchConsoleExportRow,
@@ -13,15 +14,15 @@ use clap::ArgMatches;
 use csv::Writer;
 use std::path::{Path, PathBuf};
 
-use super::exit_code::{EXIT_FINDINGS, EXIT_SUCCESS};
-use crate::commands::common::{canonicalize_or_keep, required_arg};
-use crate::output::{emit_config_warnings, render_data_command_json, render_failed_command_json};
+use super::exit_code::EXIT_SUCCESS;
+use crate::commands::common::{canonicalize_or_keep, emit_failure, required_arg};
+use crate::output::{emit_config_warnings, render_data_command_json};
 
 pub fn command_snippet(submatches: &ArgMatches) -> Result<i32> {
     match submatches.subcommand() {
         Some(("inspect", inspect_matches)) => command_snippet_inspect(inspect_matches),
         Some((other, _)) => bail!("unsupported snippet command: {}", other),
-        None => bail!("missing snippet subcommand"),
+        None => user_bail!("missing snippet subcommand"),
     }
 }
 
@@ -33,7 +34,7 @@ pub fn command_indexnow(submatches: &ArgMatches) -> Result<i32> {
         Some(("ledger", ledger_matches)) => command_indexnow_ledger(ledger_matches),
         Some(("retry", retry_matches)) => command_indexnow_retry(retry_matches),
         Some((other, _)) => bail!("unsupported indexnow command: {}", other),
-        None => bail!("missing indexnow subcommand"),
+        None => user_bail!("missing indexnow subcommand"),
     }
 }
 
@@ -47,10 +48,10 @@ pub fn command_bing_ai(submatches: &ArgMatches) -> Result<i32> {
             Some(("import", import_matches)) => command_bing_ai_trend_import(import_matches),
             Some(("show", show_matches)) => command_bing_ai_trend_show(show_matches),
             Some((other, _)) => bail!("unsupported bing-ai trend command: {}", other),
-            None => bail!("missing bing-ai trend subcommand"),
+            None => user_bail!("missing bing-ai trend subcommand"),
         },
         Some((other, _)) => bail!("unsupported bing-ai command: {}", other),
-        None => bail!("missing bing-ai subcommand"),
+        None => user_bail!("missing bing-ai subcommand"),
     }
 }
 
@@ -58,7 +59,7 @@ pub fn command_search_console(submatches: &ArgMatches) -> Result<i32> {
     match submatches.subcommand() {
         Some(("export", export_matches)) => command_search_console_export(export_matches),
         Some((other, _)) => bail!("unsupported search-console command: {}", other),
-        None => bail!("missing search-console subcommand"),
+        None => user_bail!("missing search-console subcommand"),
     }
 }
 
@@ -66,19 +67,8 @@ pub fn command_publish_hook(submatches: &ArgMatches) -> Result<i32> {
     match submatches.subcommand() {
         Some(("run", run_matches)) => command_publish_hook_run(run_matches),
         Some((other, _)) => bail!("unsupported publish-hook command: {}", other),
-        None => bail!("missing publish-hook subcommand"),
+        None => user_bail!("missing publish-hook subcommand"),
     }
-}
-
-fn emit_integration_failure(command: &str, format: &str, error: anyhow::Error) -> Result<i32> {
-    match format {
-        "json" => println!(
-            "{}",
-            render_failed_command_json(command, error.to_string(), Vec::new())?
-        ),
-        _ => eprintln!("{}", error),
-    }
-    Ok(EXIT_FINDINGS)
 }
 
 fn snippet_text(inspection: &SnippetInspection) -> String {
@@ -522,12 +512,12 @@ fn command_snippet_inspect(submatches: &ArgMatches) -> Result<i32> {
             submatches.get_one::<String>("config").map(Path::new),
             route,
         ),
-        (Some(_), Some(_)) => bail!("choose either --url or --path"),
-        (None, None) => bail!("one of --url or --path is required"),
+        (Some(_), Some(_)) => user_bail!("choose either --url or --path"),
+        (None, None) => user_bail!("one of --url or --path is required"),
     };
     let inspection = match result {
         Ok(inspection) => inspection,
-        Err(error) => return emit_integration_failure("snippet inspect", format, error),
+        Err(error) => return emit_failure("snippet inspect", format, error),
     };
     match format {
         "json" => println!(
@@ -550,7 +540,7 @@ fn command_indexnow_validate(submatches: &ArgMatches) -> Result<i32> {
         root.as_deref(),
     ) {
         Ok(validation) => validation,
-        Err(error) => return emit_integration_failure("indexnow validate", format, error),
+        Err(error) => return emit_failure("indexnow validate", format, error),
     };
     let success = validation.errors.is_empty();
     match format {
@@ -581,7 +571,7 @@ fn command_indexnow_plan(submatches: &ArgMatches) -> Result<i32> {
         &urls,
     ) {
         Ok(plan) => plan,
-        Err(error) => return emit_integration_failure("indexnow plan", format, error),
+        Err(error) => return emit_failure("indexnow plan", format, error),
     };
     let success = plan.can_submit;
     match format {
@@ -630,7 +620,7 @@ fn command_indexnow_submit(submatches: &ArgMatches) -> Result<i32> {
     };
     let submission = match submission_result {
         Ok(submission) => submission,
-        Err(error) => return emit_integration_failure("indexnow submit", format, error),
+        Err(error) => return emit_failure("indexnow submit", format, error),
     };
     let success = submission.success;
     match format {
@@ -648,7 +638,7 @@ fn command_indexnow_ledger(submatches: &ArgMatches) -> Result<i32> {
     let format = required_arg(submatches, "format")?;
     let ledger = match load_indexnow_ledger(&root) {
         Ok(ledger) => ledger,
-        Err(error) => return emit_integration_failure("indexnow ledger", format, error),
+        Err(error) => return emit_failure("indexnow ledger", format, error),
     };
     match format {
         "json" => println!(
@@ -666,7 +656,7 @@ fn command_indexnow_retry(submatches: &ArgMatches) -> Result<i32> {
     let limit = *submatches.get_one::<usize>("limit").unwrap_or(&10);
     let report = match retry_indexnow_submissions(&root, required_arg(submatches, "key")?, limit) {
         Ok(report) => report,
-        Err(error) => return emit_integration_failure("indexnow retry", format, error),
+        Err(error) => return emit_failure("indexnow retry", format, error),
     };
     let success = report.failed == 0;
     match format {
@@ -685,7 +675,7 @@ fn command_bing_ai_import(submatches: &ArgMatches) -> Result<i32> {
     let report =
         match import_bing_ai_export(Path::new(required_arg(submatches, "path")?), audit_path) {
             Ok(report) => report,
-            Err(error) => return emit_integration_failure("bing-ai import", format, error),
+            Err(error) => return emit_failure("bing-ai import", format, error),
         };
     match format {
         "json" => println!(
@@ -704,7 +694,7 @@ fn command_bing_ai_opportunities(submatches: &ArgMatches) -> Result<i32> {
         Path::new(required_arg(submatches, "audit")?),
     ) {
         Ok(report) => report,
-        Err(error) => return emit_integration_failure("bing-ai opportunities", format, error),
+        Err(error) => return emit_failure("bing-ai opportunities", format, error),
     };
     match format {
         "json" => println!(
@@ -725,7 +715,7 @@ fn command_bing_ai_trend_import(submatches: &ArgMatches) -> Result<i32> {
         submatches.get_one::<String>("audit").map(Path::new),
     ) {
         Ok(snapshot) => snapshot,
-        Err(error) => return emit_integration_failure("bing-ai trend import", format, error),
+        Err(error) => return emit_failure("bing-ai trend import", format, error),
     };
     match format {
         "json" => println!(
@@ -742,7 +732,7 @@ fn command_bing_ai_trend_show(submatches: &ArgMatches) -> Result<i32> {
     let format = required_arg(submatches, "format")?;
     let report = match build_bing_ai_trend_report(&root) {
         Ok(report) => report,
-        Err(error) => return emit_integration_failure("bing-ai trend show", format, error),
+        Err(error) => return emit_failure("bing-ai trend show", format, error),
     };
     match format {
         "json" => println!(
@@ -761,7 +751,7 @@ fn command_search_console_export(submatches: &ArgMatches) -> Result<i32> {
         submatches.get_one::<String>("site_url").map(String::as_str),
     ) {
         Ok(rows) => rows,
-        Err(error) => return emit_integration_failure("search-console export", format, error),
+        Err(error) => return emit_failure("search-console export", format, error),
     };
     match format {
         "json" => println!(
@@ -780,7 +770,7 @@ fn command_publish_hook_run(submatches: &ArgMatches) -> Result<i32> {
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
     let loaded = match load_config_with_diagnostics(&root, explicit_config.as_deref()) {
         Ok(loaded) => loaded,
-        Err(error) => return emit_integration_failure("publish-hook run", format, error),
+        Err(error) => return emit_failure("publish-hook run", format, error),
     };
     let changed_urls = submatches
         .get_many::<String>("changed-url")
@@ -800,7 +790,7 @@ fn command_publish_hook_run(submatches: &ArgMatches) -> Result<i32> {
             .unwrap_or("https://api.indexnow.org/indexnow"),
     ) {
         Ok(report) => report,
-        Err(error) => return emit_integration_failure("publish-hook run", format, error),
+        Err(error) => return emit_failure("publish-hook run", format, error),
     };
     let success = report
         .indexnow_validation

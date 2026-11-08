@@ -18,11 +18,37 @@ python3 scripts/evaluate-content-gates.py eval/content/link-destinations.json \
 python3 scripts/test-evaluate-content-gates.py
 ```
 
+## Markdown regression fixtures
+
+`eval/content/markdown-*.json` run through `--input-format markdown` and are
+gated by `scripts/check-code.sh`. They cover lists, tables, headings with inline
+code, soft wraps, CJK, www and email autolinks, term options, wrapped evidence
+claims and input limits. They are **regression fixtures only**: synthetic text,
+written with the behaviour they pin, marked `fixture_kind: "synthetic_regression"`
+and `review_status: "not_reviewed"`. Each example has a `why`. Their labels
+state expected tool behaviour, not an editorial judgement by a human reviewer,
+and the runner rejects a declared review on them. Passing them says nothing
+about accuracy on real content.
+
+A real, independently reviewed corpus remains open: see item 7 of
+[the content roadmap](../../docs/plans/CONTENT-ROADMAP.md). These fixtures do not advance it.
+
+An example may expect `not_checked`, reported as `expected_not_checked`.
+`--assert-regression` fails on `missed_not_checked`, when such an example was
+assessed, as well as on mismatches and unexpected `not_checked` results. A corpus
+may also embed `evidence_sources`, materialized as temporary local files.
+
 A corpus may specify an input format and an embedded TOML preset; the runner
 materializes the preset in a temporary directory and removes it afterward.
+Each example can optionally contain `metadata`, a JSON object whose keys and
+values are strings. The runner supplies that example's metadata through the
+CLI's `--metadata` option; omitting it is distinct from providing `{}`. Do not
+put sensitive metadata into a corpus intended for publication.
 The runner invokes the local CLI once per example and does not contact a remote
-service. Its precision and recall use checked examples only; `unchecked_rate`
-is reported separately. `reviewed_metrics` separately reports the same counts,
+service. Its precision and recall use checked examples only. The legacy
+`unchecked_rate` counts unexpected unchecked cases; `actual_unchecked_rate`
+counts all unchecked cases, including those expected by the corpus. Both divide
+by the number of examples and are null when there are none. `reviewed_metrics` separately reports the same counts,
 precision, recall and unchecked rate for examples declared reviewed; rates are
 null when their denominator is zero. Overall metrics still include all examples.
 Declared review is not proof of independent or correct review.
@@ -54,6 +80,12 @@ and an `events` array. Each event records `example_id`, `text_sha256` (SHA-256
 of the exact UTF-8 example text), `model_status` (`passed`, `failed`, or
 `not_checked`), `reviewer_status` (`passed` or `failed`), and nonempty
 `reviewer` and `method` provenance. At most one event per example is accepted.
+For an example with metadata, the event must also contain `metadata_sha256`,
+bound to that exact string map. Capture it using `feedback-capture --metadata`
+with the same JSON file used for evaluation. The digest is SHA-256 over the
+sorted UTF-8 key/value pairs, each prefixed by its length as an unsigned
+64-bit big-endian integer. Maps with different JSON formatting or key order
+produce the same digest; missing metadata and an empty map remain distinct.
 
 Events are historical, not evidence that the current rule version produced the
 same decision; rerun and record new reviews when comparing versions. Stale
@@ -96,12 +128,17 @@ A human can provide feedback while an agent drafts or reviews content. To captur
 it, use a saved UTF-8 content snapshot and the corresponding Aexeo JSON report:
 
 ```sh
-python3 scripts/content-review-note.py capture --text draft.md --report report.json \
+aexeo-cli feedback-capture --text draft.md --report report.json \
   --gate editorial.sentence_length --example example-1 --human-status failed \
   --reviewer reviewer-1 --method manual --output feedback.json
-python3 scripts/content-review-note.py export-review --note feedback.json \
+aexeo-cli feedback-export --note feedback.json \
   --corpus corpus.json --output review-events.json
 ```
+
+Both native commands are available in the standalone CLI. The Python equivalents
+remain available as `python3 scripts/content-review-note.py capture` and
+`python3 scripts/content-review-note.py export-review`. Both implementations
+support opt-in `--telemetry`, reporting only operation and elapsed time.
 
 Use the actual gate ID from the report. `--human-status`, `--reviewer` and
 `--method` may be omitted during capture; use `uncertain` or omit the verdict
@@ -121,3 +158,9 @@ optional reason or context. Output files are created only if absent. A reported
 verdict and supplied provenance do not prove independent review. Keep unresolved
 feedback out of reviewed metrics and follow the contribution and holdout policy
 above before sharing or adding examples.
+
+For examples with metadata, export also verifies the metadata hash. Older notes
+without this hash cannot be exported for those examples; capture a new note with
+the original metadata rather than attaching a guessed hash. These hashes do not
+bind the preset, tool version or report to the input; operators must preserve
+and compare those separately.

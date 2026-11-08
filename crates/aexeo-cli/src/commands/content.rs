@@ -1,9 +1,14 @@
 use super::exit_code::{EXIT_FINDINGS, EXIT_SUCCESS, EXIT_UNSUPPORTED};
 use aexeo_core::{
-    content_gate::{ContentEvaluationContext, ContentGate, ContentInput, GateStatus},
+    content_gate::{
+        ContentContext, ContentEvaluationContext, ContentGate, ContentInput, GateStatus,
+        MAX_CONTENT_INPUT_BYTES,
+    },
     content_presets::{builtin_content_presets, resolve_content_preset},
+    error::UserContext,
+    user_bail,
 };
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::ArgMatches;
 use std::{
     collections::BTreeMap,
@@ -58,12 +63,11 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         for entry in entries {
             let (name, path) = entry
                 .split_once('=')
-                .context("--preset-source requires NAME=PATH")?;
+                .user_context("--preset-source requires NAME=PATH")?;
             if name.is_empty() || path.is_empty() {
-                bail!("--preset-source requires NAME=PATH");
+                user_bail!("--preset-source requires NAME=PATH");
             }
-            let source =
-                fs::read_to_string(path).with_context(|| format!("reading preset {path}"))?;
+            let source = fs::read_to_string(path).user_context(format!("reading preset {path}"))?;
             sources.insert(name.to_owned(), source);
         }
     }
@@ -82,7 +86,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     }
     let preset_name = args
         .get_one::<String>("preset")
-        .context("missing preset argument")?;
+        .user_context("missing preset argument")?;
     let preset = resolve_content_preset(preset_name, &sources)?;
     if args.get_flag("explain") {
         if args.get_one::<String>("format").map(String::as_str) == Some("json") {
@@ -97,27 +101,32 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     }
     let path = args
         .get_one::<String>("path")
-        .context("missing content path")?;
+        .user_context("missing content path")?;
     if args.get_flag("fix") && (path == "-" || args.get_flag("no-text")) {
-        bail!("--fix requires a local content file");
+        user_bail!("--fix requires a local content file");
     }
     let measuring = args.get_flag("telemetry");
     let input_started = measuring.then(std::time::Instant::now);
-    let mut text = if args.get_flag("no-text") {
-        None
+    let is_markdown =
+        args.get_one::<String>("input-format").map(String::as_str) == Some("markdown");
+    let (mut text, input_limit) = if args.get_flag("no-text") {
+        (None, None)
     } else if path == "-" {
-        let mut text = String::new();
-        io::stdin().read_to_string(&mut text)?;
-        Some(text)
+        read_limited_content(io::stdin(), is_markdown)?
     } else {
-        Some(fs::read_to_string(path).with_context(|| format!("reading content {path}"))?)
+        read_limited_content(
+            fs::File::open(path).user_context(format!("reading content {path}"))?,
+            is_markdown,
+        )
+        .user_context(format!("reading content {path}"))?
     };
     let metadata: Option<BTreeMap<String, String>> = args
         .get_one::<String>("metadata")
         .map(|path| -> Result<_> {
             let input =
-                fs::read_to_string(path).with_context(|| format!("reading metadata {path}"))?;
-            serde_json::from_str(&input).context("metadata must be a JSON object of string values")
+                fs::read_to_string(path).user_context(format!("reading metadata {path}"))?;
+            serde_json::from_str(&input)
+                .user_context("metadata must be a JSON object of string values")
         })
         .transpose()?;
     let evidence_sources = args
@@ -127,14 +136,14 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             for entry in entries {
                 let (name, path) = entry
                     .split_once('=')
-                    .context("--evidence-source requires NAME=PATH")?;
+                    .user_context("--evidence-source requires NAME=PATH")?;
                 if name.is_empty() || path.is_empty() {
-                    bail!("--evidence-source requires NAME=PATH");
+                    user_bail!("--evidence-source requires NAME=PATH");
                 }
                 let snapshot = fs::read_to_string(path)
-                    .with_context(|| format!("reading evidence source {path}"))?;
+                    .user_context(format!("reading evidence source {path}"))?;
                 if sources.insert(name.to_owned(), snapshot).is_some() {
-                    bail!("duplicate evidence source: {name}");
+                    user_bail!("duplicate evidence source: {name}");
                 }
             }
             Ok(sources)
@@ -144,13 +153,13 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         .get_one::<String>("collection")
         .map(|path| -> Result<_> {
             let data =
-                fs::read_to_string(path).with_context(|| format!("reading collection {path}"))?;
+                fs::read_to_string(path).user_context(format!("reading collection {path}"))?;
             let items: Vec<ContentInput> = serde_json::from_str(&data)
-                .context("collection must be a JSON array of content inputs")?;
+                .user_context("collection must be a JSON array of content inputs")?;
             let mut ids = std::collections::BTreeSet::new();
             for item in &items {
                 if item.id.trim().is_empty() || !ids.insert(&item.id) {
-                    bail!("collection item IDs must be nonempty and unique");
+                    user_bail!("collection item IDs must be nonempty and unique");
                 }
             }
             Ok(items)
@@ -198,7 +207,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     };
     let input_load_ms = input_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
     let adapter_started = measuring.then(std::time::Instant::now);
-    let mut context = None;
+    let mut context = input_limit.map(|limit| ContentContext {
+        input_limit: Some(limit),
+        ..Default::default()
+    });
     let mut link_count = None;
     let mut source_map = None;
     let mut destinations = None;
@@ -295,8 +307,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                     })
                     .collect();
                 positional_findings += result.findings.len();
-                if indices.len() == result.findings.len() {
-                    for (finding_index, index) in indices.into_iter().enumerate() {
+                if indices.len() == result.total_findings() {
+                    for (finding_index, index) in
+                        indices.into_iter().take(result.findings.len()).enumerate()
+                    {
                         if let Some((line, column)) = map.link_source_position(source, index) {
                             source_locations.push(SourceLocation {
                                 gate_id: &result.gate_id,
@@ -312,8 +326,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                     aexeo_core::content_gate::heading_finding_indices(gate, headings)
             {
                 positional_findings += result.findings.len();
-                if indices.len() == result.findings.len() {
-                    for (finding_index, index) in indices.into_iter().enumerate() {
+                if indices.len() == result.total_findings() {
+                    for (finding_index, index) in
+                        indices.into_iter().take(result.findings.len()).enumerate()
+                    {
                         if let Some((line, column)) = map.heading_source_position(source, index) {
                             source_locations.push(SourceLocation {
                                 gate_id: &result.gate_id,
@@ -329,7 +345,9 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 ContentGate::ForbiddenTerms { .. }
                     | ContentGate::RepeatedTerms { .. }
                     | ContentGate::SentenceLength { .. }
+                    | ContentGate::SentenceCharacterLength { .. }
                     | ContentGate::ParagraphLength { .. }
+                    | ContentGate::ParagraphCharacterLength { .. }
             ) {
                 for (finding_index, finding) in result.findings.iter().enumerate() {
                     positional_findings += 1;
@@ -374,12 +392,6 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         for fix in &report.applied_fixes {
             println!("Applied fix: {fix}");
         }
-        for location in &source_locations {
-            println!(
-                "Source location: gate {} finding {} at {}:{}",
-                location.gate_id, location.finding_index, location.line, location.column
-            );
-        }
         for gate in &report.gates {
             println!("{}: {:?}", gate.gate_id, gate.status);
             for (name, value) in &gate.measurements {
@@ -388,10 +400,13 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             if let Some(reason) = &gate.reason {
                 println!("  {reason}");
             }
-            for finding in &gate.findings {
+            for (finding_index, finding) in gate.findings.iter().enumerate() {
+                let location = source_locations.iter().find(|location| {
+                    location.gate_id == gate.gate_id && location.finding_index == finding_index
+                });
                 println!(
-                    "  {}:{}:{}: {}",
-                    finding.path, finding.line, finding.column, finding.message
+                    "  {}",
+                    finding_line(finding, location, source_map.is_some())
                 );
             }
         }
@@ -415,16 +430,66 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     )
 }
 
+/// Read content up to the supported size. Input that is too large, or Markdown
+/// nested too deeply to process safely, yields a reason instead of the text, and
+/// gates that need it report `not_checked`.
+fn read_limited_content(
+    reader: impl Read,
+    is_markdown: bool,
+) -> Result<(Option<String>, Option<String>)> {
+    let mut bytes = Vec::new();
+    reader
+        .take(MAX_CONTENT_INPUT_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > MAX_CONTENT_INPUT_BYTES {
+        return Ok((
+            None,
+            Some(format!(
+                "input exceeds the {MAX_CONTENT_INPUT_BYTES} byte limit and was not evaluated"
+            )),
+        ));
+    }
+    let text = String::from_utf8(bytes).user_context("content is not valid UTF-8")?;
+    let limit = is_markdown
+        .then(|| aexeo_core::markdown_adapter::markdown_limit_reason(&text))
+        .flatten();
+    Ok(match limit {
+        Some(reason) => (None, Some(reason)),
+        None => (Some(text), None),
+    })
+}
+
+/// One finding in `file:line:col: message` form. A finding's own coordinates
+/// index the projected prose when the input was adapted from a source format,
+/// so they are never presented as a position in the source file.
+fn finding_line(
+    finding: &aexeo_contracts::Finding,
+    source_location: Option<&SourceLocation>,
+    projected: bool,
+) -> String {
+    let (path, line, column, message) = (
+        &finding.path,
+        finding.line,
+        finding.column,
+        &finding.message,
+    );
+    match source_location {
+        Some(source) => format!("{path}:{}:{}: {message}", source.line, source.column),
+        None if projected => format!("{path}: {message} (projected text {line}:{column})"),
+        None => format!("{path}:{line}:{column}: {message}"),
+    }
+}
+
 fn evaluate_crawl(
     args: &ArgMatches,
     url: &str,
     preset: &aexeo_core::content_gate::ContentPreset,
 ) -> Result<i32> {
     if args.value_source("path") == Some(clap::parser::ValueSource::CommandLine) {
-        bail!("--crawl-url cannot be combined with a content path");
+        user_bail!("--crawl-url cannot be combined with a content path");
     }
     if args.value_source("input-format") == Some(clap::parser::ValueSource::CommandLine) {
-        bail!("--crawl-url cannot be combined with --input-format");
+        user_bail!("--crawl-url cannot be combined with --input-format");
     }
     let root = std::env::current_dir()?;
     let config_path = args
@@ -435,12 +500,13 @@ fn evaluate_crawl(
         .get_one::<usize>("crawl-max-pages")
         .context("missing crawl limit")?;
     if max_pages == 0 {
-        bail!("--crawl-max-pages must be at least 1");
+        user_bail!("--crawl-max-pages must be at least 1");
     }
     let engine = args
         .get_one::<String>("crawl-engine")
         .context("missing crawl engine")?;
-    let audit = aexeo_core::run_runtime_audit(url, max_pages, engine, &config)?;
+    let audit = aexeo_core::run_runtime_audit(url, max_pages, engine, &config)
+        .user_context("runtime audit failed")?;
     let started = std::time::Instant::now();
     let mut gate_timer = GateTimer::default();
     let report = if args.get_flag("telemetry") {
@@ -555,20 +621,20 @@ fn toml_output(preset: &aexeo_core::content_gate::ContentPreset) -> Result<Strin
 fn append_final_newline(path: &std::path::Path, original: &str, suffix: &str) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.file_type().is_file() {
-        bail!("--fix requires a regular file, not a symlink");
+        user_bail!("--fix requires a regular file, not a symlink");
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         if metadata.nlink() > 1 {
-            bail!("--fix refuses a file with multiple hard links");
+            user_bail!("--fix refuses a file with multiple hard links");
         }
     }
     let mut file = fs::OpenOptions::new().read(true).append(true).open(path)?;
     let mut current = String::new();
     file.read_to_string(&mut current)?;
     if current != original {
-        bail!("file changed while evaluating; no fix applied");
+        user_bail!("file changed while evaluating; no fix applied");
     }
     file.write_all(suffix.as_bytes())?;
     Ok(())

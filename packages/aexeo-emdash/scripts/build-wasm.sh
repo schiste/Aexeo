@@ -13,7 +13,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ROOT_DIR="$(cd "$PLUGIN_DIR/../.." && pwd)"
 OUT_DIR="${1:-$PLUGIN_DIR/wasm}"
-TARGET_DIR="$ROOT_DIR/target/wasm32-unknown-unknown/release"
+# Honour CARGO_TARGET_DIR so the build works with an out-of-tree target dir.
+TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT_DIR/target}/wasm32-unknown-unknown/release"
 WASM_NAME="aexeo_emdash_bridge"
 RAW_WASM="$TARGET_DIR/${WASM_NAME}.wasm"
 

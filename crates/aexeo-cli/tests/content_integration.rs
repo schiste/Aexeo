@@ -509,6 +509,43 @@ fn heading_and_term_measurements_distinguish_absent_inputs() {
 }
 
 #[test]
+fn sentence_character_gate_runs_from_stdin_with_a_portable_preset() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    std::fs::write(&preset, "version=1\nname='Sentences'\n[[gates]]\nid='sentence'\nkind='sentence_character_length'\nmax_chars=4\ndelimiters='。'\nblocking=false\n").unwrap();
+    let source = format!("custom={}", preset.display());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "-",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &source,
+            "--format",
+            "json",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all("中文文章測試。".as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "failed");
+    assert_eq!(
+        report["gates"][0]["measurements"]["longest_sentence_chars"],
+        6
+    );
+}
+
+#[test]
 fn sentence_length_gate_uses_configured_delimiters_and_reports_position() {
     let dir = tempfile::tempdir().unwrap();
     let preset = dir.path().join("preset.toml");
@@ -801,4 +838,110 @@ fn repeated_term_gate_emits_aggregate_telemetry_without_draft_text() {
             .unwrap()
             .contains("unique-term")
     );
+}
+
+fn run_markdown(preset_toml: &str, content: &[u8]) -> (i32, serde_json::Value) {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    std::fs::write(&preset, preset_toml).unwrap();
+    let path = dir.path().join("input.md");
+    std::fs::write(&path, content).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            path.to_str().unwrap(),
+            "--input-format",
+            "markdown",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    (
+        output.status.code().unwrap(),
+        serde_json::from_slice(&output.stdout).unwrap_or_default(),
+    )
+}
+
+const SENTENCE_PRESET: &str =
+    "version=1\nname='r'\n[[gates]]\nid='s'\nkind='sentence_length'\nmax_words=30\n";
+
+#[test]
+fn unpunctuated_bullets_are_separate_sentences() {
+    let bullets = "- one two three four five six\n".repeat(8);
+    let (code, report) = run_markdown(SENTENCE_PRESET, bullets.as_bytes());
+    assert_eq!(code, 0, "{report}");
+    assert_eq!(report["gates"][0]["status"], "passed");
+    assert_eq!(report["gates"][0]["measurements"]["sentence_count"], 8);
+}
+
+#[test]
+fn deeply_nested_markdown_is_reported_as_not_checked() {
+    let deep = format!("{} text\n", ">".repeat(200_000));
+    let (code, report) = run_markdown(SENTENCE_PRESET, deep.as_bytes());
+    assert_eq!(code, 2);
+    assert_eq!(report["gates"][0]["status"], "not_checked");
+    assert!(
+        report["gates"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("nesting exceeds")
+    );
+}
+
+#[test]
+fn oversized_input_is_reported_as_not_checked_without_being_evaluated() {
+    let size = aexeo_core::content_gate::MAX_CONTENT_INPUT_BYTES + 1;
+    let (code, report) = run_markdown(SENTENCE_PRESET, &vec![b'a'; size]);
+    assert_eq!(code, 2);
+    assert_eq!(report["gates"][0]["status"], "not_checked");
+    assert!(
+        report["gates"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("byte limit")
+    );
+}
+
+#[test]
+fn truncated_heading_findings_keep_their_source_locations() {
+    let headings = "# Same\n\n".repeat(1002);
+    let (code, report) = run_markdown(
+        "version=1\nname='r'\n[[gates]]\nid='d'\nkind='duplicate_headings'\n",
+        headings.as_bytes(),
+    );
+    assert_eq!(code, 1);
+    let gate = &report["gates"][0];
+    assert_eq!(gate["findings"].as_array().unwrap().len(), 1000);
+    assert_eq!(gate["measurements"]["findings_omitted"], 1);
+    assert_eq!(gate["measurements"]["duplicate_headings"], 1001);
+    assert_eq!(report["source_locations"].as_array().unwrap().len(), 1000);
+    assert_eq!(report["source_locations"][0]["line"], 3);
+}
+
+#[test]
+fn a_preset_that_checks_nothing_is_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    std::fs::write(&preset, "version=1\nname=\"x\"\n").unwrap();
+    let path = dir.path().join("input.md");
+    std::fs::write(&path, "text\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            path.to_str().unwrap(),
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_ne!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no gates"));
 }

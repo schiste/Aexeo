@@ -4,12 +4,16 @@ use crate::output::{
     render_audit_command_json, render_diff_command_json, render_paths_command_json,
 };
 use aexeo_contracts::AuditStatus;
+use aexeo_core::error::UserContext;
+use aexeo_core::link_notes::LinkFindingNotes;
+use aexeo_core::link_report::LinkReport;
 use aexeo_core::{
     build_audit_artifact, find_reference_doc_drift, load_audit_artifact, load_findings_from_audit,
-    render_audit_artifact_json, render_diff_text, render_markdown_artifact, render_sarif,
-    render_text_artifact, run_repo_quality_checks, write_audit_artifact, write_reference_documents,
+    render_audit_artifact_json, render_diff_text, render_markdown_artifact_with_links,
+    render_sarif, render_text_artifact, render_text_artifact_with_links, reports_dir,
+    run_repo_quality_checks, write_audit_artifact, write_reference_documents,
 };
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -119,22 +123,21 @@ pub fn command_diff(baseline: &str, current: &str, output_format: &str) -> Resul
 
 pub fn command_trend(command_name: &str, path: &str, output_format: &str) -> Result<i32> {
     let root = canonicalize_or_keep(path);
-    let trend_path = root
-        .join(".aexeo-reports")
-        .join(format!("{}-trends.json", command_name));
+    let trend_path = reports_dir(&root).join(format!("{}-trends.json", command_name));
     if !trend_path.exists() {
         println!("No trend history found.");
         return Ok(EXIT_SUCCESS);
     }
     let text = fs::read_to_string(&trend_path)?;
-    let payload: serde_json::Value = serde_json::from_str(&text)?;
+    let payload: serde_json::Value = serde_json::from_str(&text)
+        .user_context(format!("invalid trend history {}", trend_path.display()))?;
     if output_format == "json" {
         println!("{}", serde_json::to_string_pretty(&payload)?);
         return Ok(EXIT_SUCCESS);
     }
     let entries = payload
         .as_array()
-        .ok_or_else(|| anyhow!("trend payload must be a JSON array"))?;
+        .user_context("trend payload must be a JSON array")?;
     println!("Trend Report");
     println!();
     println!("Command: {}", command_name);
@@ -163,18 +166,36 @@ pub fn command_trend(command_name: &str, path: &str, output_format: &str) -> Res
     Ok(EXIT_SUCCESS)
 }
 
-pub fn command_report_render(audit: &str, output_format: &str) -> Result<i32> {
+pub fn command_report_render(
+    audit: &str,
+    output_format: &str,
+    link_graph: Option<&str>,
+) -> Result<i32> {
     let artifact = load_audit_artifact(Path::new(audit))?;
+    let links = link_graph
+        .map(|path| -> Result<LinkFindingNotes> {
+            let data =
+                fs::read(path).user_context(format!("cannot read link graph report: {path}"))?;
+            let report: LinkReport =
+                serde_json::from_slice(&data).user_context("invalid link graph report JSON")?;
+            Ok(LinkFindingNotes::from_report(&report, Some(path)))
+        })
+        .transpose()?;
     match output_format {
         "json" => println!("{}", render_audit_artifact_json(&artifact)?),
         "md" => println!(
             "{}",
-            render_markdown_artifact(&artifact, Some(Path::new(audit)))
+            render_markdown_artifact_with_links(&artifact, Some(Path::new(audit)), links.as_ref())
         ),
         "sarif" => println!("{}", render_sarif(&artifact.findings, "aexeo")?),
         _ => println!(
             "{}",
-            render_text_artifact(&artifact, "All checks passed.", Some(Path::new(audit)))
+            render_text_artifact_with_links(
+                &artifact,
+                "All checks passed.",
+                Some(Path::new(audit)),
+                links.as_ref()
+            )
         ),
     }
     Ok(EXIT_SUCCESS)

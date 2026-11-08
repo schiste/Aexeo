@@ -1,13 +1,17 @@
+#[path = "site/markup.rs"]
+pub(crate) mod markup;
 #[path = "site/parser.rs"]
 mod parser;
 #[path = "site/sitemap.rs"]
 mod sitemap;
 
+use crate::error::UserContext;
 use aexeo_contracts::{AuditCrawlMeta, AuditPageSnapshot, AuditSiteSnapshot};
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use url::Url;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AlternateLink {
@@ -72,6 +76,10 @@ pub struct CrawlMeta {
     /// discovery sees them as present even when they're not
     /// reachable from the HTML link graph.
     pub probed_artifact_paths: Vec<String>,
+    /// Requests answered with a non-2xx status. These are not pages.
+    pub failed_responses: Vec<aexeo_contracts::CrawlResponseProvenance>,
+    /// URLs the crawler did not request because robots.txt disallows them.
+    pub robots_skipped_urls: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,6 +107,10 @@ pub enum PageKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageReference {
     pub src: String,
+    /// Additional `srcset` candidates associated with this image.
+    pub asset_sources: Vec<String>,
+    /// AVIF/WebP candidates supplied by a modern `<source>` inside `<picture>`.
+    pub modern_sources: Vec<String>,
     pub alt: Option<String>,
     pub line: usize,
     pub column: usize,
@@ -111,6 +123,14 @@ pub struct ImageReference {
     /// as `role`: marks the image as not-conveying-information so
     /// strict missing-alt checks can be relaxed.
     pub aria_hidden: bool,
+    /// Intrinsic HTML attributes used to reserve layout space.
+    pub width: Option<String>,
+    pub height: Option<String>,
+    /// True when the enclosing `<picture>` has an AVIF or WebP source.
+    pub has_modern_source: bool,
+    /// Whether the image belongs to a `<figure>` and its visible caption, if any.
+    pub inside_figure: bool,
+    pub figure_caption: Option<String>,
 }
 
 impl ImageReference {
@@ -336,6 +356,48 @@ pub fn normalize_internal_href(href: &str) -> Option<String> {
     Some(trimmed.to_string())
 }
 
+pub(crate) fn decode_url_path(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut offset = 0;
+    while offset < bytes.len() {
+        if bytes[offset] == b'%' {
+            let high = hex_digit(*bytes.get(offset + 1)?)?;
+            let low = hex_digit(*bytes.get(offset + 2)?)?;
+            let byte = (high << 4) | low;
+            if byte == 0 {
+                return None;
+            }
+            decoded.push(byte);
+            offset += 3;
+        } else {
+            decoded.push(bytes[offset]);
+            offset += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+pub(crate) fn sitemap_image_urls(
+    root: &Path,
+    allowed_origin: Option<&str>,
+) -> anyhow::Result<BTreeSet<String>> {
+    sitemap::read_sitemap_image_urls(&root.join("sitemap.xml"), root, allowed_origin)
+}
+
+pub(crate) fn sitemap_image_urls_from_text(text: &str) -> Option<BTreeSet<String>> {
+    sitemap::read_sitemap_image_urls_from_text(text)
+}
+
 pub fn route_from_urlish(value: &str) -> Option<String> {
     if let Some(route) = normalize_internal_href(value) {
         return Some(route);
@@ -357,30 +419,26 @@ pub(crate) fn collapse_whitespace(text: &str) -> String {
 
 pub(crate) fn strip_tags(raw: &str) -> String {
     let mut result = String::new();
-    let mut in_tag = false;
-    for ch in raw.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => result.push(ch),
-            _ => {}
+    let mut rest = raw;
+    while let Some(open) = rest.find('<') {
+        result.push_str(&rest[..open]);
+        let tag = &rest[open + 1..];
+        let name = tag.trim_start_matches('/');
+        let name_end = name
+            .find(|ch: char| !ch.is_ascii_alphanumeric())
+            .unwrap_or(name.len());
+        if markup::tag_breaks_text(&name[..name_end]) {
+            result.push(' ');
         }
+        // An unclosed `<` drops the rest, as it did when scanning by character.
+        let Some(close) = tag.find('>') else {
+            rest = "";
+            break;
+        };
+        rest = &tag[close + 1..];
     }
+    result.push_str(rest);
     collapse_whitespace(&result)
-}
-
-fn line_column_for(raw: &str, index: usize) -> (usize, usize) {
-    let mut line = 1;
-    let mut column = 1;
-    for ch in raw[..index.min(raw.len())].chars() {
-        if ch == '\n' {
-            line += 1;
-            column = 1;
-        } else {
-            column += 1;
-        }
-    }
-    (line, column)
 }
 
 fn build_site_index(root: &Path) -> Result<BTreeSet<String>> {
@@ -450,7 +508,9 @@ fn build_inbound_link_map(pages: &[Page]) -> BTreeMap<String, BTreeSet<String>> 
 }
 
 fn read_optional_text(path: &Path) -> Option<String> {
-    fs::read_to_string(path).ok()
+    fs::read(path)
+        .ok()
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
 }
 
 fn detect_deployment_model(root: &Path) -> (DeploymentModel, Vec<String>) {
@@ -527,15 +587,58 @@ pub struct SiteBuildInput {
     pub crawl_meta: Option<CrawlMeta>,
 }
 
+/// Give a crawled page the link targets its observed URL makes resolvable.
+///
+/// The source parser only knows root-relative hrefs, because a static file has
+/// no URL. A crawled page does, so the links the crawl followed must also count
+/// for inbound and broken-link analysis, or a page reached through a relative
+/// link would look orphaned. Links the parser already located keep their line.
+fn apply_crawled_links(page: &mut Page) {
+    let Some(url) = page
+        .crawl_response
+        .as_ref()
+        .and_then(|response| response.observed_url.as_deref())
+    else {
+        return;
+    };
+    for crate::link_evidence::CrawlLink {
+        href,
+        anchor,
+        route,
+    } in crate::link_evidence::crawl_links(&page.raw_text, url)
+    {
+        let mut located = false;
+        for link in page.links.iter_mut().filter(|link| link.href == href) {
+            located = true;
+            link.target.get_or_insert_with(|| route.clone());
+        }
+        if !located {
+            page.links.push(Link {
+                href,
+                target: Some(route),
+                text: anchor,
+                line: 1,
+                column: 1,
+            });
+        }
+    }
+    page.internal_links = page
+        .links
+        .iter()
+        .filter_map(|link| link.target.clone())
+        .collect();
+}
+
 pub fn build_site_from_parts(input: SiteBuildInput) -> Result<Site> {
     let SiteBuildInput {
         root,
-        pages,
+        mut pages,
         artifacts,
         deployment_model,
         deployment_markers,
         crawl_meta,
     } = input;
+    pages.iter_mut().for_each(apply_crawled_links);
     let mut route_page_indices = BTreeMap::new();
     for (index, page) in pages.iter().enumerate() {
         let current = route_page_indices
@@ -563,6 +666,19 @@ pub fn build_site_from_parts(input: SiteBuildInput) -> Result<Site> {
         for path in &meta.probed_artifact_paths {
             indexed_paths.insert(path.clone());
         }
+        // A route the crawler was told not to request or denied access to is
+        // unknown, not broken.
+        let denied = meta
+            .failed_responses
+            .iter()
+            .filter(|response| matches!(response.status_code, Some(401 | 403)))
+            .map(|response| &response.requested_url);
+        indexed_paths.extend(
+            meta.robots_skipped_urls
+                .iter()
+                .chain(denied)
+                .filter_map(|url| route_from_urlish(url)),
+        );
     }
     Ok(Site {
         root,
@@ -600,7 +716,7 @@ fn deployment_model_from_label(label: &str) -> DeploymentModel {
 pub fn audit_site_snapshot(site: &Site, site_url: Option<&str>) -> AuditSiteSnapshot {
     AuditSiteSnapshot {
         version: 1,
-        site_url: site_url.map(str::to_string),
+        site_url: site_url.map(crate::link_graph::redact_url),
         root: site.root.to_string_lossy().to_string(),
         deployment_model: deployment_model_label(&site.deployment_model).to_string(),
         deployment_markers: site.deployment_markers.clone(),
@@ -610,6 +726,8 @@ pub fn audit_site_snapshot(site: &Site, site_url: Option<&str>) -> AuditSiteSnap
             discovered_internal_routes: meta.discovered_internal_routes,
             truncated: meta.truncated,
             probed_artifact_paths: meta.probed_artifact_paths.clone(),
+            failed_responses: meta.failed_responses.clone(),
+            robots_skipped_urls: meta.robots_skipped_urls.clone(),
         }),
         llms_text: site.llms_text.clone(),
         robots_text: site.robots_text.clone(),
@@ -660,11 +778,49 @@ pub fn build_site_from_audit_snapshot(snapshot: &AuditSiteSnapshot) -> Result<Si
             discovered_internal_routes: meta.discovered_internal_routes,
             truncated: meta.truncated,
             probed_artifact_paths: meta.probed_artifact_paths.clone(),
+            failed_responses: meta.failed_responses.clone(),
+            robots_skipped_urls: meta.robots_skipped_urls.clone(),
         }),
     })
 }
 
+fn page_sitemap_origin(page: &Page) -> Option<String> {
+    let value = page
+        .canonical
+        .as_deref()
+        .or_else(|| page.meta_by_property.get("og:url").map(String::as_str))?;
+    let url = Url::parse(value.trim()).ok()?;
+    matches!(url.scheme(), "http" | "https")
+        .then(|| url.origin().ascii_serialization().to_ascii_lowercase())
+}
+
+fn primary_site_sitemap_origin(
+    pages: &[Page],
+    configured_site_url: Option<&str>,
+) -> Option<String> {
+    pages
+        .iter()
+        .find(|page| page.route.is_empty())
+        .and_then(page_sitemap_origin)
+        .or_else(|| configured_site_url.and_then(site_url_sitemap_origin))
+        .or_else(|| pages.iter().find_map(page_sitemap_origin))
+}
+
+fn site_url_sitemap_origin(site_url: &str) -> Option<String> {
+    let url = Url::parse(site_url.trim()).ok()?;
+    matches!(url.scheme(), "http" | "https")
+        .then(|| url.origin().ascii_serialization().to_ascii_lowercase())
+}
+
 pub fn load_site(root: &Path) -> Result<Site> {
+    load_site_with_site_url(root, None)
+}
+
+pub(crate) fn load_site_with_site_url(root: &Path, site_url: Option<&str>) -> Result<Site> {
+    read_site(root, site_url).user_context(format!("cannot load site at {}", root.display()))
+}
+
+fn read_site(root: &Path, site_url: Option<&str>) -> Result<Site> {
     let mut html_files = Vec::new();
     iter_html_files(root, &mut html_files)?;
     html_files.sort();
@@ -686,8 +842,9 @@ pub fn load_site(root: &Path) -> Result<Site> {
         crawl_meta: None,
     })?;
     site.indexed_paths = build_site_index(root)?;
+    let allowed_origin = primary_site_sitemap_origin(&site.pages, site_url);
     let (sitemap_routes, sitemap_error) =
-        sitemap::read_sitemap_routes(&root.join("sitemap.xml"), root);
+        sitemap::read_sitemap_routes(&root.join("sitemap.xml"), root, allowed_origin.as_deref());
     site.sitemap_routes = sitemap_routes;
     site.sitemap_error = sitemap_error;
     Ok(site)
@@ -720,6 +877,155 @@ mod tests {
     }
 
     #[test]
+    fn captures_image_dimensions_picture_formats_and_visible_figure_captions() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><body><picture><source type=\"image/avif\" srcset=\"/images/chair.avif\"><img src=\"/images/chair.jpg\" alt=\"Office chair\" width=\"640\" height=\"480\"></picture><figure><img src=\"/images/desk.jpg\" alt=\"Desk setup\"><figcaption>A desk with a chair and monitor.</figcaption></figure><IMG SRC = \"/images/alternate.png\" ALT = \"Alternate asset\" WIDTH = \"320\" HEIGHT = \"240\"><img src=\"/images/angle>asset.png\" alt=\"Angle bracket asset\" width=\"320\" height=\"240\"><!-- <img src=\"/images/commented.webp\" alt=\"Commented\"> --><script>const html = '<img src=\"/images/script.webp\" alt=\"Script\">';</script><img-widget src=\"/images/widget.webp\" alt=\"Widget\"></body></html>",
+        );
+
+        let site = load_site(root).unwrap();
+        let images = &site.page("").unwrap().images;
+
+        assert_eq!(images.len(), 4);
+        assert_eq!(images[0].width.as_deref(), Some("640"));
+        assert_eq!(images[0].height.as_deref(), Some("480"));
+        assert!(images[0].has_modern_source);
+        assert!(!images[0].inside_figure);
+        assert!(images[1].inside_figure);
+        assert_eq!(
+            images[1].figure_caption.as_deref(),
+            Some("A desk with a chair and monitor.")
+        );
+        assert_eq!(images[2].src, "/images/alternate.png");
+        assert_eq!(images[2].alt.as_deref(), Some("Alternate asset"));
+        assert_eq!(images[2].width.as_deref(), Some("320"));
+        assert_eq!(images[2].height.as_deref(), Some("240"));
+        assert_eq!(images[3].src, "/images/angle>asset.png");
+        assert_eq!(images[3].alt.as_deref(), Some("Angle bracket asset"));
+    }
+
+    #[test]
+    fn captures_image_when_srcset_is_the_only_img_source() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><body><img srcset=\"/images/responsive-1x.jpg 1x, /images/responsive-2x.jpg 2x\" alt=\"Responsive photo\" width=\"320\" height=\"240\"></body></html>",
+        );
+
+        let site = load_site(root).unwrap();
+        let images = &site.page("").unwrap().images;
+
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].src, "/images/responsive-1x.jpg");
+    }
+
+    #[test]
+    fn image_context_tags_ignore_case_and_attributes_match_whole_names() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><body><PICTURE><Source data-srcset=\"/images/lazy.webp\" SRCSET=\"/images/chair.avif 1x\"><img data-src=\"/x.jpg\" src=\"/images/chair.jpg\" alt=\"Chair\"></PICTURE>\
+             <FIGURE><figure><img src=\"/images/inner.jpg\" alt=\"Inner\"></figure><img src=\"/images/outer.jpg\" alt=\"Outer\"><FigCaption title=\"x>y\">Outer <b>caption</b></FigCaption></FIGURE>\
+             <img src=\"/images/after.jpg\" alt=\"After\"></body></html>",
+        );
+
+        let site = load_site(root).unwrap();
+        let images = &site.page("").unwrap().images;
+
+        assert_eq!(images.len(), 4);
+        assert_eq!(images[0].src, "/images/chair.jpg");
+        assert_eq!(images[0].modern_sources, ["/images/chair.avif"]);
+        assert!(
+            images[0]
+                .asset_sources
+                .iter()
+                .all(|source| source != "/images/lazy.webp")
+        );
+        assert!(images[1].inside_figure && images[1].figure_caption.is_none());
+        assert!(images[2].inside_figure);
+        assert_eq!(images[2].figure_caption.as_deref(), Some("Outer caption"));
+        assert!(!images[3].inside_figure && !images[3].has_modern_source);
+    }
+
+    #[test]
+    fn crafted_figure_markup_neither_panics_nor_invents_a_caption() {
+        // (markup, whether the image is inside a figure)
+        for (html, inside_figure) in [
+            (
+                "<figure title=\"</figure>\"><img src=\"/a.jpg\" alt=\"A\"></figure>",
+                true,
+            ),
+            (
+                "<figure title=\"</figure><figcaption>Fake</figcaption>\"><img src=\"/a.jpg\" alt=\"A\">",
+                true,
+            ),
+            (
+                "<img src=\"/a.jpg\" alt=\"<figure>\"></figure><figcaption>Fake</figcaption>",
+                false,
+            ),
+            ("</figure><img src=\"/a.jpg\" alt=\"A\"><figure", false),
+            (
+                "<figure><img src=\"/a.jpg\" alt=\"A\"><figcaption title=\"</figcaption>\">",
+                true,
+            ),
+        ] {
+            let page = super::parser::build_page_from_source(
+                std::path::PathBuf::from("index.html"),
+                "index.html".to_string(),
+                format!("<html><body>{html}</body></html>"),
+                std::collections::BTreeMap::new(),
+            );
+            assert_eq!(page.images.len(), 1, "{html}");
+            assert_eq!(page.images[0].inside_figure, inside_figure, "{html}");
+            assert_eq!(page.images[0].figure_caption, None, "{html}");
+        }
+    }
+
+    #[test]
+    fn ignores_script_markup_and_figure_tag_prefixes_when_associating_images() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><body><script>const fake = '<picture><source type=\"image/webp\"><figure>';</script><img src=\"/images/legacy-photo.jpg\" alt=\"Legacy photo\"><figure-widget><img src=\"/images/widget-photo.jpg\" alt=\"Widget photo\"></figure-widget></body></html>",
+        );
+
+        let site = load_site(root).unwrap();
+        let images = &site.page("").unwrap().images;
+
+        assert_eq!(images.len(), 2);
+        assert!(!images[0].has_modern_source);
+        assert!(!images[1].inside_figure);
+    }
+
+    #[test]
+    fn does_not_read_nested_route_sitemaps_from_another_origin() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><link rel=\"canonical\" href=\"https://example.com/\"></head><body><h1>Home</h1></body></html>",
+        );
+        write(
+            &root.join("sitemap.xml"),
+            "<sitemapindex><sitemap><loc>https://evil.example/sitemaps/images</loc></sitemap></sitemapindex>",
+        );
+        write(
+            &root.join("sitemaps/images"),
+            "<urlset><url><loc>https://example.com/leaked-route</loc></url></urlset>",
+        );
+
+        let site = load_site(root).unwrap();
+
+        assert!(!site.sitemap_routes.contains("leaked-route"));
+        assert!(site.sitemap_error.is_some());
+    }
+
+    #[test]
     fn loads_clean_route_pages_and_nested_sitemap() {
         let temp_dir = tempfile::tempdir().unwrap();
         let root = temp_dir.path();
@@ -733,11 +1039,11 @@ mod tests {
         );
         write(
             &root.join("sitemap.xml"),
-            "<sitemapindex><sitemap><loc>https://example.com/sitemap-core.xml</loc></sitemap></sitemapindex>",
+            "<s:sitemapindex xmlns:s=\"http://www.sitemaps.org/schemas/sitemap/0.9\"><s:sitemap><s:loc>https://example.com/sitemap-core.xml</s:loc></s:sitemap></s:sitemapindex>",
         );
         write(
             &root.join("sitemap-core.xml"),
-            "<urlset><url><loc>https://example.com/guide</loc></url></urlset>",
+            "<s:urlset xmlns:s=\"http://www.sitemaps.org/schemas/sitemap/0.9\" xmlns:img=\"http://www.google.com/schemas/sitemap-image/1.1\"><s:url><s:loc>https://example.com/guide</s:loc><img:image><img:loc>https://example.com/images/picture.webp</img:loc></img:image></s:url></s:urlset>",
         );
         write(&root.join("llms.txt"), "# Site\n\n## Pages\n");
         let site = load_site(root).unwrap();
@@ -745,6 +1051,7 @@ mod tests {
         assert!(site.has_route("guide"));
         assert!(site.indexed_paths.contains("guide"));
         assert!(site.sitemap_routes.contains("guide"));
+        assert!(!site.sitemap_routes.contains("images/picture.webp"));
         assert!(site.llms_text.is_some());
         let home = site.page("").unwrap();
         assert_eq!(
@@ -801,5 +1108,154 @@ mod tests {
         let site = load_site(root).unwrap();
         assert_eq!(site.deployment_model, DeploymentModel::SsrWorker);
         assert!(!site.deployment_markers.is_empty());
+    }
+
+    fn only_page(html: &[u8]) -> super::Page {
+        let temp_dir = tempfile::tempdir().unwrap();
+        fs::write(temp_dir.path().join("index.html"), html).unwrap();
+        let site = load_site(temp_dir.path()).unwrap();
+        site.page("").unwrap().clone()
+    }
+
+    #[test]
+    fn title_and_h1_are_found_whatever_the_tag_case() {
+        let page = only_page(
+            b"<HTML><HEAD><TITLE>Upper</TITLE></HEAD><BODY><H1 CLASS=\"a\">Head</H1></BODY></HTML>",
+        );
+        assert_eq!(page.title.as_deref(), Some("Upper"));
+        assert_eq!(page.h1_texts, vec!["Head".to_string()]);
+    }
+
+    #[test]
+    fn comments_scripts_templates_and_svg_titles_are_not_markup() {
+        let page = only_page(
+            b"<html><head><!-- <title>Old</title> --><title>Live</title><script>x='<h1>s</h1>'</script></head>\
+              <body><svg><title>Icon</title></svg><!-- <h1>Old</h1> --><h1>Live</h1><template><h1>t</h1></template></body></html>",
+        );
+        assert_eq!(page.title.as_deref(), Some("Live"));
+        assert_eq!(page.h1_texts, vec!["Live".to_string()]);
+        assert_eq!(page.h1_count, 1);
+    }
+
+    #[test]
+    fn svg_title_is_not_the_page_title() {
+        let page = only_page(b"<html><body><svg><title>Icon</title></svg><h1>x</h1></body></html>");
+        assert_eq!(page.title, None);
+    }
+
+    #[test]
+    fn title_and_h1_text_decode_entities_and_keep_nested_text() {
+        let page = only_page(b"<title>A &amp; B</title><h1>One <em>two</em>\n three</h1>");
+        assert_eq!(page.title.as_deref(), Some("A & B"));
+        assert_eq!(page.h1_texts, vec!["One two three".to_string()]);
+    }
+
+    #[test]
+    fn empty_h1_does_not_count() {
+        let page = only_page(b"<title>x</title><h1> </h1>");
+        assert_eq!(page.h1_count, 0);
+    }
+
+    #[test]
+    fn line_numbers_of_other_elements_are_unaffected_by_title_extraction() {
+        let page = only_page(b"<!-- c -->\n<TITLE>x</TITLE>\n<H1>y</H1>\n<a href=\"/z\">z</a>");
+        assert_eq!(page.links[0].line, 4);
+    }
+
+    #[test]
+    fn non_utf8_page_is_decoded_lossily_and_the_site_keeps_loading() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        fs::write(root.join("index.html"), "<title>Home</title><h1>Home</h1>").unwrap();
+        fs::write(
+            root.join("latin.html"),
+            b"<title>Caf\xe9</title><h1>Caf\xe9</h1>",
+        )
+        .unwrap();
+
+        let site = load_site(root).unwrap();
+
+        assert!(site.has_route(""));
+        assert_eq!(
+            site.page("latin").unwrap().title.as_deref(),
+            Some("Caf\u{fffd}")
+        );
+    }
+
+    #[test]
+    fn non_utf8_robots_still_counts_as_present() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        fs::write(root.join("index.html"), "<title>Home</title>").unwrap();
+        fs::write(
+            root.join("robots.txt"),
+            b"User-agent: *\nDisallow: /caf\xe9\n",
+        )
+        .unwrap();
+
+        let site = load_site(root).unwrap();
+
+        assert!(site.robots_text.is_some());
+    }
+
+    /// React and Next.js write `hrefLang`, and the attribute must still be read.
+    #[test]
+    fn a_page_reads_camel_case_attributes_and_ignores_script_text() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("index.html"),
+            concat!(
+                r#"<html LANG="en"><head><title>x</title>"#,
+                r#"<link rel="alternate" hrefLang="x-default" href="/"/>"#,
+                r#"<link data-rel="canonical" rel="canonical" href="/real"/>"#,
+                r#"<meta property="og:title" content="a > b"/>"#,
+                r#"<script>var a = '<a href="/in-script">x</a><img src="/in-script.png">';</script>"#,
+                r#"<!-- <a href="/in-comment">x</a> --></head><body><h1>x</h1>"#,
+                r#"<article><p>text</p></article>"#,
+                r#"<section>before<script>var t = "code";</script><style>.a{}</style></section>"#,
+                r#"<a data-href="/wrong" href="/right">y</a></body></html>"#,
+            ),
+        )
+        .unwrap();
+        let site = load_site(dir.path()).unwrap();
+        let page = site.page("").unwrap();
+
+        assert_eq!(
+            page.alternate_links[0].hreflang.as_deref(),
+            Some("x-default")
+        );
+        assert_eq!(page.html_lang.as_deref(), Some("en"));
+        assert_eq!(page.canonical.as_deref(), Some("/real"));
+        assert_eq!(page.meta_by_property["og:title"], "a > b");
+        let hrefs: Vec<_> = page.links.iter().map(|link| link.href.as_str()).collect();
+        assert_eq!(hrefs, ["/right"]);
+        assert!(page.images.is_empty());
+        let section = page
+            .blocks
+            .iter()
+            .find(|block| block.tag == "section")
+            .unwrap();
+        assert_eq!(section.text, "before");
+    }
+
+    #[test]
+    fn block_and_break_tags_separate_words_but_inline_tags_do_not() {
+        assert_eq!(
+            super::strip_tags("document<br>eligibility"),
+            "document eligibility"
+        );
+        assert_eq!(super::strip_tags("<div>a</div><div>b</div>"), "a b");
+        assert_eq!(super::strip_tags("<li>a</li><LI>b</LI>"), "a b");
+        assert_eq!(super::strip_tags("wo<b>r</b>d <span>x</span>"), "word x");
+        assert_eq!(super::strip_tags("a < b"), "a");
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("index.html"),
+            "<html><head><title>x</title></head><body><h1>Secure your<br/>wo<b>r</b>ld<div>today</div></h1></body></html>",
+        )
+        .unwrap();
+        let site = load_site(dir.path()).unwrap();
+        assert_eq!(site.page("").unwrap().h1_texts, ["Secure your world today"]);
     }
 }

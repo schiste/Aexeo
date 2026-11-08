@@ -8,6 +8,7 @@ use std::fs;
 use std::path::Path;
 use url::Url;
 
+use crate::error::UserContext;
 use crate::intelligence::truth::TruthManifest;
 use crate::site::{Site, route_from_urlish};
 
@@ -58,7 +59,7 @@ pub struct TrustSurfaceReconciliation {
 }
 
 pub fn import_trust_surface_records(path: &Path) -> Result<Vec<TrustSurfaceRecord>> {
-    match path
+    let records = match path
         .extension()
         .and_then(|extension| extension.to_str())
         .unwrap_or_default()
@@ -67,7 +68,8 @@ pub fn import_trust_surface_records(path: &Path) -> Result<Vec<TrustSurfaceRecor
     {
         "json" => import_json(path),
         _ => import_csv(path),
-    }
+    };
+    records.user_context(format!("cannot import trust surfaces {}", path.display()))
 }
 
 pub fn reconcile_trust_surfaces(

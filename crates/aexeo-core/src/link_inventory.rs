@@ -8,21 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use url::Url;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SurfaceIdentity {
-    pub origin: String,
-    pub release: String,
-    pub surface: String,
-    pub snapshot: String,
-}
-
-impl SurfaceIdentity {
-    fn is_complete(&self) -> bool {
-        [&self.origin, &self.release, &self.surface, &self.snapshot]
-            .iter()
-            .all(|value| !value.trim().is_empty())
-    }
-}
+pub use aexeo_contracts::SurfaceIdentity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -51,6 +37,20 @@ pub struct InventorySnapshot {
     /// True only if the inventory producer attests it covers the whole surface.
     pub complete: bool,
     pub pages: Vec<InventoryPage>,
+}
+
+impl InventorySnapshot {
+    /// Read an inventory either on its own or under an `inventory` key, as in
+    /// a link graph input, an audit link context or an EmDash export.
+    pub fn from_json_document(data: &[u8]) -> anyhow::Result<Self> {
+        let value: serde_json::Value = serde_json::from_slice(data)?;
+        let inventory = match value.get("inventory") {
+            Some(serde_json::Value::Null) => anyhow::bail!("the document has a null inventory"),
+            Some(inventory) => inventory.clone(),
+            None => value,
+        };
+        Ok(serde_json::from_value(inventory)?)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,6 +84,17 @@ fn valid_page_url(value: &str, origin: &Url) -> bool {
 /// Compare exact URL identities. Normalization and alias resolution are not
 /// inferred; aliases prevent eligibility until the graph can account for them.
 pub fn reconcile(inventory: &InventorySnapshot, crawl: &CrawlSurface) -> InventoryReconciliation {
+    reconcile_with_verified_aliases(inventory, crawl, &BTreeSet::new())
+}
+
+/// Like [`reconcile`], except that alias records whose exact inventory URL is
+/// in `verified_aliases` no longer require resolution: the caller observed
+/// them reaching their target. Their URLs still never become eligible.
+pub fn reconcile_with_verified_aliases(
+    inventory: &InventorySnapshot,
+    crawl: &CrawlSurface,
+    verified_aliases: &BTreeSet<String>,
+) -> InventoryReconciliation {
     let mut issues = Vec::new();
     if !inventory.complete {
         issues.push("inventory_incomplete".to_string());
@@ -134,7 +145,9 @@ pub fn reconcile(inventory: &InventorySnapshot, crawl: &CrawlSurface) -> Invento
                 | InventoryDisposition::CanonicalAlias
                 | InventoryDisposition::LocaleFallback
         ) {
-            issues.push("alias_resolution_required".to_string());
+            if !verified_aliases.contains(&page.url) {
+                issues.push("alias_resolution_required".to_string());
+            }
             if page
                 .target
                 .as_deref()
@@ -295,6 +308,25 @@ mod tests {
                 .issues
                 .contains(&"unknown_inventory_disposition".into())
         );
+    }
+
+    #[test]
+    fn an_inventory_reads_bare_or_wrapped_and_rejects_a_null_one() {
+        let (inventory, _) = inputs();
+        let bare = serde_json::to_vec(&inventory).unwrap();
+        assert_eq!(
+            InventorySnapshot::from_json_document(&bare).unwrap(),
+            inventory
+        );
+        let wrapped =
+            serde_json::to_vec(&serde_json::json!({"identity": null, "inventory": inventory}))
+                .unwrap();
+        assert_eq!(
+            InventorySnapshot::from_json_document(&wrapped).unwrap(),
+            inventory
+        );
+        assert!(InventorySnapshot::from_json_document(br#"{"inventory":null}"#).is_err());
+        assert!(InventorySnapshot::from_json_document(br#"{"pages":"x"}"#).is_err());
     }
 
     #[test]
