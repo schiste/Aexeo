@@ -42,6 +42,7 @@ const linkReport = await evaluateContent({ route: "/links", title: "Links", body
 assert.equal(linkReport.gates[0].status, "failed");
 assert.equal(linkReport.gates[0].measurements.checked_destinations, 1);
 assert.equal(linkReport.gates[0].measurements.invalid_destinations, 1);
+assert.deepEqual(linkReport.source_locations, [{ gate_id: "destinations", finding_index: 0, block_index: 0, span_index: 0, utf16_offset: 0 }]);
 console.log("WASM link destination smoke test passed");
 
 const headingPreset = `version=1
