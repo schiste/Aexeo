@@ -47,7 +47,7 @@ class EvaluateTests(unittest.TestCase):
 
     def test_metrics_include_unchecked_without_counting_it_as_a_pass(self):
         corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": [
-            {"id": "a", "split": "holdout", "text": "a", "expected": "failed", "review_status": "reviewed", "review": {"reviewer": "reviewer-1", "method": "manual"}},
+            {"id": "a", "split": "holdout", "text": "a", "expected": "failed", "review_status": "reviewed", "review": {"reviewer": "reviewer-1", "method": "manual", "text_sha256": hashlib.sha256(b"a").hexdigest(), "expected": "failed"}},
             {"id": "b", "split": "holdout", "text": "b", "expected": "passed"},
             {"id": "c", "split": "holdout", "text": "c", "expected": "failed"},
         ]}
@@ -116,6 +116,30 @@ class EvaluateTests(unittest.TestCase):
         self.assertIsNone(metrics["precision"])
         self.assertIsNone(metrics["recall"])
         self.assertIsNone(metrics["unchecked_rate"])
+
+    def test_reviewed_metrics_require_current_bound_text_metadata_and_label(self):
+        item = {"id": "a", "split": "holdout", "text": "abc", "metadata": {"title": "x"}, "expected": "passed",
+                "review_status": "reviewed", "review": {"reviewer": "r", "method": "manual"}}
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": [item]}
+        result = SimpleNamespace(returncode=0, stdout='{"gates":[{"gate_id":"g","status":"passed"}]}')
+        with patch.object(eval_module.subprocess, "run", return_value=result):
+            report = eval_module.evaluate("cli", corpus, "holdout")
+            self.assertEqual(report["reviewed_examples"], 0)
+            self.assertEqual(report["unbound_reviewed_examples"], 1)
+            item["review"].update(text_sha256=hashlib.sha256(b"abc").hexdigest(),
+                                  metadata_sha256=eval_module.metadata_hash(item["metadata"]), expected="passed")
+            report = eval_module.evaluate("cli", corpus, "holdout")
+            self.assertEqual(report["reviewed_examples"], 1)
+            self.assertEqual(report["unbound_reviewed_examples"], 0)
+            for field, value in (("text", "changed"), ("metadata", {"title": "changed"}), ("expected", "failed")):
+                original = item[field]
+                item[field] = value
+                with self.assertRaisesRegex(ValueError, "review .* does not match"):
+                    eval_module.evaluate("cli", corpus, "holdout")
+                item[field] = original
+            del item["metadata"]
+            with self.assertRaisesRegex(ValueError, "metadata is absent"):
+                eval_module.evaluate("cli", corpus, "holdout")
 
     def test_markdown_and_embedded_preset_reach_cli(self):
         corpus = {"version": 1, "preset": "custom", "preset_toml": "name='example'", "input_format": "markdown", "gate_id": "g", "examples": [

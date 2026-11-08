@@ -51,7 +51,11 @@ counts all unchecked cases, including those expected by the corpus. Both divide
 by the number of examples and are null when there are none. `reviewed_metrics` separately reports the same counts,
 precision, recall and unchecked rate for examples declared reviewed; rates are
 null when their denominator is zero. Overall metrics still include all examples.
-Declared review is not proof of independent or correct review.
+Only reviews bound to the current example are included in `reviewed_metrics`.
+Legacy `reviewed` examples without complete bindings remain accepted but are
+counted in `unbound_reviewed_examples`, not as reviewed metrics. A supplied
+binding that no longer matches causes evaluation to fail. Declared review is
+not proof of independent or correct review.
 `fresh_process_p95_ms` includes process startup and
 is not a cold-cache measurement. Results contain counts and timings, not text.
 `--assert-regression` returns a nonzero exit status if any example is
@@ -72,6 +76,16 @@ not paraphrases, related examples, or other forms of dependence. Examples marked
 strings. These fields record supplied provenance; the runner cannot verify the
 reviewer, independence, or label quality. Report only aggregate counts, and do
 not include private reviewer information in published corpora.
+
+To include a reviewed example in reviewed metrics, the `review` object must also
+contain `text_sha256` (SHA-256 of the exact UTF-8 text) and `expected` (the
+reviewed label). If the example contains `metadata`, include `metadata_sha256`
+using the length-framed map hash defined below. Missing bindings are reported
+as unbound; mismatched bindings are rejected. Obtain a fresh human review when
+content, metadata or the label changes, then record its matching bindings. Do
+not attach hashes to old reviews without confirming what the reviewer saw.
+These bindings do not establish the preset, source context, reviewer identity,
+or independence; preserve that provenance separately.
 
 Optional `--review-events path/to/local-review-log.json` reports historical
 reviewer agreement, overrides to pass/fail, resolved unchecked cases, and the
@@ -164,3 +178,20 @@ without this hash cannot be exported for those examples; capture a new note with
 the original metadata rather than attaching a guessed hash. These hashes do not
 bind the preset, tool version or report to the input; operators must preserve
 and compare those separately.
+
+To create a new corpus copy containing an explicit matching review, use:
+
+```sh
+python3 scripts/content-review-note.py bind-review --corpus corpus.json \
+  --note feedback.json --output reviewed-corpus.json --telemetry
+```
+
+This Python action validates the note and its text and metadata hashes, requires
+the human verdict to match the proposed label, refuses synthetic examples and
+existing reviews, and leaves the input untouched. Disagreements and uncertain
+verdicts must be resolved explicitly; they are never silently relabeled. The
+new file contains the **entire corpus including content**, not just hashes, and
+is created with private permissions. `--telemetry` emits only operation and
+elapsed time. This action records supplied provenance, not proof that review
+was independent or blind; follow the holdout policy before using its metrics.
+The standalone native CLI currently supports capture and event export only.
