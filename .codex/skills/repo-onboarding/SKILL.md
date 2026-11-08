@@ -23,8 +23,8 @@ description: Use when starting work in an unfamiliar repository, when the task a
 
 - `.` (primary; cargo; manifest `Cargo.toml`; high confidence)
 - `.` (supporting; npm; manifest `package.json`; high confidence)
-- `packages/aexeo-emdash` (supporting; npm; manifest `packages/aexeo-emdash/package.json`; high confidence)
 - `packages/aexeo-crawl-worker` (supporting; npm; manifest `packages/aexeo-crawl-worker/package.json`; high confidence)
+- `packages/aexeo-emdash` (supporting; npm; manifest `packages/aexeo-emdash/package.json`; high confidence)
 - `packages/aexeo-emdash/tests/fixtures/plugin-host` (supporting; npm; manifest `packages/aexeo-emdash/tests/fixtures/plugin-host/package.json`; high confidence)
 
 ## Start Here
@@ -41,8 +41,8 @@ description: Use when starting work in an unfamiliar repository, when the task a
 - `cargo test` (fast_test; high confidence from `Cargo.toml`)
 - `cargo test --workspace` (fast_test; high confidence from `Cargo.toml`)
   Workspace: `.`
-- `npm --prefix packages/aexeo-emdash run test` (fast_test; high confidence from `packages/aexeo-emdash/package.json`)
-  Workspace: `packages/aexeo-emdash`
+- `npm --prefix packages/aexeo-crawl-worker run test` (fast_test; high confidence from `packages/aexeo-crawl-worker/package.json`)
+  Workspace: `packages/aexeo-crawl-worker`
 
 ## Repo Map
 
@@ -67,7 +67,7 @@ description: Use when starting work in an unfamiliar repository, when the task a
 
 ## Freshness
 
-- Source digest: `fccda4f8cac139036f8fc2acdff0abdc38ed9913ca2112dfc055293c2a165b45`
-- Tracked source files: `254`
+- Source digest: `825625ef8e53bdae601eba1e9f2e276c9a66a53dbb2ee91fe4e552a5e914b507`
+- Tracked source files: `378`
 - Overrides applied: `False`
 - Sections generated: `repo, workspaces, primary_workspace, commands, areas, entrypoints, caution_zones, generated_paths, dangerous_paths, navigation_recipes, summon, freshness`
