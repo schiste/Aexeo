@@ -230,6 +230,27 @@ pub struct AuditLinkContext {
     pub inventory: Option<InventorySnapshot>,
 }
 
+impl AuditLinkContext {
+    /// The context an inventory document gives on its own, as a crawl's
+    /// `--seed-file`: the top-level `identity` and `snapshot_date` it declares,
+    /// as a `--context` file does, else the inventory's own identity and no
+    /// date.
+    pub fn from_inventory_document(data: &[u8]) -> anyhow::Result<Self> {
+        #[derive(Deserialize)]
+        struct Declared {
+            identity: Option<SurfaceIdentity>,
+            snapshot_date: Option<String>,
+        }
+        let inventory = InventorySnapshot::from_json_document(data)?;
+        let declared: Declared = serde_json::from_slice(data)?;
+        Ok(Self {
+            identity: declared.identity.or_else(|| inventory.identity.clone()),
+            snapshot_date: declared.snapshot_date,
+            inventory: Some(inventory),
+        })
+    }
+}
+
 /// Analyze only pages whose effective URL was actually captured in an audit.
 /// Crawl coverage is claimed only as `crawl_audit_completeness_issues` allows:
 /// without a supplied inventory matching the crawl's seed, never.
@@ -1369,6 +1390,29 @@ mod tests {
 
     fn attested_identity() -> serde_json::Value {
         serde_json::json!({"origin":"https://example.org", "release":"r1", "surface":"public", "snapshot":"s1"})
+    }
+
+    #[test]
+    fn an_inventory_document_gives_its_declared_context_else_the_inventory_identity() {
+        let inventory =
+            serde_json::json!({"identity": attested_identity(), "complete": true, "pages": []});
+        let bare =
+            AuditLinkContext::from_inventory_document(inventory.to_string().as_bytes()).unwrap();
+        assert_eq!(serde_json::json!(bare.identity), attested_identity());
+        assert_eq!(bare.snapshot_date, None);
+        let export = serde_json::json!({"inventory": inventory, "issues": []});
+        let exported =
+            AuditLinkContext::from_inventory_document(export.to_string().as_bytes()).unwrap();
+        assert_eq!(serde_json::json!(exported.identity), attested_identity());
+        let mut declared = attested_identity();
+        declared["surface"] = "preview".into();
+        let context = serde_json::json!({"identity": declared, "snapshot_date": "2026-01-01",
+            "inventory": inventory});
+        let context =
+            AuditLinkContext::from_inventory_document(context.to_string().as_bytes()).unwrap();
+        assert_eq!(serde_json::json!(context.identity), declared);
+        assert_eq!(context.snapshot_date.as_deref(), Some("2026-01-01"));
+        assert!(context.inventory.is_some());
     }
 
     /// A complete HTTP crawl seeded from the context inventory; `/orphan` was

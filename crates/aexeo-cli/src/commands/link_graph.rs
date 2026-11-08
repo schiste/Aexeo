@@ -19,11 +19,7 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
         let artifact = serde_json::from_slice(&data).user_context("invalid audit artifact JSON")?;
         let context = matches
             .get_one::<String>("context")
-            .map(|path| -> Result<AuditLinkContext> {
-                let data = fs::read(path)
-                    .user_context(format!("cannot read audit link context: {path}"))?;
-                serde_json::from_slice(&data).user_context("invalid audit link context JSON")
-            })
+            .map(|path| read_audit_link_context(path))
             .transpose()?;
         let static_urls = matches
             .get_one::<String>("static-url-map")
@@ -51,6 +47,13 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
     }
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(0)
+}
+
+/// Read an audit link context file, for `link-graph --audit --context` and
+/// `crawl --link-graph-context`.
+pub(super) fn read_audit_link_context(path: &str) -> Result<AuditLinkContext> {
+    let data = fs::read(path).user_context(format!("cannot read audit link context: {path}"))?;
+    serde_json::from_slice(&data).user_context("invalid audit link context JSON")
 }
 
 pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {

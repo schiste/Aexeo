@@ -1724,3 +1724,214 @@ fn links_through_a_redirect_are_neither_broken_nor_orphaned_once_the_report_prov
     assert!(rule_findings(&stored["findings"], "LNK002").is_empty());
     assert_eq!(stored["summary"], payload["artifact"]["summary"]);
 }
+
+/// A seeded crawl of `site` with the link rules only, writing its own link
+/// report: the command output and that report.
+fn seeded_crawl_with_report(
+    site: &Site,
+    dir: &Path,
+    seed: &Value,
+    extra: &[&str],
+) -> (Value, Value) {
+    let config = link_rules_only(dir);
+    let graph = dir.join("graph.json");
+    let mut args = vec![
+        "--config",
+        config.to_str().unwrap(),
+        "--link-graph-output",
+        graph.to_str().unwrap(),
+        "--link-graph-summary",
+    ];
+    args.extend(extra);
+    let (payload, _) = seeded_crawl(site, dir, seed, &args);
+    let report = serde_json::from_slice(&std::fs::read(&graph).unwrap()).unwrap();
+    (payload, report)
+}
+
+/// The report's qualification of `rule_id` at `url`, from either list.
+fn legacy_finding(report: &Value, rule_id: &str, url: &str) -> Value {
+    ["legacy_findings", "suppressed_legacy_findings"]
+        .iter()
+        .filter_map(|list| report[list].as_array())
+        .flatten()
+        .find(|finding| finding["rule_id"] == rule_id && finding["url"] == url)
+        .cloned()
+        .unwrap_or_else(|| panic!("{rule_id} at {url}: {report:#}"))
+}
+
+#[test]
+fn a_seeded_crawl_confirms_an_unlinked_published_page_in_one_command() {
+    let site = orphan_site();
+    site.serve_header("X-Release", "r1");
+    let temp = tempfile::tempdir().unwrap();
+    // A bare inventory, as an EmDash export carries: no context date.
+    let inventory = inventory_context(&site, &["/", "/a", "/orphan"], &[])["inventory"].clone();
+    let (payload, report) = seeded_crawl_with_report(
+        &site,
+        temp.path(),
+        &inventory,
+        &["--release-header", "x-release"],
+    );
+    assert_eq!(report["crawl_complete"], true, "{report:#}");
+    assert_eq!(report["identity"], inventory["identity"]);
+    let started_at = payload["artifact"]["crawl_attestation"]["snapshot"]["started_at"]
+        .as_str()
+        .unwrap();
+    assert_eq!(report["snapshot_date"], started_at[..10]);
+    assert_eq!(report["reconciliation"]["comparable"], true, "{report:#}");
+    let orphan = format!("{}/orphan", site.base_url);
+    let finding = legacy_finding(&report, "LNK002", &orphan);
+    assert_eq!(finding["conclusion"], "confirmed", "{report:#}");
+    // A confirmed orphan is a real finding: it stays in the run.
+    let kept = rule_findings(&payload["artifact"]["findings"], "LNK002");
+    assert!(
+        kept.iter().any(|(_, path)| *path == finding["path"]),
+        "{payload:#}"
+    );
+    assert_eq!(
+        payload["link_graph_summary"]["legacy_link_findings"]["confirmed"], 1,
+        "{payload:#}"
+    );
+}
+
+#[test]
+fn a_seeded_crawl_suppresses_the_orphan_finding_of_a_verified_canonical_alias() {
+    let site = Site::start(vec![
+        ("/", html(r#"<main><a href="/guide">Guide</a></main>"#)),
+        ("/guide", html("<main>Guide</main>")),
+        (
+            "/alias",
+            html(r#"<link rel="canonical" href="/guide"><main>Copy</main>"#),
+        ),
+    ]);
+    let temp = tempfile::tempdir().unwrap();
+    let base = &site.base_url;
+    let mut context = inventory_context(&site, &["/", "/guide"], &[]);
+    context["inventory"]["pages"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"url": format!("{base}/alias"),
+            "disposition": "canonical_alias", "target": format!("{base}/guide"), "locale": null}));
+    let (payload, report) = seeded_crawl_with_report(&site, temp.path(), &context, &[]);
+    let alias = format!("{base}/alias");
+    let finding = legacy_finding(&report, "LNK002", &alias);
+    assert_eq!(finding["conclusion"], "inventory_alias", "{report:#}");
+    assert_eq!(
+        report["suppressed_legacy_findings"],
+        serde_json::json!([finding])
+    );
+    assert_eq!(
+        payload["link_graph_summary"]["suppressed_legacy_findings"],
+        report["suppressed_legacy_findings"]
+    );
+    let path = finding["path"].as_str().unwrap();
+    let stored: Value =
+        serde_json::from_slice(&std::fs::read(payload["audit_path"].as_str().unwrap()).unwrap())
+            .unwrap();
+    for findings in [&payload["artifact"]["findings"], &stored["findings"]] {
+        assert!(
+            !rule_findings(findings, "LNK002")
+                .iter()
+                .any(|(_, found)| found == path),
+            "{payload:#}"
+        );
+    }
+}
+
+#[test]
+fn without_a_seed_file_the_crawl_report_is_the_context_free_audit_report() {
+    let site = orphan_site();
+    let temp = tempfile::tempdir().unwrap();
+    let graph = temp.path().join("graph.json");
+    let output = Command::new(bin())
+        .current_dir(temp.path())
+        .args([
+            "crawl",
+            &site.base_url,
+            "--engine",
+            "http",
+            "--progress",
+            "off",
+        ])
+        .args([
+            "--format",
+            "json",
+            "--no-sitemap-seed",
+            "--link-graph-output",
+        ])
+        .arg(&graph)
+        .output()
+        .unwrap();
+    let payload = parse_json(&output.stdout);
+    let output = Command::new(bin())
+        .current_dir(temp.path())
+        .args([
+            "link-graph",
+            payload["audit_path"].as_str().unwrap(),
+            "--audit",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let written = std::fs::read(&graph).unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&written),
+        String::from_utf8_lossy(&output.stdout).trim_end()
+    );
+    let report: Value = serde_json::from_slice(&written).unwrap();
+    assert_eq!(report["reconciliation"], Value::Null);
+}
+
+#[test]
+fn a_seed_inventory_without_identity_never_confirms_an_orphan() {
+    let site = orphan_site();
+    site.serve_header("X-Release", "r1");
+    let temp = tempfile::tempdir().unwrap();
+    let context = inventory_context(&site, &["/", "/a", "/orphan"], &[]);
+    let mut anonymous = context["inventory"].clone();
+    anonymous["identity"] = Value::Null;
+    let orphan = format!("{}/orphan", site.base_url);
+    let (_, report) = seeded_crawl_with_report(
+        &site,
+        temp.path(),
+        &anonymous,
+        &["--release-header", "x-release"],
+    );
+    let issues = report["issues"].to_string();
+    assert!(
+        issues.contains("audit_seed_inventory_mismatch"),
+        "{report:#}"
+    );
+    assert_eq!(report["crawl_complete"], false);
+    assert_eq!(
+        legacy_finding(&report, "LNK002", &orphan)["conclusion"],
+        "not_eligible"
+    );
+
+    // An explicit context with an identity cannot stand in for the seed's.
+    let explicit = temp.path().join("explicit.json");
+    write(&explicit, &context.to_string());
+    let (_, report) = seeded_crawl_with_report(
+        &site,
+        temp.path(),
+        &anonymous,
+        &[
+            "--release-header",
+            "x-release",
+            "--link-graph-context",
+            explicit.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(report["identity"]["surface"], "public", "{report:#}");
+    assert_eq!(report["snapshot_date"], "2026-11-07");
+    assert!(
+        report["issues"]
+            .to_string()
+            .contains("audit_seed_inventory_mismatch"),
+        "{report:#}"
+    );
+    assert_eq!(
+        legacy_finding(&report, "LNK002", &orphan)["conclusion"],
+        "not_eligible"
+    );
+}
