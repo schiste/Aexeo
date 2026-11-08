@@ -11,8 +11,10 @@ Portable Text bodies provide text, headings, paragraphs and links to content
 presets. A plain text body provides text only. EmDash custom blocks are
 project-specific; their flattened text is available to the legacy site audit,
 but content-preset gates that require body capabilities are reported as
-`not_checked` until a faithful mapping is provided. This avoids treating
-unobserved headings, paragraphs or links as absent. An explicitly empty body
+`not_checked` until a faithful mapping is provided. The configured plugin
+returns `content_preset_incomplete` for such a report, preserving its existing
+fail-closed behavior. This avoids treating unobserved headings, paragraphs or
+links as absent. An explicitly empty body
 is distinct from an unavailable body.
 
 Adapters supplying an `EmdashDocument` can set `body_capabilities` to a subset
