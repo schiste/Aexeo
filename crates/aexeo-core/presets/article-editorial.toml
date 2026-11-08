@@ -1,0 +1,14 @@
+version = 1
+name = "Article editorial starter"
+extends = ["article"]
+[[gates]]
+id = "editorial.length"
+kind = "word_count"
+min = 50
+max = 2000
+blocking = false
+[[gates]]
+id = "editorial.metadata"
+kind = "required_metadata"
+fields = ["title", "description"]
+blocking = false

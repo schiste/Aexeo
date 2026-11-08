@@ -162,7 +162,7 @@ Validate the manifest contract explicitly before relying on it for scoring:
 cargo run -p aexeo-cli -- intelligence facts validate .
 ```
 
-The manifest contract is documented in [docs/schemas/facts.schema.json](/Users/christophehenner/Downloads/Repositories/Aexeo/docs/schemas/facts.schema.json).
+The manifest contract is documented in [docs/schemas/facts.schema.json](schemas/facts.schema.json).
 
 The score is intentionally capped when no structured truth source is present:
 
@@ -244,8 +244,8 @@ cargo run -p aexeo-cli -- intelligence trust-surface import trust-surfaces.csv -
 
 For a realistic fixture-driven workflow, see:
 
-- [crates/aexeo-cli/tests/fixtures/chau7-trust-surfaces.json](/Users/christophehenner/Downloads/Repositories/Aexeo/crates/aexeo-cli/tests/fixtures/chau7-trust-surfaces.json)
-- [crates/aexeo-cli/tests/fixtures/chau7-mini-site](/Users/christophehenner/Downloads/Repositories/Aexeo/crates/aexeo-cli/tests/fixtures/chau7-mini-site)
+- [crates/aexeo-cli/tests/fixtures/chau7-trust-surfaces.json](../crates/aexeo-cli/tests/fixtures/chau7-trust-surfaces.json)
+- [crates/aexeo-cli/tests/fixtures/chau7-mini-site](../crates/aexeo-cli/tests/fixtures/chau7-mini-site)
 
 Supported columns:
 
@@ -276,9 +276,16 @@ The reconciliation report highlights:
 - forbidden terminology usage
 - descriptor gaps where external text does not reflect the canonical product framing
 
-### Intelligence Score
+### Entity Presence
 
-Use the score workflow when you want a product-level summary instead of separate analysis reports.
+`intelligence presence` reports what five public sources show about the manifest's organization. Two results depend on what was searched:
+
+- **Wikipedia** searches one language edition, `en` unless you pass `--wikipedia-language fr`. `not_found` means absent from that edition and says so in the result; other editions are not checked. The EmDash plugin searches `en` only.
+- **Common Crawl** searches the newest crawl listed by `collinfo.json`. `not_found` means no capture in that one crawl, and `unreachable` means the index could not be resolved, so nothing was searched.
+
+### Intelligence Facts and Blockers
+
+Use the `intelligence score` workflow when you want one summary of the separate analysis reports. It keeps its command name for compatibility, but it reports no composite score: Aexeo does not reduce a site to one number (`CONSTITUTION.md`, "No vanity scoring").
 
 Example:
 
@@ -286,19 +293,28 @@ Example:
 cargo run -p aexeo-cli -- intelligence score . --site-url https://example.com --trust-surfaces trust-surfaces.json
 ```
 
-The score report combines:
+The report lists, side by side:
 
 - citation readiness from evidence coverage
 - truth consistency from schema and manifest alignment
-- answer-pack quality from grounding gaps
+- answer structure from grounding: answer blocks, headings, and routes with coverage gaps
 - optional external trust alignment from reconciled trust surfaces
 
-It writes `.aexeo-reports/intelligence-score-latest.json` and includes:
+It writes `.aexeo-reports/intelligence-score-latest.json`. Identical inputs write identical bytes, so the file holds no timings. It includes:
 
-- site-level score breakdown
-- route-level scores
+- site-level facts
+- route-level facts, most-blocked routes first
 - top blockers
-- lowest scoring routes
+
+A value of `null` (`unknown` in text output) means nothing was measured, and is not a low result:
+
+- `citation_readiness_score`: the site or route makes no assessable claims
+- `truth_consistency_score`: the site has no schema.org JSON-LD and no facts manifest, which is also reported as a site-wide blocker
+- `answer_blocks`, `heading_count`: the route was not part of the grounding analysis
+- site `external_trust_alignment_score`: no trust surface was imported, or the import has no rows
+- route `external_trust_alignment_score`: no imported row reports an issue on this route. This does not show that a row covers the route. With issues, it holds the worst issue's value, and `external_trust_issue_count` counts them all.
+
+Fields removed from this report: `overall_score` (site and route), `answer_pack_score` (site and route; use `answer_pack`, `answer_blocks` and `heading_count`) and `elapsed_us`. Components that remain, such as citation readiness and truth consistency, are heuristic and must not be compared across sites as a rating.
 
 ## Snippet Inspection
 

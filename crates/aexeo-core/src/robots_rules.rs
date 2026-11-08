@@ -18,6 +18,7 @@ fn finding(
         severity: "warning".to_string(),
         suggestion: suggestion.map(str::to_string),
         scope: FindingScope::Sitewide,
+        subject: None,
     }
 }
 
@@ -339,6 +340,7 @@ mod tests {
             h1_texts: vec!["x".to_string()],
             has_breadcrumb_nav: false,
             response_headers,
+            crawl_response: None,
             links: Vec::new(),
             internal_links: Vec::new(),
             alternate_links: Vec::new(),

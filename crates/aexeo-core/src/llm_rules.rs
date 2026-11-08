@@ -91,6 +91,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
             severity: "error".to_string(),
             suggestion: None,
             scope: FindingScope::Sitewide,
+            subject: None,
         }];
     };
     let text = text.trim();
@@ -104,6 +105,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
             severity: "error".to_string(),
             suggestion: None,
             scope: FindingScope::Sitewide,
+            subject: None,
         }];
     }
 
@@ -123,7 +125,12 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
     if has_feature_routes && !has_feature_pages {
         missing_sections.push("## Feature Pages");
     }
-    if !missing_sections.is_empty() {
+    // These headings are what `aexeo generate` writes. The llms.txt format does
+    // not require them, so only a generated file can have drifted from them.
+    let is_generated = text
+        .lines()
+        .any(|line| line.trim() == crate::generate::LLMS_GENERATED_MARKER);
+    if is_generated && !missing_sections.is_empty() {
         findings.push(Finding {
             rule_id: "LLM003".to_string(),
             message: format!(
@@ -136,6 +143,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
             severity: "error".to_string(),
             suggestion: Some("regenerate llms.txt from site inventory so it mirrors the current route and feature structure".to_string()),
             scope: FindingScope::Sitewide,
+            subject: None,
         });
     }
 
@@ -161,6 +169,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
                         .to_string(),
                 ),
                 scope: FindingScope::Sitewide,
+                subject: Some(href.to_string()),
             });
         }
         if config.canonical_style == "extensionless" && href.ends_with(".html") {
@@ -173,6 +182,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
                 severity: "warning".to_string(),
                 suggestion: Some("prefer clean routes in llms.txt or regenerate the artifact from canonical URLs".to_string()),
                 scope: FindingScope::Sitewide,
+                subject: Some(href.to_string()),
             });
         }
     }
@@ -196,6 +206,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
                         .to_string(),
                 ),
                 scope: FindingScope::Sitewide,
+                subject: None,
             });
         }
         if let Some(claimed_feature_pages) = feature_page_count(text)
@@ -216,6 +227,7 @@ pub fn run_llm_rules(site: &Site, config: &Config) -> Vec<Finding> {
                         .to_string(),
                 ),
                 scope: FindingScope::Sitewide,
+                subject: None,
             });
         }
     }
@@ -278,7 +290,10 @@ mod tests {
         );
         write(
             &root.join("llms.txt"),
-            "# Site\n\n## Key Facts\n- 1 features across 1 categories\n",
+            &format!(
+                "# Site\n\n## Key Facts\n- 1 features across 1 categories\n{}\n",
+                crate::generate::LLMS_GENERATED_MARKER
+            ),
         );
 
         let findings = run_llm_rules(&load_site(root).unwrap(), &Config::default());
@@ -298,5 +313,21 @@ mod tests {
                 .contains("regenerate llms.txt from site inventory"),
             "suggestion should point to regeneration from inventory"
         );
+    }
+
+    #[test]
+    fn a_hand_written_llms_txt_may_use_its_own_sections() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><title>x</title></head><body><h1>x</h1></body></html>",
+        );
+        write(
+            &root.join("llms.txt"),
+            "# Site\n\n## What is Site?\nA product.\n",
+        );
+        let findings = run_llm_rules(&load_site(root).unwrap(), &Config::default());
+        assert!(!findings.iter().any(|finding| finding.rule_id == "LLM003"));
     }
 }

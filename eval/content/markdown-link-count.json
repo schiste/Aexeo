@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "fixture_kind": "synthetic_regression",
+  "description": "Synthetic Markdown regression fixture, written to pin specific adapter and gate behaviour. Labels are the expected tool behaviour, not human-reviewed editorial judgements, and results do not estimate production accuracy.",
+  "preset": "fixture",
+  "preset_toml": "version=1\nname='fixture'\n[[gates]]\nid='g'\nkind='link_count'\nmin=1\n",
+  "gate_id": "g",
+  "input_format": "markdown",
+  "examples": [
+    {
+      "id": "literal-email-only",
+      "split": "development",
+      "text": "Write to me@example.org today.\n",
+      "expected": "failed",
+      "why": "A literal email address does not count as a link.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "direct-link",
+      "split": "development",
+      "text": "See [docs](https://example.org).\n",
+      "expected": "passed",
+      "why": "A direct link counts.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "www-autolink",
+      "split": "holdout",
+      "text": "Go to www.example.org now.\n",
+      "expected": "passed",
+      "why": "A bare www address renders as a link.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "no-links",
+      "split": "holdout",
+      "text": "Plain prose.\n",
+      "expected": "failed",
+      "why": "No links.",
+      "review_status": "not_reviewed"
+    }
+  ]
+}

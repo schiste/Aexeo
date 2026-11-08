@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "description": "Synthetic examples, labels not independently reviewed.",
+  "preset": "link-destinations",
+  "preset_toml": "version=1\nname='link destination evaluation'\n[[gates]]\nid='urls'\nkind='link_destinations'\nallowed_schemes=['https']\nblocking=false\n",
+  "input_format": "markdown",
+  "gate_id": "urls",
+  "examples": [
+    {
+      "id": "dev-https",
+      "split": "development",
+      "text": "[Secure](https://example.org/a)",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "dev-bad",
+      "split": "development",
+      "text": "[Script](javascript:alert(1))",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "dev-relative",
+      "split": "development",
+      "text": "[Local](/guide)",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "dev-reference",
+      "split": "development",
+      "text": "[Doc][r]\n\n[r]: http://example.org",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "holdout-multiple",
+      "split": "holdout",
+      "text": "[First](https://example.org) [Second](ftp://example.org/a)",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "holdout-fragment",
+      "split": "holdout",
+      "text": "[Section](#details)",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "holdout-image",
+      "split": "holdout",
+      "text": "![Only an image](javascript:private)",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "holdout-schemeless",
+      "split": "holdout",
+      "text": "[Ambiguous](//example.org/resource)",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    }
+  ]
+}

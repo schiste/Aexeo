@@ -1,0 +1,203 @@
+// Run after the plugin build. Drives the real configured plugin against the
+// real WASM: only the CMS host (KV and content API) is faked, because a stub
+// evaluator is what hid this bug. A save evaluates one document, so every rule
+// that consults other documents sees a one-page site.
+import assert from "node:assert/strict";
+import { createPlugin } from "../dist/configured.js";
+
+const SITE = "https://example.com";
+const LONG_COPY = "Shared paragraph about how the robots are assembled and tested. ".repeat(40);
+
+function block(key, text, style = "normal", href) {
+  return {
+    _type: "block",
+    _key: key,
+    style,
+    markDefs: href === undefined ? [] : [{ _key: `${key}-link`, _type: "link", href }],
+    children: [
+      { _type: "span", text, marks: href === undefined ? [] : [`${key}-link`] },
+    ],
+  };
+}
+
+function item(slug, overrides = {}) {
+  return {
+    id: slug,
+    type: "pages",
+    slug,
+    status: "published",
+    locale: "en",
+    seo: {
+      title: `Title of ${slug}`,
+      description: `Description of ${slug}.`,
+      canonical: `${SITE}/${slug}`,
+    },
+    data: { body: [block("h", `Heading of ${slug}`, "h1")] },
+    ...overrides,
+  };
+}
+
+function fakeHost(items, translations = {}) {
+  const store = new Map();
+  const logged = [];
+  return {
+    store,
+    items,
+    logged,
+    ctx: {
+      kv: {
+        get: async (key) => (store.has(key) ? store.get(key) : null),
+        set: async (key, value) => void store.set(key, value),
+        delete: async (key) => store.delete(key),
+        list: async (prefix = "") =>
+          [...store].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => ({ key, value })),
+      },
+      content: {
+        list: async (collection) => ({
+          items: collection === "pages" ? items : [],
+          hasMore: false,
+        }),
+        getPublicUrl: async (_collection, id) => `${SITE}/${id}`,
+        getTranslations: async (_collection, id) => ({
+          translationGroup: id,
+          translations: translations[id] ?? [],
+        }),
+      },
+      site: { url: SITE, locale: "en" },
+      log: {
+        info: () => {},
+        warn: (message) => logged.push(message),
+        error: (message, data) => logged.push(`${message} ${JSON.stringify(data)}`),
+      },
+    },
+  };
+}
+
+const plugin = createPlugin();
+const refresh = async (host) => {
+  await plugin.routes.refresh.handler(host.ctx);
+  assert.equal(host.logged.length, 0, `refresh logged errors: ${host.logged.join("; ")}`);
+};
+const save = (host, content) =>
+  plugin.hooks["content:afterSave"].handler(
+    { content, collection: "pages", isNew: false },
+    host.ctx,
+  );
+const rulesAt = (host, route) => {
+  const findings = host.store.get(`findings:${route}`)?.findings ?? [];
+  return new Set(findings.map((finding) => finding.rule_id));
+};
+const has = (host, route, ruleId) => rulesAt(host, route).has(ruleId);
+
+// --- A save must not invent findings from its one-page view -----------------
+
+{
+  const home = item("home", {
+    data: {
+      body: [
+        block("h", "Heading of home", "h1"),
+        block("p", "See our pricing page for the plans we offer", "normal", "/pricing"),
+      ],
+    },
+  });
+  const pricing = item("pricing", {
+    data: {
+      body: [
+        block("h", "Heading of pricing", "h1"),
+        block("p", "Back to the home page of the company", "normal", "/home"),
+      ],
+    },
+  });
+  const host = fakeHost([home, pricing]);
+  await refresh(host);
+  assert.equal(has(host, "/home", "LNK001"), false, "the link target exists on the site");
+  assert.equal(has(host, "/pricing", "LNK002"), false, "/home links to /pricing");
+  assert.equal(has(host, "/home", "LNK002"), false, "/pricing links to /home");
+
+  await save(host, home);
+  assert.equal(has(host, "/home", "LNK001"), false, "save reported a false broken link");
+  assert.equal(has(host, "/home", "LNK002"), false, "save reported a false orphan");
+  console.log("WASM save keeps valid links and inbound links clean");
+
+  // Rules that only look at the saved document still update on save.
+  assert.equal(has(host, "/home", "SEO002"), false);
+  const withoutDescription = { ...home, seo: { ...home.seo, description: null } };
+  await save(host, withoutDescription);
+  assert.equal(has(host, "/home", "SEO002"), true, "save must re-evaluate the document's own rules");
+  await save(host, home);
+  assert.equal(has(host, "/home", "SEO002"), false, "save must clear fixed findings");
+  console.log("WASM save still updates document-level findings");
+}
+
+// --- A save must not erase what Refresh found --------------------------------
+
+// Every site-graph rule is triggered on /subject by a Refresh, so each must
+// survive a save of /subject. A rule missing from SITE_GRAPH_RULE_IDS loses its
+// finding here.
+{
+  const subject = item("subject", {
+    seo: { title: "Same title", description: "Same description.", canonical: `${SITE}/subject` },
+    data: {
+      body: [
+        block("h", "Heading of subject", "h1"),
+        block("copy", LONG_COPY),
+        block("broken", "Read the missing page for details", "normal", "/missing"),
+        block("weak", "click here", "normal", "/inbound"),
+      ],
+    },
+  });
+  const twin = item("twin", {
+    seo: { title: "Same title", description: "Same description.", canonical: `${SITE}/twin` },
+    data: subject.data,
+  });
+  const inbound = item("inbound");
+  // /moved canonicalizes to a route that exists only in the whole-site view.
+  const moved = item("moved", {
+    seo: { title: "Moved", description: "Moved page.", canonical: `${SITE}/inbound` },
+  });
+  // /fr-subject exists but does not link back, so the cluster is not reciprocal.
+  const translated = item("fr-subject", { locale: "fr" });
+  const translations = {
+    "fr-subject": [],
+    subject: [
+      { id: "subject", locale: "en", slug: "subject", status: "published", updatedAt: "" },
+      { id: "fr-subject", locale: "fr", slug: "fr-subject", status: "published", updatedAt: "" },
+    ],
+    moved: [
+      { id: "moved", locale: "en", slug: "moved", status: "published", updatedAt: "" },
+      { id: "gone", locale: "fr", slug: "gone", status: "published", updatedAt: "" },
+    ],
+  };
+  const host = fakeHost([subject, twin, inbound, moved, translated], translations);
+  await refresh(host);
+
+  const expected = [
+    ["/subject", "LNK001"],
+    ["/subject", "LNK002"],
+    ["/subject", "LNK003"],
+    ["/subject", "SEO012"],
+    ["/subject", "SEO017"],
+    ["/subject", "CNT005"],
+    ["/moved", "SEO009"],
+    ["/moved", "SEO016"],
+  ];
+  for (const [route, ruleId] of expected) {
+    assert.equal(has(host, route, ruleId), true, `fixture must trigger ${ruleId} on ${route} at Refresh; got ${[...rulesAt(host, route)]}`);
+  }
+
+  for (const [route, content] of [["/subject", subject], ["/moved", moved], ["/inbound", inbound]]) {
+    const before = rulesAt(host, route);
+    await save(host, content);
+    assert.deepEqual(
+      [...rulesAt(host, route)].sort(),
+      [...before].sort(),
+      `saving unchanged ${route} must leave its findings as Refresh stored them`,
+    );
+  }
+  console.log("WASM save preserves stored site-graph findings until Refresh");
+
+  await refresh(host);
+  for (const [route, ruleId] of expected) {
+    assert.equal(has(host, route, ruleId), true, `Refresh must recompute ${ruleId} on ${route}`);
+  }
+}

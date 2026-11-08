@@ -1,10 +1,9 @@
-use crate::time_shim::Instant;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use super::{
     EvidenceSiteAssessment, GroundingCoverageGap, GroundingSiteAnalysis, TrustSurfaceIssueKind,
-    TrustSurfaceReconciliation, TruthAssessment,
+    TrustSurfaceReconciliation, TruthAssessment, TruthStructuredSource,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -15,27 +14,51 @@ pub struct IntelligenceBlocker {
     pub message: String,
 }
 
+/// Per-route facts. A `None` component means "unknown": nothing was measured
+/// for this route, so no number is reported.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RouteIntelligenceScore {
     pub route: String,
-    pub citation_readiness_score: u8,
-    pub truth_consistency_score: u8,
-    pub answer_pack_score: u8,
+    /// `None` when the route makes no assessable claims.
+    pub citation_readiness_score: Option<u8>,
+    /// `None` when the site exposes no structured facts to compare against.
+    pub truth_consistency_score: Option<u8>,
+    /// `None` when the route was not part of the grounding analysis.
+    pub answer_blocks: Option<usize>,
+    /// `None` when the route was not part of the grounding analysis.
+    pub heading_count: Option<usize>,
+    /// The worst issue's value on this route. `None` when no imported trust
+    /// row reports an issue here: the reconciliation does not record which
+    /// routes were covered, so an issue-free route is unknown, not perfect.
     pub external_trust_alignment_score: Option<u8>,
-    pub overall_score: u8,
+    pub external_trust_issue_count: usize,
     pub blockers: Vec<String>,
 }
 
+/// Measured answer structure across the routes in the grounding analysis.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnswerPackFacts {
+    pub routes_analyzed: usize,
+    pub routes_with_answer_blocks: usize,
+    pub routes_with_coverage_gaps: usize,
+    pub answer_blocks: usize,
+}
+
+/// Site-level facts and blockers. There is deliberately no composite: see
+/// CONSTITUTION.md, "No vanity scoring". This is persisted as
+/// `intelligence-score-latest.json`, so it holds no wall-clock data and
+/// identical inputs produce identical bytes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SiteIntelligenceScore {
-    pub citation_readiness_score: u8,
-    pub truth_consistency_score: u8,
-    pub answer_pack_score: u8,
+    /// `None` when no route makes an assessable claim.
+    pub citation_readiness_score: Option<u8>,
+    /// `None` when the site exposes no structured facts to compare against.
+    pub truth_consistency_score: Option<u8>,
+    pub answer_pack: AnswerPackFacts,
+    /// `None` when no trust surface was imported, or the import has no rows.
     pub external_trust_alignment_score: Option<u8>,
-    pub overall_score: u8,
     pub route_scores: Vec<RouteIntelligenceScore>,
     pub blockers: Vec<IntelligenceBlocker>,
-    pub elapsed_us: u64,
 }
 
 pub fn score_intelligence(
@@ -44,31 +67,45 @@ pub fn score_intelligence(
     evidence: &EvidenceSiteAssessment,
     trust: Option<&TrustSurfaceReconciliation>,
 ) -> SiteIntelligenceScore {
-    let started = Instant::now();
-    let citation_readiness_score = evidence.citation_readiness_score;
-    let truth_consistency_score = truth.score;
-    let answer_pack_score = answer_pack_score(grounding);
-    let external_trust_alignment_score = trust.map(trust_alignment_score);
-
-    let route_scores = build_route_scores(grounding, truth, evidence, trust);
-    let blockers = collect_blockers(grounding, truth, evidence, trust);
-    let overall_score = weighted_overall_score(
-        citation_readiness_score,
-        truth_consistency_score,
-        answer_pack_score,
-        external_trust_alignment_score,
-    );
-
     SiteIntelligenceScore {
-        citation_readiness_score,
-        truth_consistency_score,
-        answer_pack_score,
-        external_trust_alignment_score,
-        overall_score,
-        route_scores,
-        blockers,
-        elapsed_us: started.elapsed().as_micros() as u64,
+        citation_readiness_score: site_citation_readiness(evidence),
+        truth_consistency_score: site_truth_score(truth),
+        answer_pack: answer_pack_facts(grounding),
+        external_trust_alignment_score: trust.and_then(trust_alignment_score),
+        route_scores: build_route_scores(grounding, truth, evidence, trust),
+        blockers: collect_blockers(grounding, truth, evidence, trust),
     }
+}
+
+/// What the trust import says about one route: the worst issue wins, and every
+/// issue is counted.
+#[derive(Clone, Copy)]
+struct RouteTrustIssues {
+    worst: u8,
+    count: usize,
+}
+
+fn trust_issues_by_route(
+    trust: Option<&TrustSurfaceReconciliation>,
+) -> BTreeMap<&str, RouteTrustIssues> {
+    let mut by_route = BTreeMap::<&str, RouteTrustIssues>::new();
+    for issue in trust.iter().flat_map(|report| &report.issues) {
+        let Some(route) = issue.route.as_deref() else {
+            continue;
+        };
+        let penalty = trust_penalty(issue.kind());
+        by_route
+            .entry(route)
+            .and_modify(|merged| {
+                merged.worst = merged.worst.min(penalty);
+                merged.count += 1;
+            })
+            .or_insert(RouteTrustIssues {
+                worst: penalty,
+                count: 1,
+            });
+    }
+    by_route
 }
 
 fn build_route_scores(
@@ -87,14 +124,7 @@ fn build_route_scores(
         .iter()
         .map(|route| (route.route.as_str(), route))
         .collect::<BTreeMap<_, _>>();
-    let mut trust_penalties = BTreeMap::<String, u8>::new();
-    if let Some(trust) = trust {
-        for issue in &trust.issues {
-            if let Some(route) = &issue.route {
-                *trust_penalties.entry(route.clone()).or_insert(100) = trust_penalty(issue.kind());
-            }
-        }
-    }
+    let trust_issues = trust_issues_by_route(trust);
 
     let mut routes = grounding
         .routes
@@ -103,50 +133,23 @@ fn build_route_scores(
             let evidence_route = evidence_by_route
                 .get(grounding_route.route.as_str())
                 .copied();
-            let citation_readiness_score = evidence_route
-                .map(|route| route.citation_readiness_score)
-                .unwrap_or(75);
-            let answer_pack_score = route_answer_pack_score(grounding_route);
-            let truth_consistency_score = route_truth_score(&grounding_route.route, truth);
-            let external_trust_alignment_score =
-                trust.map(|_| *trust_penalties.get(&grounding_route.route).unwrap_or(&100));
-            let overall_score = weighted_overall_score(
-                citation_readiness_score,
-                truth_consistency_score,
-                answer_pack_score,
-                external_trust_alignment_score,
+            let mut route = route_facts(
+                &grounding_route.route,
+                evidence_route,
+                truth,
+                trust_issues.get(grounding_route.route.as_str()).copied(),
             );
-            let mut blockers = Vec::new();
-            if let Some(evidence_route) = evidence_route
-                && evidence_route.unsupported_claims > 0
-            {
-                blockers.push(format!(
-                    "{} unsupported claims",
-                    evidence_route.unsupported_claims
-                ));
-            }
-            for gap in &grounding_route.coverage_gaps {
-                blockers.push(gap_label(gap).to_string());
-            }
-            if route_truth_score(&grounding_route.route, truth) < 80 {
-                blockers.push("truth_consistency_gap".to_string());
-            }
-            if let Some(score) = external_trust_alignment_score
-                && score < 100
-            {
-                blockers.push("external_trust_alignment_gap".to_string());
-            }
-            blockers.sort();
-            blockers.dedup();
-            RouteIntelligenceScore {
-                route: grounding_route.route.clone(),
-                citation_readiness_score,
-                truth_consistency_score,
-                answer_pack_score,
-                external_trust_alignment_score,
-                overall_score,
-                blockers,
-            }
+            route.answer_blocks = Some(grounding_route.answer_blocks);
+            route.heading_count = Some(grounding_route.heading_count);
+            route.blockers.extend(
+                grounding_route
+                    .coverage_gaps
+                    .iter()
+                    .map(|gap| gap_label(gap).to_string()),
+            );
+            route.blockers.sort();
+            route.blockers.dedup();
+            route
         })
         .collect::<Vec<_>>();
 
@@ -155,33 +158,60 @@ fn build_route_scores(
         .iter()
         .filter(|route| !grounding_by_route.contains_key(route.route.as_str()))
     {
-        routes.push(RouteIntelligenceScore {
-            route: route.route.clone(),
-            citation_readiness_score: route.citation_readiness_score,
-            truth_consistency_score: truth.score,
-            answer_pack_score: 75,
-            external_trust_alignment_score: trust.map(|_| 100),
-            overall_score: weighted_overall_score(
-                route.citation_readiness_score,
-                truth.score,
-                75,
-                trust.map(|_| 100),
-            ),
-            blockers: if route.unsupported_claims > 0 {
-                vec![format!("{} unsupported claims", route.unsupported_claims)]
-            } else {
-                Vec::new()
-            },
-        });
+        routes.push(route_facts(
+            &route.route,
+            Some(route),
+            truth,
+            trust_issues.get(route.route.as_str()).copied(),
+        ));
     }
 
     routes.sort_by(|left, right| {
-        left.overall_score
-            .cmp(&right.overall_score)
-            .then_with(|| right.blockers.len().cmp(&left.blockers.len()))
+        right
+            .blockers
+            .len()
+            .cmp(&left.blockers.len())
             .then_with(|| left.route.cmp(&right.route))
     });
     routes
+}
+
+/// The facts every route has, whichever analysis it came from. Grounding facts
+/// start unknown and are filled in by the caller when the route was analyzed.
+fn route_facts(
+    route: &str,
+    evidence_route: Option<&super::EvidenceRouteAssessment>,
+    truth: &TruthAssessment,
+    trust_issues: Option<RouteTrustIssues>,
+) -> RouteIntelligenceScore {
+    let truth_consistency_score = route_truth_score(route, truth);
+    let mut blockers = Vec::new();
+    if let Some(evidence_route) = evidence_route
+        && evidence_route.unsupported_claims > 0
+    {
+        blockers.push(format!(
+            "{} unsupported claims",
+            evidence_route.unsupported_claims
+        ));
+    }
+    if truth_consistency_score.is_some_and(|score| score < 80) {
+        blockers.push("truth_consistency_gap".to_string());
+    }
+    if trust_issues.is_some() {
+        blockers.push("external_trust_alignment_gap".to_string());
+    }
+    RouteIntelligenceScore {
+        route: route.to_string(),
+        citation_readiness_score: evidence_route
+            .filter(|route| route.claim_count > 0)
+            .map(|route| route.citation_readiness_score),
+        truth_consistency_score,
+        answer_blocks: None,
+        heading_count: None,
+        external_trust_alignment_score: trust_issues.map(|issues| issues.worst),
+        external_trust_issue_count: trust_issues.map_or(0, |issues| issues.count),
+        blockers,
+    }
 }
 
 fn collect_blockers(
@@ -191,6 +221,15 @@ fn collect_blockers(
     trust: Option<&TrustSurfaceReconciliation>,
 ) -> Vec<IntelligenceBlocker> {
     let mut blockers = Vec::new();
+    if matches!(truth.structured_truth_source, TruthStructuredSource::None) {
+        blockers.push(IntelligenceBlocker {
+            category: "truth".to_string(),
+            route: None,
+            severity: 90,
+            message: "no structured facts to check: add schema.org JSON-LD or a facts manifest"
+                .to_string(),
+        });
+    }
     for mismatch in &truth.mismatches {
         blockers.push(IntelligenceBlocker {
             category: "truth".to_string(),
@@ -249,109 +288,65 @@ fn collect_blockers(
     blockers
 }
 
-fn answer_pack_score(grounding: &GroundingSiteAnalysis) -> u8 {
-    let total = grounding
+fn answer_pack_facts(grounding: &GroundingSiteAnalysis) -> AnswerPackFacts {
+    AnswerPackFacts {
+        routes_analyzed: grounding.routes.len(),
+        routes_with_answer_blocks: grounding
+            .routes
+            .iter()
+            .filter(|route| route.answer_blocks > 0)
+            .count(),
+        routes_with_coverage_gaps: grounding
+            .routes
+            .iter()
+            .filter(|route| !route.coverage_gaps.is_empty())
+            .count(),
+        answer_blocks: grounding
+            .routes
+            .iter()
+            .map(|route| route.answer_blocks)
+            .sum(),
+    }
+}
+
+/// Mean readiness over the routes that make claims. The evidence report gives
+/// claim-free pages a default density, so including them would average that
+/// default into a number that looks measured.
+fn site_citation_readiness(evidence: &EvidenceSiteAssessment) -> Option<u8> {
+    let scores = evidence
         .routes
         .iter()
-        .map(|route| u64::from(route_answer_pack_score(route)))
-        .sum::<u64>();
-    (total / grounding.routes.len().max(1) as u64) as u8
+        .filter(|route| route.claim_count > 0)
+        .map(|route| u64::from(route.citation_readiness_score))
+        .collect::<Vec<_>>();
+    let mean = scores
+        .iter()
+        .sum::<u64>()
+        .checked_div(scores.len() as u64)?;
+    Some(mean as u8)
 }
 
-fn route_answer_pack_score(route: &super::GroundingRouteAnalysis) -> u8 {
-    let mut score = route_answer_pack_baseline(route.primary_intent.clone());
-
-    score = score.saturating_add(match route.answer_blocks {
-        0 => 0,
-        1 => 4,
-        2..=3 => 9,
-        _ => 12,
-    });
-
-    score = score.saturating_add(match route.heading_count {
-        0..=1 => 0,
-        2 => 3,
-        3..=4 => 6,
-        _ => 8,
-    });
-
-    score = score.saturating_add(match route.secondary_intents.len() {
-        0 => 0,
-        1 => 2,
-        _ => 4,
-    });
-
-    if route.page_kind == "detail" && route.answer_blocks >= 2 {
-        score = score.saturating_add(4);
-    }
-
-    for gap in &route.coverage_gaps {
-        score = score.saturating_sub(match gap {
-            GroundingCoverageGap::MissingDirectAnswer => 20,
-            GroundingCoverageGap::ThinAnswerCoverage => 15,
-            GroundingCoverageGap::WeakComparisonStructure => 15,
-            GroundingCoverageGap::MissingPricingSignals => 10,
-            GroundingCoverageGap::MissingProceduralSignals => 10,
-        });
-    }
-
-    score.min(100)
+/// Without schema or a manifest, `truth.score` is its ceiling less penalties
+/// for the absent schema: there was nothing to be consistent with.
+fn site_truth_score(truth: &TruthAssessment) -> Option<u8> {
+    (!matches!(truth.structured_truth_source, TruthStructuredSource::None)).then_some(truth.score)
 }
 
-fn route_answer_pack_baseline(intent: super::GroundingIntentFamily) -> u8 {
-    match intent {
-        super::GroundingIntentFamily::Feature => 78,
-        super::GroundingIntentFamily::Comparison => 76,
-        super::GroundingIntentFamily::Definition => 74,
-        super::GroundingIntentFamily::Procedural => 74,
-        super::GroundingIntentFamily::Pricing => 74,
-        super::GroundingIntentFamily::Troubleshooting => 72,
-        super::GroundingIntentFamily::Asset => 72,
-        super::GroundingIntentFamily::Reference => 68,
-        super::GroundingIntentFamily::Generic => 64,
-    }
-}
-
-fn route_truth_score(route: &str, truth: &TruthAssessment) -> u8 {
+fn route_truth_score(route: &str, truth: &TruthAssessment) -> Option<u8> {
     let penalties = truth
         .mismatches
         .iter()
         .filter(|mismatch| mismatch.route == route)
         .count()
         .min(4) as u8;
-    truth.score.saturating_sub(penalties * 10)
+    site_truth_score(truth).map(|score| score.saturating_sub(penalties * 10))
 }
 
-fn trust_alignment_score(report: &TrustSurfaceReconciliation) -> u8 {
-    if report.rows_read == 0 {
-        return 100;
-    }
-    let match_ratio = ((report.matched_first_party_routes * 100) / report.rows_read) as u8;
+fn trust_alignment_score(report: &TrustSurfaceReconciliation) -> Option<u8> {
+    let match_ratio =
+        (report.matched_first_party_routes * 100).checked_div(report.rows_read)? as u8;
     let issue_penalty = (report.issues.len().min(10) * 7) as u8;
-    match_ratio.saturating_sub(issue_penalty).max(40)
-}
-
-fn weighted_overall_score(
-    citation_readiness_score: u8,
-    truth_consistency_score: u8,
-    answer_pack_score: u8,
-    external_trust_alignment_score: Option<u8>,
-) -> u8 {
-    match external_trust_alignment_score {
-        Some(trust) => {
-            ((u32::from(citation_readiness_score) * 35
-                + u32::from(truth_consistency_score) * 30
-                + u32::from(answer_pack_score) * 25
-                + u32::from(trust) * 10)
-                / 100) as u8
-        }
-        None => {
-            ((u32::from(citation_readiness_score) * 40
-                + u32::from(truth_consistency_score) * 35
-                + u32::from(answer_pack_score) * 25)
-                / 100) as u8
-        }
-    }
+    Some(match_ratio.saturating_sub(issue_penalty))
 }
 
 fn gap_label(gap: &GroundingCoverageGap) -> &'static str {
@@ -426,8 +421,8 @@ mod tests {
         }
     }
 
-    fn trust_report_base() -> super::TrustSurfaceReconciliation {
-        super::TrustSurfaceReconciliation {
+    fn trust_report_base() -> TrustSurfaceReconciliation {
+        TrustSurfaceReconciliation {
             rows_read: 0,
             matched_first_party_routes: 0,
             offsite_mentions: 0,
@@ -437,8 +432,8 @@ mod tests {
         }
     }
     use crate::intelligence::{
-        GroundingIntentFamily, GroundingRouteAnalysis, TruthMismatch, TruthMismatchSeverity,
-        TruthStructuredSource,
+        EvidenceRouteAssessment, GroundingIntentFamily, GroundingRouteAnalysis, TrustSurfaceIssue,
+        TruthMismatch, TruthMismatchSeverity,
     };
 
     #[test]
@@ -498,7 +493,7 @@ mod tests {
             evidence_quality_score: 40,
             citation_readiness_score: 55,
             average_fidelity_risk_score: 60,
-            routes: vec![super::super::EvidenceRouteAssessment {
+            routes: vec![EvidenceRouteAssessment {
                 route: "pricing".to_string(),
                 sections: Vec::new(),
                 claim_count: 1,
@@ -512,113 +507,253 @@ mod tests {
         };
         let report = score_intelligence(&grounding, &truth, &evidence, None);
         assert_eq!(report.route_scores.len(), 1);
-        assert!(report.overall_score < 80);
+        assert_eq!(report.citation_readiness_score, Some(55));
+        assert_eq!(report.truth_consistency_score, Some(82));
+        assert_eq!(
+            report.answer_pack,
+            AnswerPackFacts {
+                routes_analyzed: 1,
+                routes_with_answer_blocks: 1,
+                routes_with_coverage_gaps: 1,
+                answer_blocks: 1,
+            }
+        );
+        assert_eq!(report.external_trust_alignment_score, None);
+        assert_eq!(report.route_scores[0].answer_blocks, Some(1));
         assert!(!report.blockers.is_empty());
     }
 
-    #[test]
-    fn answer_pack_scoring_requires_real_structure_for_perfect_scores() {
-        let generic_route = GroundingRouteAnalysis {
-            route: String::new(),
-            page_kind: "landing".to_string(),
-            primary_topic: "home".to_string(),
-            secondary_topics: Vec::new(),
-            primary_intent: GroundingIntentFamily::Generic,
-            secondary_intents: Vec::new(),
-            intents: vec![GroundingIntentFamily::Generic],
-            intent_matches: Vec::new(),
-            schema_types: Vec::new(),
-            signals: Vec::new(),
-            coverage_gaps: Vec::new(),
-            answer_blocks: 1,
-            heading_count: 1,
-        };
-        let rich_feature_route = GroundingRouteAnalysis {
-            route: "features/hyperlinks".to_string(),
+    fn grounding_base(routes: Vec<GroundingRouteAnalysis>) -> GroundingSiteAnalysis {
+        GroundingSiteAnalysis {
+            pages_analyzed: routes.len(),
+            routes_with_topics: routes.len(),
+            intent_distribution: BTreeMap::new(),
+            primary_intent_distribution: BTreeMap::new(),
+            topic_clusters: BTreeMap::new(),
+            routes,
+            elapsed_us: 0,
+        }
+    }
+
+    fn grounding_route(route: &str) -> GroundingRouteAnalysis {
+        GroundingRouteAnalysis {
+            route: route.to_string(),
             page_kind: "detail".to_string(),
-            primary_topic: "hyperlinks".to_string(),
-            secondary_topics: vec!["terminal hyperlinks".to_string()],
+            primary_topic: "topic".to_string(),
+            secondary_topics: Vec::new(),
             primary_intent: GroundingIntentFamily::Feature,
-            secondary_intents: vec![GroundingIntentFamily::Definition],
-            intents: vec![
-                GroundingIntentFamily::Feature,
-                GroundingIntentFamily::Definition,
-            ],
+            secondary_intents: Vec::new(),
+            intents: vec![GroundingIntentFamily::Feature],
             intent_matches: Vec::new(),
             schema_types: Vec::new(),
             signals: Vec::new(),
             coverage_gaps: Vec::new(),
-            answer_blocks: 4,
-            heading_count: 5,
+            answer_blocks: 0,
+            heading_count: 1,
+        }
+    }
+
+    fn evidence_route(route: &str, claim_count: usize) -> EvidenceRouteAssessment {
+        EvidenceRouteAssessment {
+            route: route.to_string(),
+            sections: Vec::new(),
+            claim_count,
+            unsupported_claims: 0,
+            evidence_density_score: 90,
+            evidence_quality_score: 0,
+            citation_readiness_score: 58,
+            fidelity_risk_score: 0,
+        }
+    }
+
+    fn evidence_base(routes: Vec<EvidenceRouteAssessment>) -> EvidenceSiteAssessment {
+        EvidenceSiteAssessment {
+            pages_analyzed: routes.len(),
+            routes_with_claims: 0,
+            claim_count: 0,
+            unsupported_claims: 0,
+            claim_kind_distribution: BTreeMap::new(),
+            evidence_density_score: 0,
+            evidence_quality_score: 0,
+            citation_readiness_score: 58,
+            average_fidelity_risk_score: 0,
+            routes,
+            elapsed_us: 0,
+        }
+    }
+
+    fn trust_issue(route: &str, kind: TrustSurfaceIssueKind) -> TrustSurfaceIssue {
+        TrustSurfaceIssue {
+            source_type: "search_console".to_string(),
+            url: format!("https://example.com/{route}"),
+            route: Some(route.to_string()),
+            kind,
+            message: "issue".to_string(),
+        }
+    }
+
+    /// The composite and the wall clock are gone from the persisted artifact:
+    /// consumers must not find either, and identical runs serialize alike.
+    #[test]
+    fn serialized_report_has_no_composite_or_timing_and_is_stable() {
+        let grounding = grounding_base(vec![grounding_route("a")]);
+        let evidence = evidence_base(vec![evidence_route("a", 1)]);
+        let truth = truth_assessment_base();
+        let first = serde_json::to_value(score_intelligence(&grounding, &truth, &evidence, None))
+            .expect("serialize");
+        let second = serde_json::to_value(score_intelligence(&grounding, &truth, &evidence, None))
+            .expect("serialize");
+        assert_eq!(first, second);
+        let text = first.to_string();
+        for removed in ["overall_score", "elapsed_us", "answer_pack_score"] {
+            assert!(!text.contains(removed), "{removed} in {text}");
+        }
+    }
+
+    /// A claim-free route used to report 75 or the evidence report's default;
+    /// nothing was measured, so its readiness is unknown. The same default
+    /// must not leak into the site mean.
+    #[test]
+    fn citation_readiness_is_unknown_without_claims() {
+        let grounding = grounding_base(vec![
+            grounding_route("no-evidence"),
+            grounding_route("no-claims"),
+            grounding_route("claims"),
+        ]);
+        let mut with_claims = evidence_route("claims", 2);
+        with_claims.citation_readiness_score = 40;
+        let evidence = evidence_base(vec![evidence_route("no-claims", 0), with_claims]);
+        let report = score_intelligence(&grounding, &truth_assessment_base(), &evidence, None);
+
+        let readiness = |route: &str| {
+            report
+                .route_scores
+                .iter()
+                .find(|item| item.route == route)
+                .expect("route")
+                .citation_readiness_score
         };
+        assert_eq!(readiness("no-evidence"), None);
+        assert_eq!(readiness("no-claims"), None);
+        assert_eq!(readiness("claims"), Some(40));
+        assert_eq!(report.citation_readiness_score, Some(40));
 
-        assert_eq!(route_answer_pack_score(&generic_route), 68);
-        assert_eq!(route_answer_pack_score(&rich_feature_route), 100);
+        let no_claims = evidence_base(vec![evidence_route("no-claims", 0)]);
+        let report = score_intelligence(&grounding, &truth_assessment_base(), &no_claims, None);
+        assert_eq!(report.citation_readiness_score, None);
     }
 
-    /// The weighting is the score, so a silent change here would move every
-    /// reported number without failing anything.
-    ///
-    /// With a trust surface present the four components are weighted
-    /// 35/30/25/10. Without one, trust is dropped and the remaining three
-    /// take its share: 40/35/25. Both sets must sum to 100, or the overall
-    /// score is silently rescaled.
+    /// A route known only to the evidence report has unknown answer structure
+    /// (it used to report a flat 75), and trust issues still apply to it.
     #[test]
-    fn overall_score_weights_sum_to_one_hundred() {
-        const WITH_TRUST: [u8; 4] = [35, 30, 25, 10];
-        const WITHOUT_TRUST: [u8; 3] = [40, 35, 25];
-        assert_eq!(WITH_TRUST.iter().map(|w| *w as u32).sum::<u32>(), 100);
-        assert_eq!(WITHOUT_TRUST.iter().map(|w| *w as u32).sum::<u32>(), 100);
+    fn evidence_only_route_has_unknown_answer_structure_and_keeps_trust_issues() {
+        let report = score_intelligence(
+            &grounding_base(Vec::new()),
+            &truth_assessment_base(),
+            &evidence_base(vec![evidence_route("only-evidence", 1)]),
+            Some(&TrustSurfaceReconciliation {
+                rows_read: 1,
+                issues: vec![trust_issue(
+                    "only-evidence",
+                    TrustSurfaceIssueKind::RouteNotInSite,
+                )],
+                ..trust_report_base()
+            }),
+        );
+        let route = &report.route_scores[0];
+        assert_eq!(route.answer_blocks, None);
+        assert_eq!(route.heading_count, None);
+        assert_eq!(route.external_trust_alignment_score, Some(45));
+        assert_eq!(route.external_trust_issue_count, 1);
     }
 
+    /// Without schema or a manifest, there is nothing to be consistent with:
+    /// the facts dimension is unknown and the missing input is the blocker.
     #[test]
-    fn overall_score_is_the_weighted_average_of_its_inputs() {
-        // 100 * 35 + 100 * 30 + 100 * 25 + 100 * 10 = 100.
-        assert_eq!(weighted_overall_score(100, 100, 100, Some(100)), 100);
-        // 0 everywhere is 0.
-        assert_eq!(weighted_overall_score(0, 0, 0, Some(0)), 0);
-        // Only citation readiness: 100 * 35 / 100 = 35.
-        assert_eq!(weighted_overall_score(100, 0, 0, Some(0)), 35);
-        // Without a trust surface, citation readiness is worth 40.
-        assert_eq!(weighted_overall_score(100, 0, 0, None), 40);
-    }
-
-    /// A missing trust surface must not be treated as a zero score; that
-    /// would punish a site for not opting into a surface it never claimed.
-    #[test]
-    fn absent_trust_surface_scores_higher_than_a_zero_one() {
-        let without = weighted_overall_score(80, 80, 80, None);
-        let with_zero = weighted_overall_score(80, 80, 80, Some(0));
+    fn truth_consistency_is_unknown_without_structured_facts() {
+        let truth = TruthAssessment {
+            score: 43,
+            ..truth_assessment_base()
+        };
+        let report = score_intelligence(
+            &grounding_base(vec![grounding_route("a")]),
+            &truth,
+            &evidence_base(Vec::new()),
+            None,
+        );
+        assert_eq!(report.truth_consistency_score, None);
+        let route = &report.route_scores[0];
+        assert_eq!(route.truth_consistency_score, None);
+        assert!(!route.blockers.iter().any(|b| b == "truth_consistency_gap"));
         assert!(
-            without > with_zero,
-            "omitting trust ({without}) must beat scoring it zero ({with_zero})"
+            report
+                .blockers
+                .iter()
+                .any(|b| b.category == "truth" && b.route.is_none()),
+            "{:?}",
+            report.blockers
         );
     }
 
-    /// Every intent family needs a baseline; a missing arm would make a
-    /// route silently score as if it were a different kind of page.
+    /// The worst issue wins whatever order the import lists them in: a later
+    /// DescriptorGap (70) must not raise a RouteNotInSite (45), and both count.
     #[test]
-    fn every_intent_family_has_a_baseline() {
-        use crate::intelligence::grounding::GroundingIntentFamily::*;
-        for (intent, expected) in [
-            (Feature, 78),
-            (Comparison, 76),
-            (Definition, 74),
-            (Procedural, 74),
-            (Pricing, 74),
-            (Troubleshooting, 72),
-            (Asset, 72),
-            (Reference, 68),
-            (Generic, 64),
-        ]
-        .into_iter()
-        {
-            assert_eq!(
-                route_answer_pack_baseline(intent.clone()),
-                expected,
-                "baseline for {intent:?}"
+    fn route_trust_merge_keeps_the_worst_issue_and_counts_all() {
+        for issues in [
+            vec![
+                trust_issue("a", TrustSurfaceIssueKind::RouteNotInSite),
+                trust_issue("a", TrustSurfaceIssueKind::DescriptorGap),
+            ],
+            vec![
+                trust_issue("a", TrustSurfaceIssueKind::DescriptorGap),
+                trust_issue("a", TrustSurfaceIssueKind::RouteNotInSite),
+            ],
+        ] {
+            let report = score_intelligence(
+                &grounding_base(vec![grounding_route("a"), grounding_route("clean")]),
+                &truth_assessment_base(),
+                &evidence_base(Vec::new()),
+                Some(&TrustSurfaceReconciliation {
+                    rows_read: 2,
+                    issues,
+                    ..trust_report_base()
+                }),
             );
+            let route = |name: &str| {
+                report
+                    .route_scores
+                    .iter()
+                    .find(|item| item.route == name)
+                    .expect("route")
+            };
+            assert_eq!(route("a").external_trust_alignment_score, Some(45));
+            assert_eq!(route("a").external_trust_issue_count, 2);
+            assert_eq!(route("clean").external_trust_alignment_score, None);
+            assert_eq!(route("clean").external_trust_issue_count, 0);
         }
+    }
+
+    /// Routes come back most-blocked first, then by name, with no score to
+    /// sort on.
+    #[test]
+    fn routes_sort_by_blocker_count_then_name() {
+        let mut blocked = grounding_route("z-blocked");
+        blocked.coverage_gaps = vec![GroundingCoverageGap::MissingDirectAnswer];
+        let report = score_intelligence(
+            &grounding_base(vec![grounding_route("b"), grounding_route("a"), blocked]),
+            &TruthAssessment {
+                structured_truth_source: TruthStructuredSource::SchemaAndManifest,
+                ..truth_assessment_base()
+            },
+            &evidence_base(Vec::new()),
+            None,
+        );
+        let order = report
+            .route_scores
+            .iter()
+            .map(|route| route.route.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(order, ["z-blocked", "a", "b"]);
     }
 
     /// Every grounding gap needs a stable label (it appears in report output
@@ -651,15 +786,14 @@ mod tests {
         );
     }
 
-    /// Trust penalties are bounded so a route with many issues cannot drive
-    /// the trust sub-score to zero and take the whole score with it.
+    /// Trust penalties stay in the range the route value is reported in.
     #[test]
     fn every_trust_issue_kind_has_a_bounded_penalty() {
         for kind in [
-            super::TrustSurfaceIssueKind::RouteNotInSite,
-            super::TrustSurfaceIssueKind::MissingCanonicalEntity,
-            super::TrustSurfaceIssueKind::ForbiddenTerminology,
-            super::TrustSurfaceIssueKind::DescriptorGap,
+            TrustSurfaceIssueKind::RouteNotInSite,
+            TrustSurfaceIssueKind::MissingCanonicalEntity,
+            TrustSurfaceIssueKind::ForbiddenTerminology,
+            TrustSurfaceIssueKind::DescriptorGap,
         ] {
             let penalty = trust_penalty(kind.clone());
             assert!((1..=100).contains(&penalty), "{kind:?} penalty {penalty}");
@@ -667,62 +801,61 @@ mod tests {
     }
 
     /// A truth mismatch on a route degrades that route, capped at four so a
-    /// pathologically noisy route cannot zero out the score, and other routes
+    /// pathologically noisy route cannot zero out the value, and other routes
     /// are unaffected.
     #[test]
     fn truth_mismatches_penalise_only_their_own_route_and_are_capped() {
-        let base = TruthAssessment {
-            score: 90,
-            mismatches: vec![],
+        let structured = || TruthAssessment {
+            structured_truth_source: TruthStructuredSource::Schema,
             ..truth_assessment_base()
         };
-        assert_eq!(route_truth_score("/a", &base), 90);
+        assert_eq!(route_truth_score("/a", &structured()), Some(90));
 
         let one = TruthAssessment {
             mismatches: vec![mismatch("/a")],
-            ..truth_assessment_base()
+            ..structured()
         };
-        assert_eq!(route_truth_score("/a", &one), 80, "one mismatch costs 10");
-        assert_eq!(route_truth_score("/b", &one), 90, "other routes untouched");
+        assert_eq!(
+            route_truth_score("/a", &one),
+            Some(80),
+            "one mismatch costs 10"
+        );
+        assert_eq!(
+            route_truth_score("/b", &one),
+            Some(90),
+            "other routes untouched"
+        );
 
         // Five mismatches still cost 40, not 50: the cap is at four.
         let many = TruthAssessment {
             mismatches: (0..5).map(|_| mismatch("/a")).collect(),
-            ..truth_assessment_base()
+            ..structured()
         };
-        assert_eq!(route_truth_score("/a", &many), 50);
+        assert_eq!(route_truth_score("/a", &many), Some(50));
     }
 
-    /// The trust sub-score has a floor of 40 and a 100 ceiling: a site with
-    /// no trust surface at all is perfect on that axis, not zero.
+    /// An import with no rows measured nothing: unknown, not a perfect 100.
+    /// A real import reports what it found, with no floor holding it at 40.
     #[test]
-    fn trust_alignment_is_bounded_and_defaults_to_perfect() {
-        let empty = super::TrustSurfaceReconciliation {
+    fn trust_alignment_is_unknown_when_empty_and_has_no_floor() {
+        let empty = TrustSurfaceReconciliation {
             rows_read: 0,
             ..trust_report_base()
         };
-        assert_eq!(
-            trust_alignment_score(&empty),
-            100,
-            "an unread trust surface must not penalise a site"
-        );
+        assert_eq!(trust_alignment_score(&empty), None);
 
-        let all_matched = super::TrustSurfaceReconciliation {
+        let all_matched = TrustSurfaceReconciliation {
             rows_read: 4,
             matched_first_party_routes: 4,
             ..trust_report_base()
         };
-        assert_eq!(trust_alignment_score(&all_matched), 100);
+        assert_eq!(trust_alignment_score(&all_matched), Some(100));
 
-        let none_matched = super::TrustSurfaceReconciliation {
+        let none_matched = TrustSurfaceReconciliation {
             rows_read: 4,
             matched_first_party_routes: 0,
             ..trust_report_base()
         };
-        let score = trust_alignment_score(&none_matched);
-        assert!(
-            (40..=100).contains(&score),
-            "trust score {score} escaped the documented 40..100 band"
-        );
+        assert_eq!(trust_alignment_score(&none_matched), Some(0));
     }
 }

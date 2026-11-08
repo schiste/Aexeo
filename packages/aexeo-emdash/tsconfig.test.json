@@ -11,8 +11,8 @@
   // `npm run typecheck` runs both.
   //
   // `noEmit` is explicit because the inherited `declaration`/`outDir`/
-  // `rootDir` trio is emit-shaped, and `rootDir` is widened to "." so
-  // tests/ and vitest.config.ts are inside the program.
+  // `rootDir` trio is emit-shaped, and `rootDir` is widened to ".." so tests can also validate the sibling
+  // sidecar preset evaluator without changing build outputs.
   //
   // `tests/fixtures/plugin-host/dist/**` is excluded: the emdash test-host
   // plugin generates a bundled runtime plus .d.mts type probe there on
@@ -29,7 +29,7 @@
     "declaration": false,
     "declarationMap": false,
     "sourceMap": false,
-    "rootDir": "."
+    "rootDir": ".."
   },
   "include": [
     "src/**/*.ts",

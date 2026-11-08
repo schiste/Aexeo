@@ -51,10 +51,11 @@ export function findingsByRoute(
 
 // Backed by the bridge's wasm-bindgen scoreIntelligence export. Passes
 // the full document set in one call; the bridge builds the Site,
-// computes grounding/truth/evidence, and runs score_intelligence.
+// computes grounding/truth/evidence, and runs score_intelligence. Null means
+// no score is available, which only the sandbox stub reports.
 export async function scoreSite(
   documents: readonly EmdashDocument[],
-): Promise<SiteIntelligenceScore> {
+): Promise<SiteIntelligenceScore | null> {
   const raw = scoreIntelligence(JSON.stringify(documents));
   return JSON.parse(raw) as SiteIntelligenceScore;
 }

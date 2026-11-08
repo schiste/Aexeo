@@ -1,0 +1,3 @@
+version = 1
+name = "Article readability starter"
+extends = ["article-editorial", "readability"]

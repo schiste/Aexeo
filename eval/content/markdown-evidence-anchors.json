@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "fixture_kind": "synthetic_regression",
+  "description": "Synthetic Markdown regression fixture, written to pin specific adapter and gate behaviour. Labels are the expected tool behaviour, not human-reviewed editorial judgements, and results do not estimate production accuracy.",
+  "preset": "fixture",
+  "preset_toml": "version=1\nname='fixture'\n[[gates]]\nid='g'\nkind='evidence_anchors'\nsource='source'\nclaim='rose by ten percent'\nquote='ten percent'\n",
+  "gate_id": "g",
+  "input_format": "markdown",
+  "evidence_sources": {
+    "source": "Sales grew ten percent.\n"
+  },
+  "examples": [
+    {
+      "id": "soft-wrapped-claim",
+      "split": "development",
+      "text": "Sales rose by\nten percent.\n",
+      "expected": "passed",
+      "why": "A wrapped claim is present.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "absent-claim",
+      "split": "development",
+      "text": "Sales fell.\n",
+      "expected": "failed",
+      "why": "The claim does not occur.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "indented-wrap",
+      "split": "holdout",
+      "text": "- Sales rose\n  by ten\n  percent.\n",
+      "expected": "passed",
+      "why": "A claim wrapped within a list item is present.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "across-bullets",
+      "split": "holdout",
+      "text": "- Sales rose by\n- ten percent.\n",
+      "expected": "failed",
+      "why": "A claim split between list items is absent.",
+      "review_status": "not_reviewed"
+    }
+  ]
+}

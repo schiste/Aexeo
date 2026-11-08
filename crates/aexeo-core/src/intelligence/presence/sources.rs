@@ -31,14 +31,6 @@ const PRESENCE_USER_AGENT: &str = concat!(
     " (+https://github.com/schiste/Aexeo; entity-presence diagnostic)",
 );
 
-// The Common Crawl index is a moving target — a new month-stamped
-// crawl ships every 4–6 weeks. Pinning here is intentional: it
-// keeps the diagnostic deterministic, surfaces clearly when we
-// drift, and avoids one extra round-trip to the index-of-indexes
-// on every run. A periodic version bump that updates this constant
-// is part of expected plugin/CLI maintenance.
-const COMMON_CRAWL_INDEX: &str = "CC-MAIN-2026-15";
-
 /// Base endpoints for the five presence sources.
 ///
 /// These were inline string literals in each fetcher, which made the whole
@@ -55,20 +47,21 @@ pub(crate) struct SourceEndpoints {
     pub github_api: String,
     pub github_profile_base: String,
     pub rdap_base: String,
-    pub common_crawl_index: String,
+    /// Serves `collinfo.json` and one `<id>-index` CDX endpoint per crawl.
+    pub common_crawl_base: String,
 }
 
 impl SourceEndpoints {
-    /// The real upstream endpoints.
-    pub fn production() -> Self {
+    /// The real upstream endpoints, searching one Wikipedia language edition.
+    pub fn production(wikipedia_language: &str) -> Self {
         Self {
-            wikipedia_api: "https://en.wikipedia.org/w/api.php".to_string(),
+            wikipedia_api: format!("https://{wikipedia_language}.wikipedia.org/w/api.php"),
             wikidata_api: "https://www.wikidata.org/w/api.php".to_string(),
             wikidata_article_base: "https://www.wikidata.org/wiki".to_string(),
             github_api: "https://api.github.com/users".to_string(),
             github_profile_base: "https://github.com".to_string(),
             rdap_base: "https://rdap.org/domain".to_string(),
-            common_crawl_index: format!("https://index.commoncrawl.org/{COMMON_CRAWL_INDEX}-index"),
+            common_crawl_base: "https://index.commoncrawl.org".to_string(),
         }
     }
 }
@@ -77,7 +70,10 @@ impl SourceEndpoints {
 /// the truth manifest. Order of returned results matches
 /// SOURCE_ORDER in `types.rs`.
 pub fn check_all_sources(input: &EntityInput) -> Vec<SourceResult> {
-    check_all_sources_with(input, &SourceEndpoints::production())
+    check_all_sources_with(
+        input,
+        &SourceEndpoints::production(&input.wikipedia_language),
+    )
 }
 
 /// `check_all_sources` against caller-supplied endpoints, so tests can point
@@ -181,11 +177,16 @@ fn check_wikipedia(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    if title.is_empty() {
-        return not_found_result("wikipedia");
-    }
-    if !fuzzy_match(&title, &input.name) {
-        return not_found_result("wikipedia");
+    if title.is_empty() || !fuzzy_match(&title, &input.name) {
+        // One edition's silence says nothing about the others, so the result
+        // must not read as "no Wikipedia article anywhere".
+        return SourceResult {
+            extra: Some(format!(
+                "searched {}.wikipedia.org only",
+                input.wikipedia_language
+            )),
+            ..not_found_result("wikipedia")
+        };
     }
     let article_url = urls
         .and_then(|u| u.first())
@@ -582,7 +583,11 @@ fn check_common_crawl(
             "no website URL in manifest, can't query crawl index",
         );
     };
-    let mut url = match Url::parse(&endpoints.common_crawl_index) {
+    let index = match latest_common_crawl_index(client, endpoints) {
+        Ok(index) => index,
+        Err(result) => return *result,
+    };
+    let mut url = match Url::parse(&format!("{}/{index}-index", endpoints.common_crawl_base)) {
         Ok(u) => u,
         Err(err) => {
             return unreachable_result("common_crawl", &format!("URL build failed: {err}"));
@@ -626,12 +631,44 @@ fn check_common_crawl(
     };
     let extra = match parsed.get("timestamp").and_then(Value::as_str) {
         Some(ts) => Some(format!(
-            "last seen in {COMMON_CRAWL_INDEX} at {}",
+            "last seen in {index} at {}",
             format_cdx_timestamp(ts)
         )),
-        None => Some(format!("present in {COMMON_CRAWL_INDEX}")),
+        None => Some(format!("present in {index}")),
     };
     found_result("common_crawl", host, None, extra)
+}
+
+/// Ask the index-of-indexes for the newest crawl. A new one ships every few
+/// weeks, and a pinned index would report every newer site as `not_found`.
+/// Failure here is `unreachable`: no index was searched, so nothing is known
+/// about the site.
+fn latest_common_crawl_index(
+    client: &Client,
+    endpoints: &SourceEndpoints,
+) -> Result<String, Box<SourceResult>> {
+    let url = format!("{}/collinfo.json", endpoints.common_crawl_base);
+    let body = send_json_get(client, &url, "common_crawl")?;
+    newest_crawl_id(&body).map(str::to_string).ok_or_else(|| {
+        Box::new(unreachable_result(
+            "common_crawl",
+            "no crawl index listed in collinfo.json",
+        ))
+    })
+}
+
+/// Crawl ids are `CC-MAIN-YYYY-WW`, so the newest sorts last. Picking by id
+/// keeps this correct even if the listing's order changes. Ids become part of
+/// a URL path, so anything else in the listing is ignored.
+fn newest_crawl_id(collinfo: &Value) -> Option<&str> {
+    collinfo
+        .as_array()?
+        .iter()
+        .filter_map(|crawl| crawl.get("id")?.as_str())
+        .filter(|id| {
+            id.starts_with("CC-MAIN-") && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        })
+        .max()
 }
 
 // --- Helpers ---------------------------------------------------------
@@ -883,7 +920,7 @@ mod tests {
                 github_api: format!("{}/github/users", self.base_url),
                 github_profile_base: format!("{}/github", self.base_url),
                 rdap_base: format!("{}/rdap/domain", self.base_url),
-                common_crawl_index: format!("{}/cc/CC-MAIN-test-index", self.base_url),
+                common_crawl_base: format!("{}/cc", self.base_url),
             }
         }
     }
@@ -924,11 +961,14 @@ mod tests {
         let _ = stream.flush();
     }
 
+    const COLLINFO: (&str, u16, &str) = ("collinfo.json", 200, r#"[{"id":"CC-MAIN-test"}]"#);
+
     fn entity() -> EntityInput {
         EntityInput {
             name: "Aeptus".to_string(),
             website: Some("https://www.aeptus.com".to_string()),
             aliases: vec![],
+            wikipedia_language: "en".to_string(),
         }
     }
 
@@ -1036,6 +1076,7 @@ mod tests {
             name: "Aeptus, Inc.".to_string(),
             website: Some("https://www.aeptus.com".to_string()),
             aliases: vec![],
+            wikipedia_language: "en".to_string(),
         };
         let result = check_github(&client, &input, &server.endpoints());
         assert_eq!(result.status, SourceStatus::Skipped, "{result:?}");
@@ -1081,6 +1122,7 @@ mod tests {
             name: "Aeptus".to_string(),
             website: None,
             aliases: vec![],
+            wikipedia_language: "en".to_string(),
         };
         let result = check_rdap(&client, &input, &server.endpoints());
         assert_eq!(result.status, SourceStatus::Skipped, "{result:?}");
@@ -1088,14 +1130,25 @@ mod tests {
 
     #[test]
     fn common_crawl_reports_found_when_a_capture_exists() {
-        let server = FakeSources::start(vec![(
-            "CC-MAIN-test-index",
-            200,
-            r#"{"urlkey":"com,aeptus)/","timestamp":"20260101000000","url":"https://www.aeptus.com/","mime":"text/html","status":"200"}"#,
-        )]);
+        let server = FakeSources::start(vec![
+            COLLINFO,
+            (
+                "CC-MAIN-test-index",
+                200,
+                r#"{"urlkey":"com,aeptus)/","timestamp":"20260101000000","url":"https://www.aeptus.com/","mime":"text/html","status":"200"}"#,
+            ),
+        ]);
         let client = build_client().expect("client");
         let result = check_common_crawl(&client, &entity(), &server.endpoints());
         assert_eq!(result.status, SourceStatus::Found, "{result:?}");
+        assert!(
+            result
+                .extra
+                .as_deref()
+                .unwrap_or("")
+                .contains("CC-MAIN-test"),
+            "{result:?}"
+        );
     }
 
     #[test]
@@ -1103,10 +1156,80 @@ mod tests {
         // The CDX API returns NDJSON, and an empty body is how it says
         // "no captures". A JSON array here would parse fine and then be
         // reported as found, which is exactly the bug this pins.
-        let server = FakeSources::start(vec![("CC-MAIN-test-index", 200, "")]);
+        let server = FakeSources::start(vec![COLLINFO, ("CC-MAIN-test-index", 200, "")]);
         let client = build_client().expect("client");
         let result = check_common_crawl(&client, &entity(), &server.endpoints());
         assert_eq!(result.status, SourceStatus::NotFound, "{result:?}");
+    }
+
+    /// A site first crawled after a pinned index reported `not_found` until
+    /// the next CLI release. The newest listed crawl is what gets searched,
+    /// wherever the listing puts it.
+    #[test]
+    fn common_crawl_searches_the_newest_listed_index() {
+        let server = FakeSources::start(vec![
+            (
+                "collinfo.json",
+                200,
+                r#"[{"id":"CC-MAIN-2026-15"},{"id":"CC-MAIN-2099-01"},{"id":"../evil"},{"id":"CC-MAIN-2013-20"}]"#,
+            ),
+            ("CC-MAIN-2026-15-index", 404, ""),
+            (
+                "CC-MAIN-2099-01-index",
+                200,
+                r#"{"timestamp":"20990101000000"}"#,
+            ),
+        ]);
+        let client = build_client().expect("client");
+        let result = check_common_crawl(&client, &entity(), &server.endpoints());
+        assert_eq!(result.status, SourceStatus::Found, "{result:?}");
+        assert!(
+            result
+                .extra
+                .as_deref()
+                .unwrap_or("")
+                .contains("CC-MAIN-2099-01"),
+            "{result:?}"
+        );
+    }
+
+    /// If the index cannot be resolved nothing was searched, which is "we
+    /// don't know", never "the site is absent".
+    #[test]
+    fn common_crawl_is_unreachable_when_the_index_cannot_be_resolved() {
+        for collinfo in [
+            ("collinfo.json", 503, "busy"),
+            ("collinfo.json", 200, "not json"),
+            ("collinfo.json", 200, "[]"),
+            ("collinfo.json", 200, r#"[{"id":"../evil"}]"#),
+        ] {
+            let server = FakeSources::start(vec![collinfo]);
+            let client = build_client().expect("client");
+            let result = check_common_crawl(&client, &entity(), &server.endpoints());
+            assert_eq!(
+                result.status,
+                SourceStatus::Unreachable,
+                "{collinfo:?}: {result:?}"
+            );
+            assert!(result.error.is_some(), "{result:?}");
+        }
+    }
+
+    /// Absence from one edition must say which edition was searched.
+    #[test]
+    fn wikipedia_not_found_names_the_edition_searched() {
+        let server = FakeSources::start(vec![("wikipedia/api.php", 200, r#"["aeptus",[],[],[]]"#)]);
+        let client = build_client().expect("client");
+        let input = EntityInput {
+            wikipedia_language: "fr".to_string(),
+            ..entity()
+        };
+        let result = check_wikipedia(&client, &input, &server.endpoints());
+        assert_eq!(result.status, SourceStatus::NotFound, "{result:?}");
+        assert_eq!(
+            result.extra.as_deref(),
+            Some("searched fr.wikipedia.org only")
+        );
     }
 
     #[test]
@@ -1117,6 +1240,7 @@ mod tests {
             name: "Aeptus".to_string(),
             website: None,
             aliases: vec![],
+            wikipedia_language: "en".to_string(),
         };
         let result = check_common_crawl(&client, &input, &server.endpoints());
         assert_eq!(result.status, SourceStatus::Skipped, "{result:?}");
@@ -1139,6 +1263,7 @@ mod tests {
                 200,
                 r#"{"login":"aeptus","type":"User"}"#,
             ),
+            COLLINFO,
             ("CC-MAIN-test-index", 200, "[]"),
         ]);
         let results = check_all_sources_with(&entity(), &server.endpoints());
@@ -1185,7 +1310,7 @@ mod tests {
             github_api: format!("{dead}/github/users"),
             github_profile_base: format!("{dead}/github"),
             rdap_base: format!("{dead}/rdap/domain"),
-            common_crawl_index: format!("{dead}/cc/CC-MAIN-test-index"),
+            common_crawl_base: format!("{dead}/cc"),
         };
 
         let results = check_all_sources_with(&entity(), &endpoints);
@@ -1209,24 +1334,18 @@ mod tests {
     fn production_endpoints_are_the_real_apis() {
         // The injectable seam must not be able to silently change what
         // production talks to.
-        let endpoints = SourceEndpoints::production();
+        let endpoints = SourceEndpoints::production("en");
         assert_eq!(
             endpoints.wikipedia_api,
             "https://en.wikipedia.org/w/api.php"
         );
+        assert_eq!(
+            SourceEndpoints::production("pt-br").wikipedia_api,
+            "https://pt-br.wikipedia.org/w/api.php"
+        );
         assert_eq!(endpoints.wikidata_api, "https://www.wikidata.org/w/api.php");
         assert_eq!(endpoints.github_api, "https://api.github.com/users");
         assert_eq!(endpoints.rdap_base, "https://rdap.org/domain");
-        assert!(
-            endpoints
-                .common_crawl_index
-                .starts_with("https://index.commoncrawl.org/"),
-            "{}",
-            endpoints.common_crawl_index
-        );
-        assert!(
-            endpoints.common_crawl_index.contains(COMMON_CRAWL_INDEX),
-            "the pinned crawl index must be the one in the URL"
-        );
+        assert_eq!(endpoints.common_crawl_base, "https://index.commoncrawl.org");
     }
 }

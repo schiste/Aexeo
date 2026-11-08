@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "description": "Synthetic examples, labels not independently reviewed.",
+  "preset": "link-eval",
+  "preset_toml": "version=1\nname=\"Link evaluation\"\n[[gates]]\nid=\"links\"\nkind=\"link_count\"\nmin=1\nblocking=false\n",
+  "input_format": "markdown",
+  "gate_id": "links",
+  "examples": [
+    {
+      "id": "inline",
+      "split": "development",
+      "text": "[one](https://example.org)",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "none",
+      "split": "development",
+      "text": "No link here.",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "reference",
+      "split": "development",
+      "text": "[one][ref]\n\n[ref]: https://example.org",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "image-only",
+      "split": "holdout",
+      "text": "![diagram](diagram.png)",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "bare-url",
+      "split": "holdout",
+      "text": "https://example.org",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "code-only",
+      "split": "holdout",
+      "text": "```\n[link](https://example.org)\n```",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "missing-ref",
+      "split": "holdout",
+      "text": "[link][missing]",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    }
+  ]
+}

@@ -1,11 +1,201 @@
-use anyhow::Result;
-use std::collections::{BTreeMap, BTreeSet};
+use anyhow::{Context, Result};
+use std::collections::BTreeMap;
+use std::collections::hash_map::RandomState;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::hash::{BuildHasher, Hasher};
+use std::io::{self, Write};
+use std::path::{Component, Path, PathBuf};
 
 use crate::config::Config;
-use crate::generate::{build_link_suggestions, render_llms_txt, render_robots_txt};
+use crate::generate::{
+    LLMS_GENERATED_MARKER, build_link_suggestions, render_bundle_llms_txt, render_llms_txt,
+    render_robots_txt,
+};
 use crate::site::{Page, Site, load_site};
+
+/// A file `fix` left untouched, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkippedFix {
+    pub path: PathBuf,
+    pub reason: String,
+}
+
+/// Outcome of one `fix` run. Under `FixOptions::dry_run`, `changed` lists the
+/// files a real run would write and nothing has been written.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FixReport {
+    pub changed: Vec<PathBuf>,
+    pub skipped: Vec<SkippedFix>,
+}
+
+/// In-memory result of every fix pass. Passes never touch the disk, so a dry
+/// run reports exactly what a real run writes, and a pass that fails leaves
+/// the site as it was.
+#[derive(Default)]
+struct FixPlan {
+    pending: BTreeMap<PathBuf, String>,
+    skipped: BTreeMap<PathBuf, String>,
+}
+
+impl FixPlan {
+    /// Current text of a file, including changes earlier passes planned, or
+    /// `None` when the file cannot be safely rewritten (recorded as skipped).
+    fn read(&mut self, path: &Path) -> Result<Option<String>> {
+        if let Some(text) = self.pending.get(path) {
+            return Ok(Some(text.clone()));
+        }
+        if self.skipped.contains_key(path) {
+            return Ok(None);
+        }
+        if let Some(reason) = unsafe_to_replace(path)? {
+            self.skip(path, reason);
+            return Ok(None);
+        }
+        let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+        match String::from_utf8(bytes) {
+            Ok(text) => Ok(Some(text)),
+            Err(_) => {
+                self.skip(path, "not valid UTF-8; rewriting it could corrupt it");
+                Ok(None)
+            }
+        }
+    }
+
+    fn stage(&mut self, path: &Path, text: String) {
+        self.pending.insert(path.to_path_buf(), text);
+    }
+
+    fn skip(&mut self, path: &Path, reason: impl Into<String>) {
+        self.skipped.insert(path.to_path_buf(), reason.into());
+    }
+
+    fn inject_into_head(&mut self, path: &Path, tags: &[String]) -> Result<()> {
+        let Some(raw_text) = self.read(path)? else {
+            return Ok(());
+        };
+        let updated = inject_head_tags(&raw_text, tags);
+        if updated != raw_text {
+            self.stage(path, updated);
+        }
+        Ok(())
+    }
+
+    fn finish(self, dry_run: bool) -> Result<FixReport> {
+        if !dry_run {
+            for (path, text) in &self.pending {
+                write_atomic(path, text).with_context(|| format!("writing {}", path.display()))?;
+            }
+        }
+        Ok(FixReport {
+            changed: self.pending.into_keys().collect(),
+            skipped: self
+                .skipped
+                .into_iter()
+                .map(|(path, reason)| SkippedFix { path, reason })
+                .collect(),
+        })
+    }
+}
+
+/// Replacing a file by rename would detach a symlink or a hard link from what
+/// it points at, so those are refused the same way `content --fix` refuses them.
+fn unsafe_to_replace(path: &Path) -> Result<Option<&'static str>> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
+    };
+    if !metadata.file_type().is_file() {
+        return Ok(Some("not a regular file (symlinks are not rewritten)"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.nlink() > 1 {
+            return Ok(Some("has multiple hard links"));
+        }
+    }
+    Ok(None)
+}
+
+/// Write through a sibling temporary file and a rename, so a crash or a full
+/// disk leaves either the old file or the new one, never a truncated page.
+fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
+    let destination_permissions = match fs::metadata(path) {
+        Ok(metadata) => Some(metadata.permissions()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    let (mut temp, temp_path) = create_temp_sibling(path, destination_permissions.is_some())?;
+    let result = (|| {
+        temp.write_all(text.as_bytes())?;
+        if let Some(permissions) = destination_permissions {
+            temp.set_permissions(permissions)?;
+        }
+        temp.sync_all()?;
+        fs::rename(&temp_path, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    result
+}
+
+/// Create a new file next to `path` under an unpredictable name. `create_new`
+/// refuses anything already there, including a planted symlink. When `private`,
+/// the file stays owner-only until the caller applies the destination's mode, so
+/// a restricted file's new content is never briefly readable by others.
+fn create_temp_sibling(path: &Path, private: bool) -> io::Result<(fs::File, PathBuf)> {
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?
+        .to_string_lossy();
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    if private {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    #[cfg(not(unix))]
+    let _ = private;
+    for _ in 0..16 {
+        // RandomState is seeded from OS randomness, unlike a pid or a counter.
+        let token = RandomState::new().build_hasher().finish();
+        let temp_path = path.with_file_name(format!(".{file_name}.aexeo-fix-{token:016x}.tmp"));
+        match options.open(&temp_path) {
+            Ok(file) => return Ok((file, temp_path)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "could not allocate a temporary file name",
+    ))
+}
+
+/// HTML file for a route under `root`, in the conventional layouts: `index.html`
+/// for the home route, then nested `<route>/index.html`, then flat `<route>.html`.
+/// Routes come from JSON files on disk, so one that climbs out of `root` is refused.
+fn html_path_for_route(root: &Path, route: &str) -> Result<Option<PathBuf>, String> {
+    let relative = route.trim_start_matches('/');
+    if !Path::new(relative)
+        .components()
+        .all(|component| matches!(component, Component::Normal(_)))
+    {
+        return Err(format!("route {route:?} points outside the site root"));
+    }
+    let candidates = if relative.is_empty() {
+        vec![root.join("index.html")]
+    } else {
+        vec![
+            root.join(relative).join("index.html"),
+            root.join(format!("{relative}.html")),
+        ]
+    };
+    Ok(candidates.into_iter().find(|path| path.exists()))
+}
 
 fn escape_html_attr(value: &str) -> String {
     value
@@ -83,17 +273,11 @@ fn inject_head_tags(raw_text: &str, tags: &[String]) -> String {
     raw_text.to_string()
 }
 
-fn apply_html_metadata_fixes(site: &Site, config: &Config) -> Result<Vec<PathBuf>> {
-    let mut changed = Vec::new();
+fn plan_html_metadata_fixes(plan: &mut FixPlan, site: &Site, config: &Config) -> Result<()> {
     for page in site.route_pages() {
-        let raw_text = fs::read_to_string(&page.path)?;
-        let updated = inject_head_tags(&raw_text, &render_missing_head_tags(page, config));
-        if updated != raw_text {
-            fs::write(&page.path, updated)?;
-            changed.push(page.path.clone());
-        }
+        plan.inject_into_head(&page.path, &render_missing_head_tags(page, config))?;
     }
-    Ok(changed)
+    Ok(())
 }
 
 fn render_related_links_section(
@@ -117,12 +301,16 @@ fn render_related_links_section(
                 })
                 .collect::<Vec<_>>()
                 .join(" ");
-            format!("      <li><a href=\"/{}\">{}</a></li>", target, label)
+            format!(
+                "      <li><a href=\"/{}\">{}</a></li>",
+                escape_html_attr(target),
+                escape_html_attr(&label)
+            )
         })
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "\n  <section data-ui=\"related-links\" data-source-route=\"{}\">\n    <h2>{}</h2>\n    <ul>\n{}\n    </ul>\n  </section>\n",
+        "\n  <section data-ui=\"related-links\" data-aexeo-link-context=\"related\" data-source-route=\"{}\">\n    <h2>{}</h2>\n    <ul>\n{}\n    </ul>\n  </section>\n",
         escape_html_attr(if source_route.is_empty() {
             "/"
         } else {
@@ -133,17 +321,18 @@ fn render_related_links_section(
     )
 }
 
-fn apply_related_link_insertions(site: &Site, config: &Config) -> Result<Vec<PathBuf>> {
+fn plan_related_link_insertions(plan: &mut FixPlan, site: &Site, config: &Config) -> Result<()> {
     if !config.enable_link_autofix {
-        return Ok(Vec::new());
+        return Ok(());
     }
     let suggestions = build_link_suggestions(site, config.link_suggestion_count);
-    let mut changed = Vec::new();
     for (source_route, target_routes) in suggestions {
         let Some(source_page) = site.page(&source_route) else {
             continue;
         };
-        let raw_text = fs::read_to_string(&source_page.path)?;
+        let Some(raw_text) = plan.read(&source_page.path)? else {
+            continue;
+        };
         if raw_text.contains("data-ui=\"related-links\"")
             || raw_text.contains(&config.related_links_heading)
         {
@@ -164,11 +353,10 @@ fn apply_related_link_insertions(site: &Site, config: &Config) -> Result<Vec<Pat
             format!("{}{}", raw_text, section)
         };
         if updated != raw_text {
-            fs::write(&source_page.path, updated)?;
-            changed.push(source_page.path.clone());
+            plan.stage(&source_page.path, updated);
         }
     }
-    Ok(changed)
+    Ok(())
 }
 
 /// Inject schema-suggestions JSON-LD blocks into HTML pages, applying
@@ -182,19 +370,18 @@ fn apply_related_link_insertions(site: &Site, config: &Config) -> Result<Vec<Pat
 /// Silent no-op when the suggestions file is missing. Opt-in fix: only
 /// runs when the caller explicitly enables it (the default `fix`
 /// invocation does not write JSON-LD into pages).
-fn apply_schema_injection_fixes(root: &Path) -> Result<Vec<PathBuf>> {
+fn plan_schema_injection_fixes(plan: &mut FixPlan, root: &Path) -> Result<()> {
     let suggestions_path = root.join("schema-suggestions.json");
     let Ok(suggestions_text) = fs::read_to_string(&suggestions_path) else {
-        return Ok(Vec::new());
+        return Ok(());
     };
     let Ok(payload) = serde_json::from_str::<serde_json::Value>(&suggestions_text) else {
-        return Ok(Vec::new());
+        return Ok(());
     };
     let Some(suggestions) = payload.get("suggestions").and_then(|v| v.as_array()) else {
-        return Ok(Vec::new());
+        return Ok(());
     };
 
-    let mut changed = Vec::new();
     for entry in suggestions {
         let Some(route) = entry.get("route").and_then(|v| v.as_str()) else {
             continue;
@@ -202,39 +389,43 @@ fn apply_schema_injection_fixes(root: &Path) -> Result<Vec<PathBuf>> {
         let Some(types) = entry.get("types").and_then(|v| v.as_object()) else {
             continue;
         };
-        let candidates: Vec<PathBuf> = if route.is_empty() {
-            vec![root.join("index.html")]
-        } else {
-            vec![
-                root.join(route).join("index.html"),
-                root.join(format!("{route}.html")),
-            ]
+        let html_path = match html_path_for_route(root, route) {
+            Ok(Some(path)) => path,
+            Ok(None) => continue,
+            Err(reason) => {
+                plan.skip(&suggestions_path, reason);
+                continue;
+            }
         };
-        let Some(html_path) = candidates.into_iter().find(|p| p.exists()) else {
+        let Some(raw_text) = plan.read(&html_path)? else {
             continue;
         };
-        let raw_text = fs::read_to_string(&html_path)?;
         let existing_types = collect_existing_schema_types(&raw_text);
         let mut to_inject = Vec::new();
         for (type_name, body) in types {
             if existing_types.contains(type_name.as_str()) {
                 continue;
             }
-            let body_text = serde_json::to_string(body).unwrap_or_else(|_| "{}".to_string());
-            to_inject.push(format!(
-                "<script type=\"application/ld+json\">{body_text}</script>"
-            ));
+            to_inject.push(render_json_ld_script(body));
         }
         if to_inject.is_empty() {
             continue;
         }
-        let updated = inject_head_tags(&raw_text, &to_inject);
-        if updated != raw_text {
-            fs::write(&html_path, updated)?;
-            changed.push(html_path);
-        }
+        plan.inject_into_head(&html_path, &to_inject)?;
     }
-    Ok(changed)
+    Ok(())
+}
+
+/// JSON-LD block for a page. serde_json leaves `<` as is, and suggestion text
+/// comes from page content, so `</script>` in a value would end the block and
+/// run what follows. JSON unicode escapes keep the value identical for parsers.
+fn render_json_ld_script(body: &serde_json::Value) -> String {
+    let body_text = serde_json::to_string(body)
+        .unwrap_or_else(|_| "{}".to_string())
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('&', "\\u0026");
+    format!("<script type=\"application/ld+json\">{body_text}</script>")
 }
 
 /// Scan an HTML string for the `@type` values of every existing
@@ -310,16 +501,16 @@ fn collect_at_types(value: &serde_json::Value, out: &mut std::collections::BTree
 /// manifest exists (i.e. the host hasn't generated a public-bundle there),
 /// the fix is a silent no-op — the safer behavior than guessing at mirror
 /// paths from filename conventions.
-fn apply_discovery_link_fixes(root: &Path) -> Result<Vec<PathBuf>> {
+fn plan_discovery_link_fixes(plan: &mut FixPlan, root: &Path) -> Result<()> {
     let manifest_path = root.join("manifest.json");
     let Ok(manifest_text) = fs::read_to_string(&manifest_path) else {
-        return Ok(Vec::new());
+        return Ok(());
     };
     let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&manifest_text) else {
-        return Ok(Vec::new());
+        return Ok(());
     };
     let Some(artifacts) = manifest.get("artifacts").and_then(|v| v.as_array()) else {
-        return Ok(Vec::new());
+        return Ok(());
     };
 
     // Build a route → mirror-path map from the manifest. The manifest's
@@ -343,44 +534,34 @@ fn apply_discovery_link_fixes(root: &Path) -> Result<Vec<PathBuf>> {
         mirror_by_route.insert(route.to_string(), path.to_string());
     }
     if mirror_by_route.is_empty() {
-        return Ok(Vec::new());
+        return Ok(());
     }
 
-    let mut changed = Vec::new();
     for (route, mirror_path) in &mirror_by_route {
-        // Match the route to one of the conventional HTML layouts.
-        // Order matters: index.html is the canonical home, then nested
-        // <route>/index.html (Astro/Hugo default), then flat <route>.html.
-        let candidates: Vec<PathBuf> = if route == "/" {
-            vec![root.join("index.html")]
-        } else {
-            let stripped = route.trim_start_matches('/');
-            vec![
-                root.join(stripped).join("index.html"),
-                root.join(format!("{stripped}.html")),
-            ]
+        let html_path = match html_path_for_route(root, route) {
+            Ok(Some(path)) => path,
+            Ok(None) => continue,
+            Err(reason) => {
+                plan.skip(&manifest_path, reason);
+                continue;
+            }
         };
-        let Some(html_path) = candidates.into_iter().find(|p| p.exists()) else {
+        let Some(raw_text) = plan.read(&html_path)? else {
             continue;
         };
-        let raw_text = fs::read_to_string(&html_path)?;
         // Idempotency: skip if the discovery link is already present.
         // Match on the href specifically rather than just the rel/type
         // string so a different mirror path doesn't get silently
         // duplicated. The mirror path is the canonical signal.
-        let href = format!("/{mirror_path}");
+        let href = format!("/{}", escape_html_attr(mirror_path));
         let needle = format!("href=\"{href}\"");
         if raw_text.contains(&needle) {
             continue;
         }
         let tag = format!(r#"<link rel="alternate" type="text/markdown" href="{href}">"#);
-        let updated = inject_head_tags(&raw_text, &[tag]);
-        if updated != raw_text {
-            fs::write(&html_path, updated)?;
-            changed.push(html_path);
-        }
+        plan.inject_into_head(&html_path, &[tag])?;
     }
-    Ok(changed)
+    Ok(())
 }
 
 /// Caller-controlled toggles for fixes that mutate the host's HTML beyond
@@ -395,78 +576,107 @@ pub struct FixOptions {
     /// host is making claims about its own content; that should be
     /// deliberate.
     pub inject_schema: bool,
+    /// When true, compute and report every change without writing any file.
+    pub dry_run: bool,
 }
 
-pub fn apply_safe_fixes(root: &Path, config: &Config) -> Result<Vec<PathBuf>> {
+pub fn apply_safe_fixes(root: &Path, config: &Config) -> Result<FixReport> {
     apply_safe_fixes_with_options(root, config, FixOptions::default())
+}
+
+/// `llms.txt` is only regenerated when it is known to be Aexeo's own output:
+/// it carries the generated marker, it is blank, or it matches what an earlier
+/// marker-less version rendered for this site. Anything else may be hand-written.
+fn plan_llms_fix(plan: &mut FixPlan, site: &Site, root: &Path, config: &Config) -> Result<()> {
+    let llms_path = root.join("llms.txt");
+    if fs::symlink_metadata(&llms_path).is_err() {
+        return Ok(());
+    }
+    let Some(current) = plan.read(&llms_path)? else {
+        return Ok(());
+    };
+    let site_url = config.site_url.as_deref();
+    let generated = render_llms_txt(site, site_url);
+    if current == generated || current == render_bundle_llms_txt(site) {
+        return Ok(());
+    }
+    let is_generated = current.trim().is_empty()
+        || current
+            .lines()
+            .any(|line| line.trim() == LLMS_GENERATED_MARKER)
+        || generated.strip_suffix(&format!("{LLMS_GENERATED_MARKER}\n")) == Some(current.as_str());
+    if is_generated {
+        plan.stage(&llms_path, generated);
+    } else {
+        plan.skip(
+            &llms_path,
+            format!(
+                "no generated marker, so it may be hand-written; add the line `{LLMS_GENERATED_MARKER}` to let fix regenerate it"
+            ),
+        );
+    }
+    Ok(())
+}
+
+/// Create a missing `robots.txt`, or append the `Sitemap:` line to an existing
+/// one. Existing directives are always kept.
+fn plan_robots_fix(plan: &mut FixPlan, root: &Path, site_url: &str) -> Result<()> {
+    let robots_path = root.join("robots.txt");
+    if fs::symlink_metadata(&robots_path).is_err() {
+        plan.stage(&robots_path, render_robots_txt(site_url));
+        return Ok(());
+    }
+    let Some(text) = plan.read(&robots_path)? else {
+        return Ok(());
+    };
+    if !text.to_ascii_lowercase().contains("sitemap:") {
+        plan.stage(
+            &robots_path,
+            format!(
+                "{}\nSitemap: {}/sitemap.xml\n",
+                text.trim_end(),
+                site_url.trim_end_matches('/')
+            ),
+        );
+    }
+    Ok(())
 }
 
 pub fn apply_safe_fixes_with_options(
     root: &Path,
     config: &Config,
     options: FixOptions,
-) -> Result<Vec<PathBuf>> {
-    let mut changed = BTreeSet::new();
+) -> Result<FixReport> {
     let site = load_site(root)?;
+    let mut plan = FixPlan::default();
 
-    let llms_path = root.join("llms.txt");
-    if site.llms_text.is_some() {
-        let generated = render_llms_txt(&site, config.site_url.as_deref());
-        if site.llms_text.as_deref() != Some(generated.as_str()) {
-            fs::write(&llms_path, generated)?;
-            changed.insert(llms_path);
-        }
-    }
-
+    plan_llms_fix(&mut plan, &site, root, config)?;
     if let Some(site_url) = config.site_url.as_deref() {
-        let robots_path = root.join("robots.txt");
-        match site.robots_text.as_deref() {
-            None => {
-                fs::write(&robots_path, render_robots_txt(site_url))?;
-                changed.insert(robots_path);
-            }
-            Some(text) if !text.to_ascii_lowercase().contains("sitemap:") => {
-                let updated = format!(
-                    "{}\nSitemap: {}/sitemap.xml\n",
-                    text.trim_end(),
-                    site_url.trim_end_matches('/')
-                );
-                fs::write(&robots_path, updated)?;
-                changed.insert(robots_path);
-            }
-            _ => {}
-        }
+        plan_robots_fix(&mut plan, root, site_url)?;
     }
-
-    let refreshed_site = load_site(root)?;
-    for path in apply_html_metadata_fixes(&refreshed_site, config)? {
-        changed.insert(path);
-    }
-    let refreshed_site = load_site(root)?;
-    for path in apply_related_link_insertions(&refreshed_site, config)? {
-        changed.insert(path);
-    }
+    plan_html_metadata_fixes(&mut plan, &site, config)?;
+    plan_related_link_insertions(&mut plan, &site, config)?;
     // Discovery-link injection runs against the manifest (if present) so
     // hosts who've generated a public-bundle into the same root get their
     // <link rel="alternate"> tags wired up automatically. Silent no-op
     // when no manifest is found — the safer behavior than guessing at
     // mirror paths from filename conventions.
-    for path in apply_discovery_link_fixes(root)? {
-        changed.insert(path);
-    }
+    plan_discovery_link_fixes(&mut plan, root)?;
     if options.inject_schema {
-        for path in apply_schema_injection_fixes(root)? {
-            changed.insert(path);
-        }
+        plan_schema_injection_fixes(&mut plan, root)?;
     }
 
-    Ok(changed.into_iter().collect())
+    plan.finish(options.dry_run)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::apply_safe_fixes;
+    use super::{
+        FixOptions, apply_safe_fixes, apply_safe_fixes_with_options, render_related_links_section,
+    };
     use crate::config::Config;
+    use crate::generate::LLMS_GENERATED_MARKER;
+    use crate::link_evidence::{LinkContext, extract_links};
     use anyhow::Result;
     use std::fs;
 
@@ -507,14 +717,16 @@ mod tests {
         );
         write(
             &root.join("llms.txt"),
-            "# Site\n\n## Key Facts\n- 9 features across 3 categories\n\n## Pages\n- [Home](index.html)\n",
+            &format!(
+                "# Site\n\n## Key Facts\n- 9 features across 3 categories\n\n## Pages\n- [Home](index.html)\n{LLMS_GENERATED_MARKER}\n"
+            ),
         );
         let config = Config {
             site_url: Some("https://example.com".to_string()),
             ..Config::default()
         };
         let changed = apply_safe_fixes(root, &config)?;
-        assert!(!changed.is_empty());
+        assert!(!changed.changed.is_empty());
         assert!((root.join("robots.txt")).exists());
         let index_html = fs::read_to_string(root.join("index.html"))?;
         assert!(index_html.contains("rel=\"canonical\""));
@@ -585,10 +797,11 @@ mod tests {
         );
 
         let config = Config::default();
-        let options = super::FixOptions {
+        let options = FixOptions {
             inject_schema: true,
+            ..FixOptions::default()
         };
-        super::apply_safe_fixes_with_options(root, &config, options)?;
+        apply_safe_fixes_with_options(root, &config, options)?;
 
         let updated = fs::read_to_string(root.join("guide.html"))?;
         // Per-type augmentation: BreadcrumbList added, Article NOT
@@ -604,13 +817,45 @@ mod tests {
         assert!(!updated.contains("Aexeo-generated"));
 
         // Idempotency: a second run does not re-add the BreadcrumbList.
-        super::apply_safe_fixes_with_options(root, &config, options)?;
+        apply_safe_fixes_with_options(root, &config, options)?;
         let twice = fs::read_to_string(root.join("guide.html"))?;
         assert_eq!(
             twice.matches("\"BreadcrumbList\"").count(),
             1,
             "schema injection must not duplicate types on second run"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn injected_schema_cannot_close_its_script_block() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("index.html"),
+            "<html><head><title>x</title></head><body></body></html>",
+        );
+        write(
+            &root.join("schema-suggestions.json"),
+            r#"{"suggestions":[{"route":"","types":{"WebSite":{"@type":"WebSite","name":"</script><script>alert(1)</script> & co"}}}]}"#,
+        );
+
+        apply_safe_fixes_with_options(
+            root,
+            &Config::default(),
+            FixOptions {
+                inject_schema: true,
+                ..FixOptions::default()
+            },
+        )?;
+
+        let html = fs::read_to_string(root.join("index.html"))?;
+        assert_eq!(html.matches("</script>").count(), 1, "{html}");
+        assert!(!html.contains("<script>"), "{html}");
+        let start = html.find("ld+json\">").unwrap() + "ld+json\">".len();
+        let end = html.find("</script>").unwrap();
+        let value: serde_json::Value = serde_json::from_str(&html[start..end])?;
+        assert_eq!(value["name"], "</script><script>alert(1)</script> & co");
         Ok(())
     }
 
@@ -686,6 +931,346 @@ mod tests {
             1,
             "discovery link must not be duplicated on second run"
         );
+        Ok(())
+    }
+
+    /// The block lands before `</body>`, outside any landmark, so without the
+    /// marker the link graph would report its links as `unknown`.
+    #[test]
+    fn related_links_are_attributed_as_related_by_the_link_graph() {
+        let section = render_related_links_section("", &["guide".to_string()], "Related");
+        let html = format!("<html><body><main><p>x</p></main>{section}</body></html>");
+        let links = extract_links(&html, "https://example.com/", "https://example.com", None);
+        assert_eq!(links.len(), 1, "{links:?}");
+        assert_eq!(links[0].context, LinkContext::RelatedContent);
+    }
+
+    /// Routes come from file names, which may hold any HTML metacharacter.
+    #[test]
+    fn related_links_escape_routes_in_href_and_label() {
+        let section = render_related_links_section(
+            "",
+            &["b\"><img src=x onerror=alert(1)>".to_string()],
+            "Related",
+        );
+        assert!(
+            !section.contains("<img"),
+            "route must not open an element: {section}"
+        );
+        assert!(
+            section.contains("href=\"/b&quot;&gt;&lt;img src=x onerror=alert(1)&gt;\""),
+            "route must stay inside the href attribute: {section}"
+        );
+    }
+
+    #[test]
+    fn discovery_link_escapes_manifest_path_and_stays_idempotent() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(&root.join("index.html"), &make_html_page("", ""));
+        write(
+            &root.join("manifest.json"),
+            r#"{"artifacts": [{"kind": "markdown_mirror", "path": "x\"><script>alert(1)</script>.md", "source_route": "/"}]}"#,
+        );
+        let escaped = r#"href="/x&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;.md""#;
+        let config = Config::default();
+
+        apply_safe_fixes(root, &config)?;
+        let page = fs::read_to_string(root.join("index.html"))?;
+        assert!(!page.contains("<script>"), "script injected: {page}");
+        assert!(page.contains(escaped), "link missing: {page}");
+
+        apply_safe_fixes(root, &config)?;
+        let page = fs::read_to_string(root.join("index.html"))?;
+        assert_eq!(
+            page.matches(escaped).count(),
+            1,
+            "an escaped path must still be recognised on the second run: {page}"
+        );
+        Ok(())
+    }
+
+    const PAGE: &str = "<html lang=\"en\"><head><title>x</title><meta name=\"description\" content=\"y\"></head><body><h1>x</h1></body></html>";
+
+    fn site_config() -> Config {
+        Config {
+            site_url: Some("https://example.com".to_string()),
+            ..Config::default()
+        }
+    }
+
+    fn snapshot(root: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+        fs::read_dir(root)
+            .unwrap()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                (
+                    entry.file_name().to_string_lossy().into_owned(),
+                    fs::read(entry.path()).unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn hand_written_llms_is_kept_and_reported_as_skipped() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(&root.join("index.html"), PAGE);
+        let hand_written =
+            "# Acme\n\n> Hand-written summary.\n\n## Pages\n- [Home](/): start here\n";
+        write(&root.join("llms.txt"), hand_written);
+
+        let report = apply_safe_fixes(root, &site_config())?;
+
+        assert_eq!(fs::read_to_string(root.join("llms.txt"))?, hand_written);
+        assert!(!report.changed.contains(&root.join("llms.txt")));
+        assert_eq!(report.skipped.len(), 1, "{report:?}");
+        assert_eq!(report.skipped[0].path, root.join("llms.txt"));
+        assert!(report.skipped[0].reason.contains("marker"));
+        Ok(())
+    }
+
+    #[test]
+    fn generated_llms_is_refreshed_when_routes_change() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(&root.join("index.html"), PAGE);
+        let site = crate::site::load_site(root)?;
+        write(
+            &root.join("llms.txt"),
+            &crate::generate::render_llms_txt(&site, None),
+        );
+        write(&root.join("pricing.html"), PAGE);
+
+        let report = apply_safe_fixes(root, &site_config())?;
+
+        assert!(report.skipped.is_empty(), "{report:?}");
+        let refreshed = fs::read_to_string(root.join("llms.txt"))?;
+        assert!(refreshed.contains("/pricing"), "{refreshed}");
+        assert!(refreshed.contains(LLMS_GENERATED_MARKER));
+        Ok(())
+    }
+
+    #[test]
+    fn marker_less_generated_llms_gains_the_marker() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(&root.join("index.html"), PAGE);
+        let site = crate::site::load_site(root)?;
+        let current = crate::generate::render_llms_txt(&site, None);
+        let legacy = current
+            .strip_suffix(&format!("{LLMS_GENERATED_MARKER}\n"))
+            .unwrap();
+        write(&root.join("llms.txt"), legacy);
+
+        let report = apply_safe_fixes(root, &site_config())?;
+
+        assert!(report.skipped.is_empty(), "{report:?}");
+        assert_eq!(fs::read_to_string(root.join("llms.txt"))?, current);
+        Ok(())
+    }
+
+    #[test]
+    fn current_public_bundle_llms_is_left_alone() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(&root.join("index.html"), PAGE);
+        let site = crate::site::load_site(root)?;
+        let bundle = crate::generate::render_bundle_llms_txt(&site);
+        assert!(bundle.contains("## Markdown Mirrors"), "{bundle}");
+        write(&root.join("llms.txt"), &bundle);
+
+        let report = apply_safe_fixes(root, &site_config())?;
+
+        assert!(report.skipped.is_empty(), "{report:?}");
+        assert_eq!(fs::read_to_string(root.join("llms.txt"))?, bundle);
+        Ok(())
+    }
+
+    #[test]
+    fn non_utf8_robots_is_not_replaced_by_the_template() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(&root.join("index.html"), PAGE);
+        let robots = b"User-agent: *\nDisallow: /caf\xe9\n".to_vec();
+        fs::write(root.join("robots.txt"), &robots)?;
+
+        let report = apply_safe_fixes(root, &site_config())?;
+
+        assert_eq!(fs::read(root.join("robots.txt"))?, robots);
+        assert_eq!(report.skipped[0].path, root.join("robots.txt"));
+        Ok(())
+    }
+
+    #[test]
+    fn existing_robots_keeps_its_directives_when_sitemap_is_added() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(&root.join("index.html"), PAGE);
+        write(
+            &root.join("robots.txt"),
+            "User-agent: *\nDisallow: /private\n",
+        );
+
+        apply_safe_fixes(root, &site_config())?;
+
+        assert_eq!(
+            fs::read_to_string(root.join("robots.txt"))?,
+            "User-agent: *\nDisallow: /private\nSitemap: https://example.com/sitemap.xml\n"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn dry_run_lists_the_same_changes_as_a_real_run_and_writes_nothing() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(&root.join("index.html"), PAGE);
+        write(
+            &root.join("schema-suggestions.json"),
+            r#"{"suggestions":[{"route":"","types":{"WebSite":{"@type":"WebSite"}}}]}"#,
+        );
+        let before = snapshot(root);
+        let config = site_config();
+        let options = FixOptions {
+            inject_schema: true,
+            dry_run: true,
+        };
+
+        let planned = apply_safe_fixes_with_options(root, &config, options)?;
+
+        assert_eq!(snapshot(root), before, "dry run must not touch the site");
+        assert_eq!(
+            planned.changed,
+            vec![root.join("index.html"), root.join("robots.txt")]
+        );
+        let applied = apply_safe_fixes_with_options(
+            root,
+            &config,
+            FixOptions {
+                dry_run: false,
+                ..options
+            },
+        )?;
+        assert_eq!(applied.changed, planned.changed);
+        assert!(fs::read_to_string(root.join("index.html"))?.contains("WebSite"));
+        Ok(())
+    }
+
+    #[test]
+    fn suggestion_route_cannot_write_outside_the_root() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("site");
+        write(&root.join("index.html"), PAGE);
+        let outside = temp_dir.path().join("outside.html");
+        write(&outside, PAGE);
+        write(
+            &root.join("schema-suggestions.json"),
+            r#"{"suggestions":[{"route":"../outside","types":{"WebSite":{"@type":"WebSite"}}}]}"#,
+        );
+
+        let report = apply_safe_fixes_with_options(
+            &root,
+            &site_config(),
+            FixOptions {
+                inject_schema: true,
+                ..FixOptions::default()
+            },
+        )?;
+
+        assert_eq!(fs::read_to_string(&outside)?, PAGE);
+        assert_eq!(report.skipped[0].path, root.join("schema-suggestions.json"));
+        Ok(())
+    }
+
+    #[test]
+    fn atomic_write_leaves_no_temporary_file_behind() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("page.html");
+        write(&path, "old");
+
+        super::write_atomic(&path, "new")?;
+
+        assert_eq!(fs::read_to_string(&path)?, "new");
+        assert_eq!(fs::read_dir(temp_dir.path())?.count(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn failed_atomic_write_removes_its_temporary_file() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        // Renaming a file over a non-empty directory fails after the temporary
+        // file has been written.
+        let target = temp_dir.path().join("target");
+        write(&target.join("keep.txt"), "kept");
+
+        assert!(super::write_atomic(&target, "new").is_err());
+
+        assert_eq!(fs::read_dir(temp_dir.path())?.count(), 1);
+        assert_eq!(fs::read_to_string(target.join("keep.txt"))?, "kept");
+        Ok(())
+    }
+
+    #[test]
+    fn temporary_names_differ_between_calls() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("page.html");
+        let (_first, first_path) = super::create_temp_sibling(&path, false)?;
+        let (_second, second_path) = super::create_temp_sibling(&path, false)?;
+        assert_ne!(first_path, second_path);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temporary_file_is_private_while_replacing_an_existing_file() -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("page.html");
+        let (_file, temp_path) = super::create_temp_sibling(&path, true)?;
+        assert_eq!(
+            fs::metadata(&temp_path)?.permissions().mode() & 0o777,
+            0o600
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_keeps_file_permissions() -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("page.html");
+        write(&path, "old");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640))?;
+
+        super::write_atomic(&path, "new")?;
+
+        assert_eq!(fs::metadata(&path)?.permissions().mode() & 0o777, 0o640);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_and_hard_linked_pages_are_skipped_not_detached() -> Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("site");
+        write(&root.join("index.html"), PAGE);
+        write(&root.join("robots.txt"), "User-agent: *\n");
+        let robots_target = temp_dir.path().join("shared-robots.txt");
+        fs::rename(root.join("robots.txt"), &robots_target)?;
+        std::os::unix::fs::symlink(&robots_target, root.join("robots.txt"))?;
+        let html_link = temp_dir.path().join("hard-link.html");
+        fs::hard_link(root.join("index.html"), &html_link)?;
+
+        let report = apply_safe_fixes(&root, &site_config())?;
+
+        assert!(report.changed.is_empty(), "{report:?}");
+        assert_eq!(report.skipped.len(), 2, "{report:?}");
+        assert_eq!(fs::read_to_string(&robots_target)?, "User-agent: *\n");
+        assert!(fs::symlink_metadata(root.join("robots.txt"))?.is_symlink());
+        assert_eq!(fs::read_to_string(&html_link)?, PAGE);
         Ok(())
     }
 }
