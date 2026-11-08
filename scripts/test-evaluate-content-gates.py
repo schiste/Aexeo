@@ -17,6 +17,34 @@ spec.loader.exec_module(eval_module)
 
 
 class EvaluateTests(unittest.TestCase):
+    def test_example_metadata_is_isolated_and_reviews_bind_it(self):
+        items = [
+            {"id": "a", "split": "holdout", "text": "one", "metadata": {"titre": "Été", "lang": "fr"}, "expected": "passed"},
+            {"id": "b", "split": "holdout", "text": "two", "expected": "not_checked"},
+            {"id": "c", "split": "holdout", "text": "three", "metadata": {}, "expected": "failed"},
+        ]
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": items}
+        observed = []
+        def run(arguments, **_):
+            observed.append(json.loads(Path(arguments[arguments.index("--metadata") + 1]).read_text()) if "--metadata" in arguments else None)
+            status = ("passed", "not_checked", "failed")[len(observed) - 1]
+            return SimpleNamespace(returncode=0, stdout=json.dumps({"gates": [{"gate_id": "g", "status": status}]}))
+        with patch.object(eval_module.subprocess, "run", side_effect=run):
+            eval_module.evaluate("cli", corpus, "holdout")
+        self.assertEqual(observed, [items[0]["metadata"], None, {}])
+        digest = eval_module.metadata_hash(items[0]["metadata"])
+        self.assertEqual(digest, "c2dd6ca92cc1c5c1a1208812e55ddfac14cbdbcb54ef0f9441d0deb31e3d541e")
+        event = {"example_id": "a", "text_sha256": hashlib.sha256(b"one").hexdigest(), "metadata_sha256": digest,
+                 "model_status": "passed", "reviewer_status": "passed", "reviewer": "r", "method": "manual"}
+        log = {"version": 1, "gate_id": "g", "events": [event]}
+        self.assertEqual(eval_module.aggregate_review_events(corpus, "holdout", log)["events"], 1)
+        items[0]["metadata"]["lang"] = "en"
+        with self.assertRaisesRegex(ValueError, "metadata"):
+            eval_module.aggregate_review_events(corpus, "holdout", log)
+        items[0]["metadata"] = {"lang": 1}
+        with self.assertRaisesRegex(ValueError, "string"):
+            eval_module.validate_corpus(corpus)
+
     def test_metrics_include_unchecked_without_counting_it_as_a_pass(self):
         corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": [
             {"id": "a", "split": "holdout", "text": "a", "expected": "failed", "review_status": "reviewed", "review": {"reviewer": "reviewer-1", "method": "manual"}},

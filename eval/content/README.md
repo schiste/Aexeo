@@ -40,6 +40,10 @@ may also embed `evidence_sources`, materialized as temporary local files.
 
 A corpus may specify an input format and an embedded TOML preset; the runner
 materializes the preset in a temporary directory and removes it afterward.
+Each example can optionally contain `metadata`, a JSON object whose keys and
+values are strings. The runner supplies that example's metadata through the
+CLI's `--metadata` option; omitting it is distinct from providing `{}`. Do not
+put sensitive metadata into a corpus intended for publication.
 The runner invokes the local CLI once per example and does not contact a remote
 service. Its precision and recall use checked examples only; `unchecked_rate`
 is reported separately. `reviewed_metrics` separately reports the same counts,
@@ -74,6 +78,12 @@ and an `events` array. Each event records `example_id`, `text_sha256` (SHA-256
 of the exact UTF-8 example text), `model_status` (`passed`, `failed`, or
 `not_checked`), `reviewer_status` (`passed` or `failed`), and nonempty
 `reviewer` and `method` provenance. At most one event per example is accepted.
+For an example with metadata, the event must also contain `metadata_sha256`,
+bound to that exact string map. Capture it using `feedback-capture --metadata`
+with the same JSON file used for evaluation. The digest is SHA-256 over the
+sorted UTF-8 key/value pairs, each prefixed by its length as an unsigned
+64-bit big-endian integer. Maps with different JSON formatting or key order
+produce the same digest; missing metadata and an empty map remain distinct.
 
 Events are historical, not evidence that the current rule version produced the
 same decision; rerun and record new reviews when comparing versions. Stale
@@ -146,3 +156,9 @@ optional reason or context. Output files are created only if absent. A reported
 verdict and supplied provenance do not prove independent review. Keep unresolved
 feedback out of reviewed metrics and follow the contribution and holdout policy
 above before sharing or adding examples.
+
+For examples with metadata, export also verifies the metadata hash. Older notes
+without this hash cannot be exported for those examples; capture a new note with
+the original metadata rather than attaching a guessed hash. These hashes do not
+bind the preset, tool version or report to the input; operators must preserve
+and compare those separately.

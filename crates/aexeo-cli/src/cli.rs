@@ -27,6 +27,7 @@ pub fn build_cli() -> Command {
                 .about("Capture explicitly reported human feedback in a private local note")
                 .arg(Arg::new("text").long("text").required(true))
                 .arg(Arg::new("report").long("report").required(true))
+                .arg(Arg::new("metadata").long("metadata").help("JSON metadata supplied to the evaluated gate"))
                 .arg(Arg::new("gate").long("gate").required(true))
                 .arg(Arg::new("example").long("example").required(true))
                 .arg(Arg::new("human-status").long("human-status").value_parser(["passed", "failed", "uncertain"]))
