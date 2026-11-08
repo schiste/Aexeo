@@ -12,6 +12,6 @@
 # `packages/aexeo-emdash/scripts/build-wasm.sh` needs: rustup keeps targets per
 # toolchain, so without it every bump would strand that build.
 [toolchain]
-channel = "1.99.0"
+channel = "1.99.1"
 components = ["rustfmt", "clippy"]
 targets = ["wasm32-unknown-unknown"]
