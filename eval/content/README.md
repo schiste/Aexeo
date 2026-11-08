@@ -178,3 +178,20 @@ without this hash cannot be exported for those examples; capture a new note with
 the original metadata rather than attaching a guessed hash. These hashes do not
 bind the preset, tool version or report to the input; operators must preserve
 and compare those separately.
+
+To create a new corpus copy containing an explicit matching review, use:
+
+```sh
+python3 scripts/content-review-note.py bind-review --corpus corpus.json \
+  --note feedback.json --output reviewed-corpus.json --telemetry
+```
+
+This Python action validates the note and its text and metadata hashes, requires
+the human verdict to match the proposed label, refuses synthetic examples and
+existing reviews, and leaves the input untouched. Disagreements and uncertain
+verdicts must be resolved explicitly; they are never silently relabeled. The
+new file contains the **entire corpus including content**, not just hashes, and
+is created with private permissions. `--telemetry` emits only operation and
+elapsed time. This action records supplied provenance, not proof that review
+was independent or blind; follow the holdout policy before using its metrics.
+The standalone native CLI currently supports capture and event export only.
