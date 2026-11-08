@@ -170,6 +170,19 @@ not change their counts or assert confirmed orphans.
   are unchanged. Item 3 stays open: the default audit text, Markdown and
   priority list do not yet show the qualification, and the static `audit`
   command builds no report.
+- With `--link-graph-output`, the crawl's text report, and `report render
+  --link-graph` for text or Markdown, show each `LNK002`/`LNK004` finding's
+  qualification after its message ("confirmed orphan", or "not verifiable"
+  with the report's decisive reason) and a short `Link graph` block: crawl
+  completeness with its top issues, confirmed, not-verifiable and suppressed
+  counts, and the graph report path. In "Start here", a confirmed problem
+  ranks before an otherwise equal unverifiable one of the same rule, and the
+  JSON `priorities` gain an additive `link_graph` count. Rule IDs, severities,
+  messages and fingerprints are unchanged, and output without a report is
+  byte-identical. Item 3 stays open: the static `audit` command builds no
+  report, so its site reports carry no coverage-aware observation; it would
+  need a link report built from a `--static-url-map`, whose mapped pages can
+  never be complete, so wiring it is not a one-line change.
 
 A live EmDash schema inspection showed that one CMS can contain multiple
 publications and non-page collections even when a collection is marked

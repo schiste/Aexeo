@@ -1935,3 +1935,89 @@ fn a_seed_inventory_without_identity_never_confirms_an_orphan() {
         "not_eligible"
     );
 }
+
+/// The text output of a crawl of `site` seeded with `seed`, with `extra`.
+fn seeded_text_crawl(site: &Site, dir: &Path, seed: &Value, extra: &[&str]) -> String {
+    let config = link_rules_only(dir);
+    let seed_path = dir.join("seed.json");
+    write(&seed_path, &seed.to_string());
+    let output = Command::new(bin())
+        .current_dir(dir)
+        .args(["crawl", &site.base_url, "--engine", "http", "--progress"])
+        .args(["off", "--no-sitemap-seed", "--release-header", "x-release"])
+        .arg("--config")
+        .arg(&config)
+        .arg("--seed-file")
+        .arg(&seed_path)
+        .args(extra)
+        .output()
+        .unwrap();
+    String::from_utf8(output.stdout).unwrap()
+}
+
+#[test]
+fn the_text_report_qualifies_orphan_findings_only_with_a_link_report() {
+    let site = orphan_site();
+    site.serve_header("X-Release", "r1");
+    let temp = tempfile::tempdir().unwrap();
+    let inventory = inventory_context(&site, &["/", "/a", "/orphan"], &[])["inventory"].clone();
+    let text = seeded_text_crawl(
+        &site,
+        temp.path(),
+        &inventory,
+        &["--link-graph-output", "graph.json"],
+    );
+    let finding = "LNK002 [hard/high] no inbound links observed in the analyzed pages: /orphan";
+    assert!(
+        text.contains(&format!("{finding} (confirmed orphan)\n")),
+        "{text}"
+    );
+    assert!(
+        text.contains("LNK002 no inbound links observed in the analyzed pages: /orphan (confirmed orphan) (on "),
+        "{text}"
+    );
+    assert!(
+        text.contains("\nLink graph:\n  Crawl complete: yes\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("  LNK002/LNK004 findings: 1 confirmed, 0 not verifiable, 0 suppressed as disproven\n  Graph report: graph.json\n"),
+        "{text}"
+    );
+
+    // `report render` qualifies the stored audit with the written report.
+    let audit = text
+        .lines()
+        .last()
+        .unwrap()
+        .trim_start_matches("Audit results: ");
+    let output = Command::new(bin())
+        .current_dir(temp.path())
+        .args([
+            "report",
+            "render",
+            audit,
+            "--format",
+            "md",
+            "--link-graph",
+            "graph.json",
+        ])
+        .output()
+        .unwrap();
+    let markdown = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        markdown.contains("/orphan (confirmed orphan)\n"),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("## Link graph\n\n- Crawl complete: yes\n"),
+        "{markdown}"
+    );
+
+    let plain = seeded_text_crawl(&site, temp.path(), &inventory, &[]);
+    assert!(plain.contains(&format!("{finding}\n")), "{plain}");
+    assert!(
+        !plain.contains("Link graph") && !plain.contains("confirmed"),
+        "{plain}"
+    );
+}

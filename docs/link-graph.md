@@ -407,6 +407,45 @@ of them is `confirmed`. Its `suppressed_legacy_findings` array
 repeats the report's list of findings removed from the run (below), and the
 text output counts them on one more line.
 
+### In the audit report
+
+With `--link-graph-output`, the crawl's text report shows each remaining
+`LNK002` and `LNK004` finding's conclusion (below) after its message, in the
+finding list and in "Start here":
+
+```text
+- crawl/orphan/index.html:1:1 LNK002 [hard/high] no inbound links observed in the analyzed pages: /orphan (confirmed orphan)
+- crawl/old/index.html:1:1 LNK002 [hard/high] no inbound links observed in the analyzed pages: /old (not verifiable: crawl incomplete / no inventory)
+```
+
+A finding that is not `confirmed` is "not verifiable", with the report's most
+decisive reasons: `crawl incomplete` when `crawl_complete` is false, then
+`no inventory` or `inventory not comparable`; with neither, `page not
+eligible`. A group of findings with one message, as `LNK004` has, counts them:
+`2 confirmed / 1 not verifiable: crawl incomplete`. A `Link graph` block
+follows "Start here":
+
+```text
+Link graph:
+  Crawl complete: no; issues: audit_not_inventory_seeded, crawl_incomplete, inventory_missing (+2 more)
+  LNK002/LNK004 findings: 0 confirmed, 1 not verifiable, 0 suppressed as disproven
+  Graph report: graph.json
+```
+
+It names the first three of the report's `issues`; the graph report holds the
+rest and the evidence. In "Start here", a problem with a confirmed finding
+ranks before an otherwise equal one of the same rule without: every `LNK002`
+problem is one page, so confirmed orphans lead the unverifiable ones. Pages
+reached and finding counts still rank first. The JSON `priorities` gain an
+additive `link_graph` object (`confirmed`, `not_verifiable`) on the problems
+the report qualifies. `report render <audit> --format md --link-graph
+graph.json` (or `--format text`) shows the same for a stored crawl audit and
+its report. Rule IDs, severities, messages and fingerprints are unchanged.
+Without a report, every output is byte for byte what it was. The static
+`audit` command builds no report, so its report shows no qualification: its
+pages have no observed URL, and a report for it would need a
+`--static-url-map` (below) to place any page.
+
 ## Legacy inbound-link findings
 
 The site audit rules `LNK002` (no inbound links observed in the analyzed pages)
