@@ -76,6 +76,9 @@ Options:
       --report <report>
 
 
+      --metadata <metadata>
+          JSON metadata supplied to the evaluated gate
+
       --gate <gate>
 
 

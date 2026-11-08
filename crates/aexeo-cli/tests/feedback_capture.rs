@@ -1,6 +1,41 @@
 use std::{fs, process::Command};
 
 #[test]
+fn captures_metadata_hash_without_storing_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = dir.path().join("text");
+    let report = dir.path().join("report");
+    let metadata = dir.path().join("metadata");
+    let note = dir.path().join("note");
+    fs::write(&text, "text").unwrap();
+    fs::write(&report, r#"{"gates":[{"gate_id":"g","status":"passed"}]}"#).unwrap();
+    fs::write(&metadata, r#"{"titre":"Été","lang":"fr"}"#).unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(["feedback-capture", "--text"])
+        .arg(&text)
+        .arg("--report")
+        .arg(&report)
+        .arg("--metadata")
+        .arg(&metadata)
+        .args(["--gate", "g", "--example", "e", "--output"])
+        .arg(&note)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let note = fs::read_to_string(note).unwrap();
+    assert!(!note.contains("Été"));
+    let note: serde_json::Value = serde_json::from_str(&note).unwrap();
+    assert_eq!(
+        note["metadata_sha256"],
+        "c2dd6ca92cc1c5c1a1208812e55ddfac14cbdbcb54ef0f9441d0deb31e3d541e"
+    );
+}
+
+#[test]
 fn captures_private_note_and_refuses_overwrite() {
     let dir = tempfile::tempdir().unwrap();
     let text = dir.path().join("text");
@@ -90,6 +125,15 @@ fn export_matches_existing_python_validator_on_representative_inputs() {
     let corpus = json!({"version":1,"gate_id":"g","examples":[{"id":"e","split":"development","text":"abc\r\n","expected":"passed"}]});
     let note = json!({"version":1,"kind":"reported_human_feedback","gate_id":"g","example_id":"e","text_sha256":"552bab6864c7a7b69a502ed1854b9245c0e1a30f008aaa0b281da62585fdb025","model_status":"failed","human_status":"passed","reviewer":"human","method":"manual","reason":"private reason"});
     let mut cases: Vec<(Value, Value)> = vec![(corpus.clone(), note.clone())];
+    let mut metadata_corpus = corpus.clone();
+    metadata_corpus["examples"][0]["metadata"] = json!({"titre":"Été", "lang":"fr"});
+    let mut metadata_note = note.clone();
+    metadata_note["metadata_sha256"] =
+        json!("c2dd6ca92cc1c5c1a1208812e55ddfac14cbdbcb54ef0f9441d0deb31e3d541e");
+    cases.push((metadata_corpus.clone(), metadata_note.clone()));
+    cases.push((metadata_corpus.clone(), note.clone()));
+    metadata_corpus["examples"][0]["metadata"]["lang"] = json!("en");
+    cases.push((metadata_corpus, metadata_note));
     for (field, value) in [
         ("human_status", json!("uncertain")),
         ("gate_id", json!("other")),
