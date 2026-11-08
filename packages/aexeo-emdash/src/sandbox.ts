@@ -19,7 +19,7 @@ import {
   buildAllowedHosts,
   buildCapabilities,
 } from "./plugin.js";
-import type { SecretSettingField } from "./plugin.js";
+import type { PluginSettingField } from "./plugin.js";
 import { PACKAGE_VERSION } from "./version.js";
 
 // Local mirror of emdash's PluginDescriptor / SandboxedPluginDescriptor
@@ -59,7 +59,7 @@ export interface SandboxedPluginDescriptor {
   // sidecar bearer token out of the database in plaintext — without it the
   // Setup page's `secret_input` is only a UI affordance and the value would
   // land in plugin KV verbatim.
-  settingsSchema: Record<string, SecretSettingField>;
+  settingsSchema: Record<string, PluginSettingField>;
 }
 
 // Factory consumers call from astro.config.mjs when they want the

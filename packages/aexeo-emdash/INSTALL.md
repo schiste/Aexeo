@@ -38,7 +38,9 @@ in order. `richText` accepts Portable Text arrays and preserves their headings
 and links; `heading` represents an h2. Every encountered block type must be
 mapped and every mapped field must have the expected type. If not, capabilities
 remain unverified. These options apply to configured-mode saves and both
-refresh routes; the sandboxed plugin does not accept block mappings.
+refresh routes. In sandboxed mode, enter the same JSON object in the plugin
+settings field `Custom block mappings (JSON)`; it applies to save and Refresh.
+Invalid or unavailable settings leave custom blocks unverified.
 
 Adapters supplying an `EmdashDocument` can set `body_capabilities` to a subset
 of `text`, `headings`, `paragraphs` and `links`. Omit it only when all four

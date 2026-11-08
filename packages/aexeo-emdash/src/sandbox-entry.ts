@@ -12,6 +12,7 @@ import {
   handleAfterSave,
   isTokenStoredInPlaintext,
   readSidecarConfig,
+  readSandboxBlockMappings,
   writeSidecarConfig,
 } from "./plugin.js";
 import { validateSidecarUrl } from "./sidecar-url.js";
@@ -214,6 +215,7 @@ async function handleRefresh(ctx: DispatchCtx): Promise<BlockResponse> {
     collections: DEFAULT_COLLECTIONS,
     evaluator: sandboxEvaluator,
     suppressionFilter: sandboxSuppressionFilter,
+    blockMappings: await readSandboxBlockMappings(ctx.ctx),
     tuning: adminViewTuning,
   });
 }

@@ -202,6 +202,17 @@ publications and non-page collections even when a collection is marked
 routable. The EmDash inventory adapter must use an explicit publication/surface
 mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
 
+## EmDash preview integration update
+
+- Configured and sandboxed plugins support ordered, host-declared mappings for
+  custom block fields. Unknown or malformed blocks remain unverified.
+- One real Aeptus preview article was evaluated in memory through the adapter
+  and WASM with word-count, heading and link gates; all three ran. This is not
+  a rendered-site comparison or evidence of inventory completeness.
+- The CMS and rendered preview are different access surfaces: MCP access to CMS
+  content alone does not prove snapshot equivalence or grant browser access to
+  the Cloudflare Access-protected preview.
+
 ## Remaining integration and validation
 
 - [ ] Validate the EmDash inventory exporter with an explicit publication, route,
