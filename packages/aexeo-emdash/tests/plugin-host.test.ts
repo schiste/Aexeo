@@ -39,6 +39,7 @@ describe("EmDash content adaptation", () => {
   it("distinguishes an absent body from an explicitly empty one without hiding another rich text field", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: {} };
     expect(contentItemToEmdashDocument(item).body).toBeUndefined();
+    expect(contentItemToEmdashDocument({ ...item, data: { body: "plain text" } }).body_capabilities).toEqual(["text"]);
     expect(contentItemToEmdashDocument({ ...item, data: { body: [] } }).body).toEqual([]);
     expect(contentItemToEmdashDocument({ ...item, data: { body: "  " } }).body).toEqual([]);
     expect(contentItemToEmdashDocument({ ...item, data: { body: [], content: body("actual text") } }).body?.[0]?.children[0]?.text).toBe("actual text");
@@ -110,6 +111,7 @@ describe("EmDash content adaptation", () => {
 
     expect(adapted.document.route).toBe("/journal/hello/");
     expect(adapted.document.body).toHaveLength(1);
+    expect(adapted.document.body_capabilities).toEqual([]);
     expect(bodyText.join(" ")).toContain("A structured heading");
     expect(bodyText.join(" ")).toContain("Useful article body text.");
     expect(bodyText.join(" ")).not.toContain("skip-this-url");

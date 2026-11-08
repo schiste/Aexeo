@@ -142,7 +142,10 @@ export function adaptContentItem(
     document.lang = locale;
   }
   const body = extractPortableText(content.data);
-  if (body !== null) document.body = body;
+  if (body !== null) {
+    document.body = body.blocks;
+    if (body.capabilities !== undefined) document.body_capabilities = body.capabilities;
+  }
 
   return {
     document,
@@ -180,7 +183,7 @@ function stringOrEmpty(value: unknown): string {
 
 function extractPortableText(
   data: Record<string, unknown>,
-): PortableTextBlock[] | null {
+): { blocks: PortableTextBlock[]; capabilities?: ("text" | "headings" | "paragraphs" | "links")[] } | null {
   // Prefer established rich-text fields. EmDash's typed `blocks` field is a
   // separate composition format: its _type/_version/_key envelope does not
   // contain Portable Text's `children`, so passing it through loses the text.
@@ -188,24 +191,24 @@ function extractPortableText(
   for (const slug of ["body", "content"]) {
     const value = data[slug];
     if ((Array.isArray(value) && value.length === 0) || (typeof value === "string" && value.trim().length === 0)) foundEmptyBody = true;
-    if (isPortableTextArray(value)) return value;
-    if (isEmdashBlocksArray(value, slug)) return blocksToPortableText(value);
+    if (isPortableTextArray(value)) return { blocks: value };
+    if (isEmdashBlocksArray(value, slug)) return { blocks: blocksToPortableText(value), capabilities: [] };
     if (typeof value === "string" && value.trim().length > 0) {
-      return [portableTextBlock(value.trim(), `${slug}-text`)];
+      return { blocks: [portableTextBlock(value.trim(), `${slug}-text`)], capabilities: ["text"] };
     }
   }
 
   const blocks = data["blocks"];
   if (Array.isArray(blocks) && blocks.length === 0) foundEmptyBody = true;
-  if (isPortableTextArray(blocks)) return blocks;
-  if (isEmdashBlocksArray(blocks, "blocks")) return blocksToPortableText(blocks);
+  if (isPortableTextArray(blocks)) return { blocks };
+  if (isEmdashBlocksArray(blocks, "blocks")) return { blocks: blocksToPortableText(blocks), capabilities: [] };
 
   for (const [field, value] of Object.entries(data)) {
     if (field === "body" || field === "content" || field === "blocks") continue;
-    if (isPortableTextArray(value)) return value;
-    if (isEmdashBlocksArray(value, field)) return blocksToPortableText(value);
+    if (isPortableTextArray(value)) return { blocks: value };
+    if (isEmdashBlocksArray(value, field)) return { blocks: blocksToPortableText(value), capabilities: [] };
   }
-  return foundEmptyBody ? [] : null;
+  return foundEmptyBody ? { blocks: [] } : null;
 }
 
 function isPortableTextArray(value: unknown): value is PortableTextBlock[] {
