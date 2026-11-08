@@ -399,3 +399,16 @@ kind = "paragraph_character_length"
 max_chars = 200
 blocking = false
 ```
+
+### Sentence length in characters
+
+The opt-in `sentence_character_length` gate uses the same sentence-boundary heuristic, delimiters and optional abbreviation exceptions as `sentence_length`, but limits Unicode scalar values instead of whitespace-separated words. It excludes sentence delimiters and leading/trailing whitespace while counting internal whitespace and punctuation. It does not count visual grapheme clusters and is not linguistic sentence segmentation. Measurements include `max_chars`, `sentence_count` and `longest_sentence_chars`; missing text is `not_checked`.
+
+```toml
+[[gates]]
+id = "editorial.sentence_characters"
+kind = "sentence_character_length"
+max_chars = 100
+delimiters = ".!?。！？"
+blocking = false
+```
