@@ -65,7 +65,7 @@ not as blended application code.
 
 The supported config contract is the nested `version = 1` TOML surface.
 
-- legacy flat keys remain compatibility inputs, not the forward-looking contract
-- compatibility mode must emit machine-readable deprecation warnings
+- every config declares `version = 1`; the flat format was removed once its only users had migrated
+- a key from the flat format fails with an error naming its new location
 - CI should validate config through `aexeo-cli config print --format json`
 - future config evolution should happen through versioned schema changes, not silent drift

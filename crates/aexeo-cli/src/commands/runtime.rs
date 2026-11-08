@@ -2,24 +2,28 @@ use aexeo_contracts::AuditStatus;
 use aexeo_contracts::PerformanceBudget;
 use aexeo_contracts::PerformanceDiffThresholds;
 use aexeo_core::config::load_config_with_diagnostics;
+use aexeo_core::crawl_attestation::{InventorySeed, attest_runtime_crawl, inventory_seed};
+use aexeo_core::error::UserContext;
+use aexeo_core::link_report::AuditLinkContext;
+use aexeo_core::release_marker::ReleaseMarkerSpec;
+use aexeo_core::user_bail;
 use aexeo_core::{
     RuntimeAudit, RuntimeAuditOptions, RuntimeProgressEvent, RuntimeProgressMode,
     audit_site_snapshot, build_audit_artifact, diff_finding_sets, diff_performance_artifacts,
     evaluate_performance_budget, load_audit_artifact, load_findings_from_audit, render_diff_text,
-    render_performance_diff_text, render_sarif, render_text_artifact,
+    render_performance_diff_text, render_sarif, render_text_artifact_with_links, reports_dir,
     run_runtime_audit_with_options, runtime_doctor, verify_runtime_audit, write_audit_artifact,
     write_partial_audit_artifact, write_progress_audit_artifact,
 };
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::exit_code::EXIT_UNSUPPORTED;
-use crate::commands::common::required_arg;
+use crate::commands::common::{report_failure, required_arg};
 use crate::output::{
-    emit_config_warnings, render_audit_command_json, render_diff_command_json,
-    render_failed_command_json,
+    emit_config_warnings, render_audit_command_json_with_graph, render_diff_command_json,
 };
 
 fn apply_runtime_cli_overrides(config: &mut aexeo_core::Config, submatches: &ArgMatches) {
@@ -34,6 +38,9 @@ fn apply_runtime_cli_overrides(config: &mut aexeo_core::Config, submatches: &Arg
     }
     if submatches.get_flag("no-sitemap-seed") {
         config.crawl_use_sitemap = false;
+    }
+    if submatches.get_flag("ignore-robots") {
+        config.crawl_ignore_robots = true;
     }
     // try_get_one because not every runtime subcommand registers
     // --a11y-strict (only `crawl` does today). get_flag would panic.
@@ -82,6 +89,22 @@ fn apply_cf_access_credentials(config: &mut aexeo_core::Config, submatches: &Arg
     }
 }
 
+/// Read a seed file as the link context it gives on its own; its inventory
+/// seeds the crawl and, unless `--link-graph-context` replaces it, is the
+/// context of the crawl's link report.
+fn load_seed_context(path: &str) -> Result<AuditLinkContext> {
+    let data = fs::read(path).user_context(format!("cannot read seed file: {path}"))?;
+    AuditLinkContext::from_inventory_document(&data)
+        .user_context(format!("invalid link inventory in seed file: {path}"))
+}
+
+/// Seed the crawl with the inventory's URLs alongside any `--seed`. They take
+/// the same path: once planned they live in checkpoints, so a resumed crawl
+/// keeps them without re-seeding.
+fn add_inventory_seeds(config: &mut aexeo_core::Config, seed: &InventorySeed) {
+    config.crawl_seeds.extend(seed.urls.iter().cloned());
+}
+
 fn selected_runtime_engine<'a>(
     config: &'a aexeo_core::Config,
     submatches: &'a ArgMatches,
@@ -120,8 +143,10 @@ fn load_performance_budget(
 }
 
 fn load_performance_budget_path(path: PathBuf) -> Result<(PathBuf, PerformanceBudget)> {
-    let text = fs::read_to_string(&path)?;
-    let budget = serde_json::from_str::<PerformanceBudget>(&text)?;
+    let text = fs::read_to_string(&path)
+        .user_context(format!("cannot read performance budget {}", path.display()))?;
+    let budget = serde_json::from_str::<PerformanceBudget>(&text)
+        .user_context(format!("invalid performance budget {}", path.display()))?;
     Ok((path, budget))
 }
 
@@ -205,13 +230,11 @@ fn sanitize_baseline_name(name: &str) -> String {
 }
 
 fn runtime_baseline_latest_path(cwd: &Path, name: &str) -> PathBuf {
-    cwd.join(".aexeo-reports")
-        .join(format!("{name}-runtime-baseline-latest.json"))
+    reports_dir(cwd).join(format!("{name}-runtime-baseline-latest.json"))
 }
 
 fn runtime_baseline_timestamped_path(cwd: &Path, name: &str, generated_at: u64) -> PathBuf {
-    cwd.join(".aexeo-reports")
-        .join(format!("{name}-runtime-baseline-{generated_at}.json"))
+    reports_dir(cwd).join(format!("{name}-runtime-baseline-{generated_at}.json"))
 }
 
 fn write_runtime_baseline_artifact(
@@ -220,14 +243,13 @@ fn write_runtime_baseline_artifact(
     name: &str,
     update_latest: bool,
 ) -> Result<(PathBuf, PathBuf)> {
-    let reports_dir = cwd.join(".aexeo-reports");
-    fs::create_dir_all(&reports_dir)?;
+    fs::create_dir_all(reports_dir(cwd))?;
     let latest_path = runtime_baseline_latest_path(cwd, name);
     let timestamped_path = runtime_baseline_timestamped_path(cwd, name, artifact.generated_at);
     let payload = serde_json::to_string_pretty(artifact)?;
-    fs::write(&timestamped_path, &payload)?;
+    aexeo_core::write_private_file(&timestamped_path, payload.as_bytes())?;
     if update_latest {
-        fs::write(&latest_path, payload)?;
+        aexeo_core::write_private_file(&latest_path, payload.as_bytes())?;
     }
     Ok((latest_path, timestamped_path))
 }
@@ -333,6 +355,22 @@ fn runtime_options_from_cli<'a>(
         artifact_command,
         progress_artifact,
         partial_audit_artifact: partial_artifact,
+        release_marker: None,
+    }
+}
+
+/// The release marker `--release-header` and `--release-meta` ask for, if any.
+fn release_marker_from_cli(submatches: &ArgMatches) -> Result<Option<ReleaseMarkerSpec>> {
+    let flag = |name: &str| {
+        submatches
+            .try_get_one::<String>(name)
+            .ok()
+            .flatten()
+            .map(String::as_str)
+    };
+    match ReleaseMarkerSpec::new(flag("release-header"), flag("release-meta")) {
+        Ok(spec) => Ok(spec),
+        Err(reason) => user_bail!("{reason}"),
     }
 }
 
@@ -343,13 +381,10 @@ fn emit_runtime_failure(
     warnings: Vec<aexeo_core::config::ConfigWarning>,
 ) -> Result<i32> {
     match format {
-        "json" => println!(
-            "{}",
-            render_failed_command_json(command, error.to_string(), warnings)?
-        ),
+        "json" => report_failure(command, format, error, warnings)?,
         _ => {
             emit_config_warnings(&warnings);
-            eprintln!("Runtime audit failed: {}", error);
+            eprintln!("Runtime audit failed: {error:#}");
         }
     }
     Ok(EXIT_UNSUPPORTED)
@@ -365,13 +400,17 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     let baseline_path = submatches.get_one::<String>("baseline");
     let regressions_only = submatches.get_flag("regressions-only");
     if regressions_only && baseline_path.is_none() {
-        bail!("--regressions-only requires --baseline");
+        user_bail!("--regressions-only requires --baseline");
     }
     let performance_budget = load_performance_budget(submatches)?;
     let format = submatches
         .get_one::<String>("format")
         .map(String::as_str)
         .unwrap_or("text");
+    if submatches.get_flag("link-graph-summary") && format == "sarif" {
+        user_bail!("--link-graph-summary is supported only with text or json output");
+    }
+    let release_marker = release_marker_from_cli(submatches)?;
     let progress_mode = submatches
         .get_one::<String>("progress")
         .map(String::as_str)
@@ -395,9 +434,26 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
         aexeo_core::runtime::RuntimeArtifactMode::Callback(&mut progress_writer),
         aexeo_core::runtime::RuntimeArtifactMode::Callback(&mut partial_writer),
     );
+    options.release_marker = release_marker.as_ref();
     let target_url = required_arg(submatches, "url")?;
+    let seed_context = submatches
+        .get_one::<String>("seed-file")
+        .map(|path| load_seed_context(path))
+        .transpose()?;
+    let seed = seed_context
+        .as_ref()
+        .and_then(|context| context.inventory.as_ref())
+        .map(|inventory| inventory_seed(inventory, target_url));
+    // Read before crawling, so a bad file fails fast.
+    let link_context = match submatches.get_one::<String>("link-graph-context") {
+        Some(path) => Some(super::link_graph::read_audit_link_context(path)?),
+        None => seed_context,
+    };
+    if let Some(seed) = &seed {
+        add_inventory_seeds(&mut config, seed);
+    }
 
-    let audit = match run_runtime_audit_with_options(
+    let mut audit = match run_runtime_audit_with_options(
         target_url,
         *submatches.get_one::<usize>("max-pages").unwrap_or(&200),
         selected_runtime_engine(&config, submatches),
@@ -409,8 +465,59 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     };
     let mut full_audit_artifact =
         runtime_output_artifact("crawl", &audit, &audit.findings, Some(target_url));
+    full_audit_artifact.crawl_attestation = attest_runtime_crawl(
+        seed.as_ref(),
+        release_marker.as_ref(),
+        &audit.crawl_run,
+        &full_audit_artifact,
+    );
     let performance_budget_passed =
         apply_performance_budget(&mut full_audit_artifact, performance_budget.as_ref());
+    let mut graph_summary = None;
+    let mut link_notes = None;
+    if let Some(path) = submatches.get_one::<String>("link-graph-output") {
+        let started = std::time::Instant::now();
+        let graph = aexeo_core::link_report::build_link_report_from_audit_with_context(
+            &full_audit_artifact,
+            link_context.as_ref(),
+        )?;
+        // Findings the report proves false leave every output of this run,
+        // the stored audit included; the report lists them.
+        if !graph.suppressed_legacy_findings.is_empty() {
+            aexeo_core::link_findings::remove_suppressed_findings(&mut audit.findings, &graph);
+            aexeo_core::link_findings::remove_suppressed_findings(
+                &mut full_audit_artifact.findings,
+                &graph,
+            );
+            full_audit_artifact.summary =
+                aexeo_core::reporting::summarize_findings(&full_audit_artifact.findings);
+        }
+        if submatches.get_flag("link-graph-summary") {
+            graph_summary = Some(serde_json::json!({
+                "version": 1,
+                "crawl_complete": graph.crawl_complete,
+                "page_count": graph.pages.len(),
+                "destination_count": graph.links.destinations.len(),
+                "same_document_count": graph.links.same_document.len(),
+                "indeterminate_count": graph.links.indeterminate.len(),
+                "issues": graph.issues,
+                "legacy_link_findings": aexeo_core::link_findings::count_conclusions(
+                    &graph.legacy_findings
+                ),
+                "suppressed_legacy_findings": graph.suppressed_legacy_findings,
+            }));
+        }
+        link_notes = Some(aexeo_core::link_notes::LinkFindingNotes::from_report(
+            &graph,
+            Some(path),
+        ));
+        let bytes = serde_json::to_vec_pretty(&graph)?;
+        fs::write(path, bytes)
+            .with_context(|| format!("cannot write link graph report: {path}"))?;
+        if submatches.get_flag("link-graph-telemetry") {
+            super::link_graph::emit_link_graph_telemetry(&graph, started);
+        }
+    }
     let audit_path = write_audit_artifact(
         &full_audit_artifact,
         &cwd,
@@ -431,6 +538,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     let mut render_artifact =
         runtime_output_artifact("crawl", &audit, &findings_to_render, Some(target_url));
     copy_performance_budget(&mut render_artifact, &full_audit_artifact);
+    render_artifact.crawl_attestation = full_audit_artifact.crawl_attestation.clone();
     let findings_success = if regressions_only {
         findings_to_render.is_empty() && audit.status != AuditStatus::Failed
     } else {
@@ -442,12 +550,14 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     match format {
         "json" => println!(
             "{}",
-            render_audit_command_json(
+            render_audit_command_json_with_graph(
                 "crawl",
                 &render_artifact,
                 success,
                 Some(audit_path.display().to_string()),
                 warnings,
+                graph_summary.as_ref(),
+                link_notes.as_ref(),
             )?
         ),
         "sarif" => {
@@ -458,12 +568,41 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
             emit_config_warnings(&warnings);
             println!(
                 "{}",
-                render_text_artifact(
+                render_text_artifact_with_links(
                     &render_artifact,
                     "All runtime checks passed.",
-                    Some(&audit_path)
+                    Some(&audit_path),
+                    link_notes.as_ref(),
                 )
             );
+            if let Some(summary) = &graph_summary {
+                println!(
+                    "Link graph observations: {} pages, {} destinations, {} same-page jumps",
+                    summary["page_count"],
+                    summary["destination_count"],
+                    summary["same_document_count"]
+                );
+                println!(
+                    "Link graph crawl complete: {}; issues: {}",
+                    summary["crawl_complete"], summary["issues"]
+                );
+                println!(
+                    "Link graph coverage of LNK002/LNK004 findings: {}",
+                    summary["legacy_link_findings"]
+                        .as_object()
+                        .into_iter()
+                        .flatten()
+                        .map(|(conclusion, count)| format!("{count} {conclusion}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                println!(
+                    "Link graph suppressed LNK002/LNK004 findings it proves false: {} (listed in the link graph report)",
+                    summary["suppressed_legacy_findings"]
+                        .as_array()
+                        .map_or(0, Vec::len)
+                );
+            }
         }
     }
     Ok(if success { 0 } else { 1 })
@@ -524,7 +663,7 @@ pub fn command_verify(submatches: &ArgMatches) -> Result<i32> {
         build_audit_artifact("baseline", &[], AuditStatus::Complete, None, None)
     };
     if baseline_artifact.is_partial() && !submatches.get_flag("allow-partial-baseline") {
-        bail!(
+        user_bail!(
             "baseline audit is partial; rerun the baseline or pass --allow-partial-baseline to compare against an incomplete crawl"
         );
     }
@@ -568,7 +707,8 @@ pub fn command_profile_runtime(submatches: &ArgMatches) -> Result<i32> {
         selected_runtime_engine(&config, submatches),
         &config,
         &mut options,
-    )?;
+    )
+    .user_context("runtime audit failed")?;
     let mut artifact =
         runtime_output_artifact("profile", &audit, &audit.findings, Some(target_url));
     let performance_budget_passed =
@@ -767,7 +907,8 @@ pub fn command_perf_baseline(submatches: &ArgMatches) -> Result<i32> {
         selected_runtime_engine(&config, submatches),
         &config,
         &mut options,
-    )?;
+    )
+    .user_context("runtime audit failed")?;
     let mut artifact =
         runtime_output_artifact("perf-baseline", &audit, &audit.findings, Some(target_url));
     let performance_budget_passed =
@@ -805,7 +946,7 @@ pub fn command_perf_baseline(submatches: &ArgMatches) -> Result<i32> {
                 "command": "perf baseline",
                 "success": success,
                 "name": baseline_name,
-                "url": target_url,
+                "url": aexeo_core::redact_url(target_url),
                 "audit_path": audit_path.display().to_string(),
                 "baseline_path": timestamped_path.display().to_string(),
                 "latest_path": latest_path.display().to_string(),
@@ -821,7 +962,7 @@ pub fn command_perf_baseline(submatches: &ArgMatches) -> Result<i32> {
             println!("Performance Baseline");
             println!();
             println!("- Name: {}", baseline_name);
-            println!("- URL: {}", target_url);
+            println!("- URL: {}", aexeo_core::redact_url(target_url));
             println!("- Status: {:?}", audit.status);
             println!("- Pages: {}", audit.crawl_stats.visited_pages);
             println!("- Elapsed: {}ms", audit.crawl_stats.elapsed_ms);
@@ -1121,6 +1262,7 @@ mod tests {
             severity: "error".to_string(),
             suggestion: None,
             scope: aexeo_contracts::FindingScope::Page,
+            subject: None,
         }];
         artifact.summary.errors = errors;
         artifact.performance = Some(aexeo_contracts::AuditPerformance {

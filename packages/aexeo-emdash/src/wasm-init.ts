@@ -139,3 +139,24 @@ export async function validateFactsManifest(
   await ensureInitialized();
   return glue.validateFactsManifest(manifestJson, documentsJson);
 }
+
+/** Run a portable content preset on an EmDash document. */
+export async function evaluateContent(
+  documentJson: string,
+  presetName: string,
+  sourcesJson?: string | null,
+  evidenceJson?: string | null,
+): Promise<string> {
+  await ensureInitialized();
+  return glue.evaluateContent(documentJson, presetName, sourcesJson, evidenceJson);
+}
+
+/** Run a portable content preset over a complete EmDash collection. */
+export async function evaluateContentCollection(
+  documentsJson: string,
+  presetName: string,
+  sourcesJson?: string | null,
+): Promise<string> {
+  await ensureInitialized();
+  return glue.evaluateContentCollection(documentsJson, presetName, sourcesJson);
+}

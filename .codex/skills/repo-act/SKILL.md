@@ -23,6 +23,7 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - Run the fastest relevant test command first.
 - Check likely entrypoints and impacted callers before finishing.
 - Re-run lint/build only after the focused validation passes.
+- After changing CLI commands or options, run `cargo run -q -p aexeo-cli -- docs generate .` and `cargo run -q -p aexeo-cli -- docs check .`; include the generated `docs/cli.md` changes.
 - Document any override-based maintainer note that affected the change plan.
 
 ## Useful Commands
@@ -30,3 +31,8 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - `fast_test`: `cargo test --workspace`
 - `build`: `cargo build --workspace`
 - `dev`: `cargo run`
+- `module_format_check`: `cargo fmt --all -- --check` after adding or moving modules; this also checks parent declarations.
+
+- For a broker-coordinated `gh pr merge --match-head-commit`, use the full `headRefOid` from `gh pr view --json headRefOid`; an abbreviated SHA is rejected.
+
+- If a broker push fails with an internal remote hook error, preserve the commit and inspect the error; retry through the broker without force. If it persists, report the rejection and keep the session for recovery.

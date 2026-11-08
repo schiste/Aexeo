@@ -1,14 +1,22 @@
 use anyhow::{Context, Result};
-use reqwest::blocking::{Client, RequestBuilder};
+use reqwest::blocking::{Client, ClientBuilder, RequestBuilder, Response};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::redirect::Policy;
+use reqwest::{Method, StatusCode};
 use std::collections::BTreeMap;
+use std::error::Error as _;
+use std::io::Read;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 use url::Url;
 
-use super::fetcher::FetchOutcome;
+use aexeo_contracts::RedirectHop;
+
+use super::egress::{CrawlEgress, FetchRefused, is_refused};
+use super::fetcher::{FetchOutcome, crawl_user_agent};
+use crate::link_graph::redact_url;
+pub(crate) use crate::link_graph::same_site_host;
 
 #[derive(Debug, Clone)]
 pub(crate) struct FetchResult {
@@ -17,14 +25,25 @@ pub(crate) struct FetchResult {
     pub(crate) body: Option<String>,
     pub(crate) headers: BTreeMap<String, String>,
     pub(crate) effective_url: String,
+    pub(crate) effective_url_observed: bool,
+    pub(crate) headers_observed: bool,
+    /// Redirects followed before the final response, in order. Empty when the
+    /// first response was final or the engine does not report hops.
+    pub(crate) redirect_chain: Vec<RedirectHop>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct HttpFetcher {
     client: Client,
+    headers: HeaderMap,
     cookies: Vec<BTreeMap<String, String>>,
     basic_auth: BTreeMap<String, String>,
+    egress: CrawlEgress,
+    max_response_bytes: u64,
 }
+
+const MAX_REDIRECTS: usize = 10;
+const REDACTED_HEADER_VALUE: &str = "[redacted]";
 
 pub(crate) fn normalize_base_url(base_url: &str) -> String {
     format!("{}/", base_url.trim_end_matches('/'))
@@ -59,28 +78,18 @@ pub(crate) fn host_for_url(url: &str) -> String {
         .unwrap_or_default()
 }
 
-fn comparable_host(host: &str) -> String {
-    let without_userinfo = host.rsplit_once('@').map(|(_, rest)| rest).unwrap_or(host);
-    let without_port = if without_userinfo.starts_with('[') {
-        without_userinfo
-            .split_once(']')
-            .map(|(value, _)| value)
-            .unwrap_or(without_userinfo)
-    } else {
-        without_userinfo
-            .split_once(':')
-            .map(|(value, _)| value)
-            .unwrap_or(without_userinfo)
+/// Whether two URLs are the same crawl origin: scheme, host and port, treating
+/// `www.` as equivalent only when scheme and port match.
+pub(crate) fn same_crawl_origin(left: &str, right: &str) -> bool {
+    let (Ok(left), Ok(right)) = (Url::parse(left), Url::parse(right)) else {
+        return false;
     };
-    let normalized = without_port.trim_end_matches('.').to_ascii_lowercase();
-    normalized
-        .strip_prefix("www.")
-        .unwrap_or(&normalized)
-        .to_string()
-}
-
-pub(crate) fn same_site_host(left: &str, right: &str) -> bool {
-    comparable_host(left) == comparable_host(right)
+    let (Some(left_host), Some(right_host)) = (left.host_str(), right.host_str()) else {
+        return false;
+    };
+    left.scheme() == right.scheme()
+        && left.port_or_known_default() == right.port_or_known_default()
+        && same_site_host(left_host, right_host)
 }
 
 fn headers_from_map(headers: &BTreeMap<String, String>) -> Result<HeaderMap> {
@@ -108,43 +117,139 @@ fn cookie_header_value(cookies: &[BTreeMap<String, String>]) -> Option<String> {
     }
 }
 
-fn build_client(headers: &BTreeMap<String, String>) -> Result<Client> {
-    Ok(Client::builder()
-        .default_headers(headers_from_map(headers)?)
-        .redirect(Policy::limited(10))
-        .timeout(Duration::from_secs(30))
-        .build()?)
-}
-
 impl HttpFetcher {
-    pub(crate) fn new(runtime: &crate::config::RuntimeConfig<'_>) -> Result<Self> {
+    pub(crate) fn new(
+        runtime: &crate::config::RuntimeConfig<'_>,
+        egress: &CrawlEgress,
+    ) -> Result<Self> {
+        Self::with_client_options(runtime, egress, |builder| builder)
+    }
+
+    fn with_client_options(
+        runtime: &crate::config::RuntimeConfig<'_>,
+        egress: &CrawlEgress,
+        customize: impl FnOnce(ClientBuilder) -> ClientBuilder,
+    ) -> Result<Self> {
+        // Redirects are followed by hand in `send` because credentials and
+        // policy are per hop: a reqwest redirect policy can only follow or
+        // stop, not strip headers from the next request.
+        // The User-Agent identifies the crawl on every hop, unlike configured
+        // headers, which stop at the crawl origin.
+        let builder = Client::builder()
+            .user_agent(crawl_user_agent(runtime.crawl_headers))
+            .redirect(Policy::none())
+            .dns_resolver(egress.resolver())
+            .timeout(Duration::from_secs(30));
+        let client = customize(builder).build()?;
         Ok(Self {
-            client: build_client(runtime.crawl_headers)?,
+            client,
+            headers: headers_from_map(runtime.crawl_headers)?,
             cookies: runtime.crawl_cookies.to_vec(),
             basic_auth: runtime.crawl_basic_auth.clone(),
+            egress: egress.clone(),
+            max_response_bytes: runtime.crawl_max_response_bytes,
         })
     }
 
-    pub(crate) fn fetch(&self, url: &str) -> Result<FetchResult> {
-        let response =
-            apply_runtime_credentials(self.client.get(url), &self.cookies, &self.basic_auth)
+    /// The final response and the redirect hops followed to reach it. Each hop
+    /// is recorded only after its response, so the chain never holds a URL
+    /// the egress policy refused.
+    fn send(
+        &self,
+        method: Method,
+        url: &str,
+        credentials: bool,
+        customize: &dyn Fn(RequestBuilder) -> RequestBuilder,
+    ) -> Result<(Response, Vec<RedirectHop>)> {
+        let mut current =
+            Url::parse(url).with_context(|| format!("failed to fetch URL: {}", redact_url(url)))?;
+        let mut chain = Vec::new();
+        for _ in 0..=MAX_REDIRECTS {
+            self.egress.check_url(&current)?;
+            let mut request = customize(self.client.request(method.clone(), current.clone()));
+            if credentials && self.egress.allows_credentials(&current) {
+                request = apply_runtime_credentials(
+                    request.headers(self.headers.clone()),
+                    &self.cookies,
+                    &self.basic_auth,
+                );
+            }
+            let response = request
                 .send()
-                .with_context(|| format!("failed to fetch URL: {url}"))?;
+                .map_err(|error| send_error(error, &current))?;
+            match redirect_target(&response, &current) {
+                Some(next) => {
+                    chain.push(RedirectHop {
+                        url: redact_url(current.as_str()),
+                        status_code: response.status().as_u16(),
+                    });
+                    current = next;
+                }
+                None => return Ok((response, chain)),
+            }
+        }
+        Err(FetchRefused(format!(
+            "refused to fetch {}: more than {MAX_REDIRECTS} redirects",
+            redact_url(url)
+        ))
+        .into())
+    }
+
+    pub(crate) fn fetch(&self, url: &str) -> Result<FetchResult> {
+        self.fetch_customized(url, &|request| request)
+    }
+
+    pub(crate) fn fetch_with_timeout(&self, url: &str, timeout: Duration) -> Result<FetchResult> {
+        self.fetch_customized(url, &|request| request.timeout(timeout))
+    }
+
+    /// Status of a HEAD request carrying the crawl credentials where allowed.
+    pub(crate) fn head_status(&self, url: &str, timeout: Duration) -> Result<StatusCode> {
+        let (response, _) =
+            self.send(Method::HEAD, url, true, &|request| request.timeout(timeout))?;
+        Ok(response.status())
+    }
+
+    /// Status and content type of a GET with this `Accept`, sent without
+    /// credentials and without reading the body.
+    pub(crate) fn negotiate(
+        &self,
+        url: &str,
+        accept: &str,
+        timeout: Duration,
+    ) -> Result<(StatusCode, Option<String>)> {
+        let (response, _) = self.send(Method::GET, url, false, &|request| {
+            request
+                .header(reqwest::header::ACCEPT, accept)
+                .timeout(timeout)
+        })?;
+        Ok((response.status(), content_type_of(&response)))
+    }
+
+    fn fetch_customized(
+        &self,
+        url: &str,
+        customize: &dyn Fn(RequestBuilder) -> RequestBuilder,
+    ) -> Result<FetchResult> {
+        let (response, redirect_chain) = self.send(Method::GET, url, true, customize)?;
         let status_code = Some(response.status().as_u16());
         let effective_url = response.url().to_string();
-        let content_type = response
+        let content_type = content_type_of(&response);
+        let headers_observed = response
             .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_string);
+            .values()
+            .all(|value| value.to_str().is_ok());
         let headers = response_headers(response.headers());
-        let body = response.text().ok();
+        let body = read_capped_body(response, content_type.as_deref(), self.max_response_bytes)?;
         Ok(FetchResult {
             status_code,
             content_type,
             body,
             headers,
             effective_url,
+            effective_url_observed: true,
+            headers_observed,
+            redirect_chain,
         })
     }
 
@@ -162,9 +267,19 @@ impl HttpFetcher {
                 let mut retries = 0usize;
                 let result = loop {
                     match fetcher.fetch(&url) {
-                        Ok(fetched) => break Ok(fetched),
-                        Err(_) if retries < fetch_retry_budget => {
+                        Ok(fetched)
+                            if !super::fetcher::is_retryable_response(&fetched)
+                                || retries >= fetch_retry_budget =>
+                        {
+                            break Ok(fetched);
+                        }
+                        Ok(_) => {
                             retries += 1;
+                            thread::sleep(super::fetcher::retry_backoff(retries));
+                        }
+                        Err(error) if retries < fetch_retry_budget && !is_refused(&error) => {
+                            retries += 1;
+                            thread::sleep(super::fetcher::retry_backoff(retries));
                         }
                         Err(error) => break Err(error),
                     }
@@ -212,16 +327,132 @@ fn apply_runtime_credentials(
     }
 }
 
-fn response_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
-    headers
-        .iter()
-        .filter_map(|(key, value)| {
-            Some((
-                key.as_str().to_ascii_lowercase(),
-                value.to_str().ok()?.to_string(),
-            ))
+/// Surface a policy refusal raised inside the resolver; reqwest wraps it in
+/// several layers that would otherwise hide it behind a generic send error.
+fn send_error(error: reqwest::Error, url: &Url) -> anyhow::Error {
+    let mut source = error.source();
+    while let Some(cause) = source {
+        if let Some(refused) = cause.downcast_ref::<FetchRefused>() {
+            return refused.clone().into();
+        }
+        source = cause.source();
+    }
+    // reqwest's own message repeats the full URL, query included.
+    anyhow::Error::new(error.without_url())
+        .context(format!("failed to fetch URL: {}", redact_url(url.as_str())))
+}
+
+fn redirect_target(response: &Response, current: &Url) -> Option<Url> {
+    let status = response.status().as_u16();
+    if !matches!(status, 301 | 302 | 303 | 307 | 308) {
+        return None;
+    }
+    let location = response.headers().get(reqwest::header::LOCATION)?;
+    current.join(location.to_str().ok()?).ok()
+}
+
+fn content_type_of(response: &Response) -> Option<String> {
+    response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+}
+
+/// Read at most `max_bytes` of the body. An oversized body is a refusal; a
+/// transport failure mid-body keeps its `None` meaning for the caller.
+fn read_capped_body(
+    response: Response,
+    content_type: Option<&str>,
+    max_bytes: u64,
+) -> Result<Option<String>> {
+    let url = redact_url(response.url().as_str());
+    let oversized = || {
+        FetchRefused(format!(
+            "refused to read {url}: response body exceeds crawl_max_response_bytes ({max_bytes} bytes)"
+        ))
+    };
+    if response
+        .content_length()
+        .is_some_and(|length| length > max_bytes)
+    {
+        return Err(oversized().into());
+    }
+    let mut bytes = Vec::new();
+    if response
+        .take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .is_err()
+    {
+        return Ok(None);
+    }
+    if bytes.len() as u64 > max_bytes {
+        return Err(oversized().into());
+    }
+    Ok(Some(decode_body(&bytes, content_type)))
+}
+
+fn decode_body(bytes: &[u8], content_type: Option<&str>) -> String {
+    let encoding = content_type
+        .and_then(|value| {
+            value.split(';').skip(1).find_map(|parameter| {
+                let (name, label) = parameter.split_once('=')?;
+                name.trim()
+                    .eq_ignore_ascii_case("charset")
+                    .then(|| label.trim().trim_matches('"'))
+            })
         })
-        .collect()
+        .and_then(|label| encoding_rs::Encoding::for_label(label.as_bytes()))
+        .unwrap_or(encoding_rs::UTF_8);
+    encoding.decode(bytes).0.into_owned()
+}
+
+/// Response headers are persisted to checkpoints and audit artifacts, so
+/// values that can carry session material are replaced at capture. The name
+/// stays so a rule can still see that the header was present.
+pub(crate) fn redact_sensitive_headers(headers: &mut BTreeMap<String, String>) {
+    for (name, value) in headers.iter_mut() {
+        if is_sensitive_header(name) {
+            *value = REDACTED_HEADER_VALUE.to_string();
+        }
+    }
+}
+
+fn is_sensitive_header(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    [
+        "authorization",
+        "cookie",
+        "token",
+        "secret",
+        "api-key",
+        "apikey",
+        "password",
+        "session",
+    ]
+    .iter()
+    .any(|marker| name.contains(marker))
+}
+
+fn response_headers(headers: &HeaderMap) -> BTreeMap<String, String> {
+    let mut captured = BTreeMap::<String, String>::new();
+    for (key, value) in headers {
+        let Ok(value) = value.to_str() else { continue };
+        let key = key.as_str().to_ascii_lowercase();
+        if key == "x-robots-tag" {
+            captured
+                .entry(key)
+                .and_modify(|existing| {
+                    existing.push_str(", ");
+                    existing.push_str(value);
+                })
+                .or_insert_with(|| value.to_string());
+        } else {
+            captured.insert(key, value.to_string());
+        }
+    }
+    redact_sensitive_headers(&mut captured);
+    captured
 }
 
 pub(crate) fn is_html_content_type(content_type: Option<&str>) -> bool {
@@ -237,45 +468,174 @@ pub(crate) fn is_html_content_type(content_type: Option<&str>) -> bool {
     matches!(media_type.as_str(), "text/html" | "application/xhtml+xml")
 }
 
-pub(crate) fn fetch_with_http(
-    url: &str,
-    headers: &BTreeMap<String, String>,
-    cookies: &[BTreeMap<String, String>],
-    basic_auth: &BTreeMap<String, String>,
-) -> Result<FetchResult> {
-    let runtime = crate::config::RuntimeConfig {
-        browser_engine: "http",
-        browser_wait_until: "networkidle",
-        max_workers: 1,
-        crawl_headers: headers,
-        crawl_cookies: cookies,
-        crawl_basic_auth: basic_auth,
-        crawl_seeds: &[],
-        crawl_include_patterns: &[],
-        crawl_exclude_patterns: &[],
-        crawl_use_sitemap: true,
-        crawl_capture_trace: false,
-        crawl_capture_screenshot: false,
-        crawl_capture_console: false,
-        crawl_capture_network: false,
-        crawl_artifact_dir: "",
-    };
-    HttpFetcher::new(&runtime)?.fetch(url)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{fetch_with_http, origin_for_url, same_site_host};
-    use std::collections::BTreeMap;
+    use super::{
+        CrawlEgress, HttpFetcher, is_refused, origin_for_url, same_crawl_origin, same_site_host,
+    };
+    use crate::config::Config;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
     use std::thread;
+    use std::time::{Duration, Instant};
+
+    /// Serves `respond(path)` as raw HTTP and records every request head, so a
+    /// test can assert exactly what crossed the wire. Runs until dropped.
+    struct RecordingServer {
+        port: u16,
+        requests: Arc<Mutex<Vec<String>>>,
+        stop: Arc<Mutex<bool>>,
+    }
+
+    impl RecordingServer {
+        fn start(respond: impl Fn(&str) -> String + Send + 'static) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let stop = Arc::new(Mutex::new(false));
+            let (recorded, stopped) = (requests.clone(), stop.clone());
+            thread::spawn(move || {
+                while !*stopped.lock().unwrap() {
+                    let Ok((mut stream, _)) = listener.accept() else {
+                        thread::sleep(Duration::from_millis(5));
+                        continue;
+                    };
+                    stream.set_nonblocking(false).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    let mut head = Vec::new();
+                    let mut buffer = [0_u8; 4096];
+                    while !head.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                        match stream.read(&mut buffer) {
+                            Ok(size) if size > 0 => head.extend_from_slice(&buffer[..size]),
+                            _ => break,
+                        }
+                    }
+                    let head = String::from_utf8_lossy(&head).to_lowercase();
+                    let path = head.split_whitespace().nth(1).unwrap_or("/").to_string();
+                    recorded.lock().unwrap().push(head);
+                    let _ = stream.write_all(respond(&path).as_bytes());
+                    let _ = stream.flush();
+                }
+            });
+            Self {
+                port,
+                requests,
+                stop,
+            }
+        }
+
+        fn requests(&self) -> Vec<String> {
+            self.requests.lock().unwrap().clone()
+        }
+    }
+
+    impl Drop for RecordingServer {
+        fn drop(&mut self) {
+            *self.stop.lock().unwrap() = true;
+        }
+    }
+
+    fn ok(body: &str) -> String {
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    fn redirect(location: &str) -> String {
+        redirect_with(302, "Found", location)
+    }
+
+    fn redirect_with(status: u16, reason: &str, location: &str) -> String {
+        format!(
+            "HTTP/1.1 {status} {reason}\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+    }
+
+    fn credentialed_config() -> Config {
+        let mut config = Config::default();
+        config
+            .crawl_headers
+            .insert("x-secret".to_string(), "header-secret".to_string());
+        config.crawl_cookies.push(
+            [("session".to_string(), "cookie-secret".to_string())]
+                .into_iter()
+                .collect(),
+        );
+        config
+            .crawl_basic_auth
+            .insert("username".to_string(), "user".to_string());
+        config
+            .crawl_basic_auth
+            .insert("password".to_string(), "pass".to_string());
+        config
+    }
+
+    fn fetcher(config: &Config, origin: &str, allow_private: bool) -> HttpFetcher {
+        HttpFetcher::new(&config.runtime(), &CrawlEgress::new(origin, allow_private)).unwrap()
+    }
+
+    fn assert_has_credentials(request: &str) {
+        assert!(request.contains("x-secret: header-secret"), "{request}");
+        assert!(request.contains("cookie: "), "{request}");
+        assert!(request.contains("authorization: basic"), "{request}");
+    }
+
+    fn assert_no_credentials(request: &str) {
+        assert!(!request.contains("x-secret"), "{request}");
+        assert!(!request.contains("cookie"), "{request}");
+        assert!(!request.contains("authorization"), "{request}");
+    }
+
+    #[test]
+    fn preserves_multiple_robots_headers() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.append("x-robots-tag", "noindex".parse().unwrap());
+        headers.append("x-robots-tag", "nofollow".parse().unwrap());
+        let captured = super::response_headers(&headers);
+        assert_eq!(captured.get("x-robots-tag").unwrap(), "noindex, nofollow");
+    }
+
+    #[test]
+    fn redacts_sensitive_response_headers_at_capture() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.append("set-cookie", "session=abc; Secure".parse().unwrap());
+        headers.append("x-auth-token", "abc".parse().unwrap());
+        headers.append("authorization", "Bearer abc".parse().unwrap());
+        headers.append("content-type", "text/html".parse().unwrap());
+        let captured = super::response_headers(&headers);
+        assert_eq!(captured["set-cookie"], "[redacted]");
+        assert_eq!(captured["x-auth-token"], "[redacted]");
+        assert_eq!(captured["authorization"], "[redacted]");
+        assert_eq!(captured["content-type"], "text/html");
+    }
 
     #[test]
     fn compares_bare_and_www_hosts_as_same_site() {
         assert!(same_site_host("dilitrust.com", "www.dilitrust.com"));
         assert!(same_site_host("www.example.com:443", "example.com"));
         assert!(!same_site_host("docs.example.com", "example.com"));
+    }
+
+    #[test]
+    fn crawl_origin_compares_scheme_and_port_as_well_as_host() {
+        assert!(same_crawl_origin(
+            "https://example.com/",
+            "https://www.example.com:443/a"
+        ));
+        assert!(!same_crawl_origin(
+            "https://example.com/",
+            "http://example.com/"
+        ));
+        assert!(!same_crawl_origin(
+            "http://example.com/",
+            "http://example.com:81/"
+        ));
+        assert!(!same_crawl_origin("https://example.com/", "not a url"));
     }
 
     #[test]
@@ -288,33 +648,279 @@ mod tests {
 
     #[test]
     fn fetches_headers_and_body_in_process() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let handle = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut buffer = [0_u8; 4096];
-            let _ = stream.read(&mut buffer).unwrap();
-            stream
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nX-Test: ok\r\nContent-Length: 14\r\nConnection: close\r\n\r\n<h1>hello</h1>",
-                )
-                .unwrap();
-            stream.flush().unwrap();
+        let server = RecordingServer::start(|_| {
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nX-Test: ok\r\nContent-Length: 14\r\nConnection: close\r\n\r\n<h1>hello</h1>".to_string()
         });
-
-        let fetched = fetch_with_http(
-            &format!("http://{address}"),
-            &BTreeMap::new(),
-            &[],
-            &BTreeMap::new(),
-        )
-        .unwrap();
+        let origin = format!("http://127.0.0.1:{}", server.port);
+        let fetched = fetcher(&Config::default(), &origin, true)
+            .fetch(&origin)
+            .unwrap();
         assert_eq!(fetched.status_code, Some(200));
         assert_eq!(
             fetched.headers.get("x-test").map(String::as_str),
             Some("ok")
         );
         assert_eq!(fetched.body.as_deref(), Some("<h1>hello</h1>"));
-        handle.join().unwrap();
+    }
+
+    #[test]
+    fn credentials_do_not_follow_a_redirect_to_another_host() {
+        let other = RecordingServer::start(|_| ok("elsewhere"));
+        let location = format!("http://localhost:{}/landing", other.port);
+        let crawl = RecordingServer::start(move |_| redirect(&location));
+        let origin = format!("http://127.0.0.1:{}", crawl.port);
+
+        let fetched = fetcher(&credentialed_config(), &origin, true)
+            .fetch(&origin)
+            .unwrap();
+
+        assert_eq!(fetched.body.as_deref(), Some("elsewhere"));
+        assert_has_credentials(&crawl.requests()[0]);
+        assert_eq!(other.requests().len(), 1);
+        assert_no_credentials(&other.requests()[0]);
+    }
+
+    #[test]
+    fn credentials_do_not_follow_a_redirect_to_another_port() {
+        let other = RecordingServer::start(|_| ok("other port"));
+        let location = format!("http://127.0.0.1:{}/", other.port);
+        let crawl = RecordingServer::start(move |_| redirect(&location));
+        let origin = format!("http://127.0.0.1:{}", crawl.port);
+
+        fetcher(&credentialed_config(), &origin, true)
+            .fetch(&origin)
+            .unwrap();
+
+        assert_has_credentials(&crawl.requests()[0]);
+        assert_no_credentials(&other.requests()[0]);
+    }
+
+    #[test]
+    fn credentials_follow_a_redirect_within_the_origin() {
+        let crawl = RecordingServer::start(|path| match path {
+            "/" => redirect("/final"),
+            _ => ok("final"),
+        });
+        let origin = format!("http://127.0.0.1:{}", crawl.port);
+
+        let fetched = fetcher(&credentialed_config(), &origin, true)
+            .fetch(&origin)
+            .unwrap();
+
+        assert_eq!(fetched.body.as_deref(), Some("final"));
+        let requests = crawl.requests();
+        assert_eq!(requests.len(), 2);
+        assert_has_credentials(&requests[0]);
+        assert_has_credentials(&requests[1]);
+    }
+
+    /// `check_url` and the resolver run on every hop of the same loop, so
+    /// refusing the first hop proves the gate a redirect hop goes through.
+    #[test]
+    fn strict_egress_refuses_private_targets_before_connecting() {
+        let server = RecordingServer::start(|_| ok("private"));
+        let strict = fetcher(&credentialed_config(), "https://example.com/", false);
+        for url in [
+            format!("http://127.0.0.1:{}/", server.port),
+            format!("http://localhost:{}/", server.port),
+        ] {
+            let error = strict.fetch(&url).expect_err(&url);
+            assert!(is_refused(&error), "{url}: {error:#}");
+            assert!(error.to_string().contains("non-public"), "{error}");
+            assert!(
+                error.to_string().contains("allow_private_network"),
+                "{error}"
+            );
+        }
+        assert!(server.requests().is_empty());
+    }
+
+    /// Simulates a public origin: `public.test` is pinned to a local server by a
+    /// client override, and the egress policy is strict, as for a public target.
+    /// The socket, redirect loop and guarded resolver are real. What is not
+    /// exercised is real DNS or a real public network path for the origin.
+    #[test]
+    fn a_public_origin_cannot_redirect_to_a_name_resolving_privately() {
+        let private = RecordingServer::start(|_| ok("metadata"));
+        let location = format!("http://localhost:{}/latest/meta-data/", private.port);
+        let public = RecordingServer::start(move |_| redirect(&location));
+        let origin = format!("http://public.test:{}/", public.port);
+        let config = credentialed_config();
+        let pinned = std::net::SocketAddr::from(([127, 0, 0, 1], public.port));
+        let fetcher = HttpFetcher::with_client_options(
+            &config.runtime(),
+            &CrawlEgress::new(&origin, false),
+            |builder| builder.no_proxy().resolve("public.test", pinned),
+        )
+        .unwrap();
+
+        let error = fetcher.fetch(&origin).unwrap_err();
+
+        assert!(is_refused(&error), "{error:#}");
+        assert!(error.to_string().contains("non-public"), "{error}");
+        assert_has_credentials(&public.requests()[0]);
+        assert!(private.requests().is_empty(), "{:?}", private.requests());
+    }
+
+    #[test]
+    fn fetch_errors_do_not_repeat_url_secrets() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let origin = format!("http://127.0.0.1:{port}");
+        let error = fetcher(&Config::default(), &origin, true)
+            .fetch(&format!(
+                "http://user:hunter2@127.0.0.1:{port}/a?token=hunter2"
+            ))
+            .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(!message.contains("hunter2"), "{message}");
+    }
+
+    #[test]
+    fn a_redirect_loop_is_refused() {
+        let crawl = RecordingServer::start(|_| redirect("/again"));
+        let origin = format!("http://127.0.0.1:{}", crawl.port);
+        let error = fetcher(&Config::default(), &origin, true)
+            .fetch(&origin)
+            .unwrap_err();
+        assert!(is_refused(&error), "{error:#}");
+        assert_eq!(crawl.requests().len(), super::MAX_REDIRECTS + 1);
+    }
+
+    #[test]
+    fn a_page_fetch_records_each_redirect_hop_in_order() {
+        let crawl = RecordingServer::start(|path| match path {
+            "/start?token=secret" => redirect_with(301, "Moved Permanently", "/middle"),
+            "/middle" => redirect_with(302, "Found", "/final"),
+            _ => ok("final"),
+        });
+        let origin = format!("http://127.0.0.1:{}", crawl.port);
+
+        let fetched = fetcher(&Config::default(), &origin, true)
+            .fetch(&format!("{origin}/start?token=secret"))
+            .unwrap();
+
+        assert_eq!(fetched.body.as_deref(), Some("final"));
+        assert_eq!(fetched.effective_url, format!("{origin}/final"));
+        let hops = fetched
+            .redirect_chain
+            .iter()
+            .map(|hop| (hop.url.as_str(), hop.status_code))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            hops,
+            [
+                (format!("{origin}/start").as_str(), 301),
+                (format!("{origin}/middle").as_str(), 302),
+            ]
+        );
+        assert_eq!(crawl.requests().len(), 3);
+    }
+
+    #[test]
+    fn a_direct_response_has_no_redirect_chain() {
+        let crawl = RecordingServer::start(|_| ok("direct"));
+        let origin = format!("http://127.0.0.1:{}", crawl.port);
+        let fetched = fetcher(&Config::default(), &origin, true)
+            .fetch(&origin)
+            .unwrap();
+        assert!(fetched.redirect_chain.is_empty());
+    }
+
+    #[test]
+    fn more_redirects_than_the_limit_are_refused_without_a_result() {
+        let crawl = RecordingServer::start(|path| {
+            let hop = path.trim_start_matches('/').parse::<usize>().unwrap_or(0);
+            redirect(&format!("/{}", hop + 1))
+        });
+        let origin = format!("http://127.0.0.1:{}", crawl.port);
+        let error = fetcher(&Config::default(), &origin, true)
+            .fetch(&format!("{origin}/0"))
+            .unwrap_err();
+        assert!(is_refused(&error), "{error:#}");
+        assert!(error.to_string().contains("redirects"), "{error}");
+        assert_eq!(crawl.requests().len(), super::MAX_REDIRECTS + 1);
+    }
+
+    #[test]
+    fn a_redirect_to_another_scheme_is_refused() {
+        let crawl = RecordingServer::start(|_| redirect("file:///etc/passwd"));
+        let origin = format!("http://127.0.0.1:{}", crawl.port);
+        let error = fetcher(&Config::default(), &origin, true)
+            .fetch(&origin)
+            .unwrap_err();
+        assert!(is_refused(&error), "{error:#}");
+    }
+
+    fn capped_fetcher(origin: &str, max_response_bytes: u64) -> HttpFetcher {
+        let config = Config {
+            crawl_max_response_bytes: max_response_bytes,
+            ..Config::default()
+        };
+        fetcher(&config, origin, true)
+    }
+
+    #[test]
+    fn oversized_declared_body_is_a_refusal() {
+        let server = RecordingServer::start(|_| ok(&"x".repeat(1024)));
+        let origin = format!("http://127.0.0.1:{}", server.port);
+        let error = capped_fetcher(&origin, 100).fetch(&origin).unwrap_err();
+        assert!(is_refused(&error), "{error:#}");
+        assert!(
+            error.to_string().contains("crawl_max_response_bytes"),
+            "{error}"
+        );
+    }
+
+    /// Without Content-Length only the streaming cap can stop the read, and it
+    /// must do so long before the server finishes sending.
+    #[test]
+    fn oversized_undeclared_body_stops_reading_at_the_cap() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0_u8; 4096];
+            let _ = stream.read(&mut buffer);
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+            // Endless body: this only ends when the client hangs up.
+            let chunk = [b'x'; 8192];
+            while stream.write_all(&chunk).is_ok() {}
+        });
+        let origin = format!("http://127.0.0.1:{port}");
+        let started = Instant::now();
+        let error = capped_fetcher(&origin, 64 * 1024)
+            .fetch(&origin)
+            .unwrap_err();
+        assert!(is_refused(&error), "{error:#}");
+        assert!(started.elapsed() < Duration::from_secs(20));
+    }
+
+    #[test]
+    fn body_at_the_cap_is_returned() {
+        let server = RecordingServer::start(|_| ok(&"x".repeat(100)));
+        let origin = format!("http://127.0.0.1:{}", server.port);
+        let fetched = capped_fetcher(&origin, 100).fetch(&origin).unwrap();
+        assert_eq!(fetched.body.map(|body| body.len()), Some(100));
+    }
+
+    #[test]
+    fn decodes_the_declared_charset() {
+        assert_eq!(
+            super::decode_body(
+                &[0x63, 0x61, 0x66, 0xe9],
+                Some("text/html; Charset=\"iso-8859-1\"")
+            ),
+            "café"
+        );
+        assert_eq!(
+            super::decode_body("café".as_bytes(), Some("text/html")),
+            "café"
+        );
     }
 }

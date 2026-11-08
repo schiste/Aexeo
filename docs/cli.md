@@ -4,6 +4,208 @@
 
 ## Commands
 
+## `link-graph`
+
+Analyze explicitly identified rendered pages and inventory
+
+```text
+Analyze explicitly identified rendered pages and inventory
+
+Usage: link-graph [OPTIONS] <input>
+
+Arguments:
+  <input>
+          Versioned JSON input file
+
+Options:
+      --audit
+          Read an Aexeo audit artifact instead of a link graph input
+
+      --context <context>
+          JSON audit identity and inventory context
+
+      --static-url-map <static-url-map>
+          JSON map of static relative paths to public URLs
+
+      --telemetry
+          Emit aggregate timings and counts as JSON on stderr
+
+  -h, --help
+          Print help
+```
+
+## `feedback-export`
+
+Export validated human feedback as a historical review event
+
+```text
+Export validated human feedback as a historical review event
+
+Usage: feedback-export [OPTIONS] --corpus <corpus> --note <note> --output <output>
+
+Options:
+      --corpus <corpus>
+
+
+      --note <note>
+
+
+      --output <output>
+
+
+      --telemetry
+
+
+  -h, --help
+          Print help
+```
+
+## `feedback-capture`
+
+Capture explicitly reported human feedback in a private local note
+
+```text
+Capture explicitly reported human feedback in a private local note
+
+Usage: feedback-capture [OPTIONS] --text <text> --report <report> --gate <gate> --example <example> --output <output>
+
+Options:
+      --text <text>
+
+
+      --report <report>
+
+
+      --metadata <metadata>
+          JSON metadata supplied to the evaluated gate
+
+      --gate <gate>
+
+
+      --example <example>
+
+
+      --human-status <human-status>
+          [possible values: passed, failed, uncertain]
+
+      --reviewer <reviewer>
+
+
+      --method <method>
+
+
+      --reason-file <reason-file>
+
+
+      --language <language>
+
+
+      --content-type <content-type>
+
+
+      --preset <preset>
+
+
+      --config-version <config-version>
+
+
+      --tool-version <tool-version>
+
+
+      --output <output>
+
+
+      --telemetry
+
+
+  -h, --help
+          Print help
+```
+
+## `content`
+
+Run a portable content preset on a UTF-8 file or stdin
+
+```text
+Run a portable content preset on a UTF-8 file or stdin
+
+Usage: content [OPTIONS] [path]
+
+Arguments:
+  [path]
+          [default: -]
+
+Options:
+      --preset <preset>
+          [default: article]
+
+      --preset-source <preset-source>
+          Load a named TOML preset as NAME=PATH; may be repeated
+
+      --metadata <metadata>
+          JSON file containing string metadata fields
+
+      --evidence-source <evidence-source>
+          Load a named UTF-8 source snapshot as NAME=PATH; may be repeated
+
+      --site <site>
+          Load a static website for site gates
+
+      --collection <collection>
+          Load a complete JSON array of content items for collection gates
+
+      --site-config <site-config>
+          Existing site audit config file
+
+      --crawl-url <crawl-url>
+          Crawl a website and evaluate the preset against its snapshot
+
+      --crawl-config <crawl-config>
+          Existing crawl configuration file
+
+      --crawl-max-pages <crawl-max-pages>
+          Maximum pages to crawl
+
+          [default: 200]
+
+      --crawl-engine <crawl-engine>
+          Crawl engine
+
+          [default: http]
+          [possible values: http, playwright]
+
+      --input-format <input-format>
+          Interpret content as raw text or Markdown
+
+          [default: text]
+          [possible values: text, markdown]
+
+      --telemetry
+          Write local evaluation timing and aggregate counts as JSON to stderr
+
+      --fix
+          Apply supported safe fixes to a local file
+
+      --no-text
+          Do not read a text input
+
+      --list-site-groups
+          List native website groups usable in presets
+
+      --list-presets
+          List available preset names
+
+      --explain
+          Print the resolved preset as TOML (or JSON with --format json) without reading content
+
+      --format <format>
+          [default: text]
+          [possible values: text, json]
+
+  -h, --help
+          Print help
+```
+
 ## `check`
 
 Run static checks against a site directory
@@ -55,6 +257,15 @@ Options:
       --seed <seed>
 
 
+      --seed-file <seed-file>
+          Seed every page URL on the target's origin from a link inventory JSON file and record a crawl attestation in the audit artifact
+
+      --release-header <release-header>
+          Record each HTML page's release marker from this response header and attest it in the audit artifact; takes precedence over --release-meta
+
+      --release-meta <release-meta>
+          Record each HTML page's release marker from the content of <meta name=NAME> and attest it in the audit artifact
+
       --include-pattern <include-pattern>
 
 
@@ -64,8 +275,23 @@ Options:
       --no-sitemap-seed
 
 
+      --ignore-robots
+          Crawl URLs that robots.txt disallows; only for auditing a site you own
+
       --max-pages <max-pages>
           [default: 200]
+
+      --link-graph-output <link-graph-output>
+          Write an observational link graph report to this JSON file
+
+      --link-graph-context <link-graph-context>
+          Compare the link graph report with this audit link context file instead of the --seed-file inventory
+
+      --link-graph-summary
+          Include an observational link graph coverage summary in the crawl output
+
+      --link-graph-telemetry
+          Emit aggregate link graph timing and counts to stderr
 
       --checkpoint <checkpoint>
 
@@ -237,7 +463,7 @@ Commands:
   presence       Surface what the open web shows about the manifest's organization (5 sources, no scoring)
   trust-surface  Import and reconcile trusted external surfaces against site truth
   surfaces       Discover machine-readable website surfaces and retrieval paths
-  score          Compute site and route intelligence scores
+  score          Report site and route intelligence facts and blockers (no composite score)
   help           Print this message or the help of the given subcommand(s)
 
 Options:
@@ -401,6 +627,9 @@ Options:
 
       --no-sitemap-seed
 
+
+      --ignore-robots
+          Crawl URLs that robots.txt disallows; only for auditing a site you own
 
       --config <config>
 
@@ -617,6 +846,9 @@ Options:
 
       --inject-schema
           Read schema-suggestions.json from the path and inject suggested JSON-LD into HTML <head> blocks (per-type augmentation; existing types are skipped).
+
+      --dry-run
+          List the files fix would change or skip without writing anything.
 
       --format <format>
           [default: text]

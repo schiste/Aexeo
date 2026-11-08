@@ -6,6 +6,8 @@ export interface EmdashContentItem {
   slug: string | null;
   status: string;
   locale: string | null;
+  /** Host write timestamp. Orders concurrent saves and Refresh sweeps. */
+  updatedAt?: string;
   translationGroup?: string | null;
   data: Record<string, unknown>;
   seo?: {
@@ -23,6 +25,8 @@ export interface EmdashContentMeta {
   title: string;
   /** Exact URL returned by EmDash, or null when this entry has no public route. */
   publicUrl: string | null;
+  /** The host's `updatedAt` for the row this entry was adapted from. */
+  updatedAt?: string;
 }
 
 export interface ContentUrlApi {
@@ -149,6 +153,7 @@ export function adaptContentItem(
       status: content.status,
       title,
       publicUrl: options.publicUrl ?? null,
+      ...(content.updatedAt === undefined ? {} : { updatedAt: content.updatedAt }),
     },
   };
 }

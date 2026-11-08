@@ -1,159 +1,26 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "allOf": [
-    {
-      "if": {
-        "anyOf": [
-          {
-            "required": [
-              "site"
-            ]
-          },
-          {
-            "required": [
-              "runtime"
-            ]
-          },
-          {
-            "required": [
-              "policy"
-            ]
-          },
-          {
-            "required": [
-              "rules"
-            ]
-          },
-          {
-            "required": [
-              "output"
-            ]
-          },
-          {
-            "required": [
-              "quality"
-            ]
-          }
-        ]
-      },
-      "then": {
-        "properties": {
-          "version": {
-            "const": 1
-          }
-        },
-        "required": [
-          "version"
-        ]
-      }
-    }
-  ],
   "properties": {
-    "adapter": {
-      "description": "Adapter selection mode.",
-      "type": "string"
-    },
-    "audit_log_limit": {
-      "description": "Number of audit artifacts retained per command.",
-      "minimum": 0,
-      "type": "integer"
-    },
-    "baseline_file": {
-      "description": "Default audit baseline path.",
-      "type": "string"
-    },
-    "browser_engine": {
-      "description": "Default crawl engine.",
-      "type": "string"
-    },
-    "browser_wait_until": {
-      "description": "Browser navigation wait strategy.",
-      "type": "string"
-    },
-    "canonical_style": {
-      "description": "Preferred internal canonical style.",
-      "type": "string"
-    },
-    "checks": {
-      "additionalProperties": {
-        "type": "boolean"
+    "accessibility": {
+      "additionalProperties": false,
+      "properties": {
+        "strict": {
+          "description": "Fire A11Y001 on every image without alt.",
+          "type": "boolean"
+        }
       },
-      "description": "Built-in rule-group toggles.",
       "type": "object"
     },
-    "crawl_artifact_dir": {
-      "description": "Directory used for crawl artifacts.",
-      "type": "string"
-    },
-    "crawl_basic_auth": {
-      "additionalProperties": {
-        "type": "string"
+    "agent_discovery": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Enable the opt-in AGT rules.",
+          "type": "boolean"
+        }
       },
-      "description": "Basic auth credentials for runtime crawl sessions.",
       "type": "object"
-    },
-    "crawl_capture_console": {
-      "description": "Whether browser crawl should persist console output.",
-      "type": "boolean"
-    },
-    "crawl_capture_network": {
-      "description": "Whether browser crawl should persist network logs.",
-      "type": "boolean"
-    },
-    "crawl_capture_screenshot": {
-      "description": "Whether browser crawl should save screenshots.",
-      "type": "boolean"
-    },
-    "crawl_capture_trace": {
-      "description": "Whether browser crawl should capture a trace artifact.",
-      "type": "boolean"
-    },
-    "crawl_cookies": {
-      "description": "Cookies injected into runtime crawl sessions.",
-      "items": {
-        "additionalProperties": {
-          "type": "string"
-        },
-        "type": "object"
-      },
-      "type": "array"
-    },
-    "crawl_exclude_patterns": {
-      "description": "Route substrings excluded from runtime crawl.",
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    },
-    "crawl_headers": {
-      "additionalProperties": {
-        "type": "string"
-      },
-      "description": "Extra HTTP headers applied to runtime crawl requests.",
-      "type": "object"
-    },
-    "crawl_include_patterns": {
-      "description": "Route substrings used to constrain runtime crawl scope.",
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    },
-    "crawl_seeds": {
-      "description": "Additional route seeds for runtime crawl.",
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    },
-    "crawl_use_sitemap": {
-      "description": "Whether runtime crawl should seed routes from sitemap.xml.",
-      "type": "boolean"
-    },
-    "default_twitter_card": {
-      "description": "Default twitter:card value used by safe fixes.",
-      "type": "string"
     },
     "editorial": {
       "additionalProperties": false,
@@ -199,10 +66,6 @@
       },
       "type": "object"
     },
-    "enable_link_autofix": {
-      "description": "Whether safe fix mode may insert related-links sections.",
-      "type": "boolean"
-    },
     "extends": {
       "description": "Parent config file or files merged before the current config.",
       "oneOf": [
@@ -217,56 +80,46 @@
         }
       ]
     },
-    "ignore_paths": {
-      "description": "Path patterns to suppress after evaluation.",
-      "items": {
-        "type": "string"
+    "images": {
+      "additionalProperties": false,
+      "properties": {
+        "max_alt_characters": {
+          "description": "Advisory maximum length of informative alt text, in characters (IMG006).",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_bytes": {
+          "description": "Advisory maximum encoded size of a local image, in bytes (IMG003).",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "prefer_modern_formats": {
+          "description": "Suggest WebP or AVIF sources for JPEG and PNG images (IMG005).",
+          "type": "boolean"
+        },
+        "recommend_figure_captions": {
+          "description": "Suggest a visible caption for informative images inside a figure (IMG008).",
+          "type": "boolean"
+        },
+        "require_dimensions": {
+          "description": "Report images without positive width and height attributes (IMG007).",
+          "type": "boolean"
+        },
+        "require_image_object_metadata": {
+          "description": "Opt in: require ImageObject contentUrl, creator and license metadata (IMG010).",
+          "type": "boolean"
+        },
+        "require_image_sitemap": {
+          "description": "Opt in: report informative local images missing from the image sitemap (IMG009).",
+          "type": "boolean"
+        }
       },
-      "type": "array"
-    },
-    "ignore_rules": {
-      "description": "Rule IDs to suppress after evaluation.",
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    },
-    "link_suggestion_count": {
-      "description": "Candidate internal-link suggestions per weakly linked page.",
-      "minimum": 0,
-      "type": "integer"
+      "type": "object"
     },
     "max_workers": {
       "description": "Worker count used for parallel analysis tasks.",
       "minimum": 0,
       "type": "integer"
-    },
-    "min_answer_blocks": {
-      "description": "Minimum answer-oriented blocks required for a page.",
-      "minimum": 0,
-      "type": "integer"
-    },
-    "min_block_text_length": {
-      "description": "Minimum visible text length for a semantic content block.",
-      "minimum": 0,
-      "type": "integer"
-    },
-    "min_inbound_links": {
-      "description": "Minimum inbound internal links before LNK004 triggers.",
-      "minimum": 0,
-      "type": "integer"
-    },
-    "min_page_size": {
-      "description": "Minimum visible text length before CNT001 triggers.",
-      "minimum": 0,
-      "type": "integer"
-    },
-    "orphan_exclude": {
-      "description": "Routes or filenames excluded from orphan detection.",
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
     },
     "output": {
       "additionalProperties": false,
@@ -280,10 +133,6 @@
         }
       },
       "type": "object"
-    },
-    "performance_budget_file": {
-      "description": "Performance budget file checked by repo quality.",
-      "type": "string"
     },
     "plugin_settings": {
       "additionalProperties": false,
@@ -385,364 +234,284 @@
       },
       "type": "object"
     },
-    "related_links_heading": {
-      "description": "Heading text used when related-links autofix inserts content.",
-      "type": "string"
-    },
-    "repeatable_data_ui": {
-      "description": "data-ui labels treated as intentionally repeatable.",
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    },
-    "require_breadcrumb_schema": {
-      "description": "Whether nested pages must emit BreadcrumbList schema.",
-      "type": "boolean"
-    },
-    "require_fact_consistency": {
-      "description": "Whether visible and structured page facts should align.",
-      "type": "boolean"
-    },
-    "require_hreflang_self": {
-      "description": "Whether pages with hreflang alternates require a self-reference.",
-      "type": "boolean"
-    },
-    "require_html_lang": {
-      "description": "Whether indexable pages must declare html lang.",
-      "type": "boolean"
-    },
-    "require_meta_robots_consistency": {
-      "description": "Whether sitemap/indexability robots inconsistencies should be flagged.",
-      "type": "boolean"
-    },
-    "require_open_graph": {
-      "description": "Whether core Open Graph tags are required.",
-      "type": "boolean"
-    },
-    "require_robots_sitemap": {
-      "description": "Whether robots.txt must declare a sitemap.",
-      "type": "boolean"
-    },
-    "require_schema_title_alignment": {
-      "description": "Whether JSON-LD title fields must align with visible titles.",
-      "type": "boolean"
-    },
-    "require_social_images": {
-      "description": "Whether og:image is required.",
-      "type": "boolean"
-    },
-    "require_twitter_card": {
-      "description": "Whether twitter:card is required.",
-      "type": "boolean"
-    },
-    "require_twitter_image": {
-      "description": "Whether twitter:image is required.",
-      "type": "boolean"
-    },
-    "required_feature_markers": {
-      "description": "Literal strings required on feature-like pages.",
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    },
-    "required_schema_families": {
-      "description": "Schema families that should be validated.",
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    },
-    "required_schema_types": {
-      "description": "JSON-LD @type values expected on route pages.",
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    },
-    "route_policy_overrides": {
-      "description": "Per-route robots policy overrides.",
-      "items": {
+    "route_kinds": {
+      "additionalProperties": {
         "additionalProperties": false,
         "properties": {
-          "allow_canonical_noindex": {
+          "match": {
+            "description": "Path substrings selecting this route kind.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "noindex": {
+            "description": "Accepted, but not read by any rule yet.",
             "type": "boolean"
           },
-          "allow_nofollow": {
-            "type": "boolean"
-          },
-          "pattern": {
-            "type": "string"
+          "skip_rules": {
+            "description": "Rule IDs dropped on matching paths.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
-        "required": [
-          "pattern"
-        ],
         "type": "object"
       },
-      "type": "array"
+      "description": "Named route groups whose matching paths skip the listed rules.",
+      "type": "object"
     },
     "rules": {
       "additionalProperties": false,
       "properties": {
+        "accessibility": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "agent_discovery": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
         "content": {
-          "oneOf": [
-            {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
               "type": "boolean"
             },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "enabled": {
-                  "type": "boolean"
-                },
-                "min_page_size": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "required_feature_markers": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                }
+            "min_page_size": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "required_feature_markers": {
+              "items": {
+                "type": "string"
               },
-              "type": "object"
+              "type": "array"
             }
-          ]
+          },
+          "type": "object"
         },
         "editorial": {
-          "oneOf": [
-            {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
               "type": "boolean"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "enabled": {
-                  "type": "boolean"
-                }
-              },
-              "type": "object"
             }
-          ]
+          },
+          "type": "object"
+        },
+        "headers": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
         },
         "html": {
-          "oneOf": [
-            {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
               "type": "boolean"
             },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "enabled": {
-                  "type": "boolean"
-                },
-                "require_hreflang_self": {
-                  "type": "boolean"
-                },
-                "require_html_lang": {
-                  "type": "boolean"
-                }
-              },
-              "type": "object"
+            "require_hreflang_self": {
+              "type": "boolean"
+            },
+            "require_html_lang": {
+              "type": "boolean"
             }
-          ]
+          },
+          "type": "object"
+        },
+        "images": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
         },
         "links": {
-          "oneOf": [
-            {
+          "additionalProperties": false,
+          "properties": {
+            "enable_link_autofix": {
               "type": "boolean"
             },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "enable_link_autofix": {
-                  "type": "boolean"
-                },
-                "enabled": {
-                  "type": "boolean"
-                },
-                "link_suggestion_count": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "min_inbound_links": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "related_links_heading": {
-                  "type": "string"
-                },
-                "weak_anchor_text": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                }
+            "enabled": {
+              "type": "boolean"
+            },
+            "link_suggestion_count": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "min_inbound_links": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "orphan_exclude": {
+              "items": {
+                "type": "string"
               },
-              "type": "object"
+              "type": "array"
+            },
+            "related_links_heading": {
+              "type": "string"
+            },
+            "weak_anchor_text": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             }
-          ]
+          },
+          "type": "object"
         },
         "llm": {
-          "oneOf": [
-            {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
               "type": "boolean"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "enabled": {
-                  "type": "boolean"
-                }
-              },
-              "type": "object"
             }
-          ]
+          },
+          "type": "object"
         },
         "robots": {
-          "oneOf": [
-            {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
               "type": "boolean"
             },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "enabled": {
-                  "type": "boolean"
-                },
-                "require_meta_consistency": {
-                  "type": "boolean"
-                },
-                "require_sitemap": {
-                  "type": "boolean"
-                }
-              },
-              "type": "object"
+            "require_meta_consistency": {
+              "type": "boolean"
+            },
+            "require_sitemap": {
+              "type": "boolean"
             }
-          ]
+          },
+          "type": "object"
         },
         "schema": {
-          "oneOf": [
-            {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
               "type": "boolean"
             },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "enabled": {
-                  "type": "boolean"
-                },
-                "require_breadcrumb_schema": {
-                  "type": "boolean"
-                },
-                "require_title_alignment": {
-                  "type": "boolean"
-                },
-                "required_families": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                "required_types": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                }
+            "require_breadcrumb_schema": {
+              "type": "boolean"
+            },
+            "require_title_alignment": {
+              "type": "boolean"
+            },
+            "required_families": {
+              "items": {
+                "type": "string"
               },
-              "type": "object"
+              "type": "array"
+            },
+            "required_types": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             }
-          ]
+          },
+          "type": "object"
         },
         "sitemap": {
-          "oneOf": [
-            {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
               "type": "boolean"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "enabled": {
-                  "type": "boolean"
-                }
-              },
-              "type": "object"
             }
-          ]
+          },
+          "type": "object"
         },
         "social": {
-          "oneOf": [
-            {
+          "additionalProperties": false,
+          "properties": {
+            "default_twitter_card": {
+              "type": "string"
+            },
+            "enabled": {
               "type": "boolean"
             },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "default_twitter_card": {
-                  "type": "string"
-                },
-                "enabled": {
-                  "type": "boolean"
-                },
-                "require_open_graph": {
-                  "type": "boolean"
-                },
-                "require_social_images": {
-                  "type": "boolean"
-                },
-                "require_twitter_card": {
-                  "type": "boolean"
-                },
-                "require_twitter_image": {
-                  "type": "boolean"
-                }
-              },
-              "type": "object"
+            "require_open_graph": {
+              "type": "boolean"
+            },
+            "require_social_images": {
+              "type": "boolean"
+            },
+            "require_twitter_card": {
+              "type": "boolean"
+            },
+            "require_twitter_image": {
+              "type": "boolean"
             }
-          ]
+          },
+          "type": "object"
         },
         "structure": {
-          "oneOf": [
-            {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
               "type": "boolean"
             },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "enabled": {
-                  "type": "boolean"
-                },
-                "min_answer_blocks": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "min_block_text_length": {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "repeatable_data_ui": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                "require_fact_consistency": {
-                  "type": "boolean"
-                },
-                "utility_route_patterns": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                }
+            "min_answer_blocks": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "min_block_text_length": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "repeatable_data_ui": {
+              "items": {
+                "type": "string"
               },
-              "type": "object"
+              "type": "array"
+            },
+            "require_fact_consistency": {
+              "type": "boolean"
+            },
+            "utility_route_patterns": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             }
-          ]
+          },
+          "type": "object"
+        },
+        "surfaces": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "well_known": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
         }
       },
       "type": "object"
@@ -750,6 +519,9 @@
     "runtime": {
       "additionalProperties": false,
       "properties": {
+        "allow_private_network": {
+          "type": "boolean"
+        },
         "artifact_dir": {
           "type": "string"
         },
@@ -780,6 +552,10 @@
           },
           "type": "array"
         },
+        "crawl_delay_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
         "engine": {
           "description": "Default crawl engine.",
           "type": "string"
@@ -797,11 +573,18 @@
           "description": "Extra HTTP headers.",
           "type": "object"
         },
+        "ignore_robots": {
+          "type": "boolean"
+        },
         "include_patterns": {
           "items": {
             "type": "string"
           },
           "type": "array"
+        },
+        "max_response_bytes": {
+          "minimum": 1,
+          "type": "integer"
         },
         "seeds": {
           "items": {
@@ -817,13 +600,6 @@
           "type": "string"
         }
       },
-      "type": "object"
-    },
-    "severity_overrides": {
-      "additionalProperties": {
-        "type": "string"
-      },
-      "description": "Per-rule severity overrides applied after rules run.",
       "type": "object"
     },
     "site": {
@@ -848,64 +624,15 @@
       },
       "type": "object"
     },
-    "site_url": {
-      "description": "Canonical base URL used for generation and runtime verification.",
-      "type": "string"
-    },
-    "source_dir": {
-      "description": "Optional build-output directory beneath the repository root.",
-      "type": "string"
-    },
-    "suppressions": {
-      "description": "Explicit reviewable suppressions.",
-      "items": {
-        "additionalProperties": false,
-        "properties": {
-          "expires": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "path_pattern": {
-            "type": "string"
-          },
-          "reason": {
-            "type": "string"
-          },
-          "rule_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "rule_id",
-          "path_pattern",
-          "reason"
-        ],
-        "type": "object"
-      },
-      "type": "array"
-    },
-    "utility_route_patterns": {
-      "description": "Route substrings treated as utility routes.",
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    },
     "version": {
       "const": 1,
       "description": "Canonical nested config surface version.",
       "type": "integer"
-    },
-    "weak_anchor_text": {
-      "description": "Anchor texts treated as weak generic phrasing.",
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
     }
   },
+  "required": [
+    "version"
+  ],
   "title": "aexeo configuration",
   "type": "object"
 }

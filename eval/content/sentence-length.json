@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "description": "Synthetic regression examples; labels have not been independently human-reviewed.",
+  "preset": "article-readable",
+  "gate_id": "editorial.sentence_length",
+  "examples": [
+    {
+      "id": "short-en",
+      "split": "development",
+      "text": "A short sentence is easy to scan.",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "long-en",
+      "split": "development",
+      "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word.",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "decimal",
+      "split": "development",
+      "text": "Rates fell from 45.1 to 34.5 percent. Next sentence.",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "short-fr",
+      "split": "development",
+      "text": "Une phrase courte aide à comprendre le texte.",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "long-fr",
+      "split": "holdout",
+      "text": "mot mot mot mot mot mot mot mot mot mot mot mot mot mot mot mot mot mot mot mot mot mot mot mot mot mot mot mot mot mot mot !",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "exact-boundary",
+      "split": "holdout",
+      "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word.",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "two-sentences",
+      "split": "holdout",
+      "text": "word word word word word word word word word word word word word word word word word word word word. word word word word word word word word word word word word word word word word word word word word.",
+      "expected": "passed",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "no-terminator",
+      "split": "holdout",
+      "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+      "expected": "failed",
+      "review_status": "not_reviewed"
+    }
+  ]
+}

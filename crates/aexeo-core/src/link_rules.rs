@@ -1,8 +1,11 @@
 use aexeo_contracts::{Finding, FindingScope};
+use std::collections::BTreeSet;
 use std::path::Path;
+use url::Url;
 
 use crate::config::Config;
-use crate::site::{Link, Page, Site};
+use crate::link_report::redirect_chain_consistent;
+use crate::site::{Link, Page, Site, route_from_urlish};
 
 fn normalize_anchor_text(text: &str) -> String {
     text.to_ascii_lowercase()
@@ -33,6 +36,7 @@ fn finding(
         .to_string(),
         suggestion: suggestion.map(str::to_string),
         scope: FindingScope::Page,
+        subject: None,
     }
 }
 
@@ -80,6 +84,37 @@ fn is_graph_validated_target(target: &str) -> bool {
             .is_none_or(|ext| ext.eq_ignore_ascii_case("html"))
 }
 
+/// Routes whose request the crawl saw redirect, through a consistent recorded
+/// chain, to an analysed page: the requested URL and every hop on that page's
+/// host. A link to one reaches the page, so it is not broken. A redirect ending
+/// in an error response or off the site leaves no page, so its routes stay
+/// out; so do chains not recorded, and static exports, which record none.
+fn redirect_source_routes(site: &Site) -> BTreeSet<String> {
+    let mut routes = BTreeSet::new();
+    for response in site
+        .pages
+        .iter()
+        .filter_map(|page| page.crawl_response.as_ref())
+    {
+        let host = |url: &str| Url::parse(url).ok()?.host_str().map(str::to_string);
+        let page_host = response.observed_url.as_deref().and_then(host);
+        let requests = std::iter::once((&response.requested_url, &response.redirect_chain)).chain(
+            response
+                .redirected_arrivals
+                .iter()
+                .map(|arrival| (&arrival.requested_url, &arrival.redirect_chain)),
+        );
+        routes.extend(
+            requests
+                .filter(|(requested, chain)| redirect_chain_consistent(requested, chain))
+                .flat_map(|(_, chain)| chain)
+                .filter(|hop| page_host.is_some() && host(&hop.url) == page_host)
+                .filter_map(|hop| route_from_urlish(&hop.url)),
+        );
+    }
+    routes
+}
+
 pub fn run_link_rules(site: &Site, config: &Config) -> Vec<Finding> {
     let rules = config.rules();
     let mut findings = Vec::new();
@@ -88,6 +123,7 @@ pub fn run_link_rules(site: &Site, config: &Config) -> Vec<Finding> {
         .as_ref()
         .map(|meta| meta.truncated)
         .unwrap_or(false);
+    let redirect_sources = redirect_source_routes(site);
 
     for page in site.route_pages() {
         for link in &page.links {
@@ -97,34 +133,41 @@ pub fn run_link_rules(site: &Site, config: &Config) -> Vec<Finding> {
             if !suppress_graph_findings
                 && is_graph_validated_target(target)
                 && !site.indexed_paths.contains(target)
+                && !redirect_sources.contains(target)
             {
-                findings.push(finding(
-                    "LNK001",
-                    format!("broken internal link: /{}", target),
-                    &page.path,
-                    link.line,
-                    link.column,
-                    None,
-                ));
+                findings.push(
+                    finding(
+                        "LNK001",
+                        format!("broken internal link: /{}", target),
+                        &page.path,
+                        link.line,
+                        link.column,
+                        None,
+                    )
+                    .with_subject(target),
+                );
                 continue;
             }
             if is_weak_internal_anchor(link, site, config) {
-                findings.push(finding(
-                    "LNK003",
-                    format!(
-                        "weak internal anchor text '{}' for /{}",
-                        if link.text.is_empty() {
-                            "(empty)"
-                        } else {
-                            &link.text
-                        },
-                        target
-                    ),
-                    &page.path,
-                    link.line,
-                    link.column,
-                    None,
-                ));
+                findings.push(
+                    finding(
+                        "LNK003",
+                        format!(
+                            "weak internal anchor text '{}' for /{}",
+                            if link.text.is_empty() {
+                                "(empty)"
+                            } else {
+                                &link.text
+                            },
+                            target
+                        ),
+                        &page.path,
+                        link.line,
+                        link.column,
+                        None,
+                    )
+                    .with_subject(target),
+                );
             }
         }
     }
@@ -148,11 +191,11 @@ pub fn run_link_rules(site: &Site, config: &Config) -> Vec<Finding> {
         if inbound.is_empty() {
             findings.push(finding(
                 "LNK002",
-                format!("orphan page: /{}", page.route),
+                format!("no inbound links observed in the analyzed pages: /{}", page.route),
                 &page.path,
                 1,
                 1,
-                Some("add an internal link from an indexable page"),
+                Some("check crawl and inventory coverage, link forms, indexing and redirects before treating this as an orphan"),
             ));
             continue;
         }
@@ -206,7 +249,16 @@ mod tests {
             "<html><head><title>x</title><meta name=\"description\" content=\"y\"><link rel=\"canonical\" href=\"https://example.com/orphan\"></head><body><h1>x</h1></body></html>",
         );
         let findings = run_link_rules(&load_site(root).unwrap(), &Config::default());
-        assert!(findings.iter().any(|finding| finding.rule_id == "LNK002"));
+        let orphan = findings
+            .iter()
+            .find(|finding| finding.rule_id == "LNK002")
+            .unwrap();
+        assert!(
+            orphan
+                .message
+                .contains("no inbound links observed in the analyzed pages")
+        );
+        assert!(orphan.suggestion.as_ref().unwrap().contains("coverage"));
         assert!(findings.iter().any(|finding| finding.rule_id == "LNK003"));
     }
 
@@ -257,5 +309,77 @@ mod tests {
         );
         let findings = run_link_rules(&load_site(root).unwrap(), &Config::default());
         assert!(!findings.iter().any(|finding| finding.rule_id == "LNK001"));
+    }
+
+    /// A crawled site of `pages`, each `(route, html, provenance overrides)`.
+    fn crawled_site(pages: &[(&str, &str, serde_json::Value)]) -> crate::site::Site {
+        let pages = pages
+            .iter()
+            .map(|(route, html, provenance)| {
+                let url = format!("https://example.org/{route}");
+                let relative = if route.is_empty() {
+                    "index.html".to_string()
+                } else {
+                    format!("{route}/index.html")
+                };
+                let mut response = serde_json::json!({"requested_url":url, "observed_url":url, "status_code":200});
+                for (key, value) in provenance.as_object().unwrap() {
+                    response[key] = value.clone();
+                }
+                serde_json::json!({"path":format!("crawl/{relative}"), "relative_path":relative, "route":route,
+                    "raw_html":html, "response_headers":{}, "crawl_response":response})
+            })
+            .collect::<Vec<_>>();
+        let artifact: aexeo_contracts::AuditArtifact = serde_json::from_value(serde_json::json!({"command":"crawl",
+            "site":{"site_url":"https://example.org/", "root":"crawl", "deployment_model":"runtime_snapshot", "pages":pages}}))
+        .unwrap();
+        crate::verification::site_from_audit_artifact(&artifact).unwrap()
+    }
+
+    fn broken_targets(site: &crate::site::Site) -> Vec<String> {
+        run_link_rules(site, &Config::default())
+            .into_iter()
+            .filter(|finding| finding.rule_id == "LNK001")
+            .map(|finding| finding.message)
+            .collect()
+    }
+
+    const HOME: &str =
+        "<main><a href='/old'>Old</a> <a href='/gone'>Gone</a> <a href='/moved'>Moved</a></main>";
+
+    #[test]
+    fn a_link_to_a_recorded_redirect_onto_an_analysed_page_is_not_broken() {
+        let hop = |route: &str, status: u16| serde_json::json!({"url":format!("https://example.org/{route}"), "status_code":status});
+        let site = crawled_site(&[
+            ("", HOME, serde_json::json!({})),
+            (
+                "new",
+                "<main>New</main>",
+                serde_json::json!({"requested_url":"https://example.org/old", "redirect_chain":[hop("old", 301)],
+                    "redirected_arrivals":[{"requested_url":"https://example.org/moved", "redirect_chain":[hop("moved", 308)]}]}),
+            ),
+        ]);
+        // `/gone` has no page: a redirect ending in an error response, or off
+        // the site, leaves none either.
+        assert_eq!(broken_targets(&site), ["broken internal link: /gone"]);
+    }
+
+    #[test]
+    fn a_redirect_without_a_consistent_recorded_chain_stays_broken() {
+        let unproven = serde_json::json!({"requested_url":"https://example.org/old",
+            "redirect_chain":[{"url":"https://example.org/old", "status_code":200}],
+            "redirected_arrivals":[{"requested_url":"https://example.org/moved"}]});
+        let site = crawled_site(&[
+            ("", HOME, serde_json::json!({})),
+            ("new", "<main>New</main>", unproven),
+        ]);
+        assert_eq!(
+            broken_targets(&site),
+            [
+                "broken internal link: /old",
+                "broken internal link: /gone",
+                "broken internal link: /moved"
+            ]
+        );
     }
 }

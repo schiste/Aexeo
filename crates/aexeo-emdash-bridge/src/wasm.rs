@@ -148,3 +148,67 @@ pub fn validate_facts_manifest_js(
     serde_json::to_string(&payload)
         .map_err(|error| JsError::new(&format!("failed to serialize result: {error}")))
 }
+
+fn resolve_content_preset_js(
+    preset_name: &str,
+    sources_json: Option<&str>,
+) -> Result<aexeo_core::content_gate::ContentPreset, JsError> {
+    let mut sources = aexeo_core::content_presets::builtin_content_presets();
+    if let Some(json) = sources_json.filter(|value| !value.is_empty()) {
+        let custom: std::collections::BTreeMap<String, String> = serde_json::from_str(json)
+            .map_err(|error| JsError::new(&format!("failed to parse preset sources: {error}")))?;
+        sources.extend(custom);
+    }
+    aexeo_core::content_presets::resolve_content_preset(preset_name, &sources)
+        .map_err(|error| JsError::new(&format!("failed to resolve preset: {error:#}")))
+}
+
+/// Evaluate collection-scoped gates on a complete set of EmDash documents.
+#[wasm_bindgen(js_name = "evaluateContentCollection")]
+pub fn evaluate_content_collection_js(
+    documents_json: &str,
+    preset_name: &str,
+    sources_json: Option<String>,
+) -> Result<String, JsError> {
+    install_panic_hook();
+    let documents: Vec<EmdashDocument> = serde_json::from_str(documents_json)
+        .map_err(|error| JsError::new(&format!("failed to parse documents: {error}")))?;
+    let preset = resolve_content_preset_js(preset_name, sources_json.as_deref())?;
+    let report = crate::content::evaluate_collection(&documents, &preset)
+        .map_err(|error| JsError::new(&format!("collection evaluation failed: {error:#}")))?;
+    serde_json::to_string(&report)
+        .map_err(|error| JsError::new(&format!("failed to serialize report: {error}")))
+}
+
+/// Evaluate one EmDash document using named TOML preset sources. The source map
+/// is JSON: {"preset-name": "TOML text"}; built-ins are available by default.
+#[wasm_bindgen(js_name = "evaluateContent")]
+pub fn evaluate_content_js(
+    document_json: &str,
+    preset_name: &str,
+    sources_json: Option<String>,
+    evidence_json: Option<String>,
+) -> Result<String, JsError> {
+    install_panic_hook();
+    let document: EmdashDocument = serde_json::from_str(document_json)
+        .map_err(|error| JsError::new(&format!("failed to parse document: {error}")))?;
+    let preset = resolve_content_preset_js(preset_name, sources_json.as_deref())?;
+    let evidence = evidence_json
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .map(|json| {
+            serde_json::from_str(json).map_err(|error| {
+                JsError::new(&format!("failed to parse evidence sources: {error}"))
+            })
+        })
+        .transpose()?;
+    let report = crate::content::evaluate_content_with_evidence(&document, &preset, evidence)
+        .map_err(|error| JsError::new(&format!("content evaluation failed: {error:#}")))?;
+    let locations = crate::content::source_locations(&document, &preset, &report);
+    let mut output = serde_json::to_value(&report)
+        .map_err(|error| JsError::new(&format!("failed to serialize report: {error}")))?;
+    output["source_locations"] = serde_json::to_value(locations)
+        .map_err(|error| JsError::new(&format!("failed to serialize locations: {error}")))?;
+    serde_json::to_string(&output)
+        .map_err(|error| JsError::new(&format!("failed to serialize report: {error}")))
+}

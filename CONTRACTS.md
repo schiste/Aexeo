@@ -19,6 +19,9 @@ an Astro build pipeline, or a repo-level CLI integration.
   - `crates/aexeo-contracts`
   - `crates/aexeo-core`
   - `crates/aexeo-cli`
+  - `crates/aexeo-emdash-bridge`, the WASM bridge used by the EmDash plugin
+- `crates/tempfile` is a test-only helper, not a supported surface. See its
+  crate documentation.
 
 ### Stable external types
 
@@ -29,6 +32,25 @@ an Astro build pipeline, or a repo-level CLI integration.
 - `RuleMetadata`
 
 These are owned by `crates/aexeo-contracts`.
+
+### Finding fingerprints
+
+A finding's identity across runs is fingerprint version 2: `rule_id`, `path` and
+the optional `subject`. Message wording and source position are not part of it,
+so rewording a message or moving a finding on the page does not make it new.
+`subject` is a stable key such as a link target. A rule that can report several
+distinct problems on one path must set it.
+
+`baseline`, `diff` and `verify` pair findings one to one, so repeated identical
+findings are counted rather than collapsed.
+
+Existing baselines need no migration. Fingerprints are computed when comparing,
+from the fields stored in the file. A stored finding without `subject` first
+matches by version 1 (`rule_id`, `path`, `line`, `column`, `message`), then by
+version 2 against a current finding without one. A stored finding from a rule
+that now sets `subject` therefore matches only by version 1, so if its wording or
+position changed it reads as resolved and new until the baseline is rewritten
+with `aexeo-cli baseline`.
 
 ### Stable rule identifiers
 
@@ -48,6 +70,10 @@ Stable prefixes:
 - `CRW`
 - `DEP`
 - `QLT`
+- `AGT`
+- `SRF`
+- `EDT`
+- `A11Y`
 
 ### Stable rule metadata semantics
 

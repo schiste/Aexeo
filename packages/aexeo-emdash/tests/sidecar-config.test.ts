@@ -7,6 +7,8 @@ import {
   SETTINGS_TOKEN_KEY,
   type KvNamespace,
   type PluginSettingsAccess,
+  TokenStorageError,
+  isTokenStoredInPlaintext,
   readSidecarConfig,
   writeSidecarConfig,
 } from "../src/plugin.js";
@@ -29,6 +31,16 @@ describe("validateSidecarUrl", () => {
       ok: true,
       url: "https://aexeo-crawl-worker.example.workers.dev",
     });
+  });
+
+  it("rejects a trailing-dot host, which still reaches the named machine", () => {
+    for (const url of ["https://localhost./", "https://foo.localhost./"]) {
+      const result = validateSidecarUrl(url);
+      expect(result.ok).toBe(false);
+    }
+    expect(
+      validateSidecarUrl("https://aexeo-crawl-worker.example.workers.dev./").ok,
+    ).toBe(false);
   });
 
   it("accepts a port, a path, and surrounding whitespace", () => {
@@ -292,11 +304,12 @@ describe("sidecar config storage", () => {
     expect(h.kv.has(CONFIG_TOKEN_KEY)).toBe(false);
   });
 
-  it("falls back to KV on a host that has no settings accessor", async () => {
+  it("refuses to store the token on a host that has no settings accessor", async () => {
     const h = harness({ withSettings: false });
-    await writeSidecarConfig(h.store, CONFIG);
-    expect(h.kv.get(CONFIG_TOKEN_KEY)).toBe(CONFIG.token);
-    expect(await readSidecarConfig(h.store)).toEqual(CONFIG);
+    await expect(writeSidecarConfig(h.store, CONFIG)).rejects.toBeInstanceOf(
+      TokenStorageError,
+    );
+    expect(h.kv.size).toBe(0);
   });
 
   it("reads a pre-migration install whose token only exists in KV", async () => {
@@ -306,35 +319,42 @@ describe("sidecar config storage", () => {
     expect(await readSidecarConfig(h.store)).toEqual(CONFIG);
   });
 
-  it("prefers settings over a stale KV copy", async () => {
+  it("reads a token left in KV by a rotation that could not be encrypted", async () => {
+    // Every successful settings write deletes the KV copy, so a KV value is
+    // always the newer of the two. Earlier versions wrote a rotated token
+    // here when encryption failed, and reading settings first ignored it.
     const h = harness({ withSettings: true });
     h.kv.set(CONFIG_URL_KEY, CONFIG.url);
-    h.kv.set(CONFIG_TOKEN_KEY, "stale");
-    h.settings.set(SETTINGS_TOKEN_KEY, "fresh");
+    h.kv.set(CONFIG_TOKEN_KEY, "rotated");
+    h.settings.set(SETTINGS_TOKEN_KEY, "replaced");
     expect(await readSidecarConfig(h.store)).toEqual({
       url: CONFIG.url,
-      token: "fresh",
+      token: "rotated",
     });
+    expect(await isTokenStoredInPlaintext(h.store)).toBe(true);
   });
 
-  it("warns and falls back to KV when the host cannot encrypt the secret", async () => {
+  it("fails without changing anything when the host cannot encrypt the secret", async () => {
     // What emdash does when EMDASH_ENCRYPTION_KEY is unset: the write
-    // throws PluginSettingEncryptionError. The Setup page must still work.
+    // throws PluginSettingEncryptionError.
     const h = harness({ withSettings: true });
+    h.kv.set(CONFIG_URL_KEY, "https://previous.test");
     const failing: PluginSettingsAccess = {
       get: async () => null,
       set: async () => {
         throw new Error("Plugin secret setting could not be encrypted");
       },
     };
-    await writeSidecarConfig({ ...h.store, settings: failing, log: { warn: (m) => h.warn.push(m) } }, CONFIG);
+    await expect(
+      writeSidecarConfig({ ...h.store, settings: failing }, CONFIG),
+    ).rejects.toThrow(/EMDASH_ENCRYPTION_KEY/);
 
-    expect(h.kv.get(CONFIG_TOKEN_KEY)).toBe(CONFIG.token);
-    expect(h.warn).toHaveLength(1);
-    expect(h.warn[0]).toMatch(/EMDASH_ENCRYPTION_KEY/);
+    expect(h.kv.has(CONFIG_TOKEN_KEY)).toBe(false);
+    expect(h.kv.get(CONFIG_URL_KEY)).toBe("https://previous.test");
+    expect(JSON.stringify([...h.kv.entries()])).not.toContain(CONFIG.token);
   });
 
-  it("never puts the token in a warning, even if the error quotes it", async () => {
+  it("never puts the token in the error, even if the host's error quotes it", async () => {
     const h = harness({ withSettings: true });
     const leaky: PluginSettingsAccess = {
       get: async () => null,
@@ -342,17 +362,18 @@ describe("sidecar config storage", () => {
         throw new Error(`failed to encrypt "${String(value)}"`);
       },
     };
-    await writeSidecarConfig({ ...h.store, settings: leaky, log: { warn: (m) => h.warn.push(m) } }, CONFIG);
+    const error = await writeSidecarConfig(
+      { ...h.store, settings: leaky },
+      CONFIG,
+    ).catch((err: unknown) => err as Error);
 
-    expect(h.warn).toHaveLength(1);
-    expect(h.warn[0]).not.toContain(CONFIG.token);
-    expect(h.warn[0]).toContain("[redacted]");
+    expect((error as Error).message).not.toContain(CONFIG.token);
+    expect((error as Error).message).toContain("[redacted]");
   });
 
-  it("falls back to KV when the encrypted value cannot be decoded", async () => {
+  it("reports unconfigured when the encrypted value cannot be decoded", async () => {
     const h = harness({ withSettings: true });
     h.kv.set(CONFIG_URL_KEY, CONFIG.url);
-    h.kv.set(CONFIG_TOKEN_KEY, "legacy-token");
     const throwing: PluginSettingsAccess = {
       get: async () => {
         throw new Error("Plugin secret setting has an invalid encrypted envelope");
@@ -365,7 +386,7 @@ describe("sidecar config storage", () => {
         settings: throwing,
         log: { warn: (m) => h.warn.push(m) },
       }),
-    ).toEqual({ url: CONFIG.url, token: "legacy-token" });
+    ).toBeNull();
     expect(h.warn).toHaveLength(1);
   });
 

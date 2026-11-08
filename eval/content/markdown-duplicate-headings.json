@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "fixture_kind": "synthetic_regression",
+  "description": "Synthetic Markdown regression fixture, written to pin specific adapter and gate behaviour. Labels are the expected tool behaviour, not human-reviewed editorial judgements, and results do not estimate production accuracy.",
+  "preset": "fixture",
+  "preset_toml": "version=1\nname='fixture'\n[[gates]]\nid='g'\nkind='duplicate_headings'\n",
+  "gate_id": "g",
+  "input_format": "markdown",
+  "examples": [
+    {
+      "id": "inline-code-differs",
+      "split": "development",
+      "text": "## Option `a`\n\n## Option `b`\n",
+      "expected": "passed",
+      "why": "Inline code text distinguishes the headings.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "inline-code-same",
+      "split": "development",
+      "text": "## Option `a`\n\n## Option `a`\n",
+      "expected": "failed",
+      "why": "Same heading including its code text.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "inline-code-only",
+      "split": "holdout",
+      "text": "## `a`\n\n## `b`\n",
+      "expected": "passed",
+      "why": "Headings made only of code keep their text.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "setext-soft-wrap",
+      "split": "holdout",
+      "text": "Same\nname\n===\n\nSame name\n===\n",
+      "expected": "failed",
+      "why": "A soft wrap inside a heading collapses to a space.",
+      "review_status": "not_reviewed"
+    }
+  ]
+}

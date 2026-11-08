@@ -1,0 +1,6 @@
+version = 1
+name = "Article content"
+[[gates]]
+id = "content.minimum_words"
+kind = "word_count"
+min = 1

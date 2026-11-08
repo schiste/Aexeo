@@ -54,6 +54,7 @@ sh scripts/ci-local.sh
 cargo run -p aexeo-cli -- check .
 cargo run -p aexeo-cli -- crawl http://localhost:8000 --engine http
 cargo run -p aexeo-cli -- fix .
+cargo run -p aexeo-cli -- fix . --dry-run
 cargo run -p aexeo-cli -- generate llms .
 cargo run -p aexeo-cli -- generate robots .
 cargo run -p aexeo-cli -- generate sitemap . --site-url https://example.com
@@ -108,3 +109,50 @@ cargo run -p aexeo-cli -- adapters
 ## Notes
 
 `cargo run -p aexeo-cli -- docs generate .` refreshes generated docs from the Rust codebase. `cargo run -p aexeo-cli -- docs check .` fails when those docs are stale.
+
+### What `fix` rewrites
+
+`fix` only regenerates an `llms.txt` it can recognise as its own: one carrying the generated marker line, a blank one, or one matching the marker-less output for the current site. Any other `llms.txt` is left in place and reported as skipped with a warning, also in the `skipped` array of `--format json`; add the marker line to opt in. Files that are symlinks, have several hard links, or are not valid UTF-8 are skipped the same way. `robots.txt` and HTML pages only ever gain lines. Writes go through a temporary file and a rename. `--dry-run` reports the same changes and skips without writing. `fix` does not write `sitemap.xml`.
+
+### Agent content skill
+
+The repository ships the [Aexeo content skill](skills/aexeo-content/SKILL.md)
+for agent-driven lint, revision, and interpretation of reports. Load or install
+it using your agent runtime's skill mechanism; it is not installed automatically.
+
+### Content report and local telemetry
+
+Content reports count configured gates by outcome, including blocking failures and
+checks that could not run. A passing report covers only its configured gates; it
+is not a general quality or factuality assessment. Word-count gates report the
+observed count and configured bounds; metadata gates report required and present
+field counts when metadata is available. Supply metadata explicitly with
+`--metadata metadata.json` when evaluating an exported Markdown article.
+
+Use `aexeo-cli content article.md --preset article-editorial --input-format markdown
+--format json --telemetry` to emit one JSON telemetry event to stderr. It contains
+aggregate gate counts and durations, not input text, metadata, paths, or findings.
+`evaluation_ms` covers preset evaluation only. For local content, optional
+`stages.input_load_ms` covers content, metadata, evidence, collection and site loading and
+any requested fix; `stages.adapter_ms` covers input adaptation including Markdown
+parsing. These stages exclude preset resolution, output and process startup.
+Crawl events omit stage timings and `evaluation_ms` excludes crawling. The
+additive `stages` field is optional in schema version 1. Telemetry is opt-in and is
+not transmitted or retained by Aexeo; redirect stderr to retain it locally.
+
+The optional `article-readable` and `glossary-readable` presets combine their respective editorial starter with the shared `readability` preset, which adds an advisory 30-word sentence limit. Projects can inherit and override these gates independently. A custom content preset can configure the heuristic sentence-length gate:
+
+```toml
+[[gates]]
+id = "editorial.sentence_length"
+kind = "sentence_length"
+max_words = 30
+delimiters = ".!?。！？"
+blocking = false
+```
+
+It splits at the configured characters and counts whitespace-separated words;
+this is a simple heuristic, not linguistic sentence segmentation. Abbreviations and languages without whitespace-separated words need tailored rules. Decimal points between ASCII digits do not end a sentence.
+Locations refer to the adapter's projected text. Delimiters default to `. ! ?`
+(without spaces), and the gate reports its limit, sentence count and longest
+sentence; absent text is `not_checked`.

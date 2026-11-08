@@ -53,6 +53,7 @@ fn finding(rule_id: &str, message: impl Into<String>, suggestion: Option<&str>) 
         severity: "warning".to_string(),
         suggestion: suggestion.map(str::to_string),
         scope: FindingScope::Sitewide,
+        subject: None,
     }
 }
 
@@ -111,6 +112,7 @@ mod tests {
             h1_texts: vec!["Home".to_string()],
             has_breadcrumb_nav: false,
             response_headers: BTreeMap::new(),
+            crawl_response: None,
             links: Vec::new(),
             internal_links: Vec::new(),
             alternate_links: Vec::new(),
@@ -139,6 +141,8 @@ mod tests {
                 discovered_internal_routes: 1,
                 truncated: false,
                 probed_artifact_paths: probed.iter().map(|s| s.to_string()).collect(),
+                failed_responses: Vec::new(),
+                robots_skipped_urls: Vec::new(),
             }),
         })
         .unwrap()

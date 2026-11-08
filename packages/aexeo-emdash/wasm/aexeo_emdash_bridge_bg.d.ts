@@ -11,6 +11,17 @@
 // sites by name. See scripts/build-wasm.sh for why this file is
 // hand-maintained: wasm-bindgen does not generate it for our target.
 export const __wbg_set_wasm: (wasm: WebAssembly.Exports) => void;
+export const evaluateContent: (
+  document_json: string,
+  preset_name: string,
+  sources_json?: string | null,
+  evidence_json?: string | null,
+) => string;
+export const evaluateContentCollection: (
+  documents_json: string,
+  preset_name: string,
+  sources_json?: string | null,
+) => string;
 export const evaluateDocuments: (
   documents_json: string,
   config_json?: string | null,

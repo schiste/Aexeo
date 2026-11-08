@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "fixture_kind": "synthetic_regression",
+  "description": "Synthetic Markdown regression fixture, written to pin specific adapter and gate behaviour. Labels are the expected tool behaviour, not human-reviewed editorial judgements, and results do not estimate production accuracy.",
+  "preset": "fixture",
+  "preset_toml": "version=1\nname='fixture'\n[[gates]]\nid='g'\nkind='heading_length'\nmax_chars=10\n",
+  "gate_id": "g",
+  "input_format": "markdown",
+  "examples": [
+    {
+      "id": "short-code",
+      "split": "development",
+      "text": "## Use `x`\n",
+      "expected": "passed",
+      "why": "Counts code text and stays within the limit.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "long-code",
+      "split": "development",
+      "text": "## Use `longidentifier`\n",
+      "expected": "failed",
+      "why": "Code text counts towards heading length.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "short-plain",
+      "split": "holdout",
+      "text": "## Use it\n",
+      "expected": "passed",
+      "why": "Plain heading within the limit.",
+      "review_status": "not_reviewed"
+    },
+    {
+      "id": "code-only-long",
+      "split": "holdout",
+      "text": "## `longidentifier`\n",
+      "expected": "failed",
+      "why": "A code-only heading is measured.",
+      "review_status": "not_reviewed"
+    }
+  ]
+}

@@ -56,6 +56,8 @@ export interface ConfiguredPluginDescriptor {
 }
 
 export interface AexeoPluginOptions {
+  /** Add a portable content preset to configured-mode evaluation. */
+  contentPreset?: { name: string; sources?: Record<string, string>; byCollection?: Record<string, string> };
   /**
    * emdash collections the plugin sweeps when an admin clicks
    * Refresh on the findings page. Order doesn't matter; the sweep
@@ -136,7 +138,7 @@ export interface AexeoPluginOptions {
    *
    * Suppressions are plugin-only by design. The CLI's `check` is the
    * canonical strict audit; if you want to silence findings at the
-   * CLI layer, use `aexeo.toml`'s `[ignore]` block instead. The two
+   * CLI layer, use `ignore_paths` under `[policy]` in `aexeo.toml` instead. The two
    * surfaces serve different audiences: the plugin is editorial
    * workflow, the CLI is build-gating.
    */
@@ -171,6 +173,19 @@ export function aexeoPlugin(
     // receives. Spread to a plain object so readonly arrays survive
     // the structured-clone semantics of that codegen.
     options: {
+      ...(options.contentPreset === undefined
+        ? {}
+        : {
+            contentPreset: {
+              ...options.contentPreset,
+              ...(options.contentPreset.sources === undefined
+                ? {}
+                : { sources: { ...options.contentPreset.sources } }),
+              ...(options.contentPreset.byCollection === undefined
+                ? {}
+                : { byCollection: { ...options.contentPreset.byCollection } }),
+            },
+          }),
       ...(options.collections === undefined
         ? {}
         : { collections: [...options.collections] }),
@@ -214,3 +229,6 @@ export function aexeoPlugin(
     ],
   };
 }
+
+export { exportLinkInventory } from "./inventory.js";
+export type { LinkInventoryDisposition, LinkInventoryExport, LinkInventoryIdentity, LinkInventoryPage } from "./inventory.js";

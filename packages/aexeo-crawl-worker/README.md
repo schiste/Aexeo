@@ -12,15 +12,17 @@ The emdash plugin has two operating modes:
   module in its CPU budget. Evaluation is pushed out to this Worker, which the
   plugin reaches over `POST /evaluate` with a bearer token.
 
-This package is that sidecar. Copy it into your own repository, set your token,
-and deploy it. Each site owns its own Worker and its own token; nothing is
-shared.
+This package is that sidecar. Deploy it from a checkout or fork of this
+repository, with your own token: `npm run build:wasm` compiles the bridge from
+the Rust crates and uses the plugin package's build script, so copying this
+directory elsewhere does not work. Each site owns its own Worker and its own
+token; nothing is shared.
 
 ## The route
 
 | Route | Auth | Purpose |
 | --- | --- | --- |
-| `POST /evaluate` | `Authorization: Bearer <EVAL_TOKEN>` | Runs the bridge over `{ documents, configJson? }` and returns the JSON-encoded `Finding[]`. |
+| `POST /evaluate` | `Authorization: Bearer <EVAL_TOKEN>` | Runs the bridge over `{ documents, configJson? }`, at most 8 MiB (the limit of emdash's sandbox bridge), and returns the JSON-encoded `Finding[]`. The `x-aexeo-version` response header carries the worker's version; the plugin logs a warning when it differs from its own. |
 | `OPTIONS *` | — | CORS preflight. |
 
 That is the whole surface, deliberately. An earlier revision also served
@@ -33,7 +35,7 @@ unauthenticated `GET` routes back.**
 
 ## Setup
 
-1. Install dependencies:
+1. From `packages/aexeo-crawl-worker` in your checkout, install dependencies:
 
    ```sh
    npm ci
@@ -46,7 +48,9 @@ unauthenticated `GET` routes back.**
    npx wrangler secret put EVAL_TOKEN
    ```
 
-   Generate a value with `openssl rand -hex 32`. Paste the same value into the
+   Generate a value with `openssl rand -hex 32`. The Worker refuses every
+   request with a token shorter than 32 characters, so rotate a shorter one
+   before upgrading. Paste the same value into the
    plugin's **Setup** admin page (see `sandbox-entry.ts`); the plugin sends it
    as the bearer header.
 
@@ -71,6 +75,22 @@ unauthenticated `GET` routes back.**
 
 4. Edit `SITE_URL` in `wrangler.toml` to your emdash site's origin. It is used
    as the `Access-Control-Allow-Origin` value.
+
+5. Optionally configure content gates under `[vars]` in `wrangler.toml`:
+
+   ```toml
+   CONTENT_PRESET = "article"
+   CONTENT_PRESET_BY_COLLECTION_JSON = '{"glossary":"glossary"}'
+   # CONTENT_PRESET_SOURCES_JSON = '{"custom":"version = 1\n..."}'
+   ```
+
+   `CONTENT_PRESET` is the fallback; the collection map overrides it. Both
+   maps must be JSON objects with string values; custom sources contain TOML
+   preset text and can be selected by name. With neither a matching collection
+   nor a fallback, content evaluation is skipped. The SEO evaluation remains
+   active. Collection overrides require the updated plugin to send collection
+   names; incomplete evaluations return an error instead of silently passing.
+   See [content gates](../../docs/content-gates.md) for preset syntax.
 
 For local work, `wrangler dev` does not fetch secrets — put the value in
 `.dev.vars` (gitignored) instead:
@@ -102,9 +122,10 @@ package's TypeScript compiles against, and nothing regenerates them:
 wasm-bindgen does not emit `_bg.d.ts` for the bundler target at all, and
 `_bg.wasm.d.ts` has to describe a precompiled `WebAssembly.Module` (what
 Wrangler resolves `.wasm` imports to) rather than the ESM export shape
-wasm-bindgen would assume. Keep
-[`../aexeo-emdash/wasm/aexeo_emdash_bridge_bg.d.ts`](../aexeo-emdash/wasm/aexeo_emdash_bridge_bg.d.ts)
-and the copy here in step whenever the bridge surface changes.
+wasm-bindgen would assume. `aexeo_emdash_bridge_bg.d.ts` is a byte-for-byte copy
+of
+[`../aexeo-emdash/wasm/aexeo_emdash_bridge_bg.d.ts`](../aexeo-emdash/wasm/aexeo_emdash_bridge_bg.d.ts);
+`npm run check:dts` fails when they differ, and CI runs it.
 
 > A checked-in `.wasm` with no regeneration step is what this package used to
 > ship: several releases behind the plugin that calls it, with the hand-written
@@ -120,6 +141,17 @@ npm run typecheck
 Passes without the WASM present, because the tracked `.d.ts` files satisfy
 `src/wasm/init.ts` at compile time. `npm run deploy` and `npm run dev` are what
 need the real artifact.
+
+## Tests
+
+```sh
+npm run build:wasm
+npm test
+```
+
+The tests start the real Worker in workerd through Wrangler, with the real WASM,
+so they need the build above. They cover auth, malformed and oversized bodies, and
+evaluation.
 
 ## Removing the crawl pipeline
 

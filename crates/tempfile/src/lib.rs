@@ -1,3 +1,15 @@
+//! Test-only temporary directories. This is not the crates.io `tempfile` crate.
+//!
+//! The name is deliberate: call sites read `tempfile::tempdir()` as they would
+//! with the real crate, which offers the same `tempdir()` and `TempDir::path()`.
+//!
+//! It stays because the tests use nothing else from that API. The real crate
+//! would add `fastrand`, `getrandom` and `rustix` to `Cargo.lock`, all subject
+//! to the `multiple-versions = "deny"` check in `deny.toml`, to replace about 50
+//! lines. It is a dev-dependency of `aexeo-core` and `aexeo-cli`, unpublished,
+//! and must not become a runtime dependency: directories get a predictable name
+//! and default permissions.
+
 #![forbid(unsafe_code)]
 
 use std::env;

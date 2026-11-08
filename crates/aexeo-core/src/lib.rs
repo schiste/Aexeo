@@ -5,18 +5,29 @@ pub mod adapter;
 pub mod agent_discovery_rules;
 pub mod capabilities;
 pub mod config;
+pub mod content_gate;
+pub mod content_presets;
 pub mod content_rules;
 pub mod docs;
 pub mod editorial_rules;
+pub mod error;
 pub mod fix;
 pub mod generate;
 pub mod header_rules;
 pub mod html_rules;
+pub mod image_rules;
 #[cfg(feature = "net")]
 pub mod integrations;
 pub mod intelligence;
+pub mod link_counts;
+pub mod link_evidence;
+pub mod link_findings;
+pub mod link_graph;
+pub mod link_notes;
+pub mod link_report;
 pub mod link_rules;
 pub mod llm_rules;
+pub mod markdown_adapter;
 #[cfg(test)]
 mod page_kind_divergence;
 pub mod plugin;
@@ -36,6 +47,7 @@ pub mod structure_rules;
 pub mod surface_rules;
 pub mod surfaces;
 pub(crate) mod text;
+pub mod text_index;
 pub mod time_shim;
 pub mod verification;
 pub mod well_known_rules;
@@ -53,7 +65,7 @@ pub use docs::{
     render_config_reference, render_rule_reference, write_reference_documents,
 };
 pub use editorial_rules::run_editorial_rules;
-pub use fix::{FixOptions, apply_safe_fixes, apply_safe_fixes_with_options};
+pub use fix::{FixOptions, FixReport, SkippedFix, apply_safe_fixes, apply_safe_fixes_with_options};
 pub use generate::{
     GeneratedMachineArtifact, MachineArtifactBundle, build_link_suggestions,
     build_machine_artifact_bundle, render_llms_full_txt, render_llms_txt, render_markdown_mirror,
@@ -61,6 +73,7 @@ pub use generate::{
 };
 pub use header_rules::run_header_rules;
 pub use html_rules::{run_html_rules, run_static_html_audit};
+pub use image_rules::run_image_rules;
 #[cfg(feature = "net")]
 pub use integrations::{
     BingAiImportReport, BingAiOpportunity, BingAiOpportunityReport, BingAiRecord, BingAiTrendDelta,
@@ -75,7 +88,7 @@ pub use integrations::{
     submit_indexnow_with_ledger, validate_indexnow,
 };
 pub use intelligence::{
-    AnswerFanoutQuery, AnswerFanoutReport, AnswerFanoutRouteMatch, EvidenceClaim,
+    AnswerFanoutQuery, AnswerFanoutReport, AnswerFanoutRouteMatch, AnswerPackFacts, EvidenceClaim,
     EvidenceClaimKind, EvidenceRouteAssessment, EvidenceSectionAssessment, EvidenceSiteAssessment,
     GroundingCoverageGap, GroundingIntentFamily, GroundingRouteAnalysis, GroundingSiteAnalysis,
     IdentityDrift, IntelligenceBlocker, PageIdentity, PageIdentitySources, RouteIntelligenceScore,
@@ -89,6 +102,7 @@ pub use intelligence::{
     looks_like_generic_entity_name, map_grounding_queries, reconcile_trust_surfaces,
     render_facts_prompt, score_intelligence, validate_truth_manifest,
 };
+pub use link_graph::redact_url;
 pub use link_rules::run_link_rules;
 pub use llm_rules::run_llm_rules;
 pub use plugin::{PluginManifestCheck, validate_python_plugin_module};
@@ -99,10 +113,12 @@ pub use registry::{
     list_adapter_names, list_rule_group_names, rule_layers_for_id,
 };
 pub use reporting::{
-    DEFAULT_AUDIT_LOG_LIMIT, LayerBreakdown, build_audit_artifact, build_recap_lines,
-    render_audit_artifact_json, render_markdown_artifact, render_sarif, render_text,
-    render_text_artifact, rule_group_name, summarize_findings, summarize_findings_by_layer,
-    write_audit_artifact, write_partial_audit_artifact, write_progress_audit_artifact,
+    DEFAULT_AUDIT_LOG_LIMIT, LayerBreakdown, PriorityIssue, build_audit_artifact,
+    build_recap_lines, is_reports_dir, prioritize_findings, prioritize_findings_with_links,
+    render_audit_artifact_json, render_markdown_artifact, render_markdown_artifact_with_links,
+    render_sarif, render_text, render_text_artifact, render_text_artifact_with_links, reports_dir,
+    rule_group_name, summarize_findings, summarize_findings_by_layer, write_audit_artifact,
+    write_partial_audit_artifact, write_private_file, write_progress_audit_artifact,
 };
 pub use robots_rules::run_robots_rules;
 #[cfg(feature = "net")]
@@ -134,3 +150,7 @@ pub use verification::{
     load_site_from_audit_artifact, render_diff_text, site_from_audit_artifact, write_baseline_file,
 };
 pub use well_known_rules::run_well_known_rules;
+
+pub mod crawl_attestation;
+pub mod link_inventory;
+pub mod release_marker;

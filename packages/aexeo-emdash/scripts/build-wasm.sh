@@ -13,7 +13,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ROOT_DIR="$(cd "$PLUGIN_DIR/../.." && pwd)"
 OUT_DIR="${1:-$PLUGIN_DIR/wasm}"
-TARGET_DIR="$ROOT_DIR/target/wasm32-unknown-unknown/release"
+# Honour CARGO_TARGET_DIR so the build works with an out-of-tree target dir.
+TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT_DIR/target}/wasm32-unknown-unknown/release"
 WASM_NAME="aexeo_emdash_bridge"
 RAW_WASM="$TARGET_DIR/${WASM_NAME}.wasm"
 
@@ -42,8 +43,16 @@ mkdir -p "$OUT_DIR"
 # exports moved and the tracked copy is now stale.
 BG_DTS="$OUT_DIR/aexeo_emdash_bridge_bg.d.ts"
 API_DTS="$OUT_DIR/aexeo_emdash_bridge.d.ts"
+WASM_DTS="$OUT_DIR/aexeo_emdash_bridge_bg.wasm.d.ts"
+WASM_DTS_BACKUP=""
 BG_DTS_BACKUP=""
 API_DTS_BACKUP=""
+# The Cloudflare worker maintains a Module declaration at this path;
+# preserve it rather than replacing it with the bundler-shaped output.
+if [ -f "$WASM_DTS" ] && grep -qF 'declare const bridgeModule: WebAssembly.Module;' "$WASM_DTS"; then
+  WASM_DTS_BACKUP=$(mktemp)
+  cp "$WASM_DTS" "$WASM_DTS_BACKUP"
+fi
 if [ -f "$BG_DTS" ]; then
   BG_DTS_BACKUP=$(mktemp)
   cp "$BG_DTS" "$BG_DTS_BACKUP"
@@ -64,6 +73,15 @@ wasm-bindgen \
   --target bundler \
   --out-dir "$OUT_DIR" \
   "$RAW_WASM"
+
+if [ -n "$WASM_DTS_BACKUP" ]; then
+  cp "$WASM_DTS_BACKUP" "$WASM_DTS"
+  rm -f "$WASM_DTS_BACKUP"
+  # The worker imports the glue directly and does not track the generated API declaration.
+  if [ -z "$API_DTS_BACKUP" ]; then
+    rm -f "$API_DTS"
+  fi
+fi
 
 if [ -n "$BG_DTS_BACKUP" ] && ! cmp -s "$BG_DTS_BACKUP" "$BG_DTS"; then
   echo "warning: wasm-bindgen has begun emitting $BG_DTS for the bundler" >&2

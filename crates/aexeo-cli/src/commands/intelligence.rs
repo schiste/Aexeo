@@ -1,4 +1,5 @@
 use aexeo_contracts::AuditStatus;
+use aexeo_core::error::UserContext;
 use aexeo_core::intelligence::presence::{
     SOURCE_ORDER, SourceResult, SourceStatus, check_all_sources, entity_from_manifest, source_label,
 };
@@ -8,9 +9,9 @@ use aexeo_core::{
     TrustSurfaceReconciliation, TruthAssessment, TruthManifestGeneration, TruthManifestValidation,
     TruthStructuredSource, assess_answer_fanout, assess_evidence_coverage, assess_truth_layer,
     compute_page_identity, discover_machine_surface_graph, discover_truth_manifest,
-    generate_truth_manifest_with_options, import_trust_surface_records, load_site,
+    generate_truth_manifest_with_options, import_trust_surface_records, is_reports_dir, load_site,
     load_site_from_audit_artifact, looks_like_generic_entity_name, map_grounding_queries,
-    reconcile_trust_surfaces, score_intelligence, validate_truth_manifest,
+    reconcile_trust_surfaces, reports_dir, score_intelligence, user_bail, validate_truth_manifest,
 };
 use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
@@ -18,9 +19,9 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::exit_code::{EXIT_FINDINGS, EXIT_SUCCESS, EXIT_UNSUPPORTED};
-use crate::commands::common::{canonicalize_or_keep, required_arg};
-use crate::output::{render_data_command_json, render_failed_command_json};
+use super::exit_code::{EXIT_SUCCESS, EXIT_UNSUPPORTED};
+use crate::commands::common::{canonicalize_or_keep, emit_failure, required_arg};
+use crate::output::render_data_command_json;
 
 #[derive(Debug, Clone, Serialize)]
 struct IntelligenceInputMetadata {
@@ -47,12 +48,12 @@ pub fn command_intelligence(submatches: &ArgMatches) -> Result<i32> {
         Some(("evidence", evidence_matches)) => match evidence_matches.subcommand() {
             Some(("assess", assess_matches)) => command_evidence_assess(assess_matches),
             Some((other, _)) => bail!("unsupported evidence command: {}", other),
-            None => bail!("missing evidence subcommand"),
+            None => user_bail!("missing evidence subcommand"),
         },
         Some(("fanout", fanout_matches)) => match fanout_matches.subcommand() {
             Some(("assess", assess_matches)) => command_fanout_assess(assess_matches),
             Some((other, _)) => bail!("unsupported fanout command: {}", other),
-            None => bail!("missing fanout subcommand"),
+            None => user_bail!("missing fanout subcommand"),
         },
         Some(("facts", truth_matches)) | Some(("truth", truth_matches)) => {
             match truth_matches.subcommand() {
@@ -60,7 +61,7 @@ pub fn command_intelligence(submatches: &ArgMatches) -> Result<i32> {
                 Some(("generate", generate_matches)) => command_truth_generate(generate_matches),
                 Some(("assess", assess_matches)) => command_truth_assess(assess_matches),
                 Some((other, _)) => bail!("unsupported facts command: {}", other),
-                None => bail!("missing facts subcommand"),
+                None => user_bail!("missing facts subcommand"),
             }
         }
         Some(("trust-surface", trust_matches)) => match trust_matches.subcommand() {
@@ -69,17 +70,17 @@ pub fn command_intelligence(submatches: &ArgMatches) -> Result<i32> {
                 command_trust_surface_reconcile(reconcile_matches)
             }
             Some((other, _)) => bail!("unsupported trust-surface command: {}", other),
-            None => bail!("missing trust-surface subcommand"),
+            None => user_bail!("missing trust-surface subcommand"),
         },
         Some(("surfaces", surfaces_matches)) => match surfaces_matches.subcommand() {
             Some(("discover", discover_matches)) => command_surfaces_discover(discover_matches),
             Some((other, _)) => bail!("unsupported surfaces command: {}", other),
-            None => bail!("missing surfaces subcommand"),
+            None => user_bail!("missing surfaces subcommand"),
         },
         Some(("score", score_matches)) => command_intelligence_score(score_matches),
         Some(("presence", presence_matches)) => command_intelligence_presence(presence_matches),
         Some((other, _)) => bail!("unsupported intelligence command: {}", other),
-        None => bail!("missing intelligence subcommand"),
+        None => user_bail!("missing intelligence subcommand"),
     }
 }
 
@@ -476,7 +477,7 @@ fn status_label(status: AuditStatus) -> &'static str {
 
 fn report_root_for_artifact(path: &Path) -> PathBuf {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    if parent.file_name().and_then(|item| item.to_str()) == Some(".aexeo-reports") {
+    if is_reports_dir(parent) {
         let root = parent
             .parent()
             .filter(|candidate| !candidate.as_os_str().is_empty())
@@ -503,7 +504,7 @@ fn load_intelligence_input(submatches: &ArgMatches) -> Result<IntelligenceInput>
         let snapshot = artifact
             .site
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("audit artifact does not include a site snapshot"))?;
+            .user_context("audit artifact does not include a site snapshot")?;
         let report_root = report_root_for_artifact(&artifact_path);
         let partial = artifact.is_partial();
         let warning = if partial {
@@ -532,7 +533,7 @@ fn load_intelligence_input(submatches: &ArgMatches) -> Result<IntelligenceInput>
 
     let root = PathBuf::from(required_arg(submatches, "path")?);
     if root.is_file() {
-        bail!(
+        user_bail!(
             "{} is a file; pass --from-crawl-artifact for crawl audit artifacts or provide a site directory",
             root.display()
         );
@@ -568,19 +569,8 @@ fn with_input_text(mut text: String, metadata: &IntelligenceInputMetadata) -> St
     text
 }
 
-fn emit_failure(command: &str, format: &str, error: anyhow::Error) -> Result<i32> {
-    match format {
-        "json" => println!(
-            "{}",
-            render_failed_command_json(command, error.to_string(), Vec::new())?
-        ),
-        _ => eprintln!("{}", error),
-    }
-    Ok(EXIT_FINDINGS)
-}
-
 fn write_report<T: Serialize>(root: &Path, file_name: &str, payload: &T) -> Result<PathBuf> {
-    let reports_dir = root.join(".aexeo-reports");
+    let reports_dir = reports_dir(root);
     fs::create_dir_all(&reports_dir)?;
     let path = reports_dir.join(file_name);
     fs::write(&path, serde_json::to_string_pretty(payload)?)?;
@@ -761,22 +751,38 @@ fn evidence_text(report: &EvidenceSiteAssessment, report_path: &Path) -> String 
     lines.join("\n")
 }
 
+fn optional_value(value: Option<u8>) -> String {
+    value.map_or_else(|| "unknown".to_string(), |value| value.to_string())
+}
+
+fn optional_count(value: Option<usize>) -> String {
+    value.map_or_else(|| "unknown".to_string(), |value| value.to_string())
+}
+
 fn score_text(report: &SiteIntelligenceScore, report_path: &Path) -> String {
+    let answer_pack = &report.answer_pack;
     let mut lines = vec![
-        "Intelligence Score".to_string(),
+        "Intelligence Facts and Blockers".to_string(),
         String::new(),
-        format!("Overall score: {}", report.overall_score),
-        format!("Citation readiness: {}", report.citation_readiness_score),
-        format!("Facts consistency: {}", report.truth_consistency_score),
-        format!("Answer pack: {}", report.answer_pack_score),
+        format!(
+            "Citation readiness: {}",
+            optional_value(report.citation_readiness_score)
+        ),
+        format!(
+            "Facts consistency: {}",
+            optional_value(report.truth_consistency_score)
+        ),
+        format!(
+            "Answer structure: {} of {} routes have answer blocks ({} blocks), {} have coverage gaps",
+            answer_pack.routes_with_answer_blocks,
+            answer_pack.routes_analyzed,
+            answer_pack.answer_blocks,
+            answer_pack.routes_with_coverage_gaps
+        ),
         format!(
             "External trust alignment: {}",
-            report
-                .external_trust_alignment_score
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "n/a".to_string())
+            optional_value(report.external_trust_alignment_score)
         ),
-        format!("Elapsed: {}ms", report.elapsed_us / 1000),
         format!("Report: {}", report_path.display()),
     ];
     if !report.blockers.is_empty() {
@@ -792,19 +798,18 @@ fn score_text(report: &SiteIntelligenceScore, report_path: &Path) -> String {
         }
     }
     lines.push(String::new());
-    lines.push("Lowest scoring routes:".to_string());
+    lines.push("Routes with the most blockers:".to_string());
     for route in report.route_scores.iter().take(10) {
         lines.push(format!(
-            "- /{} overall={} citation={} facts={} answer_pack={} trust={}",
+            "- /{} blockers={} citation={} facts={} answer_blocks={} headings={} trust={} trust_issues={}",
             route.route,
-            route.overall_score,
-            route.citation_readiness_score,
-            route.truth_consistency_score,
-            route.answer_pack_score,
-            route
-                .external_trust_alignment_score
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "n/a".to_string())
+            route.blockers.len(),
+            optional_value(route.citation_readiness_score),
+            optional_value(route.truth_consistency_score),
+            optional_count(route.answer_blocks),
+            optional_count(route.heading_count),
+            optional_value(route.external_trust_alignment_score),
+            route.external_trust_issue_count,
         ));
     }
     lines.join("\n")
@@ -1201,7 +1206,7 @@ fn command_intelligence_presence(submatches: &ArgMatches) -> Result<i32> {
         Err(error) => return emit_failure("intelligence presence", format, error),
     };
 
-    let entity = match entity_from_manifest(&manifest) {
+    let mut entity = match entity_from_manifest(&manifest) {
         Some(entity) => entity,
         None => {
             return emit_failure(
@@ -1232,6 +1237,7 @@ fn command_intelligence_presence(submatches: &ArgMatches) -> Result<i32> {
         eprintln!("warning: {message}");
     }
 
+    entity.wikipedia_language = required_arg(submatches, "wikipedia-language")?.to_string();
     let results = check_all_sources(&entity);
     let report_path = write_report(
         &root,
@@ -1676,26 +1682,35 @@ mod tests {
 
     // --- score_text -----------------------------------------------------
 
-    /// The external-trust score is optional (it needs network data). When
-    /// absent it must read `n/a`, never a misleading `0`, which would look
-    /// like a failing score.
+    fn answer_pack_fixture() -> serde_json::Value {
+        serde_json::json!({
+            "routes_analyzed": 2,
+            "routes_with_answer_blocks": 1,
+            "routes_with_coverage_gaps": 1,
+            "answer_blocks": 3,
+        })
+    }
+
+    /// An unmeasured dimension must read `unknown`, never a misleading number,
+    /// and no composite is printed.
     #[test]
-    fn score_text_prints_n_a_for_a_missing_external_trust_score() {
+    fn score_text_prints_unknown_for_unmeasured_dimensions() {
         let report: SiteIntelligenceScore = serde_json::from_value(serde_json::json!({
-            "overall_score": 70,
-            "citation_readiness_score": 60,
-            "truth_consistency_score": 80,
-            "answer_pack_score": 70,
+            "citation_readiness_score": null,
+            "truth_consistency_score": null,
+            "answer_pack": answer_pack_fixture(),
             "external_trust_alignment_score": null,
-            "elapsed_us": 0,
             "blockers": [],
             "route_scores": [],
         }))
         .expect("score fixture");
 
         let text = score_text(&report, path("score.json"));
-        assert!(text.contains("External trust alignment: n/a"), "{text}");
-        assert!(!text.contains("External trust alignment: 0"), "{text}");
+        assert!(text.contains("Citation readiness: unknown"), "{text}");
+        assert!(text.contains("Facts consistency: unknown"), "{text}");
+        assert!(text.contains("External trust alignment: unknown"), "{text}");
+        assert!(text.contains("1 of 2 routes have answer blocks"), "{text}");
+        assert!(!text.to_lowercase().contains("overall"), "{text}");
     }
 
     /// Blockers are the most actionable output of the score report: a
@@ -1704,12 +1719,10 @@ mod tests {
     #[test]
     fn score_text_marks_a_sitewide_blocker() {
         let report: SiteIntelligenceScore = serde_json::from_value(serde_json::json!({
-            "overall_score": 40,
             "citation_readiness_score": 30,
             "truth_consistency_score": 50,
-            "answer_pack_score": 40,
+            "answer_pack": answer_pack_fixture(),
             "external_trust_alignment_score": 60,
-            "elapsed_us": 0,
             "blockers": [{
                 "category": "truth",
                 "route": null,
