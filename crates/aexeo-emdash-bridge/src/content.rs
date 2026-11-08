@@ -408,18 +408,36 @@ pub fn evaluate_content_with_evidence(
     preset: &ContentPreset,
     evidence_sources: Option<BTreeMap<String, String>>,
 ) -> anyhow::Result<ContentReport> {
-    let (mut input, context, link_count) = content_input_with_context(document);
+    evaluate_content_with_body_availability(document, preset, evidence_sources, true)
+}
+
+/// Evaluate an EmDash snapshot while explicitly indicating whether its body was
+/// supplied. An unavailable body is distinct from an explicitly empty body.
+pub fn evaluate_content_with_body_availability(
+    document: &EmdashDocument,
+    preset: &ContentPreset,
+    evidence_sources: Option<BTreeMap<String, String>>,
+    body_available: bool,
+) -> anyhow::Result<ContentReport> {
+    let (mut input, mut context, link_count) = content_input_with_context(document);
     input.evidence_sources = evidence_sources;
-    let destinations = preset
-        .gates
-        .iter()
-        .any(|gate| matches!(gate, ContentGate::LinkDestinations { .. }))
-        .then(|| content_link_destinations(document));
+    if !body_available {
+        input.text = None;
+        input.headings = None;
+        context.paragraphs = None;
+        context.block_ends = None;
+    }
+    let destinations = (body_available
+        && preset
+            .gates
+            .iter()
+            .any(|gate| matches!(gate, ContentGate::LinkDestinations { .. })))
+    .then(|| content_link_destinations(document));
     preset.evaluate_with_destinations(
         &input,
         &ContentEvaluationContext {
             adapter: Some(&context),
-            link_count: Some(link_count),
+            link_count: body_available.then_some(link_count),
             ..Default::default()
         },
         destinations.as_deref(),
@@ -524,6 +542,29 @@ mod tests {
         assert_eq!(
             source_locations(&document, &preset, &report)[0].utf16_offset,
             3
+        );
+    }
+
+    #[test]
+    fn unavailable_body_is_not_an_empty_body() {
+        let document: EmdashDocument =
+            serde_json::from_str(r#"{"route":"/test","title":"Test"}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='body'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\n[[gates]]\nid='headings'\nkind='heading_length'\nmax_chars=20\n[[gates]]\nid='paragraphs'\nkind='paragraph_length'\nmax_words=20\n").unwrap();
+        let missing =
+            evaluate_content_with_body_availability(&document, &preset, None, false).unwrap();
+        assert!(
+            missing
+                .gates
+                .iter()
+                .all(|gate| gate.status == GateStatus::NotChecked)
+        );
+        let empty =
+            evaluate_content_with_body_availability(&document, &preset, None, true).unwrap();
+        assert_eq!(empty.gates[0].status, GateStatus::Failed);
+        assert!(
+            empty.gates[1..]
+                .iter()
+                .all(|gate| gate.status == GateStatus::Passed)
         );
     }
 

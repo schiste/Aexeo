@@ -55,3 +55,9 @@ max_chars=3
 const headingReport = await evaluateContent({ route: "/heading", title: "Heading", body: [{ style: "h2", children: [{ _type: "span", text: "long title" }] }] }, "test", { test: headingPreset });
 assert.deepEqual(headingReport.source_locations, [{ gate_id: "length", finding_index: 0, block_index: 0, span_index: 0, utf16_offset: 0 }]);
 console.log("WASM heading location smoke test passed");
+
+const missingBodyReport = await evaluateContent({ route: "/missing", title: "Missing" }, "test", { test: linkPreset });
+assert.equal(missingBodyReport.gates[0].status, "not_checked");
+const emptyBodyReport = await evaluateContent({ route: "/empty", title: "Empty", body: [] }, "test", { test: linkPreset });
+assert.equal(emptyBodyReport.gates[0].status, "passed");
+console.log("WASM body availability smoke test passed");

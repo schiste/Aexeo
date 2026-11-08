@@ -190,7 +190,10 @@ pub fn evaluate_content_js(
     evidence_json: Option<String>,
 ) -> Result<String, JsError> {
     install_panic_hook();
-    let document: EmdashDocument = serde_json::from_str(document_json)
+    let raw_document: serde_json::Value = serde_json::from_str(document_json)
+        .map_err(|error| JsError::new(&format!("failed to parse document: {error}")))?;
+    let body_available = raw_document.get("body").is_some();
+    let document: EmdashDocument = serde_json::from_value(raw_document)
         .map_err(|error| JsError::new(&format!("failed to parse document: {error}")))?;
     let preset = resolve_content_preset_js(preset_name, sources_json.as_deref())?;
     let evidence = evidence_json
@@ -202,8 +205,13 @@ pub fn evaluate_content_js(
             })
         })
         .transpose()?;
-    let report = crate::content::evaluate_content_with_evidence(&document, &preset, evidence)
-        .map_err(|error| JsError::new(&format!("content evaluation failed: {error:#}")))?;
+    let report = crate::content::evaluate_content_with_body_availability(
+        &document,
+        &preset,
+        evidence,
+        body_available,
+    )
+    .map_err(|error| JsError::new(&format!("content evaluation failed: {error:#}")))?;
     let locations = crate::content::source_locations(&document, &preset, &report);
     let mut output = serde_json::to_value(&report)
         .map_err(|error| JsError::new(&format!("failed to serialize report: {error}")))?;
