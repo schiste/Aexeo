@@ -5,6 +5,30 @@ broker. Other agents may be working in sibling worktrees right now. The
 `aethyme` router and its engine sibling are installed once for the user;
 check the paired runtime with `aethyme --version` and
 `aethyme-engine-cli --version`.
+
+Shared preparation-cache rotation uses a bounded no-follow inventory. If its
+time or entry cap is reached, the report marks the inventory incomplete and
+sets exact `bytes_before` to null; that limit can trigger whole-store rotation.
+Depth, read, mount, special-node and lease failures still refuse. The cache
+rotation remover independently refuses special nodes and leaves durable debt
+for recovery.
+When investigating retained worktrees, distinguish task identity from shared
+service uptime. A shared agent daemon can outlive many tasks; its PID alone
+proves neither that each task is active nor that its checkout is disposable.
+Check the saved holder identity, current task activity and process-use evidence
+separately. A lease without an expiry is not proof of activity. Preserve raw
+ownership history and explicit takeover requirements when liveness is unknown;
+never clear leases or force removal merely because a holder is ambiguous. Use
+native reclamation plans, which independently protect recent work and open files.
+
+Before starting or delegating a fix for shared CI failures or generated
+files, use `aethyme broker status --compact --json` and open PRs on affected
+paths. Read the matching task, claimed paths and PR diff even when the graph
+is unavailable. Coordinate with the owning session before starting duplicate
+work; use `aethyme broker advanced note send --to-session <id>` for a broker
+note. A known base failure still needs verification at its exact base commit;
+an overlap warning does not waive gates.
+
 Follow this protocol:
 
 When `aethyme broker advanced hooks install` is active (or its pre-commit command is
@@ -20,18 +44,34 @@ blocked.
    isolated broker worktree, and work from that checkout:
 
    ```bash
-   aethyme broker status --json    # who is working on what
+   aethyme broker status --compact --json  # concise coordination summary
    aethyme broker start --task "<your task>" --short-name "<short name>" --path <planned-path>
    ```
+
+   Routine status groups repeated advice categories, reports deferred checks
+   as unknown, and omits per-session evidence and lease paths. Use full
+   `aethyme broker status --json` when you need exact session, lease-path or
+   evidence detail before deciding what to edit. A deferred check is not a
+   clean result.
+
+   If the execution tool reports the start command is still running, poll
+   that same command to completion before retrying; a pending result does not
+   mean it failed. Before editing, confirm the session's reported repository
+   and worktree root match the repository you intended.
 
    `cd` into the reported worktree before editing. If you are already in a
    dedicated worktree, use
    `aethyme broker start --adopt --task "<your task>" --short-name "<short name>" --path <planned-path>` instead.
+   Before running repository tools or audits, inspect the session's preparation
+   status and follow its `next_action` when dependencies are required:
+   `aethyme broker submit prepare status --session <your-session-id> --json`.
+   Worktrees do not inherit ignored dependencies such as `node_modules/` or
+   `.venv/` from the main checkout; preparation is explicit.
    Repeat `--path` for every file or trailing-slash directory known up front.
    The broker validates the whole set first, then creates the session plus
    explicit leases atomically. Omit `--path` only when no target is known yet.
-   If `status` shows another session holding leases on the files you plan
-   to change, prefer working elsewhere first or say so in your report —
+   If full `status --json` shows another session holding leases on the files
+   you plan to change, prefer working elsewhere first or say so in your report —
    overlapping edits will conflict at merge time.
    When you edit a file another live session is changing, the broker tells you
    in context who, where and whether Git would conflict, never blocking the
@@ -54,6 +94,35 @@ blocked.
    back as a warning naming the holder, with the `note send` command to
    coordinate.
 
+   Cleanup and archive inventories are deletion proofs: path enumeration must
+   preserve every path or fail closed. Do not use a parser that silently drops
+   newline or non-UTF-8 paths; use lossless NUL-delimited bytes and reject paths
+   the consumer cannot represent.
+   Treat the proof as a complete literal Git path census plus committed file
+   type and mode evidence; diff-rendering settings are not source identity.
+   For cleanup eligibility, carry one absolute deadline and the same output and
+   path caps through status checks and proof rechecks; do not grant a late
+   recheck a fresh timeout. If finish cleanup is already deregistered and its
+   Git admin/index is gone, recovery must rely on the durable pre-removal proof
+   and fresh ownership/liveness checks because Git cannot produce another
+   status result.
+   Before deleting a source checkout after archiving, sync archive files and
+   directories bottom-up; after publishing the final archive, sync its
+   directory, parent and storage anchor. Keep the source if any sync fails.
+
+   Before launching a temporary hold, persist its unique run token and
+   known backup location. Capture helper or template bytes once, hash that
+   buffer, and execute or generate from those same bytes. After the child
+   is reaped, recover and validate its durable applied receipt even if
+   waiting was interrupted or stdout was truncated; compare-and-swap only
+   values proven owned by this run, and restore only after detached workers
+   settle. Keep unresolved intent fenced, report it, and do not start
+   overlapping work.
+
+   Compound filesystem guards should name the failed predicate (file type,
+   owner, zero/multiple links, group/world write, or identity change) without
+   logging raw metadata values; keep a refusal regression for each category.
+
    Orchestration with no path -- a release, a merge chain -- is claimed by
    name instead: `aethyme broker advanced ownership claim "release v1.2.0"
    --session <your-session-id> --reason "<why>"`. `status` shows every claim,
@@ -70,16 +139,18 @@ blocked.
    The guard fails if the command leaves dirty paths outside your explicit
    leases or in files that were untracked before your session began.
 
+   For preservation archives, check free space on the actual destination
+   volume against checked payload and metadata sizes, plus the configured
+   reserve, before staging. If commits need a Git bundle, include its enforced
+   1 GiB output cap in this known minimum. The check excludes filesystem
+   allocation overhead and concurrent writes, so the reserve is not guaranteed
+   to remain available. A bundle cap refusal keeps the source and leaves the
+   bounded partial bundle for diagnosis. Keep the source until the archive is
+   fully written, verified and synced.
+
 4. **While working**: commit early and small. Only committed work can be
    verified and integrated. Never switch branches inside someone else's
    worktree; never edit files outside your own worktree.
-
-   If `broker commit` reports that an embedded upgrade is required and
-   explicitly directs pending work through the managed pre-commit lane, use
-   the repository's normal `git commit` with its managed hook enabled, then
-   push the session with `broker push`. Do not bypass hooks. Review
-   `aethyme upgrade plan` before applying a migration; it can require active
-   sessions to finish before shared policy or gate files are migrated.
 
    **If `.aethyme/config.toml`, as committed on the default branch, sets
    `[delivery] push_session_branches = true`, push your session branch as you
@@ -195,10 +266,12 @@ blocked.
    in integration and re-runs gates only for replayed trees that changed.
    Review that reconciliation report. If it refuses or cannot apply safely,
    use `aethyme broker advanced integration reconcile --upstream <published-sha> --dry-run`
-   and follow its reviewed apply plan. `broker main reconcile plan/apply` remains
-   the separate operation for advancing the local default checkout from
-   integration; independent publication does not mark the other queue entries
-   shipped or change their promotion order.
+   and follow its reviewed apply plan. Advancing the local default checkout
+   from integration is a separate reviewed operation: run
+   `aethyme broker advanced main reconcile plan`, then apply its reviewed
+   digest with `aethyme broker advanced main reconcile apply --session <id> --confirm <sha256>`.
+   Independent publication does not mark the other queue entries shipped or
+   change their promotion order.
 
    Prefer this reviewed broker ship workflow over a raw push. Never infer
    publication authority from permission to edit, submit, or promote.
@@ -218,6 +291,19 @@ blocked.
    retained broker-owned worktrees with
    `aethyme broker finish cleanup --all-cleaned` and apply the unchanged plan
    explicitly with `aethyme broker finish cleanup --all-cleaned --apply`.
+
+   For a storage audit, reconcile broker session paths, `git worktree list
+   --porcelain`, and directories under current and historical roots on every
+   relevant volume. Include temporary and merge-simulation checkouts; report
+   shared cache containers separately to avoid counting nested worktrees twice.
+   A closed or `cleaned` session is not proof of physical removal. Report each
+   path's cleanup result or blocker, keeping uninspected and unsupported scopes
+   unknown. Preserve complete audit output and disclose incomplete scans.
+   Filesystem birth time, descendant modification time, broker activity, and
+   source edits are different observations; label the date used. Walk without
+   following symlinks and distinguish summed file bytes from unique physical
+   space, since hardlinks and clones can share storage. Never authorize deletion
+   from age, a stale-session label, or a missing size estimate alone.
 
 7. **If a file named `.aethyme/broker-action-required.md` appears in your
    worktree**, read it immediately: your submission conflicted. It names

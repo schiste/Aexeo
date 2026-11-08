@@ -64,16 +64,6 @@ AETHYME_JSON="$(mktemp -t aethyme-explore.XXXXXX.json)"
    commands. Use `--depth 1/2/3` only when the previous result did not provide
    enough evidence to act.
 
-## Preparation and migration failures
-
-A refused preparation-status command does not establish that every broker
-operation is blocked. Report the exact refusal, check the session's preparation
-instructions, and verify each authorized operation separately. Before gating,
-prepare dependencies using the repository's documented setup. Review an upgrade
-plan before applying it: ordinary lease coordination and migration preconditions
-are separate mechanisms, and a migration plan may treat overlapping leases or
-stale sessions as blockers. Preserve other sessions and inspect the planned diff.
-
 ## Load References Only When Needed
 
 - `references/explore.md`: depth, intent, trust/observability, retry rules.

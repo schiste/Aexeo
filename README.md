@@ -156,3 +156,21 @@ this is a simple heuristic, not linguistic sentence segmentation. Abbreviations 
 Locations refer to the adapter's projected text. Delimiters default to `. ! ?`
 (without spaces), and the gate reports its limit, sentence count and longest
 sentence; absent text is `not_checked`.
+
+<!-- AETHYME:BEGIN skill-learning -->
+
+## Skill learning and maintenance
+
+Skills are editable procedures. After meaningful work, review confirmed fixes,
+user corrections, pitfalls, and repeatable techniques for a reusable lesson.
+
+- Read the relevant existing skill before changing it; prefer the skill used
+  for the work. Correct inaccurate guidance and add missing durable steps.
+- Keep skills focused on reusable procedures. Exclude session transcripts,
+  secrets, one-off details, and unconfirmed guesses.
+- Create a new skill only for a reusable class of work with no suitable home.
+- Follow this repository's skill conventions in `.codex/skills/` and
+  `.claude/skills/`; keep matching mirrors aligned where the repository
+  requires it. Respect ownership and do not edit system or plugin caches.
+
+<!-- AETHYME:END skill-learning -->
