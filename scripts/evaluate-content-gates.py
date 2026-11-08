@@ -23,6 +23,21 @@ def metadata_hash(metadata):
     return digest.hexdigest()
 
 
+def review_is_bound(item):
+    """Only count reviews bound to the current text, metadata and label."""
+    review = item["review"]
+    expected_hashes = {"text_sha256": hashlib.sha256(item["text"].encode("utf-8")).hexdigest(),
+                       "expected": item["expected"]}
+    if "metadata" in item:
+        expected_hashes["metadata_sha256"] = metadata_hash(item["metadata"])
+    elif "metadata_sha256" in review:
+        raise ValueError("review metadata is absent from the example")
+    for field, value in expected_hashes.items():
+        if field in review and review[field] != value:
+            raise ValueError(f"review {field} does not match the current example")
+    return all(field in review for field in expected_hashes)
+
+
 def validate_corpus(corpus):
     if corpus.get("version") != 1:
         raise ValueError("unsupported corpus version")
@@ -121,6 +136,9 @@ def classification_metrics(counts, examples):
 
 def evaluate(binary, corpus, split, review_log=None):
     validate_corpus(corpus)
+    for item in corpus["examples"]:
+        if item.get("review_status") == "reviewed":
+            review_is_bound(item)
     review_metrics = aggregate_review_events(corpus, split, review_log) if review_log is not None else None
     examples = [item for item in corpus["examples"] if item["split"] == split]
     if not examples:
@@ -128,6 +146,7 @@ def evaluate(binary, corpus, split, review_log=None):
     counts = empty_counts()
     reviewed_counts = empty_counts()
     reviewed_examples = 0
+    unbound_reviewed_examples = 0
     durations = []
     input_format = corpus.get("input_format")
     if input_format not in (None, "text", "markdown"):
@@ -162,11 +181,15 @@ def evaluate(binary, corpus, split, review_log=None):
             actual, expected = gates[0]["status"], item["expected"]
             record_result(counts, actual, expected)
             if item.get("review_status") == "reviewed":
-                reviewed_examples += 1
-                record_result(reviewed_counts, actual, expected)
+                if review_is_bound(item):
+                    reviewed_examples += 1
+                    record_result(reviewed_counts, actual, expected)
+                else:
+                    unbound_reviewed_examples += 1
     durations.sort()
     result = {"version": 1, "metric_scope": "checked_examples_only", "split": split,
               **classification_metrics(counts, len(examples)), "reviewed_examples": reviewed_examples,
+              "unbound_reviewed_examples": unbound_reviewed_examples,
               "reviewed_metrics": classification_metrics(reviewed_counts, reviewed_examples),
               "fresh_process_p95_ms": durations[math.ceil(len(durations) * .95) - 1]}
     if review_metrics is not None:

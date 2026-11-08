@@ -44,6 +44,10 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
   `actual_unchecked_rate` reports expected and unexpected unchecked cases;
   the existing `unchecked_rate` retains its unexpected-only semantics. Neither
   the metadata hash nor supplied provenance proves review independence.
+- [x] Reviewed corpus metrics require bindings to the current text, metadata
+  and label; legacy unbound reviews are counted separately. Explicit feedback
+  can be bound into a private corpus copy ([PR #132](https://github.com/schiste/Aexeo/pull/132)).
+  The bindings do not prove reviewer independence or bind the resolved policy.
 - [x] Bounded agent lint-and-revise workflow and local telemetry guidance ([PR #30](https://github.com/schiste/Aexeo/pull/30)).
 - [x] Configurable paragraph-length gate with Markdown and EmDash adapter
   capabilities ([PR #33](https://github.com/schiste/Aexeo/pull/33)).
