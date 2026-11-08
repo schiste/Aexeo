@@ -597,6 +597,22 @@ fn print_telemetry(
     gate_timings_ms: Option<&[f64]>,
 ) -> Result<()> {
     let mut event = serde_json::json!({"schema_version": 1, "event": "content_evaluation", "evaluation_ms": evaluation_ms, "summary": report.summary});
+    let mut length_checks = 0usize;
+    let mut length_exceedances = 0usize;
+    for gate in &report.gates {
+        for key in ["paragraphs_exceeding_limit", "sentences_exceeding_limit"] {
+            if let Some(&count) = gate.measurements.get(key) {
+                length_checks += 1;
+                length_exceedances = length_exceedances.saturating_add(count);
+            }
+        }
+    }
+    if length_checks > 0 {
+        event["length_checks"] = serde_json::json!({
+            "measured_gates": length_checks,
+            "exceedances": length_exceedances,
+        });
+    }
     if let Some((input_load_ms, adapter_ms)) = stages {
         event["stages"] =
             serde_json::json!({"input_load_ms": input_load_ms, "adapter_ms": adapter_ms});

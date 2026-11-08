@@ -21,6 +21,8 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 
 - [x] Aggregate gate coverage and measurements for word count, required metadata,
   required headings and forbidden terms. Unavailable measurements remain absent.
+- [ ] Report the number of sentence and paragraph length violations even when
+  findings are capped; emit opt-in anonymous aggregate length-check telemetry.
 - [x] CI benchmarks and conservative budgets for evaluation, Markdown adaptation,
   50-item batches and fresh-process CLI runs, with p50/p95 telemetry. Fresh
   processes do not imply cold operating-system caches.

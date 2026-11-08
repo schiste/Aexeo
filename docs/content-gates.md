@@ -198,7 +198,7 @@ by the adapter. Markdown paragraphs and EmDash normal blocks are supported;
 headings are excluded. Plain text does not provide paragraph structure and
 therefore produces `not_checked`, not an inferred pass. Locations refer to the
 adapter's projected text, not necessarily the original source. The gate reports
-`paragraph_count`, `longest_paragraph_words`, and the configured `max_words`.
+`paragraph_count`, `longest_paragraph_words`, `paragraphs_exceeding_limit`, and the configured `max_words`.
 
 ```toml
 [[gates]]
@@ -238,7 +238,9 @@ delimiters = ".!?。！？"
 blocking = false
 ```
 
-`delimiters` lists the characters that end a sentence and defaults to `.!?`. A decimal point between ASCII digits does not end one, and neither do Markdown hard breaks. Adapter block ends always do, so unpunctuated bullets, headings and table cells are measured separately. This is a heuristic, not linguistic segmentation. By default abbreviations end a sentence. Optionally set `abbreviations = ["Dr.", "M."]` to keep the period of an exact, case-sensitive, whitespace-delimited abbreviation inside a sentence. This also applies at a true sentence end, so choose exceptions for the content carefully; adapter block boundaries still end sentences. Multi-period abbreviations and words attached to opening punctuation are not recognized by this option. Languages without whitespace-separated words need tailored rules. Measurements report the limit, sentence count and longest sentence; absent text is `not_checked`.
+`delimiters` lists the characters that end a sentence and defaults to `.!?`. A decimal point between ASCII digits does not end one, and neither do Markdown hard breaks. Adapter block ends always do, so unpunctuated bullets, headings and table cells are measured separately. This is a heuristic, not linguistic segmentation. By default abbreviations end a sentence. Optionally set `abbreviations = ["Dr.", "M."]` to keep the period of an exact, case-sensitive, whitespace-delimited abbreviation inside a sentence. This also applies at a true sentence end, so choose exceptions for the content carefully; adapter block boundaries still end sentences. Multi-period abbreviations and words attached to opening punctuation are not recognized by this option. Languages without whitespace-separated words need tailored rules. Measurements report the limit, sentence count, longest sentence and `sentences_exceeding_limit`; absent text is `not_checked`.
+
+Exceeding counts cover all measured items, including findings omitted by the output limit. When the required input is unavailable the count is absent, rather than zero. Opt-in CLI telemetry includes only aggregate `length_checks.measured_gates` and `length_checks.exceedances`, with no content or gate IDs. Exceedances count gate-item pairs, so an item checked by two gates can count twice; unavailable gates are excluded.
 
 ### Repeated terms
 
@@ -390,7 +392,7 @@ heading block (offset zero), in the evaluated Portable Text snapshot.
 
 ### Paragraph length in characters
 
-The opt-in `paragraph_character_length` gate limits each adapter-provided paragraph independently, useful when whitespace-separated word counts do not fit the content. Configure `max_chars` as a positive integer. It counts Unicode scalar values, including whitespace and punctuation; this is not a count of visual grapheme clusters or words. Measurements include `max_chars`, `paragraph_count`, and `longest_paragraph_chars`. Missing paragraph capability is `not_checked`.
+The opt-in `paragraph_character_length` gate limits each adapter-provided paragraph independently, useful when whitespace-separated word counts do not fit the content. Configure `max_chars` as a positive integer. It counts Unicode scalar values, including whitespace and punctuation; this is not a count of visual grapheme clusters or words. Measurements include `max_chars`, `paragraph_count`, `longest_paragraph_chars`, and `paragraphs_exceeding_limit`. Missing paragraph capability is `not_checked`.
 
 ```toml
 [[gates]]
@@ -402,7 +404,7 @@ blocking = false
 
 ### Sentence length in characters
 
-The opt-in `sentence_character_length` gate uses the same sentence-boundary heuristic, delimiters and optional abbreviation exceptions as `sentence_length`, but limits Unicode scalar values instead of whitespace-separated words. It excludes sentence delimiters and leading/trailing whitespace while counting internal whitespace and punctuation. It does not count visual grapheme clusters and is not linguistic sentence segmentation. Measurements include `max_chars`, `sentence_count` and `longest_sentence_chars`; missing text is `not_checked`.
+The opt-in `sentence_character_length` gate uses the same sentence-boundary heuristic, delimiters and optional abbreviation exceptions as `sentence_length`, but limits Unicode scalar values instead of whitespace-separated words. It excludes sentence delimiters and leading/trailing whitespace while counting internal whitespace and punctuation. It does not count visual grapheme clusters and is not linguistic sentence segmentation. Measurements include `max_chars`, `sentence_count`, `longest_sentence_chars`, and `sentences_exceeding_limit`; missing text is `not_checked`.
 
 ```toml
 [[gates]]
