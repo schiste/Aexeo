@@ -11,7 +11,7 @@ use aexeo_core::{
     RuntimeAudit, RuntimeAuditOptions, RuntimeProgressEvent, RuntimeProgressMode,
     audit_site_snapshot, build_audit_artifact, diff_finding_sets, diff_performance_artifacts,
     evaluate_performance_budget, load_audit_artifact, load_findings_from_audit, render_diff_text,
-    render_performance_diff_text, render_sarif, render_text_artifact, reports_dir,
+    render_performance_diff_text, render_sarif, render_text_artifact_with_links, reports_dir,
     run_runtime_audit_with_options, runtime_doctor, verify_runtime_audit, write_audit_artifact,
     write_partial_audit_artifact, write_progress_audit_artifact,
 };
@@ -474,6 +474,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     let performance_budget_passed =
         apply_performance_budget(&mut full_audit_artifact, performance_budget.as_ref());
     let mut graph_summary = None;
+    let mut link_notes = None;
     if let Some(path) = submatches.get_one::<String>("link-graph-output") {
         let started = std::time::Instant::now();
         let graph = aexeo_core::link_report::build_link_report_from_audit_with_context(
@@ -506,6 +507,10 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
                 "suppressed_legacy_findings": graph.suppressed_legacy_findings,
             }));
         }
+        link_notes = Some(aexeo_core::link_notes::LinkFindingNotes::from_report(
+            &graph,
+            Some(path),
+        ));
         let bytes = serde_json::to_vec_pretty(&graph)?;
         fs::write(path, bytes)
             .with_context(|| format!("cannot write link graph report: {path}"))?;
@@ -552,6 +557,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
                 Some(audit_path.display().to_string()),
                 warnings,
                 graph_summary.as_ref(),
+                link_notes.as_ref(),
             )?
         ),
         "sarif" => {
@@ -562,10 +568,11 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
             emit_config_warnings(&warnings);
             println!(
                 "{}",
-                render_text_artifact(
+                render_text_artifact_with_links(
                     &render_artifact,
                     "All runtime checks passed.",
-                    Some(&audit_path)
+                    Some(&audit_path),
+                    link_notes.as_ref(),
                 )
             );
             if let Some(summary) = &graph_summary {

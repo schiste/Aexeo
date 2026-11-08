@@ -1060,6 +1060,12 @@ pub fn build_cli() -> Command {
                                 .long("format")
                                 .value_parser(["text", "md", "json", "sarif"])
                                 .default_value("text"),
+                        )
+                        .arg(
+                            Arg::new("link-graph")
+                                .long("link-graph")
+                                .num_args(1)
+                                .help("Qualify LNK002/LNK004 findings in text or md output with this crawl link graph report"),
                         ),
                 ),
         )

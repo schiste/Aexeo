@@ -73,9 +73,12 @@ pub fn render_audit_command_json(
     audit_path: Option<String>,
     warnings: Vec<ConfigWarning>,
 ) -> Result<String> {
-    render_audit_command_json_with_graph(command, artifact, success, audit_path, warnings, None)
+    render_audit_command_json_with_graph(
+        command, artifact, success, audit_path, warnings, None, None,
+    )
 }
 
+/// `links` qualifies the priorities with the run's link report, additively.
 pub fn render_audit_command_json_with_graph(
     command: &str,
     artifact: &AuditArtifact,
@@ -83,6 +86,7 @@ pub fn render_audit_command_json_with_graph(
     audit_path: Option<String>,
     warnings: Vec<ConfigWarning>,
     link_graph_summary: Option<&serde_json::Value>,
+    links: Option<&aexeo_core::link_notes::LinkFindingNotes>,
 ) -> Result<String> {
     let slim = without_page_html(artifact);
     Ok(serde_json::to_string_pretty(&AuditCommandOutput {
@@ -92,7 +96,7 @@ pub fn render_audit_command_json_with_graph(
         summary: &artifact.summary,
         findings: &artifact.findings,
         artifact: slim.as_ref().unwrap_or(artifact),
-        priorities: aexeo_core::prioritize_findings(&artifact.findings, 10),
+        priorities: aexeo_core::prioritize_findings_with_links(&artifact.findings, 10, links),
         warnings,
         link_graph_summary,
     })?)
