@@ -94,12 +94,95 @@ not change their counts or assert confirmed orphans.
   and with every seed fetched; each unmet condition raises its own `audit_*`
   issue, and a `--context` alone never completes coverage. Release and snapshot
   identity remain caller-supplied, so item 2 below stays open.
-- A synthetic in-process benchmark covers 50 pages and 500 links (#76). No CI
-  performance budget has been established for this graph benchmark.
+- `crawl --release-header` / `--release-meta` record the release marker each
+  fetched HTML page serves, and the crawl attestation adds the release, attested
+  only when every page serves the same value. The audit adapter uses the
+  attested release as the report identity, compares it with the inventory's,
+  and raises `audit_release_mismatch`, `audit_release_inconsistent` or
+  `audit_release_unattested`, each withholding eligibility.
+- The crawl attestation records the crawl's actual snapshot window; a resume
+  keeps the first segment's start, must ask for the same release marker, and
+  raises `audit_snapshot_spans_releases` when a resumed segment meets a new
+  release. The report's snapshot date defaults to the crawl start. Item 2 below
+  stays open: locale-fallback treatment and canonical alias observation are not
+  done.
+- Inventory `redirect`, `canonical_alias` and `locale_fallback` entries are
+  checked against the page that answered their URL: a redirect must reach its
+  target, and the other two may instead answer with a single canonical link to
+  it; content equivalence is never inferred. An unmet expectation raises a
+  per-page `inventory_alias_unobserved` that withholds eligibility. A verified
+  alias whose target is an inventory URL lifts `alias_resolution_required` and
+  the redirect or canonical issue it accounts for, but never makes its own URL
+  eligible. Noindex treatment stays `inventory_indexability_mismatch`, now
+  documented. Item 2 below stays open: the runtime snapshot keeps one capture
+  per final route, so a seeded redirect alias fetched before its target loses
+  its provenance (failing closed as an unfetched seed), and browser-engine
+  crawls still record no redirect chains.
+- The runtime snapshot still keeps one capture per final route, but every other
+  request that ended on it keeps its requested URL, hops and status in an
+  additive `redirected_arrivals` list. The capture is chosen independently of
+  fetch order, and the list survives checkpoints, resume and audit artifacts.
+  Seed attestation, the audit adapter's redirect credit and consistency checks,
+  and alias verification read every arrival, each checked on its own. An
+  end-to-end crawl verifies one redirect alias fetched before its target and one
+  fetched after it. This ticks item 2 below: release and snapshot identity
+  (release markers, snapshot window, segment checks), completeness (seeded
+  attestation), HTTP-engine redirect chains and the noindex, canonical and
+  locale-fallback treatment are all in place. Browser-engine crawls still
+  record no redirect chains. That limitation is documented and stated per
+  report: it raises `audit_browser_engine`, so such a crawl is never complete.
+- Audit link reports qualify the legacy `LNK002` and `LNK004` findings in an
+  additive `legacy_findings` list: `confirmed` only for an eligible page of a
+  complete, comparable crawl, otherwise `not_eligible`, `inbound_observed`
+  (redirect credit the rule missed), `inventory_alias` or `not_in_report`, with
+  per-context sources and a `navigation_only` flag. `crawl --link-graph-summary`
+  counts them in one text line and a JSON object. Findings, severities,
+  messages and fingerprints are unchanged, and nothing changes without a
+  report. Tests confirm the legacy semantics this corrects: `LNK002` fires on a
+  redirect target and an alias page, and navigation links count as inbound.
+  Item 3 below stays open: the default audit text, Markdown and priority list
+  do not show the qualification, the static `audit` command builds no report,
+  and a crawl's own report has no context, so it can never confirm.
+- Legacy findings the report proves false (`inbound_observed`,
+  `inventory_alias`) are now suppressed: listed in an additive
+  `suppressed_legacy_findings` array with their reason, and removed from the
+  findings, summary and stored audit of `crawl --link-graph-output`.
+  `link-graph --audit` lists them; runs without a report are unchanged.
+  Baselines see them as resolved, as accepted. `LNK001` no longer fires on a
+  link to the requested URL or a hop of a consistent recorded redirect chain
+  that ended on an analyzed page; redirects to an error response stay broken.
+- A synthetic in-process benchmark covers 50 pages and 500 links (#76) and now
+  a second tier of 1,000 pages and 20,000 links. `scripts/check-performance.sh`
+  runs both tiers in the CI `validate` job against average and p95 ceilings in
+  `performance-budget.json`. The large tier measured 52 to 92 ms average on CI
+  and is capped at 300 ms, about 3x the slower run. A deliberate 4x slowdown,
+  tried locally and not committed, fails the check. The calibration is in
+  [the link graph benchmark](../link-graph.md#benchmark).
 - A live Aeptus URL returned a generic noindex holding page, not the article
   visible in the CMS preview. An end-to-end HTTP crawl and audit adapter report
   captured the URL and noindex and flagged incomplete coverage. This sample does
   not establish that the live site and CMS describe the same publication.
+- `crawl --seed-file` with `--link-graph-output` now builds its own report
+  with the seed inventory as context, through the same path as
+  `link-graph --audit --context`; `--link-graph-context` supplies a separate
+  context file. One command can reach `confirmed`, and `inventory_alias`
+  findings are suppressed in the run. Runs without a seed file or context
+  are unchanged. Item 3 stays open: the default audit text, Markdown and
+  priority list do not yet show the qualification, and the static `audit`
+  command builds no report.
+- With `--link-graph-output`, the crawl's text report, and `report render
+  --link-graph` for text or Markdown, show each `LNK002`/`LNK004` finding's
+  qualification after its message ("confirmed orphan", or "not verifiable"
+  with the report's decisive reason) and a short `Link graph` block: crawl
+  completeness with its top issues, confirmed, not-verifiable and suppressed
+  counts, and the graph report path. In "Start here", a confirmed problem
+  ranks before an otherwise equal unverifiable one of the same rule, and the
+  JSON `priorities` gain an additive `link_graph` count. Rule IDs, severities,
+  messages and fingerprints are unchanged, and output without a report is
+  byte-identical. Item 3 stays open: the static `audit` command builds no
+  report, so its site reports carry no coverage-aware observation; it would
+  need a link report built from a `--static-url-map`, whose mapped pages can
+  never be complete, so wiring it is not a one-line change.
 
 A live EmDash schema inspection showed that one CMS can contain multiple
 publications and non-page collections even when a collection is marked
@@ -111,14 +194,15 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
 - [ ] Validate the EmDash inventory exporter with an explicit publication, route,
   locale, status and surface mapping on a real matching site; do not infer
   completeness from `routable` or from a non-transactional export.
-- [ ] Capture matching release and snapshot identity, reliable crawl completeness,
+- [x] Capture matching release and snapshot identity, reliable crawl completeness,
   redirect chains and explicit noindex/canonical/locale-fallback treatment.
 - [ ] Integrate coverage-aware graph observations into existing site reports;
   validate legacy rule semantics and preserve contracts and baseline compatibility.
 - [ ] Run end-to-end fixtures and real-site comparisons for static and runtime
   sources, multiple locales, incomplete crawls, redirects and cross-origin URLs.
 - [x] Benchmark graph parsing independently and retain opt-in, aggregate-only
-  operational telemetry. A calibrated CI budget remains outstanding.
+  operational telemetry. A calibrated CI budget enforces it in the perf budget
+  step.
 - [ ] Finish the independent, diverse human-reviewed evaluation corpus and the
   outstanding broader content-quality roadmap. Fact/source verification remains
   later in that roadmap and must not be presented as already validated.

@@ -31,6 +31,8 @@ struct Site {
     base_url: String,
     /// `(path, user agent)` of every request, in arrival order.
     requests: Arc<Mutex<Vec<(String, String)>>>,
+    /// Raw header lines, each ending in CRLF, added to every response.
+    headers: Arc<Mutex<String>>,
     stop: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
 }
@@ -43,7 +45,8 @@ impl Site {
         let base_url = format!("http://{}", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
         let stop = Arc::new(AtomicBool::new(false));
-        let (log, stopping) = (requests.clone(), stop.clone());
+        let headers = Arc::new(Mutex::new(String::new()));
+        let (log, stopping, extra) = (requests.clone(), stop.clone(), headers.clone());
         let handle = thread::spawn(move || {
             while !stopping.load(Ordering::Relaxed) {
                 let mut stream = match listener.accept() {
@@ -85,8 +88,9 @@ impl Site {
                 let (status, content_type, body) = routes.get(path.as_str()).unwrap_or(&not_found);
                 log.lock().unwrap().push((path, agent));
                 let response = format!(
-                    "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
+                    "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n{}Connection: close\r\n\r\n{body}",
+                    body.len(),
+                    extra.lock().unwrap()
                 );
                 let _ = stream.write_all(response.as_bytes());
             }
@@ -94,9 +98,15 @@ impl Site {
         Self {
             base_url,
             requests,
+            headers,
             stop,
             handle: Some(handle),
         }
+    }
+
+    /// Answer every later request with `name: value` as well.
+    fn serve_header(&self, name: &str, value: &str) {
+        *self.headers.lock().unwrap() = format!("{name}: {value}\r\n");
     }
 
     fn request_count(&self, path: &str) -> usize {
@@ -1092,12 +1102,20 @@ fn an_inventory_seeded_crawl_reaches_an_unlinked_page_and_attests_completeness()
         "the seed reaches the unlinked page"
     );
     let attestation = &payload["artifact"]["crawl_attestation"];
+    let mut observed = attestation.clone();
+    let snapshot = observed
+        .as_object_mut()
+        .unwrap()
+        .remove("snapshot")
+        .unwrap();
     assert_eq!(
-        *attestation,
+        observed,
         serde_json::json!({"seeded_from": {"inventory_identity": context["identity"], "url_count": 3},
             "engine": "http", "out_of_origin_urls": [], "unfetched_urls": [], "robots_skipped_urls": []}),
         "{payload:#}"
     );
+    assert!(snapshot["started_at"].as_str().unwrap() <= snapshot["finished_at"].as_str().unwrap());
+    assert!(snapshot.get("resumed").is_none());
     let saved: Value = serde_json::from_slice(&std::fs::read(&audit).unwrap()).unwrap();
     assert_eq!(saved["crawl_attestation"], *attestation);
 
@@ -1308,5 +1326,698 @@ fn a_seeded_draft_answering_500_leaves_the_crawl_incomplete() {
             .to_string()
             .contains("audit_failed_responses"),
         "{report:#}"
+    );
+}
+
+fn release_attestation(payload: &Value) -> &Value {
+    &payload["artifact"]["crawl_attestation"]["release"]
+}
+
+fn page_markers(payload: &Value) -> Vec<Value> {
+    payload["artifact"]["site"]["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|page| page["crawl_response"]["release_marker"].clone())
+        .collect()
+}
+
+#[test]
+fn a_release_header_is_recorded_per_page_and_becomes_the_report_release() {
+    let site = orphan_site();
+    site.serve_header("X-Release", " r1 ");
+    let temp = tempfile::tempdir().unwrap();
+    let context = inventory_context(&site, &["/", "/a", "/orphan"], &[]);
+    let (payload, audit) = seeded_crawl(
+        &site,
+        temp.path(),
+        &context,
+        &["--release-header", "x-release"],
+    );
+    assert_eq!(page_markers(&payload), vec![Value::from("r1"); 3]);
+    assert_eq!(
+        *release_attestation(&payload),
+        serde_json::json!({"source": "header", "name": "x-release", "value": "r1",
+            "pages_with_marker": 3, "pages_without_marker": 0, "distinct_values": ["r1"]})
+    );
+    let report = audit_link_report(temp.path(), &audit);
+    assert_eq!(report["identity"]["release"], "r1");
+    assert_eq!(report["crawl_complete"], true, "{report:#}");
+    assert!(
+        !report["issues"].to_string().contains("audit_"),
+        "{report:#}"
+    );
+    assert_eq!(report["reconciliation"]["comparable"], true, "{report:#}");
+
+    // The site serves another release than the caller and the inventory say.
+    site.serve_header("X-Release", "r2");
+    let temp = tempfile::tempdir().unwrap();
+    let (_, audit) = seeded_crawl(
+        &site,
+        temp.path(),
+        &context,
+        &["--release-header", "X-Release"],
+    );
+    let report = audit_link_report(temp.path(), &audit);
+    assert_eq!(report["identity"]["release"], "r2");
+    let issues = report["issues"].to_string();
+    assert!(issues.contains("audit_release_mismatch"), "{report:#}");
+    let reconciliation = &report["reconciliation"];
+    assert_eq!(reconciliation["comparable"], false);
+    assert!(
+        reconciliation["issues"]
+            .to_string()
+            .contains("surface_identity_mismatch")
+    );
+    assert_eq!(reconciliation["eligible_pages"], serde_json::json!([]));
+}
+
+#[test]
+fn release_meta_markers_that_disagree_or_are_missing_are_not_attested() {
+    let meta = |release: &str| format!(r#"<meta name="release" content="{release}">"#);
+    let site = Site::start(vec![
+        (
+            "/",
+            html(&format!(
+                r#"{}<a href="/a">A</a><a href="/b">B</a>"#,
+                meta("r1")
+            )),
+        ),
+        ("/a", html(&meta("r2"))),
+        (
+            "/b",
+            html("<!-- <meta name=\"release\" content=\"r1\"> -->"),
+        ),
+    ]);
+    let temp = tempfile::tempdir().unwrap();
+    let (_, payload) = crawl(&site, &["--no-sitemap-seed", "--release-meta", "release"]);
+    let attestation = &payload["artifact"]["crawl_attestation"];
+    assert_eq!(attestation["seeded_from"]["url_count"], 0);
+    assert_eq!(
+        *release_attestation(&payload),
+        serde_json::json!({"source": "meta", "name": "release", "value": null,
+            "pages_with_marker": 2, "pages_without_marker": 1, "distinct_values": ["r1", "r2"]})
+    );
+    let context = inventory_context(&site, &["/", "/a", "/b"], &[]);
+    write(&temp.path().join("context.json"), &context.to_string());
+    // The crawl's own directory is gone; its artifact is in the output.
+    write(
+        &temp.path().join("audit.json"),
+        &payload["artifact"].to_string(),
+    );
+    let report = audit_link_report(temp.path(), "audit.json");
+    let issues = report["issues"].to_string();
+    for issue in [
+        "audit_release_inconsistent",
+        "audit_release_unattested",
+        "audit_not_inventory_seeded",
+    ] {
+        assert!(issues.contains(issue), "{issue}: {report:#}");
+    }
+    // The caller's release stands when the crawl attests none.
+    assert_eq!(report["identity"]["release"], "r1");
+}
+
+fn resume_with(url: &str, checkpoint: &Path, extra: &[&str]) -> Output {
+    Command::new(bin())
+        .args(["crawl", url, "--engine", "http", "--progress", "off"])
+        .args(["--format", "json", "--resume", checkpoint.to_str().unwrap()])
+        .args(extra)
+        .current_dir(checkpoint.parent().unwrap())
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn a_resumed_crawl_keeps_its_start_and_reports_a_release_change() {
+    let site = resumable_site();
+    site.serve_header("X-Release", "r1");
+    let temp = tempfile::tempdir().unwrap();
+    let checkpoint = temp.path().join("checkpoint.json");
+    let (_, payload) = crawl(
+        &site,
+        &[
+            "--max-pages",
+            "1",
+            "--checkpoint",
+            checkpoint.to_str().unwrap(),
+            "--checkpoint-every",
+            "1",
+            "--release-header",
+            "x-release",
+        ],
+    );
+    assert_eq!(payload["artifact"]["status"], "partial");
+    let mut saved: Value = serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
+    assert!(saved["started_at"].is_i64(), "{saved:#}");
+    assert_eq!(saved["release_marker"]["header"], "x-release");
+    saved["started_at"] = 0.into();
+    std::fs::write(&checkpoint, saved.to_string()).unwrap();
+
+    // A resume must ask for the same marker.
+    let refused = resume_with(&site.base_url, &checkpoint, &[]);
+    assert_ne!(refused.status.code(), Some(0));
+    let text = String::from_utf8_lossy(&refused.stdout).to_string()
+        + &String::from_utf8_lossy(&refused.stderr);
+    assert!(text.contains("different release marker"), "{text}");
+
+    site.serve_header("X-Release", "r2");
+    let output = resume_with(
+        &site.base_url,
+        &checkpoint,
+        &["--release-header", "x-release"],
+    );
+    let payload = parse_json(&output.stdout);
+    assert_eq!(payload["artifact"]["status"], "complete", "{payload:#}");
+    let attestation = &payload["artifact"]["crawl_attestation"];
+    assert_eq!(
+        attestation["snapshot"]["started_at"],
+        "1970-01-01T00:00:00Z"
+    );
+    assert_eq!(attestation["snapshot"]["resumed"], true);
+    let release = release_attestation(&payload);
+    assert_eq!(release["spans_segments"], true, "{payload:#}");
+    assert_eq!(release["value"], Value::Null);
+    assert_eq!(release["distinct_values"], serde_json::json!(["r1", "r2"]));
+}
+
+#[test]
+fn a_checkpoint_from_before_release_markers_still_resumes_unchanged() {
+    let site = resumable_site();
+    let temp = tempfile::tempdir().unwrap();
+    let checkpoint = temp.path().join("checkpoint.json");
+    interrupted_crawl(&site, &checkpoint);
+    let mut saved: Value = serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
+    assert!(saved.get("release_marker").is_none());
+    saved.as_object_mut().unwrap().remove("started_at");
+    std::fs::write(&checkpoint, saved.to_string()).unwrap();
+    let payload = parse_json(&resume_with(&site.base_url, &checkpoint, &[]).stdout);
+    assert_eq!(payload["artifact"]["status"], "complete");
+    assert!(payload["artifact"].get("crawl_attestation").is_none());
+    assert!(!payload.to_string().contains("release_marker"));
+}
+
+#[test]
+fn a_credential_header_is_refused_as_a_release_marker() {
+    let site = resumable_site();
+    let (output, _) = crawl(&site, &["--release-header", "Set-Cookie"]);
+    assert_ne!(output.status.code(), Some(0));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("credentials")
+            || String::from_utf8_lossy(&output.stdout).contains("credentials")
+    );
+    assert!(site.requests.lock().unwrap().is_empty());
+}
+
+/// A permanent redirect to `/new`, its Location carried by the status line.
+fn moved_to_new() -> Route {
+    (
+        "301 Moved Permanently\r\nLocation: /new",
+        "text/html",
+        String::new(),
+    )
+}
+
+#[test]
+fn inventory_aliases_are_checked_against_what_the_seeded_crawl_observed() {
+    let site = Site::start(vec![
+        ("/", html(r#"<main><a href="/guide">Guide</a></main>"#)),
+        // Seeds are fetched in order: one alias before its target, one after.
+        ("/aold", moved_to_new()),
+        ("/new", html("<main>New</main>")),
+        ("/zold", moved_to_new()),
+        ("/guide", html("<main>Guide</main>")),
+        (
+            "/alias",
+            html(r#"<link rel="canonical" href="guide#top"><main>Copy</main>"#),
+        ),
+        ("/fr/guide", html("<main>Guide</main>")),
+    ]);
+    let temp = tempfile::tempdir().unwrap();
+    let base = &site.base_url;
+    let mut context = inventory_context(&site, &["/", "/new", "/guide"], &[]);
+    let aliases = [
+        ("/aold", "redirect", "/new"),
+        ("/zold", "redirect", "/new"),
+        ("/alias", "canonical_alias", "/guide"),
+        ("/fr/guide", "locale_fallback", "/guide"),
+    ];
+    for (path, disposition, target) in aliases {
+        context["inventory"]["pages"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+            "url": format!("{base}{path}"), "disposition": disposition,
+            "target": format!("{base}{target}"), "locale": null}));
+    }
+    let (payload, audit) = seeded_crawl(&site, temp.path(), &context, &[]);
+    assert_eq!(site.request_count("/new"), 3, "two redirects and the seed");
+    let attestation = &payload["artifact"]["crawl_attestation"];
+    assert_eq!(attestation["unfetched_urls"], serde_json::json!([]));
+    let report = audit_link_report(temp.path(), &audit);
+    assert_eq!(report["crawl_complete"], true, "{report:#}");
+    let aliases_at = |url: String| {
+        report["pages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|page| page["url"] == url)
+            .unwrap_or_else(|| panic!("{report:#}"))["inventory_aliases"]
+            .clone()
+    };
+    // Whichever side of the direct fetch an alias was fetched on, it keeps
+    // its own provenance and is verified.
+    let redirects = aliases_at(format!("{base}/new"));
+    let verified = redirects
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|alias| (alias["url"].clone(), alias["verified_by"].clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        verified,
+        ["/aold", "/zold"].map(|path| (format!("{base}{path}").into(), "redirect".into())),
+        "{report:#}"
+    );
+    assert_eq!(
+        aliases_at(format!("{base}/alias"))[0]["verified_by"],
+        "canonical"
+    );
+    let fallback = aliases_at(format!("{base}/fr/guide"))[0].clone();
+    assert_eq!(
+        fallback,
+        serde_json::json!({"url": format!("{base}/fr/guide"), "disposition": "locale_fallback",
+            "expected_target": format!("{base}/guide"), "verified_by": null,
+            "issue": "inventory_alias_unobserved", "observed_url": format!("{base}/fr/guide")})
+    );
+    let reconciliation = &report["reconciliation"];
+    assert_eq!(reconciliation["comparable"], false);
+    assert_eq!(reconciliation["eligible_pages"], serde_json::json!([]));
+    let issues = reconciliation["issues"].to_string();
+    assert!(issues.contains("inventory_alias_unobserved"), "{report:#}");
+    assert!(!issues.contains("redirect_observed"), "{report:#}");
+    assert!(
+        !issues.contains("canonical_target_unresolved"),
+        "{report:#}"
+    );
+
+    // Once the fallback is published in its own right, the verified aliases
+    // leave the inventory's own pages eligible, and never themselves.
+    context["inventory"]["pages"][6]["disposition"] = "published".into();
+    write(&temp.path().join("context.json"), &context.to_string());
+    let report = audit_link_report(temp.path(), &audit);
+    let reconciliation = &report["reconciliation"];
+    assert_eq!(reconciliation["comparable"], true, "{report:#}");
+    let eligible = ["/", "/fr/guide", "/guide", "/new"].map(|path| format!("{base}{path}"));
+    assert_eq!(
+        reconciliation["eligible_pages"],
+        serde_json::json!(eligible)
+    );
+}
+
+/// Findings for `rule_id` of an audit, as `(message, path)`.
+fn rule_findings(findings: &Value, rule_id: &str) -> Vec<(String, String)> {
+    findings
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|finding| finding["rule_id"] == rule_id)
+        .map(|finding| {
+            (
+                finding["message"].as_str().unwrap().to_string(),
+                finding["path"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn links_through_a_redirect_are_neither_broken_nor_orphaned_once_the_report_proves_it() {
+    let site = Site::start(vec![
+        (
+            "/",
+            html(r#"<main><a href="/old">Old</a> <a href="/dead">Dead</a></main>"#),
+        ),
+        ("/old", moved_to_new()),
+        (
+            "/dead",
+            (
+                "301 Moved Permanently\r\nLocation: /missing",
+                "text/html",
+                String::new(),
+            ),
+        ),
+        ("/new", html("<main>New</main>")),
+    ]);
+    let temp = tempfile::tempdir().unwrap();
+    let config = link_rules_only(temp.path());
+    let run = |extra: &[&str]| {
+        let output = Command::new(bin())
+            .current_dir(temp.path())
+            .args(["crawl", &site.base_url, "--engine", "http"])
+            .args(["--progress", "off", "--format", "json", "--config"])
+            .arg(&config)
+            .args(extra)
+            .output()
+            .unwrap();
+        parse_json(&output.stdout)
+    };
+
+    // Without a report, the redirect still keeps `/old` from being broken; the
+    // legacy orphan finding on `/new` stays, since nothing proves it false.
+    let plain = run(&[]);
+    assert_eq!(
+        rule_messages(&plain, "LNK001"),
+        ["broken internal link: /dead"],
+        "{plain:#}"
+    );
+    let orphan = rule_findings(&plain["artifact"]["findings"], "LNK002");
+    assert_eq!(orphan.len(), 1, "{plain:#}");
+    assert!(orphan[0].0.ends_with("/new"));
+
+    let graph = temp.path().join("graph.json");
+    let payload = run(&[
+        "--link-graph-output",
+        graph.to_str().unwrap(),
+        "--link-graph-summary",
+    ]);
+    // A redirect ending in a 404 is still a broken link.
+    assert_eq!(
+        rule_messages(&payload, "LNK001"),
+        ["broken internal link: /dead"],
+        "{payload:#}"
+    );
+    assert!(rule_messages(&payload, "LNK002").is_empty(), "{payload:#}");
+    let expected = serde_json::json!([{"rule_id": "LNK002", "path": orphan[0].1,
+        "url": format!("{}/new", site.base_url), "conclusion": "inbound_observed",
+        "source_pages_by_context": {}, "via_redirect_source_pages": 1, "navigation_only": false}]);
+    assert_eq!(
+        payload["link_graph_summary"]["suppressed_legacy_findings"],
+        expected
+    );
+    let report: Value = serde_json::from_slice(&std::fs::read(&graph).unwrap()).unwrap();
+    assert_eq!(report["suppressed_legacy_findings"], expected, "{report:#}");
+    // The stored audit, which later runs use as a baseline, leaves it out too.
+    let stored: Value =
+        serde_json::from_slice(&std::fs::read(payload["audit_path"].as_str().unwrap()).unwrap())
+            .unwrap();
+    assert!(rule_findings(&stored["findings"], "LNK002").is_empty());
+    assert_eq!(stored["summary"], payload["artifact"]["summary"]);
+}
+
+/// A seeded crawl of `site` with the link rules only, writing its own link
+/// report: the command output and that report.
+fn seeded_crawl_with_report(
+    site: &Site,
+    dir: &Path,
+    seed: &Value,
+    extra: &[&str],
+) -> (Value, Value) {
+    let config = link_rules_only(dir);
+    let graph = dir.join("graph.json");
+    let mut args = vec![
+        "--config",
+        config.to_str().unwrap(),
+        "--link-graph-output",
+        graph.to_str().unwrap(),
+        "--link-graph-summary",
+    ];
+    args.extend(extra);
+    let (payload, _) = seeded_crawl(site, dir, seed, &args);
+    let report = serde_json::from_slice(&std::fs::read(&graph).unwrap()).unwrap();
+    (payload, report)
+}
+
+/// The report's qualification of `rule_id` at `url`, from either list.
+fn legacy_finding(report: &Value, rule_id: &str, url: &str) -> Value {
+    ["legacy_findings", "suppressed_legacy_findings"]
+        .iter()
+        .filter_map(|list| report[list].as_array())
+        .flatten()
+        .find(|finding| finding["rule_id"] == rule_id && finding["url"] == url)
+        .cloned()
+        .unwrap_or_else(|| panic!("{rule_id} at {url}: {report:#}"))
+}
+
+#[test]
+fn a_seeded_crawl_confirms_an_unlinked_published_page_in_one_command() {
+    let site = orphan_site();
+    site.serve_header("X-Release", "r1");
+    let temp = tempfile::tempdir().unwrap();
+    // A bare inventory, as an EmDash export carries: no context date.
+    let inventory = inventory_context(&site, &["/", "/a", "/orphan"], &[])["inventory"].clone();
+    let (payload, report) = seeded_crawl_with_report(
+        &site,
+        temp.path(),
+        &inventory,
+        &["--release-header", "x-release"],
+    );
+    assert_eq!(report["crawl_complete"], true, "{report:#}");
+    assert_eq!(report["identity"], inventory["identity"]);
+    let started_at = payload["artifact"]["crawl_attestation"]["snapshot"]["started_at"]
+        .as_str()
+        .unwrap();
+    assert_eq!(report["snapshot_date"], started_at[..10]);
+    assert_eq!(report["reconciliation"]["comparable"], true, "{report:#}");
+    let orphan = format!("{}/orphan", site.base_url);
+    let finding = legacy_finding(&report, "LNK002", &orphan);
+    assert_eq!(finding["conclusion"], "confirmed", "{report:#}");
+    // A confirmed orphan is a real finding: it stays in the run.
+    let kept = rule_findings(&payload["artifact"]["findings"], "LNK002");
+    assert!(
+        kept.iter().any(|(_, path)| *path == finding["path"]),
+        "{payload:#}"
+    );
+    assert_eq!(
+        payload["link_graph_summary"]["legacy_link_findings"]["confirmed"], 1,
+        "{payload:#}"
+    );
+}
+
+#[test]
+fn a_seeded_crawl_suppresses_the_orphan_finding_of_a_verified_canonical_alias() {
+    let site = Site::start(vec![
+        ("/", html(r#"<main><a href="/guide">Guide</a></main>"#)),
+        ("/guide", html("<main>Guide</main>")),
+        (
+            "/alias",
+            html(r#"<link rel="canonical" href="/guide"><main>Copy</main>"#),
+        ),
+    ]);
+    let temp = tempfile::tempdir().unwrap();
+    let base = &site.base_url;
+    let mut context = inventory_context(&site, &["/", "/guide"], &[]);
+    context["inventory"]["pages"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"url": format!("{base}/alias"),
+            "disposition": "canonical_alias", "target": format!("{base}/guide"), "locale": null}));
+    let (payload, report) = seeded_crawl_with_report(&site, temp.path(), &context, &[]);
+    let alias = format!("{base}/alias");
+    let finding = legacy_finding(&report, "LNK002", &alias);
+    assert_eq!(finding["conclusion"], "inventory_alias", "{report:#}");
+    assert_eq!(
+        report["suppressed_legacy_findings"],
+        serde_json::json!([finding])
+    );
+    assert_eq!(
+        payload["link_graph_summary"]["suppressed_legacy_findings"],
+        report["suppressed_legacy_findings"]
+    );
+    let path = finding["path"].as_str().unwrap();
+    let stored: Value =
+        serde_json::from_slice(&std::fs::read(payload["audit_path"].as_str().unwrap()).unwrap())
+            .unwrap();
+    for findings in [&payload["artifact"]["findings"], &stored["findings"]] {
+        assert!(
+            !rule_findings(findings, "LNK002")
+                .iter()
+                .any(|(_, found)| found == path),
+            "{payload:#}"
+        );
+    }
+}
+
+#[test]
+fn without_a_seed_file_the_crawl_report_is_the_context_free_audit_report() {
+    let site = orphan_site();
+    let temp = tempfile::tempdir().unwrap();
+    let graph = temp.path().join("graph.json");
+    let output = Command::new(bin())
+        .current_dir(temp.path())
+        .args([
+            "crawl",
+            &site.base_url,
+            "--engine",
+            "http",
+            "--progress",
+            "off",
+        ])
+        .args([
+            "--format",
+            "json",
+            "--no-sitemap-seed",
+            "--link-graph-output",
+        ])
+        .arg(&graph)
+        .output()
+        .unwrap();
+    let payload = parse_json(&output.stdout);
+    let output = Command::new(bin())
+        .current_dir(temp.path())
+        .args([
+            "link-graph",
+            payload["audit_path"].as_str().unwrap(),
+            "--audit",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let written = std::fs::read(&graph).unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&written),
+        String::from_utf8_lossy(&output.stdout).trim_end()
+    );
+    let report: Value = serde_json::from_slice(&written).unwrap();
+    assert_eq!(report["reconciliation"], Value::Null);
+}
+
+#[test]
+fn a_seed_inventory_without_identity_never_confirms_an_orphan() {
+    let site = orphan_site();
+    site.serve_header("X-Release", "r1");
+    let temp = tempfile::tempdir().unwrap();
+    let context = inventory_context(&site, &["/", "/a", "/orphan"], &[]);
+    let mut anonymous = context["inventory"].clone();
+    anonymous["identity"] = Value::Null;
+    let orphan = format!("{}/orphan", site.base_url);
+    let (_, report) = seeded_crawl_with_report(
+        &site,
+        temp.path(),
+        &anonymous,
+        &["--release-header", "x-release"],
+    );
+    let issues = report["issues"].to_string();
+    assert!(
+        issues.contains("audit_seed_inventory_mismatch"),
+        "{report:#}"
+    );
+    assert_eq!(report["crawl_complete"], false);
+    assert_eq!(
+        legacy_finding(&report, "LNK002", &orphan)["conclusion"],
+        "not_eligible"
+    );
+
+    // An explicit context with an identity cannot stand in for the seed's.
+    let explicit = temp.path().join("explicit.json");
+    write(&explicit, &context.to_string());
+    let (_, report) = seeded_crawl_with_report(
+        &site,
+        temp.path(),
+        &anonymous,
+        &[
+            "--release-header",
+            "x-release",
+            "--link-graph-context",
+            explicit.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(report["identity"]["surface"], "public", "{report:#}");
+    assert_eq!(report["snapshot_date"], "2026-11-07");
+    assert!(
+        report["issues"]
+            .to_string()
+            .contains("audit_seed_inventory_mismatch"),
+        "{report:#}"
+    );
+    assert_eq!(
+        legacy_finding(&report, "LNK002", &orphan)["conclusion"],
+        "not_eligible"
+    );
+}
+
+/// The text output of a crawl of `site` seeded with `seed`, with `extra`.
+fn seeded_text_crawl(site: &Site, dir: &Path, seed: &Value, extra: &[&str]) -> String {
+    let config = link_rules_only(dir);
+    let seed_path = dir.join("seed.json");
+    write(&seed_path, &seed.to_string());
+    let output = Command::new(bin())
+        .current_dir(dir)
+        .args(["crawl", &site.base_url, "--engine", "http", "--progress"])
+        .args(["off", "--no-sitemap-seed", "--release-header", "x-release"])
+        .arg("--config")
+        .arg(&config)
+        .arg("--seed-file")
+        .arg(&seed_path)
+        .args(extra)
+        .output()
+        .unwrap();
+    String::from_utf8(output.stdout).unwrap()
+}
+
+#[test]
+fn the_text_report_qualifies_orphan_findings_only_with_a_link_report() {
+    let site = orphan_site();
+    site.serve_header("X-Release", "r1");
+    let temp = tempfile::tempdir().unwrap();
+    let inventory = inventory_context(&site, &["/", "/a", "/orphan"], &[])["inventory"].clone();
+    let text = seeded_text_crawl(
+        &site,
+        temp.path(),
+        &inventory,
+        &["--link-graph-output", "graph.json"],
+    );
+    let finding = "LNK002 [hard/high] no inbound links observed in the analyzed pages: /orphan";
+    assert!(
+        text.contains(&format!("{finding} (confirmed orphan)\n")),
+        "{text}"
+    );
+    assert!(
+        text.contains("LNK002 no inbound links observed in the analyzed pages: /orphan (confirmed orphan) (on "),
+        "{text}"
+    );
+    assert!(
+        text.contains("\nLink graph:\n  Crawl complete: yes\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("  LNK002/LNK004 findings: 1 confirmed, 0 not verifiable, 0 suppressed as disproven\n  Graph report: graph.json\n"),
+        "{text}"
+    );
+
+    // `report render` qualifies the stored audit with the written report.
+    let audit = text
+        .lines()
+        .last()
+        .unwrap()
+        .trim_start_matches("Audit results: ");
+    let output = Command::new(bin())
+        .current_dir(temp.path())
+        .args([
+            "report",
+            "render",
+            audit,
+            "--format",
+            "md",
+            "--link-graph",
+            "graph.json",
+        ])
+        .output()
+        .unwrap();
+    let markdown = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        markdown.contains("/orphan (confirmed orphan)\n"),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("## Link graph\n\n- Crawl complete: yes\n"),
+        "{markdown}"
+    );
+
+    let plain = seeded_text_crawl(&site, temp.path(), &inventory, &[]);
+    assert!(plain.contains(&format!("{finding}\n")), "{plain}");
+    assert!(
+        !plain.contains("Link graph") && !plain.contains("confirmed"),
+        "{plain}"
     );
 }

@@ -84,6 +84,17 @@ fn valid_page_url(value: &str, origin: &Url) -> bool {
 /// Compare exact URL identities. Normalization and alias resolution are not
 /// inferred; aliases prevent eligibility until the graph can account for them.
 pub fn reconcile(inventory: &InventorySnapshot, crawl: &CrawlSurface) -> InventoryReconciliation {
+    reconcile_with_verified_aliases(inventory, crawl, &BTreeSet::new())
+}
+
+/// Like [`reconcile`], except that alias records whose exact inventory URL is
+/// in `verified_aliases` no longer require resolution: the caller observed
+/// them reaching their target. Their URLs still never become eligible.
+pub fn reconcile_with_verified_aliases(
+    inventory: &InventorySnapshot,
+    crawl: &CrawlSurface,
+    verified_aliases: &BTreeSet<String>,
+) -> InventoryReconciliation {
     let mut issues = Vec::new();
     if !inventory.complete {
         issues.push("inventory_incomplete".to_string());
@@ -134,7 +145,9 @@ pub fn reconcile(inventory: &InventorySnapshot, crawl: &CrawlSurface) -> Invento
                 | InventoryDisposition::CanonicalAlias
                 | InventoryDisposition::LocaleFallback
         ) {
-            issues.push("alias_resolution_required".to_string());
+            if !verified_aliases.contains(&page.url) {
+                issues.push("alias_resolution_required".to_string());
+            }
             if page
                 .target
                 .as_deref()

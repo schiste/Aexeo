@@ -26,8 +26,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::config::Config;
+use crate::crawl_attestation::CrawlRun;
 use crate::link_evidence::crawl_links;
 use crate::link_graph::redact_url;
+use crate::release_marker::ReleaseMarkerSpec;
 use crate::reporting::build_audit_artifact;
 use crate::site::{Site, route_from_urlish};
 use crate::static_check::run_checks_for_site_profiled;
@@ -57,6 +59,8 @@ pub struct RuntimeAudit {
     pub crawl_stats: CrawlStats,
     pub truncation_reason: Option<String>,
     pub performance: Option<AuditPerformance>,
+    /// Wall-clock bounds and per-segment release markers of the crawl.
+    pub crawl_run: CrawlRun,
 }
 
 const CHECKPOINT_VERSION: u32 = 1;
@@ -70,6 +74,27 @@ pub struct RuntimeCheckpoint {
     pub(crate) snapshot: RuntimeSnapshotState,
     pub(crate) crawl_findings: Vec<Finding>,
     pub(crate) crawl_stats: CrawlStats,
+    /// Start of the first segment, in Unix seconds. Absent from checkpoints
+    /// written before it was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) started_at: Option<i64>,
+    /// The release marker the crawl records; a resume must ask for the same.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) release_marker: Option<ReleaseMarkerSpec>,
+}
+
+/// What identifies the crawl a checkpoint belongs to, beyond its progress.
+struct CheckpointScope<'a> {
+    base_url: &'a str,
+    engine: &'a str,
+    started_at: Option<i64>,
+    release_marker: Option<&'a ReleaseMarkerSpec>,
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs() as i64)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -108,6 +133,8 @@ pub struct RuntimeAuditOptions<'a> {
     pub artifact_command: &'a str,
     pub progress_artifact: RuntimeArtifactMode<'a>,
     pub partial_audit_artifact: RuntimeArtifactMode<'a>,
+    /// Record each HTML page's release marker in its response provenance.
+    pub release_marker: Option<&'a ReleaseMarkerSpec>,
 }
 
 #[derive(Default)]
@@ -139,6 +166,7 @@ impl<'a> Default for RuntimeAuditOptions<'a> {
             artifact_command: "crawl",
             progress_artifact: RuntimeArtifactMode::Off,
             partial_audit_artifact: RuntimeArtifactMode::Off,
+            release_marker: None,
         }
     }
 }
@@ -1429,6 +1457,7 @@ type RuntimeMaterialization = (
     CrawlStats,
     Option<String>,
     RuntimePerformance,
+    CrawlRun,
 );
 
 fn resolve_runtime_engine(engine: &str) -> Result<&'static str> {
@@ -1684,8 +1713,7 @@ fn build_partial_runtime_artifact(
 
 fn checkpoint_state(
     checkpoint_path: &Path,
-    base_url: &str,
-    engine: &str,
+    scope: &CheckpointScope<'_>,
     planner: &CrawlPlanner,
     snapshot: &RuntimeSnapshotBuilder,
     crawl_findings: &[Finding],
@@ -1693,12 +1721,14 @@ fn checkpoint_state(
 ) -> Result<()> {
     let checkpoint = RuntimeCheckpoint {
         version: CHECKPOINT_VERSION,
-        base_url: redact_url(base_url),
-        engine: engine.to_string(),
+        base_url: redact_url(scope.base_url),
+        engine: scope.engine.to_string(),
         planner: planner.checkpoint_state(),
         snapshot: snapshot.checkpoint_state(),
         crawl_findings: crawl_findings.to_vec(),
         crawl_stats: crawl_stats.clone(),
+        started_at: scope.started_at,
+        release_marker: scope.release_marker.cloned(),
     };
     write_atomically(checkpoint_path, &serde_json::to_vec_pretty(&checkpoint)?)
 }
@@ -1764,14 +1794,13 @@ fn create_temporary_sibling(path: &Path) -> Result<(std::path::PathBuf, fs::File
 
 fn load_checkpoint(
     checkpoint_path: &Path,
-    base_url: &str,
-    engine: &str,
+    scope: &CheckpointScope<'_>,
     max_pages: usize,
 ) -> Result<RuntimeCheckpoint> {
     let text = fs::read_to_string(checkpoint_path)?;
     let mut checkpoint = serde_json::from_str::<RuntimeCheckpoint>(&text)?;
     // In the message itself: failure output renders only the outermost error.
-    validate_checkpoint(&checkpoint, base_url, engine).map_err(|reason| {
+    validate_checkpoint(&checkpoint, scope).map_err(|reason| {
         anyhow::anyhow!("cannot resume from {}: {reason}", checkpoint_path.display())
     })?;
     checkpoint.planner.max_pages = max_pages;
@@ -1781,7 +1810,9 @@ fn load_checkpoint(
 
 /// A checkpoint decides which host the crawl talks to, and the current run supplies
 /// the credentials, so resuming a different crawl could send them to the wrong site.
-fn validate_checkpoint(checkpoint: &RuntimeCheckpoint, base_url: &str, engine: &str) -> Result<()> {
+/// It must also record the same release marker, or its pages could not be compared.
+fn validate_checkpoint(checkpoint: &RuntimeCheckpoint, scope: &CheckpointScope<'_>) -> Result<()> {
+    let (base_url, engine) = (scope.base_url, scope.engine);
     anyhow::ensure!(
         checkpoint.version == CHECKPOINT_VERSION,
         "checkpoint version {} is not supported (expected {CHECKPOINT_VERSION}); start a new crawl",
@@ -1807,6 +1838,10 @@ fn validate_checkpoint(checkpoint: &RuntimeCheckpoint, base_url: &str, engine: &
         "checkpoint was made with engine '{}' but this crawl uses '{engine}'; pass the same engine or start a new crawl",
         checkpoint.engine
     );
+    anyhow::ensure!(
+        checkpoint.release_marker.as_ref() == scope.release_marker,
+        "checkpoint records a different release marker than this crawl; pass the same --release-header and --release-meta or start a new crawl"
+    );
     Ok(())
 }
 
@@ -1824,10 +1859,24 @@ fn materialize_runtime_site(
         crawl_headers: &crawl_headers,
         ..config.runtime()
     };
+    let release_marker = options.release_marker;
+    let mut crawl_run = CrawlRun {
+        started_at: Some(unix_now()),
+        ..CrawlRun::default()
+    };
     let (mut planner, mut snapshot, mut crawl_findings, mut crawl_stats, mut performance) =
         if let Some(resume_from) = options.resume_from {
-            let checkpoint = load_checkpoint(resume_from, base_url, engine, max_pages)?;
+            let scope = CheckpointScope {
+                base_url,
+                engine,
+                started_at: None,
+                release_marker,
+            };
+            let checkpoint = load_checkpoint(resume_from, &scope, max_pages)?;
             let resumed_elapsed_us = checkpoint.crawl_stats.elapsed_us;
+            crawl_run.started_at = checkpoint.started_at;
+            crawl_run.resumed = true;
+            crawl_run.earlier_release_values = checkpoint.snapshot.release_markers();
             (
                 CrawlPlanner::from_checkpoint(checkpoint.planner, base_url, max_pages),
                 RuntimeSnapshotBuilder::from_state(checkpoint.snapshot),
@@ -1953,7 +2002,7 @@ fn materialize_runtime_site(
                 performance.apply_to(&mut crawl_stats);
                 continue;
             }
-            let provenance = aexeo_contracts::CrawlResponseProvenance {
+            let mut provenance = aexeo_contracts::CrawlResponseProvenance {
                 requested_url: redact_url(&current),
                 observed_url: fetched
                     .effective_url_observed
@@ -1961,6 +2010,8 @@ fn materialize_runtime_site(
                 status_code: fetched.status_code,
                 headers_observed: fetched.headers_observed,
                 redirect_chain: fetched.redirect_chain.clone(),
+                release_marker: None,
+                redirected_arrivals: Vec::new(),
             };
             // An unknown status (a browser runner may not report one) is not
             // evidence of a problem; a known non-2xx is not a page of the site.
@@ -2032,6 +2083,11 @@ fn materialize_runtime_site(
                 continue;
             }
             let route = route_from_urlish(&fetched.effective_url).unwrap_or_default();
+            provenance.release_marker =
+                release_marker.and_then(|spec| spec.observe(&fetched.headers, &body));
+            if let Some(value) = &provenance.release_marker {
+                crawl_run.segment_release_values.insert(value.clone());
+            }
             let snapshot_write_started_at = Instant::now();
             snapshot.write_page(&route, &body, &fetched.headers, Some(provenance))?;
             performance.record(
@@ -2109,8 +2165,12 @@ fn materialize_runtime_site(
             let checkpoint_started_at = Instant::now();
             checkpoint_state(
                 checkpoint_path,
-                base_url,
-                engine,
+                &CheckpointScope {
+                    base_url,
+                    engine,
+                    started_at: crawl_run.started_at,
+                    release_marker,
+                },
                 &planner,
                 &snapshot,
                 &crawl_findings,
@@ -2230,12 +2290,14 @@ fn materialize_runtime_site(
     {
         let _ = fs::remove_file(checkpoint_path);
     }
+    crawl_run.finished_at = unix_now();
     Ok((
         site,
         crawl_findings,
         crawl_stats,
         truncation_reason,
         performance,
+        crawl_run,
     ))
 }
 
@@ -2351,7 +2413,7 @@ pub fn run_runtime_audit_with_options(
 ) -> Result<RuntimeAudit> {
     let effective_engine = resolve_runtime_engine(engine)?;
     let egress = CrawlEgress::for_target(base_url, config.crawl_allow_private_network);
-    let (site, crawl_findings, mut crawl_stats, truncation_reason, mut performance) =
+    let (site, crawl_findings, mut crawl_stats, truncation_reason, mut performance, crawl_run) =
         materialize_runtime_site(
             base_url,
             max_pages,
@@ -2429,6 +2491,7 @@ pub fn run_runtime_audit_with_options(
         crawl_stats,
         truncation_reason,
         performance: Some(performance_summary),
+        crawl_run,
     })
 }
 
@@ -2567,6 +2630,7 @@ mod tests {
             crawl_stats: CrawlStats::default(),
             truncation_reason: Some("page limit".into()),
             performance: None,
+            crawl_run: Default::default(),
         };
         let preset = crate::content_presets::resolve_content_preset(
             "seo-website",
@@ -3317,6 +3381,7 @@ mod tests {
             },
             truncation_reason: None,
             performance: None,
+            crawl_run: Default::default(),
         };
         let diff = verify_runtime_audit(&audit, &[]);
         assert_eq!(diff.new_findings.len(), 1);

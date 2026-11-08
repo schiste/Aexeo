@@ -86,6 +86,15 @@ pub enum ContentGate {
         blocking: bool,
         max_words: usize,
     },
+    /// Limits Unicode scalar values in adapter-supplied paragraphs.
+    ParagraphCharacterLength {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+        max_chars: usize,
+    },
     /// Requires a minimum number of hyperlinks; does not validate destinations.
     LinkCount {
         id: String,
@@ -116,6 +125,22 @@ pub enum ContentGate {
         max_words: usize,
         #[serde(default = "default_sentence_delimiters")]
         delimiters: String,
+        /// Exact whitespace-delimited abbreviations whose final period is not a boundary.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        abbreviations: Vec<String>,
+    },
+    /// Limits Unicode scalar values per heuristic sentence.
+    SentenceCharacterLength {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+        max_chars: usize,
+        #[serde(default = "default_sentence_delimiters")]
+        delimiters: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        abbreviations: Vec<String>,
     },
     /// Limits exact occurrences of user-configured terms.
     RepeatedTerms {
@@ -290,7 +315,9 @@ impl ContentGate {
             | Self::LinkCount { severity, .. }
             | Self::LinkDestinations { severity, .. }
             | Self::SentenceLength { severity, .. }
+            | Self::SentenceCharacterLength { severity, .. }
             | Self::ParagraphLength { severity, .. }
+            | Self::ParagraphCharacterLength { severity, .. }
             | Self::RepeatedTerms { severity, .. }
             | Self::ForbiddenTerms { severity, .. }
             | Self::RequiredMetadata { severity, .. }
@@ -312,7 +339,9 @@ impl ContentGate {
             | Self::LinkCount { blocking, .. }
             | Self::LinkDestinations { blocking, .. }
             | Self::SentenceLength { blocking, .. }
+            | Self::SentenceCharacterLength { blocking, .. }
             | Self::ParagraphLength { blocking, .. }
+            | Self::ParagraphCharacterLength { blocking, .. }
             | Self::RepeatedTerms { blocking, .. }
             | Self::ForbiddenTerms { blocking, .. }
             | Self::RequiredMetadata { blocking, .. }
@@ -333,12 +362,13 @@ impl ContentGate {
         match self {
             Self::WordCount { .. }
             | Self::SentenceLength { .. }
+            | Self::SentenceCharacterLength { .. }
             | Self::RepeatedTerms { .. }
             | Self::ForbiddenTerms { .. } => "text",
             Self::LinkCount { .. } => "links",
             Self::LinkDestinations { .. } => "link_destinations",
             Self::RequiredMetadata { .. } => "metadata",
-            Self::ParagraphLength { .. } => "paragraphs",
+            Self::ParagraphLength { .. } | Self::ParagraphCharacterLength { .. } => "paragraphs",
             Self::RequiredHeadings { .. }
             | Self::DuplicateHeadings { .. }
             | Self::HeadingLength { .. } => "headings",
@@ -357,7 +387,9 @@ impl ContentGate {
             | Self::LinkCount { id, .. }
             | Self::LinkDestinations { id, .. }
             | Self::SentenceLength { id, .. }
+            | Self::SentenceCharacterLength { id, .. }
             | Self::ParagraphLength { id, .. }
+            | Self::ParagraphCharacterLength { id, .. }
             | Self::RepeatedTerms { id, .. }
             | Self::ForbiddenTerms { id, .. }
             | Self::RequiredMetadata { id, .. }
@@ -775,13 +807,40 @@ impl ContentPreset {
                 ContentGate::ParagraphLength { max_words, .. } if *max_words == 0 => {
                     bail!("paragraph length needs a positive limit for {}", gate.id())
                 }
+                ContentGate::ParagraphCharacterLength { max_chars, .. } if *max_chars == 0 => {
+                    bail!(
+                        "paragraph character length needs a positive limit for {}",
+                        gate.id()
+                    )
+                }
                 ContentGate::SentenceLength {
                     max_words,
+                    delimiters,
+                    ..
+                }
+                | ContentGate::SentenceCharacterLength {
+                    max_chars: max_words,
                     delimiters,
                     ..
                 } if *max_words == 0 || delimiters.is_empty() => {
                     bail!(
                         "sentence length needs a positive limit and delimiters for {}",
+                        gate.id()
+                    )
+                }
+                ContentGate::SentenceLength { abbreviations, .. }
+                | ContentGate::SentenceCharacterLength { abbreviations, .. }
+                    if abbreviations.iter().any(|abbr| {
+                        abbr.strip_suffix('.').is_none_or(|word| {
+                            word.is_empty()
+                                || word.contains('.')
+                                || word.chars().any(char::is_whitespace)
+                        })
+                    }) || abbreviations.iter().collect::<BTreeSet<_>>().len()
+                        != abbreviations.len() =>
+                {
+                    bail!(
+                        "sentence abbreviations must be unique single tokens ending in a period for {}",
                         gate.id()
                     )
                 }
@@ -1141,26 +1200,39 @@ impl ContentPreset {
                         reason = Some("link destinations are unavailable from this adapter".into())
                     }
                 },
-                ContentGate::ParagraphLength { max_words, .. } => {
-                    measurements.insert("max_words".into(), *max_words);
+                ContentGate::ParagraphLength {
+                    max_words: limit, ..
+                }
+                | ContentGate::ParagraphCharacterLength {
+                    max_chars: limit, ..
+                } => {
+                    let chars = matches!(gate, ContentGate::ParagraphCharacterLength { .. });
+                    let (limit_key, longest_key, unit) = if chars {
+                        ("max_chars", "longest_paragraph_chars", "characters")
+                    } else {
+                        ("max_words", "longest_paragraph_words", "words")
+                    };
+                    measurements.insert(limit_key.into(), *limit);
                     match context.and_then(|c| c.paragraphs.as_ref()) {
                         Some(paragraphs) => {
                             let mut longest = 0;
                             for paragraph in paragraphs {
-                                let count = paragraph.text.split_whitespace().count();
+                                let count = if chars {
+                                    paragraph.text.chars().count()
+                                } else {
+                                    paragraph.text.split_whitespace().count()
+                                };
                                 longest = longest.max(count);
-                                if count > *max_words {
+                                if count > *limit {
                                     emit(
-                                        format!(
-                                            "Paragraph has {count} words; maximum is {max_words}"
-                                        ),
+                                        format!("Paragraph has {count} {unit}; maximum is {limit}"),
                                         paragraph.line,
                                         paragraph.column,
                                     );
                                 }
                             }
                             measurements.insert("paragraph_count".into(), paragraphs.len());
-                            measurements.insert("longest_paragraph_words".into(), longest);
+                            measurements.insert(longest_key.into(), longest);
                         }
                         None => {
                             reason = Some("paragraphs are unavailable from this adapter".into())
@@ -1168,11 +1240,24 @@ impl ContentPreset {
                     }
                 }
                 ContentGate::SentenceLength {
-                    max_words,
+                    max_words: limit,
                     delimiters,
+                    abbreviations,
+                    ..
+                }
+                | ContentGate::SentenceCharacterLength {
+                    max_chars: limit,
+                    delimiters,
+                    abbreviations,
                     ..
                 } => {
-                    measurements.insert("max_words".into(), *max_words);
+                    let chars = matches!(gate, ContentGate::SentenceCharacterLength { .. });
+                    let (limit_key, longest_key, unit) = if chars {
+                        ("max_chars", "longest_sentence_chars", "characters")
+                    } else {
+                        ("max_words", "longest_sentence_words", "words")
+                    };
+                    measurements.insert(limit_key.into(), *limit);
                     match &input.text {
                         Some(text) => {
                             let mut segment_start = 0;
@@ -1196,24 +1281,40 @@ impl ContentPreset {
                                         .chars()
                                         .next()
                                         .is_some_and(|c| c.is_ascii_digit());
+                                let abbreviation = ch == Some('.')
+                                    && !abbreviations.is_empty()
+                                    && text[segment_start..offset]
+                                        .split_whitespace()
+                                        .next_back()
+                                        .is_some_and(|word| {
+                                            abbreviations
+                                                .iter()
+                                                .any(|abbr| abbr.strip_suffix('.') == Some(word))
+                                        });
                                 while block_ends.get(next_block).is_some_and(|&end| end < offset) {
                                     next_block += 1;
                                 }
                                 let block_end = block_ends.get(next_block) == Some(&offset);
                                 if block_end
-                                    || !decimal_point && ch.is_none_or(|ch| delimiters.contains(ch))
+                                    || !decimal_point
+                                        && !abbreviation
+                                        && ch.is_none_or(|ch| delimiters.contains(ch))
                                 {
-                                    let count =
-                                        text[segment_start..offset].split_whitespace().count();
+                                    let segment = &text[segment_start..offset];
+                                    let count = if chars {
+                                        segment.trim().chars().count()
+                                    } else {
+                                        segment.split_whitespace().count()
+                                    };
                                     if count > 0 {
                                         sentence_count += 1;
                                         longest = longest.max(count);
-                                        if count > *max_words {
+                                        if count > *limit {
                                             let (start_line, start_column) =
                                                 first_position.unwrap_or((line, column));
                                             emit(
                                                 format!(
-                                                    "Sentence has {count} words; maximum is {max_words}"
+                                                    "Sentence has {count} {unit}; maximum is {limit}"
                                                 ),
                                                 start_line,
                                                 start_column,
@@ -1235,7 +1336,7 @@ impl ContentPreset {
                                 }
                             }
                             measurements.insert("sentence_count".into(), sentence_count);
-                            measurements.insert("longest_sentence_words".into(), longest);
+                            measurements.insert(longest_key.into(), longest);
                         }
                         None => reason = Some("text is unavailable from this adapter".into()),
                     }

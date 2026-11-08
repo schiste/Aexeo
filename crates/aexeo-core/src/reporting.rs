@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::adapter::resolve_static_site_root;
 use crate::config::load_config;
+use crate::link_notes::{LinkFindingCounts, LinkFindingNotes};
 use crate::registry::rule_metadata_for_id;
 use aexeo_contracts::{
     AuditArtifact, AuditStatus, AuditSummary, CrawlStats, Finding, FindingScope, RuleClass,
@@ -77,11 +78,26 @@ pub struct PriorityIssue {
     /// six duplicate ids from one navigation template do. `message` is the first.
     pub variants: usize,
     pub examples: Vec<String>,
+    /// With a link report: how many of the problem's `LNK002`/`LNK004`
+    /// findings it confirms and how many it cannot verify.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub link_graph: Option<LinkFindingCounts>,
 }
 
 /// Distinct problems in the order to fix them: errors first, then problems
 /// that are not heuristic, then by how many pages each one fixes.
 pub fn prioritize_findings(findings: &[Finding], limit: usize) -> Vec<PriorityIssue> {
+    prioritize_findings_with_links(findings, limit, None)
+}
+
+/// [`prioritize_findings`], with each problem's link report qualification when
+/// `links` is given: a problem the report confirms ranks before an otherwise
+/// equal one of the same rule it cannot verify. Without `links`, identical.
+pub fn prioritize_findings_with_links(
+    findings: &[Finding],
+    limit: usize,
+    links: Option<&LinkFindingNotes>,
+) -> Vec<PriorityIssue> {
     // Per (rule, message, severity): the paths seen, the finding count and
     // whether the rule is heuristic.
     type Tally<'a> = (BTreeSet<&'a str>, usize, bool);
@@ -107,6 +123,9 @@ pub fn prioritize_findings(findings: &[Finding], limit: usize) -> Vec<PriorityIs
             findings: count,
             variants: 1,
             examples: paths.iter().take(3).map(|path| path.to_string()).collect(),
+            link_graph: links
+                .map(|notes| notes.count(paths.iter().map(|path| (rule_id, *path))))
+                .filter(|counts| *counts != LinkFindingCounts::default()),
         };
         if paths.len() < 2 {
             issues.push((heuristic, issue));
@@ -133,6 +152,7 @@ pub fn prioritize_findings(findings: &[Finding], limit: usize) -> Vec<PriorityIs
             .then_with(|| b.pages.cmp(&a.pages))
             .then_with(|| b.findings.cmp(&a.findings))
             .then_with(|| a.rule_id.cmp(&b.rule_id))
+            .then_with(|| unconfirmed(a).cmp(&unconfirmed(b)))
             .then_with(|| a.message.cmp(&b.message))
     });
     issues
@@ -142,12 +162,21 @@ pub fn prioritize_findings(findings: &[Finding], limit: usize) -> Vec<PriorityIs
         .collect()
 }
 
+/// Without a confirmed finding behind it, a problem ranks after one with.
+fn unconfirmed(issue: &PriorityIssue) -> bool {
+    issue.link_graph.is_none_or(|counts| counts.confirmed == 0)
+}
+
 /// How many priorities the text and Markdown reports lead with.
 const PRIORITY_LIMIT: usize = 10;
 
-fn priority_lines(findings: &[Finding], markdown: bool) -> Vec<String> {
+fn priority_lines(
+    findings: &[Finding],
+    markdown: bool,
+    links: Option<&LinkFindingNotes>,
+) -> Vec<String> {
     let distinct = prioritize_findings(findings, usize::MAX).len();
-    let issues = prioritize_findings(findings, PRIORITY_LIMIT);
+    let issues = prioritize_findings_with_links(findings, PRIORITY_LIMIT, links);
     if issues.is_empty() {
         return Vec::new();
     }
@@ -168,11 +197,17 @@ fn priority_lines(findings: &[Finding], markdown: bool) -> Vec<String> {
         lines.push(String::new());
     }
     for (rank, issue) in issues.iter().enumerate() {
-        let message = if issue.variants > 1 {
+        let mut message = if issue.variants > 1 {
             format!("{} (+{} similar)", issue.message, issue.variants - 1)
         } else {
             issue.message.clone()
         };
+        if let Some(note) = links
+            .zip(issue.link_graph)
+            .and_then(|(notes, counts)| notes.describe(&issue.rule_id, counts))
+        {
+            message.push_str(&format!(" ({note})"));
+        }
         let reach = if issue.pages == 1 {
             format!("on {}", issue.examples.first().map_or("", String::as_str))
         } else {
@@ -704,8 +739,47 @@ pub fn render_text_artifact(
     success_message: &str,
     audit_path: Option<&Path>,
 ) -> String {
+    render_text_artifact_with_links(artifact, success_message, audit_path, None)
+}
+
+/// The qualification of a cluster's `LNK002`/`LNK004` findings, as ` (...)`,
+/// or nothing.
+fn link_note(
+    links: Option<&LinkFindingNotes>,
+    findings: &[Finding],
+    cluster: &FindingCluster,
+) -> String {
+    let Some(notes) = links else {
+        return String::new();
+    };
+    let counts = notes.count(
+        findings
+            .iter()
+            .filter(|finding| {
+                finding.rule_id == cluster.rule_id && finding.message == cluster.message
+            })
+            .map(|finding| (finding.rule_id.as_str(), finding.path.as_str())),
+    );
+    notes
+        .describe(&cluster.rule_id, counts)
+        .map_or_else(String::new, |note| format!(" ({note})"))
+}
+
+/// [`render_text_artifact`], with the qualification of a run's link report
+/// when `links` is given. Without `links`, identical.
+pub fn render_text_artifact_with_links(
+    artifact: &AuditArtifact,
+    success_message: &str,
+    audit_path: Option<&Path>,
+    links: Option<&LinkFindingNotes>,
+) -> String {
     if artifact.findings.is_empty() && artifact.status == AuditStatus::Complete {
         let mut lines = vec![success_message.to_string()];
+        if let Some(notes) = links {
+            lines.push(String::new());
+            lines.extend(notes.summary_lines(false));
+            lines.pop();
+        }
         if let Some(path) = audit_path {
             lines.push(String::new());
             lines.push(format!("Audit results: {}", path.display()));
@@ -718,7 +792,10 @@ pub fn render_text_artifact(
     if !lines.last().is_some_and(|line| line.is_empty()) {
         lines.push(String::new());
     }
-    lines.extend(priority_lines(&artifact.findings, false));
+    lines.extend(priority_lines(&artifact.findings, false, links));
+    if let Some(notes) = links {
+        lines.extend(notes.summary_lines(false));
+    }
 
     // Per-layer breakdown — gives the editor a one-glance read of which
     // GEO layer needs attention before they dive into the per-scope
@@ -780,11 +857,12 @@ pub fn render_text_artifact(
                 lines.push(format!("{} ({})", group_name, group_count));
                 for cluster in group_clusters {
                     let mut line = format!(
-                        "- {} {} [{}] {}",
+                        "- {} {} [{}] {}{}",
                         cluster.examples.first().cloned().unwrap_or_default(),
                         cluster.rule_id,
                         cluster.confidence_tag(),
-                        cluster.message
+                        cluster.message,
+                        link_note(links, &section_findings, &cluster)
                     );
                     if cluster.count > 1 {
                         line.push_str(&format!(" ({} occurrences)", cluster.count));
@@ -807,6 +885,16 @@ pub fn render_text_artifact(
 }
 
 pub fn render_markdown_artifact(artifact: &AuditArtifact, audit_path: Option<&Path>) -> String {
+    render_markdown_artifact_with_links(artifact, audit_path, None)
+}
+
+/// [`render_markdown_artifact`], with the qualification of a run's link report
+/// when `links` is given. Without `links`, identical.
+pub fn render_markdown_artifact_with_links(
+    artifact: &AuditArtifact,
+    audit_path: Option<&Path>,
+    links: Option<&LinkFindingNotes>,
+) -> String {
     let mut lines = vec!["# Audit Report".to_string(), String::new()];
     lines.push(format!("- Command: `{}`", artifact.command));
     lines.push(format!(
@@ -823,7 +911,10 @@ pub fn render_markdown_artifact(artifact: &AuditArtifact, audit_path: Option<&Pa
         lines.push(format!("- Audit artifact: `{}`", path.display()));
     }
     lines.push(String::new());
-    lines.extend(priority_lines(&artifact.findings, true));
+    lines.extend(priority_lines(&artifact.findings, true, links));
+    if let Some(notes) = links {
+        lines.extend(notes.summary_lines(true));
+    }
     lines.push("## Summary".to_string());
     lines.push(format!("- Total findings: `{}`", artifact.summary.total));
     lines.push(format!("- Errors: `{}`", artifact.summary.errors));
@@ -961,10 +1052,11 @@ pub fn render_markdown_artifact(artifact: &AuditArtifact, audit_path: Option<&Pa
             lines.push(format!("### {}", group_name));
             for cluster in group_clusters {
                 let mut line = format!(
-                    "- `{}` `{}` {}",
+                    "- `{}` `{}` {}{}",
                     cluster.examples.first().cloned().unwrap_or_default(),
                     cluster.rule_id,
-                    cluster.message
+                    cluster.message,
+                    link_note(links, &scoped, &cluster)
                 );
                 if cluster.count > 1 {
                     line.push_str(&format!(" (`{} occurrences`)", cluster.count));

@@ -2,14 +2,15 @@
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-pub use aexeo_contracts::RedirectHop;
+pub use aexeo_contracts::{RedirectHop, RedirectedArrival};
 
 use crate::link_counts::{LinkCounts, count_links};
 use crate::link_evidence::{HtmlLinkMetadata, LinkContext, extract_document};
+use crate::link_findings::{LegacyLinkFinding, qualify_legacy_link_findings};
 use crate::link_graph::{LinkResolution, resolve_link};
 use crate::link_inventory::{
     CrawlSurface, InventoryDisposition, InventoryReconciliation, InventorySnapshot,
-    SurfaceIdentity, reconcile,
+    SurfaceIdentity, reconcile_with_verified_aliases,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +28,11 @@ pub struct RenderedPage {
     /// if the producer recorded them. Empty means none recorded, not none seen.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub redirect_chain: Vec<RedirectHop>,
+    /// Other requests that were redirected to this same page, each with its
+    /// own recorded hops. Every one is checked and credited like
+    /// `requested_url` and `redirect_chain`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redirected_arrivals: Vec<RedirectedArrival>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,11 +81,54 @@ pub struct ObservedPageLinks {
     /// order. Links to a hop are credited only in `via_redirect`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub redirect_chain: Vec<RedirectHop>,
-    /// Other pages linking to the requested URL or to any hop of a recorded,
-    /// consistent `redirect_chain`. Never added to the counts above and never
-    /// a basis for eligibility. Omitted when nothing is credited.
+    /// Other requests redirected to this page, after `redirected_from`, with
+    /// their recorded hops; a hop list that is not consistent is dropped and
+    /// reported. Links to them are credited only in `via_redirect`. Omitted
+    /// when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redirected_arrivals: Vec<RedirectedArrival>,
+    /// Other pages linking to a requested URL, or to any hop of a recorded,
+    /// consistent chain, of `redirected_from` or of `redirected_arrivals`.
+    /// Never added to the counts above and never a basis for eligibility.
+    /// Omitted when nothing is credited.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub via_redirect: Option<RedirectCredit>,
+    /// Inventory redirects, canonical aliases and locale fallbacks whose URL
+    /// this page answered, checked against their inventory target. Omitted
+    /// when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inventory_aliases: Vec<InventoryAliasObservation>,
+}
+
+/// What the crawl showed reaching an inventory alias target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AliasEvidence {
+    /// Requesting the alias URL redirected, directly or through hops, to the target.
+    Redirect,
+    /// The alias URL answered itself with a single canonical link to the target.
+    Canonical,
+}
+
+/// An inventory alias checked against the page that answered its URL.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InventoryAliasObservation {
+    /// The alias URL, as the inventory lists it.
+    pub url: String,
+    pub disposition: InventoryDisposition,
+    /// The inventory target, resolved against the alias URL, without fragment.
+    pub expected_target: String,
+    /// How the observation reached `expected_target`, or `null` when it did not.
+    pub verified_by: Option<AliasEvidence>,
+    /// `inventory_alias_unobserved` when the observation did not reach the target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issue: Option<String>,
+    /// The URL that finally answered the request for the alias.
+    pub observed_url: String,
+    /// Canonical links the alias URL declared when it answered without a
+    /// redirect, resolved without fragments; unresolvable ones kept verbatim.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observed_canonicals: Vec<String>,
 }
 
 /// Distinct source pages credited to a page through its recorded redirects.
@@ -161,6 +210,16 @@ pub struct LinkReport {
     pub reconciliation: Option<InventoryReconciliation>,
     pub pages: Vec<ObservedPageLinks>,
     pub links: LinkCounts,
+    /// The audit's legacy `LNK002` and `LNK004` findings, qualified by this
+    /// report, except those it suppressed. Only audit reports have them;
+    /// omitted when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub legacy_findings: Vec<LegacyLinkFinding>,
+    /// The legacy findings this report proves false, in the same shape, the
+    /// conclusion giving the reason. A run that built the report removes them
+    /// from its findings; omitted when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub suppressed_legacy_findings: Vec<LegacyLinkFinding>,
 }
 
 /// Caller-supplied identity and inventory for comparison with an audit.
@@ -169,6 +228,27 @@ pub struct AuditLinkContext {
     pub identity: Option<SurfaceIdentity>,
     pub snapshot_date: Option<String>,
     pub inventory: Option<InventorySnapshot>,
+}
+
+impl AuditLinkContext {
+    /// The context an inventory document gives on its own, as a crawl's
+    /// `--seed-file`: the top-level `identity` and `snapshot_date` it declares,
+    /// as a `--context` file does, else the inventory's own identity and no
+    /// date.
+    pub fn from_inventory_document(data: &[u8]) -> anyhow::Result<Self> {
+        #[derive(Deserialize)]
+        struct Declared {
+            identity: Option<SurfaceIdentity>,
+            snapshot_date: Option<String>,
+        }
+        let inventory = InventorySnapshot::from_json_document(data)?;
+        let declared: Declared = serde_json::from_slice(data)?;
+        Ok(Self {
+            identity: declared.identity.or_else(|| inventory.identity.clone()),
+            snapshot_date: declared.snapshot_date,
+            inventory: Some(inventory),
+        })
+    }
 }
 
 /// Analyze only pages whose effective URL was actually captured in an audit.
@@ -259,6 +339,7 @@ pub fn build_link_report_from_audit_with_static_urls(
                     response_headers: None,
                     requested_url: None,
                     redirect_chain: Vec::new(),
+                    redirected_arrivals: Vec::new(),
                 });
             }
             let Some(response) = &page.crawl_response else {
@@ -273,6 +354,25 @@ pub fn build_link_report_from_audit_with_static_urls(
             if response.requested_url != *url && redirect_chain.is_empty() {
                 issues.insert("audit_redirect_chain_unavailable");
             }
+            // Each other request reaching this page is checked on its own.
+            let redirected_arrivals = response
+                .redirected_arrivals
+                .iter()
+                .map(|arrival| {
+                    let redirect_chain = consistent_chain(
+                        &arrival.requested_url,
+                        &arrival.redirect_chain,
+                        &mut issues,
+                    );
+                    if arrival.requested_url != *url && redirect_chain.is_empty() {
+                        issues.insert("audit_redirect_chain_unavailable");
+                    }
+                    RedirectedArrival {
+                        redirect_chain,
+                        ..arrival.clone()
+                    }
+                })
+                .collect();
             Some(RenderedPage {
                 url: url.clone(),
                 html: page.raw_html.clone(),
@@ -282,6 +382,7 @@ pub fn build_link_report_from_audit_with_static_urls(
                     .then(|| page.response_headers.clone()),
                 requested_url: Some(response.requested_url.clone()),
                 redirect_chain,
+                redirected_arrivals,
             })
         })
         .collect();
@@ -300,9 +401,24 @@ pub fn build_link_report_from_audit_with_static_urls(
                 response_headers: None,
                 requested_url: Some(response.requested_url.clone()),
                 redirect_chain: recorded_redirect_chain(response, &mut issues),
+                redirected_arrivals: Vec::new(),
             }),
     );
-    // A static export is not a crawl: its coverage is never attested.
+    // A static export is not a crawl: neither its coverage nor its release
+    // is ever attested.
+    let attestation = artifact
+        .crawl_attestation
+        .as_ref()
+        .filter(|_| static_urls.is_none());
+    let declared_release = context
+        .and_then(|value| value.identity.as_ref())
+        .map(|identity| identity.release.trim())
+        .filter(|release| !release.is_empty());
+    let (observed_release, release_issues) = crawl_release(
+        attestation.and_then(|value| value.release.as_ref()),
+        declared_release,
+    );
+    issues.extend(release_issues.iter().copied());
     let crawl_complete = static_urls.is_none() && {
         let incomplete = crawl_audit_completeness_issues(
             artifact,
@@ -312,26 +428,103 @@ pub fn build_link_report_from_audit_with_static_urls(
         issues.extend(incomplete);
         complete
     };
-    let input = LinkReportInput {
-        version: 1,
-        identity: context
+    let mut identity =
+        context
             .and_then(|value| value.identity.clone())
-            .or(Some(SurfaceIdentity {
+            .unwrap_or(SurfaceIdentity {
                 origin,
                 release: String::new(),
                 surface: String::new(),
                 snapshot: String::new(),
-            })),
-        snapshot_date: context.and_then(|value| value.snapshot_date.clone()),
+            });
+    // The release the pages served outranks the one the caller declared, so
+    // reconciliation compares the inventory's release with what was crawled.
+    if let Some(release) = observed_release {
+        identity.release = release;
+    }
+    let snapshot_date = context
+        .and_then(|value| value.snapshot_date.clone())
+        .or_else(|| {
+            attestation
+                .and_then(|value| value.snapshot.as_ref()?.started_at.as_deref())
+                .and_then(|started_at| started_at.get(..10))
+                .map(str::to_string)
+        });
+    let input = LinkReportInput {
+        version: 1,
+        identity: Some(identity),
+        snapshot_date,
         crawl_complete,
         pages,
         inventory: context.and_then(|value| value.inventory.clone()),
     };
     let mut report = build_link_report(&input)?;
+    // An unconfirmed release, like a coverage gap, keeps every page ineligible.
+    if let Some(result) = report
+        .reconciliation
+        .as_mut()
+        .filter(|_| !release_issues.is_empty())
+    {
+        result.comparable = false;
+        result.eligible_pages.clear();
+        result
+            .issues
+            .extend(release_issues.iter().map(|issue| (*issue).to_string()));
+        result.issues.sort();
+        result.issues.dedup();
+        issues.insert("inventory_not_comparable");
+    }
     report.issues.extend(issues.into_iter().map(str::to_string));
     report.issues.sort();
     report.issues.dedup();
+    (report.suppressed_legacy_findings, report.legacy_findings) =
+        qualify_legacy_link_findings(&artifact.findings, &site.pages, static_urls, &report)
+            .into_iter()
+            .partition(|finding| finding.conclusion.proves_finding_false());
     Ok(report)
+}
+
+/// The release the crawl attests, and why it does not when one was asked for.
+/// A crawl attests a release only when every fetched HTML page served the
+/// same marker; a declared release that differs from it is a mismatch.
+/// Without a requested marker there is nothing to report.
+fn crawl_release(
+    release: Option<&aexeo_contracts::ReleaseAttestation>,
+    declared: Option<&str>,
+) -> (Option<String>, Vec<&'static str>) {
+    let Some(release) = release else {
+        return (None, Vec::new());
+    };
+    let mut issues = Vec::new();
+    let observed = release
+        .value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match observed {
+        Some(value) if declared.is_some_and(|declared| declared != value) => {
+            issues.push("audit_release_mismatch");
+        }
+        Some(_) => {}
+        None => {
+            let inconsistent = release
+                .distinct_value_count
+                .unwrap_or(release.distinct_values.len())
+                > 1;
+            if inconsistent {
+                issues.push("audit_release_inconsistent");
+            }
+            // Anything else that leaves no value, such as a page without a
+            // marker, means the release is not attested.
+            if !inconsistent || release.pages_without_marker > 0 {
+                issues.push("audit_release_unattested");
+            }
+        }
+    }
+    if release.spans_segments {
+        issues.push("audit_snapshot_spans_releases");
+    }
+    (observed.map(str::to_string), issues)
 }
 
 /// Why a runtime audit does not attest complete crawl coverage, one issue per
@@ -431,12 +624,21 @@ fn recorded_redirect_chain(
     response: &aexeo_contracts::CrawlResponseProvenance,
     issues: &mut std::collections::BTreeSet<&'static str>,
 ) -> Vec<RedirectHop> {
-    let chain = &response.redirect_chain;
+    consistent_chain(&response.requested_url, &response.redirect_chain, issues)
+}
+
+/// `chain` when it is evidence for a request of `requested_url`; otherwise
+/// reported as inconsistent and dropped.
+fn consistent_chain(
+    requested_url: &str,
+    chain: &[RedirectHop],
+    issues: &mut std::collections::BTreeSet<&'static str>,
+) -> Vec<RedirectHop> {
     if chain.is_empty() {
         return Vec::new();
     }
-    if redirect_chain_consistent(&response.requested_url, chain) {
-        chain.clone()
+    if redirect_chain_consistent(requested_url, chain) {
+        chain.to_vec()
     } else {
         issues.insert("audit_redirect_chain_inconsistent");
         Vec::new()
@@ -445,27 +647,41 @@ fn recorded_redirect_chain(
 
 /// A chain is evidence only when it starts at the requested URL and every hop
 /// is a redirect status.
-fn redirect_chain_consistent(requested_url: &str, chain: &[RedirectHop]) -> bool {
+pub(crate) fn redirect_chain_consistent(requested_url: &str, chain: &[RedirectHop]) -> bool {
     chain.first().is_some_and(|hop| hop.url == requested_url)
         && chain
             .iter()
             .all(|hop| (300..400).contains(&hop.status_code))
 }
 
+/// Every request that ended on the page, as its requested URL and recorded
+/// hops: the one it was captured from, then its redirected arrivals.
+fn arrivals(page: &RenderedPage) -> impl Iterator<Item = (Option<&str>, &[RedirectHop])> {
+    std::iter::once((
+        page.requested_url.as_deref(),
+        page.redirect_chain.as_slice(),
+    ))
+    .chain(page.redirected_arrivals.iter().map(|arrival| {
+        (
+            Some(arrival.requested_url.as_str()),
+            arrival.redirect_chain.as_slice(),
+        )
+    }))
+}
+
 /// Sources linking to any URL of the page's recorded, consistent redirect
-/// chain, the requested URL included. Without such a chain nothing is credited.
+/// chains, the requested URLs included. Without such a chain nothing is
+/// credited.
 fn redirect_credit(
     page: &RenderedPage,
     by_destination: &std::collections::BTreeMap<&str, &crate::link_counts::DestinationLinks>,
 ) -> Option<RedirectCredit> {
-    let requested = page.requested_url.as_deref()?;
-    if !redirect_chain_consistent(requested, &page.redirect_chain) {
-        return None;
-    }
     let own = Url::parse(&page.url).ok().map(String::from);
-    let chain_urls = page
-        .redirect_chain
-        .iter()
+    let chain_urls = arrivals(page)
+        .filter(|(requested, chain)| {
+            requested.is_some_and(|requested| redirect_chain_consistent(requested, chain))
+        })
+        .flat_map(|(_, chain)| chain)
         .filter_map(|hop| Url::parse(&hop.url).ok().map(String::from))
         .filter(|url| own.as_ref() != Some(url))
         .collect::<std::collections::BTreeSet<_>>();
@@ -491,6 +707,105 @@ fn redirect_credit(
             .map(|(context, sources)| (context, sources.len()))
             .collect(),
     })
+}
+
+fn normalized_url(value: &str) -> Option<String> {
+    Url::parse(value).ok().map(String::from)
+}
+
+/// The URLs each request ending on the page passed through, after parsing:
+/// the requested URL, the hops of a consistent recorded chain, then the
+/// final URL. One path per entry of [`arrivals`], in the same order.
+fn response_paths(page: &RenderedPage) -> Vec<Vec<String>> {
+    arrivals(page)
+        .map(|(requested, chain)| response_path(&page.url, requested, chain))
+        .collect()
+}
+
+fn response_path(url: &str, requested: Option<&str>, chain: &[RedirectHop]) -> Vec<String> {
+    let mut path = Vec::new();
+    if let Some(requested) = requested {
+        path.push(requested);
+        if redirect_chain_consistent(requested, chain) {
+            path.extend(chain.iter().map(|hop| hop.url.as_str()));
+        }
+    }
+    path.push(url);
+    let mut path = path
+        .into_iter()
+        .filter_map(normalized_url)
+        .collect::<Vec<_>>();
+    path.dedup();
+    path
+}
+
+/// Check each inventory alias against the page that answered its URL. A
+/// `redirect` must redirect to its target; a `canonical_alias` or
+/// `locale_fallback` may also answer itself with a single canonical link to
+/// it. Serving the target's content is never inferred. Aliases without a
+/// target, or whose URL no page answered, are left to the reconciliation.
+fn observe_aliases(
+    inventory: Option<&InventorySnapshot>,
+    pages: &[RenderedPage],
+    canonicals: &[Vec<String>],
+) -> Vec<(usize, InventoryAliasObservation)> {
+    let paths = pages.iter().map(response_paths).collect::<Vec<_>>();
+    let mut observed = Vec::new();
+    for entry in inventory.iter().flat_map(|inventory| &inventory.pages) {
+        let redirect_only = match entry.disposition {
+            InventoryDisposition::Redirect => true,
+            InventoryDisposition::CanonicalAlias | InventoryDisposition::LocaleFallback => false,
+            _ => continue,
+        };
+        let target = entry
+            .target
+            .as_deref()
+            .filter(|target| !target.trim().is_empty())
+            .and_then(|target| Url::parse(&entry.url).ok()?.join(target).ok());
+        let (Some(alias), Some(mut target)) = (normalized_url(&entry.url), target) else {
+            continue;
+        };
+        target.set_fragment(None);
+        let target = String::from(target);
+        let Some((index, path, position)) =
+            paths.iter().enumerate().find_map(|(index, page_paths)| {
+                page_paths.iter().find_map(|path| {
+                    Some((index, path, path.iter().position(|url| *url == alias)?))
+                })
+            })
+        else {
+            continue;
+        };
+        let served_directly = position + 1 == path.len();
+        let verified_by = if !served_directly {
+            path[position + 1..]
+                .contains(&target)
+                .then_some(AliasEvidence::Redirect)
+        } else if !redirect_only && canonicals[index] == [target.clone()] {
+            Some(AliasEvidence::Canonical)
+        } else {
+            None
+        };
+        observed.push((
+            index,
+            InventoryAliasObservation {
+                url: entry.url.clone(),
+                disposition: entry.disposition,
+                expected_target: target,
+                verified_by,
+                issue: verified_by
+                    .is_none()
+                    .then(|| "inventory_alias_unobserved".to_string()),
+                observed_url: pages[index].url.clone(),
+                observed_canonicals: if served_directly {
+                    canonicals[index].clone()
+                } else {
+                    Vec::new()
+                },
+            },
+        ));
+    }
+    observed
 }
 
 /// The serialized requested URL, when it differs from the observed page URL.
@@ -545,6 +860,8 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
     let mut evidence = Vec::new();
     let mut observations = Vec::<(HtmlLinkMetadata, bool, Option<String>)>::new();
     let mut coverage_issues = std::collections::BTreeSet::new();
+    let (mut page_redirects, mut canonical_unresolved, mut canonicals) =
+        (Vec::new(), Vec::new(), Vec::<Vec<String>>::new());
     let inventory_dispositions = input
         .inventory
         .iter()
@@ -642,19 +959,32 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
             }
             _ => {}
         }
-        if redirected_from(page).is_some() || !page.redirect_chain.is_empty() {
-            coverage_issues.insert("redirect_observed");
-        }
-        if metadata.canonical_hrefs.len() > 1
-            || metadata.canonical_hrefs.iter().any(|href| {
-                !matches!(
-                    resolve_link(href, &page.url, origin, metadata.base_href.as_deref()),
-                    LinkResolution::SameDocument { .. }
-                )
+        let resolutions = metadata
+            .canonical_hrefs
+            .iter()
+            .map(|href| {
+                let resolution =
+                    resolve_link(href, &page.url, origin, metadata.base_href.as_deref());
+                let self_reference = matches!(resolution, LinkResolution::SameDocument { .. });
+                let resolved = match resolution {
+                    LinkResolution::SameDocument { url }
+                    | LinkResolution::Internal { url }
+                    | LinkResolution::External { url } => url,
+                    _ => href.clone(),
+                };
+                (resolved, self_reference)
             })
-        {
-            coverage_issues.insert("canonical_target_unresolved");
-        }
+            .collect::<Vec<_>>();
+        // Redirects and canonical targets are reported once aliases are known:
+        // a verified inventory alias accounts for them.
+        page_redirects.push(
+            redirected_from(page).is_some()
+                || !page.redirect_chain.is_empty()
+                || !page.redirected_arrivals.is_empty(),
+        );
+        canonical_unresolved
+            .push(resolutions.len() > 1 || resolutions.iter().any(|(_, same)| !same));
+        canonicals.push(resolutions.into_iter().map(|(url, _)| url).collect());
         observations.push((metadata, noindex, redirect_target));
     }
     if evidence
@@ -691,14 +1021,66 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
             coverage_issues.insert("destination_unmatched_near_variant");
         }
     }
+    let mut aliases = observe_aliases(input.inventory.as_ref(), &input.pages, &canonicals);
+    // A verified alias resolves only when its target is itself an inventory
+    // page, so the inventory accounts for where the alias leads.
+    let inventory_urls = inventory_dispositions
+        .keys()
+        .filter_map(|url| normalized_url(url))
+        .collect::<std::collections::BTreeSet<_>>();
+    let resolved = |alias: &InventoryAliasObservation| {
+        alias.verified_by.is_some() && inventory_urls.contains(&alias.expected_target)
+    };
+    let verified_aliases = aliases
+        .iter()
+        .map(|(_, alias)| alias)
+        .filter(|alias| resolved(alias))
+        .map(|alias| alias.url.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    for (index, page) in input.pages.iter().enumerate() {
+        let resolved_here = aliases
+            .iter()
+            .filter(|(at, alias)| *at == index && resolved(alias))
+            .map(|(_, alias)| alias)
+            .collect::<Vec<_>>();
+        // Every request that redirected here must be accounted for by a
+        // verified alias, each through its own chain.
+        let redirected = arrivals(page)
+            .zip(response_paths(page))
+            .filter(|(_, path)| path.len() > 1)
+            .collect::<Vec<_>>();
+        let redirect_resolved = !redirected.is_empty()
+            && redirected.iter().all(|((requested, chain), path)| {
+                requested.is_some_and(|requested| {
+                    chain.is_empty() || redirect_chain_consistent(requested, chain)
+                }) && path[..path.len() - 1].iter().all(|url| {
+                    resolved_here
+                        .iter()
+                        .any(|alias| normalized_url(&alias.url).as_ref() == Some(url))
+                })
+            });
+        if page_redirects[index] && !redirect_resolved {
+            coverage_issues.insert("redirect_observed");
+        }
+        let canonical_resolved = resolved_here
+            .iter()
+            .any(|alias| alias.verified_by == Some(AliasEvidence::Canonical));
+        if canonical_unresolved[index] && !canonical_resolved {
+            coverage_issues.insert("canonical_target_unresolved");
+        }
+    }
+    if aliases.iter().any(|(_, alias)| alias.issue.is_some()) {
+        coverage_issues.insert("inventory_alias_unobserved");
+    }
     let mut reconciliation = input.inventory.as_ref().map(|inventory| {
-        reconcile(
+        reconcile_with_verified_aliases(
             inventory,
             &CrawlSurface {
                 identity: input.identity.clone(),
                 complete: input.crawl_complete,
                 pages: input.pages.iter().map(|page| page.url.clone()).collect(),
             },
+            &verified_aliases,
         )
     });
     issues.extend(coverage_issues.iter().map(|issue| (*issue).to_string()));
@@ -730,7 +1112,8 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
         .pages
         .iter()
         .zip(observations)
-        .map(|(page, (metadata, noindex, redirect_target))| {
+        .enumerate()
+        .map(|(index, (page, (metadata, noindex, redirect_target)))| {
             // Link resolution serializes parsed URLs (normalizing host case and
             // default ports), while page observations preserve the input spelling.
             let normalized_url = Url::parse(&page.url).ok().map(String::from);
@@ -790,7 +1173,12 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
                     }),
                 redirected_from: redirected,
                 redirect_chain: page.redirect_chain.clone(),
+                redirected_arrivals: page.redirected_arrivals.clone(),
                 via_redirect: redirect_credit(page, &by_destination),
+                inventory_aliases: aliases
+                    .extract_if(.., |(at, _)| *at == index)
+                    .map(|(_, alias)| alias)
+                    .collect(),
             }
         })
         .collect();
@@ -803,6 +1191,8 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
         reconciliation,
         pages,
         links,
+        legacy_findings: Vec::new(),
+        suppressed_legacy_findings: Vec::new(),
     })
 }
 
@@ -830,6 +1220,7 @@ mod tests {
                     response_headers: Some(Default::default()),
                     requested_url: None,
                     redirect_chain: Vec::new(),
+                    redirected_arrivals: Vec::new(),
                 },
                 RenderedPage {
                     url: "https://EXAMPLE.org:443/target?lang=fr".into(),
@@ -838,6 +1229,7 @@ mod tests {
                     response_headers: Some(Default::default()),
                     requested_url: None,
                     redirect_chain: Vec::new(),
+                    redirected_arrivals: Vec::new(),
                 },
                 RenderedPage {
                     url: "https://example.org/target?lang=en".into(),
@@ -846,6 +1238,7 @@ mod tests {
                     response_headers: Some(Default::default()),
                     requested_url: None,
                     redirect_chain: Vec::new(),
+                    redirected_arrivals: Vec::new(),
                 },
             ],
             inventory: None,
@@ -920,6 +1313,42 @@ mod tests {
     }
 
     #[test]
+    fn each_redirected_arrival_is_checked_and_credited_on_its_own() {
+        let mut artifact = redirected_audit(None);
+        let page = &mut artifact.site.as_mut().unwrap().pages[1];
+        page.crawl_response = Some(serde_json::from_value(serde_json::json!({
+            "requested_url":"https://example.org/new", "observed_url":"https://example.org/new",
+            "status_code":200, "headers_observed":true, "redirected_arrivals":[
+                {"requested_url":"https://example.org/moved", "redirect_chain":[{"url":"https://example.org/elsewhere", "status_code":301}]},
+                {"requested_url":"https://example.org/old", "redirect_chain":[{"url":"https://example.org/old", "status_code":301}]}]})).unwrap());
+        let report = build_link_report_from_audit(&artifact).unwrap();
+        let page = &report.pages[1];
+        // The direct capture redirected from nothing; links to the consistent
+        // arrival are credited through the redirect, the inconsistent chain is
+        // dropped and reported.
+        assert_eq!(page.redirected_from, None);
+        assert_eq!(page.distinct_source_pages, 0);
+        assert_eq!(
+            page.via_redirect
+                .as_ref()
+                .map(|credit| credit.distinct_source_pages),
+            Some(1)
+        );
+        assert_eq!(
+            serde_json::to_value(&page.redirected_arrivals).unwrap(),
+            serde_json::json!([{"requested_url":"https://example.org/moved"},
+                {"requested_url":"https://example.org/old", "redirect_chain":[{"url":"https://example.org/old", "status_code":301}]}])
+        );
+        for issue in [
+            "audit_redirect_chain_inconsistent",
+            "audit_redirect_chain_unavailable",
+            "redirect_observed",
+        ] {
+            assert!(report.issues.contains(&issue.to_string()), "{issue}");
+        }
+    }
+
+    #[test]
     fn an_artifact_without_recorded_hops_keeps_the_unavailable_issue() {
         let report = build_link_report_from_audit(&redirected_audit(None)).unwrap();
         assert!(report.pages[1].redirect_chain.is_empty());
@@ -961,6 +1390,29 @@ mod tests {
 
     fn attested_identity() -> serde_json::Value {
         serde_json::json!({"origin":"https://example.org", "release":"r1", "surface":"public", "snapshot":"s1"})
+    }
+
+    #[test]
+    fn an_inventory_document_gives_its_declared_context_else_the_inventory_identity() {
+        let inventory =
+            serde_json::json!({"identity": attested_identity(), "complete": true, "pages": []});
+        let bare =
+            AuditLinkContext::from_inventory_document(inventory.to_string().as_bytes()).unwrap();
+        assert_eq!(serde_json::json!(bare.identity), attested_identity());
+        assert_eq!(bare.snapshot_date, None);
+        let export = serde_json::json!({"inventory": inventory, "issues": []});
+        let exported =
+            AuditLinkContext::from_inventory_document(export.to_string().as_bytes()).unwrap();
+        assert_eq!(serde_json::json!(exported.identity), attested_identity());
+        let mut declared = attested_identity();
+        declared["surface"] = "preview".into();
+        let context = serde_json::json!({"identity": declared, "snapshot_date": "2026-01-01",
+            "inventory": inventory});
+        let context =
+            AuditLinkContext::from_inventory_document(context.to_string().as_bytes()).unwrap();
+        assert_eq!(serde_json::json!(context.identity), declared);
+        assert_eq!(context.snapshot_date.as_deref(), Some("2026-01-01"));
+        assert!(context.inventory.is_some());
     }
 
     /// A complete HTTP crawl seeded from the context inventory; `/orphan` was
@@ -1200,6 +1652,163 @@ mod tests {
         assert!(!report.crawl_complete);
     }
 
+    /// `attested_audit` whose crawl recorded `release` and a snapshot window.
+    fn audit_with_release(release: serde_json::Value) -> (serde_json::Value, AuditLinkContext) {
+        let (mut artifact, mut context) = attested_audit();
+        artifact["crawl_attestation"]["release"] = release;
+        artifact["crawl_attestation"]["snapshot"] = serde_json::json!(
+            {"started_at":"2026-11-06T23:59:00Z", "finished_at":"2026-11-07T00:01:00Z"});
+        context.snapshot_date = None;
+        (artifact, context)
+    }
+
+    fn release(
+        value: Option<&str>,
+        with: usize,
+        without: usize,
+        distinct: &[&str],
+    ) -> serde_json::Value {
+        serde_json::json!({"source":"header", "name":"x-release", "value":value,
+            "pages_with_marker":with, "pages_without_marker":without, "distinct_values":distinct})
+    }
+
+    const RELEASE_ISSUES: [&str; 4] = [
+        "audit_release_inconsistent",
+        "audit_release_mismatch",
+        "audit_release_unattested",
+        "audit_snapshot_spans_releases",
+    ];
+
+    #[test]
+    fn an_attested_release_and_crawl_start_fill_the_identity_and_keep_eligibility() {
+        let (artifact, mut context) = audit_with_release(release(Some("r1"), 3, 0, &["r1"]));
+        context.identity.as_mut().unwrap().release = String::new();
+        let report = attested_report(&artifact, &context);
+        assert_eq!(report.identity.as_ref().unwrap().release, "r1");
+        assert_eq!(report.snapshot_date.as_deref(), Some("2026-11-06"));
+        assert!(report.crawl_complete, "{:?}", report.issues);
+        assert!(
+            !report
+                .issues
+                .iter()
+                .any(|issue| RELEASE_ISSUES.contains(&issue.as_str()))
+        );
+        let reconciliation = report.reconciliation.as_ref().unwrap();
+        assert!(reconciliation.comparable, "{:?}", reconciliation.issues);
+        assert!(!reconciliation.eligible_pages.is_empty());
+        // A date the caller supplies still wins over the crawl's start.
+        context.snapshot_date = Some("2026-11-05".into());
+        let report = attested_report(&artifact, &context);
+        assert_eq!(report.snapshot_date.as_deref(), Some("2026-11-05"));
+        // An attested release never makes an unseeded crawl complete.
+        let (mut artifact, context) = audit_with_release(release(Some("r1"), 3, 0, &["r1"]));
+        artifact["crawl_attestation"]["seeded_from"]["url_count"] = 0.into();
+        let report = attested_report(&artifact, &context);
+        assert!(!report.crawl_complete);
+        assert!(
+            report
+                .issues
+                .contains(&"audit_not_inventory_seeded".to_string())
+        );
+    }
+
+    #[test]
+    fn an_unconfirmed_release_raises_its_issue_and_keeps_pages_ineligible() {
+        let cases: [(&str, Mutation); 5] = [
+            ("audit_release_inconsistent", |artifact, _| {
+                artifact["crawl_attestation"]["release"] = release(None, 3, 0, &["r1", "r2"]);
+            }),
+            ("audit_release_unattested", |artifact, _| {
+                artifact["crawl_attestation"]["release"] = release(None, 2, 1, &["r1"]);
+            }),
+            ("audit_release_unattested", |artifact, _| {
+                artifact["crawl_attestation"]["release"] = release(None, 0, 3, &[]);
+            }),
+            ("audit_release_mismatch", |_, context| {
+                context.identity.as_mut().unwrap().release = "r0".into();
+            }),
+            ("audit_snapshot_spans_releases", |artifact, _| {
+                artifact["crawl_attestation"]["release"]["spans_segments"] = true.into();
+            }),
+        ];
+        for (expected, mutate) in cases {
+            let (mut artifact, mut context) =
+                audit_with_release(release(Some("r1"), 3, 0, &["r1"]));
+            mutate(&mut artifact, &mut context);
+            let report = attested_report(&artifact, &context);
+            let raised = RELEASE_ISSUES
+                .iter()
+                .filter(|issue| report.issues.iter().any(|value| value == *issue))
+                .copied()
+                .collect::<Vec<_>>();
+            assert_eq!(raised, [expected], "{:?}", report.issues);
+            // Coverage is a separate question; the release only withholds eligibility.
+            assert!(report.crawl_complete, "{expected}: {:?}", report.issues);
+            let reconciliation = report.reconciliation.as_ref().unwrap();
+            assert!(!reconciliation.comparable, "{expected}");
+            assert!(reconciliation.eligible_pages.is_empty());
+            assert!(reconciliation.issues.contains(&expected.to_string()));
+            assert!(
+                report
+                    .issues
+                    .contains(&"inventory_not_comparable".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn the_crawled_release_wins_and_is_compared_with_the_inventory() {
+        // The caller declares r0, the pages serve r1: r1 is the report's release.
+        let (artifact, mut context) = audit_with_release(release(Some("r1"), 3, 0, &["r1"]));
+        context.identity.as_mut().unwrap().release = "r0".into();
+        let report = attested_report(&artifact, &context);
+        assert_eq!(report.identity.as_ref().unwrap().release, "r1");
+        // An inventory of another release does not reconcile with the crawl,
+        // even when the caller declares that release too.
+        let (artifact, mut context) = audit_with_release(release(Some("r1"), 3, 0, &["r1"]));
+        context
+            .inventory
+            .as_mut()
+            .unwrap()
+            .identity
+            .as_mut()
+            .unwrap()
+            .release = "r0".into();
+        context.identity.as_mut().unwrap().release = "r0".into();
+        let report = attested_report(&artifact, &context);
+        let reconciliation = report.reconciliation.as_ref().unwrap();
+        assert!(
+            reconciliation
+                .issues
+                .contains(&"surface_identity_mismatch".to_string())
+        );
+        assert!(reconciliation.eligible_pages.is_empty());
+        // Without a crawled release, the declared one is compared as before.
+        let (mut artifact, mut context) = attested_audit();
+        artifact["crawl_attestation"]["seeded_from"]["inventory_identity"]["release"] = "r0".into();
+        context
+            .inventory
+            .as_mut()
+            .unwrap()
+            .identity
+            .as_mut()
+            .unwrap()
+            .release = "r0".into();
+        let report = attested_report(&artifact, &context);
+        let reconciliation = report.reconciliation.as_ref().unwrap();
+        assert!(
+            reconciliation
+                .issues
+                .contains(&"surface_identity_mismatch".to_string())
+        );
+        assert!(
+            !report
+                .issues
+                .iter()
+                .any(|issue| RELEASE_ISSUES.contains(&issue.as_str()))
+        );
+    }
+
     fn redirect_report(chain: Vec<RedirectHop>) -> LinkReport {
         let page = |url: &str, html: &str| RenderedPage {
             url: url.into(),
@@ -1208,6 +1817,7 @@ mod tests {
             response_headers: Some(Default::default()),
             requested_url: Some(url.into()),
             redirect_chain: Vec::new(),
+            redirected_arrivals: Vec::new(),
         };
         let mut redirected = page(
             "https://example.org/new",
@@ -1324,5 +1934,294 @@ mod tests {
             assert_eq!(page.redirected_source_pages, 2);
             assert!(report.issues.contains(&"redirect_observed".to_string()));
         }
+    }
+
+    const ALIAS: &str = "https://example.org/alias";
+    const GUIDE: &str = "https://example.org/guide";
+
+    fn served(url: &str, html: &str) -> RenderedPage {
+        RenderedPage {
+            url: url.into(),
+            html: html.into(),
+            status_code: Some(200),
+            response_headers: Some(Default::default()),
+            requested_url: Some(url.into()),
+            redirect_chain: Vec::new(),
+            redirected_arrivals: Vec::new(),
+        }
+    }
+
+    /// The guide, reached by requesting `from` and following one redirect.
+    fn guide_via(from: &str) -> RenderedPage {
+        RenderedPage {
+            requested_url: Some(from.into()),
+            redirect_chain: vec![hop(from, 301)],
+            redirected_arrivals: Vec::new(),
+            ..served(GUIDE, "<main>Guide</main>")
+        }
+    }
+
+    /// An otherwise complete, matching report whose inventory lists the
+    /// published guide and one alias at `ALIAS`.
+    fn alias_report(
+        disposition: InventoryDisposition,
+        target: Option<&str>,
+        pages: Vec<RenderedPage>,
+    ) -> LinkReport {
+        let identity = SurfaceIdentity {
+            origin: "https://example.org".into(),
+            release: "r1".into(),
+            surface: "public".into(),
+            snapshot: "s1".into(),
+        };
+        let entry =
+            |url: &str, disposition, target: Option<&str>| crate::link_inventory::InventoryPage {
+                url: url.into(),
+                disposition,
+                target: target.map(Into::into),
+                locale: None,
+            };
+        build_link_report(&LinkReportInput {
+            version: 1,
+            identity: Some(identity.clone()),
+            snapshot_date: Some("2026-11-07".into()),
+            crawl_complete: true,
+            pages,
+            inventory: Some(InventorySnapshot {
+                identity: Some(identity),
+                complete: true,
+                pages: vec![
+                    entry(GUIDE, InventoryDisposition::Published, None),
+                    entry(ALIAS, disposition, target),
+                ],
+            }),
+        })
+        .unwrap()
+    }
+
+    fn reconciliation(report: &LinkReport) -> &InventoryReconciliation {
+        report.reconciliation.as_ref().expect("reconciliation")
+    }
+
+    /// A verified alias leaves only the published target eligible.
+    fn assert_verified(report: &LinkReport, page: usize, evidence: AliasEvidence) {
+        let alias = &report.pages[page].inventory_aliases[0];
+        assert_eq!(alias.verified_by, Some(evidence), "{report:#?}");
+        assert_eq!(alias.issue, None);
+        assert_eq!(alias.expected_target, GUIDE);
+        let result = reconciliation(report);
+        assert!(result.comparable, "{report:#?}");
+        assert_eq!(result.eligible_pages, vec![GUIDE.to_string()]);
+        assert_eq!(
+            report
+                .pages
+                .iter()
+                .map(|page| page.inventory_aliases.len())
+                .sum::<usize>(),
+            1
+        );
+    }
+
+    fn assert_unobserved(report: &LinkReport, page: usize) -> &InventoryAliasObservation {
+        let alias = &report.pages[page].inventory_aliases[0];
+        assert_eq!(alias.verified_by, None, "{report:#?}");
+        assert_eq!(alias.issue.as_deref(), Some("inventory_alias_unobserved"));
+        assert!(
+            report
+                .issues
+                .contains(&"inventory_alias_unobserved".to_string())
+        );
+        let result = reconciliation(report);
+        assert!(!result.comparable);
+        assert!(result.eligible_pages.is_empty());
+        assert!(
+            result
+                .issues
+                .contains(&"inventory_alias_unobserved".to_string())
+        );
+        alias
+    }
+
+    #[test]
+    fn a_redirect_alias_is_verified_only_by_redirecting_to_its_target() {
+        let report = alias_report(
+            InventoryDisposition::Redirect,
+            Some(GUIDE),
+            vec![guide_via(ALIAS)],
+        );
+        assert_verified(&report, 0, AliasEvidence::Redirect);
+        assert!(!report.issues.contains(&"redirect_observed".to_string()));
+
+        // A canonical link is not a redirect.
+        let report = alias_report(
+            InventoryDisposition::Redirect,
+            Some(GUIDE),
+            vec![
+                served(GUIDE, "<main>Guide</main>"),
+                served(ALIAS, "<link rel='canonical' href='/guide'>"),
+            ],
+        );
+        let alias = assert_unobserved(&report, 1);
+        assert_eq!(alias.observed_url, ALIAS);
+        assert_eq!(alias.observed_canonicals, vec![GUIDE.to_string()]);
+    }
+
+    #[test]
+    fn a_redirect_alias_reaching_a_directly_captured_target_is_verified() {
+        let arrival = RedirectedArrival {
+            requested_url: ALIAS.into(),
+            redirect_chain: vec![hop(ALIAS, 301)],
+            status_code: Some(200),
+        };
+        let guide = RenderedPage {
+            redirected_arrivals: vec![arrival.clone()],
+            ..served(GUIDE, "<main>Guide</main>")
+        };
+        let report = alias_report(InventoryDisposition::Redirect, Some(GUIDE), vec![guide]);
+        assert_verified(&report, 0, AliasEvidence::Redirect);
+        assert!(!report.issues.contains(&"redirect_observed".to_string()));
+
+        // An arrival that no verified alias accounts for is still a redirect.
+        let other = RedirectedArrival {
+            requested_url: "https://example.org/other".into(),
+            redirect_chain: vec![hop("https://example.org/other", 301)],
+            status_code: Some(200),
+        };
+        let guide = RenderedPage {
+            redirected_arrivals: vec![arrival, other],
+            ..served(GUIDE, "<main>Guide</main>")
+        };
+        let report = alias_report(InventoryDisposition::Redirect, Some(GUIDE), vec![guide]);
+        assert!(report.issues.contains(&"redirect_observed".to_string()));
+    }
+
+    #[test]
+    fn a_canonical_alias_is_verified_by_a_relative_canonical_with_a_fragment() {
+        let report = alias_report(
+            InventoryDisposition::CanonicalAlias,
+            Some(GUIDE),
+            vec![
+                served(GUIDE, "<main>Guide</main>"),
+                served(
+                    ALIAS,
+                    "<link rel='canonical' href='guide#intro'><main>Copy</main>",
+                ),
+            ],
+        );
+        assert_verified(&report, 1, AliasEvidence::Canonical);
+        assert_eq!(
+            report.pages[1].inventory_aliases[0].observed_canonicals,
+            vec![GUIDE.to_string()]
+        );
+        assert!(
+            !report
+                .issues
+                .contains(&"canonical_target_unresolved".to_string())
+        );
+
+        let report = alias_report(
+            InventoryDisposition::CanonicalAlias,
+            Some(GUIDE),
+            vec![
+                served(GUIDE, "<main>Guide</main>"),
+                served(ALIAS, "<link rel='canonical' href='/elsewhere'>"),
+            ],
+        );
+        let alias = assert_unobserved(&report, 1);
+        assert_eq!(
+            alias.observed_canonicals,
+            vec!["https://example.org/elsewhere".to_string()]
+        );
+        assert!(
+            report
+                .issues
+                .contains(&"canonical_target_unresolved".to_string())
+        );
+    }
+
+    #[test]
+    fn a_locale_fallback_serving_its_own_page_is_unobserved() {
+        let report = alias_report(
+            InventoryDisposition::LocaleFallback,
+            Some(GUIDE),
+            vec![guide_via(ALIAS)],
+        );
+        assert_verified(&report, 0, AliasEvidence::Redirect);
+
+        // The same content at the alias URL is not inferred to be the target.
+        let report = alias_report(
+            InventoryDisposition::LocaleFallback,
+            Some(GUIDE),
+            vec![
+                served(GUIDE, "<main>Guide</main>"),
+                served(ALIAS, "<main>Guide</main>"),
+            ],
+        );
+        let alias = assert_unobserved(&report, 1);
+        assert_eq!(alias.observed_url, ALIAS);
+        assert!(alias.observed_canonicals.is_empty());
+    }
+
+    #[test]
+    fn missing_targets_and_uncrawled_aliases_keep_their_reconciliation_issues() {
+        let missing = alias_report(
+            InventoryDisposition::CanonicalAlias,
+            None,
+            vec![
+                served(GUIDE, "<main>Guide</main>"),
+                served(ALIAS, "<link rel='canonical' href='/guide'>"),
+            ],
+        );
+        let uncrawled = alias_report(
+            InventoryDisposition::Redirect,
+            Some(GUIDE),
+            vec![served(GUIDE, "<main>Guide</main>")],
+        );
+        for (report, issue) in [
+            (&missing, "alias_target_missing"),
+            (&uncrawled, "alias_resolution_required"),
+        ] {
+            assert!(
+                report
+                    .pages
+                    .iter()
+                    .all(|page| page.inventory_aliases.is_empty())
+            );
+            assert!(
+                !report
+                    .issues
+                    .contains(&"inventory_alias_unobserved".to_string())
+            );
+            let result = reconciliation(report);
+            assert!(result.issues.contains(&issue.to_string()), "{report:#?}");
+            assert!(result.eligible_pages.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_verified_alias_to_a_page_outside_the_inventory_stays_unresolved() {
+        let report = alias_report(
+            InventoryDisposition::CanonicalAlias,
+            Some("/elsewhere"),
+            vec![
+                served(GUIDE, "<main>Guide</main>"),
+                served(ALIAS, "<link rel='canonical' href='/elsewhere'>"),
+            ],
+        );
+        let alias = &report.pages[1].inventory_aliases[0];
+        assert_eq!(alias.verified_by, Some(AliasEvidence::Canonical));
+        assert_eq!(alias.expected_target, "https://example.org/elsewhere");
+        let result = reconciliation(&report);
+        assert!(
+            result
+                .issues
+                .contains(&"alias_resolution_required".to_string())
+        );
+        assert!(
+            result
+                .issues
+                .contains(&"canonical_target_unresolved".to_string())
+        );
+        assert!(result.eligible_pages.is_empty());
     }
 }

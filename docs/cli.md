@@ -76,6 +76,9 @@ Options:
       --report <report>
 
 
+      --metadata <metadata>
+          JSON metadata supplied to the evaluated gate
+
       --gate <gate>
 
 
@@ -257,6 +260,12 @@ Options:
       --seed-file <seed-file>
           Seed every page URL on the target's origin from a link inventory JSON file and record a crawl attestation in the audit artifact
 
+      --release-header <release-header>
+          Record each HTML page's release marker from this response header and attest it in the audit artifact; takes precedence over --release-meta
+
+      --release-meta <release-meta>
+          Record each HTML page's release marker from the content of <meta name=NAME> and attest it in the audit artifact
+
       --include-pattern <include-pattern>
 
 
@@ -274,6 +283,9 @@ Options:
 
       --link-graph-output <link-graph-output>
           Write an observational link graph report to this JSON file
+
+      --link-graph-context <link-graph-context>
+          Compare the link graph report with this audit link context file instead of the --seed-file inventory
 
       --link-graph-summary
           Include an observational link graph coverage summary in the crawl output
