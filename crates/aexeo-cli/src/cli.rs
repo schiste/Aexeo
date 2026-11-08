@@ -134,6 +134,7 @@ pub fn build_cli() -> Command {
                         .default_value("200"),
                 )
                 .arg(Arg::new("link-graph-output").long("link-graph-output").num_args(1).help("Write an observational link graph report to this JSON file"))
+                .arg(Arg::new("link-graph-context").long("link-graph-context").requires("link-graph-output").num_args(1).help("Compare the link graph report with this audit link context file instead of the --seed-file inventory"))
                 .arg(Arg::new("link-graph-summary").long("link-graph-summary").requires("link-graph-output").action(ArgAction::SetTrue).help("Include an observational link graph coverage summary in the crawl output"))
                 .arg(Arg::new("link-graph-telemetry").long("link-graph-telemetry").requires("link-graph-output").action(ArgAction::SetTrue).help("Emit aggregate link graph timing and counts to stderr"))
                 .arg(Arg::new("checkpoint").long("checkpoint").num_args(1))

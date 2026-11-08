@@ -288,7 +288,7 @@ holds, and otherwise raises one issue per unmet condition:
 | HTTP engine, which records redirect chains | `audit_browser_engine` |
 | Seeded from an inventory with at least one URL | `audit_not_inventory_seeded` |
 | Every seeded URL has a page or response | `audit_seed_unfetched` |
-| The `--context` inventory has the seed inventory's identity | `audit_seed_inventory_mismatch` |
+| The context inventory has the seed inventory's identity | `audit_seed_inventory_mismatch` |
 
 A seed inventory without identity matches nothing. Static exports never report
 these issues and never complete coverage. A complete crawl is one input to
@@ -373,18 +373,37 @@ output and exit status remain unchanged, except that legacy `LNK002` and
 `LNK004` findings the report proves false are removed (see
 [Legacy inbound-link findings](#legacy-inbound-link-findings)). Add `--link-graph-telemetry` to emit
 the same aggregate-only event to stderr. This is opt-in; graph evidence in the
-output file can include URLs and page text. That report is built without a
-context, so it has no inventory to reconcile against and keeps incomplete
-coverage even with `--seed-file`; run `link-graph --audit --context` on the saved
-artifact to use the attestation.
+output file can include URLs and page text.
+
+With `--seed-file`, that report uses the seed file as its context, exactly as
+`link-graph --audit --context` would: the top-level `identity` and
+`snapshot_date` the file declares, as a `--context` file does, else the
+inventory's own identity and no date, so an EmDash export or a bare inventory
+works as is. The report therefore reconciles the inventory, an attested
+release, if any, replaces the declared one, and `snapshot_date` falls back to the date
+of the crawl's `snapshot.started_at`. Since the seed and the context are the
+same inventory, `audit_seed_inventory_mismatch` is never raised unless the
+inventory has no identity. One command can thus reach `crawl_complete` and
+`confirmed`. `--link-graph-context context.json` replaces that context with a
+separate `--context` file, which may declare another identity; the coverage
+conditions above still compare its inventory with the seed's. Without
+`--seed-file` or `--link-graph-context`, the report has no context and is
+unchanged.
+
+Before this change, `--seed-file` with `--link-graph-output` wrote a report
+without context: never complete, no `reconciliation`, no `confirmed` finding,
+and only `inbound_observed` suppressions. The same command now writes a
+report that can be complete and confirm orphans, and suppresses
+`inventory_alias` findings too, so the run's findings, the stored audit and a
+later baseline comparison can change.
 Add `--link-graph-summary` alongside `--link-graph-output` to include aggregate
 observations and coverage issues in the text or JSON command output. The JSON
 field `link_graph_summary` is omitted unless requested. SARIF does not support
-this option. The summary does not identify confirmed orphans or include evidence.
+this option. The summary does not list confirmed orphans or include evidence.
 Its `legacy_link_findings` object counts the run's remaining `LNK002` and
 `LNK004` findings per conclusion (below), and the text output adds one
-`Link graph coverage of LNK002/LNK004 findings:` line. Since this report has
-no context, none of them is `confirmed`. Its `suppressed_legacy_findings` array
+`Link graph coverage of LNK002/LNK004 findings:` line. Without a context, none
+of them is `confirmed`. Its `suppressed_legacy_findings` array
 repeats the report's list of findings removed from the run (below), and the
 text output counts them on one more line.
 
@@ -424,9 +443,9 @@ resolved; that is intended, since the report shows they never held. The
 findings that remain keep the rule ID, severity, message, position and
 fingerprint the rules produced. `link-graph --audit` emits no findings: it
 reads a stored artifact and lists which of its findings a report built in the
-same run would suppress. A crawl's own report has no inventory context, so in
-practice it suppresses only `inbound_observed` findings; `inventory_alias`
-needs `link-graph --audit --context`. A crawl without `--link-graph-output`,
+same run would suppress. A crawl's own report has an inventory context only
+with `--seed-file` or `--link-graph-context` (above); without one, it
+suppresses only `inbound_observed` findings. A crawl without `--link-graph-output`,
 and the static `audit` command, build no report, and their findings do not
 change at all.
 

@@ -4,7 +4,7 @@ use aexeo_contracts::PerformanceDiffThresholds;
 use aexeo_core::config::load_config_with_diagnostics;
 use aexeo_core::crawl_attestation::{InventorySeed, attest_runtime_crawl, inventory_seed};
 use aexeo_core::error::UserContext;
-use aexeo_core::link_inventory::InventorySnapshot;
+use aexeo_core::link_report::AuditLinkContext;
 use aexeo_core::release_marker::ReleaseMarkerSpec;
 use aexeo_core::user_bail;
 use aexeo_core::{
@@ -89,12 +89,13 @@ fn apply_cf_access_credentials(config: &mut aexeo_core::Config, submatches: &Arg
     }
 }
 
-/// Read a link inventory and keep the URLs a crawl of `target_url` may seed.
-fn load_inventory_seed(path: &str, target_url: &str) -> Result<InventorySeed> {
+/// Read a seed file as the link context it gives on its own; its inventory
+/// seeds the crawl and, unless `--link-graph-context` replaces it, is the
+/// context of the crawl's link report.
+fn load_seed_context(path: &str) -> Result<AuditLinkContext> {
     let data = fs::read(path).user_context(format!("cannot read seed file: {path}"))?;
-    let inventory = InventorySnapshot::from_json_document(&data)
-        .user_context(format!("invalid link inventory in seed file: {path}"))?;
-    Ok(inventory_seed(&inventory, target_url))
+    AuditLinkContext::from_inventory_document(&data)
+        .user_context(format!("invalid link inventory in seed file: {path}"))
 }
 
 /// Seed the crawl with the inventory's URLs alongside any `--seed`. They take
@@ -435,10 +436,19 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     );
     options.release_marker = release_marker.as_ref();
     let target_url = required_arg(submatches, "url")?;
-    let seed = submatches
+    let seed_context = submatches
         .get_one::<String>("seed-file")
-        .map(|path| load_inventory_seed(path, target_url))
+        .map(|path| load_seed_context(path))
         .transpose()?;
+    let seed = seed_context
+        .as_ref()
+        .and_then(|context| context.inventory.as_ref())
+        .map(|inventory| inventory_seed(inventory, target_url));
+    // Read before crawling, so a bad file fails fast.
+    let link_context = match submatches.get_one::<String>("link-graph-context") {
+        Some(path) => Some(super::link_graph::read_audit_link_context(path)?),
+        None => seed_context,
+    };
     if let Some(seed) = &seed {
         add_inventory_seeds(&mut config, seed);
     }
@@ -466,7 +476,10 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     let mut graph_summary = None;
     if let Some(path) = submatches.get_one::<String>("link-graph-output") {
         let started = std::time::Instant::now();
-        let graph = aexeo_core::link_report::build_link_report_from_audit(&full_audit_artifact)?;
+        let graph = aexeo_core::link_report::build_link_report_from_audit_with_context(
+            &full_audit_artifact,
+            link_context.as_ref(),
+        )?;
         // Findings the report proves false leave every output of this run,
         // the stored audit included; the report lists them.
         if !graph.suppressed_legacy_findings.is_empty() {

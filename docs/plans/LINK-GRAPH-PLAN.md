@@ -157,6 +157,14 @@ not change their counts or assert confirmed orphans.
   visible in the CMS preview. An end-to-end HTTP crawl and audit adapter report
   captured the URL and noindex and flagged incomplete coverage. This sample does
   not establish that the live site and CMS describe the same publication.
+- `crawl --seed-file` with `--link-graph-output` now builds its own report
+  with the seed inventory as context, through the same path as
+  `link-graph --audit --context`; `--link-graph-context` supplies a separate
+  context file. One command can reach `confirmed`, and `inventory_alias`
+  findings are suppressed in the run. Runs without a seed file or context
+  are unchanged. Item 3 stays open: the default audit text, Markdown and
+  priority list do not yet show the qualification, and the static `audit`
+  command builds no report.
 
 A live EmDash schema inspection showed that one CMS can contain multiple
 publications and non-page collections even when a collection is marked

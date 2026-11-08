@@ -281,6 +281,9 @@ Options:
       --link-graph-output <link-graph-output>
           Write an observational link graph report to this JSON file
 
+      --link-graph-context <link-graph-context>
+          Compare the link graph report with this audit link context file instead of the --seed-file inventory
+
       --link-graph-summary
           Include an observational link graph coverage summary in the crawl output
 

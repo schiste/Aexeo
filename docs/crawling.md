@@ -72,6 +72,15 @@ URL returned an error status, nothing was audited and the status is `partial`.
 A link to a URL that redirected to an audited page, through a recorded chain, is
 not broken (see [legacy findings](link-graph.md#legacy-inbound-link-findings)).
 
+`--seed-file inventory.json` also requests every inventory page and records a
+crawl attestation (see
+[inventory-seeded crawls](link-graph.md#inventory-seeded-crawl-attestation)).
+With `--link-graph-output`, the crawl's own link report then uses that
+inventory as its context, or the file `--link-graph-context` names, so a
+single command can confirm an unlinked published page and remove the orphan
+findings of verified aliases. Before this, that report had no context: adding
+`--seed-file` now changes the report and can change the run's findings.
+
 | Command | Effect of `partial` |
 | --- | --- |
 | `crawl` | Exit code still follows findings: exit 1 on an error finding, exit 0 if only warnings |
