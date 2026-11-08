@@ -37,6 +37,8 @@ export interface ContentEvaluationTelemetry {
   /** End-to-end wrapper duration, including serialization and WASM initialization. */
   evaluation_ms: number;
   source_locations_mapped: number;
+  /** Aggregate destination occurrences; omitted when the gate did not measure them. */
+  link_destinations?: { checked: number; invalid: number };
 }
 
 /** Evaluate a document locally using the built-in or supplied named TOML presets. */
@@ -55,7 +57,17 @@ export async function evaluateContent(
     : await evaluateContentWasm(documentJson, preset, sourcesJson, JSON.stringify(evidenceSources));
   const report = JSON.parse(result) as ContentReport;
   if (onTelemetry) {
-    onTelemetry({ evaluation_ms: performance.now() - started, source_locations_mapped: report.source_locations?.length ?? 0 });
+    const event: ContentEvaluationTelemetry = { evaluation_ms: performance.now() - started, source_locations_mapped: report.source_locations?.length ?? 0 };
+    for (const gate of report.gates) {
+      const checked = gate.measurements?.checked_destinations;
+      const invalid = gate.measurements?.invalid_destinations;
+      if (checked !== undefined && invalid !== undefined) {
+        event.link_destinations ??= { checked: 0, invalid: 0 };
+        event.link_destinations.checked += checked;
+        event.link_destinations.invalid += invalid;
+      }
+    }
+    onTelemetry(event);
   }
   return report;
 }

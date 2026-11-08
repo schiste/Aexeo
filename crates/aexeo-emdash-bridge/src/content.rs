@@ -318,17 +318,24 @@ pub fn evaluate_collection(
 fn content_link_destinations(document: &EmdashDocument) -> Vec<String> {
     let mut links = Vec::new();
     for block in &document.body {
-        let used: std::collections::BTreeSet<_> = block
-            .children
+        let definitions: BTreeMap<_, _> = block
+            .mark_defs
             .iter()
-            .flat_map(|child| match child {
-                PortableTextChild::Span(span) => span.marks.iter().map(String::as_str),
-            })
+            .filter(|definition| definition.mark_type == "link")
+            .map(|definition| (definition.key.as_str(), definition))
             .collect();
-        for definition in &block.mark_defs {
-            if definition.mark_type == "link" && used.contains(definition.key.as_str()) {
+        let mut previous = std::collections::BTreeSet::new();
+        for child in &block.children {
+            let PortableTextChild::Span(span) = child;
+            let current: std::collections::BTreeSet<_> = span
+                .marks
+                .iter()
+                .map(String::as_str)
+                .filter(|key| definitions.contains_key(key))
+                .collect();
+            for key in current.difference(&previous) {
                 links.push(
-                    definition
+                    definitions[key]
                         .data
                         .get("href")
                         .and_then(|value| value.as_str())
@@ -336,6 +343,7 @@ fn content_link_destinations(document: &EmdashDocument) -> Vec<String> {
                         .to_owned(),
                 );
             }
+            previous = current;
         }
     }
     links
@@ -473,6 +481,21 @@ mod tests {
         let report = evaluate_content(&document, &preset).unwrap();
         assert_eq!(report.gates[0].status, GateStatus::Failed);
         assert_eq!(report.gates[0].measurements["checked_destinations"], 1);
+    }
+
+    #[test]
+    fn destination_checks_count_each_link_occurrence_like_markdown() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"markDefs":[{"_key":"a","_type":"link","href":"javascript:bad"},{"_key":"unused","_type":"link","href":"javascript:unused"}],"children":[{"_type":"span","text":"one ","marks":["a"]},{"_type":"span","text":"link","marks":["a","strong"]},{"_type":"span","text":" then "},{"_type":"span","text":"again","marks":["a"]}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='links'\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\n").unwrap();
+        let emdash = evaluate_content(&document, &preset).unwrap();
+        let markdown = "[one link](javascript:bad) then [again](javascript:bad)";
+        let destinations = aexeo_core::markdown_adapter::markdown_link_destinations(markdown)
+            .unwrap()
+            .unwrap();
+        assert_eq!(content_link_destinations(&document), destinations);
+        assert_eq!(emdash.gates[0].measurements["checked_destinations"], 2);
+        assert_eq!(emdash.gates[0].measurements["invalid_destinations"], 2);
+        assert_eq!(emdash.gates[0].total_findings(), 2);
     }
 
     #[test]

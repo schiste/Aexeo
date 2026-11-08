@@ -4,7 +4,7 @@ vi.mock("../src/wasm-init.js", () => ({
   evaluateContentCollection: vi.fn(async () => JSON.stringify({ preset: "custom", input_id: "collection", gates: [{ gate_id: "unique", status: "failed", findings: [], reason: null }] })),
   evaluateContent: vi.fn(async () => JSON.stringify({
     preset: "custom", input_id: "/sample", source_locations: [{ gate_id: "forbidden", finding_index: 0, block_index: 0, span_index: 1, utf16_offset: 2 }], gates: [{
-      gate_id: "forbidden", status: "failed", findings: [], reason: null,
+      gate_id: "forbidden", status: "failed", findings: [], reason: null, measurements: { checked_destinations: 2, invalid_destinations: 1 },
     }],
   })),
 }));
@@ -27,9 +27,16 @@ describe("portable content API", () => {
     expect(onTelemetry).toHaveBeenCalledOnce();
     const event = onTelemetry.mock.calls[0]?.[0];
     expect(event.source_locations_mapped).toBe(1);
+    expect(event.link_destinations).toEqual({ checked: 2, invalid: 1 });
     expect(event.evaluation_ms).toBeGreaterThanOrEqual(0);
     expect(JSON.stringify(event)).not.toContain("Private");
     expect(JSON.stringify(event)).not.toContain("/private");
+  });
+  it("omits destination telemetry when the gate was not measured", async () => {
+    vi.mocked(evaluateWasm).mockResolvedValueOnce(JSON.stringify({ preset: "custom", input_id: "/private", gates: [{ status: "not_checked", measurements: {} }] }));
+    const onTelemetry = vi.fn();
+    await evaluateContent({ route: "/private", title: "Private", body: [] }, "custom", {}, undefined, onTelemetry);
+    expect(onTelemetry.mock.calls[0]?.[0].link_destinations).toBeUndefined();
   });
   it("passes the complete collection to the bridge", async () => {
     const documents = [{ route: "/a", title: "Same", body: [] }, { route: "/b", title: "Same", body: [] }];
