@@ -5,6 +5,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  adaptContentItem,
   adaptContentItemWithContext,
   contentItemToEmdashDocument,
   type ContentUrlApi,
@@ -44,6 +45,13 @@ describe("EmDash content adaptation", () => {
     expect(contentItemToEmdashDocument({ ...item, data: { body: [] } }).body).toEqual([]);
     expect(contentItemToEmdashDocument({ ...item, data: { body: "  " } }).body).toEqual([]);
     expect(contentItemToEmdashDocument({ ...item, data: { body: [], content: body("actual text") } }).body?.[0]?.children[0]?.text).toBe("actual text");
+    const multiField = contentItemToEmdashDocument({ ...item, data: { introduction: body("intro"), sections: [{ _type: "faq", _key: "f", _version: 1 }] } });
+    expect(multiField.body_capabilities).toEqual([]);
+    const selected = adaptContentItem({ ...item, data: { introduction: body("intro"), sections: body("section") } }, { contentFields: ["introduction", "sections"] }).document;
+    expect(selected.body_capabilities).toBeUndefined();
+    expect(selected.body?.map((block) => block.children[0]?.text)).toEqual(["intro", "section"]);
+    expect(adaptContentItem(item, { contentFields: ["missing"] }).document.body).toBeUndefined();
+    expect(adaptContentItem({ ...item, data: { introduction: body("intro"), sections: 42 } }, { contentFields: ["introduction", "sections"] }).document.body_capabilities).toEqual([]);
   });
 
   it("declares only the current capabilities and configured sidecar host", () => {

@@ -171,6 +171,7 @@ export interface AdminViewTuning {
 
 export interface RefreshOptions {
   blockMappings?: CustomBlockMappings | undefined;
+  contentFieldsByCollection?: Record<string, readonly string[]> | undefined;
   /**
    * Host context. `evaluateAndPersistAll` needs kv/http/content/log, and
    * the follow-up `renderFindingsPage` needs kv.
@@ -215,6 +216,7 @@ export async function handleRefresh(
       collections: options.collections,
       evaluator: options.evaluator,
       blockMappings: options.blockMappings,
+      contentFieldsByCollection: options.contentFieldsByCollection,
       // Always forwarded. See RefreshOptions.suppressionFilter.
       suppressionFilter: options.suppressionFilter,
     });

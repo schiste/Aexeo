@@ -61,6 +61,7 @@ export type { CustomBlockMappings, CustomBlockField } from "./adapter.js";
 export interface AexeoPluginOptions {
   /** Ordered field mappings for project-specific blocks. */
   blockMappings?: CustomBlockMappings;
+  contentFieldsByCollection?: Record<string, readonly string[]>;
   /** Add a portable content preset to configured-mode evaluation. */
   contentPreset?: { name: string; sources?: Record<string, string>; byCollection?: Record<string, string> };
   /**
@@ -179,6 +180,7 @@ export function aexeoPlugin(
     // the structured-clone semantics of that codegen.
     options: {
       ...(options.blockMappings === undefined ? {} : { blockMappings: options.blockMappings }),
+      ...(options.contentFieldsByCollection === undefined ? {} : { contentFieldsByCollection: options.contentFieldsByCollection }),
       ...(options.contentPreset === undefined
         ? {}
         : {

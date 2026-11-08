@@ -126,6 +126,7 @@ export const CONFIG_TOKEN_KEY = "config:eval_token";
 // has no sidecar and no token.
 export const SETTINGS_TOKEN_KEY = "eval_token";
 export const SETTINGS_BLOCK_MAPPINGS_KEY = "block_mappings";
+export const SETTINGS_CONTENT_FIELDS_KEY = "content_fields_by_collection";
 
 // Local mirror of the host's `SecretSettingField` variant of `SettingField`
 // (emdash 0.41). Kept local so this package still typechecks without the
@@ -144,6 +145,12 @@ export type PluginSettingField = SecretSettingField | {
 };
 
 export const PLUGIN_SETTINGS_SCHEMA: Record<string, PluginSettingField> = {
+  [SETTINGS_CONTENT_FIELDS_KEY]: {
+    type: "string",
+    label: "Content fields by collection (JSON)",
+    description: "Ordered rendered body fields per collection.",
+    multiline: true,
+  },
   [SETTINGS_BLOCK_MAPPINGS_KEY]: {
     type: "string",
     label: "Custom block mappings (JSON)",
@@ -400,6 +407,23 @@ export async function readSandboxBlockMappings(ctx: SandboxCtx): Promise<CustomB
   }
 }
 
+/** Read an optional JSON mapping from collection names to ordered field names. */
+export async function readSandboxContentFields(ctx: SandboxCtx): Promise<Record<string, readonly string[]> | undefined> {
+  if (!ctx.settings) return undefined;
+  try {
+    const raw = await ctx.settings.get<unknown>(SETTINGS_CONTENT_FIELDS_KEY);
+    if (raw === null || raw === "") return undefined;
+    if (typeof raw !== "string" || raw.length > 65536) throw new Error("invalid selection size or type");
+    const value: unknown = JSON.parse(raw);
+    if (value === null || typeof value !== "object" || Array.isArray(value) ||
+      !Object.values(value).every((fields) => Array.isArray(fields) && fields.length > 0 && fields.every((field) => typeof field === "string" && field.length > 0))) throw new Error("invalid selection");
+    return value as Record<string, readonly string[]>;
+  } catch {
+    ctx.log?.warn?.("Aexeo content field selection unavailable; multiple fields remain unverified");
+    return undefined;
+  }
+}
+
 // EmDash 0.41 keeps the sandbox bridge available for afterSave work.
 // Use the same persistence path as configured mode and evaluate through
 // the sidecar that keeps WASM out of the isolate.
@@ -414,7 +438,7 @@ export async function handleAfterSave(
     );
     return;
   }
-  const blockMappings = await readSandboxBlockMappings(ctx);
+  const [blockMappings, fields] = await Promise.all([readSandboxBlockMappings(ctx), readSandboxContentFields(ctx)]);
   await handleAfterSaveConfigured(event, ctx, (documents, context) =>
     evaluateViaSidecar(
       ctx.http,
@@ -424,6 +448,7 @@ export async function handleAfterSave(
     ),
     undefined,
     blockMappings,
+    fields?.[event.content.type],
   );
 }
 
@@ -466,12 +491,14 @@ export async function handleAfterSaveConfigured(
   evaluator: EvaluatorFn,
   suppressionFilter?: SuppressionFilter,
   blockMappings?: CustomBlockMappings,
+  contentFields?: readonly string[],
 ): Promise<void> {
   const adapted = await adaptContentItemWithContext(
     event.content,
     ctx.content,
     ctx.site?.locale,
     blockMappings,
+    contentFields,
   );
   const document = adapted.document;
   recordContentCoverage(ctx, [document]);
@@ -585,6 +612,7 @@ export async function evaluateAndPersistAll(
     evaluator: EvaluatorFn;
     suppressionFilter?: SuppressionFilter;
     blockMappings?: CustomBlockMappings | undefined;
+    contentFieldsByCollection?: Record<string, readonly string[]> | undefined;
   },
 ): Promise<RefreshSummary> {
   const collections = options.collections ?? DEFAULT_COLLECTIONS;
@@ -623,6 +651,7 @@ export async function evaluateAndPersistAll(
             ctx.content,
             ctx.site?.locale,
             options.blockMappings,
+            options.contentFieldsByCollection?.[collection],
           );
           documents.push(adapted.document);
           documentCollections.push(adapted.meta.collection);

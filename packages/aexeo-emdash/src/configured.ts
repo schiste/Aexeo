@@ -165,6 +165,7 @@ const inProcessEvaluator: EvaluatorFn = async (documents) => {
 
 export interface ConfiguredPluginOptions {
   blockMappings?: CustomBlockMappings;
+  contentFieldsByCollection?: Record<string, readonly string[]>;
   /** Optional portable preset evaluated in addition to the existing site checks. */
   contentPreset?: ContentPresetOptions;
   /**
@@ -245,6 +246,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
           evaluator,
           suppressionFilter,
           options.blockMappings,
+          options.contentFieldsByCollection?.[event.content.type],
         ),
       "content:afterDelete": (event: ContentAfterDeleteEvent, ctx: SandboxCtx) =>
         handleAfterDelete(event, ctx),
@@ -262,7 +264,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
       admin: {
         permission: "plugins:read",
         handler: (ctx: RouteContext) =>
-          handleAdminRoute(ctx, collections, suppressionFilter, evaluator, options.blockMappings),
+          handleAdminRoute(ctx, collections, suppressionFilter, evaluator, options.blockMappings, options.contentFieldsByCollection),
       },
       // JSON data endpoint for the React adminEntry. Two routes:
       //   POST /_emdash/api/plugins/aexeo-emdash/data    — read current findings
@@ -280,6 +282,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
             refresh: false,
             suppressionFilter,
             blockMappings: options.blockMappings,
+            contentFieldsByCollection: options.contentFieldsByCollection,
           })).payload,
       },
       refresh: {
@@ -291,6 +294,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
             refresh: true,
             suppressionFilter,
             blockMappings: options.blockMappings,
+            contentFieldsByCollection: options.contentFieldsByCollection,
           }),
       },
       // /facts route serves the truth-manifest authoring UI. It
@@ -389,6 +393,7 @@ async function handleAdminRoute(
   suppressionFilter: SuppressionFilter,
   evaluator: EvaluatorFn,
   blockMappings?: CustomBlockMappings,
+  contentFieldsByCollection?: Record<string, readonly string[]>,
 ): Promise<BlockResponse> {
   const body = normalizeInteraction(ctx.input);
   if (body.type === "page_load") {
@@ -423,6 +428,7 @@ async function handleAdminRoute(
         suppressionFilter,
         tuning: adminViewTuning,
         blockMappings,
+        contentFieldsByCollection,
       });
     }
     if (body.action_id.startsWith("filter:")) {

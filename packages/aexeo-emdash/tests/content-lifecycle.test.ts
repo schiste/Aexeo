@@ -4,6 +4,7 @@ import type { EmdashContentItem } from "../src/adapter.js";
 import {
   CONFIG_URL_KEY,
   SETTINGS_BLOCK_MAPPINGS_KEY,
+  SETTINGS_CONTENT_FIELDS_KEY,
   SETTINGS_TOKEN_KEY,
   handleAfterSave,
   documentKey,
@@ -249,10 +250,11 @@ describe("custom block mappings", () => {
   it("forwards sandbox settings into the sidecar document", async () => {
     const content = item("mapped-sandbox", NEW);
     content.data.blocks = [{ _type: "hero", _key: "one", _version: 1, headline: "Mapped" }];
+    content.data.introduction = [{ _type: "block", children: [{ _type: "span", text: "Intro", marks: [] }] }];
     const { ctx } = host([content]);
     await ctx.kv.set(CONFIG_URL_KEY, "https://example.org");
     ctx.settings = {
-      get: async <T>(key: string) => (key === SETTINGS_TOKEN_KEY ? "token" : key === SETTINGS_BLOCK_MAPPINGS_KEY ? JSON.stringify({ hero: [{ kind: "heading", field: "headline" }] }) : null) as T | null,
+      get: async <T>(key: string) => (key === SETTINGS_TOKEN_KEY ? "token" : key === SETTINGS_BLOCK_MAPPINGS_KEY ? JSON.stringify({ hero: [{ kind: "heading", field: "headline" }] }) : key === SETTINGS_CONTENT_FIELDS_KEY ? JSON.stringify({ pages: ["introduction", "blocks"] }) : null) as T | null,
       set: async () => {},
     };
     let captured: unknown;
@@ -261,7 +263,7 @@ describe("custom block mappings", () => {
       return { status: 200, ok: true, text: async () => "[]" };
     } };
     await handleAfterSave({ content, collection: "pages", isNew: false }, ctx);
-    expect(captured).toMatchObject({ documents: [{ body: [{ style: "h2", children: [{ text: "Mapped" }] }] }] });
+    expect(captured).toMatchObject({ documents: [{ body: [{ children: [{ text: "Intro" }] }, { style: "h2", children: [{ text: "Mapped" }] }] }] });
   });
 
   it("uses the same mapping for afterSave and refresh", async () => {

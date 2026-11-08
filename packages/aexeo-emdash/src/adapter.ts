@@ -68,6 +68,7 @@ export async function adaptContentItemWithContext(
   contentApi: ContentUrlApi,
   defaultLocale?: string,
   blockMappings?: CustomBlockMappings,
+  contentFields?: readonly string[],
 ): Promise<AdaptedContent> {
   const publicUrl =
     content.status === "published"
@@ -80,6 +81,7 @@ export async function adaptContentItemWithContext(
     publicUrl,
     ...(defaultLocale === undefined ? {} : { defaultLocale }),
     ...(blockMappings === undefined ? {} : { blockMappings }),
+    ...(contentFields === undefined ? {} : { contentFields }),
   });
 
   const translationSet = await contentApi.getTranslations(
@@ -133,6 +135,7 @@ export function adaptContentItem(
     publicUrl?: string | null;
     defaultLocale?: string;
     blockMappings?: CustomBlockMappings | undefined;
+    contentFields?: readonly string[];
   } = {},
 ): AdaptedContent {
   const route = options.route ?? deriveRoute(content);
@@ -152,7 +155,9 @@ export function adaptContentItem(
   if (typeof locale === "string" && locale.length > 0) {
     document.lang = locale;
   }
-  const body = extractPortableText(content.data, options.blockMappings);
+  const body = options.contentFields === undefined
+    ? extractPortableText(content.data, options.blockMappings)
+    : extractSelectedContent(content.data, options.contentFields, options.blockMappings);
   if (body !== null) {
     document.body = body.blocks;
     if (body.capabilities !== undefined) document.body_capabilities = body.capabilities;
@@ -192,10 +197,47 @@ function stringOrEmpty(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+type ExtractedBody = { blocks: PortableTextBlock[]; capabilities?: ("text" | "headings" | "paragraphs" | "links")[] };
+
+/** A selection asserts that the listed fields constitute the rendered body, in order. */
+function extractSelectedContent(data: Record<string, unknown>, fields: readonly string[], mappings?: CustomBlockMappings): ExtractedBody | null {
+  if (fields.length === 0 || new Set(fields).size !== fields.length || fields.some((field) => typeof field !== "string" || field.length === 0)) return null;
+  const all = ["text", "headings", "paragraphs", "links"] as const;
+  let capabilities: readonly (typeof all)[number][] = all;
+  const blocks: PortableTextBlock[] = [];
+  let observed = false;
+  for (const field of fields) {
+    const value = data[field];
+    if (value === undefined || value === null) continue;
+    observed = true;
+    const part = extractFirstPortableText({ content: value }, mappings);
+    if (part === null) return { blocks, capabilities: [] };
+    blocks.push(...part.blocks);
+    capabilities = capabilities.filter((capability) => part.capabilities === undefined || part.capabilities.includes(capability));
+  }
+  if (!observed) return null;
+  return capabilities.length === all.length ? { blocks } : { blocks, capabilities: [...capabilities] };
+}
+
 function extractPortableText(
   data: Record<string, unknown>,
   mappings?: CustomBlockMappings,
-): { blocks: PortableTextBlock[]; capabilities?: ("text" | "headings" | "paragraphs" | "links")[] } | null {
+): ExtractedBody | null {
+  const result = extractFirstPortableText(data, mappings);
+  if (result === null) return null;
+  const candidates = Object.entries(data).filter(([field, value]) =>
+    isPortableTextArray(value) || isEmdashBlocksArray(value, field) ||
+    ((field === "body" || field === "content") && typeof value === "string" && value.trim().length > 0),
+  );
+  // Automatically selecting one field does not prove the others are rendered
+  // or irrelevant. Never present that projection as the complete document.
+  return candidates.length > 1 ? { blocks: result.blocks, capabilities: [] } : result;
+}
+
+function extractFirstPortableText(
+  data: Record<string, unknown>,
+  mappings?: CustomBlockMappings,
+): ExtractedBody | null {
   // Prefer established rich-text fields. EmDash's typed `blocks` field is a
   // separate composition format: its _type/_version/_key envelope does not
   // contain Portable Text's `children`, so passing it through loses the text.

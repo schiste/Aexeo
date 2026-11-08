@@ -6,6 +6,8 @@ import {
   PLUGIN_SETTINGS_SCHEMA,
   SETTINGS_TOKEN_KEY,
   SETTINGS_BLOCK_MAPPINGS_KEY,
+  SETTINGS_CONTENT_FIELDS_KEY,
+  readSandboxContentFields,
   readSandboxBlockMappings,
   type SandboxCtx,
   type KvNamespace,
@@ -217,7 +219,7 @@ describe("aexeoPluginSandboxed", () => {
     // `ctx.settings.set()` with have to be the same string, or the host
     // will not encrypt the write. Pin both sides.
     const descriptor = aexeoPluginSandboxed({ evaluatorHost: "evaluator.test" });
-    expect(Object.keys(descriptor.settingsSchema).sort()).toEqual([SETTINGS_BLOCK_MAPPINGS_KEY, SETTINGS_TOKEN_KEY].sort());
+    expect(Object.keys(descriptor.settingsSchema).sort()).toEqual([SETTINGS_BLOCK_MAPPINGS_KEY, SETTINGS_CONTENT_FIELDS_KEY, SETTINGS_TOKEN_KEY].sort());
     expect(PLUGIN_SETTINGS_SCHEMA[SETTINGS_TOKEN_KEY]?.type).toBe("secret");
   });
 });
@@ -416,5 +418,7 @@ describe("sandbox custom block mappings", () => {
     expect(await readSandboxBlockMappings(ctx("{"))).toBeUndefined();
     expect(await readSandboxBlockMappings(ctx("[]"))).toBeUndefined();
     expect(await readSandboxBlockMappings(ctx(null))).toBeUndefined();
+    expect(await readSandboxContentFields(ctx(JSON.stringify({ pages: ["content", "sections"] })))).toEqual({ pages: ["content", "sections"] });
+    expect(await readSandboxContentFields(ctx(JSON.stringify({ pages: [] })))).toBeUndefined();
   });
 });
