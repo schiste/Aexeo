@@ -30,3 +30,4 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - `fast_test`: `cargo test --workspace`
 - `build`: `cargo build --workspace`
 - `dev`: `cargo run`
+- EmDash WASM integration: run `npm ci --prefix packages/aexeo-emdash`, then `npm run build --prefix packages/aexeo-emdash` before `npm run test:wasm --prefix packages/aexeo-emdash`. The smoke tests import the bundled `dist/content.js`; building TypeScript and WASM alone does not create it.
