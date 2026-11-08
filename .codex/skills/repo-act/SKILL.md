@@ -25,6 +25,7 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - Re-run lint/build only after the focused validation passes.
 - Run `sh scripts/check-code.sh` for code changes before claiming the repository gate passes; it includes `scripts/clippy-strict.sh`, whose production-code lint policy is stricter than generic workspace Clippy.
 - After changing CLI commands or options, run `cargo run -q -p aexeo-cli -- docs generate .` and `cargo run -q -p aexeo-cli -- docs check .`; include the generated `docs/cli.md` changes.
+- Before the crawl worker integration tests in a fresh worktree, run `npm run build:wasm` in `packages/aexeo-crawl-worker`; `npm test` starts the real worker and requires that artifact.
 - Document any override-based maintainer note that affected the change plan.
 
 ## Useful Commands
