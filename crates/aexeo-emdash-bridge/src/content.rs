@@ -151,6 +151,7 @@ fn positional_gate(gate: &ContentGate) -> bool {
         ContentGate::ForbiddenTerms { .. }
             | ContentGate::RepeatedTerms { .. }
             | ContentGate::SentenceLength { .. }
+            | ContentGate::SentenceCharacterLength { .. }
             | ContentGate::ParagraphLength { .. }
             | ContentGate::ParagraphCharacterLength { .. }
     )
@@ -580,6 +581,28 @@ field = "slug"
             from_markdown.gates[0].measurements,
             from_emdash.gates[0].measurements
         );
+    }
+
+    #[test]
+    fn markdown_and_emdash_share_sentence_character_limit() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"children":[{"_type":"span","text":"中文文章測試。 好文。"}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='length'\nkind='sentence_character_length'\nmax_chars=4\ndelimiters='。'\n").unwrap();
+        let (input, context, links) =
+            markdown_input_with_links("t.md", "中文文章測試。 好文。").unwrap();
+        let markdown = preset
+            .evaluate_with_capabilities(
+                &input,
+                &ContentEvaluationContext {
+                    adapter: Some(&context),
+                    link_count: Some(links),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let emdash = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(markdown.gates[0].status, GateStatus::Failed);
+        assert_eq!(markdown.gates[0].status, emdash.gates[0].status);
+        assert_eq!(markdown.gates[0].measurements, emdash.gates[0].measurements);
     }
 
     #[test]
