@@ -65,9 +65,17 @@ description: Use when starting work in an unfamiliar repository, when the task a
 - Generated/vendor `.aethyme/generated`: tracked generated or vendored surface; verify ownership before editing
 - Sensitive `.github/workflows`: repository automation; changes can affect publication or shared CI
 
+## Maintainer Notes
+
+- EmDash WASM integration: run `npm ci --prefix packages/aexeo-emdash`, then `npm run build --prefix packages/aexeo-emdash` before `npm run test:wasm --prefix packages/aexeo-emdash`. The smoke tests import the bundled `dist/content.js`; building TypeScript and WASM alone does not create it.
+- Run `cargo fmt --all -- --check` after adding or moving a module: it also checks the parent `mod` declarations, which a focused test run does not.
+- For a broker-coordinated `gh pr merge --match-head-commit`, pass the full `headRefOid` from `gh pr view --json headRefOid`; an abbreviated SHA is rejected.
+- If a broker push fails with an internal remote hook error, keep the commit and read the error, then retry through the broker without force. If it persists, report the rejection and keep the session for recovery.
+- A refused preparation-status command does not mean every broker operation is blocked: report the exact refusal and check each authorized operation separately. Review an upgrade plan before applying it. Lease coordination and migration preconditions are separate: a migration can treat any live or stale session, including your own, as a blocker, so apply it from the main checkout with no session open and carry the result into a session for the pull request.
+
 ## Freshness
 
-- Source digest: `825625ef8e53bdae601eba1e9f2e276c9a66a53dbb2ee91fe4e552a5e914b507`
+- Source digest: `e03c4efc957bb6064a9c50e3f4f848d694a0ffb3d7a9b48eb502ce83d9a24ea3`
 - Tracked source files: `378`
-- Overrides applied: `False`
+- Overrides applied: `True`
 - Sections generated: `repo, workspaces, primary_workspace, commands, areas, entrypoints, caution_zones, generated_paths, dangerous_paths, navigation_recipes, summon, freshness`
