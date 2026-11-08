@@ -143,12 +143,20 @@ not change their counts or assert confirmed orphans.
   Item 3 below stays open: the default audit text, Markdown and priority list
   do not show the qualification, the static `audit` command builds no report,
   and a crawl's own report has no context, so it can never confirm.
+- Legacy findings the report proves false (`inbound_observed`,
+  `inventory_alias`) are now suppressed: listed in an additive
+  `suppressed_legacy_findings` array with their reason, and removed from the
+  findings, summary and stored audit of `crawl --link-graph-output`.
+  `link-graph --audit` lists them; runs without a report are unchanged.
+  Baselines see them as resolved, as accepted. `LNK001` no longer fires on a
+  link to the requested URL or a hop of a consistent recorded redirect chain
+  that ended on an analyzed page; redirects to an error response stay broken.
 - A synthetic in-process benchmark covers 50 pages and 500 links (#76) and now
   a second tier of 1,000 pages and 20,000 links. `scripts/check-performance.sh`
   runs both tiers in the CI `validate` job against average and p95 ceilings in
-  `performance-budget.json`. The large tier measured 91.5 ms average on CI and
-  is capped at 300 ms, about 3x. A deliberate 4x slowdown, tried locally and
-  not committed, fails the check. The calibration is in
+  `performance-budget.json`. The large tier measured 52 to 92 ms average on CI
+  and is capped at 300 ms, about 3x the slower run. A deliberate 4x slowdown,
+  tried locally and not committed, fails the check. The calibration is in
   [the link graph benchmark](../link-graph.md#benchmark).
 - A live Aeptus URL returned a generic noindex holding page, not the article
   visible in the CMS preview. An end-to-end HTTP crawl and audit adapter report

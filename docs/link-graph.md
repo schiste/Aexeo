@@ -369,7 +369,9 @@ one, must therefore put the marker the site serves in its `identity.release`.
 
 To write a graph alongside a runtime crawl in one command, pass
 `--link-graph-output graph.json` to `aexeo-cli crawl URL`. The normal audit
-output and exit status remain unchanged. Add `--link-graph-telemetry` to emit
+output and exit status remain unchanged, except that legacy `LNK002` and
+`LNK004` findings the report proves false are removed (see
+[Legacy inbound-link findings](#legacy-inbound-link-findings)). Add `--link-graph-telemetry` to emit
 the same aggregate-only event to stderr. This is opt-in; graph evidence in the
 output file can include URLs and page text. That report is built without a
 context, so it has no inventory to reconcile against and keeps incomplete
@@ -379,10 +381,12 @@ Add `--link-graph-summary` alongside `--link-graph-output` to include aggregate
 observations and coverage issues in the text or JSON command output. The JSON
 field `link_graph_summary` is omitted unless requested. SARIF does not support
 this option. The summary does not identify confirmed orphans or include evidence.
-Its `legacy_link_findings` object counts the run's `LNK002` and `LNK004`
-findings per conclusion (below), and the text output adds one
+Its `legacy_link_findings` object counts the run's remaining `LNK002` and
+`LNK004` findings per conclusion (below), and the text output adds one
 `Link graph coverage of LNK002/LNK004 findings:` line. Since this report has
-no context, none of them is `confirmed`.
+no context, none of them is `confirmed`. Its `suppressed_legacy_findings` array
+repeats the report's list of findings removed from the run (below), and the
+text output counts them on one more line.
 
 ## Legacy inbound-link findings
 
@@ -395,14 +399,14 @@ that links reach only through a redirect, and an alias page all raise `LNK002`,
 and a navigation link counts as much as a body link.
 
 A link report built from an audit (`link-graph --audit`, or
-`crawl --link-graph-output`) qualifies these findings in `legacy_findings`,
-omitted when the audit has none. The findings themselves are unchanged: rule
-ID, severity, message, position and fingerprint stay as the rules produced
-them, so baselines and `diff` results do not depend on whether a report was
-built. Without a report, nothing changes at all.
+`crawl --link-graph-output`) qualifies these findings. A finding the report
+proves false, concluded `inbound_observed` or `inventory_alias` (below), is
+suppressed: it moves to `suppressed_legacy_findings`, whose `conclusion` gives
+the reason. The others stay in `legacy_findings` with their qualification. Both
+lists are omitted when empty.
 
 ```json
-"legacy_findings": [{
+"suppressed_legacy_findings": [{
   "rule_id": "LNK002",
   "path": "crawl/new/index.html",
   "url": "https://example.org/new",
@@ -413,6 +417,19 @@ built. Without a report, nothing changes at all.
 }]
 ```
 
+`crawl --link-graph-output` removes the suppressed findings from every output
+of the run: the command's findings, exit status and summary counts, and the
+stored audit artifact. A later baseline comparison therefore reports them as
+resolved; that is intended, since the report shows they never held. The
+findings that remain keep the rule ID, severity, message, position and
+fingerprint the rules produced. `link-graph --audit` emits no findings: it
+reads a stored artifact and lists which of its findings a report built in the
+same run would suppress. A crawl's own report has no inventory context, so in
+practice it suppresses only `inbound_observed` findings; `inventory_alias`
+needs `link-graph --audit --context`. A crawl without `--link-graph-output`,
+and the static `audit` command, build no report, and their findings do not
+change at all.
+
 `path` is the finding's path. The page is matched through the audit page with
 that path: its observed URL, or its `--static-url-map` URL. The first matching
 conclusion applies:
@@ -420,8 +437,8 @@ conclusion applies:
 | Conclusion | When |
 | --- | --- |
 | `not_in_report` | The report has no page for the path, such as a page without response provenance |
-| `inventory_alias` | The page answered as a verified inventory `canonical_alias` or `locale_fallback` with a canonical link to its target |
-| `inbound_observed` | `LNK002` only: the report credits other sources, directly or through `via_redirect` |
+| `inventory_alias` | The page answered as a verified inventory `canonical_alias` or `locale_fallback` with a canonical link to its target. Suppressed |
+| `inbound_observed` | `LNK002` only: the report credits other sources, directly or through `via_redirect`. Suppressed |
 | `confirmed` | The crawl is complete, the reconciliation comparable and the URL eligible |
 | `not_eligible` | Otherwise; the report's `issues` say why coverage falls short |
 
@@ -432,6 +449,16 @@ excluding the page's links to itself as the rules do, and omits empty contexts.
 footer, breadcrumb or pagination components. A `confirmed` `LNK002` is a page
 the complete, attested crawl reached and nothing linked to. A `confirmed`
 `LNK004` with `navigation_only` is linked to only from site structure.
+
+`LNK001` (broken internal link) checks a link's target against the analyzed
+pages. In a crawl, a target is also found when it is the requested URL, or a
+hop, of a consistent recorded redirect chain (as above) that ended on an
+analyzed page, on that page's host. A link to `/old` that answers
+`301 -> /new` is therefore not broken. A redirect that ends in an error
+response or off the site leaves no analyzed page, so links to it remain
+`LNK001`, as do links to a redirect without a recorded, consistent chain, such
+as one from a browser-engine crawl. Static exports record no redirects and are
+unchanged. This does not depend on a link report.
 
 ## Static audit artifacts
 

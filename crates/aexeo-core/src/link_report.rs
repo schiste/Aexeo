@@ -211,9 +211,15 @@ pub struct LinkReport {
     pub pages: Vec<ObservedPageLinks>,
     pub links: LinkCounts,
     /// The audit's legacy `LNK002` and `LNK004` findings, qualified by this
-    /// report. Only audit reports have them; omitted when there are none.
+    /// report, except those it suppressed. Only audit reports have them;
+    /// omitted when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub legacy_findings: Vec<LegacyLinkFinding>,
+    /// The legacy findings this report proves false, in the same shape, the
+    /// conclusion giving the reason. A run that built the report removes them
+    /// from its findings; omitted when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub suppressed_legacy_findings: Vec<LegacyLinkFinding>,
 }
 
 /// Caller-supplied identity and inventory for comparison with an audit.
@@ -450,8 +456,10 @@ pub fn build_link_report_from_audit_with_static_urls(
     report.issues.extend(issues.into_iter().map(str::to_string));
     report.issues.sort();
     report.issues.dedup();
-    report.legacy_findings =
-        qualify_legacy_link_findings(&artifact.findings, &site.pages, static_urls, &report);
+    (report.suppressed_legacy_findings, report.legacy_findings) =
+        qualify_legacy_link_findings(&artifact.findings, &site.pages, static_urls, &report)
+            .into_iter()
+            .partition(|finding| finding.conclusion.proves_finding_false());
     Ok(report)
 }
 
@@ -618,7 +626,7 @@ fn consistent_chain(
 
 /// A chain is evidence only when it starts at the requested URL and every hop
 /// is a redirect status.
-fn redirect_chain_consistent(requested_url: &str, chain: &[RedirectHop]) -> bool {
+pub(crate) fn redirect_chain_consistent(requested_url: &str, chain: &[RedirectHop]) -> bool {
     chain.first().is_some_and(|hop| hop.url == requested_url)
         && chain
             .iter()
@@ -1163,6 +1171,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
         pages,
         links,
         legacy_findings: Vec::new(),
+        suppressed_legacy_findings: Vec::new(),
     })
 }
 
