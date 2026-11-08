@@ -67,6 +67,9 @@ pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
             Some(("render", render_matches)) => command_report_render(
                 required_arg(render_matches, "audit")?,
                 required_arg(render_matches, "format")?,
+                render_matches
+                    .get_one::<String>("link-graph")
+                    .map(String::as_str),
             ),
             Some((other, _)) => bail!("unsupported report subcommand: {}", other),
             None => user_bail!("missing report subcommand"),
