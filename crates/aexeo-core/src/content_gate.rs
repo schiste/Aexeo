@@ -117,7 +117,7 @@ pub enum ContentGate {
         #[serde(default = "default_sentence_delimiters")]
         delimiters: String,
         /// Exact whitespace-delimited abbreviations whose final period is not a boundary.
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         abbreviations: Vec<String>,
     },
     /// Limits exact occurrences of user-configured terms.

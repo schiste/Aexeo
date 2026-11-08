@@ -615,6 +615,12 @@ min = 2
     #[test]
     fn sentence_abbreviations_are_explicit_and_preserve_block_boundaries() {
         use crate::content_gate::GateStatus;
+        let preset = crate::content_gate::ContentPreset::from_toml(
+            "version=1\nname='t'\n[[gates]]\nid='g'\nkind='sentence_length'\nmax_words=4\n",
+        )
+        .unwrap();
+        let gate_json = serde_json::to_value(&preset.gates[0]).unwrap();
+        assert!(gate_json.get("abbreviations").is_none());
         let plain = "kind='sentence_length'\nmax_words=4";
         let configured = "kind='sentence_length'\nmax_words=4\nabbreviations=['Dr.', 'M.']";
         let source = "Dr. Martin writes clear notes.\n";
