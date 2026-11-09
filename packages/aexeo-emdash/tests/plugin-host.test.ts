@@ -5,12 +5,14 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  adaptContentItem,
   adaptContentItemWithContext,
   contentItemToEmdashDocument,
   type ContentUrlApi,
   type EmdashContentItem,
 } from "../src/adapter.js";
 import { buildAllowedHosts, buildCapabilities } from "../src/plugin.js";
+import { aexeoPlugin } from "../src/index.js";
 
 let host: PluginRuntimeTestHost | undefined;
 
@@ -43,6 +45,13 @@ describe("EmDash content adaptation", () => {
     expect(contentItemToEmdashDocument({ ...item, data: { body: [] } }).body).toEqual([]);
     expect(contentItemToEmdashDocument({ ...item, data: { body: "  " } }).body).toEqual([]);
     expect(contentItemToEmdashDocument({ ...item, data: { body: [], content: body("actual text") } }).body?.[0]?.children[0]?.text).toBe("actual text");
+    const multiField = contentItemToEmdashDocument({ ...item, data: { introduction: body("intro"), sections: [{ _type: "faq", _key: "f", _version: 1 }] } });
+    expect(multiField.body_capabilities).toEqual([]);
+    const selected = adaptContentItem({ ...item, data: { introduction: body("intro"), sections: body("section") } }, { contentFields: ["introduction", "sections"] }).document;
+    expect(selected.body_capabilities).toBeUndefined();
+    expect(selected.body?.map((block) => block.children[0]?.text)).toEqual(["intro", "section"]);
+    expect(adaptContentItem(item, { contentFields: ["missing"] }).document.body).toBeUndefined();
+    expect(adaptContentItem({ ...item, data: { introduction: body("intro"), sections: 42 } }, { contentFields: ["introduction", "sections"] }).document.body_capabilities).toEqual([]);
   });
 
   it("declares only the current capabilities and configured sidecar host", () => {
@@ -53,6 +62,29 @@ describe("EmDash content adaptation", () => {
       "network:request",
     ]);
     expect(buildAllowedHosts("evaluator.test")).toEqual(["evaluator.test"]);
+  });
+
+  it("maps declared custom block fields and rejects partial mappings", () => {
+    const item: EmdashContentItem = { id: "a", type: "pages", slug: "a", status: "draft", locale: "en", data: { blocks: [{ _type: "hero", _key: "h", _version: 1, heading: "Title", body: "Body", label: "Read", href: "https://example.org" }] } };
+    const mappings = { hero: [{ kind: "heading" as const, field: "heading" }, { kind: "paragraph" as const, field: "body" }, { kind: "link" as const, field: "label", hrefField: "href" }] };
+    const document = contentItemToEmdashDocument(item, mappings);
+    expect(document.body_capabilities).toBeUndefined();
+    expect(document.body?.map((block) => block.children[0]?.text)).toEqual(["Title", "Body", "Read"]);
+    expect(document.body?.[0]?.style).toBe("h2");
+    expect(document.body?.[2]?.markDefs?.[0]?.href).toBe("https://example.org");
+    expect(contentItemToEmdashDocument({ ...item, data: { blocks: [...(item.data.blocks as object[]), { _type: "unknown", _key: "u", _version: 1 }] } }, mappings).body_capabilities).toEqual([]);
+    expect(contentItemToEmdashDocument(item, { hero: [{ kind: "paragraph", field: "missing" }] }).body_capabilities).toEqual([]);
+    const faq = { ...item, data: { blocks: [{ _type: "faq", _key: "f", _version: 1, heading: "Questions", faqs: [{ question: "Why?", answer: "Because." }] }] } };
+    const faqMapping = { faq: [{ kind: "heading" as const, field: "heading" }, { kind: "paragraph" as const, field: "subtitle", optional: true }, { kind: "repeat" as const, field: "faqs", fields: [{ kind: "heading" as const, field: "question", level: 3 as const }, { kind: "paragraph" as const, field: "answer" }] }] };
+    const mappedFaq = contentItemToEmdashDocument(faq, faqMapping);
+    expect(mappedFaq.body?.map((block) => block.children[0]?.text)).toEqual(["Questions", "Why?", "Because."]);
+    expect(mappedFaq.body?.[1]?.style).toBe("h3");
+    const badFaq = { ...faq, data: { blocks: [{ _type: "faq", _key: "f", _version: 1, heading: "Questions", faqs: ["bad"] }] } };
+    expect(contentItemToEmdashDocument(badFaq, faqMapping).body_capabilities).toEqual([]);
+    expect(contentItemToEmdashDocument({ ...item, data: { blocks: [{ _type: "hero", _key: "h", _version: 1, href: "/missing-label" }] } }, { hero: [{ kind: "link", field: "label", hrefField: "href", optional: true }] }).body_capabilities).toEqual([]);
+    const rich = { ...item, data: { blocks: [{ _type: "hero", _key: "h", _version: 1, body: body("Nested") }] } };
+    expect(contentItemToEmdashDocument(rich, { hero: [{ kind: "richText", field: "body" }] }).body?.[0]?.children[0]?.text).toBe("Nested");
+    expect(JSON.parse(JSON.stringify(aexeoPlugin({ blockMappings: mappings }).options)).blockMappings).toEqual(mappings);
   });
 
   it("keeps typed block text and resolves exact URLs and translation alternates", async () => {

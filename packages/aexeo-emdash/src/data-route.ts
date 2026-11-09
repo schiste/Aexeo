@@ -1,3 +1,4 @@
+import type { CustomBlockMappings } from "./adapter.js";
 // Data route for the React admin findings page.
 //
 // Returns JSON (not Block Kit blocks) shaped for the
@@ -98,6 +99,8 @@ export interface FindingRow {
 }
 
 interface DataRouteOptions {
+  blockMappings?: CustomBlockMappings | undefined;
+  contentFieldsByCollection?: Record<string, readonly string[]> | undefined;
   collections: readonly string[];
   evaluator: EvaluatorFn;
   // Refresh: when true, the route runs evaluateAndPersistAll first
@@ -122,6 +125,8 @@ export async function handleDataRoute(
     summary = await evaluateAndPersistAll(ctx, {
       collections: options.collections,
       evaluator: options.evaluator,
+      blockMappings: options.blockMappings,
+      contentFieldsByCollection: options.contentFieldsByCollection,
       ...(options.suppressionFilter === undefined
         ? {}
         : { suppressionFilter: options.suppressionFilter }),

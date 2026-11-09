@@ -1,5 +1,13 @@
 import type { EmdashDocument, PortableTextBlock } from "./types.js";
 
+/** Ordered fields that the host declares constitute a custom block's content. */
+export type CustomBlockField =
+  | { kind: "paragraph" | "richText"; field: string; optional?: boolean }
+  | { kind: "heading"; field: string; level?: 1 | 2 | 3 | 4 | 5 | 6; optional?: boolean }
+  | { kind: "link"; field: string; hrefField: string; optional?: boolean }
+  | { kind: "repeat"; field: string; fields: readonly CustomBlockField[]; optional?: boolean };
+export type CustomBlockMappings = Record<string, readonly CustomBlockField[]>;
+
 export interface EmdashContentItem {
   id: string;
   type: string;
@@ -60,6 +68,8 @@ export async function adaptContentItemWithContext(
   content: EmdashContentItem,
   contentApi: ContentUrlApi,
   defaultLocale?: string,
+  blockMappings?: CustomBlockMappings,
+  contentFields?: readonly string[],
 ): Promise<AdaptedContent> {
   const publicUrl =
     content.status === "published"
@@ -71,6 +81,8 @@ export async function adaptContentItemWithContext(
     route,
     publicUrl,
     ...(defaultLocale === undefined ? {} : { defaultLocale }),
+    ...(blockMappings === undefined ? {} : { blockMappings }),
+    ...(contentFields === undefined ? {} : { contentFields }),
   });
 
   const translationSet = await contentApi.getTranslations(
@@ -112,8 +124,9 @@ export async function adaptContentItemWithContext(
  */
 export function contentItemToEmdashDocument(
   content: EmdashContentItem,
+  blockMappings?: CustomBlockMappings,
 ): EmdashDocument {
-  return adaptContentItem(content).document;
+  return adaptContentItem(content, { blockMappings }).document;
 }
 
 export function adaptContentItem(
@@ -122,6 +135,8 @@ export function adaptContentItem(
     route?: string;
     publicUrl?: string | null;
     defaultLocale?: string;
+    blockMappings?: CustomBlockMappings | undefined;
+    contentFields?: readonly string[];
   } = {},
 ): AdaptedContent {
   const route = options.route ?? deriveRoute(content);
@@ -141,7 +156,9 @@ export function adaptContentItem(
   if (typeof locale === "string" && locale.length > 0) {
     document.lang = locale;
   }
-  const body = extractPortableText(content.data);
+  const body = options.contentFields === undefined
+    ? extractPortableText(content.data, options.blockMappings)
+    : extractSelectedContent(content.data, options.contentFields, options.blockMappings);
   if (body !== null) {
     document.body = body.blocks;
     if (body.capabilities !== undefined) document.body_capabilities = body.capabilities;
@@ -181,9 +198,47 @@ function stringOrEmpty(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+type ExtractedBody = { blocks: PortableTextBlock[]; capabilities?: ("text" | "headings" | "paragraphs" | "links")[] };
+
+/** A selection asserts that the listed fields constitute the rendered body, in order. */
+function extractSelectedContent(data: Record<string, unknown>, fields: readonly string[], mappings?: CustomBlockMappings): ExtractedBody | null {
+  if (fields.length === 0 || new Set(fields).size !== fields.length || fields.some((field) => typeof field !== "string" || field.length === 0)) return null;
+  const all = ["text", "headings", "paragraphs", "links"] as const;
+  let capabilities: readonly (typeof all)[number][] = all;
+  const blocks: PortableTextBlock[] = [];
+  let observed = false;
+  for (const field of fields) {
+    const value = data[field];
+    if (value === undefined || value === null) continue;
+    observed = true;
+    const part = extractFirstPortableText({ content: value }, mappings);
+    if (part === null) return { blocks, capabilities: [] };
+    blocks.push(...part.blocks);
+    capabilities = capabilities.filter((capability) => part.capabilities === undefined || part.capabilities.includes(capability));
+  }
+  if (!observed) return null;
+  return capabilities.length === all.length ? { blocks } : { blocks, capabilities: [...capabilities] };
+}
+
 function extractPortableText(
   data: Record<string, unknown>,
-): { blocks: PortableTextBlock[]; capabilities?: ("text" | "headings" | "paragraphs" | "links")[] } | null {
+  mappings?: CustomBlockMappings,
+): ExtractedBody | null {
+  const result = extractFirstPortableText(data, mappings);
+  if (result === null) return null;
+  const candidates = Object.entries(data).filter(([field, value]) =>
+    isPortableTextArray(value) || isEmdashBlocksArray(value, field) ||
+    ((field === "body" || field === "content") && typeof value === "string" && value.trim().length > 0),
+  );
+  // Automatically selecting one field does not prove the others are rendered
+  // or irrelevant. Never present that projection as the complete document.
+  return candidates.length > 1 ? { blocks: result.blocks, capabilities: [] } : result;
+}
+
+function extractFirstPortableText(
+  data: Record<string, unknown>,
+  mappings?: CustomBlockMappings,
+): ExtractedBody | null {
   // Prefer established rich-text fields. EmDash's typed `blocks` field is a
   // separate composition format: its _type/_version/_key envelope does not
   // contain Portable Text's `children`, so passing it through loses the text.
@@ -192,7 +247,7 @@ function extractPortableText(
     const value = data[slug];
     if ((Array.isArray(value) && value.length === 0) || (typeof value === "string" && value.trim().length === 0)) foundEmptyBody = true;
     if (isPortableTextArray(value)) return { blocks: value };
-    if (isEmdashBlocksArray(value, slug)) return { blocks: blocksToPortableText(value), capabilities: [] };
+    if (isEmdashBlocksArray(value, slug)) return mapCustomBlocks(value, mappings);
     if (typeof value === "string" && value.trim().length > 0) {
       return { blocks: [portableTextBlock(value.trim(), `${slug}-text`)], capabilities: ["text"] };
     }
@@ -201,12 +256,12 @@ function extractPortableText(
   const blocks = data["blocks"];
   if (Array.isArray(blocks) && blocks.length === 0) foundEmptyBody = true;
   if (isPortableTextArray(blocks)) return { blocks };
-  if (isEmdashBlocksArray(blocks, "blocks")) return { blocks: blocksToPortableText(blocks), capabilities: [] };
+  if (isEmdashBlocksArray(blocks, "blocks")) return mapCustomBlocks(blocks, mappings);
 
   for (const [field, value] of Object.entries(data)) {
     if (field === "body" || field === "content" || field === "blocks") continue;
     if (isPortableTextArray(value)) return { blocks: value };
-    if (isEmdashBlocksArray(value, field)) return { blocks: blocksToPortableText(value), capabilities: [] };
+    if (isEmdashBlocksArray(value, field)) return mapCustomBlocks(value, mappings);
   }
   return foundEmptyBody ? { blocks: [] } : null;
 }
@@ -239,6 +294,60 @@ function isEmdashBlocksArray(
       typeof item["_key"] === "string" &&
       (typeof item["_version"] === "number" || field === "blocks"),
   );
+}
+
+/** A mapping is a host assertion that its ordered fields cover the rendered body.
+ * Unknown block types or malformed values fall back to unverified content. */
+function mapCustomBlocks(
+  blocks: Array<Record<string, unknown>>,
+  mappings: CustomBlockMappings | undefined,
+): { blocks: PortableTextBlock[]; capabilities?: [] } {
+  const unavailable = () => ({ blocks: blocksToPortableText(blocks), capabilities: [] as [] });
+  const result: PortableTextBlock[] = [];
+  const mapFields = (record: Record<string, unknown>, fields: readonly CustomBlockField[], depth: number): boolean => {
+    if (depth > 8 || fields.length === 0) return false;
+    for (const entry of fields) {
+      if (!entry || typeof entry.field !== "string" || !entry.field ||
+        !["heading", "paragraph", "richText", "link", "repeat"].includes(entry.kind)) return false;
+      if (entry.kind === "heading" && entry.level !== undefined && ![1, 2, 3, 4, 5, 6].includes(entry.level)) return false;
+      if (entry.kind === "link" && (typeof entry.hrefField !== "string" || !entry.hrefField)) return false;
+      if (entry.kind === "repeat" && (!Array.isArray(entry.fields) || entry.fields.length === 0)) return false;
+      const value = record[entry.field];
+      if ((value === undefined || value === null || value === "") && entry.optional) {
+        // Optional links must not silently discard a destination without its label.
+        if (entry.kind === "link" && record[entry.hrefField] != null && record[entry.hrefField] !== "") return false;
+        continue;
+      }
+      if (entry.kind === "richText") {
+        if (!Array.isArray(value) || (value.length > 0 && !isPortableTextArray(value))) return false;
+        result.push(...value);
+      } else if (entry.kind === "heading" || entry.kind === "paragraph") {
+        if (typeof value !== "string") return false;
+        result.push({ ...portableTextBlock(value, ""), style: entry.kind === "heading" ? `h${entry.level ?? 2}` : "normal" });
+      } else if (entry.kind === "link") {
+        const href = record[entry.hrefField];
+        if (typeof value !== "string" || typeof href !== "string" || !href) return false;
+        result.push({
+          _type: "block",
+          children: [{ _type: "span", text: value, marks: ["link"] }],
+          markDefs: [{ _key: "link", _type: "link", href }],
+        });
+      } else if (entry.kind === "repeat") {
+        if (!Array.isArray(value) || !Array.isArray(entry.fields)) return false;
+        for (const item of value) {
+          if (!isRecord(item) || !mapFields(item, entry.fields, depth + 1)) return false;
+        }
+      } else {
+        return false;
+      }
+    }
+    return true;
+  };
+  for (const block of blocks) {
+    const fields = mappings?.[String(block["_type"])];
+    if (!Array.isArray(fields) || !mapFields(block, fields, 0)) return unavailable();
+  }
+  return { blocks: result };
 }
 
 function blocksToPortableText(

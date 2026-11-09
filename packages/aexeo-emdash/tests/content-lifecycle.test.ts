@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { EmdashContentItem } from "../src/adapter.js";
 import {
+  CONFIG_URL_KEY,
+  SETTINGS_BLOCK_MAPPINGS_KEY,
+  SETTINGS_CONTENT_FIELDS_KEY,
+  SETTINGS_TOKEN_KEY,
+  handleAfterSave,
   documentKey,
   evaluateAndPersistAll,
   type EvaluatorFn,
@@ -227,5 +232,53 @@ describe("content:afterDelete", () => {
     await save(ctx, item("a", OLD), returning("A"));
     await handleAfterDelete({ id: "a", collection: "posts", permanent: true }, ctx);
     expect(store.has(documentKey("/a"))).toBe(true);
+  });
+});
+
+describe("custom block mappings", () => {
+  it("emits aggregate coverage without content or identifiers", async () => {
+    const content = item("private-id", NEW, "private title");
+    content.data.blocks = [{ _type: "unknown", _key: "one", _version: 1, body: "private text" }];
+    const { ctx } = host([content]);
+    const events: unknown[] = [];
+    ctx.log = { info: (message, data) => { if (message === "aexeo.content_coverage") events.push(data); }, warn: () => {}, error: () => {} };
+    await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator: returning() });
+    expect(events).toEqual([{ documents: 1, complete: 0, partial: 0, unavailable: 1 }]);
+    expect(JSON.stringify(events)).not.toContain("private");
+  });
+
+  it("forwards sandbox settings into the sidecar document", async () => {
+    const content = item("mapped-sandbox", NEW);
+    content.data.blocks = [{ _type: "hero", _key: "one", _version: 1, headline: "Mapped" }];
+    content.data.introduction = [{ _type: "block", children: [{ _type: "span", text: "Intro", marks: [] }] }];
+    const { ctx } = host([content]);
+    await ctx.kv.set(CONFIG_URL_KEY, "https://example.org");
+    ctx.settings = {
+      get: async <T>(key: string) => (key === SETTINGS_TOKEN_KEY ? "token" : key === SETTINGS_BLOCK_MAPPINGS_KEY ? JSON.stringify({ hero: [{ kind: "heading", field: "headline" }] }) : key === SETTINGS_CONTENT_FIELDS_KEY ? JSON.stringify({ pages: ["introduction", "blocks"] }) : null) as T | null,
+      set: async () => {},
+    };
+    let captured: unknown;
+    ctx.http = { fetch: async (_url, init) => {
+      captured = JSON.parse(init?.body ?? "{}");
+      return { status: 200, ok: true, text: async () => "[]" };
+    } };
+    await handleAfterSave({ content, collection: "pages", isNew: false }, ctx);
+    expect(captured).toMatchObject({ documents: [{ body: [{ children: [{ text: "Intro" }] }, { style: "h2", children: [{ text: "Mapped" }] }] }] });
+  });
+
+  it("uses the same mapping for afterSave and refresh", async () => {
+    const content = item("mapped", NEW);
+    content.data.blocks = [{ _type: "hero", _key: "one", _version: 1, headline: "Mapped" }];
+    const { ctx } = host([content]);
+    const seen: string[] = [];
+    const evaluator: EvaluatorFn = async (documents) => {
+      seen.push(documents[0]?.body?.[0]?.children[0]?.text ?? "missing");
+      expect(documents[0]?.body_capabilities).toBeUndefined();
+      return { ok: true, findings: [] };
+    };
+    const mappings = { hero: [{ kind: "heading" as const, field: "headline" }] };
+    await handleAfterSaveConfigured({ content, collection: "pages", isNew: false }, ctx, evaluator, undefined, mappings);
+    await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator, blockMappings: mappings });
+    expect(seen).toEqual(["Mapped", "Mapped"]);
   });
 });

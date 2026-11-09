@@ -5,6 +5,11 @@ import {
   CONFIG_URL_KEY,
   PLUGIN_SETTINGS_SCHEMA,
   SETTINGS_TOKEN_KEY,
+  SETTINGS_BLOCK_MAPPINGS_KEY,
+  SETTINGS_CONTENT_FIELDS_KEY,
+  readSandboxContentFields,
+  readSandboxBlockMappings,
+  type SandboxCtx,
   type KvNamespace,
   type PluginSettingsAccess,
   TokenStorageError,
@@ -214,7 +219,7 @@ describe("aexeoPluginSandboxed", () => {
     // `ctx.settings.set()` with have to be the same string, or the host
     // will not encrypt the write. Pin both sides.
     const descriptor = aexeoPluginSandboxed({ evaluatorHost: "evaluator.test" });
-    expect(Object.keys(descriptor.settingsSchema)).toEqual([SETTINGS_TOKEN_KEY]);
+    expect(Object.keys(descriptor.settingsSchema).sort()).toEqual([SETTINGS_BLOCK_MAPPINGS_KEY, SETTINGS_CONTENT_FIELDS_KEY, SETTINGS_TOKEN_KEY].sort());
     expect(PLUGIN_SETTINGS_SCHEMA[SETTINGS_TOKEN_KEY]?.type).toBe("secret");
   });
 });
@@ -402,5 +407,18 @@ describe("sidecar config storage", () => {
 
     h.settings.set(SETTINGS_TOKEN_KEY, "");
     expect(await readSidecarConfig(h.store)).toBeNull();
+  });
+});
+
+describe("sandbox custom block mappings", () => {
+  it("reads declared JSON and treats malformed settings as unavailable", async () => {
+    const mappings = { hero: [{ kind: "heading", field: "headline" }] };
+    const ctx = (value: unknown) => ({ settings: { get: async () => value } } as unknown as SandboxCtx);
+    expect(await readSandboxBlockMappings(ctx(JSON.stringify(mappings)))).toEqual(mappings);
+    expect(await readSandboxBlockMappings(ctx("{"))).toBeUndefined();
+    expect(await readSandboxBlockMappings(ctx("[]"))).toBeUndefined();
+    expect(await readSandboxBlockMappings(ctx(null))).toBeUndefined();
+    expect(await readSandboxContentFields(ctx(JSON.stringify({ pages: ["content", "sections"] })))).toEqual({ pages: ["content", "sections"] });
+    expect(await readSandboxContentFields(ctx(JSON.stringify({ pages: [] })))).toBeUndefined();
   });
 });

@@ -15,7 +15,50 @@ but content-preset gates that require body capabilities are reported as
 returns `content_preset_incomplete` for such a report, preserving its existing
 fail-closed behavior. This avoids treating unobserved headings, paragraphs or
 links as absent. An explicitly empty body
-is distinct from an unavailable body.
+is distinct from an unavailable body. When an entry has several candidate
+content fields, the default first-field projection remains unverified because
+it cannot establish which fields appear in the rendered page.
+
+For custom blocks in configured mode, declare the ordered rendered content
+fields for each block type in the plugin configuration:
+
+```js
+aexeoPlugin({
+  contentFieldsByCollection: { pages: ["introduction", "sections"] },
+  blockMappings: {
+    hero: [
+      { kind: "heading", field: "headline" },
+      { kind: "paragraph", field: "description", optional: true },
+      { kind: "link", field: "linkLabel", hrefField: "linkUrl", optional: true },
+      { kind: "richText", field: "body" },
+    ],
+    faq: [
+      { kind: "heading", field: "heading" },
+      { kind: "repeat", field: "faqs", fields: [
+        { kind: "heading", field: "question", level: 3 },
+        { kind: "paragraph", field: "answer" },
+      ] },
+    ],
+  },
+})
+```
+
+`contentFieldsByCollection` declares the body fields rendered by each selected
+collection, in order. It is an explicit assertion of completeness, so include
+all rendered fields; entries without any selected field remain unavailable.
+In sandboxed mode, enter this object in `Content fields by collection (JSON)`.
+
+A block mapping is the site's assertion that those fields cover the rendered content,
+in order. `richText` accepts Portable Text arrays and preserves their headings
+and links; `heading` defaults to h2 and accepts levels 1 through 6. `repeat`
+maps each item in an array;
+`optional: true` permits an absent field without inventing content. Every
+encountered block type must be
+mapped and every mapped field must have the expected type. If not, capabilities
+remain unverified. These options apply to configured-mode saves and both
+refresh routes. In sandboxed mode, enter the same JSON object in the plugin
+settings field `Custom block mappings (JSON)`; it applies to save and Refresh.
+Invalid or unavailable settings leave custom blocks unverified.
 
 Adapters supplying an `EmdashDocument` can set `body_capabilities` to a subset
 of `text`, `headings`, `paragraphs` and `links`. Omit it only when all four
