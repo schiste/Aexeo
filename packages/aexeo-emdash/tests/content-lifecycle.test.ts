@@ -311,9 +311,11 @@ describe("sitewide refresh coverage", () => {
   it("does not display legacy orphan or broken-link conclusions from CMS-only inputs", async () => {
     const { ctx, store } = host();
     store.set(findingsKey("/legacy"), { route: "/legacy", findings: [finding("/legacy", "LNK001"), finding("/legacy", "LNK002"), finding("/legacy", "LNK004"), finding("/legacy", "OTHER")] });
+    store.set(findingsKey("*"), { route: "*", findings: [{ ...finding("*", "LNK002"), scope: "sitewide" }] });
     expect((await readAllFindings(ctx.kv)).map((f) => f.rule_id)).toEqual(["OTHER"]);
     const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator: returning() });
     expect(payload.findings.map((f) => f.rule_id)).toEqual(["OTHER"]);
+    expect(payload.sitewideFindings).toEqual([]);
   });
   it("replaces old sitewide findings even when the new result is empty", async () => {
     const { ctx, store } = host();

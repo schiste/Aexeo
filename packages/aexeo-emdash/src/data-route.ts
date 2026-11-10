@@ -174,7 +174,8 @@ async function buildFindingsPayload(
     if (entry.value === null) continue;
     const route = entry.key.replace(/^findings:/, "");
     if (route === "*") {
-      sitewide.push(...entry.value.findings);
+      sitewide.push(...entry.value.findings.filter((finding) => isCmsObservableFinding(finding) &&
+        !(sitewideAssessment?.status === "error" && SITE_GRAPH_RULE_IDS.has(finding.rule_id))));
       continue;
     }
     let bucket = perRoute.get(route);
