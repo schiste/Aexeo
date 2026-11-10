@@ -1,6 +1,7 @@
 //! Keeps the content gate protocol examples consistent with their schemas and
 //! with each other: the example verdict must bind to the example change.
 
+use aexeo_contracts::content_gate_protocol::{CHANGE_SCHEMA, Change, VERDICT_SCHEMA, Verdict};
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -65,4 +66,45 @@ fn example_verdict_binds_exactly_to_the_example_change() {
             );
         }
     }
+}
+
+#[test]
+fn wire_types_round_trip_published_examples() {
+    let change = spec_file("examples/markdown-change.json");
+    let verdict = spec_file("examples/verdict-fail.json");
+    let parsed_change: Change = serde_json::from_value(change.clone()).unwrap();
+    let parsed_verdict: Verdict = serde_json::from_value(verdict.clone()).unwrap();
+    assert_eq!(parsed_change.schema, CHANGE_SCHEMA);
+    assert_eq!(parsed_verdict.schema, VERDICT_SCHEMA);
+    assert_eq!(serde_json::to_value(parsed_change).unwrap(), change);
+    assert_eq!(serde_json::to_value(parsed_verdict).unwrap(), verdict);
+}
+
+#[test]
+fn wire_types_ignore_unknown_fields_but_reject_unknown_statuses() {
+    let mut verdict = spec_file("examples/verdict-fail.json");
+    verdict["future_optional_field"] = serde_json::json!({"value": 42});
+    verdict["extensions"] = serde_json::json!({"example": {"enabled": true}});
+    let parsed: Verdict = serde_json::from_value(verdict.clone()).unwrap();
+    assert_eq!(parsed.extensions.unwrap()["example"]["enabled"], true);
+    verdict["status"] = "unknown".into();
+    assert!(serde_json::from_value::<Verdict>(verdict).is_err());
+}
+
+#[test]
+fn wire_types_reject_wrong_schema_and_missing_subject_digest() {
+    let mut change = spec_file("examples/markdown-change.json");
+    change["schema"] = "content-gate.change/v2".into();
+    assert!(serde_json::from_value::<Change>(change).is_err());
+    let mut verdict = spec_file("examples/verdict-fail.json");
+    verdict["schema"] = "content-gate.verdict/v2".into();
+    assert!(serde_json::from_value::<Verdict>(verdict.clone()).is_err());
+    verdict["schema"] = VERDICT_SCHEMA.into();
+    verdict["subject"]["entries"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("sha256");
+    assert!(serde_json::from_value::<Verdict>(verdict.clone()).is_err());
+    verdict["subject"]["entries"][0]["sha256"] = Value::Null;
+    assert!(serde_json::from_value::<Verdict>(verdict).is_ok());
 }
