@@ -1,4 +1,4 @@
-import type { ContentReport, ContentEvaluationTelemetry, ExtensionInput, ExternalGateResult } from "./content.js";
+import type { ContentReport, ContentEvaluationTelemetry, ExtensionInput, ExternalGateResult, LinkDestinationProjection, BoundLinkObservations } from "./content.js";
 import type { EvaluatorFn } from "./plugin.js";
 import type { EmdashDocument } from "./types.js";
 
@@ -18,6 +18,18 @@ export type ExternalGateProvider = (request: {
   collection: string | undefined;
 }) => Promise<ExternalGateResult[]>;
 
+/** Trusted host observer; it controls its own network policy and timeouts. */
+export type LinkObservationProvider = (request: {
+  destinations: readonly string[];
+  preset: string;
+  collection: string | undefined;
+}) => Promise<BoundLinkObservations["observations"]>;
+
+export interface LinkProviderTelemetry {
+  duration_ms: number;
+  status: "success" | "error" | "unavailable";
+}
+
 export interface ExternalGateTelemetry {
   duration_ms: number;
   status: "success" | "error";
@@ -27,10 +39,13 @@ export interface ExternalGateTelemetry {
 export function withContentPreset(
   base: EvaluatorFn,
   preset: ContentPresetOptions | undefined,
-  evaluate: (document: EmdashDocument, name: string, sources?: Record<string, string>, evidenceSources?: Record<string, string>, onTelemetry?: (event: ContentEvaluationTelemetry) => void, externalResults?: ExternalGateResult[]) => Promise<ContentReport>,
+  evaluate: (document: EmdashDocument, name: string, sources?: Record<string, string>, evidenceSources?: Record<string, string>, onTelemetry?: (event: ContentEvaluationTelemetry) => void, externalResults?: ExternalGateResult[], linkObservations?: BoundLinkObservations) => Promise<ContentReport>,
   provider?: ExternalGateProvider,
   project?: (document: EmdashDocument, evidenceSources?: Record<string, string>) => Promise<ExtensionInput>,
   onProviderTelemetry?: (event: ExternalGateTelemetry) => void,
+  linkProvider?: LinkObservationProvider,
+  projectLinks?: (document: EmdashDocument) => Promise<LinkDestinationProjection | null>,
+  onLinkProviderTelemetry?: (event: LinkProviderTelemetry) => void,
 ): EvaluatorFn {
   if (!preset) return base;
   return async (documents, context) => {
@@ -64,11 +79,37 @@ export function withContentPreset(
             }
           }
         }
-        const report = externalResults !== undefined
+        let report = externalResults !== undefined
           ? await evaluate(document, name, preset.sources, preset.evidenceSources, undefined, externalResults)
           : preset.evidenceSources === undefined
           ? await evaluate(document, name, preset.sources)
           : await evaluate(document, name, preset.sources, preset.evidenceSources);
+        // Do not invoke the host observer unless the resolved preset actually
+        // contains a reachability gate. Provider errors retain the initial report.
+        if (linkProvider && report.gates.some((gate) => gate.required_capability === "link_reachability")) {
+          const started = onLinkProviderTelemetry ? performance.now() : 0;
+          let status: LinkProviderTelemetry["status"] = "error";
+          try {
+            const projection = projectLinks ? await projectLinks(document) : null;
+            if (projection === null) {
+              status = "unavailable";
+            } else {
+              const observations = await linkProvider({ destinations: [...projection.destinations], preset: name, collection });
+              const valid = new Set(["reachable", "not_found", "not_checked", "not_applicable"]);
+              if (!Array.isArray(observations) || observations.length !== projection.destinations.length ||
+                  observations.some((value) => !valid.has(value))) throw new Error("invalid link observations");
+              report = await evaluate(document, name, preset.sources, preset.evidenceSources, undefined,
+                externalResults, { ...projection, observations });
+              status = "success";
+            }
+          } catch {
+            // The report already represents the missing capability as not checked.
+          } finally {
+            if (onLinkProviderTelemetry) {
+              try { onLinkProviderTelemetry({ duration_ms: performance.now() - started, status }); } catch { /* best effort */ }
+            }
+          }
+        }
         assessments[document.route] = {
           status: "evaluated",
           preset: name,

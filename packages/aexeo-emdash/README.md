@@ -186,5 +186,6 @@ MIT — see [LICENSE](./LICENSE).
 
 The optional content API can evaluate explicitly supplied link reachability
 observations without network access in WASM. See [content gate documentation](https://github.com/schiste/Aexeo/blob/main/docs/content-gates.md#emdash-host-observations) for snapshot binding,
-privacy and incomplete-coverage behavior. Configured save hooks do not invoke a
-link checker automatically.
+privacy and incomplete-coverage behavior. Configured save and refresh hooks invoke
+a host observer only when it is explicitly installed and the selected preset requests
+the gate. The host owns its network policy and request limits.
