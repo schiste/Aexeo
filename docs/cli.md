@@ -206,6 +206,9 @@ Options:
       --collection <collection>
           Load a complete JSON array of content items for collection gates
 
+      --collection-incomplete
+          Treat the supplied collection as incomplete and retain observed findings without certifying uniqueness
+
       --site-config <site-config>
           Existing site audit config file
 
