@@ -211,7 +211,10 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
   totals remain source-HTML observations, not proof of displayed links: dynamic
   rendering and CSS visibility still require separate evidence. Legacy rules can
   themselves count conditional markup before qualification and may emit no
-  finding at all; qualification cannot recover a finding that does not exist.
+  finding at all. The per-page `conditional_only_inbound` signal exposes
+  this uncertainty independently of legacy findings, including redirect credit
+  and excluding self-links. It is advisory, not an orphan determination;
+  older reports omit it rather than claiming it was checked.
 
 ## EmDash preview integration update
 
