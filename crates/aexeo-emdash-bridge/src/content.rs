@@ -692,6 +692,29 @@ mod tests {
     }
 
     #[test]
+    fn paragraph_only_sentences_skip_headings_and_require_paragraphs() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/t","title":"T","body":[{"style":"h2","children":[{"_type":"span","text":"A heading that exceeds limit"}]},{"children":[{"_type":"span","text":"A longer paragraph here."}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='s'\nkind='sentence_length'\nmax_words=3\nparagraphs_only=true\n").unwrap();
+        let full = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(full.gates[0].status, GateStatus::Failed);
+        assert_eq!(full.gates[0].measurements["sentence_count"], 1);
+        assert_eq!(full.gates[0].findings[0].line, 2);
+        assert_eq!(
+            source_locations(&document, &preset, &full)[0].block_index,
+            1
+        );
+        let partial = evaluate_content_with_body_capabilities(
+            &document,
+            &preset,
+            None,
+            [true, true, false, true],
+        )
+        .unwrap();
+        assert_eq!(partial.gates[0].status, GateStatus::NotChecked);
+        assert!(partial.gates[0].findings.is_empty());
+    }
+
+    #[test]
     fn markdown_and_portable_text_agree_on_blocks_code_and_wrapped_terms() {
         let source = "## Option `a`\n\n- one two three four\n- five six seven eight\n\nThe best\nprice `wins`\n";
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/t","title":"T","body":[

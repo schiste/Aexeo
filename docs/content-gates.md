@@ -461,6 +461,14 @@ blocking = false
 
 `delimiters` lists the characters that end a sentence and defaults to `.!?`. A decimal point between ASCII digits does not end one, and neither do Markdown hard breaks. Adapter block ends always do, so unpunctuated bullets, headings and table cells are measured separately. This is a heuristic, not linguistic segmentation. By default abbreviations end a sentence. Optionally set `abbreviations = ["Dr.", "M."]` to keep the period of an exact, case-sensitive, whitespace-delimited abbreviation inside a sentence. This also applies at a true sentence end, so choose exceptions for the content carefully; adapter block boundaries still end sentences. Multi-period abbreviations and words attached to opening punctuation are not recognized by this option. Languages without whitespace-separated words need tailored rules. Measurements report the limit, sentence count, longest sentence and `sentences_exceeding_limit`; absent text is `not_checked`.
 
+Set `paragraphs_only = true` on either sentence-length gate to measure only
+adapter-supplied paragraphs, excluding headings and other non-paragraph blocks.
+Each paragraph ends a sentence. This option requires the paragraphs capability;
+when unavailable the gate is `not_checked`, while an observed empty paragraph
+collection is assessed as empty. Markdown and EmDash provide paragraph positions
+when their projections are complete; plain text needs explicit paragraph mode.
+The default is `false`, preserving existing presets and text-wide behavior.
+
 Exceeding counts cover all measured items, including findings omitted by the output limit. When the required input is unavailable the count is absent, rather than zero. Opt-in CLI telemetry includes only aggregate `length_checks.measured_gates` and `length_checks.exceedances`, with no content or gate IDs. Exceedances count gate-item pairs, so an item checked by two gates can count twice; unavailable gates are excluded.
 
 ### Repeated terms

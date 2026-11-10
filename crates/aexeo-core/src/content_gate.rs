@@ -162,6 +162,9 @@ pub enum ContentGate {
         /// Exact whitespace-delimited abbreviations whose final period is not a boundary.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         abbreviations: Vec<String>,
+        /// Restrict sentence checks to adapter-provided paragraphs.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        paragraphs_only: bool,
     },
     /// Limits Unicode scalar values per heuristic sentence.
     SentenceCharacterLength {
@@ -175,6 +178,9 @@ pub enum ContentGate {
         delimiters: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         abbreviations: Vec<String>,
+        /// Restrict sentence checks to adapter-provided paragraphs.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        paragraphs_only: bool,
     },
     /// Limits exact occurrences of user-configured terms.
     RepeatedTerms {
@@ -402,6 +408,14 @@ impl ContentGate {
     }
     pub fn required_capability(&self) -> &'static str {
         match self {
+            Self::SentenceLength {
+                paragraphs_only: true,
+                ..
+            }
+            | Self::SentenceCharacterLength {
+                paragraphs_only: true,
+                ..
+            } => "paragraphs",
             Self::WordCount { .. }
             | Self::SentenceLength { .. }
             | Self::SentenceCharacterLength { .. }
@@ -1552,12 +1566,14 @@ impl ContentPreset {
                     max_words: limit,
                     delimiters,
                     abbreviations,
+                    paragraphs_only,
                     ..
                 }
                 | ContentGate::SentenceCharacterLength {
                     max_chars: limit,
                     delimiters,
                     abbreviations,
+                    paragraphs_only,
                     ..
                 } => {
                     let chars = matches!(gate, ContentGate::SentenceCharacterLength { .. });
@@ -1567,14 +1583,37 @@ impl ContentPreset {
                         ("max_words", "longest_sentence_words", "words")
                     };
                     measurements.insert(limit_key.into(), *limit);
-                    match &input.text {
-                        Some(text) => {
+                    let paragraphs = context.and_then(|context| context.paragraphs.as_ref());
+                    let available = if *paragraphs_only {
+                        paragraphs.is_some()
+                    } else {
+                        input.text.is_some()
+                    };
+                    if available {
+                        let mut sentence_count = 0;
+                        let mut longest = 0;
+                        let mut exceeding = 0;
+                        let segments = paragraphs
+                            .filter(|_| *paragraphs_only)
+                            .into_iter()
+                            .flatten()
+                            .map(|paragraph| {
+                                (
+                                    paragraph.text.as_str(),
+                                    paragraph.line,
+                                    paragraph.column,
+                                    &[][..],
+                                )
+                            })
+                            .chain(
+                                input
+                                    .text
+                                    .iter()
+                                    .filter(|_| !*paragraphs_only)
+                                    .map(|text| (text.as_str(), 1, 1, block_ends)),
+                            );
+                        for (text, mut line, mut column, segment_block_ends) in segments {
                             let mut segment_start = 0;
-                            let mut sentence_count = 0;
-                            let mut longest = 0;
-                            let mut exceeding = 0;
-                            let mut line = 1;
-                            let mut column = 1;
                             let mut first_position = None;
                             let mut next_block = 0;
                             for (offset, ch) in text
@@ -1601,10 +1640,13 @@ impl ContentPreset {
                                                 .iter()
                                                 .any(|abbr| abbr.strip_suffix('.') == Some(word))
                                         });
-                                while block_ends.get(next_block).is_some_and(|&end| end < offset) {
+                                while segment_block_ends
+                                    .get(next_block)
+                                    .is_some_and(|&end| end < offset)
+                                {
                                     next_block += 1;
                                 }
-                                let block_end = block_ends.get(next_block) == Some(&offset);
+                                let block_end = segment_block_ends.get(next_block) == Some(&offset);
                                 if block_end
                                     || !decimal_point
                                         && !abbreviation
@@ -1646,11 +1688,19 @@ impl ContentPreset {
                                     column += 1;
                                 }
                             }
-                            measurements.insert("sentence_count".into(), sentence_count);
-                            measurements.insert("sentences_exceeding_limit".into(), exceeding);
-                            measurements.insert(longest_key.into(), longest);
                         }
-                        None => reason = Some("text is unavailable from this adapter".into()),
+                        measurements.insert("sentence_count".into(), sentence_count);
+                        measurements.insert("sentences_exceeding_limit".into(), exceeding);
+                        measurements.insert(longest_key.into(), longest);
+                    } else {
+                        reason = Some(
+                            if *paragraphs_only {
+                                "paragraphs are unavailable from this adapter"
+                            } else {
+                                "text is unavailable from this adapter"
+                            }
+                            .into(),
+                        );
                     }
                 }
                 ContentGate::RepeatedTerms {
@@ -3112,6 +3162,46 @@ terms = ["bad"]
             .collect::<Vec<_>>();
         assert_eq!(positions, [(1, 3), (1, 7), (2, 3)]);
     }
+    #[test]
+    fn paragraph_only_sentence_checks_distinguish_unavailable_from_empty() {
+        for (kind, limit) in [
+            ("sentence_length", "max_words=2"),
+            ("sentence_character_length", "max_chars=5"),
+        ] {
+            let preset = ContentPreset::from_toml(&format!("version=1\nname='t'\n[[gates]]\nid='s'\nkind='{kind}'\n{limit}\nparagraphs_only=true\n")).unwrap();
+            assert_eq!(
+                serde_json::to_value(&preset.gates[0]).unwrap()["paragraphs_only"],
+                true
+            );
+            let default_preset = ContentPreset::from_toml(&format!(
+                "version=1\nname='t'\n[[gates]]\nid='s'\nkind='{kind}'\n{limit}\n"
+            ))
+            .unwrap();
+            assert!(
+                serde_json::to_value(&default_preset.gates[0])
+                    .unwrap()
+                    .get("paragraphs_only")
+                    .is_none()
+            );
+            let input = ContentInput {
+                text: Some("Long heading here".into()),
+                ..Default::default()
+            };
+            let missing = preset.evaluate(&input).unwrap();
+            assert_eq!(missing.gates[0].status, GateStatus::NotChecked);
+            assert_eq!(missing.gates[0].required_capability, "paragraphs");
+            let empty = ContentContext {
+                paragraphs: Some(vec![]),
+                ..Default::default()
+            };
+            let observed = preset
+                .evaluate_with_context(&input, None, None, Some(&empty))
+                .unwrap();
+            assert_eq!(observed.gates[0].status, GateStatus::Passed);
+            assert_eq!(observed.gates[0].measurements["sentence_count"], 0);
+        }
+    }
+
     #[test]
     fn paragraph_openings_report_coverage_and_bound_resource_use() {
         let preset = ContentPreset::from_toml(
