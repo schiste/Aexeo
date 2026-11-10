@@ -12,7 +12,7 @@ use serde_json::{Map, Value, json};
 
 use crate::commands::common::required_arg;
 
-fn metadata_hash(value: &Value) -> Result<String> {
+pub(super) fn metadata_hash(value: &Value) -> Result<String> {
     let object = value
         .as_object()
         .context("metadata must be an object of string fields")?;
@@ -34,6 +34,14 @@ fn metadata_hash(value: &Value) -> Result<String> {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect())
+}
+
+pub(super) fn text_hash(text: &[u8]) -> String {
+    digest(&SHA256, text)
+        .as_ref()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 fn build_note(
@@ -65,11 +73,7 @@ fn build_note(
     if !["passed", "failed", "not_checked"].contains(&status) {
         bail!("gate has invalid status");
     }
-    let hash = digest(&SHA256, text)
-        .as_ref()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>();
+    let hash = text_hash(text);
     let mut context = Map::new();
     for (argument, key) in [
         ("language", "language"),
@@ -89,11 +93,31 @@ fn build_note(
     let mut note = json!({"version":1,"kind":"reported_human_feedback","gate_id":gate,"example_id":example,
         "text_sha256":hash,"model_status":status,"human_status":args.get_one::<String>("human-status"),
         "reviewer":args.get_one::<String>("reviewer"),"method":args.get_one::<String>("method"),"reason":reason,"context":context});
-    if let Some(path) = args.get_one::<String>("metadata") {
-        let metadata: Value = serde_json::from_slice(&fs::read(path).context("reading metadata")?)
-            .context("parsing metadata")?;
-        note["metadata_sha256"] = json!(metadata_hash(&metadata)?);
+    let metadata_digest = args
+        .get_one::<String>("metadata")
+        .map(|path| -> Result<String> {
+            let metadata: Value =
+                serde_json::from_slice(&fs::read(path).context("reading metadata")?)
+                    .context("parsing metadata")?;
+            metadata_hash(&metadata)
+        })
+        .transpose()?;
+    if let Some(digest) = &metadata_digest {
+        note["metadata_sha256"] = json!(digest);
     }
+    let binding = match report.get("input_fingerprint") {
+        None => "unverified",
+        Some(fingerprint) => {
+            if fingerprint.get("version").and_then(Value::as_u64) != Some(1)
+                || fingerprint.get("text_sha256").and_then(Value::as_str) != Some(hash.as_str())
+                || fingerprint.get("metadata_sha256") != Some(&json!(metadata_digest))
+            {
+                bail!("report input fingerprint does not match the text and metadata");
+            }
+            "verified"
+        }
+    };
+    note["report_binding"] = json!(binding);
     Ok(note)
 }
 
@@ -245,6 +269,12 @@ fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
         bail!("invalid model status");
     }
     let mut event = json!({"example_id":note["example_id"],"text_sha256":hash,"model_status":model,"reviewer_status":status,"reviewer":note["reviewer"],"method":note["method"]});
+    if let Some(binding) = note.get("report_binding") {
+        if !["verified", "unverified"].contains(&binding.as_str().unwrap_or("")) {
+            bail!("invalid report binding");
+        }
+        event["report_binding"] = binding.clone();
+    }
     if let Some(metadata_digest) = metadata_digest {
         event["metadata_sha256"] = json!(metadata_digest);
     }

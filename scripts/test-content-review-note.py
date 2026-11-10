@@ -27,7 +27,20 @@ class FeedbackTests(unittest.TestCase):
         note["reason"] = "private justification"
         exported = module.export_review(self.corpus, note)
         self.assertEqual(exported["events"][0]["reviewer_status"], "passed")
+        self.assertEqual(exported["events"][0]["report_binding"], "unverified")
         self.assertNotIn("private justification", json.dumps(exported))
+
+    def test_report_fingerprint_rejects_stale_inputs_and_marks_legacy(self):
+        self.assertEqual(module.capture(self.text, self.report, "length", "e1")["report_binding"], "unverified")
+        self.report["input_fingerprint"] = {"version": 1, "text_sha256": hashlib.sha256(self.text.encode()).hexdigest(), "metadata_sha256": None}
+        self.assertEqual(module.capture(self.text, self.report, "length", "e1")["report_binding"], "verified")
+        with self.assertRaisesRegex(ValueError, "fingerprint"):
+            module.capture(self.text + "changed", self.report, "length", "e1")
+        with self.assertRaisesRegex(ValueError, "fingerprint"):
+            module.capture(self.text, self.report, "length", "e1", metadata={"lang": "fr"})
+        del self.report["input_fingerprint"]["metadata_sha256"]
+        with self.assertRaisesRegex(ValueError, "fingerprint"):
+            module.capture(self.text, self.report, "length", "e1")
 
     def test_metadata_is_bound_without_being_recorded(self):
         metadata = {"titre": "Été", "lang": "fr"}

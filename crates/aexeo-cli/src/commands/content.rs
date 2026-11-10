@@ -207,6 +207,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     };
     let input_load_ms = input_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
     let adapter_started = measuring.then(std::time::Instant::now);
+    let source_complete = input_limit.is_none();
     let mut context = input_limit.map(|limit| ContentContext {
         input_limit: Some(limit),
         ..Default::default()
@@ -461,6 +462,17 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     }
     if args.get_one::<String>("format").map(String::as_str) == Some("json") {
         let mut output = serde_json::to_value(&report)?;
+        if let Some(source) = input.source_text.as_ref().filter(|_| source_complete) {
+            let text_sha256 = super::feedback::text_hash(source.as_bytes());
+            let metadata_sha256 = input
+                .metadata
+                .as_ref()
+                .map(|metadata| super::feedback::metadata_hash(&serde_json::to_value(metadata)?))
+                .transpose()?;
+            output["input_fingerprint"] = serde_json::json!({
+                "version": 1, "text_sha256": text_sha256, "metadata_sha256": metadata_sha256
+            });
+        }
         if source_map.is_some() {
             output["source_locations"] = serde_json::to_value(&source_locations)?;
         }

@@ -218,7 +218,9 @@ class EvaluateTests(unittest.TestCase):
         def event(item, model, reviewer):
             return {"example_id": item["id"], "text_sha256": hashlib.sha256(item["text"].encode()).hexdigest(), "model_status": model, "reviewer_status": reviewer, "reviewer": "editor", "method": "manual"}
         log = {"version": 1, "gate_id": "g", "events": [event(items[0], "failed", "passed"), event(items[1], "not_checked", "failed"), event(items[2], "passed", "passed")]}
+        log["events"][0]["report_binding"] = "verified"
         result = eval_module.aggregate_review_events(corpus, "holdout", log)
+        self.assertEqual(result["report_binding_counts"], {"verified": 1, "unverified": 2})
         self.assertEqual(result["counts"], {"agreed": 1, "overrides_to_pass": 1, "overrides_to_fail": 0, "resolved_unchecked": 1})
         self.assertEqual(result["override_rate"], 0.5)
         self.assertNotIn("editor", json.dumps(result))

@@ -100,6 +100,7 @@ def aggregate_review_events(corpus, split, review_log):
     by_id = {item["id"]: item for item in corpus["examples"]}
     seen = set()
     counts = {"agreed": 0, "overrides_to_pass": 0, "overrides_to_fail": 0, "resolved_unchecked": 0}
+    binding_counts = {"verified": 0, "unverified": 0}
     for event in review_log["events"]:
         identifier = event["example_id"]
         if identifier not in by_id or identifier in seen:
@@ -119,8 +120,12 @@ def aggregate_review_events(corpus, split, review_log):
             raise ValueError("invalid review event status")
         if any(not isinstance(event.get(key), str) or not event[key].strip() for key in ("reviewer", "method")):
             raise ValueError("review event requires reviewer and method provenance")
+        binding = event.get("report_binding", "unverified")
+        if not isinstance(binding, str) or binding not in binding_counts:
+            raise ValueError("invalid report binding")
         if item["split"] != split:
             continue
+        binding_counts[binding] += 1
         if model == "not_checked":
             counts["resolved_unchecked"] += 1
         elif model == reviewer:
@@ -128,7 +133,7 @@ def aggregate_review_events(corpus, split, review_log):
         else:
             counts["overrides_to_pass" if reviewer == "passed" else "overrides_to_fail"] += 1
     decisions = counts["agreed"] + counts["overrides_to_pass"] + counts["overrides_to_fail"]
-    return {"events": sum(counts.values()), "counts": counts,
+    return {"events": sum(counts.values()), "counts": counts, "report_binding_counts": binding_counts,
             "override_rate": (counts["overrides_to_pass"] + counts["overrides_to_fail"]) / decisions if decisions else None}
 
 

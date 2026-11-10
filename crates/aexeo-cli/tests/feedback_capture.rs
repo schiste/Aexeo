@@ -245,3 +245,76 @@ fn export_telemetry_is_private_and_existing_output_is_preserved() {
     assert_eq!(run().status.code(), Some(2));
     assert_eq!(fs::read(output).unwrap(), bytes);
 }
+
+#[test]
+fn capture_checks_report_against_original_markdown_and_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = dir.path().join("article.md");
+    let metadata = dir.path().join("metadata.json");
+    let report = dir.path().join("report.json");
+    fs::write(&text, "# Titre\r\n\r\nTexte privé.\r\n").unwrap();
+    fs::write(&metadata, r#"{"lang":"fr"}"#).unwrap();
+    let evaluated = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .arg("content")
+        .arg(&text)
+        .args([
+            "--input-format",
+            "markdown",
+            "--preset",
+            "article",
+            "--format",
+            "json",
+            "--metadata",
+        ])
+        .arg(&metadata)
+        .output()
+        .unwrap();
+    assert!(
+        evaluated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&evaluated.stderr)
+    );
+    fs::write(&report, &evaluated.stdout).unwrap();
+    let report_json: serde_json::Value = serde_json::from_slice(&evaluated.stdout).unwrap();
+    assert_eq!(report_json["input_fingerprint"]["version"], 1);
+    assert!(!String::from_utf8_lossy(&evaluated.stdout).contains("Texte privé"));
+    let capture = |output: &std::path::Path| {
+        Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args(["feedback-capture", "--text"])
+            .arg(&text)
+            .arg("--report")
+            .arg(&report)
+            .arg("--metadata")
+            .arg(&metadata)
+            .args([
+                "--gate",
+                "content.minimum_words",
+                "--example",
+                "e",
+                "--output",
+            ])
+            .arg(output)
+            .output()
+            .unwrap()
+    };
+    let note = dir.path().join("note.json");
+    let result = capture(&note);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let note_json: serde_json::Value = serde_json::from_slice(&fs::read(note).unwrap()).unwrap();
+    assert_eq!(note_json["report_binding"], "verified");
+    fs::write(&text, "# Autre texte\n").unwrap();
+    assert_eq!(
+        capture(&dir.path().join("stale-text")).status.code(),
+        Some(2)
+    );
+    fs::write(&text, "# Titre\r\n\r\nTexte privé.\r\n").unwrap();
+    fs::write(&metadata, r#"{"lang":"en"}"#).unwrap();
+    assert_eq!(
+        capture(&dir.path().join("stale-metadata")).status.code(),
+        Some(2)
+    );
+}

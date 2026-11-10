@@ -161,3 +161,16 @@ exclude. Telemetry is local and explicitly enabled by default, contains no raw
 content or identifiers, and never transmits automatically. Any future export
 must be configurable, documented, and independently controllable; establish
 retention, consent and redaction before enabling it.
+
+### Feedback input matching
+
+CLI JSON reports for complete local text include `input_fingerprint`: a SHA-256
+of the original UTF-8 source and a hash of the string metadata map, if supplied.
+Feedback capture compares both against the submitted inputs, rejecting mismatches.
+Reports without the field remain accepted and are marked `report_binding: unverified`;
+matching reports are marked `verified`. Export retains this distinction, and
+review-log aggregates report both counts. Existing aggregate override rates still
+include historical unverified events for compatibility. This check detects stale
+inputs, not tampering: reports are unsigned, and matching does not establish the
+policy, collection, evidence, site context, or reviewer independence. Truncated
+or unavailable inputs do not receive a fingerprint.

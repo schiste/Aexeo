@@ -42,6 +42,16 @@ def capture(text, report, gate_id, example_id, human_status=None, reviewer=None,
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         note["metadata_sha256"] = module.metadata_hash(metadata)
+    fingerprint = report.get("input_fingerprint")
+    if "input_fingerprint" not in report:
+        note["report_binding"] = "unverified"
+    elif (not isinstance(fingerprint, dict) or type(fingerprint.get("version")) is not int or fingerprint.get("version") != 1
+          or fingerprint.get("text_sha256") != note["text_sha256"]
+          or "metadata_sha256" not in fingerprint
+          or fingerprint["metadata_sha256"] != note.get("metadata_sha256")):
+        raise ValueError("report input fingerprint does not match the text and metadata")
+    else:
+        note["report_binding"] = "verified"
     return note
 
 
@@ -64,6 +74,10 @@ def export_review(corpus, note):
              "reviewer": note["reviewer"], "method": note["method"]}
     if "metadata_sha256" in note:
         event["metadata_sha256"] = note["metadata_sha256"]
+    if "report_binding" in note:
+        if note["report_binding"] not in {"verified", "unverified"}:
+            raise ValueError("invalid report binding")
+        event["report_binding"] = note["report_binding"]
     log = {"version": 1, "gate_id": corpus["gate_id"], "events": [event]}
     module.aggregate_review_events(corpus, "development", log)
     return log
