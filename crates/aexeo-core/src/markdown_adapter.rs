@@ -321,6 +321,63 @@ pub fn markdown_input_with_source_map_and_destinations(
     })
 }
 
+/// Map only byte-identical text at the edges of a parser text node. When a
+/// node contains escapes or entities, stop at their delimiters: matching bytes
+/// inside an encoded character do not establish an exact source position.
+fn map_text_spans(
+    raw: &str,
+    value: &str,
+    source_start: usize,
+    projected_start: usize,
+    spans: &mut Vec<(usize, usize, usize)>,
+) {
+    if raw == value {
+        if !value.is_empty() {
+            spans.push((projected_start, projected_start + value.len(), source_start));
+        }
+        return;
+    }
+    let mut prefix = 0;
+    for (source, projected) in raw.chars().zip(value.chars()) {
+        if source != projected || matches!(source, '&' | '\\') {
+            break;
+        }
+        prefix += source.len_utf8();
+    }
+    if prefix > 0 {
+        spans.push((projected_start, projected_start + prefix, source_start));
+    }
+
+    // Ignore the last escape or entity and everything before it. In
+    // particular, the final character of an entity is not a literal suffix.
+    let suffix_floor = raw.rfind(['&', '\\']).map_or(0, |index| {
+        let tail = &raw[index + 1..];
+        if raw.as_bytes()[index] == b'&' {
+            tail.find(';').map_or(raw.len(), |end| index + 2 + end)
+        } else {
+            tail.chars()
+                .next()
+                .map_or(raw.len(), |ch| index + 1 + ch.len_utf8())
+        }
+    });
+    let raw_tail = &raw[prefix.max(suffix_floor)..];
+    let value_tail = &value[prefix..];
+    let mut suffix = 0;
+    for (source, projected) in raw_tail.chars().rev().zip(value_tail.chars().rev()) {
+        if source != projected {
+            break;
+        }
+        suffix += source.len_utf8();
+    }
+    if suffix > 0 {
+        spans.push((
+            projected_start + value.len() - suffix,
+            projected_start + value.len(),
+            source_start + raw.len() - suffix,
+        ));
+    }
+}
+
 #[derive(Default)]
 struct Projection {
     text: String,
@@ -346,8 +403,8 @@ impl Projection {
                 self.text.push_str(&item.value);
                 if let Some(pos) = item.position.as_ref().filter(|_| source_map.enabled) {
                     let (a, b) = (pos.start.offset, pos.end.offset);
-                    if source.get(a..b) == Some(item.value.as_str()) {
-                        source_map.spans.push((start, self.text.len(), a));
+                    if let Some(raw) = source.get(a..b) {
+                        map_text_spans(raw, &item.value, a, start, &mut source_map.spans);
                     }
                 }
             }
@@ -507,6 +564,21 @@ mod tests {
         assert_eq!(map.source_position(source, &text, 2, 3), Some((6, 4)));
         assert_eq!(map.source_position(source, &text, 3, 9), None);
         assert_eq!(map.source_position(source, &text, 0, 1), None);
+    }
+
+    #[test]
+    fn maps_unchanged_edges_around_entities_and_escapes() {
+        let source = "Avant &amp; après élan.\n\nDébut \\*fin\\*.\n\nAvant &#59; après.\n";
+        let (input, _, _, map) = markdown_input_with_source_map("t.md", source).unwrap();
+        let text = input.text.unwrap();
+        assert_eq!(text, "Avant & après élan.\nDébut *fin*.\nAvant ; après.\n");
+        assert_eq!(map.source_position(source, &text, 1, 1), Some((1, 1)));
+        assert_eq!(map.source_position(source, &text, 1, 7), None);
+        assert_eq!(map.source_position(source, &text, 1, 9), Some((1, 13)));
+        assert_eq!(map.source_position(source, &text, 2, 1), Some((3, 1)));
+        assert_eq!(map.source_position(source, &text, 2, 7), None);
+        assert_eq!(map.source_position(source, &text, 3, 7), None);
+        assert_eq!(map.source_position(source, &text, 3, 9), Some((5, 13)));
     }
 
     #[test]

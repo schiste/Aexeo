@@ -511,6 +511,8 @@ coordinates in extracted prose. The additive `source_locations` array supplies
 original-file coordinates for exact, untransformed text spans, indexed by
 `gate_id` and zero-based `finding_index`. An absent entry means no reliable
 source position was found; escaped or transformed Markdown may be unmappable.
+Unchanged text at the edges of a transformed text node can still be mapped;
+the mapping does not claim positions inside encoded entities or escapes.
 These locations apply to positional prose gates and to `link_destinations`,
 `heading_length` and `duplicate_headings` findings, not metadata, site or
 collection findings. Soft-wrapped text maps directly only where the wrapped
