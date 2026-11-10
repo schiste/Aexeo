@@ -23,12 +23,14 @@ import type {
   SiteIntelligenceScore,
 } from "./types.js";
 import type {
+  DocumentAssessment,
   EvaluatorFn,
   KvNamespace,
   RefreshSummary,
   SandboxCtx,
 } from "./plugin.js";
 import {
+  SITE_GRAPH_RULE_IDS,
   evaluateAndPersistAll,
   readAllDocuments,
   readAssessment,
@@ -271,16 +273,18 @@ export async function readAllFindings(kv: KvNamespace): Promise<FindingRow[]> {
   // emdash's kv.list returns parsed values inline, so we don't need a
   // second get-per-key pass — both the route key and the stored
   // {route, findings} payload come back in one call.
-  const entries = await kv.list<{ route: string; findings: Finding[] }>(
+  const entries = await kv.list<{ route: string; findings: Finding[]; assessment?: DocumentAssessment }>(
     "findings:",
   );
   const out: FindingRow[] = [];
+  const incomplete = entries.find((entry) => entry.key === "findings:*")?.value?.assessment?.status === "error";
   for (const entry of entries) {
     if (entry.value === null) {
       continue;
     }
     const route = entry.key.replace(/^findings:/, "");
     for (const finding of entry.value.findings) {
+      if (incomplete && SITE_GRAPH_RULE_IDS.has(finding.rule_id)) continue;
       out.push({ ...finding, document_route: route });
     }
   }
@@ -309,6 +313,7 @@ export async function renderFindingsPage(
   tuning: AdminViewTuning,
 ): Promise<BlockResponse> {
   const findings = await readAllFindings(kv);
+  const sitewideAssessment = await readAssessment(kv, "*");
   const errors = findings.filter((finding) => finding.severity === "error");
   const warnings = findings.filter(
     (finding) => finding.severity === "warning",
@@ -325,6 +330,7 @@ export async function renderFindingsPage(
           : `${findings.length} findings across ${routes.length} routes — ${errors.length} errors, ${warnings.length} warnings.`,
     },
     { type: "context", text: "Rendered page markup and generated metadata are not checked here. Audit the built site for page-level findings." },
+    ...(sitewideAssessment?.status === "error" ? [{ type: "context", text: `Sitewide checks unavailable: ${sitewideAssessment.reason}. ${sitewideAssessment.detail}` }] : []),
     { type: "divider" },
     {
       type: "actions",
@@ -484,7 +490,8 @@ export async function renderDocumentPanel(
       ],
     };
   }
-  const findings = await readFindings(kv, route);
+  const incomplete = (await readAssessment(kv, "*"))?.status === "error";
+  const findings = (await readFindings(kv, route)).filter((finding) => !incomplete || !SITE_GRAPH_RULE_IDS.has(finding.rule_id));
   const assessment = await readAssessment(kv, route);
   const errors = findings.filter((finding) => finding.severity === "error");
   const warnings = findings.filter(
@@ -502,6 +509,7 @@ export async function renderDocumentPanel(
             : `${findings.length} findings — ${errors.length} errors, ${warnings.length} warnings.`,
       },
       { type: "context", text: "Rendered page markup and generated metadata are not checked here. Audit the built site for page-level findings." },
+      ...(incomplete ? [{ type: "context", text: "Sitewide and cross-document checks are unavailable; refresh after resolving the CMS input error." }] : []),
       ...(assessment?.status === "error" ? [{ type: "context", text: `Evaluation failed: ${assessment.reason}. Findings are unavailable for this revision.` }] : []),
       ...(assessment?.status === "evaluated" ? assessment.gates.filter((gate) => gate.status === "not_checked").map((gate) => ({ type: "context", text: `${gate.gate_id} not checked: ${gate.reason ?? "required input unavailable"}` })) : []),
       ...(findings.length === 0

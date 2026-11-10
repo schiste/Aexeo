@@ -169,6 +169,10 @@ export function Findings(): React.JSX.Element {
         </div>
       )}
 
+      {payload.sitewideAssessment?.status === "error" && (
+        <p className="rounded border border-kumo-line p-3 text-sm">Sitewide checks unavailable: {payload.sitewideAssessment.reason}. {payload.sitewideAssessment.detail}</p>
+      )}
+
       {payload.sitewideFindings.length > 0 && (
         <section className="rounded border border-kumo-line p-3">
           <h2 className="text-sm font-medium">Sitewide</h2>

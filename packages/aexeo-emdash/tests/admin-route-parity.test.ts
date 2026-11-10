@@ -416,7 +416,8 @@ describe("Refresh applies suppressions on every path", () => {
       (block) => (block as { type?: string }).type === "table",
     ) as { rows: Array<{ rule: string }> } | undefined;
     expect(table?.rows.map((row) => row.rule)).toEqual(["RULE_KEEP"]);
-    expect(response.toast?.type).toBe("success");
+    // The fixture has no body; a partial sitewide evaluation is not a full success.
+    expect(response.toast?.type).toBe("info");
   });
 
   it("agrees with the React /refresh route on the same suppressions", async () => {
