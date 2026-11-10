@@ -52,4 +52,48 @@ describe("conservative EmDash link inventory", () => {
     expect(JSON.stringify(result)).not.toContain("private backend error");
     await expect(exportLinkInventory({ list, getPublicUrl }, { collections: [], identity: null })).rejects.toThrow();
   });
+
+  it("bounds concurrent URL lookups, retains classification order and accounts for failures", async () => {
+    const list = vi.fn(async () => ({ items: [item("a"), item("b"), item("c"), item("d")], hasMore: false }));
+    let active = 0;
+    let peak = 0;
+    const pending = new Map<string, () => void>();
+    const getPublicUrl = vi.fn(async (_collection: string, id: string) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise<void>((resolve) => pending.set(id, resolve));
+      active -= 1;
+      if (id === "c") throw new Error("private backend error");
+      return `https://example.org/${id}`;
+    });
+    const classify = vi.fn((_entry: EmdashContentItem, _url: string) => ({ disposition: "published" as const }));
+    const onTelemetry = vi.fn();
+    const resultPromise = exportLinkInventory({ list, getPublicUrl }, {
+      collections: ["posts"], identity: null, urlResolutionConcurrency: 2, classify, onTelemetry,
+    });
+    await vi.waitFor(() => expect(pending.size).toBe(2));
+    pending.get("b")!();
+    await vi.waitFor(() => expect(pending.has("c")).toBe(true));
+    pending.get("c")!();
+    await vi.waitFor(() => expect(pending.has("d")).toBe(true));
+    pending.get("d")!();
+    pending.get("a")!();
+    const result = await resultPromise;
+    expect(peak).toBe(2);
+    expect(classify.mock.calls.map(([entry]) => entry.id)).toEqual(["a", "b", "d"]);
+    expect(result.inventory.pages.map((page) => page.url)).toEqual([
+      "https://example.org/a", "https://example.org/b", "https://example.org/d",
+    ]);
+    expect(result.scanned).toBe(4);
+    expect(result.omitted).toBe(1);
+    expect(result.issues).toContain("url_resolution_failed");
+    expect(JSON.stringify(result)).not.toContain("private backend error");
+    expect(onTelemetry).toHaveBeenCalledOnce();
+  });
+
+  it.each([0, -1, 1.5, 101, Infinity])("rejects invalid URL lookup concurrency %s", async (urlResolutionConcurrency) => {
+    await expect(exportLinkInventory({ list: vi.fn(), getPublicUrl: vi.fn() }, {
+      collections: ["posts"], identity: null, urlResolutionConcurrency,
+    })).rejects.toThrow("urlResolutionConcurrency");
+  });
 });

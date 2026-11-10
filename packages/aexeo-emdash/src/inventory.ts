@@ -43,6 +43,8 @@ export async function exportLinkInventory(
     collections: readonly string[];
     identity: LinkInventoryIdentity | null;
     maxPagesPerCollection?: number;
+    /** Maximum simultaneous public URL resolutions, from 1 to 100 (default 8). */
+    urlResolutionConcurrency?: number;
     /** Optional aggregate-only local telemetry; no URLs or content are included. */
     onTelemetry?: (event: { event: "link_inventory_export"; elapsed_ms: number; scanned: number; omitted: number; page_count: number; issue_count: number }) => void;
     classify?: (item: EmdashContentItem, url: string) => {
@@ -60,6 +62,10 @@ export async function exportLinkInventory(
   if (!Number.isSafeInteger(limit) || limit < 1) {
     throw new Error("maxPagesPerCollection must be a positive integer");
   }
+  const concurrency = options.urlResolutionConcurrency ?? 8;
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1 || concurrency > 100) {
+    throw new Error("urlResolutionConcurrency must be an integer between 1 and 100");
+  }
   const pages: LinkInventoryPage[] = [];
   const issues = new Set<string>(["transactional_snapshot_unavailable"]);
   let scanned = 0;
@@ -75,16 +81,30 @@ export async function exportLinkInventory(
         issues.add("collection_read_failed");
         break;
       }
-      for (const item of batch.items) {
+      // Resolve concurrently without changing classification order or allowing an
+      // unbounded number of CMS requests. A failed item does not abort a batch.
+      const urls: ({ url: string | null } | { error: true })[] = new Array(batch.items.length);
+      let next = 0;
+      await Promise.all(Array.from({ length: Math.min(concurrency, batch.items.length) }, async () => {
+        for (;;) {
+          const index = next++;
+          if (index >= batch.items.length) return;
+          try {
+            urls[index] = { url: await content.getPublicUrl(collection, batch.items[index]!.id) };
+          } catch {
+            urls[index] = { error: true };
+          }
+        }
+      }));
+      for (const [index, item] of batch.items.entries()) {
         scanned += 1;
-        let url: string | null;
-        try {
-          url = await content.getPublicUrl(collection, item.id);
-        } catch {
+        const resolution = urls[index]!;
+        if ("error" in resolution) {
           issues.add("url_resolution_failed");
           omitted += 1;
           continue;
         }
+        const url = resolution.url;
         if (!url) {
           issues.add("entry_without_public_url");
           omitted += 1;
