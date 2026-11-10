@@ -191,6 +191,20 @@ mode="strict"
   assert.equal(host.store.get("document:/mapped").document.description, "Fallback");
 }
 
+// A partially projected body does not abort the preset or later documents.
+{
+  const mixed = item("partial", { data: { content: [block("a", "Before"), { _type: "askYourAi", _key: "ai" }, block("b", "After")] } });
+  const complete = item("complete", { data: { content: [block("a", "Some content")] } });
+  const host = fakeHost([mixed, complete]);
+  const configured = createPlugin({ contentPreset: { name: "article", collections: ["pages"] }, contentFieldsByCollection: { pages: ["content"] } });
+  await configured.routes.refresh.handler(host.ctx);
+  const partial = host.store.get("findings:/partial");
+  const good = host.store.get("findings:/complete");
+  assert.ok(partial?.assessment?.gates.some((gate) => gate.status === "not_checked"));
+  assert.ok(good?.assessment?.gates.some((gate) => gate.status === "passed"));
+  assert.equal(host.logged.length, 0, `incomplete gates are not errors: ${host.logged.join("; ")}`);
+}
+
 // --- A save must not erase what Refresh found --------------------------------
 
 // Every site-graph rule is triggered on /subject by a Refresh, so each must
