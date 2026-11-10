@@ -1,0 +1,3 @@
+version=1
+name="article trial"
+extends=["article-quality","natural-style-en","writing-patterns"]

@@ -1,0 +1,3 @@
+version=1
+name="glossary trial"
+extends=["glossary-quality","natural-style-fr","writing-patterns"]
