@@ -68,6 +68,9 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
   JSON destinations, with non-public egress protection and aggregate telemetry.
   This advisory command is separate from content presets and does not establish
   destination safety, source reliability or long-term availability.
+- [x] Optional blank-line-separated plain-text adapter exposes paragraph and
+  block boundaries with original source lines, bounded paragraph count and
+  explicit `not_checked` on overflow; the default raw-text mode is unchanged.
 - [x] Composable advisory reachability gate in the core and Markdown CLI; network
   checks require explicit opt-in, and partial observations remain `not_checked`.
 - [x] EmDash direct content API accepts snapshot-bound, explicitly supplied link

@@ -766,6 +766,14 @@ fn paragraph_count_checks_bounds_and_unavailable_input() {
             Some(3),
         ),
         ("text", "First.\n\nSecond.", 2, "not_checked", None),
+        (
+            "paragraph-text",
+            "First.\r\n\r\nSecond.",
+            0,
+            "passed",
+            Some(2),
+        ),
+        ("paragraph-text", " \n\t\r\n", 1, "failed", Some(0)),
     ] {
         let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
             .args([
@@ -806,6 +814,51 @@ fn paragraph_count_checks_bounds_and_unavailable_input() {
         );
         assert!(aexeo_core::content_gate::ContentPreset::from_toml(&invalid).is_err());
     }
+}
+
+#[test]
+fn paragraph_text_reports_original_location_and_withholds_overflow() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    std::fs::write(&preset, "version=1\nname='Paragraphs'\n[[gates]]\nid='length'\nkind='paragraph_length'\nmax_words=2\n").unwrap();
+    let source = format!("custom={}", preset.display());
+    let run = |input: &str| {
+        let file = dir.path().join("draft.txt");
+        std::fs::write(&file, input).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                file.to_str().unwrap(),
+                "--input-format",
+                "paragraph-text",
+                "--preset",
+                "custom",
+                "--preset-source",
+                &source,
+                "--format",
+                "json",
+            ])
+            .output()
+            .unwrap();
+        (
+            output.status.code(),
+            serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(),
+        )
+    };
+    let (code, report) = run("Élan\r\n\r\nOne two three\r\n");
+    assert_eq!(code, Some(1));
+    assert_eq!(report["gates"][0]["findings"][0]["line"], 3);
+    assert_eq!(report["gates"][0]["findings"][0]["column"], 1);
+    let (code, report) = run(&"x\n\n".repeat(100_001));
+    assert_eq!(code, Some(2));
+    assert_eq!(report["gates"][0]["status"], "not_checked");
+    assert!(
+        report["gates"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("paragraph limit")
+    );
+    assert!(report.get("input_fingerprint").is_none());
 }
 
 #[test]

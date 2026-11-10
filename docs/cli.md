@@ -230,10 +230,10 @@ Options:
           [possible values: http, playwright]
 
       --input-format <input-format>
-          Interpret content as raw text or Markdown
+          Interpret content as raw text, blank-line-separated paragraphs, or Markdown
 
           [default: text]
-          [possible values: text, markdown]
+          [possible values: text, paragraph-text, markdown]
 
       --telemetry
           Write local evaluation timing and aggregate counts as JSON to stderr

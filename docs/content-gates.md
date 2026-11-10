@@ -4,6 +4,15 @@ See [architecture and compatibility](content-architecture.md) for adapter bounda
 
 The content evaluator runs locally without a network or model. It can include the existing site audit through a site gate. It does not assess source support or factual correctness. A report records each gate as `passed`, `failed`, or `not_checked`; the last means an adapter could not supply a required capability.
 
+For plain prose with blank lines separating paragraphs, use
+`aexeo-cli content draft.txt --input-format paragraph-text --preset article-readable`.
+LF and CRLF lines containing only whitespace separate paragraphs; soft-wrapped
+lines stay together and locations refer to the original text. This interpretation
+does not identify headings, links or other markup. The default `text` mode is
+unchanged and does not claim paragraph structure. To bound memory, more than
+100,000 paragraphs withhold the text input and affected gates report
+`not_checked`; the usual input byte limit also applies.
+
 ```sh
 aexeo-cli content article.md --input-format markdown --preset article --format json
 printf 'Draft text' | aexeo-cli content - --preset glossary
