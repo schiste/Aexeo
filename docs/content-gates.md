@@ -149,7 +149,7 @@ blocking = false
 term = "example"
 ```
 
-A Rust host implements `ContentGateExtensions` and calls `evaluate_with_extensions`, providing diagnostics in projected-text coordinates. The engine supplies each finding's rule ID and severity from the preset. Returning `None`, or running in an adapter that has no extension host, reports `not_checked`. Extension code executes in the host process and must be trusted; the preset is data and cannot execute a program by itself. CLI and direct EmDash callers may supply external results explicitly; configured EmDash hosts can install a runtime provider as described in the [installation guide](../packages/aexeo-emdash/INSTALL.md). The sandbox worker does not load providers. Built-in gates remain portable across these adapters.
+A Rust host implements `ContentGateExtensions` and calls `evaluate_with_extensions`, providing diagnostics in projected-text coordinates. The engine supplies each finding's rule ID and severity from the preset. Returning `None`, or running in an adapter that has no extension host, reports `not_checked`. Extension code executes in the host process and must be trusted; the preset is data and cannot execute a program by itself. CLI and direct EmDash callers may supply external results explicitly; configured EmDash hosts can install a runtime provider as described in the [installation guide](../packages/aexeo-emdash/INSTALL.md). The sandbox worker can call an explicitly configured [service binding](../packages/aexeo-crawl-worker/README.md). Built-in gates remain portable across these adapters.
 
 ### Explicit external extension results
 
