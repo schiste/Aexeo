@@ -55,6 +55,9 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [x] Configurable paragraph-length gate with Markdown and EmDash adapter
   capabilities ([PR #33](https://github.com/schiste/Aexeo/pull/33)).
 - [x] Configurable link-count gate for Markdown and EmDash ([PR #35](https://github.com/schiste/Aexeo/pull/35)); this does not validate destinations.
+- [x] Literal matching streams occurrences instead of retaining all offsets; claim
+  anchors also respect known block boundaries. Counts still include occurrences
+  beyond the finding limit. This does not verify factual support.
 - [x] Configurable exact repeated-term check, with whole-word and substring modes
   ([PR #38](https://github.com/schiste/Aexeo/pull/38)).
 - [x] Offline link destination syntax and configurable scheme validation; this does not check reachability or link safety ([PR #46](https://github.com/schiste/Aexeo/pull/46)).
