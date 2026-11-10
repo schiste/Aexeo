@@ -20,6 +20,74 @@ pub trait ConfinedContentFiles {
     fn open(&mut self, root: &Path, relative: &Path) -> io::Result<Self::Reader>;
 }
 
+/// Linux directory-capability provider backed by the atomic `openat2` lookup.
+/// The caller chooses the trusted root, and change documents cannot replace it.
+/// The kernel must support `openat2`; unsupported kernels fail closed.
+#[cfg(target_os = "linux")]
+pub struct LinuxConfinedContentFiles {
+    root_path: std::path::PathBuf,
+    root: std::fs::File,
+}
+
+#[cfg(target_os = "linux")]
+impl LinuxConfinedContentFiles {
+    pub fn new(root: &Path) -> io::Result<Self> {
+        if !root.is_absolute() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "content root must be absolute",
+            ));
+        }
+        let directory = std::fs::File::open(root)?;
+        if !directory.metadata()?.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "content root must be a directory",
+            ));
+        }
+        Ok(Self {
+            root_path: root.to_path_buf(),
+            root: directory,
+        })
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl ConfinedContentFiles for LinuxConfinedContentFiles {
+    type Reader = std::fs::File;
+
+    fn open(&mut self, root: &Path, relative: &Path) -> io::Result<Self::Reader> {
+        use rustix::fs::{Mode, OFlags, ResolveFlags, openat2};
+        use std::path::Component;
+
+        if root != self.root_path
+            || relative.as_os_str().is_empty()
+            || !relative
+                .components()
+                .all(|part| matches!(part, Component::Normal(_)))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "unapproved content root or path",
+            ));
+        }
+        let file = std::fs::File::from(openat2(
+            &self.root,
+            relative,
+            OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NONBLOCK,
+            Mode::empty(),
+            ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
+        )?);
+        if !file.metadata()?.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "content is not a regular file",
+            ));
+        }
+        Ok(file)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceError {
     InvalidChange,
@@ -137,6 +205,65 @@ mod tests {
                 {"entity_id": "deleted", "operation": "delete", "media_type": "text/plain"}
             ]
         })).unwrap()
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_provider_refuses_escape_symlinks_and_non_files() {
+        use std::{fs, os::unix::fs::symlink};
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("posts")).unwrap();
+        fs::write(root.path().join("posts/article.md"), "inside").unwrap();
+        fs::write(outside.path().join("secret"), "outside").unwrap();
+        symlink(outside.path(), root.path().join("linked-dir")).unwrap();
+        symlink(
+            outside.path().join("secret"),
+            root.path().join("linked-file"),
+        )
+        .unwrap();
+        let mut provider = LinuxConfinedContentFiles::new(root.path()).unwrap();
+        let mut text = String::new();
+        provider
+            .open(root.path(), Path::new("posts/article.md"))
+            .unwrap()
+            .read_to_string(&mut text)
+            .unwrap();
+        assert_eq!(text, "inside");
+        for path in [
+            "../secret",
+            "linked-dir/secret",
+            "linked-file",
+            "posts",
+            "/etc/passwd",
+        ] {
+            assert!(
+                provider.open(root.path(), Path::new(path)).is_err(),
+                "{path}"
+            );
+        }
+        assert!(provider.open(outside.path(), Path::new("secret")).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_provider_pins_root_when_path_is_replaced() {
+        use std::fs;
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("root");
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("article"), "original").unwrap();
+        let mut provider = LinuxConfinedContentFiles::new(&root).unwrap();
+        fs::rename(&root, parent.path().join("old")).unwrap();
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("article"), "replacement").unwrap();
+        let mut text = String::new();
+        provider
+            .open(&root, Path::new("article"))
+            .unwrap()
+            .read_to_string(&mut text)
+            .unwrap();
+        assert_eq!(text, "original");
     }
 
     #[test]
