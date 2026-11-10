@@ -96,6 +96,30 @@ fn repeated_paragraph_openings_are_advisory_and_located() {
 }
 
 #[test]
+fn repeated_openings_with_unassessable_paragraphs_preserve_findings() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("review.toml");
+    let draft = dir.path().join("draft.md");
+    fs::write(&preset, "version=1\nname='Review'\n[[gates]]\nid='openings'\nkind='repeated_paragraph_openings'\nopening_words=2\nmax_occurrences=1\nblocking=false\n").unwrap();
+    fs::write(
+        &draft,
+        "The team reviews.\n\nThe team responds.\n\n中文文章沒有空格。\n",
+    )
+    .unwrap();
+    let report = evaluate(&draft, &format!("review={}", preset.display()));
+    assert_eq!(status(&report, "openings"), "not_checked");
+    assert_eq!(report["gates"][0]["measurements"]["openings_skipped"], 1);
+    assert_eq!(report["gates"][0]["findings"].as_array().unwrap().len(), 1);
+    assert!(
+        report["source_locations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|location| location["gate_id"] == "openings" && location["line"] == 3)
+    );
+}
+
+#[test]
 fn external_extension_results_are_bound_to_the_projected_input_and_parameters() {
     let dir = tempfile::tempdir().unwrap();
     let preset = dir.path().join("preset.toml");
