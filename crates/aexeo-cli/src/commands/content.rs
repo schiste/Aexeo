@@ -370,102 +370,24 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     // Keep the established projected finding coordinates unchanged. Supply
     // separately indexed source coordinates for positional prose and link gates.
     let mut source_locations = Vec::new();
-    if let (Some(map), Some(source), Some(projected)) = (
+    if let (Some(map), Some(source), Some(_projected)) = (
         source_map.as_ref(),
         input.source_text.as_deref(),
         input.text.as_deref(),
     ) {
         for (gate, result) in preset.gates.iter().zip(&report.gates) {
-            if let ContentGate::LinkDestinations {
-                allowed_schemes,
-                allow_relative,
-                ..
-            } = gate
-                && let Some(values) = destinations.as_deref()
-            {
-                let indices: Vec<_> = values
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, value)| {
-                        (!aexeo_core::content_gate::valid_link_destination(
-                            value,
-                            allowed_schemes,
-                            *allow_relative,
-                        ))
-                        .then_some(index)
-                    })
-                    .collect();
-                positional_findings += result.findings.len();
-                if indices.len() == result.total_findings() {
-                    for (finding_index, index) in
-                        indices.into_iter().take(result.findings.len()).enumerate()
-                    {
-                        if let Some((line, column)) = map.link_source_position(source, index) {
-                            source_locations.push(SourceLocation {
-                                gate_id: &result.gate_id,
-                                finding_index,
-                                line,
-                                column,
-                            });
-                        }
-                    }
-                }
-            } else if matches!(gate, ContentGate::LinkReachability { .. })
-                && let Some(observations) = link_observations.as_deref()
-            {
-                use aexeo_core::content_gate::LinkReachabilityObservation;
-                let indices = observations
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, observation)| {
-                        (*observation == LinkReachabilityObservation::NotFound).then_some(index)
-                    });
-                positional_findings += result.findings.len();
-                for (finding_index, index) in indices.take(result.findings.len()).enumerate() {
-                    if let Some((line, column)) = map.link_source_position(source, index) {
-                        source_locations.push(SourceLocation {
-                            gate_id: &result.gate_id,
-                            finding_index,
-                            line,
-                            column,
-                        });
-                    }
-                }
-            } else if let Some(headings) = input.headings.as_deref()
-                && let Some(indices) =
-                    aexeo_core::content_gate::heading_finding_indices(gate, headings)
-            {
-                positional_findings += result.findings.len();
-                if indices.len() == result.total_findings() {
-                    for (finding_index, index) in
-                        indices.into_iter().take(result.findings.len()).enumerate()
-                    {
-                        if let Some((line, column)) = map.heading_source_position(source, index) {
-                            source_locations.push(SourceLocation {
-                                gate_id: &result.gate_id,
-                                finding_index,
-                                line,
-                                column,
-                            });
-                        }
-                    }
-                }
-            } else if matches!(
+            if let Some(positions) = aexeo_core::markdown_adapter::gate_source_positions(
+                map,
+                source,
+                &input,
                 gate,
-                ContentGate::Custom { .. }
-                    | ContentGate::ForbiddenTerms { .. }
-                    | ContentGate::RepeatedTerms { .. }
-                    | ContentGate::SentenceLength { .. }
-                    | ContentGate::SentenceCharacterLength { .. }
-                    | ContentGate::ParagraphLength { .. }
-                    | ContentGate::RepeatedParagraphOpenings { .. }
-                    | ContentGate::ParagraphCharacterLength { .. }
+                result,
+                destinations.as_deref(),
+                link_observations.as_deref(),
             ) {
-                for (finding_index, finding) in result.findings.iter().enumerate() {
-                    positional_findings += 1;
-                    if let Some((line, column)) =
-                        map.source_position(source, projected, finding.line, finding.column)
-                    {
+                positional_findings += positions.len();
+                for (finding_index, position) in positions.into_iter().enumerate() {
+                    if let Some((line, column)) = position {
                         source_locations.push(SourceLocation {
                             gate_id: &result.gate_id,
                             finding_index,
@@ -477,6 +399,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             }
         }
     }
+
     if let Some(started) = mapping_started {
         let mapping = source_map.as_ref().map(|_| {
             (

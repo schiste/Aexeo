@@ -233,6 +233,10 @@ The CLI validates known change fields, timestamps and URIs before evaluation,
 including optional fields explicitly set to null, and accepts unknown fields for
 forward compatibility. It does not use a generic JSON Schema validator; runners
 remain responsible for validating their inputs and enforcing section 5.
+Markdown finding locations refer to the original source when an exact mapping is
+available; unmappable or non-positional findings omit `location`. Plain-text
+prose locations refer directly to the original text.
+
 Inline Markdown and plain text are supported. On Linux and macOS, file sources
 require an explicit `--content-root` matching the change's absolute
 `content_root`. The kernel must enforce `openat2` on Linux or
