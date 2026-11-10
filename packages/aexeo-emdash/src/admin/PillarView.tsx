@@ -193,7 +193,7 @@ export function PillarView({
                 <SeverityBadge severity={finding.severity} />
                 <code className="font-mono text-xs">{finding.rule_id}</code>
                 <span className="flex-1">{finding.message}</span>
-                {finding.layers?.secondaries.length ? (
+                {finding.layers?.secondaries?.length ? (
                   <SecondariesChips layers={finding.layers.secondaries} />
                 ) : null}
               </li>
@@ -238,7 +238,7 @@ export function PillarView({
                     </td>
                     <td className="px-3 py-2 align-top">{finding.message}</td>
                     <td className="px-3 py-2 align-top">
-                      {finding.layers?.secondaries.length ? (
+                      {finding.layers?.secondaries?.length ? (
                         <SecondariesChips layers={finding.layers.secondaries} />
                       ) : (
                         <span className="text-xs text-kumo-subtle">—</span>
