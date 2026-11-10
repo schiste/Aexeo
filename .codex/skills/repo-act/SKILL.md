@@ -25,6 +25,8 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - After focused validation, run `sh scripts/clippy-strict.sh` for Rust changes.
   The CI applies extra lint rules beyond ordinary `cargo clippy -- -D warnings`;
   passing the latter alone does not validate the repository policy.
+- For WASM bridge interface changes, synchronize the plugin and crawl-worker
+  glue declarations and run `npm run check:dts --prefix packages/aexeo-crawl-worker`.
 - Re-run other lint/build checks after the focused validation passes.
 - Document any override-based maintainer note that affected the change plan.
 
