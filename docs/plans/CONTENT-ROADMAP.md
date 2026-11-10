@@ -27,6 +27,9 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [x] CI benchmarks and conservative budgets for evaluation, Markdown adaptation,
   50-item batches and fresh-process CLI runs, with p50/p95 telemetry. Fresh
   processes do not imply cold operating-system caches.
+- [x] Measure EmDash projection separately from projection plus evaluation on a
+  synthetic 500-block snapshot, with local aggregate p50/p95 and CI budgets.
+  These measurements exclude JSON parsing, WASM startup and network latency.
 - [x] Single-parse Markdown link validation and a p50/p95 comparison against the
   two-parse baseline ([PR #47](https://github.com/schiste/Aexeo/pull/47)).
 - [x] Opt-in per-gate timing telemetry for local content and crawls in resolved preset
