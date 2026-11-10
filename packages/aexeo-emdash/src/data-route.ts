@@ -1,3 +1,4 @@
+import { isCmsObservableFinding } from "./cms-coverage.js";
 import type { CustomBlockMappings } from "./adapter.js";
 // Data route for the React admin findings page.
 //
@@ -182,7 +183,7 @@ async function buildFindingsPayload(
       perRoute.set(route, bucket);
     }
     for (const finding of entry.value.findings) {
-      if (sitewideAssessment?.status === "error" && SITE_GRAPH_RULE_IDS.has(finding.rule_id)) continue;
+      if (!isCmsObservableFinding(finding) || (sitewideAssessment?.status === "error" && SITE_GRAPH_RULE_IDS.has(finding.rule_id))) continue;
       bucket.findings.push(finding);
       if (finding.severity === "error") bucket.errors += 1;
       else if (finding.severity === "warning") bucket.warnings += 1;

@@ -1,3 +1,4 @@
+import { isCmsObservableFinding } from "./cms-coverage.js";
 import type { CustomBlockMappings } from "./adapter.js";
 // Shared Block Kit view layer for both plugin entrypoints.
 //
@@ -284,7 +285,7 @@ export async function readAllFindings(kv: KvNamespace): Promise<FindingRow[]> {
     }
     const route = entry.key.replace(/^findings:/, "");
     for (const finding of entry.value.findings) {
-      if (incomplete && SITE_GRAPH_RULE_IDS.has(finding.rule_id)) continue;
+      if (!isCmsObservableFinding(finding) || (incomplete && SITE_GRAPH_RULE_IDS.has(finding.rule_id))) continue;
       out.push({ ...finding, document_route: route });
     }
   }
@@ -329,7 +330,7 @@ export async function renderFindingsPage(
           ? "No findings yet — click Refresh to evaluate CMS records."
           : `${findings.length} findings across ${routes.length} routes — ${errors.length} errors, ${warnings.length} warnings.`,
     },
-    { type: "context", text: "Rendered page markup and generated metadata are not checked here. Audit the built site for page-level findings." },
+    { type: "context", text: "Rendered page markup, generated metadata and sitewide link inventory are not checked here. Audit the built site for page-level and link findings." },
     ...(sitewideAssessment?.status === "error" ? [{ type: "context", text: `Sitewide checks unavailable: ${sitewideAssessment.reason}. ${sitewideAssessment.detail}` }] : []),
     { type: "divider" },
     {
@@ -491,7 +492,7 @@ export async function renderDocumentPanel(
     };
   }
   const incomplete = (await readAssessment(kv, "*"))?.status === "error";
-  const findings = (await readFindings(kv, route)).filter((finding) => !incomplete || !SITE_GRAPH_RULE_IDS.has(finding.rule_id));
+  const findings = (await readFindings(kv, route)).filter((finding) => isCmsObservableFinding(finding) && (!incomplete || !SITE_GRAPH_RULE_IDS.has(finding.rule_id)));
   const assessment = await readAssessment(kv, route);
   const errors = findings.filter((finding) => finding.severity === "error");
   const warnings = findings.filter(
@@ -508,7 +509,7 @@ export async function renderDocumentPanel(
             ? `No findings for ${route} from the available CMS checks.`
             : `${findings.length} findings — ${errors.length} errors, ${warnings.length} warnings.`,
       },
-      { type: "context", text: "Rendered page markup and generated metadata are not checked here. Audit the built site for page-level findings." },
+      { type: "context", text: "Rendered page markup, generated metadata and sitewide link inventory are not checked here. Audit the built site for page-level and link findings." },
       ...(incomplete ? [{ type: "context", text: "Sitewide and cross-document checks are unavailable; refresh after resolving the CMS input error." }] : []),
       ...(assessment?.status === "error" ? [{ type: "context", text: `Evaluation failed: ${assessment.reason}. Findings are unavailable for this revision.` }] : []),
       ...(assessment?.status === "evaluated" ? assessment.gates.filter((gate) => gate.status === "not_checked").map((gate) => ({ type: "context", text: `${gate.gate_id} not checked: ${gate.reason ?? "required input unavailable"}` })) : []),

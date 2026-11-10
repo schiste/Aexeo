@@ -18,5 +18,10 @@ describe("CMS observation boundaries", () => {
     expect(isCmsObservableFinding(finding("SEO004"), true)).toBe(false);
     expect(isCmsObservableFinding(finding("GEO008"), true)).toBe(false);
     expect(isCmsObservableFinding(finding("editorial.custom"), false)).toBe(true);
+    for (const rule of ["LNK001", "LNK002", "LNK004"]) {
+      expect(isCmsObservableFinding(finding(rule), true)).toBe(false);
+    }
+    expect(isCmsObservableFinding(finding("LNK003"), true)).toBe(true);
+    expect(isCmsObservableFinding(finding("LNK003"), false)).toBe(false);
   });
 });

@@ -308,6 +308,13 @@ describe("assessment persistence", () => {
 describe("sitewide refresh coverage", () => {
   const sweep = (ctx: SandboxCtx, evaluator: EvaluatorFn) => evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator });
   const globalFinding = { ...finding("*", "GLOBAL"), scope: "sitewide" as const };
+  it("does not display legacy orphan or broken-link conclusions from CMS-only inputs", async () => {
+    const { ctx, store } = host();
+    store.set(findingsKey("/legacy"), { route: "/legacy", findings: [finding("/legacy", "LNK001"), finding("/legacy", "LNK002"), finding("/legacy", "LNK004"), finding("/legacy", "OTHER")] });
+    expect((await readAllFindings(ctx.kv)).map((f) => f.rule_id)).toEqual(["OTHER"]);
+    const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator: returning() });
+    expect(payload.findings.map((f) => f.rule_id)).toEqual(["OTHER"]);
+  });
   it("replaces old sitewide findings even when the new result is empty", async () => {
     const { ctx, store } = host();
     store.set(findingsKey("*"), { route: "*", findings: [globalFinding] });
@@ -317,11 +324,11 @@ describe("sitewide refresh coverage", () => {
   it("exposes a failed refresh and hides stale cross-document results in every view", async () => {
     const { ctx, store } = host([item("a", OLD)]);
     store.set(findingsKey("*"), { route: "*", findings: [globalFinding] });
-    store.set(findingsKey("/stale"), { route: "/stale", findings: [finding("/stale", "LNK002"), finding("/stale", "OTHER")] });
+    store.set(findingsKey("/stale"), { route: "/stale", findings: [finding("/stale", "CNT005"), finding("/stale", "OTHER")] });
     await sweep(ctx, async () => ({ ok: false, reason: "network_error", detail: "not reachable" }));
     expect(store.get(findingsKey("*"))).toMatchObject({ findings: [], assessment: { status: "error", reason: "network_error" } });
     expect((await readAllFindings(ctx.kv)).map((f) => f.rule_id)).toEqual(["OTHER"]);
-    expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/stale"))).not.toContain("LNK002");
+    expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/stale"))).not.toContain("CNT005");
     expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/stale"))).toContain("cross-document checks are unavailable");
     expect(JSON.stringify(await renderFindingsPage(ctx.kv, { emptyFindingsText: "empty", emptyScoreText: "empty", refreshFailureVariant: "error", score: async () => null, truthLabel: () => "" }))).toContain("Sitewide checks unavailable");
     const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator: returning() });
@@ -356,13 +363,13 @@ describe("sitewide refresh coverage", () => {
   it("suppresses cross-document conclusions when any body is unavailable and restores them on complete input", async () => {
     const partial = item("a", OLD);
     const { ctx, store } = host([partial]);
-    const evaluator: EvaluatorFn = async () => ({ ok: true, findings: [globalFinding, finding("/a", "LNK002"), finding("/a", "OTHER")] });
+    const evaluator: EvaluatorFn = async () => ({ ok: true, findings: [globalFinding, finding("/a", "CNT005"), finding("/a", "OTHER")] });
     await sweep(ctx, evaluator);
     expect(rulesAt(store, "/a")).toEqual(["OTHER"]);
     expect(store.get(findingsKey("*"))).toMatchObject({ findings: [], assessment: { reason: "body_incomplete" } });
     partial.data.content = [];
     await sweep(ctx, evaluator);
-    expect(rulesAt(store, "/a")).toEqual(["LNK002", "OTHER"]);
+    expect(rulesAt(store, "/a")).toEqual(["CNT005", "OTHER"]);
     expect(rulesAt(store, "*")).toEqual(["GLOBAL"]);
     expect((store.get(findingsKey("*")) as { assessment?: unknown }).assessment).toBeUndefined();
   });

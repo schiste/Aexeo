@@ -84,6 +84,8 @@ views and `sitewideAssessment` in the findings API. `aexeo.sitewide_coverage`
 logs only an aggregate status. A complete CMS listing is not proof that the
 CMS inventory matches a rendered site or represents an atomic snapshot;
 concurrent edits and refreshes are not isolated by the host's KV interface.
+CMS-only evaluation does not assert that links are broken or pages are orphans;
+use a rendered-site audit with matched inventory and coverage evidence.
 
 For custom blocks in configured mode, declare the ordered rendered content
 fields for each block type in the plugin configuration:
