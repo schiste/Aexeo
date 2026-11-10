@@ -263,7 +263,7 @@ function extractFirstPortableText(
     if ((Array.isArray(value) && value.length === 0) || (typeof value === "string" && value.trim().length === 0)) foundEmptyBody = true;
     if (isPortableTextArray(value)) return { blocks: value };
     if (isMixedPortableTextArray(value)) return mapMixedPortableText(value, mappings);
-    if (isEmdashBlocksArray(value, slug)) return mapCustomBlocks(value, mappings);
+    if (isEmdashBlocksArray(value, slug)) return mapMixedPortableText(value, mappings);
     if (typeof value === "string" && value.trim().length > 0) {
       return { blocks: [portableTextBlock(value.trim(), `${slug}-text`)], capabilities: ["text"] };
     }
@@ -273,13 +273,13 @@ function extractFirstPortableText(
   if (Array.isArray(blocks) && blocks.length === 0) foundEmptyBody = true;
   if (isPortableTextArray(blocks)) return { blocks };
   if (isMixedPortableTextArray(blocks)) return mapMixedPortableText(blocks, mappings);
-  if (isEmdashBlocksArray(blocks, "blocks")) return mapCustomBlocks(blocks, mappings);
+  if (isEmdashBlocksArray(blocks, "blocks")) return mapMixedPortableText(blocks, mappings);
 
   for (const [field, value] of Object.entries(data)) {
     if (field === "body" || field === "content" || field === "blocks") continue;
     if (isPortableTextArray(value)) return { blocks: value };
     if (isMixedPortableTextArray(value)) return mapMixedPortableText(value, mappings);
-    if (isEmdashBlocksArray(value, field)) return mapCustomBlocks(value, mappings);
+    if (isEmdashBlocksArray(value, field)) return mapMixedPortableText(value, mappings);
   }
   return foundEmptyBody ? { blocks: [] } : null;
 }
@@ -337,7 +337,7 @@ function isEmdashBlocksArray(
       isRecord(item) &&
       typeof item["_type"] === "string" &&
       typeof item["_key"] === "string" &&
-      (typeof item["_version"] === "number" || field === "blocks"),
+      (typeof item["_version"] === "number" || field === "blocks" || field === "body" || field === "content"),
   );
 }
 
@@ -370,7 +370,7 @@ function mapCustomBlocks(
         if (!Array.isArray(value)) return false;
         if (value.length === 0 || isPortableTextArray(value)) {
           result.push(...value);
-        } else if (isMixedPortableTextArray(value)) {
+        } else if (isMixedPortableTextArray(value) || isEmdashBlocksArray(value, "blocks")) {
           const nested = mapMixedPortableText(value, mappings, depth + 1);
           result.push(...nested.blocks);
           if (nested.capabilities !== undefined) complete = false;
