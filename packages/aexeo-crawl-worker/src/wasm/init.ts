@@ -28,5 +28,6 @@ export function ensureInitialized(): void {
 }
 
 export const evaluateContent = glue.evaluateContent;
+export const projectContentInput = glue.projectContentInput;
 export const evaluateDocuments = glue.evaluateDocuments;
 export const scoreIntelligence = glue.scoreIntelligence;
