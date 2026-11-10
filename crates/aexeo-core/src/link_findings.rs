@@ -30,6 +30,8 @@ pub enum LegacyLinkConclusion {
     /// The page answered as a verified inventory alias of another URL, so its
     /// own incoming links say nothing about the content it stands for.
     InventoryAlias,
+    /// Conditional or historical unclassified inbound markup makes the result uncertain.
+    ConditionalInbound,
     /// Coverage does not support a conclusion about this page's incoming links.
     NotEligible,
     /// The report holds no page for the finding's path, such as a page without
@@ -56,10 +58,11 @@ pub struct LegacyLinkFinding {
 }
 
 impl LegacyLinkConclusion {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Confirmed,
         Self::InboundObserved,
         Self::InventoryAlias,
+        Self::ConditionalInbound,
         Self::NotEligible,
         Self::NotInReport,
     ];
@@ -75,6 +78,7 @@ impl LegacyLinkConclusion {
             Self::Confirmed => "confirmed",
             Self::InboundObserved => "inbound_observed",
             Self::InventoryAlias => "inventory_alias",
+            Self::ConditionalInbound => "conditional_inbound",
             Self::NotEligible => "not_eligible",
             Self::NotInReport => "not_in_report",
         }
@@ -163,7 +167,8 @@ fn qualify(
     let Some(page) = page else {
         return result;
     };
-    result.source_pages_by_context = other_sources_by_context(page, report);
+    let (contexts, mut conditional, mut nonconditional) = other_sources_by_context(page, report);
+    result.source_pages_by_context = contexts;
     result.via_redirect_source_pages = page
         .via_redirect
         .as_ref()
@@ -173,16 +178,23 @@ fn qualify(
             .source_pages_by_context
             .keys()
             .all(|context| is_structural(*context));
-    let inbound =
-        !result.source_pages_by_context.is_empty() || result.via_redirect_source_pages > 0;
+    if let Some(credit) = &page.via_redirect {
+        conditional |= credit
+            .conditional_source_pages
+            .unwrap_or(credit.distinct_source_pages)
+            > 0;
+        nonconditional |= credit.nonconditional_source_pages.unwrap_or(0) > 0;
+    }
     result.conclusion = if page
         .inventory_aliases
         .iter()
         .any(|alias| alias.verified_by == Some(AliasEvidence::Canonical))
     {
         LegacyLinkConclusion::InventoryAlias
-    } else if finding.rule_id == "LNK002" && inbound {
+    } else if finding.rule_id == "LNK002" && nonconditional {
         LegacyLinkConclusion::InboundObserved
+    } else if conditional {
+        LegacyLinkConclusion::ConditionalInbound
     } else if eligible.contains(&normalized(&page.url)) {
         LegacyLinkConclusion::Confirmed
     } else {
@@ -212,9 +224,11 @@ fn report_url(
 fn other_sources_by_context(
     page: &ObservedPageLinks,
     report: &LinkReport,
-) -> BTreeMap<LinkContext, usize> {
+) -> (BTreeMap<LinkContext, usize>, bool, bool) {
     let url = normalized(&page.url);
     let mut sources = BTreeMap::<LinkContext, BTreeSet<String>>::new();
+    let mut conditional = false;
+    let mut nonconditional = false;
     for destination in report
         .links
         .destinations
@@ -225,13 +239,22 @@ fn other_sources_by_context(
             let source = normalized(&link.source);
             if source != url {
                 sources.entry(link.context).or_default().insert(source);
+                if link.conditional_markup == Some(false) {
+                    nonconditional = true;
+                } else {
+                    conditional = true;
+                }
             }
         }
     }
-    sources
-        .into_iter()
-        .map(|(context, sources)| (context, sources.len()))
-        .collect()
+    (
+        sources
+            .into_iter()
+            .map(|(context, sources)| (context, sources.len()))
+            .collect(),
+        conditional,
+        nonconditional,
+    )
 }
 
 fn is_structural(context: LinkContext) -> bool {
@@ -433,6 +456,145 @@ mod tests {
                 .iter()
                 .any(|finding| finding.rule_id == "LNK002")
         );
+    }
+
+    #[test]
+    fn conditional_inbound_withholds_low_link_count_confirmation() {
+        let config = Config {
+            min_inbound_links: 3,
+            ..Config::default()
+        };
+        let artifact = audit(
+            vec![
+                page(
+                    "",
+                    "<main><a href='/a'>A</a><noscript><a href='/a'>fallback</a></noscript></main>",
+                ),
+                page("a", "<main>Destination</main>"),
+            ],
+            &config,
+        );
+        let report = build_link_report_from_audit_with_context(
+            &artifact,
+            Some(&context(&published(&["", "a"]))),
+        )
+        .unwrap();
+        assert_eq!(
+            qualified(&report, "LNK004", "a").conclusion,
+            LegacyLinkConclusion::ConditionalInbound
+        );
+        let target = report
+            .pages
+            .iter()
+            .find(|page| page.url.ends_with("/a"))
+            .unwrap();
+        assert_eq!(target.conditional_source_pages, Some(1));
+        assert_eq!(target.nonconditional_source_pages, Some(1));
+        let rendered = crate::link_notes::LinkFindingNotes::from_report(&report, None);
+        let counts = rendered.count([("LNK004", "crawl/a/index.html")]);
+        assert_eq!(counts.not_verifiable, 1);
+        assert!(
+            rendered
+                .describe("LNK004", counts)
+                .unwrap()
+                .contains("conditional link visibility unknown")
+        );
+    }
+
+    #[test]
+    fn conditional_redirect_does_not_suppress_an_orphan_finding() {
+        let mut new = page("new", "<main>New</main>");
+        new["crawl_response"]["requested_url"] = "https://example.org/old".into();
+        new["crawl_response"]["redirect_chain"] =
+            serde_json::json!([{"url":"https://example.org/old", "status_code":301}]);
+        let artifact = audit(
+            vec![
+                page(
+                    "",
+                    "<main><template><a href='/old'>Old</a></template></main>",
+                ),
+                new.clone(),
+            ],
+            &Config::default(),
+        );
+        let report = build_link_report_from_audit(&artifact).unwrap();
+        let finding = qualified(&report, "LNK002", "new");
+        assert_eq!(finding.conclusion, LegacyLinkConclusion::ConditionalInbound);
+        assert!(
+            kept(&artifact, &report).contains(&("LNK002".into(), "crawl/new/index.html".into()))
+        );
+        let credit = report
+            .pages
+            .iter()
+            .find(|page| page.url.ends_with("/new"))
+            .unwrap()
+            .via_redirect
+            .as_ref()
+            .unwrap();
+        assert_eq!(credit.conditional_source_pages, Some(1));
+        assert_eq!(credit.nonconditional_source_pages, Some(0));
+        // Older serialized reports do not have redirect visibility counts.
+        // Unknown provenance must not become proof of a nonconditional link.
+        let mut old_report = report.clone();
+        let old_page = old_report
+            .pages
+            .iter_mut()
+            .find(|page| page.url.ends_with("/new"))
+            .unwrap();
+        let old_credit = old_page.via_redirect.as_mut().unwrap();
+        old_credit.conditional_source_pages = None;
+        old_credit.nonconditional_source_pages = None;
+        let old_page = old_report
+            .pages
+            .iter()
+            .find(|page| page.url.ends_with("/new"))
+            .unwrap();
+        let original_finding = artifact
+            .findings
+            .iter()
+            .find(|finding| finding.rule_id == "LNK002" && finding.path == "crawl/new/index.html")
+            .unwrap();
+        assert_eq!(
+            qualify(
+                original_finding,
+                Some(old_page),
+                &old_report,
+                &BTreeSet::new()
+            )
+            .conclusion,
+            LegacyLinkConclusion::ConditionalInbound
+        );
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(
+            json["links"]["destinations"][0]["evidence"][0]["conditional_markup"],
+            true
+        );
+
+        let mixed = audit(
+            vec![
+                page(
+                    "",
+                    "<main><template><a href='/old'>Old</a></template><a href='/old'>Old</a></main>",
+                ),
+                new,
+            ],
+            &Config::default(),
+        );
+        let mixed_report = build_link_report_from_audit(&mixed).unwrap();
+        assert_eq!(
+            suppressed(&mixed_report, "LNK002", "new").conclusion,
+            LegacyLinkConclusion::InboundObserved
+        );
+        let credit = mixed_report
+            .pages
+            .iter()
+            .find(|page| page.url.ends_with("/new"))
+            .unwrap()
+            .via_redirect
+            .as_ref()
+            .unwrap();
+        assert_eq!(credit.conditional_source_pages, Some(1));
+        assert_eq!(credit.nonconditional_source_pages, Some(1));
     }
 
     #[test]

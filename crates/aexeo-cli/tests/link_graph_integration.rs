@@ -82,6 +82,7 @@ fn conditional_markup_is_not_reported_as_body_or_navigation() {
     let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
         .arg("link-graph")
         .arg(path)
+        .arg("--telemetry")
         .output()
         .unwrap();
     assert!(
@@ -100,6 +101,12 @@ fn conditional_markup_is_not_reported_as_body_or_navigation() {
     );
     assert_eq!(destination["evidence"][0]["component"], "noscript");
     assert_eq!(destination["evidence"][1]["component"], "template");
+    assert_eq!(destination["conditional_source_pages"], 1);
+    assert_eq!(destination["nonconditional_source_pages"], 0);
+    let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["conditional_link_count"], 2);
+    assert_eq!(telemetry["unclassified_markup_link_count"], 0);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("example.org"));
 }
 
 #[test]
@@ -845,7 +852,7 @@ fn a_recorded_redirect_chain_is_reported_in_order_and_credited_separately() {
     assert_eq!(page["source_pages_by_context"]["navigation"], 0);
     assert_eq!(
         page["via_redirect"],
-        serde_json::json!({"distinct_source_pages":2, "source_pages_by_context":{"body":1, "navigation":1}})
+        serde_json::json!({"distinct_source_pages":2, "source_pages_by_context":{"body":1, "navigation":1}, "conditional_source_pages":0, "nonconditional_source_pages":2})
     );
     assert_eq!(page["redirected_from"], "https://example.org/old");
     assert_eq!(page["redirected_source_pages"], 1);

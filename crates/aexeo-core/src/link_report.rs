@@ -65,6 +65,11 @@ pub struct ObservedPageLinks {
     /// Observed counts only; zero does not establish orphanhood.
     pub distinct_source_pages: usize,
     pub source_pages_by_context: std::collections::BTreeMap<LinkContext, usize>,
+    /// Conditional or legacy unclassified sources; can overlap nonconditional sources.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conditional_source_pages: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nonconditional_source_pages: Option<usize>,
     /// Sources with a link free of `nofollow`, `ugc` and `sponsored`. Zero while
     /// `distinct_source_pages` is positive means every observed link is qualified.
     #[serde(default)]
@@ -141,6 +146,10 @@ pub struct InventoryAliasObservation {
 pub struct RedirectCredit {
     pub distinct_source_pages: usize,
     pub source_pages_by_context: std::collections::BTreeMap<LinkContext, usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conditional_source_pages: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nonconditional_source_pages: Option<usize>,
 }
 
 // Compare only explicit, meaningful primary language subtags. A matching
@@ -742,6 +751,8 @@ fn redirect_credit(
         .filter(|url| own.as_ref() != Some(url))
         .collect::<std::collections::BTreeSet<_>>();
     let mut sources = std::collections::BTreeSet::new();
+    let mut conditional = std::collections::BTreeSet::new();
+    let mut nonconditional = std::collections::BTreeSet::new();
     let mut contexts =
         std::collections::BTreeMap::<LinkContext, std::collections::BTreeSet<&str>>::new();
     for link in chain_urls
@@ -751,6 +762,11 @@ fn redirect_credit(
         .filter(|link| link.source != page.url)
     {
         sources.insert(link.source.as_str());
+        if link.conditional_markup == Some(false) {
+            nonconditional.insert(link.source.as_str());
+        } else {
+            conditional.insert(link.source.as_str());
+        }
         contexts
             .entry(link.context)
             .or_default()
@@ -758,6 +774,8 @@ fn redirect_credit(
     }
     (!sources.is_empty()).then(|| RedirectCredit {
         distinct_source_pages: sources.len(),
+        conditional_source_pages: Some(conditional.len()),
+        nonconditional_source_pages: Some(nonconditional.len()),
         source_pages_by_context: contexts
             .into_iter()
             .map(|(context, sources)| (context, sources.len()))
@@ -1235,6 +1253,16 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
                 redirect_target,
                 distinct_source_pages: inbound
                     .map_or(0, |destination| destination.distinct_source_pages),
+                conditional_source_pages: Some(
+                    inbound
+                        .and_then(|destination| destination.conditional_source_pages)
+                        .unwrap_or(0),
+                ),
+                nonconditional_source_pages: Some(
+                    inbound
+                        .and_then(|destination| destination.nonconditional_source_pages)
+                        .unwrap_or(0),
+                ),
                 source_pages_by_context: contexts,
                 followed_source_pages: inbound
                     .map_or(0, |destination| destination.followed_source_pages),
@@ -2064,7 +2092,7 @@ mod tests {
         let json = serde_json::to_value(page).unwrap();
         assert_eq!(
             json["via_redirect"],
-            serde_json::json!({"distinct_source_pages":3, "source_pages_by_context":{"body":2, "navigation":2}})
+            serde_json::json!({"distinct_source_pages":3, "source_pages_by_context":{"body":2, "navigation":2}, "conditional_source_pages":0, "nonconditional_source_pages":3})
         );
         assert!(report.pages[0].via_redirect.is_none());
         let unredirected = serde_json::to_value(&report.pages[0]).unwrap();

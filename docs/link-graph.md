@@ -132,13 +132,21 @@ preserve source line and column, so these are null.
 Links in `template` and `noscript` remain in discovery and evidence but have
 `unknown` context and identify the outer conditional component. The source HTML
 does not establish that these links were displayed; even an explicit context
-marker inside such markup cannot establish visibility. Unknown links still
-contribute to observed-source totals and must not be treated as confirmed
-visible links. Dynamic script rendering and CSS visibility are not evaluated.
+marker inside such markup cannot establish visibility. Existing observed-source
+totals still include them. `conditional_source_pages` and
+`nonconditional_source_pages` separately count distinct source pages, and can
+overlap when the same page contains both types. Redirect credits report the
+same breakdown. Evidence includes `conditional_markup`; its absence in an older
+report means unknown, not false; the new counts are also absent in old reports,
+not zero. A nonconditional source observation does not prove visibility: dynamic script rendering and CSS visibility are not evaluated.
+For legacy `LNK002`, a solely conditional incoming link does not suppress the
+finding or confirm an orphan; `conditional_inbound` means not verifiable.
+Conditional incoming links also prevent confirmation of `LNK004` link counts.
 
 Add `--telemetry` to write a single JSON event containing only duration, page,
-link and issue counts to standard error. It is opt-in and does not include page
-URLs or content. The normal report contains the evidence and should be handled
+link and issue counts to standard error, including counts of conditional and
+unclassified link observations. It is opt-in and does not include page URLs or
+content. The normal report contains the evidence and should be handled
 accordingly.
 
 ## Inventory aliases

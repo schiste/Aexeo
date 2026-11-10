@@ -30,6 +30,10 @@ pub struct LinkEvidence {
     pub context: LinkContext,
     pub component: Option<String>,
     pub paragraph: Option<String>,
+    /// Whether the link appeared inside template or noscript source markup.
+    /// Absent in older reports, where its status cannot be established.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conditional_markup: Option<bool>,
     /// `nofollow`, `ugc` and `sponsored` tokens of the anchor's `rel`, lowercase
     /// and sorted. Other tokens, such as `noopener`, do not qualify a link.
     #[serde(default)]
@@ -297,6 +301,7 @@ pub fn extract_document(
                     context: scope.context,
                     component: scope.component.clone(),
                     paragraph: scope.paragraph.clone(),
+                    conditional_markup: Some(scope.conditional_markup),
                     rel: crawl_rel_tokens(attribute(&node, "rel")),
                     line: None,
                     column: None,
