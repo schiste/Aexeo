@@ -44,43 +44,18 @@ pub fn content_input(document: &EmdashDocument) -> ContentInput {
 }
 
 fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, ContentContext, usize) {
-    let text = document
-        .body
-        .iter()
-        .map(|block| {
-            block
-                .children
-                .iter()
-                .map(|child| match child {
-                    PortableTextChild::Span(span) => span.text.as_str(),
-                })
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let mut text = String::new();
     let metadata = content_metadata(document);
-    let headings = document
-        .body
-        .iter()
-        .filter(|block| is_heading(&block.style))
-        .map(|block| {
-            collapse_whitespace(
-                &block
-                    .children
-                    .iter()
-                    .map(|child| match child {
-                        PortableTextChild::Span(span) => span.text.as_str(),
-                    })
-                    .collect::<String>(),
-            )
-        })
-        .collect();
+    let mut headings = Vec::new();
     let mut line = 1;
     let mut paragraphs = Vec::new();
     let mut link_count = 0;
     let mut block_ends = Vec::with_capacity(document.body.len());
     let mut offset = 0;
-    for block in &document.body {
+    for (index, block) in document.body.iter().enumerate() {
+        if index > 0 {
+            text.push('\n');
+        }
         let link_keys: std::collections::BTreeSet<_> = block
             .mark_defs
             .iter()
@@ -106,15 +81,20 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
                 PortableTextChild::Span(span) => span.text.as_str(),
             })
             .collect::<String>();
+        text.push_str(&block_text);
+        if is_heading(&block.style) {
+            headings.push(collapse_whitespace(&block_text));
+        }
+        let next_line = line + block_text.chars().filter(|ch| *ch == '\n').count() + 1;
+        offset += block_text.len();
         if matches!(block.style, crate::BlockStyle::Normal) {
             paragraphs.push(ContentParagraph {
-                text: block_text.clone(),
+                text: block_text,
                 line,
                 column: 1,
             });
         }
-        line += block_text.chars().filter(|ch| *ch == '\n').count() + 1;
-        offset += block_text.len();
+        line = next_line;
         block_ends.push(offset);
         offset += 1;
     }
@@ -1041,6 +1021,24 @@ field = "slug"
         let report = evaluate_content(&document, &preset).unwrap();
         assert_eq!(report.gates[0].scope, "collection");
         assert_eq!(report.gates[0].status, GateStatus::NotChecked);
+    }
+
+    #[test]
+    fn projection_preserves_empty_blocks_multispan_text_and_newlines() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"style":"h2","children":[{"_type":"span","text":" A "},{"_type":"span","text":" B"}]},{"children":[]},{"children":[{"_type":"span","text":"a\n"},{"_type":"span","text":"é"}]}]}"#).unwrap();
+        let (input, context, _) = content_input_with_context(&document);
+        assert_eq!(input.text.as_deref(), Some(" A  B\n\na\né"));
+        assert_eq!(
+            input.headings.as_deref(),
+            Some(["A B".to_string()].as_slice())
+        );
+        assert_eq!(context.block_ends.as_deref(), Some([5, 6, 11].as_slice()));
+        let paragraphs = context.paragraphs.unwrap();
+        assert_eq!((paragraphs[0].text.as_str(), paragraphs[0].line), ("", 2));
+        assert_eq!(
+            (paragraphs[1].text.as_str(), paragraphs[1].line),
+            ("a\né", 3)
+        );
     }
 
     #[test]
