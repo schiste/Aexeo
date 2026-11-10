@@ -579,6 +579,9 @@ from an unknown or invalid mapping.
 
 Content preset gate outcomes, including `not_checked` and their reasons, are
 stored with the current route findings and exposed in CMS views and the data
-route. A failed evaluation clears findings for that revision and records an
+route. The preset panel lists passed, failed and unchecked gates, whether they
+are blocking, and available measurements and thresholds. Older stored reports
+may not contain measurements; missing measurements are not shown as zero. A
+pass covers only the configured checks and is not an overall quality score. A failed evaluation clears findings for that revision and records an
 error; it must not be interpreted as a clean assessment. `aexeo.preset_coverage`
 logs aggregate counts without routes, gate identifiers, reasons or content.

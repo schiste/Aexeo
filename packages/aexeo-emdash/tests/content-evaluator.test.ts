@@ -23,6 +23,11 @@ describe("configured content preset", () => {
       status: "evaluated", gates: [{ gate_id: "heading", status: "not_checked", reason: "site unavailable" }],
     });
   });
+  it("preserves gate measurements including zero and configured thresholds", async () => {
+    const measured: ContentReport = { ...report, gates: [{ ...report.gates[0]!, measurements: { word_count: 0, min_words: 1 } }] };
+    const result = await withContentPreset(base, { name: "custom" }, async () => measured)([doc]);
+    expect(result.ok && result.assessments?.["/test"]).toMatchObject({ gates: [{ measurements: { word_count: 0, min_words: 1 } }] });
+  });
   it("keeps the old evaluator when no preset is configured", () => {
     expect(withContentPreset(base, undefined, async () => report)).toBe(base);
   });

@@ -339,6 +339,15 @@ describe("assessment persistence", () => {
     expect(store.get(findingsKey("/a"))).toMatchObject({ findings: [], assessment: { status: "error", reason: "unavailable" } });
     expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"))).toContain("Evaluation failed: unavailable");
   });
+  it("shows passed checks and measurements in the document panel", async () => {
+    const { ctx } = host();
+    await save(ctx, item("a", NEW), async () => ({ ok: true, findings: [], assessments: { "/a": { status: "evaluated", preset: "article", gates: [{ gate_id: "words", status: "passed", blocking: false, scope: "document", required_capability: "text", reason: null, measurements: { word_count: 50, min_words: 20 } }] } } }));
+    const panel = JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"));
+    expect(panel).toContain("Content preset: article");
+    expect(panel).toContain("words passed (advisory) — word count: 50, min words: 20");
+    const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator: returning() });
+    expect(payload.routes.find((route) => route.route === "/a")?.assessment).toMatchObject({ gates: [{ measurements: { word_count: 50, min_words: 20 } }] });
+  });
   it("stores not-checked gate details alongside current findings", async () => {
     const { ctx, store } = host();
     await save(ctx, item("a", NEW), async () => ({ ok: true, findings: [finding("/a", "current")], assessments: { "/a": { status: "evaluated", preset: "article", gates: [{ gate_id: "words", status: "not_checked", blocking: true, scope: "document", required_capability: "text", reason: "text unavailable" }] } } }));

@@ -132,7 +132,8 @@ export async function evaluateViaSidecar(
             !("blocking" in gate) || typeof gate.blocking !== "boolean" ||
             !("scope" in gate) || !["document", "collection", "site"].includes(String(gate.scope)) ||
             !("required_capability" in gate) || typeof gate.required_capability !== "string" ||
-            !("reason" in gate) || (gate.reason !== null && typeof gate.reason !== "string"))) {
+            !("reason" in gate) || (gate.reason !== null && typeof gate.reason !== "string") ||
+            ("measurements" in gate && (gate.measurements === null || typeof gate.measurements !== "object" || Array.isArray(gate.measurements) || Object.values(gate.measurements).some((v) => typeof v !== "number" || !Number.isFinite(v)))))) {
         return { ok: false, reason: "invalid_response", detail: "sidecar returned invalid gate assessment" };
       }
     }
