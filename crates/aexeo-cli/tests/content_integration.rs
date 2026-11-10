@@ -744,6 +744,71 @@ fn paragraph_gate_uses_adapter_structure_and_does_not_count_headings() {
 }
 
 #[test]
+fn paragraph_count_checks_bounds_and_unavailable_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    std::fs::write(&preset, "version=1\nname='Paragraph count'\n[[gates]]\nid='count'\nkind='paragraph_count'\nmin=2\nmax=2\n").unwrap();
+    let source = format!("custom={}", preset.display());
+    for (format, input, code, status, count) in [
+        (
+            "markdown",
+            "# Heading\n\nFirst.\n\nSecond.",
+            0,
+            "passed",
+            Some(2),
+        ),
+        ("markdown", "", 1, "failed", Some(0)),
+        (
+            "markdown",
+            "First.\n\nSecond.\n\nThird.",
+            1,
+            "failed",
+            Some(3),
+        ),
+        ("text", "First.\n\nSecond.", 2, "not_checked", None),
+    ] {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                "-",
+                "--input-format",
+                format,
+                "--preset",
+                "custom",
+                "--preset-source",
+                &source,
+                "--format",
+                "json",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert_eq!(output.status.code(), Some(code));
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let gate = &report["gates"][0];
+        assert_eq!(gate["status"], status);
+        assert_eq!(gate["required_capability"], "paragraphs");
+        assert_eq!(gate["measurements"]["paragraph_count"].as_u64(), count);
+        assert_eq!(gate["measurements"]["min_paragraphs"], 2);
+        assert_eq!(gate["measurements"]["max_paragraphs"], 2);
+    }
+    for bounds in ["", "min=3\nmax=2\n"] {
+        let invalid = format!(
+            "version=1\nname='Invalid'\n[[gates]]\nid='count'\nkind='paragraph_count'\n{bounds}"
+        );
+        assert!(aexeo_core::content_gate::ContentPreset::from_toml(&invalid).is_err());
+    }
+}
+
+#[test]
 fn paragraph_gate_rejects_zero_word_limit() {
     let source = "version=1\nname='Invalid'\n[[gates]]\nid='paragraphs'\nkind='paragraph_length'\nmax_words=0\n";
     assert!(aexeo_core::content_gate::ContentPreset::from_toml(source).is_err());

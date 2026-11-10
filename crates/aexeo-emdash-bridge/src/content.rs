@@ -614,6 +614,28 @@ mod tests {
     }
 
     #[test]
+    fn paragraph_count_distinguishes_complete_empty_and_unavailable_bodies() {
+        let preset = ContentPreset::from_toml("version=1\nname='count'\n[[gates]]\nid='count'\nkind='paragraph_count'\nmin=2\nmax=2\n").unwrap();
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"style":"h2","children":[{"_type":"span","text":"Heading"}]},{"children":[{"_type":"span","text":"First."}]},{"children":[{"_type":"span","text":"Second."}]}]}"#).unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Passed);
+        assert_eq!(report.gates[0].measurements["paragraph_count"], 2);
+        let unavailable =
+            evaluate_content_with_body_availability(&document, &preset, None, false).unwrap();
+        assert_eq!(unavailable.gates[0].status, GateStatus::NotChecked);
+        assert!(
+            !unavailable.gates[0]
+                .measurements
+                .contains_key("paragraph_count")
+        );
+        let empty: EmdashDocument =
+            serde_json::from_str(r#"{"route":"/test","title":"Test","body":[]}"#).unwrap();
+        let report = evaluate_content(&empty, &preset).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[0].measurements["paragraph_count"], 0);
+    }
+
+    #[test]
     fn unavailable_body_is_not_an_empty_body() {
         let document: EmdashDocument =
             serde_json::from_str(r#"{"route":"/test","title":"Test"}"#).unwrap();

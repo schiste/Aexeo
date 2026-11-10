@@ -81,6 +81,16 @@ pub enum ContentGate {
         min: Option<usize>,
         max: Option<usize>,
     },
+    /// Bounds the number of adapter-supplied paragraphs.
+    ParagraphCount {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+        min: Option<usize>,
+        max: Option<usize>,
+    },
     /// Limits whitespace-separated words in adapter-supplied paragraphs.
     ParagraphLength {
         id: String,
@@ -330,6 +340,7 @@ impl ContentGate {
             | Self::LinkDestinations { severity, .. }
             | Self::SentenceLength { severity, .. }
             | Self::SentenceCharacterLength { severity, .. }
+            | Self::ParagraphCount { severity, .. }
             | Self::ParagraphLength { severity, .. }
             | Self::RepeatedParagraphOpenings { severity, .. }
             | Self::ParagraphCharacterLength { severity, .. }
@@ -355,6 +366,7 @@ impl ContentGate {
             | Self::LinkDestinations { blocking, .. }
             | Self::SentenceLength { blocking, .. }
             | Self::SentenceCharacterLength { blocking, .. }
+            | Self::ParagraphCount { blocking, .. }
             | Self::ParagraphLength { blocking, .. }
             | Self::RepeatedParagraphOpenings { blocking, .. }
             | Self::ParagraphCharacterLength { blocking, .. }
@@ -384,7 +396,8 @@ impl ContentGate {
             Self::LinkCount { .. } => "links",
             Self::LinkDestinations { .. } => "link_destinations",
             Self::RequiredMetadata { .. } => "metadata",
-            Self::ParagraphLength { .. }
+            Self::ParagraphCount { .. }
+            | Self::ParagraphLength { .. }
             | Self::ParagraphCharacterLength { .. }
             | Self::RepeatedParagraphOpenings { .. } => "paragraphs",
             Self::RequiredHeadings { .. }
@@ -406,6 +419,7 @@ impl ContentGate {
             | Self::LinkDestinations { id, .. }
             | Self::SentenceLength { id, .. }
             | Self::SentenceCharacterLength { id, .. }
+            | Self::ParagraphCount { id, .. }
             | Self::ParagraphLength { id, .. }
             | Self::RepeatedParagraphOpenings { id, .. }
             | Self::ParagraphCharacterLength { id, .. }
@@ -799,6 +813,12 @@ impl ContentPreset {
                         || matches!((min, max), (Some(a), Some(b)) if a > b) =>
                 {
                     bail!("invalid word count bounds for {}", gate.id())
+                }
+                ContentGate::ParagraphCount { min, max, .. }
+                    if min.is_none() && max.is_none()
+                        || matches!((min, max), (Some(a), Some(b)) if a > b) =>
+                {
+                    bail!("invalid paragraph count bounds for {}", gate.id())
                 }
                 ContentGate::LinkDestinations {
                     allowed_schemes, ..
@@ -1229,6 +1249,41 @@ impl ContentPreset {
                         reason = Some("link destinations are unavailable from this adapter".into())
                     }
                 },
+                ContentGate::ParagraphCount { min, max, .. } => {
+                    if let Some(minimum) = min {
+                        measurements.insert("min_paragraphs".into(), *minimum);
+                    }
+                    if let Some(maximum) = max {
+                        measurements.insert("max_paragraphs".into(), *maximum);
+                    }
+                    match context.and_then(|c| c.paragraphs.as_ref()) {
+                        Some(paragraphs) => {
+                            let count = paragraphs.len();
+                            measurements.insert("paragraph_count".into(), count);
+                            if let Some(minimum) = min.filter(|n| count < *n) {
+                                emit(
+                                    format!(
+                                        "Paragraph count {count} is below the minimum of {minimum}"
+                                    ),
+                                    1,
+                                    1,
+                                );
+                            }
+                            if let Some(maximum) = max.filter(|n| count > *n) {
+                                emit(
+                                    format!(
+                                        "Paragraph count {count} exceeds the maximum of {maximum}"
+                                    ),
+                                    1,
+                                    1,
+                                );
+                            }
+                        }
+                        None => {
+                            reason = Some("paragraphs are unavailable from this adapter".into())
+                        }
+                    }
+                }
                 ContentGate::ParagraphLength {
                     max_words: limit, ..
                 }
