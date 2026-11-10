@@ -212,8 +212,44 @@ pub fn check_link_reachability_remaining(
     {
         bail!("link check limits exceeded");
     }
-    let transport = GuardedTransport::new()?;
-    Ok(check_with(&transport, destinations, max_checks, timeout))
+    LinkReachabilitySession::new(max_checks, timeout)?.check(destinations)
+}
+
+/// Reuses observations and a guarded client during one bounded evaluation.
+/// The cache is in memory only and must not be reused across independent runs.
+pub struct LinkReachabilitySession {
+    transport: GuardedTransport,
+    cache: ObservationCache,
+    max_checks: usize,
+    timeout: Duration,
+}
+
+impl LinkReachabilitySession {
+    pub fn new(max_checks: usize, timeout: Duration) -> Result<Self> {
+        if max_checks > MAX_CHECKS || timeout.is_zero() || timeout > Duration::from_secs(30) {
+            bail!("link check limits exceeded");
+        }
+        Ok(Self {
+            transport: GuardedTransport::new()?,
+            cache: BTreeMap::new(),
+            max_checks,
+            timeout,
+        })
+    }
+
+    /// Report network checks performed by this call, excluding cached observations.
+    pub fn check(&mut self, destinations: &[String]) -> Result<ReachabilityReport> {
+        if destinations.len() > MAX_LINKS {
+            bail!("link check limits exceeded");
+        }
+        Ok(check_with_cache(
+            &self.transport,
+            destinations,
+            self.max_checks,
+            self.timeout,
+            &mut self.cache,
+        ))
+    }
 }
 
 /// Convert host observations to portable gate capabilities in input order.
@@ -241,14 +277,33 @@ pub fn gate_observations(
         .collect()
 }
 
+type ObservationCache = BTreeMap<String, (ReachabilityStatus, &'static str, Option<u16>)>;
+
+#[cfg(test)]
 fn check_with(
     transport: &impl Transport,
     destinations: &[String],
     max_checks: usize,
     timeout: Duration,
 ) -> ReachabilityReport {
+    check_with_cache(
+        transport,
+        destinations,
+        max_checks,
+        timeout,
+        &mut BTreeMap::new(),
+    )
+}
+
+fn check_with_cache(
+    transport: &impl Transport,
+    destinations: &[String],
+    max_checks: usize,
+    timeout: Duration,
+    cache: &mut ObservationCache,
+) -> ReachabilityReport {
     let started = Instant::now();
-    let mut cache = BTreeMap::new();
+    let initial_checks = cache.len();
     let mut observations = Vec::with_capacity(destinations.len());
     for (offset, destination) in destinations.iter().enumerate() {
         let result = if destination.len() > MAX_URL_BYTES {
@@ -287,7 +342,7 @@ fn check_with(
     ReachabilityReport {
         version: 1,
         observations,
-        network_checks: cache.len(),
+        network_checks: cache.len() - initial_checks,
         elapsed_ms: started.elapsed().as_millis(),
     }
 }
@@ -369,6 +424,49 @@ mod tests {
             vec![false, false, true]
         );
     }
+    #[test]
+    fn batch_cache_reuses_observations_and_enforces_one_global_budget() {
+        let fake = Fake {
+            calls: RefCell::new(vec![]),
+            replies: RefCell::new(vec![response(404, None), response(200, None)]),
+        };
+        let mut cache = BTreeMap::new();
+        let timeout = Duration::from_secs(1);
+        let first = check_with_cache(
+            &fake,
+            &["https://example.com/a#first".into()],
+            2,
+            timeout,
+            &mut cache,
+        );
+        let second = check_with_cache(
+            &fake,
+            &[
+                "https://example.com/a#second".into(),
+                "https://example.com/b".into(),
+                "https://example.com/c".into(),
+            ],
+            2,
+            timeout,
+            &mut cache,
+        );
+        assert_eq!((first.network_checks, second.network_checks), (1, 1));
+        assert_eq!(fake.calls.borrow().len(), 2);
+        assert_eq!(
+            second
+                .observations
+                .iter()
+                .map(|o| o.status)
+                .collect::<Vec<_>>(),
+            vec![
+                ReachabilityStatus::NotFound,
+                ReachabilityStatus::Reachable,
+                ReachabilityStatus::Skipped
+            ]
+        );
+        assert_eq!(second.observations[2].reason, "check_budget_exhausted");
+    }
+
     #[test]
     fn incomplete_and_forbidden_cases_never_claim_not_found() {
         let fake = Fake {

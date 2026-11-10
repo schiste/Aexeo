@@ -139,6 +139,42 @@ fn link_budget_is_shared_between_entries() {
 }
 
 #[test]
+fn link_observer_reuses_same_destination_across_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut change = input();
+    change["entries"] = serde_json::json!([
+        {"entity_id":"a", "operation":"create", "media_type":"text/markdown", "after":{"inline":"[x](http://127.0.0.1/a)", "sha256":"f8fee02e4780a4cf0c950e349143cf77ab1de060e26def310c8b24565032f6c3"}},
+        {"entity_id":"b", "operation":"create", "media_type":"text/markdown", "after":{"inline":"[x](http://127.0.0.1/a)", "sha256":"f8fee02e4780a4cf0c950e349143cf77ab1de060e26def310c8b24565032f6c3"}}
+    ]);
+    let preset =
+        "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\nblocking=true\n";
+    let output = run(
+        dir.path(),
+        &change,
+        preset,
+        &[
+            "--check-link-reachability",
+            "--link-max-checks",
+            "2",
+            "--telemetry",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let events = stderr
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["network_checks"], 1);
+    assert_eq!(events[1]["network_checks"], 0);
+    let verdict: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+    assert_eq!(verdict["status"], "not_checked");
+    assert!(!stderr.contains("127.0.0.1"));
+}
+
+#[test]
 fn external_gates_bind_each_entry_and_withhold_stale_results() {
     let dir = tempfile::tempdir().unwrap();
     let mut change = input();

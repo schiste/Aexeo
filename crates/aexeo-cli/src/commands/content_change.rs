@@ -119,7 +119,7 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         .map(|path| super::content::load_external_gate_results(path, true))
         .transpose()?;
     let mut provider = HostFiles::new(args.get_one::<String>("content-root").map(String::as_str))?;
-    let mut remaining = *args
+    let max_checks = *args
         .get_one::<u64>("link-max-checks")
         .user_context("missing link-max-checks")? as usize;
     let timeout = std::time::Duration::from_secs(
@@ -128,12 +128,14 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             .user_context("missing link-timeout")?,
     );
     let telemetry = args.get_flag("telemetry");
+    let mut link_session = None;
     let mut observe = |_: &str, values: &[String]| -> Result<_> {
-        use aexeo_core::runtime::link_reachability::{
-            check_link_reachability_remaining, gate_observations,
+        use aexeo_core::runtime::link_reachability::{LinkReachabilitySession, gate_observations};
+        let session = match &mut link_session {
+            Some(session) => session,
+            slot @ None => slot.insert(LinkReachabilitySession::new(max_checks, timeout)?),
         };
-        let report = check_link_reachability_remaining(values, remaining, timeout)?;
-        remaining = remaining.saturating_sub(report.network_checks);
+        let report = session.check(values)?;
         if telemetry {
             eprintln!(
                 "{}",
