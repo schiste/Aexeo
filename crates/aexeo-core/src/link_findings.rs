@@ -428,6 +428,62 @@ mod tests {
     }
 
     #[test]
+    fn indeterminate_links_prevent_confirmed_orphans() {
+        for html in [
+            "<main><a href='/a'>A</a><a href='https://user:password@example.org/orphan'>Maybe</a></main>",
+            "<head><base href='https://user:password@example.org/'></head><main><a href='/a'>A</a><a href='orphan'>Maybe</a></main>",
+        ] {
+            let artifact = audit(
+                vec![
+                    page("", html),
+                    page("a", "<main>A</main>"),
+                    page("orphan", "<main>Orphan</main>"),
+                ],
+                &Config::default(),
+            );
+            let context = context(&published(&["", "a", "orphan"]));
+            let report =
+                build_link_report_from_audit_with_context(&artifact, Some(&context)).unwrap();
+            assert!(report.crawl_complete);
+            let reconciliation = report.reconciliation.as_ref().unwrap();
+            assert!(!reconciliation.comparable, "{html}");
+            assert!(
+                reconciliation
+                    .issues
+                    .iter()
+                    .any(|issue| issue == "indeterminate_links")
+            );
+            assert!(reconciliation.eligible_pages.is_empty());
+            assert_eq!(
+                qualified(&report, "LNK002", "orphan").conclusion,
+                LegacyLinkConclusion::NotEligible
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_non_http_links_do_not_prevent_orphan_assessment() {
+        let artifact = audit(
+            vec![
+                page(
+                    "",
+                    "<main><a href='/a'>A</a><a href='mailto:x@example.org'>Mail</a></main>",
+                ),
+                page("a", "<main>A</main>"),
+                page("orphan", "<main>Orphan</main>"),
+            ],
+            &Config::default(),
+        );
+        let context = context(&published(&["", "a", "orphan"]));
+        let report = build_link_report_from_audit_with_context(&artifact, Some(&context)).unwrap();
+        assert!(report.reconciliation.as_ref().unwrap().comparable);
+        assert_eq!(
+            qualified(&report, "LNK002", "orphan").conclusion,
+            LegacyLinkConclusion::Confirmed
+        );
+    }
+
+    #[test]
     fn an_unattested_crawl_leaves_the_orphan_finding_not_eligible() {
         let artifact = audit(orphan_site(), &Config::default());
         let before = artifact.findings.clone();

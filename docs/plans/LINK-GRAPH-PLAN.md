@@ -243,6 +243,9 @@ missing and unspecified languages are not treated as an observed mismatch.
 - [ ] Validate the EmDash inventory exporter with an explicit publication, route,
   locale, status and surface mapping on a real matching site; do not infer
   completeness from `routable` or from a non-transactional export.
+- [x] Withhold orphan eligibility when any observed link destination is
+  indeterminate; retain evidence and the `indeterminate_links` reason. Known
+  unsupported non-HTTP destinations do not block comparison.
 - [x] Capture matching release and snapshot identity, reliable crawl completeness,
   redirect chains and explicit noindex/canonical/locale-fallback treatment.
 - [x] Integrate coverage-aware graph observations into existing site reports;

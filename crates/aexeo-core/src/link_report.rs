@@ -1102,7 +1102,9 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
     }
     let links = count_links(evidence);
     if !links.indeterminate.is_empty() {
-        issues.push("indeterminate_links".to_string());
+        // An unresolved reference might target any inventoried page, so a
+        // zero incoming count cannot establish an orphan conclusion.
+        coverage_issues.insert("indeterminate_links");
     }
     let observed_urls = input
         .pages

@@ -67,6 +67,13 @@ produced from this input, even with a matching inventory; only a report built
 from an audit qualifies that audit's orphan findings (see
 [Legacy inbound-link findings](#legacy-inbound-link-findings)).
 
+When any observed reference has an indeterminate destination, the report raises
+`indeterminate_links` and makes inventory reconciliation not comparable. Such a
+reference may target an observed page, so zero known incoming links cannot confirm
+an orphan. The evidence remains in the report for investigation. Explicitly
+unsupported non-HTTP links, such as `mailto:`, are reported separately and do
+not by themselves prevent orphan assessment.
+
 Destinations are matched to pages by exact URL, after parsing. A destination
 that matches no page, but would match one if a trailing slash, percent-encoding
 spelling (`%7E` and `~`, `%c3` and `%C3`) or empty query were ignored, is not
