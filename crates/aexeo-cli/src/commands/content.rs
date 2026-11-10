@@ -207,7 +207,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     };
     let input_load_ms = input_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
     let adapter_started = measuring.then(std::time::Instant::now);
-    let source_complete = input_limit.is_none();
+    let mut source_complete = input_limit.is_none();
     let mut context = input_limit.map(|limit| ContentContext {
         input_limit: Some(limit),
         ..Default::default()
@@ -244,6 +244,32 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             context = Some(capabilities);
             link_count = Some(links);
             input
+        }
+        (Some("paragraph-text"), Some(text)) => {
+            match aexeo_core::plain_text_adapter::paragraph_text_context(&text) {
+                Ok(capabilities) => {
+                    context = Some(capabilities);
+                    ContentInput {
+                        id,
+                        source_text: Some(text.clone()),
+                        text: Some(text),
+                        headings: None,
+                        metadata: None,
+                        evidence_sources: None,
+                    }
+                }
+                Err(reason) => {
+                    source_complete = false;
+                    context = Some(ContentContext {
+                        input_limit: Some(reason.into()),
+                        ..Default::default()
+                    });
+                    ContentInput {
+                        id,
+                        ..Default::default()
+                    }
+                }
+            }
         }
         (_, text) => ContentInput {
             id,

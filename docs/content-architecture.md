@@ -4,7 +4,7 @@ Aexeo keeps the existing website audit as the source of SEO/GEO rules. Portable 
 
 ## Inputs and adapters
 
-- Raw text and stdin provide text and original source. The Markdown adapter projects prose and headings; its locations refer to the projection.
+- Raw text and stdin provide text and original source. The optional `paragraph-text` adapter interprets blank lines as paragraph separators and preserves original source locations; it does not infer headings or links. The Markdown adapter projects prose and headings; its locations refer to the projection.
 - EmDash portable text provides text, headings and metadata. Configured plugins evaluate locally through WASM. Sandboxed plugins use the authenticated sidecar, which holds preset configuration.
 - A static site and its existing `Config` supply the site capability. `seo-website` delegates to the full existing audit; `site_group` selects individual registered groups and applies the existing policy.
 - `RuntimeAudit::evaluate_preset` evaluates a preset on the site produced by a crawl while retaining the crawl status, truncation reason and both crawl and original audit findings. A partial crawl does not establish a complete review. The existing crawl CLI and artifact format are unchanged. The `content --crawl-url` CLI exposes this adapter with an explicit crawl-status envelope and rejects an incomplete crawl as unsupported.

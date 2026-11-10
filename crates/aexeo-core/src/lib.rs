@@ -31,6 +31,7 @@ pub mod llm_rules;
 pub mod markdown_adapter;
 #[cfg(test)]
 mod page_kind_divergence;
+pub mod plain_text_adapter;
 pub mod plugin;
 pub mod policy;
 pub mod quality;
