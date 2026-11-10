@@ -137,6 +137,39 @@ describe("concurrent saves", () => {
     expect(rulesAt(store, "/a")).toEqual(["NEWER"]);
   });
 
+  it.each(["equal", "missing"])("does not overwrite a changed document when revisions are %s", async (revisions) => {
+    const { ctx, store } = host();
+    const first = item("a", OLD, "first");
+    const second = item("a", OLD, "second");
+    if (revisions === "missing") {
+      delete first.updatedAt;
+      delete second.updatedAt;
+    }
+    const slow = gated("STALE");
+    const pending = save(ctx, first, slow.evaluator);
+    await new Promise((resolve) => setTimeout(resolve));
+    await save(ctx, second, returning("CURRENT"));
+    slow.release();
+    await pending;
+    expect(titleAt(store, "/a")).toBe("second");
+    expect(rulesAt(store, "/a")).toEqual(["CURRENT"]);
+  });
+
+  it("does not overwrite newer findings when an older evaluation fails at the same revision", async () => {
+    const { ctx, store } = host();
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const pending = save(ctx, item("a", OLD, "first"), async () => {
+      await gate;
+      return { ok: false, reason: "unavailable", detail: "test" };
+    });
+    await new Promise((resolve) => setTimeout(resolve));
+    await save(ctx, item("a", OLD, "second"), returning("CURRENT"));
+    release();
+    await pending;
+    expect(rulesAt(store, "/a")).toEqual(["CURRENT"]);
+  });
+
   it("does not resurrect findings for an entry deleted during evaluation", async () => {
     const { ctx, store } = host();
     const slow = gated("LATE");
@@ -189,6 +222,16 @@ describe("Refresh racing a save", () => {
     const { ctx, store } = host([item("a", OLD, "listed")]);
     await sweep(ctx, async (documents) => {
       await save(ctx, item("a", NEW, "saved"), returning("SAVED"));
+      return returning("SWEPT")(documents);
+    });
+    expect(titleAt(store, "/a")).toBe("saved");
+    expect(rulesAt(store, "/a")).toEqual(["SAVED"]);
+  });
+
+  it("does not overwrite a concurrent save at the same revision", async () => {
+    const { ctx, store } = host([item("a", OLD, "listed")]);
+    await sweep(ctx, async (documents) => {
+      await save(ctx, item("a", OLD, "saved"), returning("SAVED"));
       return returning("SWEPT")(documents);
     });
     expect(titleAt(store, "/a")).toBe("saved");
