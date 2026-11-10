@@ -56,7 +56,39 @@ pub fn evaluate_change_with_observer<P: ConfinedContentFiles>(
     evaluated_at: &str,
     max_entry_bytes: usize,
     max_total_bytes: usize,
-    mut observer: Option<&mut LinkObserver<'_>>,
+    observer: Option<&mut LinkObserver<'_>>,
+) -> Result<Verdict> {
+    evaluate_change_with_options(
+        change,
+        provider,
+        preset,
+        evaluated_at,
+        max_entry_bytes,
+        max_total_bytes,
+        ChangeEvaluationOptions {
+            link_observer: observer,
+            plain_text_paragraphs: false,
+        },
+    )
+}
+
+/// Explicit host-provided capabilities. Defaults preserve raw-text, offline behavior.
+#[derive(Default)]
+pub struct ChangeEvaluationOptions<'a, 'b> {
+    pub link_observer: Option<&'a mut LinkObserver<'b>>,
+    /// Treat blank-line-separated text/plain content as paragraphs.
+    pub plain_text_paragraphs: bool,
+}
+
+/// Evaluate verified changes with explicitly selected host capabilities.
+pub fn evaluate_change_with_options<P: ConfinedContentFiles>(
+    change: &Change,
+    provider: &mut P,
+    preset: &ContentPreset,
+    evaluated_at: &str,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    mut options: ChangeEvaluationOptions<'_, '_>,
 ) -> Result<Verdict> {
     preset.validate()?;
     if evaluated_at.is_empty() {
@@ -93,6 +125,35 @@ pub fn evaluate_change_with_observer<P: ConfinedContentFiles>(
                     Some(adapted.source_map),
                 )
             }
+            "text/plain" if options.plain_text_paragraphs => {
+                match crate::plain_text_adapter::paragraph_text_context(&text) {
+                    Ok(context) => (
+                        ContentInput {
+                            id: entry.entity_id.clone(),
+                            text: Some(text.clone()),
+                            source_text: Some(text),
+                            ..Default::default()
+                        },
+                        Some(context),
+                        None,
+                        None,
+                        None,
+                    ),
+                    Err(reason) => (
+                        ContentInput {
+                            id: entry.entity_id.clone(),
+                            ..Default::default()
+                        },
+                        Some(crate::content_gate::ContentContext {
+                            input_limit: Some(reason.into()),
+                            ..Default::default()
+                        }),
+                        None,
+                        None,
+                        None,
+                    ),
+                }
+            }
             "text/plain" => (
                 ContentInput {
                     id: entry.entity_id.clone(),
@@ -122,7 +183,10 @@ pub fn evaluate_change_with_observer<P: ConfinedContentFiles>(
                 crate::content_gate::ContentGate::LinkReachability { .. }
             )
         }) {
-            match (observer.as_deref_mut(), destinations.as_deref()) {
+            match (
+                options.link_observer.as_deref_mut(),
+                destinations.as_deref(),
+            ) {
                 (Some(observe), Some(destinations)) => {
                     let values = observe(&entry.entity_id, destinations)?;
                     if values.len() != destinations.len() {
@@ -433,6 +497,32 @@ mod tests {
             .is_err()
         );
         assert!(!called);
+    }
+
+    #[test]
+    fn paragraph_option_withholds_capabilities_on_overflow() {
+        use sha2::{Digest, Sha256};
+        let source = "x\n\n".repeat(crate::plain_text_adapter::MAX_PLAIN_TEXT_PARAGRAPHS + 1);
+        let mut input = change();
+        let state = input.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.clone());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='count'\nkind='paragraph_count'\nmin=1\nblocking=true\n").unwrap();
+        let verdict = evaluate_change_with_options(
+            &input,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            source.len(),
+            source.len(),
+            ChangeEvaluationOptions {
+                plain_text_paragraphs: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(verdict.status, VerdictStatus::NotChecked);
+        assert!(verdict.findings.is_empty());
     }
 
     #[test]

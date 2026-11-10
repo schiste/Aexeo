@@ -139,6 +139,42 @@ fn link_budget_is_shared_between_entries() {
 }
 
 #[test]
+fn paragraph_text_is_opt_in_and_preserves_original_locations() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut change = input();
+    change["entries"][0]["after"] = serde_json::json!({
+        "inline": "First.\n\nÉlan and other words.",
+        "sha256": "10a67226b86aa8c50102c329593fdd2f2d3333c4bbc3d5bc506873b362797fa4"
+    });
+    let preset = "version=1\nname='test'\n[[gates]]\nid='length'\nkind='paragraph_length'\nmax_words=2\nblocking=true\n";
+    let offline = run(dir.path(), &change, preset, &[]);
+    assert_eq!(offline.status.code(), Some(2));
+    let enabled = run(
+        dir.path(),
+        &change,
+        preset,
+        &["--plain-text-paragraphs", "--telemetry"],
+    );
+    assert_eq!(
+        enabled.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&enabled.stderr)
+    );
+    let telemetry: serde_json::Value = serde_json::from_slice(&enabled.stderr).unwrap();
+    assert_eq!(telemetry["event"], "content_change_paragraph_adapter");
+    assert_eq!(telemetry["eligible_entries"], 1);
+    assert!(!String::from_utf8_lossy(&enabled.stderr).contains("Élan"));
+    let verdict: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+    assert_eq!(verdict["status"], "fail");
+    assert_eq!(
+        verdict["findings"][0]["location"],
+        serde_json::json!({"line":3,"column":1})
+    );
+}
+
+#[test]
 fn verdict_contains_plain_text_source_location() {
     let dir = tempfile::tempdir().unwrap();
     let preset =
