@@ -119,6 +119,25 @@ describe("EmDash content adaptation", () => {
     expect(ignored.body_capabilities).toBeUndefined();
   });
 
+  it("projects component-only arrays in body and nested rich text", () => {
+    const components = [{ _type: "notice", _key: "n", text: "Notice" }, { _type: "callout", _key: "c", text: "Callout" }];
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: { content: components } };
+    const mappings = { notice: [{ kind: "heading" as const, field: "text" }], callout: [{ kind: "paragraph" as const, field: "text" }] };
+    const direct = contentItemToEmdashDocument(item, mappings);
+    expect(direct.body?.map((block) => block.children[0]?.text)).toEqual(["Notice", "Callout"]);
+    expect(direct.body?.[0]?.style).toBe("h2");
+    expect(direct.body_capabilities).toBeUndefined();
+    const nestedItem = { ...item, data: { blocks: [{ _type: "section", _key: "s", body: components }] } };
+    const section = [{ kind: "richText" as const, field: "body" }];
+    const nested = contentItemToEmdashDocument(nestedItem, { ...mappings, section });
+    expect(nested.body?.map((block) => block.children[0]?.text)).toEqual(["Notice", "Callout"]);
+    expect(nested.body_capabilities).toBeUndefined();
+    const partial = contentItemToEmdashDocument(nestedItem, { notice: mappings.notice, section });
+    expect(partial.body?.map((block) => block.children[0]?.text)).toEqual(["Notice", "Callout"]);
+    expect(partial.body?.[0]?.style).toBe("h2");
+    expect(partial.body_capabilities).toEqual([]);
+  });
+
   it("bounds recursively mapped rich text and marks deep content incomplete", () => {
     let nested: unknown[] = body("Leaf");
     for (let index = 0; index < 12; index++) {

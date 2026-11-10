@@ -252,6 +252,29 @@ kind="link_reachability"
   assert.ok(host.store.get("findings:/nested").assessment.gates.some((gate) => gate.status === "passed"));
 }
 
+// Component-only rich text works at both top level and inside a mapped section.
+{
+  const components = [{ _type: "notice", _key: "n", text: "First" }, { _type: "callout", _key: "c", text: "Second" }];
+  const direct = item("components-direct", { data: { content: components } });
+  const nested = item("components-nested", { data: { blocks: [{ _type: "section", _key: "s", body: components }] } });
+  const host = fakeHost([direct, nested]);
+  const mappings = { section: [{ kind: "richText", field: "body" }], notice: [{ kind: "heading", field: "text" }], callout: [{ kind: "paragraph", field: "text" }] };
+  const configured = createPlugin({ contentPreset: { name: "article", collections: ["pages"] }, blockMappings: mappings });
+  await configured.routes.refresh.handler(host.ctx);
+  for (const route of ["/components-direct", "/components-nested"]) {
+    const document = host.store.get(`document:${route}`).document;
+    assert.deepEqual(document.body.map((entry) => entry.children[0].text), ["First", "Second"]);
+    assert.equal(document.body[0].style, "h2");
+    assert.equal(document.body_capabilities, undefined);
+    assert.ok(host.store.get(`findings:${route}`).assessment.gates.some((gate) => gate.status === "passed"));
+  }
+  const partial = createPlugin({ contentPreset: { name: "article", collections: ["pages"] }, blockMappings: { section: mappings.section, notice: mappings.notice } });
+  await partial.hooks["content:afterSave"].handler({ content: nested, collection: "pages", isNew: false }, host.ctx);
+  assert.equal(host.store.get("document:/components-nested").document.body[0].style, "h2");
+  assert.deepEqual(host.store.get("document:/components-nested").document.body_capabilities, []);
+  assert.ok(host.store.get("findings:/components-nested").assessment.gates.some((gate) => gate.status === "not_checked"));
+}
+
 // Ordered host metadata mappings reach both save and Refresh.
 {
   const mapped = item("mapped", { data: { body: [block("p", "Content")], seo_description: "Preferred", excerpt: "Fallback" } });

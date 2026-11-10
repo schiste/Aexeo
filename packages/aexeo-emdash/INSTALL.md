@@ -123,7 +123,8 @@ the component contributes no content relevant to the evaluated body.
 
 A block mapping is the site's assertion that those fields cover the rendered content,
 in order. `richText` accepts Portable Text arrays, including text mixed with
-mapped custom components, and preserves their headings and links. Unmapped or
+mapped custom components, or arrays of mapped custom components alone, and
+preserves their headings and links. Unmapped or
 malformed nested components and recursion beyond the mapping depth limit leave
 body coverage unverified; `heading` defaults to h2 and accepts levels 1 through 6. `repeat`
 maps each item in an array;
