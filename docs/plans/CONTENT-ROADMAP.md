@@ -97,6 +97,8 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [x] Markdown invalid-link source locations and aggregate mapping telemetry
   ([PR #48](https://github.com/schiste/Aexeo/pull/48)); locations identify link
   occurrences, including reference uses.
+- [x] EmDash retains observed block boundaries for text checks when paragraph
+  extraction is unavailable; paragraph-specific gates remain `not_checked`.
 - [x] EmDash block/span coordinates and opt-in local aggregate telemetry
   ([PR #44](https://github.com/schiste/Aexeo/pull/44)); coordinates refer to the
   evaluated snapshot and use UTF-16 offsets.

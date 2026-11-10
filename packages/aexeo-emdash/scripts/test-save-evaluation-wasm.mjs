@@ -226,6 +226,18 @@ min=1
 id="headings"
 kind="required_headings"
 headings=["Summary"]
+[[gates]]
+id="phrase"
+kind="forbidden_terms"
+terms=["Before Card", "Card After"]
+[[gates]]
+id="sentence"
+kind="sentence_length"
+max_words=1
+[[gates]]
+id="paragraph"
+kind="paragraph_count"
+min=1
 `;
   const configured = createPlugin({ contentPreset: { name: "partial", sources: { partial: preset } },
     blockMappings: { card: { fields: [{ kind: "paragraph", field: "text" }], capabilities: ["text"] } } });
@@ -235,6 +247,9 @@ headings=["Summary"]
   const gates = host.store.get("findings:/partial-capability").assessment.gates;
   assert.equal(gates.find((gate) => gate.gate_id === "words").status, "passed");
   assert.equal(gates.find((gate) => gate.gate_id === "headings").status, "not_checked");
+  assert.equal(gates.find((gate) => gate.gate_id === "phrase").status, "passed");
+  assert.equal(gates.find((gate) => gate.gate_id === "sentence").status, "passed");
+  assert.equal(gates.find((gate) => gate.gate_id === "paragraph").status, "not_checked");
 }
 
 // Malformed mixed items and unrecognized fields do not hide adjacent prose.
