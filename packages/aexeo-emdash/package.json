@@ -106,6 +106,15 @@
   "overrides": {
     "@emdash-cms/plugin-types": {
       "zod": "4.6.7"
+    },
+    "emdash": {
+      "zod": "4.6.7"
+    },
+    "@emdash-cms/auth": {
+      "zod": "4.6.7"
+    },
+    "@emdash-cms/plugin-cli": {
+      "zod": "4.6.7"
     }
   }
 }
