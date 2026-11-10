@@ -938,7 +938,8 @@ fn crawl_can_write_observational_link_graph_with_private_telemetry() {
     let conclusions = payload["link_graph_summary"]["legacy_link_findings"]
         .as_object()
         .unwrap();
-    assert_eq!(conclusions.len(), 5);
+    assert_eq!(conclusions.len(), 6);
+    assert_eq!(conclusions["conditional_inbound"], 0);
     assert_eq!(
         conclusions
             .values()
@@ -1020,7 +1021,9 @@ fn crawl_graph_summary_is_visible_in_text() {
     assert!(text.contains("inventory_missing"), "{text}");
     assert!(text.contains("crawl complete: false"), "{text}");
     assert!(
-        text.contains("Link graph coverage of LNK002/LNK004 findings: 0 confirmed,"),
+        text.contains(
+            "Link graph coverage of LNK002/LNK004 findings: 0 conditional_inbound, 0 confirmed,"
+        ),
         "{text}"
     );
     server.shutdown();
