@@ -236,6 +236,7 @@ fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
         .context("missing examples")?;
     let mut ids = HashSet::new();
     let mut splits = HashMap::new();
+    let mut source_splits = HashMap::new();
     let mut matching = None;
     let synthetic =
         corpus.get("fixture_kind").and_then(Value::as_str) == Some("synthetic_regression");
@@ -267,6 +268,25 @@ fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
             .is_some_and(|previous| previous != split)
         {
             bail!("identical example text appears in multiple splits");
+        }
+        if let Some(group) = item.get("source_group") {
+            let group = group
+                .as_str()
+                .filter(|value| {
+                    (1..=128).contains(&value.len())
+                        && value
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
+                })
+                .context(
+                    "source_group must be an opaque ASCII identifier of 1 to 128 characters",
+                )?;
+            if source_splits
+                .insert(group, split)
+                .is_some_and(|previous| previous != split)
+            {
+                bail!("source group appears in multiple splits");
+            }
         }
         let expected = item
             .get("expected")

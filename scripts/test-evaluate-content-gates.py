@@ -238,6 +238,26 @@ class EvaluateTests(unittest.TestCase):
         holdout["review"] = {"reviewer": "reviewer-1", "method": "manual"}
         eval_module.validate_corpus(corpus)
 
+    def test_source_groups_prevent_leakage_and_report_coverage_without_ids(self):
+        examples = [
+            {"id": "a", "split": "development", "text": "first excerpt", "expected": "passed", "source_group": "private-source"},
+            {"id": "b", "split": "holdout", "text": "different excerpt", "expected": "passed", "source_group": "private-source"},
+        ]
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": examples}
+        with self.assertRaisesRegex(ValueError, "source group appears in multiple splits"):
+            eval_module.validate_corpus(corpus)
+        examples[1]["split"] = "development"
+        examples.append({"id": "c", "split": "development", "text": "other", "expected": "passed"})
+        response = SimpleNamespace(returncode=0, stdout='{"gates":[{"gate_id":"g","status":"passed"}]}')
+        with patch.object(eval_module.subprocess, "run", return_value=response):
+            metrics = eval_module.evaluate("cli", corpus, "development")
+        self.assertEqual(metrics["source_group_coverage"], {"grouped_examples": 2, "ungrouped_examples": 1, "distinct_groups": 1})
+        self.assertNotIn("private-source", json.dumps(metrics))
+        for invalid in [None, "", " ", "é", "a/b", "a" * 129]:
+            examples[0]["source_group"] = invalid
+            with self.assertRaisesRegex(ValueError, "source_group"):
+                eval_module.validate_corpus(corpus)
+
     def test_review_events_track_overrides_and_resolved_unchecked(self):
         items = [{"id": ident, "split": "holdout", "text": text, "expected": "passed"} for ident, text in [("a", "one"), ("b", "two"), ("c", "three")]]
         corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": items}

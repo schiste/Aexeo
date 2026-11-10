@@ -295,6 +295,18 @@ checks. Retain those separately when comparing runs. Existing human labels and
 historical review events are not bound to this fingerprint; they remain useful
 for comparison across policies and are not proof of independent review.
 
+### Preventing source-group leakage
+
+Corpus examples can carry `source_group`, an opaque identifier shared by excerpts
+from the same document or other related source. Use 1–128 ASCII letters, digits,
+periods, underscores, colons or hyphens, and avoid personal or confidential data
+in identifiers. The evaluator and both feedback exporters reject a group appearing
+in both development and holdout, even if its excerpts differ. The evaluation report
+includes grouped and ungrouped example counts and the number of distinct groups
+for the selected split, without group identifiers. Grouping is optional for legacy
+corpora; absent or incorrectly assigned groups, paraphrases and related sources
+cannot be detected automatically and do not establish independence.
+
 ## Local latency measurement
 
 For local content and crawl evaluation, `--telemetry` also emits `gate_timings_ms`, an

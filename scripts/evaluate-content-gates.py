@@ -117,6 +117,7 @@ def validate_corpus(corpus):
     synthetic = corpus.get("fixture_kind") == "synthetic_regression"
     ids = set()
     text_splits = {}
+    source_splits = {}
     for item in corpus["examples"]:
         identifier, split, text = item["id"], item["split"], item["text"]
         if not isinstance(identifier, str) or not identifier or identifier in ids:
@@ -129,6 +130,14 @@ def validate_corpus(corpus):
         if text in text_splits and text_splits[text] != split:
             raise ValueError("identical example text appears in multiple splits")
         text_splits[text] = split
+        if "source_group" in item:
+            group = item["source_group"]
+            if (not isinstance(group, str) or not 1 <= len(group) <= 128
+                    or any(not (c.isascii() and (c.isalnum() or c in "._:-")) for c in group)):
+                raise ValueError("source_group must be an opaque ASCII identifier of 1 to 128 characters")
+            if group in source_splits and source_splits[group] != split:
+                raise ValueError("source group appears in multiple splits")
+            source_splits[group] = split
         if item["expected"] not in {"passed", "failed", "not_checked"}:
             raise ValueError("expected status must be passed, failed or not_checked")
         status = item.get("review_status", "not_reviewed")
@@ -292,6 +301,11 @@ def evaluate(binary, corpus, split, review_log=None):
               "resolved_policy_fingerprint": {"version": 1, "sha256": resolved_typed_hash}, "metric_scope": "checked_examples_only", "split": split,
               **classification_metrics(counts, len(examples)), "reviewed_examples": reviewed_examples,
               "unbound_reviewed_examples": unbound_reviewed_examples,
+              "source_group_coverage": {
+                  "grouped_examples": sum("source_group" in item for item in examples),
+                  "ungrouped_examples": sum("source_group" not in item for item in examples),
+                  "distinct_groups": len({item["source_group"] for item in examples if "source_group" in item}),
+              },
               "reviewed_metrics": classification_metrics(reviewed_counts, reviewed_examples),
               "fresh_process_p95_ms": durations[math.ceil(len(durations) * .95) - 1]}
     if review_metrics is not None:
