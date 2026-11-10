@@ -213,6 +213,24 @@ kind="link_reachability"
   for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/mixed", rule), false);
 }
 
+// Malformed mixed items and unrecognized fields do not hide adjacent prose.
+{
+  const partial = item("partial-projection", { data: {
+    introduction: [block("a", "Before"), null, { _type: "block", children: "broken" }, block("b", "Between")],
+    unknown: { unexpected: true },
+    conclusion: [block("c", "After")],
+  } });
+  const host = fakeHost([partial]);
+  const configured = createPlugin({ contentPreset: { name: "article", collections: ["pages"] },
+    contentFieldsByCollection: { pages: ["introduction", "unknown", "conclusion"] } });
+  await configured.hooks["content:afterSave"].handler({ content: partial, collection: "pages", isNew: false }, host.ctx);
+  const document = host.store.get("document:/partial-projection")?.document;
+  assert.deepEqual(document.body.map((entry) => entry.children[0].text), ["Before", "Between", "After"]);
+  assert.deepEqual(document.body_capabilities, []);
+  assert.ok(host.store.get("findings:/partial-projection")?.assessment?.gates.some((gate) => gate.status === "not_checked"));
+  for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/partial-projection", rule), false);
+}
+
 // Ordered host metadata mappings reach both save and Refresh.
 {
   const mapped = item("mapped", { data: { body: [block("p", "Content")], seo_description: "Preferred", excerpt: "Fallback" } });
