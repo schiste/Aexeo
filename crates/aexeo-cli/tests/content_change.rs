@@ -71,6 +71,74 @@ fn emits_bound_pass_fail_and_not_checked_verdicts() {
 }
 
 #[test]
+fn link_observer_requires_opt_in_and_does_not_fetch_relative_links() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut change = input();
+    change["entries"][0]["media_type"] = "text/markdown".into();
+    change["entries"][0]["after"] = serde_json::json!({"inline":"[x](/x)", "sha256":"f0028e4ca25f0bd43662926fcd36d300576e7e7b3d49045cc6f89a409eaf971e"});
+    let preset =
+        "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\nblocking=true\n";
+    let offline = run(dir.path(), &change, preset, &[]);
+    assert_eq!(offline.status.code(), Some(2));
+    let online = run(
+        dir.path(),
+        &change,
+        preset,
+        &["--check-link-reachability", "--telemetry"],
+    );
+    assert_eq!(
+        online.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&online.stderr)
+    );
+    let verdict: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+    assert_eq!(verdict["status"], "pass");
+    let event: serde_json::Value = serde_json::from_slice(&online.stderr).unwrap();
+    assert_eq!(event["network_checks"], 0);
+    assert!(!String::from_utf8_lossy(&online.stderr).contains("/x"));
+}
+
+#[test]
+fn link_budget_is_shared_between_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut change = input();
+    change["entries"] = serde_json::json!([
+        {"entity_id":"a", "operation":"create", "media_type":"text/markdown", "after":{"inline":"[x](http://127.0.0.1/a)", "sha256":"f8fee02e4780a4cf0c950e349143cf77ab1de060e26def310c8b24565032f6c3"}},
+        {"entity_id":"b", "operation":"create", "media_type":"text/markdown", "after":{"inline":"[y](http://127.0.0.1/b)", "sha256":"11270c8f0f7adc7d95cf09d39bb6095efa80f852882286048c3ccb35a964b0a6"}}
+    ]);
+    let preset =
+        "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\nblocking=true\n";
+    let output = run(
+        dir.path(),
+        &change,
+        preset,
+        &[
+            "--check-link-reachability",
+            "--link-max-checks",
+            "1",
+            "--telemetry",
+        ],
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let events = stderr
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["network_checks"], 1);
+    assert_eq!(events[1]["network_checks"], 0);
+    assert!(!stderr.contains("127.0.0.1"));
+}
+
+#[test]
 fn verdict_contains_plain_text_source_location() {
     let dir = tempfile::tempdir().unwrap();
     let preset =

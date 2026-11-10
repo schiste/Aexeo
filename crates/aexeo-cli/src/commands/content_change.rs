@@ -6,7 +6,7 @@ use aexeo_contracts::{
 use aexeo_core::{
     content_gate::MAX_CONTENT_INPUT_BYTES,
     content_gate_sources::{ConfinedContentFiles, SourceError},
-    content_gate_verdict::evaluate_change,
+    content_gate_verdict::evaluate_change_with_observer,
     content_presets::{builtin_content_presets, resolve_content_preset},
     error::UserContext,
     intelligence::presence::iso_now,
@@ -113,13 +113,43 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         .user_context("preset is required")?;
     let preset = resolve_content_preset(name, &sources).user_context("invalid content preset")?;
     let mut provider = HostFiles::new(args.get_one::<String>("content-root").map(String::as_str))?;
-    let verdict = match evaluate_change(
+    let mut remaining = *args
+        .get_one::<u64>("link-max-checks")
+        .user_context("missing link-max-checks")? as usize;
+    let timeout = std::time::Duration::from_secs(
+        *args
+            .get_one::<u64>("link-timeout")
+            .user_context("missing link-timeout")?,
+    );
+    let telemetry = args.get_flag("telemetry");
+    let mut observe = |_: &str, values: &[String]| -> Result<_> {
+        use aexeo_core::runtime::link_reachability::{
+            check_link_reachability_remaining, gate_observations,
+        };
+        let report = check_link_reachability_remaining(values, remaining, timeout)?;
+        remaining = remaining.saturating_sub(report.network_checks);
+        if telemetry {
+            eprintln!(
+                "{}",
+                serde_json::json!({"event":"content_link_reachability", "version":1,
+                "elapsed_ms":report.elapsed_ms, "destinations":report.observations.len(), "network_checks":report.network_checks})
+            );
+        }
+        Ok(gate_observations(values, &report))
+    };
+    let observer = if args.get_flag("check-link-reachability") {
+        Some(&mut observe as &mut aexeo_core::content_gate_verdict::LinkObserver<'_>)
+    } else {
+        None
+    };
+    let verdict = match evaluate_change_with_observer(
         &change,
         &mut provider,
         &preset,
         &iso_now(),
         MAX_CONTENT_INPUT_BYTES,
         MAX_TOTAL_CONTENT_BYTES,
+        observer,
     ) {
         Ok(verdict) => verdict,
         Err(error) if error.downcast_ref::<SourceError>().is_some() => {

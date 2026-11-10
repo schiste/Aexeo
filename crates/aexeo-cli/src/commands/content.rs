@@ -311,8 +311,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             .any(|gate| matches!(gate, ContentGate::LinkReachability { .. }))
     {
         destinations.as_deref().map(|values| -> Result<_> {
-            use aexeo_core::content_gate::LinkReachabilityObservation as Observation;
-            use aexeo_core::runtime::link_reachability::{check_link_reachability, ReachabilityStatus};
+            use aexeo_core::runtime::link_reachability::{check_link_reachability, gate_observations};
             let report = check_link_reachability(values,
                 *args.get_one::<usize>("link-max-checks").context("missing link-max-checks")?,
                 std::time::Duration::from_secs(*args.get_one::<u64>("link-timeout").context("missing link-timeout")?))?;
@@ -320,15 +319,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 eprintln!("{}", serde_json::json!({"event":"content_link_reachability", "version":1,
                     "elapsed_ms":report.elapsed_ms, "destinations":report.observations.len(), "network_checks":report.network_checks}));
             }
-            Ok(report.observations.iter().map(|observation| match observation.status {
-                ReachabilityStatus::Reachable => Observation::Reachable,
-                ReachabilityStatus::NotFound => Observation::NotFound,
-                ReachabilityStatus::Skipped if observation.reason == "non_http_destination"
-                    || (observation.reason == "relative_or_invalid_destination"
-                        && aexeo_core::content_gate::valid_link_destination(
-                            &values[observation.index - 1], &[], true)) => Observation::NotApplicable,
-                ReachabilityStatus::Uncertain | ReachabilityStatus::Skipped => Observation::NotChecked,
-            }).collect::<Vec<_>>())
+            Ok(gate_observations(values, &report))
         }).transpose()?
     } else {
         None

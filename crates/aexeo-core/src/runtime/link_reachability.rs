@@ -192,8 +192,20 @@ pub fn check_link_reachability(
     max_checks: usize,
     timeout: Duration,
 ) -> Result<ReachabilityReport> {
+    if max_checks == 0 {
+        bail!("link check limits exceeded");
+    }
+    check_link_reachability_remaining(destinations, max_checks, timeout)
+}
+
+/// Like `check_link_reachability`, but accepts an exhausted (zero) budget so
+/// a batch host can preserve non-applicable versus unchecked observations.
+pub fn check_link_reachability_remaining(
+    destinations: &[String],
+    max_checks: usize,
+    timeout: Duration,
+) -> Result<ReachabilityReport> {
     if destinations.len() > MAX_LINKS
-        || max_checks == 0
         || max_checks > MAX_CHECKS
         || timeout.is_zero()
         || timeout > Duration::from_secs(30)
@@ -202,6 +214,31 @@ pub fn check_link_reachability(
     }
     let transport = GuardedTransport::new()?;
     Ok(check_with(&transport, destinations, max_checks, timeout))
+}
+
+/// Convert host observations to portable gate capabilities in input order.
+pub fn gate_observations(
+    destinations: &[String],
+    report: &ReachabilityReport,
+) -> Vec<crate::content_gate::LinkReachabilityObservation> {
+    use crate::content_gate::{LinkReachabilityObservation as Observation, valid_link_destination};
+    report
+        .observations
+        .iter()
+        .zip(destinations)
+        .map(|(observation, destination)| match observation.status {
+            ReachabilityStatus::Reachable => Observation::Reachable,
+            ReachabilityStatus::NotFound => Observation::NotFound,
+            ReachabilityStatus::Skipped
+                if observation.reason == "non_http_destination"
+                    || (observation.reason == "relative_or_invalid_destination"
+                        && valid_link_destination(destination, &[], true)) =>
+            {
+                Observation::NotApplicable
+            }
+            ReachabilityStatus::Uncertain | ReachabilityStatus::Skipped => Observation::NotChecked,
+        })
+        .collect()
 }
 
 fn check_with(
@@ -275,6 +312,30 @@ mod tests {
             location: location.map(str::to_owned),
         }
     }
+    #[test]
+    fn exhausted_budget_never_requests_and_preserves_relative_links() {
+        let fake = Fake {
+            calls: RefCell::new(vec![]),
+            replies: RefCell::new(vec![]),
+        };
+        let urls = vec![
+            "https://example.org/a".into(),
+            "/local".into(),
+            "mailto:x@example.org".into(),
+        ];
+        let report = check_with(&fake, &urls, 0, Duration::from_secs(1));
+        assert!(fake.calls.borrow().is_empty());
+        assert_eq!(report.network_checks, 0);
+        assert_eq!(
+            gate_observations(&urls, &report),
+            vec![
+                crate::content_gate::LinkReachabilityObservation::NotChecked,
+                crate::content_gate::LinkReachabilityObservation::NotApplicable,
+                crate::content_gate::LinkReachabilityObservation::NotApplicable,
+            ]
+        );
+    }
+
     #[test]
     fn checks_redirect_and_falls_back_from_head_without_duplicate_requests() {
         let fake = Fake {

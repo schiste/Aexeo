@@ -56,7 +56,11 @@ pub fn build_cli() -> Command {
                 .about("Evaluate a content-gate change and write a bound verdict")
                 .arg(Arg::new("preset").long("preset").required(true).help("Explicit content preset name"))
                 .arg(Arg::new("preset-source").long("preset-source").num_args(1).action(ArgAction::Append).help("Load a named TOML preset as NAME=PATH; may be repeated"))
-                .arg(Arg::new("content-root").long("content-root").help("Authorize this absolute content root for local file references (Linux and supported macOS kernels)")),
+                .arg(Arg::new("content-root").long("content-root").help("Authorize this absolute content root for local file references (Linux and supported macOS kernels)"))
+                .arg(Arg::new("check-link-reachability").long("check-link-reachability").action(ArgAction::SetTrue).help("Explicitly enable bounded external HTTP observations for reachability gates"))
+                .arg(Arg::new("link-max-checks").long("link-max-checks").value_parser(value_parser!(u64).range(1..=100)).default_value("20").help("Maximum external link checks across the entire change"))
+                .arg(Arg::new("link-timeout").long("link-timeout").value_parser(value_parser!(u64).range(1..=30)).default_value("5").help("Maximum seconds per external link including redirects"))
+                .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate link observation counts to stderr")),
         )
         .subcommand(
             Command::new("content")
