@@ -13,6 +13,8 @@ const documents = [
   { route: "/a", title: "Same", body: [] },
   { route: "/b", title: "Same", body: [] },
 ];
+await assert.rejects(evaluateContentCollection([documents[0], documents[0]], "test", { test: preset }), /nonempty and unique/);
+await assert.rejects(evaluateContentCollection([{ ...documents[0], route: " " }], "test", { test: preset }), /nonempty and unique/);
 const report = await evaluateContentCollection(documents, "test", { test: preset });
 assert.equal(report.gates[0].status, "failed");
 assert.equal(report.gates[0].measurements.collection_items, 2);

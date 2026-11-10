@@ -420,6 +420,12 @@ pub fn evaluate_collection(
     documents: &[EmdashDocument],
     preset: &ContentPreset,
 ) -> Result<ContentReport> {
+    let mut routes = std::collections::BTreeSet::new();
+    for document in documents {
+        if document.route.trim().is_empty() || !routes.insert(&document.route) {
+            anyhow::bail!("collection item IDs must be nonempty and unique");
+        }
+    }
     let items: Vec<_> = documents
         .iter()
         .map(|document| ContentInput {
@@ -926,6 +932,18 @@ field = "title"
         assert_eq!(report.gates[0].status, GateStatus::Failed);
         assert_eq!(report.gates[0].measurements["collection_items"], 2);
         assert_eq!(report.gates[0].findings[0].path, "/b");
+    }
+
+    #[test]
+    fn collection_rejects_empty_and_duplicate_routes() {
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='title'\n").unwrap();
+        for raw in [
+            r#"[{"route":" ","title":"A","body":[]}]"#,
+            r#"[{"route":"/same","title":"A","body":[]},{"route":"/same","title":"B","body":[]}]"#,
+        ] {
+            let documents: Vec<EmdashDocument> = serde_json::from_str(raw).unwrap();
+            assert!(evaluate_collection(&documents, &preset).is_err());
+        }
     }
 
     #[test]
