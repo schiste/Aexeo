@@ -174,6 +174,15 @@ describe("external gate service binding", () => {
       const stale = await post(worker, body("/stale"));
       assert.equal(stale.status, 500);
       assert.match((await stale.json()).error, /content preset incomplete/);
+      const request = JSON.parse(body("/stale"));
+      request.responseFormat = 2;
+      const partial = await post(worker, JSON.stringify(request));
+      assert.equal(partial.status, 200, await partial.clone().text());
+      const payload = await partial.json();
+      assert.ok(Array.isArray(payload.findings));
+      assert.equal(payload.assessments["/stale"].preset, "custom");
+      assert.equal(payload.assessments["/stale"].gates[0].status, "not_checked");
+      assert.ok(payload.assessments["/stale"].gates[0].reason);
     } finally {
       await harness.close();
     }

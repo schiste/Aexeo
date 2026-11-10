@@ -69,9 +69,10 @@ presets. A plain text body provides text only. EmDash custom blocks are
 project-specific; their flattened text is available to the legacy site audit,
 but content-preset gates that require body capabilities are reported as
 `not_checked` until a faithful mapping is provided. The configured plugin
-returns `content_preset_incomplete` for such a report, preserving its existing
-fail-closed behavior. This avoids treating unobserved headings, paragraphs or
-links as absent. An explicitly empty body
+persists available findings alongside each gate status and its reason. The
+sidecar also reports these assessments to updated clients; older clients retain
+the fail-closed behavior for incomplete presets. This avoids treating unobserved
+headings, paragraphs or links as absent. An explicitly empty body
 is distinct from an unavailable body. When an entry has several candidate
 content fields, the default first-field projection remains unverified because
 it cannot establish which fields appear in the rendered page.

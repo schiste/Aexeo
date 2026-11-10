@@ -12,6 +12,29 @@ describe("sandbox content presets", () => {
     await expect(contentPresetFindings([{}], undefined, { CONTENT_PRESET_BY_COLLECTION_JSON: '{"posts":"article"}' }, () => "{}")).rejects.toThrow("collection names");
     await expect(contentPresetFindings([{}], undefined, { CONTENT_PRESET: "article" }, () => JSON.stringify({ gates: [{ gate_id: "site", status: "not_checked", reason: "missing", findings: [] }] }))).rejects.toThrow("incomplete");
   });
+  it("returns partial findings with per-document assessment to upgraded clients", async () => {
+    const assessments: Record<string, unknown> = Object.create(null);
+    const evaluate = () => JSON.stringify({ gates: [
+      { gate_id: "words", status: "failed", blocking: false, scope: "document", required_capability: "text", reason: null, findings: [{ rule_id: "words" }] },
+      { gate_id: "headings", status: "not_checked", blocking: true, scope: "document", required_capability: "headings", reason: "unavailable", findings: [] },
+    ] });
+    const findings = await contentPresetFindings([{ route: "/article" }], ["posts"], { CONTENT_PRESET: "article" }, evaluate, undefined, assessments);
+    expect(findings).toEqual([{ rule_id: "words" }]);
+    expect(assessments["/article"]).toEqual({ status: "evaluated", preset: "article", gates: [
+      { gate_id: "words", status: "failed", blocking: false, scope: "document", required_capability: "text", reason: null },
+      { gate_id: "headings", status: "not_checked", blocking: true, scope: "document", required_capability: "headings", reason: "unavailable" },
+    ] });
+  });
+  it("accepts the new sidecar envelope and rejects malformed coverage", async () => {
+    const gate = { gate_id: "headings", status: "not_checked", blocking: true, scope: "document", required_capability: "headings", reason: "unavailable" };
+    const assessment = { status: "evaluated", preset: "article", gates: [gate] };
+    const fetch = vi.fn(async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ findings: [], assessments: { "/article": assessment } }) }));
+    const result = await evaluateViaSidecar({ fetch }, { url: "https://example.test", authToken: "secret" }, []);
+    expect(result).toEqual({ ok: true, findings: [], assessments: { "/article": assessment } });
+    expect(JSON.parse((fetch.mock.calls[0] as unknown as [string, { body: string }])[1].body).responseFormat).toBe(2);
+    const invalid = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ findings: [], assessments: { "/article": { ...assessment, gates: [{ ...gate, status: "mystery" }] } } }) });
+    expect(await evaluateViaSidecar({ fetch: invalid }, { url: "https://example.test", authToken: "secret" }, [])).toMatchObject({ ok: false, reason: "invalid_response" });
+  });
   it("passes configured evidence snapshots to the bridge", async () => {
     const evaluate = vi.fn((_doc: string, _name: string, _sources?: string | null, _evidence?: string | null) => JSON.stringify({ gates: [] }));
     await contentPresetFindings([{}], undefined, { CONTENT_PRESET: "article", CONTENT_EVIDENCE_SOURCES_JSON: '{"study":"14 participants"}' }, evaluate);

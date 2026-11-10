@@ -57,6 +57,7 @@ export async function contentPresetFindings(
   env: ContentPresetEnv,
   evaluate: (documentJson: string, name: string, sourcesJson?: string | null, evidenceJson?: string | null, extensionsJson?: string | null) => string,
   project?: (documentJson: string, evidenceJson?: string | null) => string,
+  assessments?: Record<string, unknown>,
 ): Promise<unknown[]> {
   const byCollection = stringMap(env.CONTENT_PRESET_BY_COLLECTION_JSON, "CONTENT_PRESET_BY_COLLECTION_JSON");
   const sources = stringMap(env.CONTENT_PRESET_SOURCES_JSON, "CONTENT_PRESET_SOURCES_JSON");
@@ -91,10 +92,18 @@ export async function contentPresetFindings(
     const report = JSON.parse(extensionsJson === undefined
       ? evaluate(documentJson, name, JSON.stringify(sources), evidenceJson)
       : evaluate(documentJson, name, JSON.stringify(sources), evidenceJson, extensionsJson)) as {
-      gates: Array<{ gate_id: string; status: string; reason: string | null; findings: unknown[] }>;
+      gates: Array<{ gate_id: string; status: string; blocking: boolean; scope: string; required_capability: string; reason: string | null; findings: unknown[] }>;
     };
+    if (assessments !== undefined) {
+      if (typeof document !== "object" || document === null || !("route" in document) || typeof document.route !== "string") throw new Error("document route is required for assessments");
+      assessments[document.route] = {
+        status: "evaluated", preset: name,
+        gates: report.gates.map(({ gate_id, status, blocking, scope, required_capability, reason }) =>
+          ({ gate_id, status, blocking, scope, required_capability, reason })),
+      };
+    }
     for (const gate of report.gates) {
-      if (gate.status === "not_checked") throw new Error(`content preset incomplete: ${gate.gate_id}: ${gate.reason}`);
+      if (gate.status === "not_checked" && assessments === undefined) throw new Error(`content preset incomplete: ${gate.gate_id}: ${gate.reason}`);
       findings.push(...gate.findings);
     }
   }

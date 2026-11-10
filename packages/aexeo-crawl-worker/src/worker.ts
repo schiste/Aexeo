@@ -119,6 +119,7 @@ interface EvaluateRequest {
   documents: unknown;
   configJson?: string;
   collections?: unknown;
+  responseFormat?: unknown;
 }
 
 async function evaluateRoute(request: Request, env: Env): Promise<Response> {
@@ -165,15 +166,18 @@ async function evaluateRoute(request: Request, env: Env): Promise<Response> {
     raw = evaluateDocuments(JSON.stringify(body.documents), body.configJson);
     const existing: unknown = JSON.parse(raw);
     if (!Array.isArray(existing)) throw new Error("invalid website findings returned by bridge");
-    const additional = await contentPresetFindings(body.documents, body.collections, env, evaluateContent, projectContentInput);
-    raw = JSON.stringify([...existing, ...additional]);
+    // Legacy callers understand only a findings array. They continue to fail
+    // closed on incomplete presets; v2 callers can receive gate coverage.
+    const assessments: Record<string, unknown> | undefined = body.responseFormat === 2 ? Object.create(null) : undefined;
+    const additional = await contentPresetFindings(body.documents, body.collections, env, evaluateContent, projectContentInput, assessments);
+    const findings = [...existing, ...additional];
+    raw = JSON.stringify(assessments === undefined ? findings : { findings, assessments });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return jsonResponse(env, { error: `evaluation failed: ${message}` }, 500);
   }
-  // The bridge returns a JSON-encoded Finding[]. We pass it through to
-  // the sandbox unmodified — the sandbox is the one that will store it
-  // in KV and shape it for the Block Kit table.
+  // Legacy callers receive the original findings array. Version 2 callers
+  // also receive gate coverage for storage and display in the sandbox.
   return new Response(raw, {
     status: 200,
     headers: {
