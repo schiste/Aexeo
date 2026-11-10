@@ -139,6 +139,14 @@ pub enum ContentGate {
         #[serde(default = "default_blocking")]
         allow_relative: bool,
     },
+    /// Reports observed HTTP not-found responses from an explicitly supplied check.
+    LinkReachability {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default)]
+        blocking: bool,
+    },
     /// Heuristic sentence length using configured punctuation and whitespace words.
     SentenceLength {
         id: String,
@@ -338,6 +346,7 @@ impl ContentGate {
             Self::WordCount { severity, .. }
             | Self::LinkCount { severity, .. }
             | Self::LinkDestinations { severity, .. }
+            | Self::LinkReachability { severity, .. }
             | Self::SentenceLength { severity, .. }
             | Self::SentenceCharacterLength { severity, .. }
             | Self::ParagraphCount { severity, .. }
@@ -364,6 +373,7 @@ impl ContentGate {
             Self::WordCount { blocking, .. }
             | Self::LinkCount { blocking, .. }
             | Self::LinkDestinations { blocking, .. }
+            | Self::LinkReachability { blocking, .. }
             | Self::SentenceLength { blocking, .. }
             | Self::SentenceCharacterLength { blocking, .. }
             | Self::ParagraphCount { blocking, .. }
@@ -395,6 +405,7 @@ impl ContentGate {
             | Self::ForbiddenTerms { .. } => "text",
             Self::LinkCount { .. } => "links",
             Self::LinkDestinations { .. } => "link_destinations",
+            Self::LinkReachability { .. } => "link_reachability",
             Self::RequiredMetadata { .. } => "metadata",
             Self::ParagraphCount { .. }
             | Self::ParagraphLength { .. }
@@ -417,6 +428,7 @@ impl ContentGate {
             Self::WordCount { id, .. }
             | Self::LinkCount { id, .. }
             | Self::LinkDestinations { id, .. }
+            | Self::LinkReachability { id, .. }
             | Self::SentenceLength { id, .. }
             | Self::SentenceCharacterLength { id, .. }
             | Self::ParagraphCount { id, .. }
@@ -710,6 +722,16 @@ pub trait ContentGateExtensions {
     ) -> Result<Option<Vec<ExtensionDiagnostic>>>;
 }
 
+/// A host observation for one destination, in adapter occurrence order.
+/// The host must bind observations to the same unchanged input and destinations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkReachabilityObservation {
+    Reachable,
+    NotFound,
+    NotChecked,
+    NotApplicable,
+}
+
 /// Capabilities supplied by an adapter to a content evaluation.
 /// Absent capabilities produce `not_checked` for the corresponding gates.
 #[derive(Default)]
@@ -718,6 +740,8 @@ pub struct ContentEvaluationContext<'a> {
     pub extensions: Option<&'a dyn ContentGateExtensions>,
     pub adapter: Option<&'a ContentContext>,
     pub link_count: Option<usize>,
+    /// One observation per destination; absent or mismatched data is not checked.
+    pub link_reachability: Option<&'a [LinkReachabilityObservation]>,
     /// The host is responsible for supplying a complete collection.
     pub collection: Option<&'a [ContentInput]>,
 }
@@ -1033,6 +1057,7 @@ impl ContentPreset {
                 extensions,
                 adapter: context,
                 link_count,
+                link_reachability: None,
                 collection: None,
             },
         )
@@ -1249,6 +1274,52 @@ impl ContentPreset {
                         reason = Some("link destinations are unavailable from this adapter".into())
                     }
                 },
+                ContentGate::LinkReachability { .. } => {
+                    match (destinations, capabilities.link_reachability) {
+                        (Some(values), Some(observations))
+                            if values.len() == observations.len() =>
+                        {
+                            let mut unchecked = 0usize;
+                            let mut not_found = 0usize;
+                            let mut checked = 0usize;
+                            for (index, observation) in observations.iter().enumerate() {
+                                match observation {
+                                    LinkReachabilityObservation::Reachable => checked += 1,
+                                    LinkReachabilityObservation::NotFound => {
+                                        checked += 1;
+                                        not_found += 1;
+                                        emit(
+                                            format!(
+                                                "Link destination #{} returned HTTP 404 or 410; review availability",
+                                                index + 1
+                                            ),
+                                            1,
+                                            1,
+                                        );
+                                    }
+                                    LinkReachabilityObservation::NotChecked => unchecked += 1,
+                                    LinkReachabilityObservation::NotApplicable => {}
+                                }
+                            }
+                            measurements.insert("checked_destinations".into(), checked);
+                            measurements.insert("not_found_destinations".into(), not_found);
+                            measurements.insert("unchecked_destinations".into(), unchecked);
+                            if unchecked > 0 {
+                                reason = Some("some link destinations could not be checked; findings cover only observed responses".into());
+                            }
+                        }
+                        (Some(_), Some(_)) => {
+                            reason =
+                                Some("link observations do not match the destination count".into())
+                        }
+                        _ => {
+                            reason = Some(
+                                "link reachability observations are unavailable from this adapter"
+                                    .into(),
+                            )
+                        }
+                    }
+                }
                 ContentGate::ParagraphCount { min, max, .. } => {
                     if let Some(minimum) = min {
                         measurements.insert("min_paragraphs".into(), *minimum);
@@ -2799,5 +2870,51 @@ terms = ["bad"]
             capped.measurements["openings_evaluated"],
             MAX_DISTINCT_PARAGRAPH_OPENINGS
         );
+    }
+    #[test]
+    fn reachability_gate_preserves_partial_findings_without_network() {
+        use LinkReachabilityObservation::{NotApplicable, NotChecked, NotFound, Reachable};
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='links'\n[[gates]]\nid='external'\nkind='link_reachability'\n",
+        )
+        .unwrap();
+        let input = ContentInput {
+            id: "test".into(),
+            ..Default::default()
+        };
+        let destinations = vec![
+            "https://a.example".to_owned(),
+            "https://b.example".to_owned(),
+            "mailto:test@example.org".to_owned(),
+        ];
+        let evaluate = |observations: Option<&[LinkReachabilityObservation]>| {
+            preset
+                .evaluate_with_destinations(
+                    &input,
+                    &ContentEvaluationContext {
+                        link_reachability: observations,
+                        ..Default::default()
+                    },
+                    Some(&destinations),
+                )
+                .unwrap()
+                .gates
+                .remove(0)
+        };
+        let unavailable = evaluate(None);
+        assert_eq!(unavailable.status, GateStatus::NotChecked);
+        assert!(unavailable.findings.is_empty());
+        let mismatched = evaluate(Some(&[Reachable]));
+        assert_eq!(mismatched.status, GateStatus::NotChecked);
+        let partial = evaluate(Some(&[NotFound, NotChecked, NotApplicable]));
+        assert_eq!(partial.status, GateStatus::NotChecked);
+        assert_eq!(partial.findings.len(), 1);
+        assert_eq!(partial.measurements["unchecked_destinations"], 1);
+        assert!(partial.findings[0].message.contains("#1"));
+        let complete = evaluate(Some(&[NotFound, Reachable, NotApplicable]));
+        assert_eq!(complete.status, GateStatus::Failed);
+        assert!(!complete.blocking);
+        let passed = evaluate(Some(&[Reachable, Reachable, NotApplicable]));
+        assert_eq!(passed.status, GateStatus::Passed);
     }
 }

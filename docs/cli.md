@@ -178,6 +178,19 @@ Options:
       --metadata <metadata>
           JSON file containing string metadata fields
 
+      --check-link-reachability
+          Explicitly enable bounded external HTTP link observations for configured reachability gates
+
+      --link-max-checks <link-max-checks>
+          Maximum unique external link checks
+
+          [default: 20]
+
+      --link-timeout <link-timeout>
+          Maximum seconds per external link including redirects
+
+          [default: 5]
+
       --extension-results <extension-results>
           Load explicitly supplied, input-bound external gate results as JSON
 

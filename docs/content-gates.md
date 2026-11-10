@@ -190,6 +190,33 @@ Limits are 32 MiB for the JSON payload, 100 results, 1,000 diagnostics per
 result and 4,096 UTF-8 bytes per message. No external program is sandboxed or
 executed by Aexeo.
 
+## Composable reachability gate
+
+A portable preset can request an advisory observation gate:
+
+```toml
+[[gates]]
+id = "editorial.external_links"
+kind = "link_reachability"
+blocking = false
+```
+
+Run Markdown evaluation with `aexeo-cli content article.md --input-format markdown
+--preset custom --preset-source custom=policy.toml --check-link-reachability`.
+The explicit flag enables network access only when this gate is present; otherwise
+no link checks are made. `--link-max-checks` (1–100, default 20) and
+`--link-timeout` (1–30 seconds, default 5) bound requests. Without the flag, or
+when the adapter cannot supply complete destinations, the gate is `not_checked`.
+Relative or malformed destinations and refused, failed or budget-exhausted
+requests leave coverage incomplete. Non-HTTP schemes are outside this gate.
+A 404/410 response is a finding to review, not proof of permanent failure. If
+some checks are inconclusive, findings for observed responses are retained and
+the gate is `not_checked`. Markdown source locations point to link occurrences.
+The optional local telemetry event contains counts and elapsed time, not URLs;
+external servers necessarily receive requested URLs. Other hosts may supply
+observations through the core context, bound by the host to the same immutable
+snapshot and destination order. Aexeo does not authenticate those observations.
+
 ## Optional external link observations
 
 `aexeo-cli link-reachability article.md` explicitly contacts absolute HTTP(S)
