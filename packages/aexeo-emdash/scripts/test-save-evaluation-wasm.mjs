@@ -202,6 +202,8 @@ mode="strict"
   const good = host.store.get("findings:/complete");
   assert.ok(partial?.assessment?.gates.some((gate) => gate.status === "not_checked"));
   assert.ok(good?.assessment?.gates.some((gate) => gate.status === "passed"));
+  const payload = await configured.routes.data.handler(host.ctx);
+  assert.ok(payload.routes.find((route) => route.route === "/partial")?.assessment?.gates.some((gate) => gate.status === "not_checked"));
   assert.equal(host.logged.length, 0, `incomplete gates are not errors: ${host.logged.join("; ")}`);
 }
 
