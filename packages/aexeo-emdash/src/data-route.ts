@@ -1,3 +1,4 @@
+import { isCmsObservableFinding } from "./cms-coverage.js";
 import type { CustomBlockMappings } from "./adapter.js";
 // Data route for the React admin findings page.
 //
@@ -16,6 +17,7 @@ import type {
   StoredDocument,
 } from "./plugin.js";
 import {
+  SITE_GRAPH_RULE_IDS,
   evaluateAndPersistAll,
   readAllDocuments,
   readAllStoredDocuments,
@@ -54,6 +56,7 @@ export interface FindingsPayload {
   // "template" rather than a specific page, it's bucketed under "*"
   // server-side and surfaced separately in the UI.
   sitewideFindings: Finding[];
+  sitewideAssessment?: DocumentAssessment;
 }
 
 export interface LayerBreakdown {
@@ -162,6 +165,7 @@ async function buildFindingsPayload(
   );
   const findings: FindingRow[] = [];
   const sitewide: Finding[] = [];
+  const sitewideAssessment = entries.find((entry) => entry.key === "findings:*")?.value?.assessment;
   const perRoute = new Map<
     string,
     { findings: Finding[]; errors: number; warnings: number; assessment?: DocumentAssessment }
@@ -170,7 +174,8 @@ async function buildFindingsPayload(
     if (entry.value === null) continue;
     const route = entry.key.replace(/^findings:/, "");
     if (route === "*") {
-      sitewide.push(...entry.value.findings);
+      sitewide.push(...entry.value.findings.filter((finding) => isCmsObservableFinding(finding) &&
+        !(sitewideAssessment?.status === "error" && SITE_GRAPH_RULE_IDS.has(finding.rule_id))));
       continue;
     }
     let bucket = perRoute.get(route);
@@ -179,6 +184,7 @@ async function buildFindingsPayload(
       perRoute.set(route, bucket);
     }
     for (const finding of entry.value.findings) {
+      if (!isCmsObservableFinding(finding) || (sitewideAssessment?.status === "error" && SITE_GRAPH_RULE_IDS.has(finding.rule_id))) continue;
       bucket.findings.push(finding);
       if (finding.severity === "error") bucket.errors += 1;
       else if (finding.severity === "warning") bucket.warnings += 1;
@@ -241,6 +247,7 @@ async function buildFindingsPayload(
     },
     layerBreakdown,
     sitewideFindings: sitewide,
+    ...(sitewideAssessment === undefined ? {} : { sitewideAssessment }),
   };
 }
 

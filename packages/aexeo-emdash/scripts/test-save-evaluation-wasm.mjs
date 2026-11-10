@@ -209,9 +209,8 @@ mode="strict"
 
 // --- A save must not erase what Refresh found --------------------------------
 
-// Every site-graph rule is triggered on /subject by a Refresh, so each must
-// survive a save of /subject. A rule missing from SITE_GRAPH_RULE_IDS loses its
-// finding here.
+// Observable site-graph findings survive a save of /subject. Conclusions about
+// missing rendered targets and orphan pages are not established by CMS data.
 {
   const subject = item("subject", {
     seo: { title: "Same title", description: "Same description.", canonical: `${SITE}/subject` },
@@ -250,13 +249,14 @@ mode="strict"
   await refresh(host);
 
   const expected = [
-    ["/subject", "LNK001"],
-    ["/subject", "LNK002"],
     ["/subject", "LNK003"],
     ["/subject", "CNT005"],
   ];
   for (const [route, ruleId] of expected) {
     assert.equal(has(host, route, ruleId), true, `fixture must trigger ${ruleId} on ${route} at Refresh; got ${[...rulesAt(host, route)]}`);
+  }
+  for (const ruleId of ["LNK001", "LNK002", "LNK004"]) {
+    assert.equal(has(host, "/subject", ruleId), false, `CMS-only Refresh must not assert ${ruleId}`);
   }
 
   for (const [route, content] of [["/subject", subject], ["/moved", moved], ["/inbound", inbound]]) {

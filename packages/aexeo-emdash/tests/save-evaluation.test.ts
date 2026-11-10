@@ -71,7 +71,7 @@ const returning =
   async () => ({ ok: true, findings });
 
 describe("handleAfterSaveConfigured", () => {
-  it("drops the evaluator's site-graph findings and keeps the stored ones", async () => {
+  it("drops site-graph findings when they cannot be observed in CMS records", async () => {
     const { ctx, findings } = fakeCtx([
       finding("LNK001", "broken internal link: /stored"),
       finding("SEO002", "stale document finding"),
@@ -85,10 +85,7 @@ describe("handleAfterSaveConfigured", () => {
         finding("EDIT001"),
       ),
     );
-    expect(findings().map((f) => f.message).sort()).toEqual([
-      "EDIT001",
-      "broken internal link: /stored",
-    ]);
+    expect(findings().map((f) => f.message).sort()).toEqual(["EDIT001"]);
   });
 
   it("stores no site-graph finding for a route Refresh has not seen", async () => {

@@ -668,6 +668,7 @@ export async function evaluateAndPersistAll(
   const documentRoutes = new Set<string>();
   for (const collection of collections) {
     let cursor: string | undefined;
+    const seenCursors = new Set<string>();
     do {
       try {
         const page: ContentList = await ctx.content.list(collection, {
@@ -691,7 +692,13 @@ export async function evaluateAndPersistAll(
             meta: adapted.meta,
           });
         }
-        cursor = page.hasMore ? page.cursor : undefined;
+        if (page.hasMore) {
+          if (!page.cursor || seenCursors.has(page.cursor)) throw new Error("incomplete pagination: missing or repeated cursor");
+          seenCursors.add(page.cursor);
+          cursor = page.cursor;
+        } else {
+          cursor = undefined;
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         summary.errors.push(`${collection}: ${message}`);
@@ -699,6 +706,7 @@ export async function evaluateAndPersistAll(
       }
     } while (cursor !== undefined);
   }
+  const inventoryComplete = summary.errors.length === 0;
   summary.documentsScanned = documents.length;
   recordContentCoverage(ctx, documents);
 
@@ -722,6 +730,11 @@ export async function evaluateAndPersistAll(
       detail: result.detail,
     });
     summary.errors.push(`${result.reason}: ${result.detail}`);
+    try { ctx.log?.info?.("aexeo.sitewide_coverage", { status: "evaluation_error" }); } catch { /* best effort */ }
+    await kv.set(findingsKey("*"), {
+      route: "*", findings: [],
+      assessment: { status: "error", reason: result.reason, detail: result.detail },
+    });
     for (const [route, stored] of adaptedByRoute) {
       if (!(await isSuperseded(kv, route, stored.meta.updatedAt))) {
         await kv.set(findingsKey(route), {
@@ -734,12 +747,24 @@ export async function evaluateAndPersistAll(
   }
 
   const findingsByRoute = new Map<string, Finding[]>();
+  findingsByRoute.set("*", []); // Replace stale sitewide findings even when the new set is empty.
   for (const route of documentRoutes) {
     findingsByRoute.set(route, []);
   }
   const completeByRoute = new Map(documents.map((document) => [document.route, hasCompleteBody(document)]));
   const allBodiesComplete = documents.every(hasCompleteBody);
+  const globalCoverageComplete = summary.errors.length === 0 && allBodiesComplete;
+  try { ctx.log?.info?.("aexeo.sitewide_coverage", { status: globalCoverageComplete ? "complete" : summary.errors.length > 0 ? "inventory_incomplete" : "body_incomplete" }); } catch { /* best effort */ }
+  const globalAssessment: DocumentAssessment | undefined = globalCoverageComplete ? undefined : {
+    status: "error",
+    reason: summary.errors.length > 0 ? "inventory_incomplete" : "body_incomplete",
+    detail: "Sitewide and cross-document checks are unavailable because the CMS input is incomplete.",
+  };
+  if (!allBodiesComplete && summary.errors.length === 0) {
+    summary.errors.push("Sitewide checks unavailable: one or more document bodies are incomplete.");
+  }
   for (const finding of result.findings) {
+    if (!globalCoverageComplete && (finding.scope !== "page" || SITE_GRAPH_RULE_IDS.has(finding.rule_id))) continue;
     const complete = finding.scope === "page" ? completeByRoute.get(finding.path) ?? false : allBodiesComplete;
     if (!isCmsObservableFinding(finding, complete)) continue;
     // The bridge tags page-scope findings with a path that maps to
@@ -787,13 +812,14 @@ export async function evaluateAndPersistAll(
         : suppressionFilter.apply(context, findings);
     await kv.set(findingsKey(route), {
       route, findings: filtered,
-      ...(result.assessments?.[route] === undefined ? {} : { assessment: result.assessments[route] }),
+      ...(route === "*" && globalAssessment !== undefined ? { assessment: globalAssessment } :
+        result.assessments?.[route] === undefined ? {} : { assessment: result.assessments[route] }),
     });
     summary.routesUpdated += 1;
     totalAfterSuppression += filtered.length;
   }
   summary.totalFindings = totalAfterSuppression;
-  if (summary.errors.length === 0) {
+  if (inventoryComplete) {
     await removeStaleDocuments(ctx, collections, documentRoutes, storedAtStart);
   }
   return summary;

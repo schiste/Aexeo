@@ -161,12 +161,16 @@ export function Findings(): React.JSX.Element {
         </button>
       </header>
 
-      <p className="text-sm text-kumo-subtle">Rendered page markup and generated metadata are not checked here. Audit the built site for page-level findings.</p>
+      <p className="text-sm text-kumo-subtle">Rendered page markup, generated metadata and sitewide link inventory are not checked here. Audit the built site for page-level and link findings.</p>
 
       {toast !== null && (
         <div className="rounded border border-kumo-line bg-kumo-tint p-3 text-sm">
           {toast}
         </div>
+      )}
+
+      {payload.sitewideAssessment?.status === "error" && (
+        <p className="rounded border border-kumo-line p-3 text-sm">Sitewide checks unavailable: {payload.sitewideAssessment.reason}. {payload.sitewideAssessment.detail}</p>
       )}
 
       {payload.sitewideFindings.length > 0 && (

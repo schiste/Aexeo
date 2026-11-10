@@ -77,6 +77,16 @@ is distinct from an unavailable body. When an entry has several candidate
 content fields, the default first-field projection remains unverified because
 it cannot establish which fields appear in the rendered page.
 
+During a CMS refresh, failed collection listings, invalid pagination and
+incomplete bodies make sitewide and cross-document results unavailable. Aexeo
+hides old cross-document findings and shows the coverage reason in the admin
+views and `sitewideAssessment` in the findings API. `aexeo.sitewide_coverage`
+logs only an aggregate status. A complete CMS listing is not proof that the
+CMS inventory matches a rendered site or represents an atomic snapshot;
+concurrent edits and refreshes are not isolated by the host's KV interface.
+CMS-only evaluation does not assert that links are broken or pages are orphans;
+use a rendered-site audit with matched inventory and coverage evidence.
+
 For custom blocks in configured mode, declare the ordered rendered content
 fields for each block type in the plugin configuration:
 

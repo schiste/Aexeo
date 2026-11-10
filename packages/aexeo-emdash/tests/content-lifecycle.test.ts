@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// The data route imports the WASM bridge; this suite tests storage and views.
+vi.mock("../src/wasm-init.js", () => ({}));
 
 import type { EmdashContentItem } from "../src/adapter.js";
 import {
@@ -17,7 +20,8 @@ import {
   type SandboxCtx,
 } from "../src/plugin.js";
 import type { Finding } from "../src/types.js";
-import { renderDocumentPanel } from "../src/findings-view.js";
+import { readAllFindings, renderDocumentPanel, renderFindingsPage } from "../src/findings-view.js";
+import { handleDataRoute } from "../src/data-route.js";
 
 const OLD = "2030-01-01T00:00:00.000Z";
 const NEW = "2030-01-02T00:00:00.000Z";
@@ -297,5 +301,78 @@ describe("assessment persistence", () => {
     await save(ctx, item("a", NEW), async () => ({ ok: true, findings: [finding("/a", "current")], assessments: { "/a": { status: "evaluated", preset: "article", gates: [{ gate_id: "words", status: "not_checked", blocking: true, scope: "document", required_capability: "text", reason: "text unavailable" }] } } }));
     expect(store.get(findingsKey("/a"))).toMatchObject({ findings: [{ rule_id: "current" }], assessment: { gates: [{ gate_id: "words", status: "not_checked" }] } });
     expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"))).toContain("words not checked: text unavailable");
+  });
+});
+
+
+describe("sitewide refresh coverage", () => {
+  const sweep = (ctx: SandboxCtx, evaluator: EvaluatorFn) => evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator });
+  const globalFinding = { ...finding("*", "GLOBAL"), scope: "sitewide" as const };
+  it("does not display legacy orphan or broken-link conclusions from CMS-only inputs", async () => {
+    const { ctx, store } = host();
+    store.set(findingsKey("/legacy"), { route: "/legacy", findings: [finding("/legacy", "LNK001"), finding("/legacy", "LNK002"), finding("/legacy", "LNK004"), finding("/legacy", "OTHER")] });
+    store.set(findingsKey("*"), { route: "*", findings: [{ ...finding("*", "LNK002"), scope: "sitewide" }] });
+    expect((await readAllFindings(ctx.kv)).map((f) => f.rule_id)).toEqual(["OTHER"]);
+    const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator: returning() });
+    expect(payload.findings.map((f) => f.rule_id)).toEqual(["OTHER"]);
+    expect(payload.sitewideFindings).toEqual([]);
+  });
+  it("replaces old sitewide findings even when the new result is empty", async () => {
+    const { ctx, store } = host();
+    store.set(findingsKey("*"), { route: "*", findings: [globalFinding] });
+    await sweep(ctx, async () => ({ ok: true, findings: [] }));
+    expect(store.get(findingsKey("*"))).toEqual({ route: "*", findings: [] });
+  });
+  it("exposes a failed refresh and hides stale cross-document results in every view", async () => {
+    const { ctx, store } = host([item("a", OLD)]);
+    store.set(findingsKey("*"), { route: "*", findings: [globalFinding] });
+    store.set(findingsKey("/stale"), { route: "/stale", findings: [finding("/stale", "CNT005"), finding("/stale", "OTHER")] });
+    await sweep(ctx, async () => ({ ok: false, reason: "network_error", detail: "not reachable" }));
+    expect(store.get(findingsKey("*"))).toMatchObject({ findings: [], assessment: { status: "error", reason: "network_error" } });
+    expect((await readAllFindings(ctx.kv)).map((f) => f.rule_id)).toEqual(["OTHER"]);
+    expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/stale"))).not.toContain("CNT005");
+    expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/stale"))).toContain("cross-document checks are unavailable");
+    expect(JSON.stringify(await renderFindingsPage(ctx.kv, { emptyFindingsText: "empty", emptyScoreText: "empty", refreshFailureVariant: "error", score: async () => null, truthLabel: () => "" }))).toContain("Sitewide checks unavailable");
+    const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator: returning() });
+    expect(payload.sitewideAssessment).toMatchObject({ status: "error", reason: "network_error" });
+    expect(payload.findings.map((f) => f.rule_id)).toEqual(["OTHER"]);
+  });
+  it("does not emit graph or global conclusions from an incomplete listing", async () => {
+    const { ctx, store } = host();
+    ctx.content.list = async () => { throw new Error("list unavailable"); };
+    const result = await sweep(ctx, async () => ({ ok: true, findings: [globalFinding, finding("/old", "LNK002")] }));
+    expect(result.errors).toHaveLength(1);
+    expect(store.get(findingsKey("*"))).toMatchObject({ findings: [], assessment: { reason: "inventory_incomplete" } });
+    expect(rulesAt(store, "/old")).toBeUndefined();
+  });
+  it("emits aggregate sitewide coverage without document identifiers", async () => {
+    const { ctx } = host([item("private-route", OLD)]);
+    const events: Array<[string, unknown]> = [];
+    ctx.log = { info: (name, data) => events.push([name, data]), warn: () => {}, error: () => {} };
+    await sweep(ctx, returning());
+    expect(events.find(([name]) => name === "aexeo.sitewide_coverage")).toEqual(["aexeo.sitewide_coverage", { status: "body_incomplete" }]);
+    expect(JSON.stringify(events)).not.toContain("private-route");
+  });
+  it("marks missing or repeated pagination cursors incomplete", async () => {
+    for (const cursor of [undefined, "repeat"]) {
+      const { ctx, store } = host();
+      ctx.content.list = async () => ({ items: [], hasMore: true, ...(cursor === undefined ? {} : { cursor }) });
+      const result = await sweep(ctx, returning());
+      expect(result.errors.join(" ")).toContain("incomplete pagination");
+      expect(store.get(findingsKey("*"))).toMatchObject({ assessment: { reason: "inventory_incomplete" } });
+    }
+  });
+  it("suppresses cross-document conclusions when any body is unavailable and restores them on complete input", async () => {
+    const partial = item("a", OLD);
+    const { ctx, store } = host([partial]);
+    const evaluator: EvaluatorFn = async () => ({ ok: true, findings: [globalFinding, finding("/a", "CNT005"), finding("/a", "OTHER")] });
+    await sweep(ctx, evaluator);
+    expect(rulesAt(store, "/a")).toEqual(["OTHER"]);
+    expect(store.get(findingsKey("*"))).toMatchObject({ findings: [], assessment: { reason: "body_incomplete" } });
+    partial.data.content = [];
+    await sweep(ctx, evaluator);
+    expect(rulesAt(store, "/a")).toEqual(["CNT005", "OTHER"]);
+    expect(rulesAt(store, "*")).toEqual(["GLOBAL"]);
+    expect((store.get(findingsKey("*")) as { assessment?: unknown }).assessment).toBeUndefined();
   });
 });
