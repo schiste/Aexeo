@@ -433,6 +433,11 @@
   ],
   "dangerous_paths": [
     {
+      "path": ".aethyme/gates.toml",
+      "reason": "repository validation policy; changes affect every broker submission",
+      "provenance": "tracked path classification"
+    },
+    {
       "path": ".github/workflows",
       "reason": "repository automation; changes can affect publication or shared CI",
       "provenance": "tracked path classification"
@@ -474,9 +479,9 @@
     ]
   },
   "freshness": {
-    "source_digest": "e03c4efc957bb6064a9c50e3f4f848d694a0ffb3d7a9b48eb502ce83d9a24ea3",
+    "source_digest": "038ebbb319751bc4e3cd7c525025fbedbf1658044bc45b20bf07362647c6d66d",
     "source_commit": null,
-    "source_file_count": 378,
+    "source_file_count": 381,
     "generator": "deterministic"
   },
   "notes": [
@@ -484,7 +489,8 @@
     "Run `cargo fmt --all -- --check` after adding or moving a module: it also checks the parent `mod` declarations, which a focused test run does not.",
     "For a broker-coordinated `gh pr merge --match-head-commit`, pass the full `headRefOid` from `gh pr view --json headRefOid`; an abbreviated SHA is rejected.",
     "If a broker push fails with an internal remote hook error, keep the commit and read the error, then retry through the broker without force. If it persists, report the rejection and keep the session for recovery.",
-    "A refused preparation-status command does not mean every broker operation is blocked: report the exact refusal and check each authorized operation separately. Review an upgrade plan before applying it. Lease coordination and migration preconditions are separate: a migration can treat any live or stale session, including your own, as a blocker, so apply it from the main checkout with no session open and carry the result into a session for the pull request."
+    "A refused preparation-status command does not mean every broker operation is blocked: report the exact refusal and check each authorized operation separately. Review an upgrade plan before applying it. Lease coordination and migration preconditions are separate: a migration can treat any live or stale session, including your own, as a blocker, so apply it from the main checkout with no session open and carry the result into a session for the pull request.",
+    "When a WASM export changes, the plugin build saves the new generated API declaration as a .wasm-bindgen file and restores the tracked declaration. Review and apply that diff, update the hand-maintained bg declaration and its crawl-worker copy, run the worker check:dts command, then rebuild and test the real WASM."
   ],
   "telemetry": {
     "sections": [
@@ -508,9 +514,9 @@
       "entrypoints": 0,
       "caution_zones": 0,
       "generated_paths": 1,
-      "dangerous_paths": 1,
+      "dangerous_paths": 2,
       "navigation_recipes": 3,
-      "notes": 5
+      "notes": 6
     },
     "overrides_applied": true,
     "override_source": ".aethyme/overrides/onboarding.json",
