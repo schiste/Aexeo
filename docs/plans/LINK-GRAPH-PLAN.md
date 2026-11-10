@@ -53,7 +53,9 @@ not change their counts or assert confirmed orphans.
   matching inventory and surface identity.
 - An EmDash inventory exporter (#70) accepts explicit collections and caller
   classification, uses CMS public URLs, reports aggregate telemetry only when
-  requested, and marks its non-transactional inventory incomplete. It has not
+  requested, and marks its non-transactional inventory incomplete. A failing or
+  malformed host classifier leaves the affected entry unknown, reports a
+  `classification_failed` issue, and retains the other entries. It has not
   been exercised against a matching live publication.
 - The audit adapter accepts a separately supplied surface identity, snapshot
   date and inventory (#72). It reports differences, but cannot attest that the
