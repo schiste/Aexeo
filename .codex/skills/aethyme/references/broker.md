@@ -240,6 +240,16 @@ blocked.
    safely and prints the accepted checkpoint plus an exact recovery sequence.
    Follow it in order: preserve the current HEAD on the named recovery branch
    before flattening the reviewed tree change. Never reset first.
+
+   A reused worktree can also carry old session-owned commits whose changes
+   reached the default branch by squash merge. If submission tries to replay
+   those commits and conflicts, inspect the exact commits and diffs first. When
+   the already-landed changes and the parent of the new work are unambiguous,
+   preserve the current HEAD on a recovery branch, then use a coordinated
+   `git rebase --onto <current-base> <parent-of-new-work>` to replay only the
+   new commits. Verify the resulting diff, push with the broker's lease, and
+   resubmit. If ownership or the correct replay boundary is uncertain, follow
+   the broker's conflict instructions instead of dropping commits.
    `broker submit` promotes to the local integration branch; it does not
    publish a remote branch, create a pull request, or push a release tag.
    Publication is a separate, explicitly authorized operator action. When
