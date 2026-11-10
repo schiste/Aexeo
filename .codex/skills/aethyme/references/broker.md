@@ -356,6 +356,11 @@ blocked.
      --repo <owner/name> --reason "<authorization>" -- <gh-args> ...
    ```
 
+   For an authorized `gh pr merge --match-head-commit`, provide the full PR
+   head object ID, not an abbreviated SHA. Read it with `gh pr view <number>
+   --repo <owner/name> --json headRefOid --jq .headRefOid`, then pass that exact
+   value so the broker and GitHub can verify the reviewed head has not changed.
+
    The broker classifies known commands and fails closed on ambiguity. Add
    `--effect write|destructive --scope <resource>` before `--` for an
    unrecognized command. Destructive operations also require `--destructive`.
