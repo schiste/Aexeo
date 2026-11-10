@@ -80,6 +80,9 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [x] Optional blank-line paragraph interpretation for `text/plain` content-change
   entries, retaining the raw-text default and source locations. Overflow remains
   not checked; opt-in telemetry records only eligible entry counts.
+- [x] Content-change evaluation accepts opt-in, snapshot-bound custom gate
+  results across entries and a trusted host extension; missing results remain
+  not checked. Telemetry exposes only the configured custom-gate count.
 - [ ] Integrate optional host observers with other adapters and continue adding
   independently validated editorial gates.
 - [x] Explicit collection metadata uniqueness gate in core, CLI and EmDash/WASM

@@ -6,7 +6,9 @@ use aexeo_contracts::{
 use aexeo_core::{
     content_gate::MAX_CONTENT_INPUT_BYTES,
     content_gate_sources::{ConfinedContentFiles, SourceError},
-    content_gate_verdict::{ChangeEvaluationOptions, evaluate_change_with_options},
+    content_gate_verdict::{
+        ChangeEvaluationHost, ChangeEvaluationOptions, evaluate_change_with_host,
+    },
     content_presets::{builtin_content_presets, resolve_content_preset},
     error::UserContext,
     intelligence::presence::iso_now,
@@ -112,6 +114,10 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         .get_one::<String>("preset")
         .user_context("preset is required")?;
     let preset = resolve_content_preset(name, &sources).user_context("invalid content preset")?;
+    let external = args
+        .get_one::<String>("extension-results")
+        .map(|path| super::content::load_external_gate_results(path, true))
+        .transpose()?;
     let mut provider = HostFiles::new(args.get_one::<String>("content-root").map(String::as_str))?;
     let mut remaining = *args
         .get_one::<u64>("link-max-checks")
@@ -142,16 +148,21 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
     } else {
         None
     };
-    let verdict = match evaluate_change_with_options(
+    let verdict = match evaluate_change_with_host(
         &change,
         &mut provider,
         &preset,
         &iso_now(),
         MAX_CONTENT_INPUT_BYTES,
         MAX_TOTAL_CONTENT_BYTES,
-        ChangeEvaluationOptions {
-            link_observer: observer,
-            plain_text_paragraphs: args.get_flag("plain-text-paragraphs"),
+        ChangeEvaluationHost {
+            options: ChangeEvaluationOptions {
+                link_observer: observer,
+                plain_text_paragraphs: args.get_flag("plain-text-paragraphs"),
+            },
+            extensions: external
+                .as_ref()
+                .map(|host| host as &dyn aexeo_core::content_gate::ContentGateExtensions),
         },
     ) {
         Ok(verdict) => verdict,
@@ -172,6 +183,17 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
                 "event": "content_change_paragraph_adapter", "version": 1,
                 "eligible_entries": entries
             })
+        );
+    }
+    if telemetry && external.is_some() {
+        let custom_gates = preset
+            .gates
+            .iter()
+            .filter(|gate| matches!(gate, aexeo_core::content_gate::ContentGate::Custom { .. }))
+            .count();
+        eprintln!(
+            "{}",
+            serde_json::json!({"event": "content_change_external_gates", "version": 1, "configured_custom_gates": custom_gates})
         );
     }
     let code = match verdict.status {

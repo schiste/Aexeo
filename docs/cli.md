@@ -174,6 +174,9 @@ Options:
       --content-root <content-root>
           Authorize this absolute content root for local file references (Linux and supported macOS kernels)
 
+      --extension-results <extension-results>
+          Load explicitly supplied, input-bound external gate results for change entries
+
       --plain-text-paragraphs
           Interpret text/plain entries as blank-line-separated paragraphs
 

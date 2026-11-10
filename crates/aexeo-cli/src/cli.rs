@@ -57,6 +57,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("preset").long("preset").required(true).help("Explicit content preset name"))
                 .arg(Arg::new("preset-source").long("preset-source").num_args(1).action(ArgAction::Append).help("Load a named TOML preset as NAME=PATH; may be repeated"))
                 .arg(Arg::new("content-root").long("content-root").help("Authorize this absolute content root for local file references (Linux and supported macOS kernels)"))
+                .arg(Arg::new("extension-results").long("extension-results").num_args(1).help("Load explicitly supplied, input-bound external gate results for change entries"))
                 .arg(Arg::new("plain-text-paragraphs").long("plain-text-paragraphs").action(ArgAction::SetTrue).help("Interpret text/plain entries as blank-line-separated paragraphs"))
                 .arg(Arg::new("check-link-reachability").long("check-link-reachability").action(ArgAction::SetTrue).help("Explicitly enable bounded external HTTP observations for reachability gates"))
                 .arg(Arg::new("link-max-checks").long("link-max-checks").value_parser(value_parser!(u64).range(1..=100)).default_value("20").help("Maximum external link checks across the entire change"))

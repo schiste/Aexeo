@@ -270,3 +270,24 @@ no partial paragraph evaluation is reported as complete. This option does not
 change Markdown or unsupported media types. With `--telemetry`, a local
 `content_change_paragraph_adapter` event reports only the number of eligible
 text entries, not the content or whether each entry was successfully adapted.
+
+### Host-supplied custom gate results
+
+`content-change --extension-results results.json` accepts an explicit JSON
+array in the same format as `content --extension-results`. A batch can contain
+one result per entity ID, extension and parameter set; it is limited to 100
+results and 32 MiB in total. Each record must bind to the exact projected
+`ContentInput`, including the entry's `entity_id` as `id`, text, source text,
+headings and metadata. Missing or stale records are not checked. Invalid or
+out-of-range diagnostics fail the invocation without replacing the verdict.
+
+For an individual entry, `content --export-adapter-input` can provide the
+projection using the same source, format, metadata and paragraph interpretation;
+set the exported `id` to the change entry's `entity_id`. The result may contain
+private text and metadata; retain it only in an appropriately protected file.
+The input comparison detects stale data, not a dishonest or incorrect producer.
+Aexeo does not execute external code. The core API also accepts a trusted
+`ContentGateExtensions` host through `ChangeEvaluationHost`; host callbacks run
+only after all content digests have been verified. With `--telemetry`, a local
+`content_change_external_gates` event reports the number of configured custom
+gates when a result file is supplied; it contains no content, IDs or outcomes.
