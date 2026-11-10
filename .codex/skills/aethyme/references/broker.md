@@ -245,7 +245,10 @@ blocked.
    reached the default branch by squash merge. If submission tries to replay
    those commits and conflicts, inspect the exact commits and diffs first. When
    the already-landed changes and the parent of the new work are unambiguous,
-   preserve the current HEAD on a recovery branch, then use a coordinated
+   first push the current branch through this session's broker to establish its
+   remote lease; a lease held by a previous session is not transferable. If the
+   broker refuses that push, inspect the remote instead of forcing it. Preserve
+   the current HEAD on a recovery branch, then use a coordinated
    `git rebase --onto <current-base> <parent-of-new-work>` to replay only the
    new commits. Verify the resulting diff, push with the broker's lease, and
    resubmit. If ownership or the correct replay boundary is uncertain, follow
