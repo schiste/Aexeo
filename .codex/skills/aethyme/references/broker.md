@@ -151,6 +151,9 @@ blocked.
 4. **While working**: commit early and small. Only committed work can be
    verified and integrated. Never switch branches inside someone else's
    worktree; never edit files outside your own worktree.
+   Run `aethyme broker commit --session <id> -- <git-commit-args>` from
+   that session's registered worktree; the command refuses a different current
+   directory, including the main checkout.
 
    **If `.aethyme/config.toml`, as committed on the default branch, sets
    `[delivery] push_session_branches = true`, push your session branch as you
