@@ -81,6 +81,10 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
   link counting and Markdown; emit opt-in aggregate destination-check telemetry
   ([PR #138](https://github.com/schiste/Aexeo/pull/138)).
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
+- [x] Include a fingerprint of the CLI-resolved preset in corpus evaluation
+  results and reject a policy change observed during a run. This identifies the
+  evaluated configuration; historical review events and human labels are not
+  bound to it, and the digest does not identify executable versions or evidence.
 - [ ] Independently reviewed, diverse evaluation corpus and held-out metrics.
   A synthetic, explicitly unreviewed starter and evaluator were delivered in
   [PR #32](https://github.com/schiste/Aexeo/pull/32); they do not establish

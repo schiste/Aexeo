@@ -190,6 +190,18 @@ Limits are 32 MiB for the JSON payload, 100 results, 1,000 diagnostics per
 result and 4,096 UTF-8 bytes per message. No external program is sandboxed or
 executed by Aexeo.
 
+## Corpus policy provenance
+
+The local corpus evaluator resolves the CLI preset before and after a run and
+includes `resolved_policy_sha256` and `resolved_policy_hash_format` in its JSON
+result. The digest hashes the resolved preset as UTF-8 JSON with sorted object
+keys, compact separators and ordered arrays; a changed observed policy aborts
+the run. It excludes tool version, input format, source snapshots and execution
+environment, and cannot detect a temporary change that is reverted between
+checks. Retain those separately when comparing runs. Existing human labels and
+historical review events are not bound to this fingerprint; they remain useful
+for comparison across policies and are not proof of independent review.
+
 ## Local latency measurement
 
 For local content and crawl evaluation, `--telemetry` also emits `gate_timings_ms`, an

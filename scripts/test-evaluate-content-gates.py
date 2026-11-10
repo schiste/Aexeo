@@ -17,6 +17,46 @@ spec.loader.exec_module(eval_module)
 
 
 class EvaluateTests(unittest.TestCase):
+    def setUp(self):
+        self.policy_patch = patch.object(eval_module, "resolve_policy", return_value={"name": "test", "gates": []})
+        self.policy_patch.start()
+        self.addCleanup(self.policy_patch.stop)
+
+    def test_policy_hash_is_canonical_and_detects_changes(self):
+        first = {"name": "Été", "gates": [{"id": "g", "min_words": 5}]}
+        reordered = {"gates": [{"min_words": 5, "id": "g"}], "name": "Été"}
+        changed = {"name": "Été", "gates": [{"id": "g", "min_words": 6}]}
+        self.assertEqual(eval_module.policy_hash(first), eval_module.policy_hash(reordered))
+        self.assertNotEqual(eval_module.policy_hash(first), eval_module.policy_hash(changed))
+        self.assertNotEqual(eval_module.policy_hash(first), eval_module.policy_hash({"name": "Été", "gates": []}))
+
+    def test_evaluation_reports_policy_and_rejects_mid_run_change(self):
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": [
+            {"id": "a", "split": "holdout", "text": "a", "expected": "passed"}]}
+        response = SimpleNamespace(returncode=0, stdout='{"gates":[{"gate_id":"g","status":"passed"}]}')
+        first = {"name": "x", "gates": [{"id": "g", "min_words": 1}]}
+        changed = {"name": "x", "gates": [{"id": "g", "min_words": 2}]}
+        with patch.object(eval_module.subprocess, "run", return_value=response), \
+             patch.object(eval_module, "resolve_policy", side_effect=[first, first]):
+            metrics = eval_module.evaluate("cli", corpus, "holdout")
+        self.assertEqual(metrics["resolved_policy_sha256"], eval_module.policy_hash(first))
+        self.assertEqual(metrics["resolved_policy_hash_format"], "canonical-json-utf8-v1")
+        with patch.object(eval_module.subprocess, "run", return_value=response), \
+             patch.object(eval_module, "resolve_policy", side_effect=[first, changed]):
+            with self.assertRaisesRegex(ValueError, "policy changed"):
+                eval_module.evaluate("cli", corpus, "holdout")
+
+    def test_policy_resolution_uses_cli_and_validates_output(self):
+        self.policy_patch.stop()
+        response = SimpleNamespace(returncode=0, stdout='{"name":"x","gates":[]}')
+        with patch.object(eval_module.subprocess, "run", return_value=response) as run:
+            self.assertEqual(eval_module.resolve_policy("cli", "x", "x=/tmp/preset"), {"name": "x", "gates": []})
+            self.assertEqual(run.call_args.args[0], ["cli", "content", "--preset", "x", "--format", "json", "--explain", "--preset-source", "x=/tmp/preset"])
+        for response in (SimpleNamespace(returncode=1, stdout=""), SimpleNamespace(returncode=0, stdout="not json"), SimpleNamespace(returncode=0, stdout="{}")):
+            with patch.object(eval_module.subprocess, "run", return_value=response):
+                with self.assertRaises(ValueError):
+                    eval_module.resolve_policy("cli", "x")
+
     def test_example_metadata_is_isolated_and_reviews_bind_it(self):
         items = [
             {"id": "a", "split": "holdout", "text": "one", "metadata": {"titre": "Été", "lang": "fr"}, "expected": "passed"},
