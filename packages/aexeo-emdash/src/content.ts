@@ -30,6 +30,8 @@ export interface ContentReport {
   applied_fixes: string[];
   /** Omitted for collection reports; link findings point to the first marked span. */
   source_locations?: EmdashSourceLocation[];
+  /** Emitted positional findings; report limits can omit additional findings. */
+  source_mapping?: { eligible: number; mapped: number; unmapped: number };
 }
 
 /** Local, opt-in aggregate metrics; contains no document text or identifiers. */
@@ -37,6 +39,9 @@ export interface ContentEvaluationTelemetry {
   /** End-to-end wrapper duration, including serialization and WASM initialization. */
   evaluation_ms: number;
   source_locations_mapped: number;
+  /** Omitted with older WASM bridges. */
+  source_locations_eligible?: number;
+  source_locations_unmapped?: number;
   /** Aggregate destination occurrences; omitted when the gate did not measure them. */
   link_destinations?: { checked: number; invalid: number };
   link_reachability?: { checked: number; not_found: number; unchecked: number };
@@ -102,6 +107,10 @@ export async function evaluateContent(
   const report = JSON.parse(result) as ContentReport;
   if (onTelemetry) {
     const event: ContentEvaluationTelemetry = { evaluation_ms: performance.now() - started, source_locations_mapped: report.source_locations?.length ?? 0 };
+    if (report.source_mapping) {
+      event.source_locations_eligible = report.source_mapping.eligible;
+      event.source_locations_unmapped = report.source_mapping.unmapped;
+    }
     for (const gate of report.gates) {
       if (gate.required_capability === "link_reachability" && gate.measurements) {
         const { checked_destinations, not_found_destinations, unchecked_destinations } = gate.measurements;

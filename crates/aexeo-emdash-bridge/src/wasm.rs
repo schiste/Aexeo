@@ -313,6 +313,10 @@ pub fn evaluate_content_js(
     );
     let mut output = serde_json::to_value(&report)
         .map_err(|error| JsError::new(&format!("failed to serialize report: {error}")))?;
+    output["source_mapping"] = serde_json::to_value(crate::content::source_mapping_coverage(
+        &preset, &report, &locations,
+    ))
+    .map_err(|error| JsError::new(&format!("failed to serialize source mapping: {error}")))?;
     output["source_locations"] = serde_json::to_value(locations)
         .map_err(|error| JsError::new(&format!("failed to serialize locations: {error}")))?;
     serde_json::to_string(&output)

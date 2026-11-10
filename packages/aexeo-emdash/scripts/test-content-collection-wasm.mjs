@@ -29,6 +29,7 @@ terms=["target"]
 `;
 const positionalReport = await evaluateContent({ route: "/test", title: "Test", body: [{ children: [{ _type: "span", text: "😀 target" }] }] }, "test", { test: positionalPreset });
 assert.deepEqual(positionalReport.source_locations, [{ gate_id: "terms", finding_index: 0, block_index: 0, span_index: 0, utf16_offset: 3 }]);
+assert.deepEqual(positionalReport.source_mapping, { eligible: 1, mapped: 1, unmapped: 0 });
 console.log("WASM source location smoke test passed");
 
 const linkPreset = `version=1
@@ -105,6 +106,12 @@ const results = [{ extension: "example.rule", parameters: { mode: "strict" }, in
 const externalReport = await evaluateContent(extensionDocument, "custom", { custom: extensionPreset }, undefined, undefined, results);
 assert.equal(externalReport.gates[0].status, "failed");
 assert.deepEqual(externalReport.source_locations, [{ gate_id: "external", finding_index: 0, block_index: 0, span_index: 0, utf16_offset: 0 }]);
+const unmappedResults = [{ ...results[0], diagnostics: [{ message: "Unmapped position", line: 1, column: Array.from("Review this text.").length + 1 }] }];
+const mappingEvents = [];
+const unmappedReport = await evaluateContent(extensionDocument, "custom", { custom: extensionPreset }, undefined, event => mappingEvents.push(event), unmappedResults);
+assert.deepEqual(unmappedReport.source_mapping, { eligible: 1, mapped: 0, unmapped: 1 });
+assert.equal(mappingEvents[0].source_locations_unmapped, 1);
+assert.equal(mappingEvents[0].source_locations_eligible, 1);
 const staleReport = await evaluateContent({ ...extensionDocument, title: "Changed" }, "custom", { custom: extensionPreset }, undefined, undefined, results);
 assert.equal(staleReport.gates[0].status, "not_checked");
 console.log("WASM external extension smoke test passed");

@@ -189,3 +189,11 @@ floats use eight-byte big-endian IEEE-754 bits, and arrays/objects carry an
 eight-byte item count. Object keys are UTF-8 length-framed in Unicode code-point
 order. The fingerprint is unsigned and does not identify the executable, input
 adapter, evidence, or other context; it does not establish reviewer independence.
+
+### EmDash source mapping coverage
+
+Single-item EmDash reports include counts of emitted findings eligible for source
+location, mapped findings, and unmapped findings. Aggregate opt-in telemetry includes
+the same eligible and unmapped counts, without content or identifiers. Counts omit
+findings truncated by the report limit; a location identifies the evaluated snapshot,
+not a later edited document. Older WASM bridges do not provide the extra counts.
