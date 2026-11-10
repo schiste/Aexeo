@@ -1,5 +1,6 @@
 import type { EmdashDocument, Finding } from "./types.js";
 import { PACKAGE_VERSION } from "./version.js";
+import type { DocumentAssessment } from "./plugin.js";
 
 // HTTP client for the Aexeo sidecar Worker (POST /evaluate).
 //
@@ -43,7 +44,7 @@ export interface SidecarConfig {
 }
 
 export type SidecarResult =
-  | { ok: true; findings: Finding[] }
+  | { ok: true; findings: Finding[]; assessments?: Record<string, DocumentAssessment> }
   | {
       ok: false;
       // Preserve the failure detail so each caller can decide whether
@@ -62,8 +63,8 @@ export async function evaluateViaSidecar(
   documents: readonly EmdashDocument[],
   collections?: readonly string[],
 ): Promise<SidecarResult> {
-  const body: { documents: readonly EmdashDocument[]; configJson?: string; collections?: readonly string[] } = {
-    documents,
+  const body: { documents: readonly EmdashDocument[]; configJson?: string; collections?: readonly string[]; responseFormat: number } = {
+    documents, responseFormat: 2,
   };
   if (collections !== undefined) body.collections = collections;
   if (config.configJson !== undefined) {
@@ -114,21 +115,28 @@ export async function evaluateViaSidecar(
     const detail = err instanceof Error ? err.message : String(err);
     return { ok: false, reason: "invalid_response", detail };
   }
-  // The sidecar returns the bridge's raw evaluateDocuments output,
-  // which is a JSON-encoded Finding[] (no envelope). If the response
-  // is not parseable, treat it as malformed rather than crashing the
-  // hook — afterSave runs inside Worker Loader and an unhandled
-  // exception would surface as a 500 to the editor.
+  // Older workers return an array. New workers return an envelope with the
+  // per-document gate status so an incomplete evaluation cannot look complete.
   try {
-    const findings = JSON.parse(raw) as Finding[];
-    if (!Array.isArray(findings)) {
-      return {
-        ok: false,
-        reason: "invalid_response",
-        detail: "sidecar returned non-array body",
-      };
+    const value: unknown = JSON.parse(raw);
+    if (Array.isArray(value)) return { ok: true, findings: value as Finding[] };
+    if (!value || typeof value !== "object" || !("findings" in value) || !Array.isArray(value.findings) ||
+        !("assessments" in value) || !value.assessments || typeof value.assessments !== "object" || Array.isArray(value.assessments)) {
+      return { ok: false, reason: "invalid_response", detail: "sidecar returned invalid assessment envelope" };
     }
-    return { ok: true, findings };
+    for (const assessment of Object.values(value.assessments)) {
+      if (!assessment || typeof assessment !== "object" || !("status" in assessment) || assessment.status !== "evaluated" ||
+          !("preset" in assessment) || typeof assessment.preset !== "string" || !("gates" in assessment) || !Array.isArray(assessment.gates) ||
+          assessment.gates.some((gate: unknown) => !gate || typeof gate !== "object" || !("gate_id" in gate) || typeof gate.gate_id !== "string" ||
+            !("status" in gate) || !["passed", "failed", "not_checked"].includes(String(gate.status)) ||
+            !("blocking" in gate) || typeof gate.blocking !== "boolean" ||
+            !("scope" in gate) || !["document", "collection", "site"].includes(String(gate.scope)) ||
+            !("required_capability" in gate) || typeof gate.required_capability !== "string" ||
+            !("reason" in gate) || (gate.reason !== null && typeof gate.reason !== "string"))) {
+        return { ok: false, reason: "invalid_response", detail: "sidecar returned invalid gate assessment" };
+      }
+    }
+    return { ok: true, findings: value.findings as Finding[], assessments: value.assessments as Record<string, DocumentAssessment> };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     return { ok: false, reason: "invalid_response", detail };
