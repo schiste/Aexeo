@@ -159,6 +159,43 @@ fn positional_gate(gate: &ContentGate) -> bool {
     )
 }
 
+/// Coverage of emitted findings that can have a source position.
+/// Findings omitted by the report limit are not included.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SourceMappingCoverage {
+    pub eligible: usize,
+    pub mapped: usize,
+    pub unmapped: usize,
+}
+
+pub fn source_mapping_coverage(
+    preset: &ContentPreset,
+    report: &ContentReport,
+    locations: &[EmdashSourceLocation],
+) -> SourceMappingCoverage {
+    let eligible = preset
+        .gates
+        .iter()
+        .zip(&report.gates)
+        .filter(|(gate, _)| {
+            positional_gate(gate)
+                || matches!(
+                    gate,
+                    ContentGate::HeadingLength { .. }
+                        | ContentGate::DuplicateHeadings { .. }
+                        | ContentGate::LinkDestinations { .. }
+                        | ContentGate::LinkReachability { .. }
+                )
+        })
+        .map(|(_, result)| result.findings.len())
+        .sum::<usize>();
+    SourceMappingCoverage {
+        eligible,
+        mapped: locations.len(),
+        unmapped: eligible.saturating_sub(locations.len()),
+    }
+}
+
 /// Map prose, heading and invalid link findings to spans. Synthetic block
 /// separators have no location. Heading locations identify the first non-empty
 /// span of the block; link locations identify the first span of the occurrence.
@@ -690,6 +727,25 @@ mod tests {
                 ("length", 1, 2, 1, 0),
                 ("duplicate", 0, 2, 1, 0)
             ]
+        );
+    }
+
+    #[test]
+    fn source_mapping_coverage_distinguishes_unmapped_and_nonpositional_findings() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/t","title":"T","body":[{"children":[{"_type":"span","text":"first second"}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['first','second']\n[[gates]]\nid='count'\nkind='word_count'\nmin=10\n").unwrap();
+        let mut report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].findings.len(), 2);
+        assert_eq!(report.gates[1].findings.len(), 1);
+        report.gates[0].findings[1].column = "first second".chars().count() + 1;
+        let locations = source_locations(&document, &preset, &report);
+        assert_eq!(
+            source_mapping_coverage(&preset, &report, &locations),
+            SourceMappingCoverage {
+                eligible: 2,
+                mapped: 1,
+                unmapped: 1
+            }
         );
     }
 
