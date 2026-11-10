@@ -68,6 +68,17 @@ name = "French product page"
 extends = ["product-editorial", "natural-style-fr"]
 ```
 
+### Repeated paragraph openings
+
+The optional `writing-patterns` preset flags the third and subsequent paragraphs
+that begin with the same three whitespace-separated words. Configure the
+`repeated_paragraph_openings` gate using `opening_words` (1–16) and positive
+`max_occurrences`. Matching lowercases and trims surrounding punctuation; it
+does not infer meaning or identify authorship. Repeated openings may be
+intentional, and languages without whitespace word boundaries need different
+rules. A missing paragraph capability is `not_checked`. Findings point to the
+paragraph start; measurements count paragraphs and excess occurrences.
+
 ## Custom presets
 
 ```toml

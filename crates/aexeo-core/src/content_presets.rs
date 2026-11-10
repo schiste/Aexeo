@@ -109,6 +109,10 @@ fn merge_gate(gates: &mut Vec<ContentGate>, gate: ContentGate) {
 pub fn builtin_content_presets() -> BTreeMap<String, String> {
     BTreeMap::from([
         (
+            "writing-patterns".into(),
+            include_str!("../presets/writing-patterns.toml").into(),
+        ),
+        (
             "editorial-structure".into(),
             include_str!("../presets/editorial-structure.toml").into(),
         ),

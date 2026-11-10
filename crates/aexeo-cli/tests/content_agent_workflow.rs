@@ -63,3 +63,34 @@ fn advisory_diagnostic_can_drive_a_local_revision_and_recheck() {
     assert_eq!(status(&after, "editorial.generic_phrases"), "passed");
     assert_eq!(status(&after, "editorial.metadata"), "not_checked");
 }
+
+#[test]
+fn repeated_paragraph_openings_are_advisory_and_located() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("review.toml");
+    let draft = dir.path().join("draft.md");
+    fs::write(
+        &preset,
+        "version=1\nname='Review'\n[[gates]]\nid='openings'\nkind='repeated_paragraph_openings'\nopening_words=2\nmax_occurrences=2\nblocking=false\n",
+    )
+    .unwrap();
+    let source = format!("review={}", preset.display());
+    fs::write(
+        &draft,
+        "The team reviews logs.\n\nTHE TEAM checks access.\n\nThe team restores backups.\n",
+    )
+    .unwrap();
+    let report = evaluate(&draft, &source);
+    assert_eq!(status(&report, "openings"), "failed");
+    let location = report["source_locations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|location| location["gate_id"] == "openings")
+        .unwrap();
+    assert_eq!(location["line"], 5);
+    assert_eq!(
+        report["gates"][0]["measurements"]["openings_exceeding_limit"],
+        1
+    );
+}

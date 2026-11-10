@@ -153,6 +153,7 @@ fn positional_gate(gate: &ContentGate) -> bool {
             | ContentGate::SentenceLength { .. }
             | ContentGate::SentenceCharacterLength { .. }
             | ContentGate::ParagraphLength { .. }
+            | ContentGate::RepeatedParagraphOpenings { .. }
             | ContentGate::ParagraphCharacterLength { .. }
     )
 }
@@ -506,6 +507,27 @@ mod tests {
         assert_eq!(emdash.gates[0].measurements["sentence_count"], 4);
         assert_eq!(emdash.gates[2].findings.len(), 1);
     }
+    #[test]
+    fn repeated_paragraph_opening_maps_to_emdash_block() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/t","title":"T","body":[{"children":[{"_type":"span","text":"The team reviews."}]},{"children":[{"_type":"span","text":"The team checks."}]},{"children":[{"_type":"span","text":"The team restores."}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='review'\n[[gates]]\nid='opening'\nkind='repeated_paragraph_openings'\nopening_words=2\nmax_occurrences=2\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        let locations = source_locations(&document, &preset, &report);
+        assert_eq!(locations.len(), 1);
+        assert_eq!(
+            (
+                locations[0].block_index,
+                locations[0].span_index,
+                locations[0].utf16_offset
+            ),
+            (2, 0, 0)
+        );
+        let unavailable =
+            evaluate_content_with_body_availability(&document, &preset, None, false).unwrap();
+        assert_eq!(unavailable.gates[0].status, GateStatus::NotChecked);
+    }
+
     #[test]
     fn findings_map_to_their_portable_text_span_and_utf16_offset() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"children":[{"_type":"span","text":"Heading"}]},{"children":[{"_type":"span","text":"😀 "},{"_type":"span","text":"pré target"}]}]}"#).unwrap();

@@ -347,6 +347,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                     | ContentGate::SentenceLength { .. }
                     | ContentGate::SentenceCharacterLength { .. }
                     | ContentGate::ParagraphLength { .. }
+                    | ContentGate::RepeatedParagraphOpenings { .. }
                     | ContentGate::ParagraphCharacterLength { .. }
             ) {
                 for (finding_index, finding) in result.findings.iter().enumerate() {
