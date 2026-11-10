@@ -357,6 +357,20 @@ function recordContentCoverage(ctx: SandboxCtx, documents: readonly EmdashDocume
   }
 }
 
+// Aggregate counts only; never log routes, gate identifiers, source text or reasons.
+function recordAssessmentCoverage(ctx: SandboxCtx, result: EvaluationOutcome): void {
+  let passed = 0, failed = 0, notChecked = 0;
+  if (result.ok) for (const assessment of Object.values(result.assessments ?? {})) {
+    if (assessment.status !== "evaluated") continue;
+    for (const gate of assessment.gates) {
+      if (gate.status === "passed") passed++;
+      else if (gate.status === "failed") failed++;
+      else notChecked++;
+    }
+  }
+  try { ctx.log?.info?.("aexeo.preset_coverage", { status: result.ok ? "evaluated" : "error", passed, failed, not_checked: notChecked }); } catch { /* best effort */ }
+}
+
 // Shape emdash's runtime hands to content:afterSave handlers. The
 // host invokes hooks with `{content, collection, isNew}` (see
 // emdash/dist/astro/middleware.mjs `runAfterSaveHooks`). content is
@@ -517,13 +531,18 @@ export async function handleAfterSaveConfigured(
   }
 
   const result = await evaluator([document], { collections: [adapted.meta.collection] });
+  recordAssessmentCoverage(ctx, result);
   if (!result.ok) {
     log?.error?.(`afterSave evaluator failure (${result.reason})`, {
       detail: result.detail,
     });
-    // Leave previous findings in place — silent-on-failure is the
-    // safer default for an editor's save flow. Any hard problem
-    // surfaces on the next manual Refresh.
+    // Findings from a previous revision are not results for this one.
+    if (!(await isSuperseded(kv, document.route, adapted.meta.updatedAt))) {
+      await kv.set(findingsKey(document.route), {
+        route: document.route, findings: [],
+        assessment: { status: "error", reason: result.reason, detail: result.detail },
+      });
+    }
     return;
   }
 
@@ -560,6 +579,7 @@ export async function handleAfterSaveConfigured(
   await kv.set(findingsKey(document.route), {
     route: document.route,
     findings: filtered,
+    ...(result.assessments?.[document.route] === undefined ? {} : { assessment: result.assessments[document.route] }),
   });
 }
 
@@ -578,8 +598,12 @@ export interface RefreshSummary {
 // Result of an evaluation pass — either findings or a structured
 // failure. The `reason` discriminator is opaque to evaluateAndPersistAll;
 // it just gets surfaced in the RefreshSummary.errors list.
+export type DocumentAssessment =
+  | { status: "evaluated"; preset: string; gates: Pick<import("./content.js").ContentGateResult, "gate_id" | "status" | "blocking" | "scope" | "required_capability" | "reason">[] }
+  | { status: "error"; reason: string; detail: string };
+
 export type EvaluationOutcome =
-  | { ok: true; findings: Finding[] }
+  | { ok: true; findings: Finding[]; assessments?: Record<string, DocumentAssessment> }
   | { ok: false; reason: string; detail: string };
 
 // Pluggable evaluator. Two implementations live in this package:
@@ -692,11 +716,20 @@ export async function evaluateAndPersistAll(
   //    route. The evaluator strategy (in-process WASM vs sidecar
   //    fetch) is the only configured-vs-sandboxed difference.
   const result = await options.evaluator(documents, { collections: documentCollections });
+  recordAssessmentCoverage(ctx, result);
   if (!result.ok) {
     log?.error?.(`aexeo evaluator failure (${result.reason})`, {
       detail: result.detail,
     });
     summary.errors.push(`${result.reason}: ${result.detail}`);
+    for (const [route, stored] of adaptedByRoute) {
+      if (!(await isSuperseded(kv, route, stored.meta.updatedAt))) {
+        await kv.set(findingsKey(route), {
+          route, findings: [],
+          assessment: { status: "error", reason: result.reason, detail: result.detail },
+        });
+      }
+    }
     return summary;
   }
 
@@ -752,7 +785,10 @@ export async function evaluateAndPersistAll(
       suppressionFilter === undefined
         ? findings
         : suppressionFilter.apply(context, findings);
-    await kv.set(findingsKey(route), { route, findings: filtered });
+    await kv.set(findingsKey(route), {
+      route, findings: filtered,
+      ...(result.assessments?.[route] === undefined ? {} : { assessment: result.assessments[route] }),
+    });
     summary.routesUpdated += 1;
     totalAfterSuppression += filtered.length;
   }
@@ -949,4 +985,10 @@ export async function readFindings(
     return [];
   }
   return stored.findings;
+}
+
+/** Assessment is stored atomically with the findings for the same revision. */
+export async function readAssessment(kv: KvNamespace, route: string): Promise<DocumentAssessment | undefined> {
+  const stored = await kv.get<{ assessment?: DocumentAssessment }>(findingsKey(route));
+  return stored?.assessment;
 }

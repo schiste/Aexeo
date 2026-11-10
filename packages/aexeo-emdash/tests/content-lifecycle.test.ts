@@ -17,6 +17,7 @@ import {
   type SandboxCtx,
 } from "../src/plugin.js";
 import type { Finding } from "../src/types.js";
+import { renderDocumentPanel } from "../src/findings-view.js";
 
 const OLD = "2030-01-01T00:00:00.000Z";
 const NEW = "2030-01-02T00:00:00.000Z";
@@ -280,5 +281,21 @@ describe("custom block mappings", () => {
     await handleAfterSaveConfigured({ content, collection: "pages", isNew: false }, ctx, evaluator, undefined, mappings);
     await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator, blockMappings: mappings });
     expect(seen).toEqual(["Mapped", "Mapped"]);
+  });
+});
+
+describe("assessment persistence", () => {
+  it("replaces previous findings with an explicit error for a failed newer evaluation", async () => {
+    const { ctx, store } = host();
+    await save(ctx, item("a", OLD), returning("OLD"));
+    await save(ctx, item("a", NEW), async () => ({ ok: false, reason: "unavailable", detail: "evaluation failed" }));
+    expect(store.get(findingsKey("/a"))).toMatchObject({ findings: [], assessment: { status: "error", reason: "unavailable" } });
+    expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"))).toContain("Evaluation failed: unavailable");
+  });
+  it("stores not-checked gate details alongside current findings", async () => {
+    const { ctx, store } = host();
+    await save(ctx, item("a", NEW), async () => ({ ok: true, findings: [finding("/a", "current")], assessments: { "/a": { status: "evaluated", preset: "article", gates: [{ gate_id: "words", status: "not_checked", blocking: true, scope: "document", required_capability: "text", reason: "text unavailable" }] } } }));
+    expect(store.get(findingsKey("/a"))).toMatchObject({ findings: [{ rule_id: "current" }], assessment: { gates: [{ gate_id: "words", status: "not_checked" }] } });
+    expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"))).toContain("words not checked: text unavailable");
   });
 });

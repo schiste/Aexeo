@@ -31,6 +31,7 @@ import type {
 import {
   evaluateAndPersistAll,
   readAllDocuments,
+  readAssessment,
   readFindings,
 } from "./plugin.js";
 import type { SuppressionFilter } from "./suppressions.js";
@@ -484,6 +485,7 @@ export async function renderDocumentPanel(
     };
   }
   const findings = await readFindings(kv, route);
+  const assessment = await readAssessment(kv, route);
   const errors = findings.filter((finding) => finding.severity === "error");
   const warnings = findings.filter(
     (finding) => finding.severity === "warning",
@@ -500,6 +502,8 @@ export async function renderDocumentPanel(
             : `${findings.length} findings — ${errors.length} errors, ${warnings.length} warnings.`,
       },
       { type: "context", text: "Rendered page markup and generated metadata are not checked here. Audit the built site for page-level findings." },
+      ...(assessment?.status === "error" ? [{ type: "context", text: `Evaluation failed: ${assessment.reason}. Findings are unavailable for this revision.` }] : []),
+      ...(assessment?.status === "evaluated" ? assessment.gates.filter((gate) => gate.status === "not_checked").map((gate) => ({ type: "context", text: `${gate.gate_id} not checked: ${gate.reason ?? "required input unavailable"}` })) : []),
       ...(findings.length === 0
         ? []
         : [{ type: "divider" }, documentFindingsTable(sorted)]),

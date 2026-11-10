@@ -184,6 +184,14 @@ export function Findings(): React.JSX.Element {
         </section>
       )}
 
+      {payload.routes.filter((route) => route.assessment?.status === "error" || (route.assessment?.status === "evaluated" && route.assessment.gates.some((gate) => gate.status === "not_checked"))).map((route) => (
+        <section key={route.route} className="rounded border border-kumo-line p-3 text-sm">
+          <strong>{route.route}</strong>
+          {route.assessment?.status === "error" ? <p>Evaluation failed: {route.assessment.reason}. Findings are unavailable for this revision.</p> :
+            route.assessment?.status === "evaluated" ? route.assessment.gates.filter((gate) => gate.status === "not_checked").map((gate) => <p key={gate.gate_id}>{gate.gate_id} not checked: {gate.reason ?? "required input unavailable"}</p>) : null}
+        </section>
+      ))}
+
       {payload.findings.length === 0 ? (
         <p className="text-sm text-kumo-subtle">
           {payload.totals.documentsIndexed === 0
