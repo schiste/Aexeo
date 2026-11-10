@@ -93,7 +93,7 @@
     }
   },
   "devDependencies": {
-    "@emdash-cms/plugin-test": "^0.2.8",
+    "@emdash-cms/plugin-test": "^0.2.11",
     "@types/node": "^22.20.5",
     "@types/react": "^19.2.14",
     "emdash": "^1.2.0",
