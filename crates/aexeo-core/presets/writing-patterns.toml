@@ -1,0 +1,9 @@
+version = 1
+name = "Writing pattern review starter"
+
+[[gates]]
+id = "editorial.paragraph_openings"
+kind = "repeated_paragraph_openings"
+opening_words = 3
+max_occurrences = 2
+blocking = false

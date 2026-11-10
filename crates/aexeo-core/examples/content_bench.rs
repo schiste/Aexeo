@@ -2,7 +2,7 @@
 use aexeo_core::{
     content_gate::ContentPreset,
     markdown_adapter::{
-        markdown_input, markdown_input_with_source_map,
+        markdown_input, markdown_input_with_links, markdown_input_with_source_map,
         markdown_input_with_source_map_and_destinations, markdown_link_destinations,
     },
 };
@@ -45,7 +45,16 @@ headings = ["Summary"]
         "# Links\n\n{}",
         "A [link](https://example.org/path) with text.\n\n".repeat(500)
     );
+    let openings_preset = ContentPreset::from_toml(
+        "version=1\nname='openings'\n[[gates]]\nid='opening'\nkind='repeated_paragraph_openings'\nopening_words=3\nmax_occurrences=2\n",
+    )?;
+    let (openings_input, openings_context, _) = markdown_input_with_links("benchmark.md", &source)?;
+    let openings_capabilities = aexeo_core::content_gate::ContentEvaluationContext {
+        adapter: Some(&openings_context),
+        ..Default::default()
+    };
     let input = markdown_input("benchmark.md", &source)?;
+    let mut openings_eval = Vec::new();
     let mut eval = Vec::new();
     let mut parse_and_eval = Vec::new();
     let mut repeated_eval = Vec::new();
@@ -53,6 +62,12 @@ headings = ["Summary"]
     let mut links_eval = Vec::new();
     let mut links_two_parses = Vec::new();
     for _ in 0..100 {
+        let start = Instant::now();
+        black_box(
+            openings_preset
+                .evaluate_with_capabilities(black_box(&openings_input), &openings_capabilities)?,
+        );
+        openings_eval.push(start.elapsed().as_micros());
         let start = Instant::now();
         black_box(preset.evaluate(black_box(&input))?);
         eval.push(start.elapsed().as_micros());
@@ -102,6 +117,7 @@ headings = ["Summary"]
         )?);
         links_two_parses.push(start.elapsed().as_micros());
     }
+    openings_eval.sort_unstable();
     eval.sort_unstable();
     parse_and_eval.sort_unstable();
     repeated_eval.sort_unstable();
@@ -110,6 +126,7 @@ headings = ["Summary"]
     links_two_parses.sort_unstable();
     if std::env::args().any(|arg| arg == "--json") {
         for (name, samples) in [
+            ("content/repeated_paragraph_openings", &openings_eval),
             ("content/evaluation", &eval),
             ("content/markdown_and_evaluation", &parse_and_eval),
             ("content/batch_50", &batch_eval),
@@ -128,6 +145,10 @@ headings = ["Summary"]
         return Ok(());
     }
     println!("input_bytes={} iterations=100", source.len());
+    println!(
+        "paragraph_openings_us p50={} p95={}",
+        openings_eval[49], openings_eval[94]
+    );
     println!("evaluation_us p50={} p95={}", eval[49], eval[94]);
     println!(
         "markdown_links_and_evaluation_us p50={} p95={}",

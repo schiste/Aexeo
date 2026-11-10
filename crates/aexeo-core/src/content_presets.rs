@@ -109,6 +109,34 @@ fn merge_gate(gates: &mut Vec<ContentGate>, gate: ContentGate) {
 pub fn builtin_content_presets() -> BTreeMap<String, String> {
     BTreeMap::from([
         (
+            "writing-patterns".into(),
+            include_str!("../presets/writing-patterns.toml").into(),
+        ),
+        (
+            "editorial-structure".into(),
+            include_str!("../presets/editorial-structure.toml").into(),
+        ),
+        (
+            "natural-style-en".into(),
+            include_str!("../presets/natural-style-en.toml").into(),
+        ),
+        (
+            "natural-style-fr".into(),
+            include_str!("../presets/natural-style-fr.toml").into(),
+        ),
+        (
+            "product-editorial".into(),
+            include_str!("../presets/product-editorial.toml").into(),
+        ),
+        (
+            "article-quality".into(),
+            include_str!("../presets/article-quality.toml").into(),
+        ),
+        (
+            "glossary-quality".into(),
+            include_str!("../presets/glossary-quality.toml").into(),
+        ),
+        (
             "seo-website".into(),
             include_str!("../presets/seo-website.toml").into(),
         ),
@@ -227,6 +255,86 @@ blocking = false
                 .gates
                 .iter()
                 .any(|gate| matches!(gate, ContentGate::SentenceLength { max_words: 20, .. }))
+        );
+    }
+
+    #[test]
+    fn quality_profiles_compose_advisory_rules_and_language_is_explicit() {
+        use crate::content_gate::{ContentInput, GateStatus};
+        let mut sources = builtin_content_presets();
+        for name in ["article-quality", "glossary-quality", "product-editorial"] {
+            let preset = resolve_content_preset(name, &sources).unwrap();
+            assert!(
+                preset
+                    .gates
+                    .iter()
+                    .any(|gate| gate.id() == "editorial.sentence_length")
+            );
+            assert!(
+                preset
+                    .gates
+                    .iter()
+                    .any(|gate| gate.id() == "editorial.paragraph_length")
+            );
+            assert!(
+                preset
+                    .gates
+                    .iter()
+                    .any(|gate| gate.id() == "editorial.duplicate_headings")
+            );
+            assert!(
+                !preset
+                    .gates
+                    .iter()
+                    .any(|gate| gate.id() == "editorial.generic_phrases")
+            );
+        }
+        sources.insert(
+            "fr-product".into(),
+            r#"
+version = 1
+name = "French product"
+extends = ["product-editorial", "natural-style-fr"]
+"#
+            .into(),
+        );
+        let preset = resolve_content_preset("fr-product", &sources).unwrap();
+        let report = preset
+            .evaluate(&ContentInput {
+                id: "draft".into(),
+                text: Some("Il est important de noter que ce produit est utile.".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        let phrase = report
+            .gates
+            .iter()
+            .find(|g| g.gate_id == "editorial.generic_phrases")
+            .unwrap();
+        assert_eq!(phrase.status, GateStatus::Failed);
+        assert!(!phrase.blocking);
+        let paragraphs = report
+            .gates
+            .iter()
+            .find(|g| g.gate_id == "editorial.paragraph_length")
+            .unwrap();
+        assert_eq!(paragraphs.status, GateStatus::NotChecked);
+        sources.insert(
+            "override".into(),
+            r#"
+version = 1
+name = "Custom"
+extends = ["fr-product"]
+disable = ["editorial.generic_phrases"]
+"#
+            .into(),
+        );
+        assert!(
+            !resolve_content_preset("override", &sources)
+                .unwrap()
+                .gates
+                .iter()
+                .any(|gate| gate.id() == "editorial.generic_phrases")
         );
     }
 

@@ -180,22 +180,12 @@ pub fn evaluate_content_collection_js(
         .map_err(|error| JsError::new(&format!("failed to serialize report: {error}")))
 }
 
-/// Evaluate one EmDash document using named TOML preset sources. The source map
-/// is JSON: {"preset-name": "TOML text"}; built-ins are available by default.
-#[wasm_bindgen(js_name = "evaluateContent")]
-pub fn evaluate_content_js(
-    document_json: &str,
-    preset_name: &str,
-    sources_json: Option<String>,
-    evidence_json: Option<String>,
-) -> Result<String, JsError> {
-    install_panic_hook();
-    let raw_document: serde_json::Value = serde_json::from_str(document_json)
+fn parse_content_document(document_json: &str) -> Result<(EmdashDocument, [bool; 4]), JsError> {
+    let raw: serde_json::Value = serde_json::from_str(document_json)
         .map_err(|error| JsError::new(&format!("failed to parse document: {error}")))?;
-    let body_available = raw_document.get("body").is_some();
-    let capabilities = if !body_available {
+    let capabilities = if raw.get("body").is_none() {
         [false; 4]
-    } else if let Some(value) = raw_document.get("body_capabilities") {
+    } else if let Some(value) = raw.get("body_capabilities") {
         ["text", "headings", "paragraphs", "links"].map(|name| {
             value
                 .as_array()
@@ -204,8 +194,44 @@ pub fn evaluate_content_js(
     } else {
         [true; 4]
     };
-    let document: EmdashDocument = serde_json::from_value(raw_document)
+    let document = serde_json::from_value(raw)
         .map_err(|error| JsError::new(&format!("failed to parse document: {error}")))?;
+    Ok((document, capabilities))
+}
+
+/// Return the exact projected input that external extensions must bind to.
+#[wasm_bindgen(js_name = "projectContentInput")]
+pub fn project_content_input_js(
+    document_json: &str,
+    evidence_json: Option<String>,
+) -> Result<String, JsError> {
+    let (document, capabilities) = parse_content_document(document_json)?;
+    let evidence = evidence_json
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|error| JsError::new(&format!("failed to parse evidence sources: {error}")))?;
+    serde_json::to_string(&crate::content::extension_input(
+        &document,
+        evidence,
+        capabilities,
+    ))
+    .map_err(|error| JsError::new(&format!("failed to serialize input: {error}")))
+}
+
+/// Evaluate one EmDash document using named TOML preset sources. The source map
+/// is JSON: {"preset-name": "TOML text"}; built-ins are available by default.
+#[wasm_bindgen(js_name = "evaluateContent")]
+pub fn evaluate_content_js(
+    document_json: &str,
+    preset_name: &str,
+    sources_json: Option<String>,
+    evidence_json: Option<String>,
+    extensions_json: Option<String>,
+) -> Result<String, JsError> {
+    install_panic_hook();
+    let (document, capabilities) = parse_content_document(document_json)?;
     let preset = resolve_content_preset_js(preset_name, sources_json.as_deref())?;
     let evidence = evidence_json
         .as_deref()
@@ -216,11 +242,28 @@ pub fn evaluate_content_js(
             })
         })
         .transpose()?;
-    let report = crate::content::evaluate_content_with_body_capabilities(
+    let external = extensions_json
+        .as_deref()
+        .filter(|json| !json.is_empty())
+        .map(|json| {
+            if json.len() > 32 * 1024 * 1024 {
+                return Err(JsError::new("external gate results exceed the size limit"));
+            }
+            let values = serde_json::from_str(json).map_err(|error| {
+                JsError::new(&format!("failed to parse extension results: {error}"))
+            })?;
+            aexeo_core::content_extensions::ExternalGateResults::new(values)
+                .map_err(|error| JsError::new(&format!("invalid extension results: {error}")))
+        })
+        .transpose()?;
+    let report = crate::content::evaluate_content_with_extensions(
         &document,
         &preset,
         evidence,
         capabilities,
+        external
+            .as_ref()
+            .map(|host| host as &dyn aexeo_core::content_gate::ContentGateExtensions),
     )
     .map_err(|error| JsError::new(&format!("content evaluation failed: {error:#}")))?;
     let locations = crate::content::source_locations(&document, &preset, &report);

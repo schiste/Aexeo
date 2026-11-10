@@ -5,6 +5,10 @@
   "runtime_audit/http_fixture_20_pages": {
     "max_avg_ms": 1500
   },
+  "content/repeated_paragraph_openings": {
+    "max_avg_ms": 100,
+    "max_p95_ms": 200
+  },
   "content/evaluation": {
     "max_avg_ms": 100,
     "max_p95_ms": 200

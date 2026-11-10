@@ -1,0 +1,16 @@
+version = 1
+name = "Product page editorial starter"
+extends = ["article", "editorial-structure"]
+
+[[gates]]
+id = "editorial.length"
+kind = "word_count"
+min = 30
+max = 1500
+blocking = false
+
+[[gates]]
+id = "editorial.metadata"
+kind = "required_metadata"
+fields = ["title", "description"]
+blocking = false

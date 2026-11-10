@@ -16,7 +16,9 @@ export const evaluateContent: (
   preset_name: string,
   sources_json?: string | null,
   evidence_json?: string | null,
+  extensions_json?: string | null,
 ) => string;
+export const projectContentInput: (document_json: string, evidence_json?: string | null) => string;
 export const evaluateContentCollection: (
   documents_json: string,
   preset_name: string,

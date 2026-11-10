@@ -1,0 +1,15 @@
+version = 1
+name = "Editorial structure starter"
+extends = ["readability"]
+
+[[gates]]
+id = "editorial.paragraph_length"
+kind = "paragraph_length"
+max_words = 120
+blocking = false
+
+[[gates]]
+id = "editorial.duplicate_headings"
+kind = "duplicate_headings"
+case_sensitive = false
+blocking = false
