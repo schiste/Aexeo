@@ -9,6 +9,7 @@ import type { CustomBlockMappings } from "./adapter.js";
 // public URLs. Two routes covers both rendering paths.
 
 import type {
+  DocumentAssessment,
   EvaluatorFn,
   RefreshSummary,
   SandboxCtx,
@@ -78,6 +79,7 @@ export interface RouteSummary {
   findingCount: number;
   errorCount: number;
   warningCount: number;
+  assessment?: DocumentAssessment;
 }
 
 export interface FindingRow {
@@ -155,14 +157,14 @@ async function buildFindingsPayload(
 
   // Walk the findings KV namespace once. Each entry is keyed by
   // findings:<route> and the value is { route, findings: Finding[] }.
-  const entries = await ctx.kv.list<{ route: string; findings: Finding[] }>(
+  const entries = await ctx.kv.list<{ route: string; findings: Finding[]; assessment?: DocumentAssessment }>(
     "findings:",
   );
   const findings: FindingRow[] = [];
   const sitewide: Finding[] = [];
   const perRoute = new Map<
     string,
-    { findings: Finding[]; errors: number; warnings: number }
+    { findings: Finding[]; errors: number; warnings: number; assessment?: DocumentAssessment }
   >();
   for (const entry of entries) {
     if (entry.value === null) continue;
@@ -173,7 +175,7 @@ async function buildFindingsPayload(
     }
     let bucket = perRoute.get(route);
     if (bucket === undefined) {
-      bucket = { findings: [], errors: 0, warnings: 0 };
+      bucket = { findings: [], errors: 0, warnings: 0, ...(entry.value.assessment === undefined ? {} : { assessment: entry.value.assessment }) };
       perRoute.set(route, bucket);
     }
     for (const finding of entry.value.findings) {
@@ -199,6 +201,7 @@ async function buildFindingsPayload(
       findingCount: bucket.findings.length,
       errorCount: bucket.errors,
       warningCount: bucket.warnings,
+      ...(bucket.assessment === undefined ? {} : { assessment: bucket.assessment }),
     });
   }
   routes.sort((a, b) => b.errorCount - a.errorCount || a.route.localeCompare(b.route));

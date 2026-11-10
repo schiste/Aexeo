@@ -37,6 +37,7 @@ export function withContentPreset(
     const result = await base(documents, context);
     if (!result.ok) return result;
     const findings = [...result.findings];
+    const assessments = { ...result.assessments };
     try {
       for (const [index, document] of documents.entries()) {
         const collection = context?.collections[index];
@@ -68,14 +69,15 @@ export function withContentPreset(
           : preset.evidenceSources === undefined
           ? await evaluate(document, name, preset.sources)
           : await evaluate(document, name, preset.sources, preset.evidenceSources);
-        const incomplete = report.gates.filter((gate) => gate.status === "not_checked");
-        if (incomplete.length) return {
-          ok: false, reason: "content_preset_incomplete",
-          detail: `${document.route}: ${incomplete.map((gate) => `${gate.gate_id}: ${gate.reason}`).join(", ")}`,
+        assessments[document.route] = {
+          status: "evaluated",
+          preset: name,
+          gates: report.gates.map(({ gate_id, status, blocking, scope, required_capability, reason }) =>
+            ({ gate_id, status, blocking, scope, required_capability, reason })),
         };
         for (const gate of report.gates) findings.push(...gate.findings);
       }
-      return { ok: true, findings };
+      return { ok: true, findings, assessments };
     } catch (error) {
       return { ok: false, reason: "content_preset_error", detail: error instanceof Error ? error.message : String(error) };
     }

@@ -565,3 +565,9 @@ aexeoPlugin({
 The mapping projects source values; it does not prove what metadata the page
 renderer generated. An absent value in a valid mapping is recorded separately
 from an unknown or invalid mapping.
+
+Content preset gate outcomes, including `not_checked` and their reasons, are
+stored with the current route findings and exposed in CMS views and the data
+route. A failed evaluation clears findings for that revision and records an
+error; it must not be interpreted as a clean assessment. `aexeo.preset_coverage`
+logs aggregate counts without routes, gate identifiers, reasons or content.

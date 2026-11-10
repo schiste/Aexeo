@@ -18,8 +18,10 @@ describe("configured content preset", () => {
   it("reports unavailable gates as incomplete", async () => {
     const incomplete: ContentReport = { ...report, gates: [{ ...report.gates[0]!, status: "not_checked", findings: [], reason: "site unavailable" }] };
     const result = await withContentPreset(base, { name: "custom" }, async () => incomplete)([doc]);
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toBe("content_preset_incomplete");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.assessments?.["/test"]).toMatchObject({
+      status: "evaluated", gates: [{ gate_id: "heading", status: "not_checked", reason: "site unavailable" }],
+    });
   });
   it("keeps the old evaluator when no preset is configured", () => {
     expect(withContentPreset(base, undefined, async () => report)).toBe(base);
@@ -97,4 +99,16 @@ it("emits content-free provider telemetry without making evaluation depend on th
   const failed = withContentPreset(base, { name: "article" }, async () => report, async () => { throw new Error("failed"); }, project, (event) => errorEvents.push(event));
   expect((await failed([doc])).ok).toBe(false);
   expect(errorEvents).toEqual([{ status: "error", duration_ms: expect.any(Number) }]);
+});
+
+it("continues assessing later documents when one has unavailable gates", async () => {
+  const seen: string[] = [];
+  const evaluator = withContentPreset(base, { name: "custom" }, async (document) => {
+    seen.push(document.route);
+    return document.route === "/test" ? { ...report, gates: [{ ...report.gates[0]!, status: "not_checked", findings: [], reason: "missing" }] } : { ...report, gates: [] };
+  });
+  const result = await evaluator([doc, { ...doc, route: "/second" }]);
+  expect(result.ok).toBe(true);
+  expect(seen).toEqual(["/test", "/second"]);
+  if (result.ok) expect(Object.keys(result.assessments ?? {})).toEqual(["/test", "/second"]);
 });
