@@ -288,20 +288,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     }
     let external = args
         .get_one::<String>("extension-results")
-        .map(|path| -> Result<_> {
-            const LIMIT: u64 = 32 * 1024 * 1024;
-            let mut data = Vec::new();
-            fs::File::open(path)
-                .user_context(format!("reading extension results {path}"))?
-                .take(LIMIT + 1)
-                .read_to_end(&mut data)?;
-            if data.len() as u64 > LIMIT {
-                user_bail!("external gate results exceed the size limit");
-            }
-            let results =
-                serde_json::from_slice(&data).user_context("invalid external gate results JSON")?;
-            aexeo_core::content_extensions::ExternalGateResults::new(results)
-        })
+        .map(|path| load_external_gate_results(path, false))
         .transpose()?;
     // Network access is an explicit host choice, never implied by a preset.
     let link_observations = if args.get_flag("check-link-reachability")
@@ -474,6 +461,28 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
 /// Read content up to the supported size. Input that is too large, or Markdown
 /// nested too deeply to process safely, yields a reason instead of the text, and
 /// gates that need it report `not_checked`.
+pub(super) fn load_external_gate_results(
+    path: &str,
+    batch: bool,
+) -> Result<aexeo_core::content_extensions::ExternalGateResults> {
+    const LIMIT: u64 = 32 * 1024 * 1024;
+    let mut data = Vec::new();
+    fs::File::open(path)
+        .user_context(format!("reading extension results {path}"))?
+        .take(LIMIT + 1)
+        .read_to_end(&mut data)?;
+    if data.len() as u64 > LIMIT {
+        user_bail!("external gate results exceed the size limit");
+    }
+    let results =
+        serde_json::from_slice(&data).user_context("invalid external gate results JSON")?;
+    if batch {
+        aexeo_core::content_extensions::ExternalGateResults::new_for_batch(results)
+    } else {
+        aexeo_core::content_extensions::ExternalGateResults::new(results)
+    }
+}
+
 fn read_limited_content(
     reader: impl Read,
     is_markdown: bool,

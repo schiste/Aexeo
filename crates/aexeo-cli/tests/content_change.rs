@@ -139,6 +139,120 @@ fn link_budget_is_shared_between_entries() {
 }
 
 #[test]
+fn external_gates_bind_each_entry_and_withhold_stale_results() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut change = input();
+    change["entries"].as_array_mut().unwrap().push(serde_json::json!({
+        "entity_id":"second", "operation":"create", "media_type":"text/plain",
+        "after":{"inline":"def", "sha256":"cb8379ac2098aa165029e3938a51da0bcecfc008fd6795f401178647f96c5b34"}
+    }));
+    let preset = "version=1\nname='test'\n[[gates]]\nid='external'\nkind='custom'\nextension='example.rule'\nblocking=true\n";
+    let path = dir.path().join("external.json");
+    let mut records = serde_json::json!([
+        {"extension":"example.rule", "parameters":{}, "input":{"id":"article", "text":"abc", "source_text":"abc", "headings":null, "metadata":null, "evidence_sources":null}, "diagnostics":[{"message":"Review", "line":1, "column":2}]},
+        {"extension":"example.rule", "parameters":{}, "input":{"id":"second", "text":"def", "source_text":"def", "headings":null, "metadata":null, "evidence_sources":null}, "diagnostics":[]}
+    ]);
+    fs::write(&path, serde_json::to_vec(&records).unwrap()).unwrap();
+    let flags = ["--extension-results", path.to_str().unwrap(), "--telemetry"];
+    let output = run(dir.path(), &change, preset, &flags);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let verdict: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+    assert_eq!(
+        verdict["findings"][0]["location"],
+        serde_json::json!({"line":1,"column":2})
+    );
+    assert_eq!(verdict["summary"]["passed"], 1);
+    let event: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(event["event"], "content_change_external_gates");
+    assert_eq!(event["configured_custom_gates"], 1);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("abc"));
+
+    records[0]["diagnostics"] = serde_json::json!([]);
+    records[1]["input"]["text"] = "stale".into();
+    fs::write(&path, serde_json::to_vec(&records).unwrap()).unwrap();
+    let output = run(dir.path(), &change, preset, &flags);
+    assert_eq!(output.status.code(), Some(2));
+    let verdict: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+    assert_eq!(verdict["status"], "not_checked");
+    assert_eq!(verdict["summary"]["passed"], 1);
+    assert_eq!(verdict["summary"]["not_checked"], 1);
+
+    let prior_verdict = fs::read(dir.path().join("verdict.json")).unwrap();
+    records[1]["input"]["text"] = "def".into();
+    records[1]["diagnostics"] = serde_json::json!([{"message":"bad", "line":9, "column":1}]);
+    fs::write(&path, serde_json::to_vec(&records).unwrap()).unwrap();
+    let output = run(dir.path(), &change, preset, &flags);
+    assert_ne!(output.status.code(), Some(0));
+    assert_eq!(
+        fs::read(dir.path().join("verdict.json")).unwrap(),
+        prior_verdict
+    );
+}
+
+#[test]
+fn external_markdown_result_maps_projected_location_to_original_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("draft.md");
+    fs::write(&source, "**abc**").unwrap();
+    let exported = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            source.to_str().unwrap(),
+            "--input-format",
+            "markdown",
+            "--export-adapter-input",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        exported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&exported.stderr)
+    );
+    let mut projected: serde_json::Value = serde_json::from_slice(&exported.stdout).unwrap();
+    projected["id"] = "article".into();
+    let path = dir.path().join("external.json");
+    fs::write(
+        &path,
+        serde_json::to_vec(&serde_json::json!([{
+            "extension":"example.rule", "parameters":{}, "input":projected,
+            "diagnostics":[{"message":"Review", "line":1, "column":2}]
+        }]))
+        .unwrap(),
+    )
+    .unwrap();
+    let mut change = input();
+    change["entries"][0]["media_type"] = "text/markdown".into();
+    change["entries"][0]["after"] = serde_json::json!({"inline":"**abc**", "sha256":"eedd8ef9da3bf94812b49afc562b48f35046d62ed8f609403290ad69d9e60b8e"});
+    let preset = "version=1\nname='test'\n[[gates]]\nid='external'\nkind='custom'\nextension='example.rule'\nblocking=true\n";
+    let output = run(
+        dir.path(),
+        &change,
+        preset,
+        &["--extension-results", path.to_str().unwrap()],
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let verdict: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+    assert_eq!(
+        verdict["findings"][0]["location"],
+        serde_json::json!({"line":1,"column":4})
+    );
+}
+
+#[test]
 fn paragraph_text_is_opt_in_and_preserves_original_locations() {
     let dir = tempfile::tempdir().unwrap();
     let mut change = input();

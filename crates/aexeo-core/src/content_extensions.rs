@@ -35,13 +35,25 @@ pub struct ExternalGateResults(Vec<ExternalGateResult>);
 
 impl ExternalGateResults {
     pub fn new(results: Vec<ExternalGateResult>) -> Result<Self> {
+        Self::validate(results, false)
+    }
+
+    /// Accept one result per entity, extension and parameter set for a batch.
+    /// Each result still binds to the complete projected input.
+    pub fn new_for_batch(results: Vec<ExternalGateResult>) -> Result<Self> {
+        Self::validate(results, true)
+    }
+
+    fn validate(results: Vec<ExternalGateResult>, by_entity: bool) -> Result<Self> {
         if results.len() > MAX_EXTERNAL_RESULTS {
             bail!("too many external gate results");
         }
         for (index, result) in results.iter().enumerate() {
             if result.extension.trim().is_empty()
                 || results[..index].iter().any(|other| {
-                    other.extension == result.extension && other.parameters == result.parameters
+                    other.extension == result.extension
+                        && other.parameters == result.parameters
+                        && (!by_entity || other.input.id == result.input.id)
                 })
             {
                 bail!("external gate identifiers and parameter sets must be nonempty and unique");
@@ -68,11 +80,11 @@ impl ContentGateExtensions for ExternalGateResults {
         parameters: &BTreeMap<String, String>,
         input: &ContentInput,
     ) -> Result<Option<Vec<ExtensionDiagnostic>>> {
-        let Some(result) = self
-            .0
-            .iter()
-            .find(|result| result.extension == extension && &result.parameters == parameters)
-        else {
+        let Some(result) = self.0.iter().find(|result| {
+            result.extension == extension
+                && &result.parameters == parameters
+                && result.input.id == input.id
+        }) else {
             return Ok(None);
         };
         if &result.input != input {
@@ -168,6 +180,36 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn batch_results_are_unique_per_entity_and_still_bound_to_inputs() {
+        let first = result();
+        let mut second = first.clone();
+        second.input.id = "other".into();
+        second.input.text = Some("Other".into());
+        second.diagnostics[0].line = 1;
+        assert!(ExternalGateResults::new(vec![first.clone(), second.clone()]).is_err());
+        let host = ExternalGateResults::new_for_batch(vec![first.clone(), second.clone()]).unwrap();
+        assert!(
+            host.evaluate("test.rule", &first.parameters, &first.input)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            host.evaluate("test.rule", &second.parameters, &second.input)
+                .unwrap()
+                .is_some()
+        );
+        second.input.text = Some("stale".into());
+        assert!(
+            host.evaluate("test.rule", &second.parameters, &second.input)
+                .unwrap()
+                .is_none()
+        );
+        let mut duplicate = first.clone();
+        duplicate.input.text = Some("other snapshot".into());
+        assert!(ExternalGateResults::new_for_batch(vec![first, duplicate]).is_err());
     }
 
     #[test]

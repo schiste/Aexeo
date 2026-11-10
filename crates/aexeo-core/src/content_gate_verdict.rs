@@ -88,7 +88,38 @@ pub fn evaluate_change_with_options<P: ConfinedContentFiles>(
     evaluated_at: &str,
     max_entry_bytes: usize,
     max_total_bytes: usize,
-    mut options: ChangeEvaluationOptions<'_, '_>,
+    options: ChangeEvaluationOptions<'_, '_>,
+) -> Result<Verdict> {
+    evaluate_change_with_host(
+        change,
+        provider,
+        preset,
+        evaluated_at,
+        max_entry_bytes,
+        max_total_bytes,
+        ChangeEvaluationHost {
+            options,
+            extensions: None,
+        },
+    )
+}
+
+/// Explicitly supplied host capabilities. No extension is executed by a preset.
+#[derive(Default)]
+pub struct ChangeEvaluationHost<'a, 'b> {
+    pub options: ChangeEvaluationOptions<'a, 'b>,
+    pub extensions: Option<&'a dyn crate::content_gate::ContentGateExtensions>,
+}
+
+/// Evaluate changes with trusted host extensions after all digests are verified.
+pub fn evaluate_change_with_host<P: ConfinedContentFiles>(
+    change: &Change,
+    provider: &mut P,
+    preset: &ContentPreset,
+    evaluated_at: &str,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    mut host: ChangeEvaluationHost<'_, '_>,
 ) -> Result<Verdict> {
     preset.validate()?;
     if evaluated_at.is_empty() {
@@ -125,7 +156,7 @@ pub fn evaluate_change_with_options<P: ConfinedContentFiles>(
                     Some(adapted.source_map),
                 )
             }
-            "text/plain" if options.plain_text_paragraphs => {
+            "text/plain" if host.options.plain_text_paragraphs => {
                 match crate::plain_text_adapter::paragraph_text_context(&text) {
                     Ok(context) => (
                         ContentInput {
@@ -184,7 +215,7 @@ pub fn evaluate_change_with_options<P: ConfinedContentFiles>(
             )
         }) {
             match (
-                options.link_observer.as_deref_mut(),
+                host.options.link_observer.as_deref_mut(),
                 destinations.as_deref(),
             ) {
                 (Some(observe), Some(destinations)) => {
@@ -201,7 +232,7 @@ pub fn evaluate_change_with_options<P: ConfinedContentFiles>(
         };
         let capabilities = ContentEvaluationContext {
             site: None,
-            extensions: None,
+            extensions: host.extensions,
             adapter: context.as_ref(),
             link_count,
             link_reachability: observations.as_deref(),
@@ -497,6 +528,64 @@ mod tests {
             .is_err()
         );
         assert!(!called);
+    }
+
+    #[test]
+    fn host_extension_runs_only_after_every_digest_is_verified() {
+        use std::{cell::Cell, collections::BTreeMap};
+        struct Host(Cell<usize>);
+        impl crate::content_gate::ContentGateExtensions for Host {
+            fn evaluate(
+                &self,
+                _: &str,
+                _: &BTreeMap<String, String>,
+                _: &ContentInput,
+            ) -> Result<Option<Vec<crate::content_gate::ExtensionDiagnostic>>> {
+                self.0.set(self.0.get() + 1);
+                Ok(Some(vec![]))
+            }
+        }
+        let mut input = change();
+        let mut other = input.entries[0].clone();
+        other.entity_id = "second".into();
+        other.after.as_mut().unwrap().sha256 = "0".repeat(64);
+        input.entries.push(other);
+        let policy = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='ext'\nkind='custom'\nextension='test.ext'\n",
+        )
+        .unwrap();
+        let extension = Host(Cell::new(0));
+        let host = || ChangeEvaluationHost {
+            extensions: Some(&extension),
+            ..Default::default()
+        };
+        assert!(
+            evaluate_change_with_host(
+                &input,
+                &mut NoFiles,
+                &policy,
+                "2026-01-01T00:00:00Z",
+                1024,
+                1024,
+                host()
+            )
+            .is_err()
+        );
+        assert_eq!(extension.0.get(), 0);
+        input.entries[1].after.as_mut().unwrap().sha256 =
+            input.entries[0].after.as_ref().unwrap().sha256.clone();
+        let verdict = evaluate_change_with_host(
+            &input,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+            host(),
+        )
+        .unwrap();
+        assert_eq!(verdict.status, VerdictStatus::Pass);
+        assert_eq!(extension.0.get(), 2);
     }
 
     #[test]
