@@ -56,6 +56,29 @@ const headingReport = await evaluateContent({ route: "/heading", title: "Heading
 assert.deepEqual(headingReport.source_locations, [{ gate_id: "length", finding_index: 0, block_index: 0, span_index: 0, utf16_offset: 0 }]);
 console.log("WASM heading location smoke test passed");
 
+const paragraphCountPreset = `version=1
+name="paragraph count"
+[[gates]]
+id="count"
+kind="paragraph_count"
+min=2
+max=2
+`;
+const paragraphs = { route: "/paragraphs", title: "Paragraphs", body: [
+  { style: "h2", children: [{ _type: "span", text: "Heading" }] },
+  { children: [{ _type: "span", text: "First." }] },
+  { children: [{ _type: "span", text: "Second." }] },
+] };
+const paragraphReport = await evaluateContent(paragraphs, "test", { test: paragraphCountPreset });
+assert.equal(paragraphReport.gates[0].status, "passed");
+assert.equal(paragraphReport.gates[0].measurements.paragraph_count, 2);
+const missingParagraphs = await evaluateContent({ ...paragraphs, body_capabilities: ["text"] }, "test", { test: paragraphCountPreset });
+assert.equal(missingParagraphs.gates[0].status, "not_checked");
+const emptyParagraphs = await evaluateContent({ ...paragraphs, body: [] }, "test", { test: paragraphCountPreset });
+assert.equal(emptyParagraphs.gates[0].status, "failed");
+assert.equal(emptyParagraphs.gates[0].measurements.paragraph_count, 0);
+console.log("WASM paragraph count smoke test passed");
+
 const missingBodyReport = await evaluateContent({ route: "/missing", title: "Missing" }, "test", { test: linkPreset });
 assert.equal(missingBodyReport.gates[0].status, "not_checked");
 const emptyBodyReport = await evaluateContent({ route: "/empty", title: "Empty", body: [] }, "test", { test: linkPreset });

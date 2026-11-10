@@ -263,6 +263,26 @@ The review itself is **trusted input**: Aexeo does not authenticate the reviewer
 
 An optional [Jev adapter](../adapters/jev/README.md) produces this review format from an explicit remote model call and a separately supplied source-reliability judgment. It is not part of the default offline engine.
 
+### Paragraph count
+
+`paragraph_count` checks optional inclusive `min` and `max` bounds against the
+paragraphs provided by the adapter. At least one bound is required; zero is a
+valid bound and `min` cannot exceed `max`. Markdown paragraphs and EmDash normal
+blocks are counted, not headings. The report includes `paragraph_count`,
+`min_paragraphs` and `max_paragraphs` when available. A missing paragraph
+capability produces `not_checked`; an observed empty body has count zero. The
+finding applies to the whole document, so no precise source location is claimed.
+Counts are structural hints, not a measure of prose quality.
+
+```toml
+[[gates]]
+id = "editorial.paragraph_count"
+kind = "paragraph_count"
+min = 2
+max = 12
+blocking = false
+```
+
 ### Paragraph length
 
 `paragraph_length` counts whitespace-separated words in each paragraph supplied
