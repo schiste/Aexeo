@@ -54,6 +54,21 @@ describe("EmDash content adaptation", () => {
     expect(adaptContentItem({ ...item, data: { introduction: body("intro"), sections: 42 } }, { contentFields: ["introduction", "sections"] }).document.body_capabilities).toEqual([]);
   });
 
+  it("preserves mixed Portable Text and marks unmapped components unverified", () => {
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: {
+      content: [...body("Before"), { _type: "askYourAi", _key: "ai", prompt: "Question" }, ...body("After")],
+    } };
+    const unknown = contentItemToEmdashDocument(item);
+    expect(unknown.body_capabilities).toEqual([]);
+    expect(unknown.body?.map((block) => block.children[0]?.text)).toEqual(["Before", "Question", "After"]);
+    const ignored = contentItemToEmdashDocument(item, { askYourAi: [] });
+    expect(ignored.body_capabilities).toBeUndefined();
+    expect(ignored.body?.map((block) => block.children[0]?.text)).toEqual(["Before", "After"]);
+    const mapped = contentItemToEmdashDocument(item, { askYourAi: [{ kind: "paragraph", field: "prompt" }] });
+    expect(mapped.body_capabilities).toBeUndefined();
+    expect(mapped.body?.map((block) => block.children[0]?.text)).toEqual(["Before", "Question", "After"]);
+  });
+
   it("declares only the current capabilities and configured sidecar host", () => {
     expect(buildCapabilities(null)).toEqual(["content:read"]);
     expect(buildAllowedHosts(null)).toEqual([]);

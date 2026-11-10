@@ -66,6 +66,11 @@ collection, in order. It is an explicit assertion of completeness, so include
 all rendered fields; entries without any selected field remain unavailable.
 In sandboxed mode, enter this object in `Content fields by collection (JSON)`.
 
+Portable Text can also interleave text blocks and custom components. An
+unknown component keeps its surrounding text but marks body capabilities
+unverified. A host may map a component to `[]` only when it has verified that
+the component contributes no content relevant to the evaluated body.
+
 A block mapping is the site's assertion that those fields cover the rendered content,
 in order. `richText` accepts Portable Text arrays and preserves their headings
 and links; `heading` defaults to h2 and accepts levels 1 through 6. `repeat`
