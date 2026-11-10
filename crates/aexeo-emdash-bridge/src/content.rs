@@ -626,7 +626,6 @@ pub fn evaluate_content_with_reachability(
     }
     if !paragraphs {
         context.paragraphs = None;
-        context.block_ends = None;
     }
     let destinations = (links
         && preset.gates.iter().any(|gate| {
@@ -680,6 +679,36 @@ mod tests {
         let untrusted = evaluate_content(&document, &preset).unwrap();
         assert_eq!(untrusted.gates[0].status, GateStatus::NotChecked);
         assert!(untrusted.gates[0].findings.is_empty());
+    }
+
+    #[test]
+    fn text_only_capability_preserves_block_boundaries() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/t","title":"T","body":[{"children":[{"_type":"span","text":"one best"}]},{"children":[{"_type":"span","text":"price four"}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='phrase'\nkind='forbidden_terms'\nterms=['best price']\n[[gates]]\nid='sentence'\nkind='sentence_length'\nmax_words=3\n[[gates]]\nid='paragraph'\nkind='paragraph_count'\nmin=1\n").unwrap();
+        let partial = evaluate_content_with_body_capabilities(
+            &document,
+            &preset,
+            None,
+            [true, true, false, true],
+        )
+        .unwrap();
+        assert_eq!(partial.gates[0].status, GateStatus::Passed);
+        assert_eq!(partial.gates[1].status, GateStatus::Passed);
+        assert_eq!(partial.gates[2].status, GateStatus::NotChecked);
+        let (input, context, links) =
+            markdown_input_with_links("t.md", "one best\n\nprice four").unwrap();
+        let markdown = preset
+            .evaluate_with_capabilities(
+                &input,
+                &ContentEvaluationContext {
+                    adapter: Some(&context),
+                    link_count: Some(links),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(partial.gates[0].status, markdown.gates[0].status);
+        assert_eq!(partial.gates[1].status, markdown.gates[1].status);
     }
 
     #[test]
