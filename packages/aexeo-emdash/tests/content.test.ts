@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/wasm-init.js", () => ({
+  projectLinkDestinations: vi.fn(async (json: string) => JSON.stringify({ document: JSON.parse(json), destinations: ["https://example.org"] })),
   evaluateContentCollection: vi.fn(async () => JSON.stringify({ preset: "custom", input_id: "collection", gates: [{ gate_id: "unique", status: "failed", findings: [], reason: null }] })),
   evaluateContent: vi.fn(async () => JSON.stringify({
     preset: "custom", input_id: "/sample", source_locations: [{ gate_id: "forbidden", finding_index: 0, block_index: 0, span_index: 1, utf16_offset: 2 }], gates: [{
@@ -9,7 +10,7 @@ vi.mock("../src/wasm-init.js", () => ({
   })),
 }));
 
-import { evaluateContent, evaluateContentCollection, type ContentGateResult } from "../src/content.js";
+import { evaluateContent, evaluateContentCollection, projectLinkDestinations, type ContentGateResult } from "../src/content.js";
 import { evaluateContent as evaluateWasm, evaluateContentCollection as evaluateCollectionWasm } from "../src/wasm-init.js";
 
 describe("portable content API", () => {
@@ -19,6 +20,22 @@ describe("portable content API", () => {
     vi.mocked(evaluateWasm).mockResolvedValueOnce(JSON.stringify({ preset: "custom", input_id: "/sample", gates: [gate], applied_fixes: [] }));
     const report = await evaluateContent({ route: "/sample", title: "Sample", body: [] }, "custom");
     expect(report.gates[0]).toEqual(gate);
+  });
+
+  it("forwards snapshot-bound link observations and emits aggregate metrics", async () => {
+    const document = { route: "/private", title: "Private", body: [] };
+    const projection = await projectLinkDestinations(document);
+    expect(projection).not.toBeNull();
+    const batch = { ...projection!, observations: ["not_found" as const] };
+    const gate: ContentGateResult = { gate_id: "external", status: "failed", blocking: false,
+      scope: "document", required_capability: "link_reachability", findings: [], reason: null,
+      measurements: { checked_destinations: 1, not_found_destinations: 1, unchecked_destinations: 0 } };
+    vi.mocked(evaluateWasm).mockResolvedValueOnce(JSON.stringify({ preset: "custom", input_id: "/private", gates: [gate], applied_fixes: [] }));
+    const onTelemetry = vi.fn();
+    await evaluateContent(document, "custom", {}, undefined, onTelemetry, undefined, batch);
+    expect(evaluateWasm).toHaveBeenLastCalledWith(JSON.stringify(document), "custom", "{}", undefined, undefined, JSON.stringify(batch));
+    expect(onTelemetry.mock.calls[0]?.[0].link_reachability).toEqual({ checked: 1, not_found: 1, unchecked: 0 });
+    expect(JSON.stringify(onTelemetry.mock.calls[0]?.[0])).not.toContain("example.org");
   });
 
   it("passes the document and preset sources to the bridge", async () => {

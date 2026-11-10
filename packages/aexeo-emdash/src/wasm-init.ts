@@ -147,9 +147,16 @@ export async function evaluateContent(
   sourcesJson?: string | null,
   evidenceJson?: string | null,
   extensionsJson?: string | null,
+  linkObservationsJson?: string | null,
 ): Promise<string> {
   await ensureInitialized();
-  return glue.evaluateContent(documentJson, presetName, sourcesJson, evidenceJson, extensionsJson);
+  return glue.evaluateContent(documentJson, presetName, sourcesJson, evidenceJson, extensionsJson, linkObservationsJson);
+}
+
+/** Project the exact document and ordered link occurrences for an external observer. */
+export async function projectLinkDestinations(documentJson: string): Promise<string> {
+  await ensureInitialized();
+  return glue.projectLinkDestinations(documentJson);
 }
 
 /** Return the exact input supplied to extension hosts. Contains content. */

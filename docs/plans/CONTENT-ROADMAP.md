@@ -70,8 +70,10 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
   destination safety, source reliability or long-term availability.
 - [x] Composable advisory reachability gate in the core and Markdown CLI; network
   checks require explicit opt-in, and partial observations remain `not_checked`.
-- [ ] Extend composable reachability observations to additional host adapters and
-  continue adding independently validated editorial gates.
+- [x] EmDash direct content API accepts snapshot-bound, explicitly supplied link
+  observations, preserves partial results and maps findings to source spans.
+- [ ] Integrate optional host observers with configured EmDash workflows and other
+  adapters; continue adding independently validated editorial gates.
 - [x] Explicit collection metadata uniqueness gate in core, CLI and EmDash/WASM
   ([PR #40](https://github.com/schiste/Aexeo/pull/40)); callers must supply the
   complete collection and missing metadata remains `not_checked`.

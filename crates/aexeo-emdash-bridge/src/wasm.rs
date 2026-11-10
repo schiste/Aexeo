@@ -220,6 +220,24 @@ pub fn project_content_input_js(
     .map_err(|error| JsError::new(&format!("failed to serialize input: {error}")))
 }
 
+/// Project the exact snapshot and ordered link occurrences for an external observer.
+/// Returns JSON null when the adapter cannot supply complete link destinations.
+#[wasm_bindgen(js_name = "projectLinkDestinations")]
+pub fn project_link_destinations_js(document_json: &str) -> Result<String, JsError> {
+    let (document, capabilities) = parse_content_document(document_json)?;
+    if !capabilities[3] {
+        return Ok("null".into());
+    }
+    let raw: serde_json::Value = serde_json::from_str(document_json)
+        .map_err(|error| JsError::new(&format!("failed to parse document: {error}")))?;
+    let destinations = crate::content::content_link_destinations(&document);
+    if destinations.len() > 10_000 {
+        return Err(JsError::new("link destination limit exceeded"));
+    }
+    serde_json::to_string(&serde_json::json!({"document": raw, "destinations": destinations}))
+        .map_err(|error| JsError::new(&format!("failed to serialize link projection: {error}")))
+}
+
 /// Evaluate one EmDash document using named TOML preset sources. The source map
 /// is JSON: {"preset-name": "TOML text"}; built-ins are available by default.
 #[wasm_bindgen(js_name = "evaluateContent")]
@@ -229,6 +247,7 @@ pub fn evaluate_content_js(
     sources_json: Option<String>,
     evidence_json: Option<String>,
     extensions_json: Option<String>,
+    link_observations_json: Option<String>,
 ) -> Result<String, JsError> {
     install_panic_hook();
     let (document, capabilities) = parse_content_document(document_json)?;
@@ -256,7 +275,26 @@ pub fn evaluate_content_js(
                 .map_err(|error| JsError::new(&format!("invalid extension results: {error}")))
         })
         .transpose()?;
-    let report = crate::content::evaluate_content_with_extensions(
+    let bound = link_observations_json
+        .as_deref()
+        .filter(|json| !json.is_empty())
+        .map(|json| {
+            if json.len() > 32 * 1024 * 1024 {
+                return Err(JsError::new("link observations exceed the size limit"));
+            }
+            serde_json::from_str::<crate::content::BoundLinkObservations>(json).map_err(|error| {
+                JsError::new(&format!("failed to parse link observations: {error}"))
+            })
+        })
+        .transpose()?;
+    let observations = if let Some(batch) = bound.as_ref() {
+        let raw: serde_json::Value = serde_json::from_str(document_json)
+            .map_err(|error| JsError::new(&format!("failed to parse document: {error}")))?;
+        crate::content::bound_link_observations(batch, &raw, &document, capabilities[3])
+    } else {
+        None
+    };
+    let report = crate::content::evaluate_content_with_reachability(
         &document,
         &preset,
         evidence,
@@ -264,9 +302,15 @@ pub fn evaluate_content_js(
         external
             .as_ref()
             .map(|host| host as &dyn aexeo_core::content_gate::ContentGateExtensions),
+        observations,
     )
     .map_err(|error| JsError::new(&format!("content evaluation failed: {error:#}")))?;
-    let locations = crate::content::source_locations(&document, &preset, &report);
+    let locations = crate::content::source_locations_with_reachability(
+        &document,
+        &preset,
+        &report,
+        observations,
+    );
     let mut output = serde_json::to_value(&report)
         .map_err(|error| JsError::new(&format!("failed to serialize report: {error}")))?;
     output["source_locations"] = serde_json::to_value(locations)
