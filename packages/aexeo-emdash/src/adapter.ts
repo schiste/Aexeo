@@ -424,20 +424,54 @@ function blocksToPortableText(
   return paragraphs;
 }
 
+// Fallback text is only a partial, unverified projection. Bound each unknown
+// component so malformed or deeply nested host data cannot monopolize a save.
+const FALLBACK_MAX_DEPTH = 64;
+const FALLBACK_MAX_NODES = 50_000;
+const FALLBACK_MAX_CHARS = 1_048_576;
+
 function collectText(value: unknown, key: string, out: string[]): void {
-  if (typeof value === "string") {
-    if (!isStructuralField(key) && value.trim().length > 0) out.push(value);
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) collectText(item, key, out);
-    return;
-  }
-  if (!isRecord(value)) return;
-  for (const [childKey, childValue] of Object.entries(value)) {
-    if (isStructuralField(childKey)) continue;
-    collectText(childValue, childKey, out);
-  }
+  const active = new WeakSet<object>();
+  let nodes = 0;
+  let remaining = FALLBACK_MAX_CHARS;
+  const visit = (current: unknown, field: string, depth: number): void => {
+    if (depth > FALLBACK_MAX_DEPTH || nodes >= FALLBACK_MAX_NODES || remaining <= 0) return;
+    nodes++;
+    if (typeof current === "string") {
+      if (!isStructuralField(field)) {
+        const separator = out.length > 0 ? 1 : 0;
+        const limit = Math.max(0, remaining - separator);
+        let text = current.slice(0, limit);
+        // Do not create an invalid lone surrogate when the budget cuts an emoji.
+        if (limit < current.length && /[\uD800-\uDBFF]/.test(text.at(-1) ?? "") &&
+            /[\uDC00-\uDFFF]/.test(current[limit] ?? "")) text = text.slice(0, -1);
+        text = text.trim();
+        if (text.length > 0) {
+          out.push(text);
+          remaining -= text.length + separator;
+        }
+      }
+      return;
+    }
+    if (!Array.isArray(current) && !isRecord(current)) return;
+    if (active.has(current)) return;
+    active.add(current);
+    if (Array.isArray(current)) {
+      for (const item of current) {
+        if (nodes >= FALLBACK_MAX_NODES || remaining <= 0) break;
+        visit(item, field, depth + 1);
+      }
+    } else {
+      for (const childKey in current) {
+        if (nodes >= FALLBACK_MAX_NODES || remaining <= 0) break;
+        if (Object.hasOwn(current, childKey) && !isStructuralField(childKey)) {
+          visit(current[childKey], childKey, depth + 1);
+        }
+      }
+    }
+    active.delete(current);
+  };
+  visit(value, key, 0);
 }
 
 const STRUCTURAL_FIELDS = new Set([
