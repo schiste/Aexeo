@@ -243,6 +243,9 @@ missing and unspecified languages are not treated as an observed mismatch.
 - [ ] Validate the EmDash inventory exporter with an explicit publication, route,
   locale, status and surface mapping on a real matching site; do not infer
   completeness from `routable` or from a non-transactional export.
+- [x] Mark links with `hidden` on themselves or an ancestor as conditional
+  observations, including redirect credit; expose evidence and aggregate opt-in
+  telemetry. HTML alone does not establish CSS or script visibility.
 - [x] Withhold orphan eligibility when any observed link destination is
   indeterminate; retain evidence and the `indeterminate_links` reason. Known
   unsupported non-HTTP destinations do not block comparison.

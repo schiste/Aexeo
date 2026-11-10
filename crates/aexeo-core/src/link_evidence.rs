@@ -34,6 +34,10 @@ pub struct LinkEvidence {
     /// Absent in older reports, where its status cannot be established.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conditional_markup: Option<bool>,
+    /// Whether this link or an ancestor has an HTML `hidden` attribute.
+    /// Absent in older reports; CSS and scripts can alter actual visibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden_attribute: Option<bool>,
     /// `nofollow`, `ugc` and `sponsored` tokens of the anchor's `rel`, lowercase
     /// and sorted. Other tokens, such as `noopener`, do not qualify a link.
     #[serde(default)]
@@ -42,6 +46,13 @@ pub struct LinkEvidence {
     pub line: Option<usize>,
     pub column: Option<usize>,
     pub resolution: LinkResolution,
+}
+
+impl LinkEvidence {
+    /// True only when both source-only markup and HTML hidden state were observed absent.
+    pub fn is_nonconditional(&self) -> bool {
+        self.conditional_markup == Some(false) && self.hidden_attribute == Some(false)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,6 +76,7 @@ struct Scope {
     non_body_landmark: bool,
     /// Source-only markup may not be displayed in the evaluated page.
     conditional_markup: bool,
+    hidden_attribute: bool,
 }
 
 fn attribute(handle: &Handle, key: &str) -> Option<String> {
@@ -222,6 +234,7 @@ pub fn extract_document(
         explicit: false,
         non_body_landmark: false,
         conditional_markup: false,
+        hidden_attribute: false,
     };
     // Keep the document alive while traversing: RcDom drains descendants when
     // the last handle to a node is dropped, even if descendants were cloned.
@@ -230,6 +243,9 @@ pub fn extract_document(
     while let Some((node, mut scope)) = stack.pop() {
         if let NodeData::Element { name, .. } = &node.data {
             let tag = name.local.as_ref();
+            if attribute(&node, "hidden").is_some() {
+                scope.hidden_attribute = true;
+            }
             if matches!(tag, "template" | "noscript") && !scope.conditional_markup {
                 scope.conditional_markup = true;
                 scope.context = LinkContext::Unknown;
@@ -302,6 +318,7 @@ pub fn extract_document(
                     component: scope.component.clone(),
                     paragraph: scope.paragraph.clone(),
                     conditional_markup: Some(scope.conditional_markup),
+                    hidden_attribute: Some(scope.hidden_attribute),
                     rel: crawl_rel_tokens(attribute(&node, "rel")),
                     line: None,
                     column: None,
@@ -422,6 +439,35 @@ mod tests {
         assert_eq!(routes(html, "https://example.org/fr/page"), ["en/intro"]);
         let foreign = r#"<head><base href="https://cdn.example.net/"></head><a href="x">X</a>"#;
         assert!(routes(foreign, "https://example.org/").is_empty());
+    }
+
+    #[test]
+    fn hidden_attribute_is_inherited_without_claiming_css_visibility() {
+        let links = extract_links(
+            "<main><div hidden><a href='/one'>one</a></div><a hidden='until-found' href='/two'>two</a><a href='/three'>three</a></main>",
+            "https://example.org/",
+            "https://example.org",
+            None,
+        );
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| link.hidden_attribute)
+                .collect::<Vec<_>>(),
+            vec![Some(true), Some(true), Some(false)]
+        );
+        assert_eq!(
+            links
+                .iter()
+                .map(LinkEvidence::is_nonconditional)
+                .collect::<Vec<_>>(),
+            vec![false, false, true]
+        );
+        let mut older = serde_json::to_value(&links[2]).unwrap();
+        older.as_object_mut().unwrap().remove("hidden_attribute");
+        let older: LinkEvidence = serde_json::from_value(older).unwrap();
+        assert_eq!(older.hidden_attribute, None);
+        assert!(!older.is_nonconditional());
     }
 
     #[test]

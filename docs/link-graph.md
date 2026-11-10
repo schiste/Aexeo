@@ -145,7 +145,15 @@ totals still include them. `conditional_source_pages` and
 overlap when the same page contains both types. Redirect credits report the
 same breakdown. Evidence includes `conditional_markup`; its absence in an older
 report means unknown, not false; the new counts are also absent in old reports,
-not zero. A nonconditional source observation does not prove visibility: dynamic script rendering and CSS visibility are not evaluated.
+not zero. A link with an HTML `hidden` attribute on itself or an ancestor is
+also counted as conditional, including `hidden="until-found"`. Evidence records
+`hidden_attribute`; its absence in older reports means unobserved. Historical
+aggregate counts were calculated before this field existed and are not revised:
+regenerate a report to assess these links. CSS can override `hidden`, and CSS
+and script-driven visibility are not evaluated, so neither the attribute nor
+its absence proves what a reader saw. Opt-in telemetry includes aggregate
+`hidden_attribute_link_count` and `hidden_attribute_unobserved_link_count`.
+A nonconditional observation does not prove visibility.
 For legacy `LNK002`, a solely conditional incoming link does not suppress the
 finding or confirm an orphan; `conditional_inbound` means not verifiable.
 Conditional incoming links also prevent confirmation of `LNK004` link counts.
