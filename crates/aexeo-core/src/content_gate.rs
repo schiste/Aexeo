@@ -1195,6 +1195,10 @@ impl ContentPreset {
                                 Some(value) => {
                                     if let Some(first_id) = first_by_value.get(value) {
                                         duplicates += 1;
+                                        if findings.len() >= MAX_FINDINGS_PER_GATE {
+                                            omitted += 1;
+                                            continue;
+                                        }
                                         findings.push(aexeo_contracts::Finding {
                                                 rule_id: gate.id().to_owned(),
                                                 message: format!("Metadata field {field:?} duplicates the value in {first_id:?}"),
@@ -2692,6 +2696,40 @@ field = "slug"
         );
         assert!(!report.gates[1].findings.is_empty());
         assert_eq!(report.summary.blocking_not_checked, 2);
+    }
+
+    #[test]
+    fn collection_duplicates_respect_finding_limit_and_keep_full_counts() {
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n").unwrap();
+        let input = ContentInput {
+            id: "collection".into(),
+            ..Default::default()
+        };
+        let items: Vec<_> = (0..MAX_FINDINGS_PER_GATE + 9)
+            .map(|index| ContentInput {
+                id: index.to_string(),
+                metadata: Some(BTreeMap::from([("slug".into(), "same".into())])),
+                ..Default::default()
+            })
+            .collect();
+        let report = preset
+            .evaluate_with_capabilities(
+                &input,
+                &ContentEvaluationContext {
+                    collection: Some(&items),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let result = &report.gates[0];
+        assert_eq!(result.status, GateStatus::Failed);
+        assert_eq!(result.findings.len(), MAX_FINDINGS_PER_GATE);
+        assert_eq!(
+            result.measurements["duplicate_items"],
+            MAX_FINDINGS_PER_GATE + 8
+        );
+        assert_eq!(result.measurements[FINDINGS_OMITTED], 8);
+        assert_eq!(result.total_findings(), MAX_FINDINGS_PER_GATE + 8);
     }
 
     #[test]

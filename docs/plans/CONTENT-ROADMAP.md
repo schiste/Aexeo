@@ -197,3 +197,10 @@ location, mapped findings, and unmapped findings. Aggregate opt-in telemetry inc
 the same eligible and unmapped counts, without content or identifiers. Counts omit
 findings truncated by the report limit; a location identifies the evaluated snapshot,
 not a later edited document. Older WASM bridges do not provide the extra counts.
+
+### Collection finding limits and identities
+
+Collection uniqueness checks retain the full duplicate count while bounding emitted
+findings and recording omitted findings. EmDash rejects blank or repeated routes,
+matching the CLI collection identity requirement. A supplied collection must still
+be complete; these checks cannot detect omitted records.
