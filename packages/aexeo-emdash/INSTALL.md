@@ -122,8 +122,10 @@ unverified. A host may map a component to `[]` only when it has verified that
 the component contributes no content relevant to the evaluated body.
 
 A block mapping is the site's assertion that those fields cover the rendered content,
-in order. `richText` accepts Portable Text arrays and preserves their headings
-and links; `heading` defaults to h2 and accepts levels 1 through 6. `repeat`
+in order. `richText` accepts Portable Text arrays, including text mixed with
+mapped custom components, and preserves their headings and links. Unmapped or
+malformed nested components and recursion beyond the mapping depth limit leave
+body coverage unverified; `heading` defaults to h2 and accepts levels 1 through 6. `repeat`
 maps each item in an array;
 `optional: true` permits an absent field without inventing content. Every
 encountered block type must be

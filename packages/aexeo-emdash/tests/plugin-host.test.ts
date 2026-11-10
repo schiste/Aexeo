@@ -100,6 +100,37 @@ describe("EmDash content adaptation", () => {
     expect(document.body_capabilities).toEqual([]);
   });
 
+  it("preserves nested mixed rich text and propagates incomplete coverage", () => {
+    const nested = [...body("Before"), { _type: "notice", _key: "notice", text: "Middle" }, ...body("After")];
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: {
+      blocks: [{ _type: "section", _key: "section", body: nested }],
+    } };
+    const mapping = { section: [{ kind: "richText" as const, field: "body" }] };
+    const partial = contentItemToEmdashDocument(item, mapping);
+    expect(partial.body?.map((block) => block.children[0]?.text)).toEqual(["Before", "Middle", "After"]);
+    expect(partial.body?.[0]).toEqual(nested[0]);
+    expect(partial.body?.[2]).toEqual(nested[2]);
+    expect(partial.body_capabilities).toEqual([]);
+    const complete = contentItemToEmdashDocument(item, { ...mapping, notice: [{ kind: "paragraph", field: "text" }] });
+    expect(complete.body?.map((block) => block.children[0]?.text)).toEqual(["Before", "Middle", "After"]);
+    expect(complete.body_capabilities).toBeUndefined();
+    const ignored = contentItemToEmdashDocument(item, { ...mapping, notice: [] });
+    expect(ignored.body?.map((block) => block.children[0]?.text)).toEqual(["Before", "After"]);
+    expect(ignored.body_capabilities).toBeUndefined();
+  });
+
+  it("bounds recursively mapped rich text and marks deep content incomplete", () => {
+    let nested: unknown[] = body("Leaf");
+    for (let index = 0; index < 12; index++) {
+      nested = [...body(`Level ${index}`), { _type: "section", _key: `s${index}`, body: nested }];
+    }
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: { content: nested } };
+    const document = contentItemToEmdashDocument(item, { section: [{ kind: "richText", field: "body" }] });
+    expect(document.body_capabilities).toEqual([]);
+    expect(document.body?.length).toBeGreaterThan(0);
+    expect(document.body?.length).toBeLessThan(13);
+  });
+
   it("declares only the current capabilities and configured sidecar host", () => {
     expect(buildCapabilities(null)).toEqual(["content:read"]);
     expect(buildAllowedHosts(null)).toEqual([]);
