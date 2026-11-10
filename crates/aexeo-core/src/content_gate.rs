@@ -637,10 +637,15 @@ impl<'a> LiteralText<'a> {
         self.block_ends.get(next).is_some_and(|&block| block < end)
     }
 
-    /// Non-overlapping occurrences of `term`, as original byte offsets. Word
-    /// boundaries use Unicode alphanumeric characters and underscore, outside
-    /// scripts written without spaces.
-    fn matches(&self, term: &str, whole_words: bool) -> Vec<usize> {
+    /// Visit non-overlapping occurrences as original byte offsets, stopping when
+    /// the visitor returns true. Word boundaries use Unicode alphanumeric
+    /// characters and underscore, outside scripts written without spaces.
+    fn visit_matches(
+        &self,
+        term: &str,
+        whole_words: bool,
+        mut visit: impl FnMut(usize) -> bool,
+    ) -> bool {
         fn word(ch: char) -> bool {
             (ch.is_alphanumeric() || ch == '_') && !unsegmented_script(ch)
         }
@@ -665,16 +670,14 @@ impl<'a> LiteralText<'a> {
                 let end = self.original_offset(offset + needle.len());
                 (!self.crosses_block_end(start, end)).then_some(start)
             })
-            .collect()
+            .any(&mut visit)
     }
 }
 
 /// Whether a claim anchor occurs, allowing for how the content happens to wrap.
 fn claim_is_present(text: &str, claim: &str, block_ends: &[usize]) -> bool {
-    text.contains(claim)
-        || !LiteralText::new(text, block_ends, false)
-            .matches(claim, false)
-            .is_empty()
+    (block_ends.is_empty() && text.contains(claim))
+        || LiteralText::new(text, block_ends, false).visit_matches(claim, false, |_| true)
 }
 
 /// An assessment produced by an external reviewer; it is not verified by Aexeo.
@@ -1655,12 +1658,13 @@ impl ContentPreset {
                             for term in terms {
                                 let mut first_excess = None;
                                 let mut count = 0;
-                                for offset in literal.matches(term, *whole_words) {
+                                literal.visit_matches(term, *whole_words, |offset| {
                                     count += 1;
                                     if count > *max_occurrences && first_excess.is_none() {
                                         first_excess = Some(offset);
                                     }
-                                }
+                                    false
+                                });
                                 total += count;
                                 if let Some(offset) = first_excess {
                                     exceeded += 1;
@@ -1697,7 +1701,7 @@ impl ContentPreset {
                             let literal = LiteralText::new(text, block_ends, *case_insensitive);
                             for term in terms {
                                 let (mut cursor, mut line, mut column) = (0, 1, 1);
-                                for offset in literal.matches(term, *whole_words) {
+                                literal.visit_matches(term, *whole_words, |offset| {
                                     matches += 1;
                                     for ch in text[cursor..offset].chars() {
                                         if ch == '\n' {
@@ -1709,7 +1713,8 @@ impl ContentPreset {
                                     }
                                     emit(format!("Forbidden term: {term}"), line, column);
                                     cursor = offset;
-                                }
+                                    false
+                                });
                             }
                             measurements.insert("matches".into(), matches);
                         }
@@ -2129,6 +2134,56 @@ mod tests {
         assert_eq!(
             forbidden("terms=['best price']", "best\n\nprice").status,
             GateStatus::Passed
+        );
+    }
+
+    #[test]
+    fn claim_anchors_respect_adapter_block_boundaries() {
+        assert!(!claim_is_present("alpha beta", "alpha beta", &[5]));
+        assert!(claim_is_present("alpha beta", "alpha beta", &[]));
+        assert!(claim_is_present(
+            "alpha beta alpha beta",
+            "alpha beta",
+            &[5]
+        ));
+        assert!(!claim_is_present("alpha  beta", "alpha beta", &[5]));
+    }
+
+    #[test]
+    fn literal_match_visitor_stops_early_and_counts_all_occurrences() {
+        let text = "word ".repeat(100_000);
+        let literal = LiteralText::new(&text, &[], false);
+        let mut visited = 0;
+        assert!(literal.visit_matches("word", true, |_| {
+            visited += 1;
+            true
+        }));
+        assert_eq!(visited, 1);
+        assert!(!literal.visit_matches("word", true, |_| {
+            visited += 1;
+            false
+        }));
+        assert_eq!(visited, 100_001);
+    }
+
+    #[test]
+    fn evidence_gate_rejects_claim_spanning_blocks() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='g'\nkind='evidence_anchors'\nsource='s'\nclaim='alpha beta'\nquote='quote'\n").unwrap();
+        let input = ContentInput {
+            evidence_sources: Some(BTreeMap::from([("s".into(), "quote".into())])),
+            ..literal_input("alpha beta")
+        };
+        let context = ContentContext {
+            block_ends: Some(vec![5]),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(
+            report.gates[0].findings[0].message,
+            "Claim anchor is absent from content"
         );
     }
 
