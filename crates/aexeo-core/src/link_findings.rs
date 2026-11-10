@@ -262,7 +262,7 @@ fn other_sources_by_context(
             let source = normalized(&link.source);
             if source != url {
                 sources.entry(link.context).or_default().insert(source);
-                if link.conditional_markup == Some(false) {
+                if link.is_nonconditional() {
                     nonconditional = true;
                 } else {
                     conditional = true;
@@ -622,6 +622,31 @@ mod tests {
     }
 
     #[test]
+    fn hidden_inbound_links_remain_uncertain() {
+        let artifact = audit(
+            vec![
+                page(
+                    "",
+                    "<main><div hidden><a href='/a'>A</a></div><a hidden='until-found' href='/b'>B</a><a href='/c'>C</a></main>",
+                ),
+                page("a", "<main>A</main>"),
+                page("b", "<main>B</main>"),
+                page("c", "<main>C</main>"),
+            ],
+            &Config::default(),
+        );
+        let report = build_link_report_from_audit(&artifact).unwrap();
+        for (path, expected) in [("/a", true), ("/b", true), ("/c", false)] {
+            let page = report
+                .pages
+                .iter()
+                .find(|page| page.url.ends_with(path))
+                .unwrap();
+            assert_eq!(page.conditional_only_inbound, Some(expected), "{path}");
+        }
+    }
+
+    #[test]
     fn conditional_inbound_withholds_low_link_count_confirmation() {
         let config = Config {
             min_inbound_links: 3,
@@ -663,6 +688,38 @@ mod tests {
                 .unwrap()
                 .contains("conditional link visibility unknown")
         );
+    }
+
+    #[test]
+    fn hidden_redirect_link_does_not_suppress_an_orphan_finding() {
+        let mut new = page("new", "<main>New</main>");
+        new["crawl_response"]["requested_url"] = "https://example.org/old".into();
+        new["crawl_response"]["redirect_chain"] =
+            serde_json::json!([{"url":"https://example.org/old", "status_code":301}]);
+        let artifact = audit(
+            vec![
+                page("", "<main><div hidden><a href='/old'>Old</a></div></main>"),
+                new,
+            ],
+            &Config::default(),
+        );
+        let report = build_link_report_from_audit(&artifact).unwrap();
+        assert_eq!(
+            qualified(&report, "LNK002", "new").conclusion,
+            LegacyLinkConclusion::ConditionalInbound
+        );
+        assert!(
+            kept(&artifact, &report).contains(&("LNK002".into(), "crawl/new/index.html".into()))
+        );
+        let new_page = report
+            .pages
+            .iter()
+            .find(|page| page.url.ends_with("/new"))
+            .unwrap();
+        let credit = new_page.via_redirect.as_ref().unwrap();
+        assert_eq!(credit.conditional_source_pages, Some(1));
+        assert_eq!(credit.nonconditional_source_pages, Some(0));
+        assert_eq!(new_page.conditional_only_inbound, Some(true));
     }
 
     #[test]

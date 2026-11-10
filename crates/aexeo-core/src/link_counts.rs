@@ -11,10 +11,10 @@ pub struct DestinationLinks {
     pub destination: String,
     pub distinct_source_pages: usize,
     pub source_pages_by_context: BTreeMap<LinkContext, usize>,
-    /// Sources with conditional or legacy unclassified markup; may overlap other counts.
+    /// Sources with conditional, hidden or legacy unclassified markup; may overlap other counts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conditional_source_pages: Option<usize>,
-    /// Sources with an observation outside conditional markup (not proof of visibility).
+    /// Sources outside conditional markup and without an HTML hidden attribute (not proof of visibility).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nonconditional_source_pages: Option<usize>,
     /// Source pages with at least one link carrying no `nofollow`, `ugc` or
@@ -62,7 +62,7 @@ pub fn count_links(evidence: Vec<LinkEvidence>) -> LinkCounts {
             LinkResolution::Internal { url } => {
                 let destination = destinations.entry(url.clone()).or_default();
                 destination.sources.insert(link.source.clone());
-                if link.conditional_markup == Some(false) {
+                if link.is_nonconditional() {
                     destination.nonconditional.insert(link.source.clone());
                 } else {
                     destination.conditional.insert(link.source.clone());

@@ -110,6 +110,43 @@ fn conditional_markup_is_not_reported_as_body_or_navigation() {
 }
 
 #[test]
+fn hidden_link_evidence_and_private_telemetry_are_reported() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("input.json");
+    let input = serde_json::json!({
+        "version":1,
+        "identity":{"origin":"https://example.org","release":"r1","surface":"public","snapshot":"s1"},
+        "snapshot_date":"2026-11-05T00:00:00Z", "crawl_complete":false,
+        "pages":[
+            {"url":"https://example.org/a", "status_code":200, "response_headers":{}, "html":"<main><div hidden><a href='/b'>private anchor</a></div></main>"},
+            {"url":"https://example.org/b", "status_code":200, "response_headers":{}, "html":"<main>B</main>"}
+        ]
+    });
+    fs::write(&path, serde_json::to_vec(&input).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .arg("link-graph")
+        .arg(path)
+        .arg("--telemetry")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let destination = &report["links"]["destinations"][0];
+    assert_eq!(destination["evidence"][0]["hidden_attribute"], true);
+    assert_eq!(destination["conditional_source_pages"], 1);
+    assert_eq!(destination["nonconditional_source_pages"], 0);
+    let event: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(event["hidden_attribute_link_count"], 1);
+    assert_eq!(event["hidden_attribute_unobserved_link_count"], 0);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("private anchor"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("example.org"));
+}
+
+#[test]
 fn observed_noindex_and_canonical_disagreement_block_eligibility() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("input.json");

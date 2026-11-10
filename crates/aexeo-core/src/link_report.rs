@@ -770,7 +770,7 @@ fn redirect_credit(
         })
     {
         sources.insert(link.source.as_str());
-        if link.conditional_markup == Some(false) {
+        if link.is_nonconditional() {
             nonconditional.insert(link.source.as_str());
         } else {
             conditional.insert(link.source.as_str());
@@ -1241,7 +1241,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
                     {
                         continue;
                     }
-                    if link.conditional_markup == Some(false) {
+                    if link.is_nonconditional() {
                         nonconditional = true;
                     } else {
                         conditional = true;
