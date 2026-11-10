@@ -212,3 +212,6 @@ EmDash API. Duplicate findings are retained, while the uniqueness result is
 Optional opaque source groups prevent known related excerpts crossing corpus splits.
 Coverage is aggregated for the selected split; incomplete grouping and related
 sources with different identifiers remain undetected and require human review.
+
+Selected EmDash body fields distinguish unobserved fields from explicit nulls:
+missing fields retain observed prose but make body capabilities unavailable.

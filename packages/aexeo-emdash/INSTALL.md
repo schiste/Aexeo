@@ -113,8 +113,9 @@ aexeoPlugin({
 
 `contentFieldsByCollection` declares the body fields rendered by each selected
 collection, in order. It is an explicit assertion of completeness, so include
-all rendered fields; entries without any selected field remain unavailable.
-In sandboxed mode, enter this object in `Content fields by collection (JSON)`.
+all rendered fields. A selected field absent from the record makes the body
+incomplete, while an explicitly present `null` is treated as empty. If no selected
+field is present, the body remains unavailable. In sandboxed mode, enter this object in `Content fields by collection (JSON)`.
 
 Portable Text can also interleave text blocks and custom components. An
 unknown component keeps its surrounding text but marks body capabilities
