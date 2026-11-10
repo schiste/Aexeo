@@ -153,17 +153,28 @@ export function adaptContentItem(
   const title = stringOrEmpty(
     content.seo?.title ?? content.data["title"] ?? content.slug ?? content.id,
   );
-  const document: EmdashDocument = { route, title };
+  const document: EmdashDocument = { route, title, description_source_observed: false };
   const fields = options.descriptionFields;
-  const mapped = fields !== undefined && fields.length > 0 &&
-    fields.every((field) => typeof field === "string" && field.length > 0 &&
-      (content.data[field] == null || typeof content.data[field] === "string"));
-  if (mapped) document.description_source_observed = true;
-  const description = fields === undefined
-    ? content.seo?.description ?? content.data["description"]
-    : mapped ? fields.map((field) => content.data[field]).find((value) => typeof value === "string" && value.length > 0) : undefined;
-  if (typeof description === "string" && description.length > 0) {
-    document.description = description;
+  if (fields === undefined) {
+    const description = content.seo?.description ?? content.data["description"];
+    if (typeof description === "string" && description.length > 0) document.description = description;
+  } else if (fields.length > 0 && fields.every((field) => typeof field === "string" && field.length > 0)) {
+    // Follow renderer fallback order: an absent earlier field makes a later
+    // value uncertain, while a populated earlier field makes later fields irrelevant.
+    let observed = true;
+    for (const field of fields) {
+      if (!Object.hasOwn(content.data, field) || content.data[field] === undefined ||
+          (content.data[field] !== null && typeof content.data[field] !== "string")) {
+        observed = false;
+        break;
+      }
+      const value = content.data[field];
+      if (typeof value === "string" && value.length > 0) {
+        document.description = value;
+        break;
+      }
+    }
+    if (observed) document.description_source_observed = true;
   }
   const canonical = content.seo?.canonical;
   if (typeof canonical === "string" && canonical.length > 0) {

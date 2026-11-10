@@ -135,7 +135,7 @@ aexeo-cli content article.md --preset product --preset-source product=product.to
 
 Heading names are matched exactly and case-sensitively. Raw-text input has no heading capability, so heading gates are `not_checked`; Markdown and EmDash provide it.
 
-Metadata must be a JSON object with string values. Without `--metadata`, metadata gates are `not_checked`, rather than treating missing input as an empty set of fields. An empty object indicates that metadata was supplied but contains no fields.
+Metadata must be a JSON object with string values. Without `--metadata`, metadata gates are `not_checked`, rather than treating missing input as an empty set of fields. An empty object indicates that metadata was supplied but contains no fields. Adapters can also mark individual metadata fields unavailable. A required-metadata gate then remains `not_checked`, while findings for other known-missing fields remain visible. Its `unavailable_fields` measurement counts unknown required fields; `present_fields` counts known, nonempty fields. EmDash treats an unobserved description as unavailable, while an explicitly observed empty description is missing.
 
 `extends` is a list of named presets. Parents are applied left to right; gates with an existing ID replace the earlier definition in place, and new gates append. `disable = ["gate.id"]` removes inherited gates and rejects unknown IDs. Supply each custom parent with a separate `--preset-source name=path`; built-ins are already available. Cycles, unknown parents, duplicate local IDs, unknown fields, invalid bounds and unsupported versions fail resolution. A preset's `name` is its report label, while its source name is the key used in `extends` and `--preset`.
 

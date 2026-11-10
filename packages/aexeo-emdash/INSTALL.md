@@ -605,9 +605,19 @@ aexeoPlugin({
 })
 ```
 
+In sandboxed mode, enter the equivalent JSON object, for example
+`{"blog_posts":["seo_description","excerpt"]}`, in the plugin setting
+`Description fields by collection (JSON)`. It applies to saves and Refresh.
+
 The mapping projects source values; it does not prove what metadata the page
-renderer generated. An absent value in a valid mapping is recorded separately
-from an unknown or invalid mapping.
+renderer generated. Explicit null or empty fields are observed as absent. A
+missing, undefined or invalid field before the chosen fallback makes the source
+unverified; an unused later field need not be present. Invalid settings remain
+unverified. A `required_metadata` gate requesting `description` reports
+`not_checked` when that source was not observed; other known-missing fields
+can still produce findings. The `aexeo.description_coverage` log contains
+aggregate counts of observed and unverified source projections without content
+or identifiers.
 
 Content preset gate outcomes, including `not_checked` and their reasons, are
 stored with the current route findings and exposed in CMS views and the data

@@ -44,6 +44,8 @@ pub struct ContentContext {
     /// Why the adapter withheld the input. It explains the `not_checked` status
     /// of each gate that needed that input.
     pub input_limit: Option<String>,
+    /// Metadata keys whose values or absence were not observed by the adapter.
+    pub unavailable_metadata_fields: Vec<String>,
 }
 
 /// Largest input the CLI adapters read. Larger input is reported as `not_checked`.
@@ -1948,19 +1950,35 @@ impl ContentPreset {
                     measurements.insert("required_fields".into(), fields.len());
                     match &input.metadata {
                         Some(metadata) => {
+                            let unavailable = context
+                                .map(|ctx| ctx.unavailable_metadata_fields.as_slice())
+                                .unwrap_or_default();
+                            let unknown = fields
+                                .iter()
+                                .filter(|field| unavailable.contains(field))
+                                .count();
+                            measurements.insert("unavailable_fields".into(), unknown);
                             measurements.insert(
                                 "present_fields".into(),
                                 fields
                                     .iter()
                                     .filter(|field| {
-                                        metadata.get(*field).is_some_and(|v| !v.trim().is_empty())
+                                        !unavailable.contains(field)
+                                            && metadata
+                                                .get(*field)
+                                                .is_some_and(|v| !v.trim().is_empty())
                                     })
                                     .count(),
                             );
                             for field in fields {
-                                if metadata.get(field).is_none_or(|v| v.trim().is_empty()) {
+                                if !unavailable.contains(field)
+                                    && metadata.get(field).is_none_or(|v| v.trim().is_empty())
+                                {
                                     emit(format!("Required metadata is missing: {field}"), 1, 1);
                                 }
+                            }
+                            if unknown > 0 {
+                                reason = Some("some required metadata fields are unavailable from this adapter".into());
                             }
                         }
                         None => reason = Some("metadata is unavailable from this adapter".into()),

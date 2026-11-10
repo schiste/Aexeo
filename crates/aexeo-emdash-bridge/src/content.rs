@@ -22,7 +22,9 @@ fn is_heading(style: &crate::BlockStyle) -> bool {
 fn content_metadata(document: &EmdashDocument) -> BTreeMap<String, String> {
     let mut metadata: BTreeMap<String, String> = document.meta.clone();
     metadata.insert("title".into(), document.title.clone());
-    if let Some(value) = &document.description {
+    if document.description_source_observed == Some(false) {
+        metadata.remove("description");
+    } else if let Some(value) = &document.description {
         metadata.insert("description".into(), value.clone());
     }
     if let Some(value) = &document.canonical {
@@ -128,6 +130,15 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
         ContentContext {
             paragraphs: Some(paragraphs),
             block_ends: Some(block_ends),
+            unavailable_metadata_fields: if document.description_source_observed == Some(false)
+                || (document.description_source_observed.is_none()
+                    && document.description.is_none()
+                    && !document.meta.contains_key("description"))
+            {
+                vec!["description".into()]
+            } else {
+                Vec::new()
+            },
             ..Default::default()
         },
         link_count,
@@ -646,6 +657,30 @@ mod tests {
         content_presets::{builtin_content_presets, resolve_content_preset},
         markdown_adapter::markdown_input_with_links,
     };
+
+    #[test]
+    fn description_metadata_distinguishes_unknown_absent_and_present() {
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='meta'\nkind='required_metadata'\nfields=['title','description']\n").unwrap();
+        let mut document: EmdashDocument =
+            serde_json::from_str(r#"{"route":"/x","title":"","body":[]}"#).unwrap();
+        let unknown = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(unknown.gates[0].status, GateStatus::NotChecked);
+        assert_eq!(unknown.gates[0].findings.len(), 1);
+        assert!(unknown.gates[0].findings[0].message.contains("title"));
+        assert_eq!(unknown.gates[0].measurements["unavailable_fields"], 1);
+        document.title = "Title".into();
+        document.description_source_observed = Some(true);
+        let absent = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(absent.gates[0].status, GateStatus::Failed);
+        assert!(absent.gates[0].findings[0].message.contains("description"));
+        document.description = Some("Observed".into());
+        let present = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(present.gates[0].status, GateStatus::Passed);
+        document.description_source_observed = Some(false);
+        let untrusted = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(untrusted.gates[0].status, GateStatus::NotChecked);
+        assert!(untrusted.gates[0].findings.is_empty());
+    }
 
     #[test]
     fn markdown_and_portable_text_agree_on_blocks_code_and_wrapped_terms() {
