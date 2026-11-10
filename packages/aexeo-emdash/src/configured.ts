@@ -43,7 +43,8 @@ import { PACKAGE_VERSION } from "./version.js";
 import { evaluateDocuments, scoreIntelligence } from "./wasm-init.js";
 import { evaluateContent } from "./content.js";
 import { withContentPreset } from "./content-evaluator.js";
-import type { ContentPresetOptions } from "./content-evaluator.js";
+import type { ContentPresetOptions, ExternalGateProvider } from "./content-evaluator.js";
+export type { ExternalGateProvider } from "./content-evaluator.js";
 import type { CustomBlockMappings, EmdashContentItem } from "./adapter.js";
 import type { Finding, SiteIntelligenceScore } from "./types.js";
 
@@ -195,7 +196,12 @@ export interface ConfiguredPluginOptions {
   suppressions?: readonly Suppression[];
 }
 
-export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
+/** Runtime-only dependencies must be installed by trusted host code, not JSON options. */
+export interface ConfiguredPluginRuntime {
+  externalGates?: ExternalGateProvider;
+}
+
+export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: ConfiguredPluginRuntime = {}): unknown {
   // Resolve runtime config once at boot and capture it in the closures
   // attached to the route handler and hooks. The descriptor's
   // `options` field is JSON-cloned by emdash's astro integration
@@ -221,7 +227,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}): unknown {
   // throws on empty rules ({} with neither routePattern nor ruleIds);
   // that error surfaces clearly in the host's startup logs.
   const suppressionFilter = compileSuppressions(options.suppressions);
-  const evaluator = withContentPreset(inProcessEvaluator, options.contentPreset, evaluateContent);
+  const evaluator = withContentPreset(inProcessEvaluator, options.contentPreset, evaluateContent, runtime.externalGates);
 
   // Capability enforcement for configured plugins is informational;
   // emdash's host plugins (formsPlugin, etc.) declare what they need

@@ -11,8 +11,9 @@ Existing source and factuality work is outside this plan.
   signal as an editorial prompt, not a claim about AI authorship.
 - [ ] Extend the custom gate contract to CLI and adapters with explicit opt-in,
   bounded input and precise unavailable/error behavior. CLI and direct EmDash
-  API accept input-bound external results; configured save hooks and sidecar do
-  not yet invoke a provider. Presets do not execute code.
+  API accept input-bound external results; configured save hooks and refreshes
+  accept a trusted host-injected provider. The sidecar does not yet invoke a
+  provider. Presets do not execute code.
 - [ ] Exercise agent authoring, localized revision, re-evaluation, feedback and
   bounded retries on representative scenarios; measure latency and outcomes,
   disclose that fixtures do not substitute for independent human evaluation.

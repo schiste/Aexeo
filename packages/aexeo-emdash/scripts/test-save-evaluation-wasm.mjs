@@ -89,6 +89,43 @@ const rulesAt = (host, route) => {
 };
 const has = (host, route, ruleId) => rulesAt(host, route).has(ruleId);
 
+// Exercise the injected runtime provider through the actual configured hooks
+// and WASM, including a later fix and re-evaluation.
+{
+  const preset = `version=1
+name="custom"
+[[gates]]
+id="external"
+kind="custom"
+extension="example.rule"
+blocking=false
+[gates.parameters]
+mode="strict"
+`;
+  const calls = [];
+  let issue = true;
+  const pluginWithProvider = createPlugin({ contentPreset: { name: "custom", sources: { custom: preset } } }, {
+    externalGates: async ({ input, preset: selected, collection }) => {
+      calls.push({ selected, collection, id: input.id });
+      return [{ extension: "example.rule", parameters: { mode: "strict" }, input,
+        diagnostics: issue ? [{ message: "Review the opening", line: 1, column: 1 }] : [] }];
+    },
+  });
+  const page = item("external");
+  const host = fakeHost([page]);
+  await pluginWithProvider.routes.refresh.handler(host.ctx);
+  assert.equal(has(host, "/external", "external"), true);
+  issue = false;
+  await pluginWithProvider.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  assert.equal(has(host, "/external", "external"), false);
+  assert.deepEqual(calls, [
+    { selected: "custom", collection: "pages", id: "/external" },
+    { selected: "custom", collection: "pages", id: "/external" },
+  ]);
+  assert.deepEqual(host.logged, []);
+  console.log("WASM configured provider runs on refresh and save");
+}
+
 // --- A save must not invent findings from its one-page view -----------------
 
 {

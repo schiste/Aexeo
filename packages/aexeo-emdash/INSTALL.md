@@ -23,6 +23,42 @@ aexeoPlugin({
 })
 ```
 
+## External gates in configured mode
+
+The default descriptor loads no external code. Hosts that need custom gates can
+provide a trusted runtime entrypoint exporting `createPlugin(options)` and call
+Aexeo's configured entry with a runtime provider. Package this module under a
+specifier your EmDash build can import, then set the descriptor's `entrypoint`
+to that specifier. EmDash serializes descriptor options as JSON, so a callback
+cannot be placed in `aexeoPlugin` options.
+
+```ts
+// Example host-owned runtime module, published as @example/aexeo-runtime
+import { createPlugin as createAexeo } from "@aeptus/aexeo-emdash/configured";
+import type { ConfiguredPluginOptions, ExternalGateProvider } from "@aeptus/aexeo-emdash/configured";
+
+const externalGates: ExternalGateProvider = async ({ input }) => [{
+  extension: "example.rule",
+  parameters: {},
+  input,
+  diagnostics: [], // Replace with your trusted checker and its diagnostics.
+}];
+
+export function createPlugin(options: ConfiguredPluginOptions) {
+  return createAexeo(options, { externalGates });
+}
+```
+
+In the host's configuration, use
+`{ ...aexeoPlugin({ contentPreset: { name: "custom", sources: { custom: "..." } } }), entrypoint: "@example/aexeo-runtime" }`.
+The callback runs for each selected document on save and refresh, receives its
+projected input, selected preset and collection, and returns results bound to
+the input and the gate's exact parameters. The preset must declare the matching
+custom gate. Aexeo reports stale or missing results as incomplete; a thrown
+provider error fails the evaluation. The input may include private content and
+evidence. The host owns provider trust, timeouts, resource limits and any
+network transfer. This runtime injection does not configure the sandbox worker.
+
 ## Content coverage
 
 Portable Text bodies provide text, headings, paragraphs and links to content
