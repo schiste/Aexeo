@@ -1,0 +1,3 @@
+version=1
+name="product trial"
+extends=["product-editorial","natural-style-en","writing-patterns"]

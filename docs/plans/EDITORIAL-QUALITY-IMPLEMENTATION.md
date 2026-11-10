@@ -37,3 +37,6 @@ Existing source and factuality work is outside this plan.
 - A configured EmDash plugin and real WASM were exercised across refresh and
   save with an explicitly injected provider. A workerd test exercises the
   sidecar's service binding, actual WASM, and rejection of stale results.
+- [Three synthetic editorial revision trials](EDITORIAL-AGENT-TRIAL.md) cover
+  article, glossary and product profiles. Open-ended agent work, retry-exhaustion
+  cases and independent human evaluation remain outstanding.
