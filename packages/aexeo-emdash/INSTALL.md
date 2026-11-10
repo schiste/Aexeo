@@ -577,6 +577,10 @@ include routes outside the chosen collections. No HTTP endpoint is installed by
 this API. It cannot by itself establish that a crawl and CMS view describe the
 same publication, release and point in time.
 
+URL resolution runs at most eight CMS requests concurrently by default. Set
+`urlResolutionConcurrency` to an integer from 1 to 100 to suit the host's
+capacity; use 1 for sequential requests. Pagination remains sequential.
+
 An optional `onTelemetry` callback receives only elapsed milliseconds and aggregate counts. It is disabled by default and does not receive URLs or content.
 
 ### CMS coverage and rendered pages
