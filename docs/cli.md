@@ -174,6 +174,22 @@ Options:
       --content-root <content-root>
           Authorize this absolute content root for local file references (Linux and supported macOS kernels)
 
+      --check-link-reachability
+          Explicitly enable bounded external HTTP observations for reachability gates
+
+      --link-max-checks <link-max-checks>
+          Maximum external link checks across the entire change
+
+          [default: 20]
+
+      --link-timeout <link-timeout>
+          Maximum seconds per external link including redirects
+
+          [default: 5]
+
+      --telemetry
+          Emit aggregate link observation counts to stderr
+
   -h, --help
           Print help
 ```

@@ -31,6 +31,33 @@ pub fn evaluate_change<P: ConfinedContentFiles>(
     max_entry_bytes: usize,
     max_total_bytes: usize,
 ) -> Result<Verdict> {
+    evaluate_change_with_observer(
+        change,
+        provider,
+        preset,
+        evaluated_at,
+        max_entry_bytes,
+        max_total_bytes,
+        None,
+    )
+}
+
+/// Host callback returning one observation per extracted destination.
+pub type LinkObserver<'a> = dyn FnMut(&str, &[String]) -> Result<Vec<crate::content_gate::LinkReachabilityObservation>>
+    + 'a;
+
+/// Evaluate with an explicitly supplied host observer. The observer receives the
+/// entity and its extracted destinations only after every content digest is verified.
+/// No observer means reachability remains not checked.
+pub fn evaluate_change_with_observer<P: ConfinedContentFiles>(
+    change: &Change,
+    provider: &mut P,
+    preset: &ContentPreset,
+    evaluated_at: &str,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    mut observer: Option<&mut LinkObserver<'_>>,
+) -> Result<Verdict> {
     preset.validate()?;
     if evaluated_at.is_empty() {
         bail!("evaluation timestamp is empty");
@@ -89,12 +116,31 @@ pub fn evaluate_change<P: ConfinedContentFiles>(
             }
         };
         input.metadata = entry.metadata.clone();
+        let observations = if preset.gates.iter().any(|gate| {
+            matches!(
+                gate,
+                crate::content_gate::ContentGate::LinkReachability { .. }
+            )
+        }) {
+            match (observer.as_deref_mut(), destinations.as_deref()) {
+                (Some(observe), Some(destinations)) => {
+                    let values = observe(&entry.entity_id, destinations)?;
+                    if values.len() != destinations.len() {
+                        bail!("link observer returned a different number of observations");
+                    }
+                    Some(values)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
         let capabilities = ContentEvaluationContext {
             site: None,
             extensions: None,
             adapter: context.as_ref(),
             link_count,
-            link_reachability: None,
+            link_reachability: observations.as_deref(),
             collection: None,
         };
         let report =
@@ -118,7 +164,7 @@ pub fn evaluate_change<P: ConfinedContentFiles>(
                     definition,
                     &gate,
                     destinations.as_deref(),
-                    None,
+                    observations.as_deref(),
                 )
             });
             let check_id = scoped_id("gate", &entry.entity_id, &gate.gate_id);
@@ -309,6 +355,84 @@ mod tests {
             Some(fail.checks[0].id.as_str())
         );
         assert!(fail.findings[0].location.is_none());
+    }
+
+    #[test]
+    fn explicit_observer_is_bound_to_verified_markdown_and_preserves_locations() {
+        use crate::content_gate::LinkReachabilityObservation as Observation;
+        use sha2::{Digest, Sha256};
+        let source = "Read [source](https://example.org/missing).";
+        let mut input = change();
+        input.entries[0].media_type = "text/markdown".into();
+        let state = input.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\nblocking=true\n").unwrap();
+        let offline = evaluate_change(
+            &input,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+        )
+        .unwrap();
+        assert_eq!(offline.status, VerdictStatus::NotChecked);
+        let mut seen = 0;
+        let mut observer = |entity: &str, urls: &[String]| {
+            assert_eq!(entity, "article");
+            assert_eq!(urls, ["https://example.org/missing"]);
+            seen += 1;
+            Ok(vec![Observation::NotFound])
+        };
+        let verdict = evaluate_change_with_observer(
+            &input,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+            Some(&mut observer),
+        )
+        .unwrap();
+        assert_eq!(verdict.status, VerdictStatus::Fail);
+        assert_eq!(
+            verdict.findings[0].location,
+            Some(protocol::Location { line: 1, column: 6 })
+        );
+        assert_eq!(seen, 1);
+        let mut malformed = |_: &str, _: &[String]| Ok(vec![]);
+        assert!(
+            evaluate_change_with_observer(
+                &input,
+                &mut NoFiles,
+                &policy,
+                "2026-01-01T00:00:00Z",
+                1024,
+                1024,
+                Some(&mut malformed)
+            )
+            .is_err()
+        );
+        input.entries[0].after.as_mut().unwrap().sha256 = "0".repeat(64);
+        let mut called = false;
+        let mut observer = |_: &str, _: &[String]| {
+            called = true;
+            Ok(vec![])
+        };
+        assert!(
+            evaluate_change_with_observer(
+                &input,
+                &mut NoFiles,
+                &policy,
+                "2026-01-01T00:00:00Z",
+                1024,
+                1024,
+                Some(&mut observer)
+            )
+            .is_err()
+        );
+        assert!(!called);
     }
 
     #[test]

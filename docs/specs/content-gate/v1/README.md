@@ -229,6 +229,14 @@ Aexeo implements this invocation as `aexeo-cli content-change --preset NAME`.
 The runner supplies `CONTENT_GATE_CHANGE_FILE` and `CONTENT_GATE_VERDICT_FILE`;
 choose a preset deliberately because a passing verdict only covers its gates.
 Additional TOML presets can be loaded with `--preset-source NAME=PATH`.
+Reachability gates do not access the network unless the host passes
+`--check-link-reachability`. The total number of attempted unique checks per
+entry is bounded by `--link-max-checks` across the change (default 20, maximum
+100); each check including redirects uses `--link-timeout` (default 5 seconds,
+maximum 30). Repeated destinations in different entries consume the budget
+again. After exhaustion remaining external links are not checked. The optional
+`--telemetry` writes aggregate counts and timings to stderr without URLs or
+content. Results are advisory observations, not proof of source quality or safety.
 The CLI validates known change fields, timestamps and URIs before evaluation,
 including optional fields explicitly set to null, and accepts unknown fields for
 forward compatibility. It does not use a generic JSON Schema validator; runners
