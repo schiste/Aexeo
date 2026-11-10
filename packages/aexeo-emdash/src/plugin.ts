@@ -1,3 +1,4 @@
+import { isCmsObservableFinding } from "./cms-coverage.js";
 import type { CustomBlockMappings } from "./adapter.js";
 import type { SuppressionFilter } from "./suppressions.js";
 import type { EmdashDocument, Finding } from "./types.js";
@@ -350,6 +351,7 @@ function recordContentCoverage(ctx: SandboxCtx, documents: readonly EmdashDocume
   }
   try {
     ctx.log?.info?.("aexeo.content_coverage", counts);
+    ctx.log?.info?.("aexeo.page_coverage", { documents: documents.length, rendered_page: "not_observed", generated_metadata: "not_observed" });
   } catch {
     // Optional diagnostics must never break an editor workflow.
   }
@@ -526,12 +528,12 @@ export async function handleAfterSaveConfigured(
   // Page-scoped findings replace this route's stored set; site-graph,
   // sitewide and template-scoped findings are left for the next Refresh.
   const storedGraphFindings = (await readFindings(kv, document.route)).filter(
-    (finding) => SITE_GRAPH_RULE_IDS.has(finding.rule_id),
+    (finding) => SITE_GRAPH_RULE_IDS.has(finding.rule_id) && isCmsObservableFinding(finding),
   );
   const pageFindings = [
     ...result.findings.filter(
       (finding) =>
-        finding.scope === "page" && !SITE_GRAPH_RULE_IDS.has(finding.rule_id),
+        finding.scope === "page" && !SITE_GRAPH_RULE_IDS.has(finding.rule_id) && isCmsObservableFinding(finding),
     ),
     ...storedGraphFindings,
   ];
@@ -699,6 +701,7 @@ export async function evaluateAndPersistAll(
     findingsByRoute.set(route, []);
   }
   for (const finding of result.findings) {
+    if (!isCmsObservableFinding(finding)) continue;
     // The bridge tags page-scope findings with a path that maps to
     // our document route; sitewide and template-scope findings get
     // bucketed under "*" so the findings page can list them under a

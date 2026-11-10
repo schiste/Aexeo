@@ -82,11 +82,11 @@ describe("handleAfterSaveConfigured", () => {
       returning(
         finding("LNK001", "broken internal link: /one-page-view"),
         finding("LNK002"),
-        finding("SEO001"),
+        finding("EDIT001"),
       ),
     );
     expect(findings().map((f) => f.message).sort()).toEqual([
-      "SEO001",
+      "EDIT001",
       "broken internal link: /stored",
     ]);
   });
@@ -96,9 +96,9 @@ describe("handleAfterSaveConfigured", () => {
     await handleAfterSaveConfigured(
       event,
       ctx,
-      returning(finding("LNK001"), finding("SEO001")),
+      returning(finding("LNK001"), finding("EDIT001")),
     );
-    expect(findings().map((f) => f.rule_id)).toEqual(["SEO001"]);
+    expect(findings().map((f) => f.rule_id)).toEqual(["EDIT001"]);
   });
 
   it("applies suppressions to carried-over findings", async () => {
@@ -106,9 +106,9 @@ describe("handleAfterSaveConfigured", () => {
     await handleAfterSaveConfigured(
       event,
       ctx,
-      returning(finding("SEO001")),
+      returning(finding("EDIT001")),
       compileSuppressions([{ ruleIds: ["LNK002"] }]),
     );
-    expect(findings().map((f) => f.rule_id)).toEqual(["SEO001"]);
+    expect(findings().map((f) => f.rule_id)).toEqual(["EDIT001"]);
   });
 });

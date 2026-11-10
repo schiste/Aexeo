@@ -318,9 +318,10 @@ export async function renderFindingsPage(
       type: "context",
       text:
         findings.length === 0
-          ? "No findings yet — click Refresh to evaluate the site."
+          ? "No findings yet — click Refresh to evaluate CMS records."
           : `${findings.length} findings across ${routes.length} routes — ${errors.length} errors, ${warnings.length} warnings.`,
     },
+    { type: "context", text: "Rendered page markup and generated metadata are not checked here. Audit the built site for page-level findings." },
     { type: "divider" },
     {
       type: "actions",
@@ -493,9 +494,10 @@ export async function renderDocumentPanel(
         type: "context",
         text:
           findings.length === 0
-            ? `No findings for ${route} — the document is currently clean.`
+            ? `No findings for ${route} from the available CMS checks.`
             : `${findings.length} findings — ${errors.length} errors, ${warnings.length} warnings.`,
       },
+      { type: "context", text: "Rendered page markup and generated metadata are not checked here. Audit the built site for page-level findings." },
       ...(findings.length === 0
         ? []
         : [{ type: "divider" }, documentFindingsTable(sorted)]),
