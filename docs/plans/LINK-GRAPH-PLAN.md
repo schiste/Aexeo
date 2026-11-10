@@ -215,6 +215,11 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
 
 ## Remaining integration and validation
 
+The graph reports the inventory locale and root HTML language when present. A
+conflicting primary language makes inventory comparison ineligible for orphan
+conclusions. Matching languages do not prove a locale, region or surface match;
+missing and unspecified languages are not treated as an observed mismatch.
+
 - [ ] Validate the EmDash inventory exporter with an explicit publication, route,
   locale, status and surface mapping on a real matching site; do not infer
   completeness from `routable` or from a non-transactional export.

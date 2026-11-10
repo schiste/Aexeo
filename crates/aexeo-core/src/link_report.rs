@@ -53,6 +53,11 @@ pub struct LinkReportInput {
 pub struct ObservedPageLinks {
     pub url: String,
     pub status_code: Option<u16>,
+    /// CMS locale and document language are observations, not proof of equivalence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inventory_locale: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_language: Option<String>,
     pub response_headers_captured: bool,
     pub noindex_observed: bool,
     pub canonical_hrefs: Vec<String>,
@@ -136,6 +141,21 @@ pub struct InventoryAliasObservation {
 pub struct RedirectCredit {
     pub distinct_source_pages: usize,
     pub source_pages_by_context: std::collections::BTreeMap<LinkContext, usize>,
+}
+
+// Compare only explicit, meaningful primary language subtags. A matching
+// language does not prove that region, locale or publication surface matches.
+fn primary_language(value: &str) -> Option<&str> {
+    let primary = value.trim().split(['-', '_']).next()?;
+    if !(2..=8).contains(&primary.len())
+        || !primary.bytes().all(|byte| byte.is_ascii_alphabetic())
+        || ["und", "mul", "zxx"]
+            .iter()
+            .any(|tag| primary.eq_ignore_ascii_case(tag))
+    {
+        return None;
+    }
+    Some(primary)
 }
 
 fn has_noindex(value: &str) -> bool {
@@ -904,6 +924,17 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
         .flat_map(|inventory| &inventory.pages)
         .map(|entry| (entry.url.as_str(), entry.disposition))
         .collect::<std::collections::BTreeMap<_, _>>();
+    let inventory_locales = input
+        .inventory
+        .iter()
+        .flat_map(|inventory| &inventory.pages)
+        .filter_map(|entry| {
+            entry
+                .locale
+                .as_deref()
+                .map(|locale| (entry.url.as_str(), locale))
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
     if input
         .snapshot_date
         .as_deref()
@@ -935,6 +966,20 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
             input.snapshot_date.as_deref(),
         );
         evidence.extend(links);
+        if inventory_dispositions.get(page.url.as_str()) == Some(&InventoryDisposition::Published)
+            && inventory_locales
+                .get(page.url.as_str())
+                .and_then(|value| primary_language(value))
+                .zip(
+                    metadata
+                        .document_language
+                        .as_deref()
+                        .and_then(primary_language),
+                )
+                .is_some_and(|(inventory, document)| !inventory.eq_ignore_ascii_case(document))
+        {
+            coverage_issues.insert("inventory_document_language_mismatch");
+        }
         let headers = page.response_headers.as_ref();
         // An unserved draft is the expected outcome; its headers cannot make
         // it indexable, so neither its status nor missing headers is a gap.
@@ -1180,6 +1225,10 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
             ObservedPageLinks {
                 url: page.url.clone(),
                 status_code: page.status_code,
+                inventory_locale: inventory_locales
+                    .get(page.url.as_str())
+                    .map(|locale| (*locale).to_string()),
+                document_language: metadata.document_language.clone(),
                 response_headers_captured: page.response_headers.is_some(),
                 noindex_observed: noindex,
                 canonical_hrefs: metadata.canonical_hrefs,
@@ -1472,6 +1521,52 @@ mod tests {
             "inventory":{"identity":attested_identity(), "complete":true, "pages":inventory_pages}}))
         .unwrap();
         (artifact, context)
+    }
+
+    #[test]
+    fn conflicting_document_language_withholds_inventory_eligibility() {
+        let (mut artifact, mut context) = attested_audit();
+        context.inventory.as_mut().unwrap().pages[2].locale = Some("fr-FR".into());
+        artifact["site"]["pages"][2]["raw_html"] =
+            "<html lang='en-US'><main>Orphan</main></html>".into();
+        let report = attested_report(&artifact, &context);
+        let reconciliation = report.reconciliation.unwrap();
+        assert!(!reconciliation.comparable);
+        assert!(reconciliation.eligible_pages.is_empty());
+        assert!(
+            reconciliation
+                .issues
+                .iter()
+                .any(|issue| issue == "inventory_document_language_mismatch")
+        );
+        let page = report
+            .pages
+            .iter()
+            .find(|page| page.url.ends_with("/orphan"))
+            .unwrap();
+        assert_eq!(page.inventory_locale.as_deref(), Some("fr-FR"));
+        assert_eq!(page.document_language.as_deref(), Some("en-US"));
+    }
+
+    #[test]
+    fn language_matching_does_not_claim_locale_equivalence() {
+        for (locale, language) in [
+            ("en-US", "EN-gb"),
+            ("fr-FR", ""),
+            ("fr-FR", "und"),
+            ("invalid!", "en"),
+        ] {
+            let (mut artifact, mut context) = attested_audit();
+            context.inventory.as_mut().unwrap().pages[2].locale = Some(locale.into());
+            artifact["site"]["pages"][2]["raw_html"] =
+                format!("<html lang='{language}'><main>Orphan</main></html>").into();
+            let report = attested_report(&artifact, &context);
+            assert!(
+                report.reconciliation.unwrap().comparable,
+                "{locale} / {language}: {:?}",
+                report.issues
+            );
+        }
     }
 
     /// Breaks one completeness condition of `attested_audit`.
