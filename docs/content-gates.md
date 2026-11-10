@@ -218,6 +218,34 @@ external servers necessarily receive requested URLs. Other hosts may supply
 observations through the core context, bound by the host to the same immutable
 snapshot and destination order. Aexeo does not authenticate those observations.
 
+### EmDash host observations
+
+The `@aeptus/aexeo-emdash/content` API can supply the same gate without making
+network requests in WASM. `projectLinkDestinations(document)` returns `null` if
+link coverage is unavailable, or an object containing the exact document snapshot
+and destinations in occurrence order. Send the destinations to a trusted host
+checker with its own explicit network policy, then attach one observation per
+occurrence (`reachable`, `not_found`, `not_checked`, or `not_applicable`):
+
+```ts
+const projection = await projectLinkDestinations(document);
+if (projection) {
+  const observations = await trustedHostChecker(projection.destinations);
+  const report = await evaluateContent(document, "custom", { custom: presetToml },
+    undefined, onTelemetry, undefined, { ...projection, observations });
+}
+```
+
+This is the direct content API; configured save hooks do not run the checker.
+An observer must use `not_found` only for an observed 404/410 and keep timeouts,
+authentication failures, refused URLs and exhausted budgets `not_checked`.
+The batch is accepted only for the exact unchanged document and ordered
+projection, with complete link capability and matching counts. A stale batch
+leaves the gate `not_checked`; it does not authenticate the observer or guarantee
+that a web response is still current. The projection and supplied batch contain
+full content and URLs: keep them private, and provide them only to a host you trust.
+Opt-in telemetry contains aggregate checked, not-found and unchecked counts.
+
 ## Optional external link observations
 
 `aexeo-cli link-reachability article.md` explicitly contacts absolute HTTP(S)

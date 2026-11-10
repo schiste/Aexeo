@@ -168,6 +168,15 @@ pub fn source_locations(
     preset: &ContentPreset,
     report: &ContentReport,
 ) -> Vec<EmdashSourceLocation> {
+    source_locations_with_reachability(document, preset, report, None)
+}
+
+pub fn source_locations_with_reachability(
+    document: &EmdashDocument,
+    preset: &ContentPreset,
+    report: &ContentReport,
+    observations: Option<&[aexeo_core::content_gate::LinkReachabilityObservation]>,
+) -> Vec<EmdashSourceLocation> {
     let needs_prose = preset
         .gates
         .iter()
@@ -188,7 +197,10 @@ pub fn source_locations(
         .iter()
         .zip(&report.gates)
         .any(|(gate, result)| {
-            matches!(gate, ContentGate::LinkDestinations { .. }) && !result.findings.is_empty()
+            matches!(
+                gate,
+                ContentGate::LinkDestinations { .. } | ContentGate::LinkReachability { .. }
+            ) && !result.findings.is_empty()
         });
     if !needs_prose && !needs_headings && !needs_links {
         return Vec::new();
@@ -266,6 +278,36 @@ pub fn source_locations(
                             finding_index,
                             block_index: *block_index,
                             span_index: *span_index,
+                            utf16_offset: 0,
+                        });
+                    }
+                }
+            }
+            continue;
+        }
+        if matches!(gate, ContentGate::LinkReachability { .. }) {
+            if let (Some(links), Some(observations)) = (&links, observations) {
+                use aexeo_core::content_gate::LinkReachabilityObservation;
+                let indices: Vec<_> = observations
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, observation)| {
+                        (*observation == LinkReachabilityObservation::NotFound).then_some(index)
+                    })
+                    .collect();
+                if links.len() == observations.len() && indices.len() == evaluated.total_findings()
+                {
+                    for (finding_index, index) in indices
+                        .into_iter()
+                        .take(evaluated.findings.len())
+                        .enumerate()
+                    {
+                        let (_, block_index, span_index) = links[index];
+                        result.push(EmdashSourceLocation {
+                            gate_id: evaluated.gate_id.clone(),
+                            finding_index,
+                            block_index,
+                            span_index,
                             utf16_offset: 0,
                         });
                     }
@@ -397,11 +439,38 @@ fn content_links(document: &EmdashDocument) -> Vec<(&str, usize, usize)> {
     links
 }
 
-fn content_link_destinations(document: &EmdashDocument) -> Vec<String> {
+pub fn content_link_destinations(document: &EmdashDocument) -> Vec<String> {
     content_links(document)
         .into_iter()
         .map(|(destination, _, _)| destination.to_owned())
         .collect()
+}
+
+/// Host-supplied observations tied to an exact JSON document and projected links.
+/// This binding prevents stale reuse; it does not authenticate the observer.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BoundLinkObservations {
+    pub document: serde_json::Value,
+    pub destinations: Vec<String>,
+    pub observations: Vec<aexeo_core::content_gate::LinkReachabilityObservation>,
+}
+
+pub fn bound_link_observations<'a>(
+    batch: &'a BoundLinkObservations,
+    raw: &serde_json::Value,
+    document: &EmdashDocument,
+    links_available: bool,
+) -> Option<&'a [aexeo_core::content_gate::LinkReachabilityObservation]> {
+    if !links_available
+        || batch.document != *raw
+        || batch.destinations.len() > 10_000
+        || batch.destinations != content_link_destinations(document)
+        || batch.observations.len() != batch.destinations.len()
+    {
+        return None;
+    }
+    Some(&batch.observations)
 }
 
 /// Evaluate with caller-supplied source snapshots; no source is fetched here.
@@ -460,6 +529,25 @@ pub fn evaluate_content_with_extensions(
     capabilities: [bool; 4],
     extensions: Option<&dyn aexeo_core::content_gate::ContentGateExtensions>,
 ) -> anyhow::Result<ContentReport> {
+    evaluate_content_with_reachability(
+        document,
+        preset,
+        evidence_sources,
+        capabilities,
+        extensions,
+        None,
+    )
+}
+
+/// Evaluate only observations already bound by the host to this snapshot.
+pub fn evaluate_content_with_reachability(
+    document: &EmdashDocument,
+    preset: &ContentPreset,
+    evidence_sources: Option<BTreeMap<String, String>>,
+    capabilities: [bool; 4],
+    extensions: Option<&dyn aexeo_core::content_gate::ContentGateExtensions>,
+    observations: Option<&[aexeo_core::content_gate::LinkReachabilityObservation]>,
+) -> anyhow::Result<ContentReport> {
     let [text, headings, paragraphs, links] = capabilities;
     let (mut input, mut context, link_count) = content_input_with_context(document);
     input.evidence_sources = evidence_sources;
@@ -474,10 +562,12 @@ pub fn evaluate_content_with_extensions(
         context.block_ends = None;
     }
     let destinations = (links
-        && preset
-            .gates
-            .iter()
-            .any(|gate| matches!(gate, ContentGate::LinkDestinations { .. })))
+        && preset.gates.iter().any(|gate| {
+            matches!(
+                gate,
+                ContentGate::LinkDestinations { .. } | ContentGate::LinkReachability { .. }
+            )
+        }))
     .then(|| content_link_destinations(document));
     preset.evaluate_with_destinations(
         &input,
@@ -485,6 +575,7 @@ pub fn evaluate_content_with_extensions(
             adapter: Some(&context),
             link_count: links.then_some(link_count),
             extensions,
+            link_reachability: if links { observations } else { None },
             ..Default::default()
         },
         destinations.as_deref(),
@@ -988,5 +1079,46 @@ quote = "14 participants"
         ).unwrap();
         let report = evaluate_content(&document, &preset).unwrap();
         assert_eq!(report.gates[0].status, GateStatus::NotChecked);
+    }
+    #[test]
+    fn bound_reachability_rejects_stale_or_incomplete_snapshots_and_maps_findings() {
+        use aexeo_core::content_gate::LinkReachabilityObservation::{NotChecked, NotFound};
+        let raw: serde_json::Value = serde_json::from_str(r#"{"route":"/t","title":"T","body":[{"children":[{"_type":"span","text":"first","marks":["a"]},{"_type":"span","text":" second","marks":["b"]}],"markDefs":[{"_key":"a","_type":"link","href":"https://a.example"},{"_key":"b","_type":"link","href":"https://b.example"}]}]}"#).unwrap();
+        let document: EmdashDocument = serde_json::from_value(raw.clone()).unwrap();
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='links'\n[[gates]]\nid='external'\nkind='link_reachability'\n",
+        )
+        .unwrap();
+        let mut batch = BoundLinkObservations {
+            document: raw.clone(),
+            destinations: content_link_destinations(&document),
+            observations: vec![NotFound, NotChecked],
+        };
+        assert_eq!(batch.destinations.len(), 2);
+        let observations = bound_link_observations(&batch, &raw, &document, true).unwrap();
+        let report = evaluate_content_with_reachability(
+            &document,
+            &preset,
+            None,
+            [true; 4],
+            None,
+            Some(observations),
+        )
+        .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::NotChecked);
+        assert_eq!(report.gates[0].findings.len(), 1);
+        let locations =
+            source_locations_with_reachability(&document, &preset, &report, Some(observations));
+        assert_eq!(locations.len(), 1);
+        assert_eq!((locations[0].block_index, locations[0].span_index), (0, 0));
+        assert!(bound_link_observations(&batch, &raw, &document, false).is_none());
+        let mut changed = raw.clone();
+        changed["title"] = "changed".into();
+        assert!(bound_link_observations(&batch, &changed, &document, true).is_none());
+        batch.destinations.reverse();
+        assert!(bound_link_observations(&batch, &raw, &document, true).is_none());
+        batch.destinations.reverse();
+        batch.observations.pop();
+        assert!(bound_link_observations(&batch, &raw, &document, true).is_none());
     }
 }

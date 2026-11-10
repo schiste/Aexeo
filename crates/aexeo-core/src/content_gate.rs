@@ -724,7 +724,8 @@ pub trait ContentGateExtensions {
 
 /// A host observation for one destination, in adapter occurrence order.
 /// The host must bind observations to the same unchanged input and destinations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum LinkReachabilityObservation {
     Reachable,
     NotFound,
