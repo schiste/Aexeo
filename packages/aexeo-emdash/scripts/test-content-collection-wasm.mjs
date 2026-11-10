@@ -26,6 +26,19 @@ assert.match(partialCollection.gates[0].reason, /collection is incomplete/);
 assert.equal(partialCollection.gates[0].findings[0].path, "/b");
 const partialEmpty = await evaluateContentCollection([], "test", { test: preset }, { complete: false });
 assert.equal(partialEmpty.gates[0].status, "not_checked");
+const groupedPreset = `${preset}group_by="lang"\n`;
+const groupedDocuments = [
+  { route: "/en", title: "Same", lang: "en", body: [] },
+  { route: "/fr", title: "Same", lang: "fr", body: [] },
+];
+const grouped = await evaluateContentCollection(groupedDocuments, "test", { test: groupedPreset });
+assert.equal(grouped.gates[0].status, "passed");
+const missingGroup = await evaluateContentCollection([...groupedDocuments, { route: "/unknown", title: "Same", body: [] }], "test", { test: groupedPreset });
+assert.equal(missingGroup.gates[0].status, "not_checked");
+assert.equal(missingGroup.gates[0].measurements.items_missing_group, 1);
+const groupedDuplicate = await evaluateContentCollection([...groupedDocuments, { route: "/en2", title: "Same", lang: "en", body: [] }], "test", { test: groupedPreset });
+assert.equal(groupedDuplicate.gates[0].status, "failed");
+assert.equal(groupedDuplicate.gates[0].findings[0].path, "/en2");
 console.log("WASM collection smoke test passed");
 
 const positionalPreset = `version=1

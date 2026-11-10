@@ -482,13 +482,21 @@ without echoing metadata values. Matching is case-sensitive and exact.
 id = "collection.unique_slug"
 kind = "unique_collection_metadata"
 field = "slug"
+# Optional: compare values within each language rather than across languages.
+group_by = "lang"
 blocking = true
 ```
 
 Rust hosts provide a complete collection in `ContentEvaluationContext` with `evaluate_with_capabilities`.
 The ordinary single-item interface reports this gate as `not_checked`. Missing
 or blank metadata in any item also yields `not_checked`; detected duplicates
-remain visible as findings. The host is responsible for collection completeness.
+remain visible as findings. When `group_by` is configured, values are compared
+only within the same exact, case-sensitive group. A missing or blank group makes
+the result `not_checked`; observed duplicates with known groups remain visible.
+`items_missing_group` counts affected entries without logging group values. The
+host must supply the group metadata consistently; Aexeo does not infer locale
+fallbacks or normalize language tags. Omitting `group_by` retains collection-wide
+matching. The host is responsible for collection completeness.
 Rust EmDash hosts can use `content::evaluate_collection` to adapt a complete
 slice of documents; document and site gates without their inputs remain
 `not_checked`. JavaScript hosts can use `evaluateContentCollection` from the
