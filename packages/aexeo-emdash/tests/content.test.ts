@@ -4,7 +4,7 @@ vi.mock("../src/wasm-init.js", () => ({
   projectLinkDestinations: vi.fn(async (json: string) => JSON.stringify({ document: JSON.parse(json), destinations: ["https://example.org"] })),
   evaluateContentCollection: vi.fn(async () => JSON.stringify({ preset: "custom", input_id: "collection", gates: [{ gate_id: "unique", status: "failed", findings: [], reason: null }] })),
   evaluateContent: vi.fn(async () => JSON.stringify({
-    preset: "custom", input_id: "/sample", source_locations: [{ gate_id: "forbidden", finding_index: 0, block_index: 0, span_index: 1, utf16_offset: 2 }], gates: [{
+    preset: "custom", input_id: "/sample", source_mapping: { eligible: 2, mapped: 1, unmapped: 1 }, source_locations: [{ gate_id: "forbidden", finding_index: 0, block_index: 0, span_index: 1, utf16_offset: 2 }], gates: [{
       gate_id: "forbidden", status: "failed", findings: [], reason: null, measurements: { checked_destinations: 2, invalid_destinations: 1 },
     }],
   })),
@@ -52,6 +52,8 @@ describe("portable content API", () => {
     expect(onTelemetry).toHaveBeenCalledOnce();
     const event = onTelemetry.mock.calls[0]?.[0];
     expect(event.source_locations_mapped).toBe(1);
+    expect(event.source_locations_eligible).toBe(2);
+    expect(event.source_locations_unmapped).toBe(1);
     expect(event.link_destinations).toEqual({ checked: 2, invalid: 1 });
     expect(event.evaluation_ms).toBeGreaterThanOrEqual(0);
     expect(JSON.stringify(event)).not.toContain("Private");
@@ -62,6 +64,7 @@ describe("portable content API", () => {
     const onTelemetry = vi.fn();
     await evaluateContent({ route: "/private", title: "Private", body: [] }, "custom", {}, undefined, onTelemetry);
     expect(onTelemetry.mock.calls[0]?.[0].link_destinations).toBeUndefined();
+    expect(onTelemetry.mock.calls[0]?.[0].source_locations_unmapped).toBeUndefined();
   });
   it("passes the complete collection to the bridge", async () => {
     const documents = [{ route: "/a", title: "Same", body: [] }, { route: "/b", title: "Same", body: [] }];
