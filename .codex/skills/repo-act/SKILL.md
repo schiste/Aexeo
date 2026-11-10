@@ -16,6 +16,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - Run Aethyme Explore on the user task before broad manual search.
 - Verify answer candidates before concluding when trust_policy is not answer-safe.
 - Identify the nearest fast test or validation command before editing.
+- In a reused worktree, check package dependencies locally even when broker
+  preparation is not configured: cleanup can remove ignored `node_modules`.
+  Restore them with the package lockfile (`npm ci`) before Node tests; avoid
+  an `npx` invocation that could install an unpinned missing executable.
 - Inspect caution zones before changing generated or vendored areas.
 
 ## Validation Checklist
