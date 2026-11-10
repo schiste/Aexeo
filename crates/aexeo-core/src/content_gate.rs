@@ -53,6 +53,10 @@ pub const MAX_CONTENT_INPUT_BYTES: usize = 16 * 1024 * 1024;
 /// counts any others, so a truncated gate still reports its full total.
 pub const MAX_FINDINGS_PER_GATE: usize = 1000;
 
+// Keep the advisory openings gate bounded for adapters other than the CLI.
+const MAX_DISTINCT_PARAGRAPH_OPENINGS: usize = 10_000;
+const MAX_PARAGRAPH_OPENING_BYTES: usize = 4_096;
+
 /// The measurement that records findings dropped by `MAX_FINDINGS_PER_GATE`.
 pub const FINDINGS_OMITTED: &str = "findings_omitted";
 
@@ -1278,21 +1282,43 @@ impl ContentPreset {
                         Some(paragraphs) => {
                             let mut openings = BTreeMap::<Vec<String>, usize>::new();
                             let mut exceeding = 0;
+                            let mut evaluated = 0;
+                            let mut skipped = 0;
                             for paragraph in paragraphs {
-                                let words: Vec<String> = paragraph
-                                    .text
-                                    .split_whitespace()
-                                    .take(*opening_words)
-                                    .map(|word| {
+                                let mut words = Vec::with_capacity(*opening_words);
+                                let mut bytes = 0usize;
+                                for word in paragraph.text.split_whitespace().take(*opening_words) {
+                                    bytes += word.len();
+                                    if bytes > MAX_PARAGRAPH_OPENING_BYTES {
+                                        break;
+                                    }
+                                    words.push(
                                         word.trim_matches(|ch: char| !ch.is_alphanumeric())
-                                            .to_lowercase()
-                                    })
-                                    .collect();
+                                            .to_lowercase(),
+                                    );
+                                }
+                                if bytes > MAX_PARAGRAPH_OPENING_BYTES {
+                                    reason = Some(
+                                        "paragraph opening exceeds the supported byte limit".into(),
+                                    );
+                                    break;
+                                }
                                 if words.len() != *opening_words
                                     || words.iter().any(String::is_empty)
                                 {
+                                    skipped += 1;
                                     continue;
                                 }
+                                if openings.len() >= MAX_DISTINCT_PARAGRAPH_OPENINGS
+                                    && !openings.contains_key(&words)
+                                {
+                                    reason = Some(
+                                        "too many distinct paragraph openings to assess completely"
+                                            .into(),
+                                    );
+                                    break;
+                                }
+                                evaluated += 1;
                                 let count = openings.entry(words).or_default();
                                 *count += 1;
                                 if *count > *max_occurrences {
@@ -1307,7 +1333,15 @@ impl ContentPreset {
                                 }
                             }
                             measurements.insert("paragraph_count".into(), paragraphs.len());
+                            measurements.insert("openings_evaluated".into(), evaluated);
+                            measurements.insert("openings_skipped".into(), skipped);
                             measurements.insert("openings_exceeding_limit".into(), exceeding);
+                            if reason.is_none() && !paragraphs.is_empty() && evaluated == 0 {
+                                reason = Some(
+                                    "no paragraph has enough whitespace-separated opening words"
+                                        .into(),
+                                );
+                            }
                         }
                         None => {
                             reason = Some("paragraphs are unavailable from this adapter".into())
@@ -2647,5 +2681,68 @@ terms = ["bad"]
             .map(|f| (f.line, f.column))
             .collect::<Vec<_>>();
         assert_eq!(positions, [(1, 3), (1, 7), (2, 3)]);
+    }
+    #[test]
+    fn paragraph_openings_report_coverage_and_bound_resource_use() {
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='openings'\n[[gates]]\nid='opening'\nkind='repeated_paragraph_openings'\nopening_words=2\nmax_occurrences=1\n",
+        ).unwrap();
+        let input = ContentInput {
+            text: Some(String::new()),
+            ..Default::default()
+        };
+        let paragraph = |text: String| ContentParagraph {
+            text,
+            line: 1,
+            column: 1,
+        };
+        let run = |paragraphs: Vec<ContentParagraph>| {
+            preset
+                .evaluate_with_context(
+                    &input,
+                    None,
+                    None,
+                    Some(&ContentContext {
+                        paragraphs: Some(paragraphs),
+                        ..Default::default()
+                    }),
+                )
+                .unwrap()
+                .gates
+                .remove(0)
+        };
+        let unsupported = run(vec![paragraph("中文文章沒有空格".into())]);
+        assert_eq!(unsupported.status, GateStatus::NotChecked);
+        assert_eq!(unsupported.measurements["openings_skipped"], 1);
+        let empty = run(vec![]);
+        assert_eq!(empty.status, GateStatus::Passed);
+        let mixed = run(vec![
+            paragraph("one".into()),
+            paragraph("same words".into()),
+            paragraph("same words again".into()),
+        ]);
+        assert_eq!(mixed.status, GateStatus::Failed);
+        assert_eq!(mixed.measurements["openings_evaluated"], 2);
+        assert_eq!(mixed.measurements["openings_skipped"], 1);
+        let large = run(vec![
+            paragraph("same words".into()),
+            paragraph("same words again".into()),
+            paragraph(format!(
+                "{} tail",
+                "x".repeat(MAX_PARAGRAPH_OPENING_BYTES + 1)
+            )),
+        ]);
+        assert_eq!(large.status, GateStatus::NotChecked);
+        assert_eq!(large.findings.len(), 1);
+        assert_eq!(large.measurements["openings_evaluated"], 2);
+        let unique = (0..=MAX_DISTINCT_PARAGRAPH_OPENINGS)
+            .map(|index| paragraph(format!("prefix{index} word")))
+            .collect();
+        let capped = run(unique);
+        assert_eq!(capped.status, GateStatus::NotChecked);
+        assert_eq!(
+            capped.measurements["openings_evaluated"],
+            MAX_DISTINCT_PARAGRAPH_OPENINGS
+        );
     }
 }
