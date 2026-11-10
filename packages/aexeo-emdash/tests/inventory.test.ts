@@ -53,6 +53,28 @@ describe("conservative EmDash link inventory", () => {
     await expect(exportLinkInventory({ list, getPublicUrl }, { collections: [], identity: null })).rejects.toThrow();
   });
 
+  it("keeps other entries when host classification fails or returns malformed data", async () => {
+    const list = vi.fn(async () => ({ items: [item("a"), item("b"), item("c")], hasMore: false }));
+    const getPublicUrl = vi.fn(async (_collection: string, id: string) => `https://example.org/${id}`);
+    const onTelemetry = vi.fn();
+    const classify = vi.fn((entry: EmdashContentItem) => {
+      if (entry.id === "a") throw new Error("private classifier error");
+      if (entry.id === "b") return { disposition: "invalid" as "published" };
+      return { disposition: "published" as const };
+    });
+    const result = await exportLinkInventory({ list, getPublicUrl }, {
+      collections: ["posts"], identity: null, classify, onTelemetry,
+    });
+    expect(result.inventory.pages.map((page) => page.disposition)).toEqual(["unknown", "unknown", "published"]);
+    expect(result.inventory.complete).toBe(false);
+    expect(result.issues).toContain("classification_failed");
+    expect(result.scanned).toBe(3);
+    expect(result.omitted).toBe(0);
+    expect(JSON.stringify(result)).not.toContain("private classifier error");
+    expect(onTelemetry.mock.calls[0]?.[0].issue_count).toBe(2);
+    expect(onTelemetry.mock.calls[0]?.[0].classification_failures).toBe(2);
+  });
+
   it("bounds concurrent URL lookups, retains classification order and accounts for failures", async () => {
     const list = vi.fn(async () => ({ items: [item("a"), item("b"), item("c"), item("d")], hasMore: false }));
     let active = 0;
