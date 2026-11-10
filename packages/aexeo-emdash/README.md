@@ -181,3 +181,10 @@ for the sandboxed setup runbook.
 ## License
 
 MIT — see [LICENSE](./LICENSE).
+
+### Host-supplied link observations
+
+The optional content API can evaluate explicitly supplied link reachability
+observations without network access in WASM. See [content gate documentation](https://github.com/schiste/Aexeo/blob/main/docs/content-gates.md#emdash-host-observations) for snapshot binding,
+privacy and incomplete-coverage behavior. Configured save hooks do not invoke a
+link checker automatically.

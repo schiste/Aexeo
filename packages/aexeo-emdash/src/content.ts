@@ -1,4 +1,4 @@
-import { evaluateContent as evaluateContentWasm, evaluateContentCollection as evaluateCollectionWasm, projectContentInput as projectContentInputWasm } from "./wasm-init.js";
+import { evaluateContent as evaluateContentWasm, evaluateContentCollection as evaluateCollectionWasm, projectContentInput as projectContentInputWasm, projectLinkDestinations as projectLinkDestinationsWasm } from "./wasm-init.js";
 import type { EmdashDocument, Finding } from "./types.js";
 
 export interface ContentGateResult {
@@ -39,6 +39,7 @@ export interface ContentEvaluationTelemetry {
   source_locations_mapped: number;
   /** Aggregate destination occurrences; omitted when the gate did not measure them. */
   link_destinations?: { checked: number; invalid: number };
+  link_reachability?: { checked: number; not_found: number; unchecked: number };
 }
 
 /** Exact projected input bound to external extension results; may contain private content. */
@@ -63,6 +64,21 @@ export async function projectContentInput(document: EmdashDocument, evidenceSour
   return JSON.parse(await projectContentInputWasm(JSON.stringify(document), evidenceSources === undefined ? undefined : JSON.stringify(evidenceSources))) as ExtensionInput;
 }
 
+/** Snapshot and link occurrences in adapter order. This may contain private content and URLs. */
+export interface LinkDestinationProjection {
+  document: EmdashDocument;
+  destinations: string[];
+}
+
+export interface BoundLinkObservations extends LinkDestinationProjection {
+  observations: Array<"reachable" | "not_found" | "not_checked" | "not_applicable">;
+}
+
+/** Return null when link coverage is unavailable. The returned snapshot must not be modified. */
+export async function projectLinkDestinations(document: EmdashDocument): Promise<LinkDestinationProjection | null> {
+  return JSON.parse(await projectLinkDestinationsWasm(JSON.stringify(document))) as LinkDestinationProjection | null;
+}
+
 /** Evaluate a document locally using the built-in or supplied named TOML presets. */
 export async function evaluateContent(
   document: EmdashDocument,
@@ -71,11 +87,14 @@ export async function evaluateContent(
   evidenceSources?: Record<string, string>,
   onTelemetry?: (event: ContentEvaluationTelemetry) => void,
   externalResults?: ExternalGateResult[],
+  linkObservations?: BoundLinkObservations,
 ): Promise<ContentReport> {
   const started = onTelemetry ? performance.now() : 0;
   const documentJson = JSON.stringify(document);
   const sourcesJson = JSON.stringify(sources);
-  const result = externalResults !== undefined
+  const result = linkObservations !== undefined
+    ? await evaluateContentWasm(documentJson, preset, sourcesJson, evidenceSources === undefined ? undefined : JSON.stringify(evidenceSources), externalResults === undefined ? undefined : JSON.stringify(externalResults), JSON.stringify(linkObservations))
+    : externalResults !== undefined
     ? await evaluateContentWasm(documentJson, preset, sourcesJson, evidenceSources === undefined ? undefined : JSON.stringify(evidenceSources), JSON.stringify(externalResults))
     : evidenceSources === undefined
       ? await evaluateContentWasm(documentJson, preset, sourcesJson)
@@ -84,6 +103,15 @@ export async function evaluateContent(
   if (onTelemetry) {
     const event: ContentEvaluationTelemetry = { evaluation_ms: performance.now() - started, source_locations_mapped: report.source_locations?.length ?? 0 };
     for (const gate of report.gates) {
+      if (gate.required_capability === "link_reachability" && gate.measurements) {
+        const { checked_destinations, not_found_destinations, unchecked_destinations } = gate.measurements;
+        if (checked_destinations !== undefined && not_found_destinations !== undefined && unchecked_destinations !== undefined) {
+          event.link_reachability ??= { checked: 0, not_found: 0, unchecked: 0 };
+          event.link_reachability.checked += checked_destinations;
+          event.link_reachability.not_found += not_found_destinations;
+          event.link_reachability.unchecked += unchecked_destinations;
+        }
+      }
       const checked = gate.measurements?.checked_destinations;
       const invalid = gate.measurements?.invalid_destinations;
       if (checked !== undefined && invalid !== undefined) {

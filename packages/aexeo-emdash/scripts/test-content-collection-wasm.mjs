@@ -1,6 +1,6 @@
 // Run after the plugin build: this exercises the real WASM, not the mock bridge.
 import assert from "node:assert/strict";
-import { evaluateContent, evaluateContentCollection, projectContentInput } from "../dist/content.js";
+import { evaluateContent, evaluateContentCollection, projectContentInput, projectLinkDestinations } from "../dist/content.js";
 
 const preset = `version=1
 name="collection"
@@ -108,3 +108,26 @@ assert.deepEqual(externalReport.source_locations, [{ gate_id: "external", findin
 const staleReport = await evaluateContent({ ...extensionDocument, title: "Changed" }, "custom", { custom: extensionPreset }, undefined, undefined, results);
 assert.equal(staleReport.gates[0].status, "not_checked");
 console.log("WASM external extension smoke test passed");
+
+const reachabilityPreset = `version=1
+name="reachability"
+[[gates]]
+id="external"
+kind="link_reachability"
+`;
+const reachabilityDocument = { route: "/r", title: "Test", body: [{ markDefs: [
+  { _key: "a", _type: "link", href: "https://example.org/missing" },
+  { _key: "b", _type: "link", href: "https://example.org/unknown" },
+], children: [{ _type: "span", text: "First", marks: ["a"] }, { _type: "span", text: " Second", marks: ["b"] }] }] };
+const projection = await projectLinkDestinations(reachabilityDocument);
+assert.deepEqual(projection.destinations, ["https://example.org/missing", "https://example.org/unknown"]);
+const observations = { ...projection, observations: ["not_found", "not_checked"] };
+const partial = await evaluateContent(reachabilityDocument, "test", { test: reachabilityPreset }, undefined, undefined, undefined, observations);
+assert.equal(partial.gates[0].status, "not_checked");
+assert.equal(partial.gates[0].findings.length, 1);
+assert.deepEqual(partial.source_locations, [{ gate_id: "external", finding_index: 0, block_index: 0, span_index: 0, utf16_offset: 0 }]);
+const stale = await evaluateContent({ ...reachabilityDocument, title: "Changed" }, "test", { test: reachabilityPreset }, undefined, undefined, undefined, observations);
+assert.equal(stale.gates[0].status, "not_checked");
+assert.equal(stale.gates[0].findings.length, 0);
+assert.equal(await projectLinkDestinations({ ...reachabilityDocument, body_capabilities: [] }), null);
+console.log("WASM bound link observation smoke test passed");
