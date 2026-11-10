@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   renderScoreWidget,
@@ -39,6 +39,17 @@ const lowScore: SiteIntelligenceScore = {
 };
 
 describe("renderScoreWidget", () => {
+  it("keeps the editor usable and logs an evaluator failure", async () => {
+    const failure = new Error("evaluator unavailable");
+    const tuning = { ...tuningFor(lowScore), score: async () => { throw failure; } };
+    const log = { error: vi.fn() };
+    const result = await renderScoreWidget(kv, tuning, log);
+    expect(log.error).toHaveBeenCalledWith("Aexeo score widget failed to initialize", { error: failure });
+    expect(result.blocks).toContainEqual(expect.objectContaining({
+      type: "banner", title: "SEO score is temporarily unavailable", variant: "alert",
+    }));
+  });
+
   it("reports facts and blockers with no composite or threshold alert", async () => {
     const { blocks } = await renderScoreWidget(kv, tuningFor(lowScore));
 

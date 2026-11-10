@@ -41,3 +41,18 @@ it("selects a preset per collection and falls back to the default", async () => 
   await evaluator([doc, { ...doc, route: "/other" }], { collections: ["glossary", "posts"] });
   expect(selected).toEqual(["glossary", "article"]);
 });
+
+
+it("limits content presets to selected collections while preserving site evaluation", async () => {
+  const selected: string[] = [];
+  const evaluator = withContentPreset(base, { name: "article", collections: ["posts", "glossary"], byCollection: { glossary: "glossary" } }, async (_doc, name) => {
+    selected.push(name);
+    return { ...report, gates: [] };
+  });
+  const result = await evaluator([doc, doc, doc], { collections: ["posts", "pages", "glossary"] });
+  expect(result.ok).toBe(true);
+  expect(selected).toEqual(["article", "glossary"]);
+  const missing = await evaluator([doc]);
+  expect(missing.ok).toBe(false);
+  if (!missing.ok) expect(missing.detail).toContain("collection is required");
+});

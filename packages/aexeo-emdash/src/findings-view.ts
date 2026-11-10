@@ -392,6 +392,7 @@ export function findingsTable(rows: FindingRow[]): unknown {
 export async function renderScoreWidget(
   kv: KvNamespace,
   tuning: AdminViewTuning,
+  log?: { error(message: string, data?: unknown): void },
 ): Promise<BlockResponse> {
   const documents = await readAllDocuments(kv);
   if (documents.length === 0) {
@@ -405,7 +406,18 @@ export async function renderScoreWidget(
       ],
     };
   }
-  const score = await tuning.score(documents, kv);
+  let score: Awaited<ReturnType<AdminViewTuning["score"]>>;
+  try {
+    score = await tuning.score(documents, kv);
+  } catch (error) {
+    log?.error("Aexeo score widget failed to initialize", { error });
+    return {
+      blocks: [
+        { type: "banner", title: "SEO score is temporarily unavailable", variant: "alert" },
+        { type: "context", text: "The authoring interface remains available. Retry after the evaluator runtime has been checked." },
+      ],
+    };
+  }
   if (score === null) {
     return {
       blocks: [

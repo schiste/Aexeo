@@ -5,6 +5,24 @@ site. Findings show up as a Block Kit admin page; a sidebar widget
 shows the site's current intelligence score; saves auto-evaluate the
 changed document.
 
+## Restricting content presets to specific collections
+
+Content presets apply to all evaluated collections by default. Set
+`contentPreset.collections` to select only the collections that use the preset;
+existing site checks continue to run on all configured collections. Use
+`byCollection` to choose an alternate preset for a selected collection.
+For example:
+
+```js
+aexeoPlugin({
+  contentPreset: {
+    name: "article",
+    collections: ["blog_posts", "glossary_terms"],
+    byCollection: { glossary_terms: "glossary" },
+  },
+})
+```
+
 ## Content coverage
 
 Portable Text bodies provide text, headings, paragraphs and links to content

@@ -7,6 +7,8 @@ export interface ContentPresetOptions {
   sources?: Record<string, string>;
   evidenceSources?: Record<string, string>;
   byCollection?: Record<string, string>;
+  /** Restrict preset evaluation to these collections; site checks still run for all. */
+  collections?: readonly string[];
 }
 
 /** Add portable content findings to an existing evaluator without hiding skipped gates. */
@@ -23,6 +25,10 @@ export function withContentPreset(
     try {
       for (const [index, document] of documents.entries()) {
         const collection = context?.collections[index];
+        if (preset.collections !== undefined) {
+          if (collection === undefined) throw new Error("collection is required for a scoped content preset");
+          if (!preset.collections.includes(collection)) continue;
+        }
         const selected = collection !== undefined && preset.byCollection !== undefined && Object.hasOwn(preset.byCollection, collection)
           ? preset.byCollection[collection] : undefined;
         const name = selected ?? preset.name;

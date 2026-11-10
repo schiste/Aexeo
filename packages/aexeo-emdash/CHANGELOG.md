@@ -6,6 +6,36 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-10
+
+### Added
+
+- Portable content presets with per-collection selection, typed body capabilities and explicit incomplete results.
+- Ordered mappings for multiple content fields and custom blocks, including nested repeats and heading levels, in configured and sandboxed modes.
+- Conservative CMS link inventory export, source locations and aggregate content coverage telemetry.
+- The configured dashboard reports evaluator failures without breaking the editor and tolerates older findings without secondary layers.
+
+### Compatibility
+
+- Supports EmDash `^1.2.0`. Deploy the matching sidecar when using sandboxed mode.
+- The intelligence widget reports facts and blockers instead of the removed composite score.
+- Existing site and CLI checks remain separate from optional content presets.
+
+### Changed
+
+- **The dashboard widget no longer shows a composite score.** The "Overall"
+  stat and the "Site score is N — below the 60 quality threshold" banner are
+  gone; blockers remain the call to action. `SiteIntelligenceScore` loses
+  `overall_score`, `answer_pack_score` and `elapsed_us` and gains
+  `answer_pack`, and `citation_readiness_score` and `truth_consistency_score`
+  may now be `null`, shown as "unknown", when nothing was measured.
+- **Entity presence resolves the newest Common Crawl index at runtime** from
+  `collinfo.json` instead of a pinned crawl, so a site first crawled after a
+  plugin release is no longer reported `not_found`. Failing to resolve the
+  index reports `unreachable`.
+- Support EmDash `^1.2.0` and run the plugin-host integration coverage against
+  EmDash `1.2.0`.
+
 ### Added
 
 - **The sandboxed plugin warns when its sidecar is on another version.** The
@@ -191,23 +221,6 @@ version, since 0.8.19 had never been published.
   binary is now produced by `npm run build:wasm`, chained into `dev` and
   `deploy`, and only the two declaration files remain tracked. The package
   also gains a README, which it did not have.
-
-## [Unreleased]
-
-### Changed
-
-- **The dashboard widget no longer shows a composite score.** The "Overall"
-  stat and the "Site score is N — below the 60 quality threshold" banner are
-  gone; blockers remain the call to action. `SiteIntelligenceScore` loses
-  `overall_score`, `answer_pack_score` and `elapsed_us` and gains
-  `answer_pack`, and `citation_readiness_score` and `truth_consistency_score`
-  may now be `null`, shown as "unknown", when nothing was measured.
-- **Entity presence resolves the newest Common Crawl index at runtime** from
-  `collinfo.json` instead of a pinned crawl, so a site first crawled after a
-  plugin release is no longer reported `not_found`. Failing to resolve the
-  index reports `unreachable`.
-- Support EmDash `^1.2.0` and run the plugin-host integration coverage against
-  EmDash `1.2.0`.
 
 ## [0.8.18] - 2026-09-28
 

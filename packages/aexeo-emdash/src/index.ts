@@ -63,7 +63,7 @@ export interface AexeoPluginOptions {
   blockMappings?: CustomBlockMappings;
   contentFieldsByCollection?: Record<string, readonly string[]>;
   /** Add a portable content preset to configured-mode evaluation. */
-  contentPreset?: { name: string; sources?: Record<string, string>; byCollection?: Record<string, string> };
+  contentPreset?: { name: string; sources?: Record<string, string>; byCollection?: Record<string, string>; collections?: readonly string[] };
   /**
    * emdash collections the plugin sweeps when an admin clicks
    * Refresh on the findings page. Order doesn't matter; the sweep
@@ -186,6 +186,7 @@ export function aexeoPlugin(
         : {
             contentPreset: {
               ...options.contentPreset,
+              ...(options.contentPreset.collections === undefined ? {} : { collections: [...options.contentPreset.collections] }),
               ...(options.contentPreset.sources === undefined
                 ? {}
                 : { sources: { ...options.contentPreset.sources } }),

@@ -459,7 +459,7 @@ async function handlePageLoad(
     return renderFindingsPage(ctx.kv, adminViewTuning);
   }
   if (normalized === "widget:aexeo-score") {
-    return renderScoreWidget(ctx.kv, adminViewTuning);
+    return renderScoreWidget(ctx.kv, adminViewTuning, ctx.log);
   }
   if (normalized === "document") {
     return renderDocumentPanel(ctx.kv);
