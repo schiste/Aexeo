@@ -4,8 +4,11 @@
 //! then timed for ITERATIONS runs (default 30). With `--json` it prints one
 //! JSON object per tier, which `scripts/check-performance.sh` compares
 //! against `performance-budget.json`.
+use aexeo_contracts::{AuditPageSnapshot, Finding};
+use aexeo_core::link_findings::qualify_legacy_link_findings;
 use aexeo_core::link_inventory::SurfaceIdentity;
 use aexeo_core::link_report::{LinkReportInput, RenderedPage, build_link_report};
+use std::collections::BTreeMap;
 use std::{hint::black_box, time::Instant};
 
 const WARMUP_ITERATIONS: usize = 3;
@@ -107,6 +110,67 @@ fn run_tier(tier: &Tier, iterations: usize) -> anyhow::Result<serde_json::Value>
     }))
 }
 
+/// Measure qualification itself, not graph construction, with two findings
+/// per page. Fixture creation is outside the measured region.
+fn run_qualification(iterations: usize) -> anyhow::Result<serde_json::Value> {
+    let tier = &TIERS[1];
+    let report = build_link_report(&fixture(tier))?;
+    let mut urls = BTreeMap::new();
+    let mut pages = Vec::new();
+    let mut findings = Vec::new();
+    for index in 0..tier.pages {
+        let path = format!("page-{index}.html");
+        urls.insert(path.clone(), format!("https://example.org/page-{index}"));
+        pages.push(AuditPageSnapshot {
+            path: path.clone(),
+            relative_path: path.clone(),
+            ..Default::default()
+        });
+        for rule_id in ["LNK002", "LNK004"] {
+            findings.push(Finding {
+                rule_id: rule_id.into(),
+                message: String::new(),
+                path: path.clone(),
+                line: 1,
+                column: 1,
+                severity: "warning".into(),
+                suggestion: None,
+                scope: Default::default(),
+                subject: None,
+            });
+        }
+    }
+    for _ in 0..WARMUP_ITERATIONS {
+        assert_eq!(
+            qualify_legacy_link_findings(&findings, &pages, Some(&urls), &report).len(),
+            findings.len()
+        );
+    }
+    let mut samples = Vec::with_capacity(iterations);
+    for _ in 0..iterations {
+        let started = Instant::now();
+        black_box(qualify_legacy_link_findings(
+            black_box(&findings),
+            black_box(&pages),
+            Some(black_box(&urls)),
+            black_box(&report),
+        ));
+        samples.push(started.elapsed().as_micros());
+    }
+    samples.sort_unstable();
+    Ok(serde_json::json!({
+        "name": "link_graph/qualify_1000_pages_2000_findings",
+        "warmup_iterations": WARMUP_ITERATIONS,
+        "iterations": samples.len(),
+        "pages": tier.pages,
+        "links": tier.pages * tier.links_per_page,
+        "findings": findings.len(),
+        "avg_ms": samples.iter().sum::<u128>() as f64 / samples.len() as f64 / 1000.0,
+        "p50_ms": percentile_ms(&samples, 50),
+        "p95_ms": percentile_ms(&samples, 95),
+    }))
+}
+
 fn main() -> anyhow::Result<()> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     let json_mode = args.iter().any(|arg| arg == "--json");
@@ -117,8 +181,12 @@ fn main() -> anyhow::Result<()> {
         .transpose()?
         .unwrap_or(30)
         .max(1);
-    for tier in &TIERS {
-        let result = run_tier(tier, iterations)?;
+    let results = TIERS
+        .iter()
+        .map(|tier| run_tier(tier, iterations))
+        .chain(std::iter::once_with(|| run_qualification(iterations)));
+    for result in results {
+        let result = result?;
         if json_mode {
             println!("{result}");
         } else {

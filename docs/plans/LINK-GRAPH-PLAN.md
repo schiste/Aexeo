@@ -215,6 +215,10 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
   this uncertainty independently of legacy findings, including redirect credit
   and excluding self-links. It is advisory, not an orphan determination;
   older reports omit it rather than claiming it was checked.
+- Legacy finding qualification indexes audit paths, report URLs and destination
+  evidence once per run instead of rescanning all pages and destinations for
+  every finding. CI now benchmarks qualification independently on 1,000 pages
+  and 2,000 findings; its fixture and budget are not real-site latency claims.
 
 ## EmDash preview integration update
 

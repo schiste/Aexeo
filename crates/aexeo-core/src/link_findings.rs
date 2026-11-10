@@ -11,6 +11,7 @@ use url::Url;
 
 use aexeo_contracts::{AuditPageSnapshot, Finding};
 
+use crate::link_counts::DestinationLinks;
 use crate::link_evidence::LinkContext;
 use crate::link_report::{AliasEvidence, LinkReport, ObservedPageLinks};
 
@@ -123,6 +124,22 @@ pub fn qualify_legacy_link_findings(
     static_urls: Option<&BTreeMap<String, String>>,
     report: &LinkReport,
 ) -> Vec<LegacyLinkFinding> {
+    if !findings
+        .iter()
+        .any(|finding| INBOUND_RULES.contains(&finding.rule_id.as_str()))
+    {
+        return Vec::new();
+    }
+    // Preserve the original first-match behavior for duplicate paths and URLs.
+    let mut pages_by_path = BTreeMap::new();
+    for page in pages {
+        pages_by_path.entry(page.path.as_str()).or_insert(page);
+    }
+    let mut observed_by_url = BTreeMap::new();
+    for page in &report.pages {
+        observed_by_url.entry(page.url.as_str()).or_insert(page);
+    }
+    let destinations = destinations_by_url(report);
     let eligible = report
         .reconciliation
         .as_ref()
@@ -139,12 +156,11 @@ pub fn qualify_legacy_link_findings(
         .iter()
         .filter(|finding| INBOUND_RULES.contains(&finding.rule_id.as_str()))
         .map(|finding| {
-            let page = pages
-                .iter()
-                .find(|page| page.path == finding.path)
+            let page = pages_by_path
+                .get(finding.path.as_str())
                 .and_then(|page| report_url(page, static_urls))
-                .and_then(|url| report.pages.iter().find(|observed| observed.url == url));
-            qualify(finding, page, report, &eligible)
+                .and_then(|url| observed_by_url.get(url.as_str()).copied());
+            qualify(finding, page, &destinations, &eligible)
         })
         .collect()
 }
@@ -152,7 +168,7 @@ pub fn qualify_legacy_link_findings(
 fn qualify(
     finding: &Finding,
     page: Option<&ObservedPageLinks>,
-    report: &LinkReport,
+    destinations: &BTreeMap<&str, Vec<&DestinationLinks>>,
     eligible: &BTreeSet<String>,
 ) -> LegacyLinkFinding {
     let mut result = LegacyLinkFinding {
@@ -167,7 +183,8 @@ fn qualify(
     let Some(page) = page else {
         return result;
     };
-    let (contexts, mut conditional, mut nonconditional) = other_sources_by_context(page, report);
+    let (contexts, mut conditional, mut nonconditional) =
+        other_sources_by_context(page, destinations);
     result.source_pages_by_context = contexts;
     result.via_redirect_source_pages = page
         .via_redirect
@@ -221,20 +238,26 @@ fn report_url(
 
 /// Distinct sources per context, without the page's links to itself, which
 /// the legacy rules do not count either.
+fn destinations_by_url(report: &LinkReport) -> BTreeMap<&str, Vec<&DestinationLinks>> {
+    let mut destinations = BTreeMap::<&str, Vec<&DestinationLinks>>::new();
+    for destination in &report.links.destinations {
+        destinations
+            .entry(&destination.destination)
+            .or_default()
+            .push(destination);
+    }
+    destinations
+}
+
 fn other_sources_by_context(
     page: &ObservedPageLinks,
-    report: &LinkReport,
+    destinations: &BTreeMap<&str, Vec<&DestinationLinks>>,
 ) -> (BTreeMap<LinkContext, usize>, bool, bool) {
     let url = normalized(&page.url);
     let mut sources = BTreeMap::<LinkContext, BTreeSet<String>>::new();
     let mut conditional = false;
     let mut nonconditional = false;
-    for destination in report
-        .links
-        .destinations
-        .iter()
-        .filter(|destination| destination.destination == url)
-    {
+    for destination in destinations.get(url.as_str()).into_iter().flatten() {
         for link in &destination.evidence {
             let source = normalized(&link.source);
             if source != url {
@@ -459,6 +482,46 @@ mod tests {
     }
 
     #[test]
+    fn qualification_preserves_first_page_and_duplicate_destination_semantics() {
+        let artifact = audit(
+            vec![
+                page("", "<main><a href='/a'>A</a></main>"),
+                page("a", "<main>Destination</main>"),
+                page("b", "<main>Other</main>"),
+            ],
+            &Config {
+                min_inbound_links: 3,
+                ..Config::default()
+            },
+        );
+        let mut report = build_link_report_from_audit(&artifact).unwrap();
+        let destination = report
+            .links
+            .destinations
+            .iter()
+            .find(|destination| destination.destination.ends_with("/a"))
+            .unwrap()
+            .clone();
+        report.links.destinations.push(destination);
+        let mut pages = artifact.site.as_ref().unwrap().pages.clone();
+        let mut duplicate = pages
+            .iter()
+            .find(|page| page.path == "crawl/a/index.html")
+            .unwrap()
+            .clone();
+        duplicate.crawl_response.as_mut().unwrap().observed_url =
+            Some("https://example.org/b".into());
+        pages.push(duplicate);
+        let results = qualify_legacy_link_findings(&artifact.findings, &pages, None, &report);
+        let a = results
+            .iter()
+            .find(|finding| finding.rule_id == "LNK004" && finding.path == "crawl/a/index.html")
+            .unwrap();
+        assert_eq!(a.url.as_deref(), Some("https://example.org/a"));
+        assert_eq!(a.source_pages_by_context.get(&LinkContext::Body), Some(&1));
+    }
+
+    #[test]
     fn conditional_only_inbound_is_reported_even_when_legacy_rule_is_silent() {
         let artifact = audit(
             vec![
@@ -612,7 +675,7 @@ mod tests {
             qualify(
                 original_finding,
                 Some(old_page),
-                &old_report,
+                &destinations_by_url(&old_report),
                 &BTreeSet::new()
             )
             .conclusion,
