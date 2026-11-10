@@ -227,7 +227,7 @@ function extractPortableText(
   const result = extractFirstPortableText(data, mappings);
   if (result === null) return null;
   const candidates = Object.entries(data).filter(([field, value]) =>
-    isPortableTextArray(value) || isEmdashBlocksArray(value, field) ||
+    isPortableTextArray(value) || isMixedPortableTextArray(value) || isEmdashBlocksArray(value, field) ||
     ((field === "body" || field === "content") && typeof value === "string" && value.trim().length > 0),
   );
   // Automatically selecting one field does not prove the others are rendered
@@ -247,6 +247,7 @@ function extractFirstPortableText(
     const value = data[slug];
     if ((Array.isArray(value) && value.length === 0) || (typeof value === "string" && value.trim().length === 0)) foundEmptyBody = true;
     if (isPortableTextArray(value)) return { blocks: value };
+    if (isMixedPortableTextArray(value)) return mapMixedPortableText(value, mappings);
     if (isEmdashBlocksArray(value, slug)) return mapCustomBlocks(value, mappings);
     if (typeof value === "string" && value.trim().length > 0) {
       return { blocks: [portableTextBlock(value.trim(), `${slug}-text`)], capabilities: ["text"] };
@@ -256,11 +257,13 @@ function extractFirstPortableText(
   const blocks = data["blocks"];
   if (Array.isArray(blocks) && blocks.length === 0) foundEmptyBody = true;
   if (isPortableTextArray(blocks)) return { blocks };
+  if (isMixedPortableTextArray(blocks)) return mapMixedPortableText(blocks, mappings);
   if (isEmdashBlocksArray(blocks, "blocks")) return mapCustomBlocks(blocks, mappings);
 
   for (const [field, value] of Object.entries(data)) {
     if (field === "body" || field === "content" || field === "blocks") continue;
     if (isPortableTextArray(value)) return { blocks: value };
+    if (isMixedPortableTextArray(value)) return mapMixedPortableText(value, mappings);
     if (isEmdashBlocksArray(value, field)) return mapCustomBlocks(value, mappings);
   }
   return foundEmptyBody ? { blocks: [] } : null;
@@ -280,6 +283,28 @@ function isPortableTextArray(value: unknown): value is PortableTextBlock[] {
         ),
     )
   );
+}
+
+/** Portable Text can interleave ordinary text blocks with custom components. */
+function isMixedPortableTextArray(value: unknown): value is Array<Record<string, unknown>> {
+  return Array.isArray(value) && value.length > 0 && value.some((item) => isPortableTextArray([item])) &&
+    value.every((item) => isRecord(item) && typeof item["_type"] === "string" &&
+      (item["_type"] !== "block" || isPortableTextArray([item])));
+}
+
+function mapMixedPortableText(blocks: Array<Record<string, unknown>>, mappings?: CustomBlockMappings): ExtractedBody {
+  const result: PortableTextBlock[] = [];
+  let complete = true;
+  for (const block of blocks) {
+    if (isPortableTextArray([block])) {
+      result.push(block as unknown as PortableTextBlock);
+      continue;
+    }
+    const mapped = mapCustomBlocks([block], mappings);
+    result.push(...mapped.blocks);
+    if (mapped.capabilities !== undefined) complete = false;
+  }
+  return complete ? { blocks: result } : { blocks: result, capabilities: [] };
 }
 
 function isEmdashBlocksArray(
@@ -345,7 +370,10 @@ function mapCustomBlocks(
   };
   for (const block of blocks) {
     const fields = mappings?.[String(block["_type"])];
-    if (!Array.isArray(fields) || !mapFields(block, fields, 0)) return unavailable();
+    if (!Array.isArray(fields)) return unavailable();
+    // An empty mapping explicitly declares a component irrelevant to the body.
+    if (fields.length === 0) continue;
+    if (!mapFields(block, fields, 0)) return unavailable();
   }
   return { blocks: result };
 }
