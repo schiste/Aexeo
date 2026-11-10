@@ -50,7 +50,7 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [x] Reviewed corpus metrics require bindings to the current text, metadata
   and label; legacy unbound reviews are counted separately. Explicit feedback
   can be bound into a private corpus copy ([PR #132](https://github.com/schiste/Aexeo/pull/132)).
-  The bindings do not prove reviewer independence or bind the resolved policy.
+  The bindings do not prove reviewer independence; historical labels remain independent of a resolved policy.
 - [x] Bounded agent lint-and-revise workflow and local telemetry guidance ([PR #30](https://github.com/schiste/Aexeo/pull/30)).
 - [x] Configurable paragraph-length gate with Markdown and EmDash adapter
   capabilities ([PR #33](https://github.com/schiste/Aexeo/pull/33)).
@@ -94,8 +94,8 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
 - [x] Include a fingerprint of the CLI-resolved preset in corpus evaluation
   results and reject a policy change observed during a run. This identifies the
-  evaluated configuration; historical review events and human labels are not
-  bound to it, and the digest does not identify executable versions or evidence.
+  evaluated configuration; historical human labels are not bound to it, and
+  the digest does not identify executable versions or evidence.
 - [ ] Independently reviewed, diverse evaluation corpus and held-out metrics.
   A synthetic, explicitly unreviewed starter and evaluator were delivered in
   [PR #32](https://github.com/schiste/Aexeo/pull/32); they do not establish
@@ -174,3 +174,18 @@ include historical unverified events for compatibility. This check detects stale
 inputs, not tampering: reports are unsigned, and matching does not establish the
 policy, collection, evidence, site context, or reviewer independence. Truncated
 or unavailable inputs do not receive a fingerprint.
+
+### Feedback policy fingerprints
+
+Local CLI JSON reports include a `resolved_policy_fingerprint` computed from
+the policy used by that evaluation. Feedback capture and export preserve it;
+corpus evaluation reports counts of historical events with the same, a different,
+or no known policy. Existing override rates still combine these groups. A report
+whose fingerprint conflicts with the policy resolved for a corpus run is rejected.
+The `version: 1` hash uses SHA-256 over tagged JSON values: `n`, `t`, `f`, `i`,
+`d`, `s`, `a`, or `o` for null, booleans, integer, float, string, array, or
+object; strings and decimal integers have an eight-byte big-endian byte length,
+floats use eight-byte big-endian IEEE-754 bits, and arrays/objects carry an
+eight-byte item count. Object keys are UTF-8 length-framed in Unicode code-point
+order. The fingerprint is unsigned and does not identify the executable, input
+adapter, evidence, or other context; it does not establish reviewer independence.

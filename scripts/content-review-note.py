@@ -52,6 +52,11 @@ def capture(text, report, gate_id, example_id, human_status=None, reviewer=None,
         raise ValueError("report input fingerprint does not match the text and metadata")
     else:
         note["report_binding"] = "verified"
+    if "resolved_policy_fingerprint" in report:
+        spec = importlib.util.spec_from_file_location("content_gate_evaluation", Path(__file__).with_name("evaluate-content-gates.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        note["resolved_policy_fingerprint"] = module.validate_policy_fingerprint(report["resolved_policy_fingerprint"])
     return note
 
 
@@ -74,6 +79,8 @@ def export_review(corpus, note):
              "reviewer": note["reviewer"], "method": note["method"]}
     if "metadata_sha256" in note:
         event["metadata_sha256"] = note["metadata_sha256"]
+    if "resolved_policy_fingerprint" in note:
+        event["resolved_policy_fingerprint"] = module.validate_policy_fingerprint(note["resolved_policy_fingerprint"])
     if "report_binding" in note:
         if note["report_binding"] not in {"verified", "unverified"}:
             raise ValueError("invalid report binding")

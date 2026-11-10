@@ -46,6 +46,32 @@ class EvaluateTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "policy changed"):
                 eval_module.evaluate("cli", corpus, "holdout")
 
+    def test_review_policy_counts_and_mismatched_run(self):
+        vector = {"z": [None, True, False, -2, 18446744073709551615, 1e-6, -0.0, "Été"], "a": {"x": []}}
+        self.assertEqual(eval_module.typed_policy_hash(vector), "559524b71198cb4b0b14d0728e4f901dad0a00d9bf3bd8bcdee1ee0552189280")
+        policy = {"name": "x", "gates": [{"id": "g", "threshold": 0.000001}]}
+        digest = eval_module.typed_policy_hash(policy)
+        self.assertEqual(digest, eval_module.typed_policy_hash({"gates": [{"threshold": 0.000001, "id": "g"}], "name": "x"}))
+        self.assertNotEqual(digest, eval_module.typed_policy_hash({"name": "x", "gates": [{"id": "g", "threshold": 1}]}))
+        items = [{"id": str(i), "split": "holdout", "text": str(i), "expected": "passed"} for i in range(3)]
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": items}
+        def event(item):
+            return {"example_id": item["id"], "text_sha256": hashlib.sha256(item["text"].encode()).hexdigest(), "model_status": "passed", "reviewer_status": "passed", "reviewer": "r", "method": "manual"}
+        events = [event(item) for item in items]
+        events[0]["resolved_policy_fingerprint"] = {"version": 1, "sha256": digest}
+        events[1]["resolved_policy_fingerprint"] = {"version": 1, "sha256": "0" * 64}
+        log = {"version": 1, "gate_id": "g", "events": events}
+        metrics = eval_module.aggregate_review_events(corpus, "holdout", log, digest)
+        self.assertEqual(metrics["policy_binding_counts"], {"matching": 1, "different": 1, "unbound": 1})
+        self.assertEqual(metrics["policy_decisions"]["matching"]["agreed"], 1)
+        response = SimpleNamespace(returncode=0, stdout=json.dumps({"gates": [{"gate_id": "g", "status": "passed"}], "resolved_policy_fingerprint": events[1]["resolved_policy_fingerprint"]}))
+        with patch.object(eval_module, "resolve_policy", return_value=policy), patch.object(eval_module.subprocess, "run", return_value=response):
+            with self.assertRaisesRegex(ValueError, "report policy differs"):
+                eval_module.evaluate("cli", corpus, "holdout")
+        events[0]["resolved_policy_fingerprint"]["sha256"] = "broken"
+        with self.assertRaisesRegex(ValueError, "invalid policy"):
+            eval_module.aggregate_review_events(corpus, "holdout", log, digest)
+
     def test_policy_resolution_uses_cli_and_validates_output(self):
         self.policy_patch.stop()
         response = SimpleNamespace(returncode=0, stdout='{"name":"x","gates":[]}')
@@ -228,7 +254,8 @@ class EvaluateTests(unittest.TestCase):
         response = SimpleNamespace(returncode=0, stdout='{"gates":[{"gate_id":"g","status":"passed"}]}')
         with patch.object(eval_module.subprocess, "run", return_value=response):
             report = eval_module.evaluate("cli", corpus, "holdout", log)
-        self.assertEqual(report["historical_review_events"], result)
+        self.assertEqual(report["historical_review_events"]["counts"], result["counts"])
+        self.assertEqual(report["historical_review_events"]["policy_binding_counts"], {"matching": 0, "different": 0, "unbound": 3})
         log["events"][0]["text_sha256"] = "stale"
         with self.assertRaisesRegex(ValueError, "current example text"):
             eval_module.aggregate_review_events(corpus, "holdout", log)

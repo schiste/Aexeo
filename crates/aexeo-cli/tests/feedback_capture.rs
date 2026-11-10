@@ -125,6 +125,11 @@ fn export_matches_existing_python_validator_on_representative_inputs() {
     let corpus = json!({"version":1,"gate_id":"g","examples":[{"id":"e","split":"development","text":"abc\r\n","expected":"passed"}]});
     let note = json!({"version":1,"kind":"reported_human_feedback","gate_id":"g","example_id":"e","text_sha256":"552bab6864c7a7b69a502ed1854b9245c0e1a30f008aaa0b281da62585fdb025","model_status":"failed","human_status":"passed","reviewer":"human","method":"manual","reason":"private reason"});
     let mut cases: Vec<(Value, Value)> = vec![(corpus.clone(), note.clone())];
+    let mut policy_note = note.clone();
+    policy_note["resolved_policy_fingerprint"] = json!({"version": 1, "sha256": "a".repeat(64)});
+    cases.push((corpus.clone(), policy_note.clone()));
+    policy_note["resolved_policy_fingerprint"]["sha256"] = json!("bad");
+    cases.push((corpus.clone(), policy_note));
     let mut metadata_corpus = corpus.clone();
     metadata_corpus["examples"][0]["metadata"] = json!({"titre":"Été", "lang":"fr"});
     let mut metadata_note = note.clone();
@@ -306,6 +311,10 @@ fn capture_checks_report_against_original_markdown_and_metadata() {
     );
     let note_json: serde_json::Value = serde_json::from_slice(&fs::read(note).unwrap()).unwrap();
     assert_eq!(note_json["report_binding"], "verified");
+    assert_eq!(
+        note_json["resolved_policy_fingerprint"],
+        report_json["resolved_policy_fingerprint"]
+    );
     fs::write(&text, "# Autre texte\n").unwrap();
     assert_eq!(
         capture(&dir.path().join("stale-text")).status.code(),

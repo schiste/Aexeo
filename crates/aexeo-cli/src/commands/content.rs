@@ -462,6 +462,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     }
     if args.get_one::<String>("format").map(String::as_str) == Some("json") {
         let mut output = serde_json::to_value(&report)?;
+        let policy = serde_json::to_value(&preset)?;
+        output["resolved_policy_fingerprint"] = serde_json::json!({
+            "version": 1, "sha256": super::feedback::policy_hash(&policy)?
+        });
         if let Some(source) = input.source_text.as_ref().filter(|_| source_complete) {
             let text_sha256 = super::feedback::text_hash(source.as_bytes());
             let metadata_sha256 = input
