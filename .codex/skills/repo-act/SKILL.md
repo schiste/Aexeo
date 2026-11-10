@@ -42,6 +42,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For EmDash source-mapping tests, external diagnostics must be within the
   projected text. Use the valid position immediately after the last character
   to exercise an unmapped boundary; an out-of-range line is rejected earlier.
+- For protected site comparisons, verify the HTTP method and final response URL:
+  a successful login page after a redirect is not an observed site page, and
+  CMS access alone does not establish a matching rendered snapshot.
 - For content file confinement, test symlinks, non-files and root replacement.
   Lexical checks and per-component no-follow opens alone do not prevent a
   concurrent directory rename from escaping the root; use an atomic platform
