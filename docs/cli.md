@@ -172,7 +172,7 @@ Options:
           Load a named TOML preset as NAME=PATH; may be repeated
 
       --content-root <content-root>
-          Authorize this absolute content root for local file references (Linux only)
+          Authorize this absolute content root for local file references (Linux and supported macOS kernels)
 
   -h, --help
           Print help

@@ -233,10 +233,11 @@ The CLI validates known change fields, timestamps and URIs before evaluation,
 including optional fields explicitly set to null, and accepts unknown fields for
 forward compatibility. It does not use a generic JSON Schema validator; runners
 remain responsible for validating their inputs and enforcing section 5.
-Inline Markdown and plain text are supported. On Linux, file sources require an
-explicit `--content-root` matching the change's absolute `content_root`; the
-kernel must support `openat2`. Other platforms cannot currently read file
-sources. URI sources are not fetched. Deletions and renames do not establish
+Inline Markdown and plain text are supported. On Linux and macOS, file sources
+require an explicit `--content-root` matching the change's absolute
+`content_root`. The kernel must enforce `openat2` on Linux or
+`O_RESOLVE_BENEATH` on macOS; unsupported kernels fail closed. Other platforms
+cannot currently read file sources. URI sources are not fetched. Deletions and renames do not establish
 site impact, so their blocking impact checks are reported as not checked.
 
 Aexeo enforces a 64 MiB change-document limit, a 16 MiB per-item limit and a
