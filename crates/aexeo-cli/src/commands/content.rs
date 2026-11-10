@@ -296,7 +296,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             Ok(report.observations.iter().map(|observation| match observation.status {
                 ReachabilityStatus::Reachable => Observation::Reachable,
                 ReachabilityStatus::NotFound => Observation::NotFound,
-                ReachabilityStatus::Skipped if observation.reason == "non_http_destination" => Observation::NotApplicable,
+                ReachabilityStatus::Skipped if observation.reason == "non_http_destination"
+                    || (observation.reason == "relative_or_invalid_destination"
+                        && aexeo_core::content_gate::valid_link_destination(
+                            &values[observation.index - 1], &[], true)) => Observation::NotApplicable,
                 ReachabilityStatus::Uncertain | ReachabilityStatus::Skipped => Observation::NotChecked,
             }).collect::<Vec<_>>())
         }).transpose()?

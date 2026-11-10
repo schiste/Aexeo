@@ -207,8 +207,9 @@ The explicit flag enables network access only when this gate is present; otherwi
 no link checks are made. `--link-max-checks` (1–100, default 20) and
 `--link-timeout` (1–30 seconds, default 5) bound requests. Without the flag, or
 when the adapter cannot supply complete destinations, the gate is `not_checked`.
-Relative or malformed destinations and refused, failed or budget-exhausted
-requests leave coverage incomplete. Non-HTTP schemes are outside this gate.
+Valid relative links and non-HTTP schemes are outside this external gate. Malformed
+or scheme-relative destinations and refused, failed or budget-exhausted requests
+leave coverage incomplete.
 A 404/410 response is a finding to review, not proof of permanent failure. If
 some checks are inconclusive, findings for observed responses are retained and
 the gate is `not_checked`. Markdown source locations point to link occurrences.
