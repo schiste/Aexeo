@@ -229,8 +229,10 @@ Aexeo implements this invocation as `aexeo-cli content-change --preset NAME`.
 The runner supplies `CONTENT_GATE_CHANGE_FILE` and `CONTENT_GATE_VERDICT_FILE`;
 choose a preset deliberately because a passing verdict only covers its gates.
 Additional TOML presets can be loaded with `--preset-source NAME=PATH`.
-The implementation validates the documented structural subset, not the complete
-JSON Schema or every URI/timestamp constraint; runners must validate their inputs.
+The CLI validates known change fields, timestamps and URIs before evaluation,
+including optional fields explicitly set to null, and accepts unknown fields for
+forward compatibility. It does not use a generic JSON Schema validator; runners
+remain responsible for validating their inputs and enforcing section 5.
 Inline Markdown and plain text are supported. On Linux, file sources require an
 explicit `--content-root` matching the change's absolute `content_root`; the
 kernel must support `openat2`. Other platforms cannot currently read file

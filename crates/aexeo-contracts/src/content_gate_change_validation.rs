@@ -20,6 +20,116 @@ impl fmt::Display for ChangeValidationError {
 }
 impl std::error::Error for ChangeValidationError {}
 
+/// Parse and validate a v1 change document before evaluation. Unknown fields
+/// remain permitted for forward compatibility. No content is read or fetched.
+pub fn parse_validated_change(bytes: &[u8]) -> Result<Change, ChangeValidationError> {
+    let value: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|_| ChangeValidationError("invalid change JSON"))?;
+    validate_present_fields(&value)?;
+    let change: Change = serde_json::from_value(value)
+        .map_err(|_| ChangeValidationError("invalid change fields"))?;
+    validate_change_structure(&change)?;
+    if chrono::DateTime::parse_from_rfc3339(&change.created_at).is_err() {
+        return Err(ChangeValidationError("invalid change timestamp"));
+    }
+    if change.content_root.as_ref().is_some_and(String::is_empty)
+        || change.origin.system.as_ref().is_some_and(String::is_empty)
+        || change
+            .origin
+            .reference
+            .as_ref()
+            .is_some_and(String::is_empty)
+        || change
+            .author
+            .as_ref()
+            .and_then(|author| author.id.as_ref())
+            .is_some_and(String::is_empty)
+    {
+        return Err(ChangeValidationError("empty optional field"));
+    }
+    if let Some(site) = &change.site
+        && (site.id.as_ref().is_some_and(String::is_empty)
+            || site.base_url.as_ref().is_some_and(|uri| !valid_uri(uri)))
+    {
+        return Err(ChangeValidationError("invalid site field"));
+    }
+    for entry in &change.entries {
+        if entry
+            .previous_entity_id
+            .as_ref()
+            .is_some_and(String::is_empty)
+        {
+            return Err(ChangeValidationError("empty previous identity"));
+        }
+        for state in [entry.before.as_ref(), entry.after.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            if state.revision.as_ref().is_some_and(String::is_empty)
+                || state.uri.as_ref().is_some_and(|uri| !valid_uri(uri))
+            {
+                return Err(ChangeValidationError("invalid content state field"));
+            }
+        }
+    }
+    Ok(change)
+}
+
+fn valid_uri(value: &str) -> bool {
+    iri_string::types::UriStr::new(value).is_ok()
+}
+
+// Serde treats `null` in an Option as absence, but the v1 schema allows
+// omission, not null, for each of these known fields.
+fn validate_present_fields(value: &serde_json::Value) -> Result<(), ChangeValidationError> {
+    fn reject_null(
+        value: &serde_json::Value,
+        fields: &[&str],
+    ) -> Result<(), ChangeValidationError> {
+        if fields
+            .iter()
+            .any(|field| value.get(*field).is_some_and(serde_json::Value::is_null))
+        {
+            return Err(ChangeValidationError("null change field"));
+        }
+        Ok(())
+    }
+    reject_null(value, &["content_root", "site", "author", "extensions"])?;
+    if let Some(origin) = value.get("origin") {
+        reject_null(origin, &["system", "ref"])?;
+    }
+    if let Some(site) = value.get("site") {
+        if site.as_object().is_some_and(serde_json::Map::is_empty) {
+            return Err(ChangeValidationError("empty site"));
+        }
+        reject_null(site, &["id", "base_url"])?;
+    }
+    if let Some(author) = value.get("author") {
+        reject_null(author, &["id", "display_name", "kind"])?;
+    }
+    if let Some(entries) = value.get("entries").and_then(serde_json::Value::as_array) {
+        for entry in entries {
+            reject_null(
+                entry,
+                &[
+                    "previous_entity_id",
+                    "public_path",
+                    "metadata",
+                    "before",
+                    "after",
+                ],
+            )?;
+            for state in [entry.get("before"), entry.get("after")]
+                .into_iter()
+                .flatten()
+            {
+                reject_null(state, &["revision", "inline", "file", "uri"])?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Validate a subset of v1's structural invariants, without accessing sources.
 pub fn validate_change_structure(change: &Change) -> Result<(), ChangeValidationError> {
     if change.schema != CHANGE_SCHEMA {
