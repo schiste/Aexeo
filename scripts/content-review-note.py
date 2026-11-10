@@ -90,8 +90,8 @@ def export_review(corpus, note):
     return log
 
 
-def bind_review(corpus, note):
-    """Create a new corpus copy from an explicit matching human verdict."""
+def bind_review(corpus, note, accept_human_label=False):
+    """Create a new corpus copy, requiring explicit acceptance of label changes."""
     event = export_review(corpus, note)["events"][0]
     if corpus.get("fixture_kind") == "synthetic_regression":
         raise ValueError("synthetic regression examples cannot be marked reviewed")
@@ -99,13 +99,19 @@ def bind_review(corpus, note):
     item = next(item for item in result["examples"] if item["id"] == event["example_id"])
     if item.get("review_status") == "reviewed":
         raise ValueError("example already has a review; preserve its provenance")
-    if item["expected"] != event["reviewer_status"]:
+    previous_expected = item["expected"]
+    label_changed = previous_expected != event["reviewer_status"]
+    if label_changed and not accept_human_label:
         raise ValueError("human verdict differs from the proposed label; resolve explicitly")
+    if label_changed:
+        item["expected"] = event["reviewer_status"]
     item["review_status"] = "reviewed"
     item["review"] = {"reviewer": event["reviewer"], "method": event["method"],
                       "text_sha256": event["text_sha256"], "expected": item["expected"]}
     if "metadata_sha256" in event:
         item["review"]["metadata_sha256"] = event["metadata_sha256"]
+    if label_changed:
+        item["review"]["previous_expected"] = previous_expected
     return result
 
 
@@ -135,9 +141,11 @@ def main():
     bind.add_argument("--corpus", type=Path, required=True)
     bind.add_argument("--note", type=Path, required=True)
     bind.add_argument("--output", type=Path, required=True)
+    bind.add_argument("--accept-human-label", action="store_true", help="Explicitly replace a conflicting unreviewed label with the human verdict")
     bind.add_argument("--telemetry", action="store_true", help="Emit aggregate local timing to stderr")
     args = parser.parse_args()
     started = time.perf_counter()
+    label_changed = False
     try:
         if args.action == "capture":
             metadata = read_json(args.metadata) if args.metadata is not None else None
@@ -151,11 +159,18 @@ def main():
         elif args.action == "export-review":
             value = export_review(read_json(args.corpus), read_json(args.note))
         else:
-            value = bind_review(read_json(args.corpus), read_json(args.note))
+            corpus = read_json(args.corpus)
+            note = read_json(args.note)
+            value = bind_review(corpus, note, args.accept_human_label)
+            original = next(item for item in corpus["examples"] if item["id"] == note["example_id"])
+            label_changed = original["expected"] != note["human_status"]
         write_new(args.output, value)
         if args.telemetry:
-            print(json.dumps({"event": "content_review_note", "version": 1, "operation": args.action,
-                              "elapsed_ms": (time.perf_counter() - started) * 1000}), file=sys.stderr)
+            event = {"event": "content_review_note", "version": 1, "operation": args.action,
+                     "elapsed_ms": (time.perf_counter() - started) * 1000}
+            if args.action == "bind-review":
+                event["label_changed"] = label_changed
+            print(json.dumps(event), file=sys.stderr)
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
         parser.exit(2, f"feedback operation failed: {error}\n")
 
