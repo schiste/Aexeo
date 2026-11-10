@@ -552,3 +552,16 @@ telemetry event marks rendered-page and generated-metadata coverage as not obser
 The built-in `article` preset is a minimal non-empty text check, not a complete
 editorial or SEO assessment. Choose and compose the editorial presets appropriate
 to the content, or supply a project-specific preset.
+
+When the host renderer selects a description from collection fields, configure
+the same ordered fallback explicitly, for example:
+
+```ts
+aexeoPlugin({
+  descriptionFieldsByCollection: { blog_posts: ["seo_description", "excerpt"] },
+})
+```
+
+The mapping projects source values; it does not prove what metadata the page
+renderer generated. An absent value in a valid mapping is recorded separately
+from an unknown or invalid mapping.

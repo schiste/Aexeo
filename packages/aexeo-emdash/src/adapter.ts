@@ -70,6 +70,7 @@ export async function adaptContentItemWithContext(
   defaultLocale?: string,
   blockMappings?: CustomBlockMappings,
   contentFields?: readonly string[],
+  descriptionFields?: readonly string[],
 ): Promise<AdaptedContent> {
   const publicUrl =
     content.status === "published"
@@ -83,6 +84,7 @@ export async function adaptContentItemWithContext(
     ...(defaultLocale === undefined ? {} : { defaultLocale }),
     ...(blockMappings === undefined ? {} : { blockMappings }),
     ...(contentFields === undefined ? {} : { contentFields }),
+    ...(descriptionFields === undefined ? {} : { descriptionFields }),
   });
 
   const translationSet = await contentApi.getTranslations(
@@ -137,6 +139,7 @@ export function adaptContentItem(
     defaultLocale?: string;
     blockMappings?: CustomBlockMappings | undefined;
     contentFields?: readonly string[];
+    descriptionFields?: readonly string[];
   } = {},
 ): AdaptedContent {
   const route = options.route ?? deriveRoute(content);
@@ -144,7 +147,14 @@ export function adaptContentItem(
     content.seo?.title ?? content.data["title"] ?? content.slug ?? content.id,
   );
   const document: EmdashDocument = { route, title };
-  const description = content.seo?.description ?? content.data["description"];
+  const fields = options.descriptionFields;
+  const mapped = fields !== undefined && fields.length > 0 &&
+    fields.every((field) => typeof field === "string" && field.length > 0 &&
+      (content.data[field] == null || typeof content.data[field] === "string"));
+  if (mapped) document.description_source_observed = true;
+  const description = fields === undefined
+    ? content.seo?.description ?? content.data["description"]
+    : mapped ? fields.map((field) => content.data[field]).find((value) => typeof value === "string" && value.length > 0) : undefined;
   if (typeof description === "string" && description.length > 0) {
     document.description = description;
   }

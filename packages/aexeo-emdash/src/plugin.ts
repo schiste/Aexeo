@@ -1,4 +1,4 @@
-import { isCmsObservableFinding } from "./cms-coverage.js";
+import { hasCompleteBody, isCmsObservableFinding } from "./cms-coverage.js";
 import type { CustomBlockMappings } from "./adapter.js";
 import type { SuppressionFilter } from "./suppressions.js";
 import type { EmdashDocument, Finding } from "./types.js";
@@ -494,6 +494,7 @@ export async function handleAfterSaveConfigured(
   suppressionFilter?: SuppressionFilter,
   blockMappings?: CustomBlockMappings,
   contentFields?: readonly string[],
+  descriptionFields?: readonly string[],
 ): Promise<void> {
   const adapted = await adaptContentItemWithContext(
     event.content,
@@ -501,6 +502,7 @@ export async function handleAfterSaveConfigured(
     ctx.site?.locale,
     blockMappings,
     contentFields,
+    descriptionFields,
   );
   const document = adapted.document;
   recordContentCoverage(ctx, [document]);
@@ -528,12 +530,12 @@ export async function handleAfterSaveConfigured(
   // Page-scoped findings replace this route's stored set; site-graph,
   // sitewide and template-scoped findings are left for the next Refresh.
   const storedGraphFindings = (await readFindings(kv, document.route)).filter(
-    (finding) => SITE_GRAPH_RULE_IDS.has(finding.rule_id) && isCmsObservableFinding(finding),
+    (finding) => SITE_GRAPH_RULE_IDS.has(finding.rule_id) && isCmsObservableFinding(finding, hasCompleteBody(document)),
   );
   const pageFindings = [
     ...result.findings.filter(
       (finding) =>
-        finding.scope === "page" && !SITE_GRAPH_RULE_IDS.has(finding.rule_id) && isCmsObservableFinding(finding),
+        finding.scope === "page" && !SITE_GRAPH_RULE_IDS.has(finding.rule_id) && isCmsObservableFinding(finding, hasCompleteBody(document)),
     ),
     ...storedGraphFindings,
   ];
@@ -615,6 +617,7 @@ export async function evaluateAndPersistAll(
     suppressionFilter?: SuppressionFilter;
     blockMappings?: CustomBlockMappings | undefined;
     contentFieldsByCollection?: Record<string, readonly string[]> | undefined;
+    descriptionFieldsByCollection?: Record<string, readonly string[]> | undefined;
   },
 ): Promise<RefreshSummary> {
   const collections = options.collections ?? DEFAULT_COLLECTIONS;
@@ -654,6 +657,7 @@ export async function evaluateAndPersistAll(
             ctx.site?.locale,
             options.blockMappings,
             options.contentFieldsByCollection?.[collection],
+            options.descriptionFieldsByCollection?.[collection],
           );
           documents.push(adapted.document);
           documentCollections.push(adapted.meta.collection);
@@ -700,8 +704,11 @@ export async function evaluateAndPersistAll(
   for (const route of documentRoutes) {
     findingsByRoute.set(route, []);
   }
+  const completeByRoute = new Map(documents.map((document) => [document.route, hasCompleteBody(document)]));
+  const allBodiesComplete = documents.every(hasCompleteBody);
   for (const finding of result.findings) {
-    if (!isCmsObservableFinding(finding)) continue;
+    const complete = finding.scope === "page" ? completeByRoute.get(finding.path) ?? false : allBodiesComplete;
+    if (!isCmsObservableFinding(finding, complete)) continue;
     // The bridge tags page-scope findings with a path that maps to
     // our document route; sitewide and template-scope findings get
     // bucketed under "*" so the findings page can list them under a

@@ -178,6 +178,19 @@ mode="strict"
   for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/mixed", rule), false);
 }
 
+// Ordered host metadata mappings reach both save and Refresh.
+{
+  const mapped = item("mapped", { data: { body: [block("p", "Content")], seo_description: "Preferred", excerpt: "Fallback" } });
+  const host = fakeHost([mapped]);
+  const configured = createPlugin({ descriptionFieldsByCollection: { pages: ["seo_description", "excerpt"] } });
+  await configured.hooks["content:afterSave"].handler({ content: mapped, collection: "pages", isNew: false }, host.ctx);
+  assert.equal(host.store.get("document:/mapped").document.description, "Preferred");
+  assert.equal(host.store.get("document:/mapped").document.description_source_observed, true);
+  host.items[0] = { ...mapped, data: { ...mapped.data, seo_description: "" } };
+  await configured.routes.refresh.handler(host.ctx);
+  assert.equal(host.store.get("document:/mapped").document.description, "Fallback");
+}
+
 // --- A save must not erase what Refresh found --------------------------------
 
 // Every site-graph rule is triggered on /subject by a Refresh, so each must
