@@ -78,9 +78,12 @@ does not infer meaning or identify authorship. Repeated openings may be
 intentional, and languages without whitespace word boundaries need different
 rules. A missing paragraph capability is `not_checked`. Findings point to the
 paragraph start; measurements count paragraphs, openings evaluated or skipped,
-and excess occurrences. When no nonempty paragraph has enough whitespace-separated
-words, the gate reports `not_checked`; this does not detect language or perform
-linguistic segmentation. To bound resource use, an opening over 4,096 bytes or
+and excess occurrences. If any paragraph is skipped because it has too few
+usable whitespace-separated words, the gate reports `not_checked` and retains
+findings from assessed paragraphs. This conservative result also applies to short
+paragraphs that may be intentional; the check does not detect language or perform
+linguistic segmentation. An explicitly empty paragraph collection still passes.
+To bound resource use, an opening over 4,096 bytes or
 more than 10,000 distinct openings stops the check as `not_checked`, retaining
 findings from the portion already assessed.
 

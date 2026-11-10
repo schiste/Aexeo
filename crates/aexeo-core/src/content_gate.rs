@@ -1520,9 +1520,9 @@ impl ContentPreset {
                             measurements.insert("openings_evaluated".into(), evaluated);
                             measurements.insert("openings_skipped".into(), skipped);
                             measurements.insert("openings_exceeding_limit".into(), exceeding);
-                            if reason.is_none() && !paragraphs.is_empty() && evaluated == 0 {
+                            if reason.is_none() && skipped > 0 {
                                 reason = Some(
-                                    "no paragraph has enough whitespace-separated opening words"
+                                    "some paragraph openings could not be assessed using whitespace-separated words"
                                         .into(),
                                 );
                             }
@@ -3066,9 +3066,30 @@ terms = ["bad"]
             paragraph("same words".into()),
             paragraph("same words again".into()),
         ]);
-        assert_eq!(mixed.status, GateStatus::Failed);
+        assert_eq!(mixed.status, GateStatus::NotChecked);
+        assert_eq!(mixed.findings.len(), 1);
+        assert!(
+            mixed
+                .reason
+                .as_deref()
+                .unwrap()
+                .contains("could not be assessed")
+        );
         assert_eq!(mixed.measurements["openings_evaluated"], 2);
         assert_eq!(mixed.measurements["openings_skipped"], 1);
+        let partial_without_findings = run(vec![
+            paragraph("valid opening".into()),
+            paragraph("中文文章沒有空格".into()),
+        ]);
+        assert_eq!(partial_without_findings.status, GateStatus::NotChecked);
+        assert!(partial_without_findings.findings.is_empty());
+        assert_eq!(
+            partial_without_findings.measurements["openings_evaluated"],
+            1
+        );
+        assert_eq!(partial_without_findings.measurements["openings_skipped"], 1);
+        let complete = run(vec![paragraph("valid opening".into())]);
+        assert_eq!(complete.status, GateStatus::Passed);
         let large = run(vec![
             paragraph("same words".into()),
             paragraph("same words again".into()),
