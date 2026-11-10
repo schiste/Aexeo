@@ -599,7 +599,7 @@ export interface RefreshSummary {
 // failure. The `reason` discriminator is opaque to evaluateAndPersistAll;
 // it just gets surfaced in the RefreshSummary.errors list.
 export type DocumentAssessment =
-  | { status: "evaluated"; preset: string; gates: Pick<import("./content.js").ContentGateResult, "gate_id" | "status" | "blocking" | "scope" | "required_capability" | "reason">[] }
+  | { status: "evaluated"; preset: string; gates: Pick<import("./content.js").ContentGateResult, "gate_id" | "status" | "blocking" | "scope" | "required_capability" | "reason" | "measurements">[] }
   | { status: "error"; reason: string; detail: string };
 
 export type EvaluationOutcome =

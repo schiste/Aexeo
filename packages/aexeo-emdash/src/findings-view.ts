@@ -1,3 +1,4 @@
+import { describeGate } from "./assessment-display.js";
 import { isCmsObservableFinding } from "./cms-coverage.js";
 import type { CustomBlockMappings } from "./adapter.js";
 // Shared Block Kit view layer for both plugin entrypoints.
@@ -512,7 +513,7 @@ export async function renderDocumentPanel(
       { type: "context", text: "Rendered page markup, generated metadata and sitewide link inventory are not checked here. Audit the built site for page-level and link findings." },
       ...(incomplete ? [{ type: "context", text: "Sitewide and cross-document checks are unavailable; refresh after resolving the CMS input error." }] : []),
       ...(assessment?.status === "error" ? [{ type: "context", text: `Evaluation failed: ${assessment.reason}. Findings are unavailable for this revision.` }] : []),
-      ...(assessment?.status === "evaluated" ? assessment.gates.filter((gate) => gate.status === "not_checked").map((gate) => ({ type: "context", text: `${gate.gate_id} not checked: ${gate.reason ?? "required input unavailable"}` })) : []),
+      ...(assessment?.status === "evaluated" ? [{ type: "context", text: `Content preset: ${assessment.preset}. Results cover only these configured checks.` }, ...assessment.gates.map((gate) => ({ type: "context", text: describeGate(gate) }))] : []),
       ...(findings.length === 0
         ? []
         : [{ type: "divider" }, documentFindingsTable(sorted)]),

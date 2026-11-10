@@ -72,8 +72,8 @@ export function withContentPreset(
         assessments[document.route] = {
           status: "evaluated",
           preset: name,
-          gates: report.gates.map(({ gate_id, status, blocking, scope, required_capability, reason }) =>
-            ({ gate_id, status, blocking, scope, required_capability, reason })),
+          gates: report.gates.map(({ gate_id, status, blocking, scope, required_capability, reason, measurements }) =>
+            ({ gate_id, status, blocking, scope, required_capability, reason, ...(measurements === undefined ? {} : { measurements }) })),
         };
         for (const gate of report.gates) findings.push(...gate.findings);
       }

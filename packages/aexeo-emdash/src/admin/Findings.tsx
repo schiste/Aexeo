@@ -27,6 +27,7 @@
 
 import * as React from "react";
 import { useCallback, useEffect, useState } from "react";
+import { describeGate } from "../assessment-display.js";
 import type { FindingsPayload, RouteSummary } from "../data-route.js";
 
 const PLUGIN_ID = "aexeo-emdash";
@@ -188,11 +189,15 @@ export function Findings(): React.JSX.Element {
         </section>
       )}
 
-      {payload.routes.filter((route) => route.assessment?.status === "error" || (route.assessment?.status === "evaluated" && route.assessment.gates.some((gate) => gate.status === "not_checked"))).map((route) => (
+      {payload.routes.filter((route) => route.assessment !== undefined).map((route) => (
         <section key={route.route} className="rounded border border-kumo-line p-3 text-sm">
           <strong>{route.route}</strong>
           {route.assessment?.status === "error" ? <p>Evaluation failed: {route.assessment.reason}. Findings are unavailable for this revision.</p> :
-            route.assessment?.status === "evaluated" ? route.assessment.gates.filter((gate) => gate.status === "not_checked").map((gate) => <p key={gate.gate_id}>{gate.gate_id} not checked: {gate.reason ?? "required input unavailable"}</p>) : null}
+            route.assessment?.status === "evaluated" ? <details>
+              <summary>Content preset: {route.assessment.preset} ({route.assessment.gates.length} checks)</summary>
+              <p>Results cover only these configured checks.</p>
+              <ul>{route.assessment.gates.map((gate) => <li key={gate.gate_id}>{describeGate(gate)}</li>)}</ul>
+            </details> : null}
         </section>
       ))}
 

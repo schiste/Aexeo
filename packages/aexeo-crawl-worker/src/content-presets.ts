@@ -92,14 +92,14 @@ export async function contentPresetFindings(
     const report = JSON.parse(extensionsJson === undefined
       ? evaluate(documentJson, name, JSON.stringify(sources), evidenceJson)
       : evaluate(documentJson, name, JSON.stringify(sources), evidenceJson, extensionsJson)) as {
-      gates: Array<{ gate_id: string; status: string; blocking: boolean; scope: string; required_capability: string; reason: string | null; findings: unknown[] }>;
+      gates: Array<{ gate_id: string; status: string; blocking: boolean; scope: string; required_capability: string; reason: string | null; measurements?: Record<string, number>; findings: unknown[] }>;
     };
     if (assessments !== undefined) {
       if (typeof document !== "object" || document === null || !("route" in document) || typeof document.route !== "string") throw new Error("document route is required for assessments");
       assessments[document.route] = {
         status: "evaluated", preset: name,
-        gates: report.gates.map(({ gate_id, status, blocking, scope, required_capability, reason }) =>
-          ({ gate_id, status, blocking, scope, required_capability, reason })),
+        gates: report.gates.map(({ gate_id, status, blocking, scope, required_capability, reason, measurements }) =>
+          ({ gate_id, status, blocking, scope, required_capability, reason, ...(measurements === undefined ? {} : { measurements }) })),
       };
     }
     for (const gate of report.gates) {
