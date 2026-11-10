@@ -22,6 +22,33 @@ class EvaluateTests(unittest.TestCase):
         self.policy_patch.start()
         self.addCleanup(self.policy_patch.stop)
 
+    def test_repeated_inputs_are_reported_and_excluded_from_unique_metrics(self):
+        text = "private repeated text"
+        reviewed = {"reviewer": "r", "method": "manual", "text_sha256": hashlib.sha256(text.encode()).hexdigest(), "expected": "passed"}
+        items = [
+            {"id": "private-a", "split": "holdout", "text": text, "expected": "passed", "review_status": "reviewed", "review": reviewed},
+            {"id": "private-b", "split": "holdout", "text": text, "expected": "failed"},
+            {"id": "private-c", "split": "holdout", "text": text, "metadata": {}, "expected": "passed"},
+            {"id": "private-d", "split": "holdout", "text": "unique reviewed", "expected": "passed", "review_status": "reviewed", "review": {"reviewer": "r", "method": "manual", "text_sha256": hashlib.sha256(b"unique reviewed").hexdigest(), "expected": "passed"}},
+        ]
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": items}
+        response = SimpleNamespace(returncode=0, stdout='{"gates":[{"gate_id":"g","status":"passed"}]}')
+        with patch.object(eval_module.subprocess, "run", return_value=response):
+            result = eval_module.evaluate("cli", corpus, "holdout")
+        self.assertEqual(result["input_multiplicity"], {"unique_input_examples": 2, "duplicate_input_groups": 1, "duplicate_input_examples": 2, "conflicting_label_groups": 1})
+        self.assertEqual(result["counts"]["false_negative"], 1)
+        self.assertEqual(result["reviewed_metrics"]["examples"], 2)
+        self.assertEqual(result["unique_input_metrics"]["examples"], 2)
+        self.assertEqual(result["unique_input_metrics"]["counts"]["false_negative"], 0)
+        self.assertEqual(result["unique_reviewed_input_metrics"]["examples"], 1)
+        self.assertNotIn("private", json.dumps(result))
+        corpus["examples"] = items[:2]
+        with patch.object(eval_module.subprocess, "run", return_value=response):
+            result = eval_module.evaluate("cli", corpus, "holdout")
+        self.assertEqual(result["unique_input_metrics"]["examples"], 0)
+        self.assertIsNone(result["unique_input_metrics"]["recall"])
+        self.assertIsNone(result["unique_reviewed_input_metrics"]["unchecked_rate"])
+
     def test_policy_hash_is_canonical_and_detects_changes(self):
         first = {"name": "Été", "gates": [{"id": "g", "min_words": 5}]}
         reordered = {"gates": [{"min_words": 5, "id": "g"}], "name": "Été"}
