@@ -353,6 +353,40 @@ describe("sitewide refresh coverage", () => {
     expect(events.find(([name]) => name === "aexeo.sitewide_coverage")).toEqual(["aexeo.sitewide_coverage", { status: "body_incomplete" }]);
     expect(JSON.stringify(events)).not.toContain("private-route");
   });
+  it.each(["save", "delete", "create"])("withholds cross-document results after a concurrent %s", async (change) => {
+    const subject = item("a", OLD);
+    subject.data.content = [];
+    const { ctx, store } = host([subject]);
+    const global = { ...finding("*", "GLOBAL"), scope: "sitewide" as const };
+    const result = await sweep(ctx, async () => {
+      if (change === "save") {
+        const updated = item("a", NEW, "changed");
+        updated.data.content = [];
+        await save(ctx, updated, returning("NEW"));
+      } else if (change === "delete") {
+        await handleAfterDelete({ id: "a", collection: "pages", permanent: true }, ctx);
+      } else {
+        const created = item("new", NEW);
+        created.data.content = [];
+        await save(ctx, created, returning("NEW"));
+      }
+      return { ok: true, findings: [global, finding("/a", "CNT005"), finding("/a", "OTHER")] };
+    });
+    expect(result.errors.join(" ")).toContain("changed during refresh");
+    expect(store.get(findingsKey("*"))).toMatchObject({ findings: [], assessment: { reason: "changed_during_refresh" } });
+    expect(rulesAt(store, "/a") ?? []).not.toContain("CNT005");
+    if (change === "save") expect(rulesAt(store, "/a")).toEqual(["NEW"]);
+    if (change === "delete") expect(store.has(documentKey("/a"))).toBe(false);
+    if (change === "create") expect(rulesAt(store, "/new")).toEqual(["NEW"]);
+  });
+  it("still clears stale records when the inventory is stable", async () => {
+    const { ctx, store } = host([]);
+    await save(ctx, item("old", OLD), returning("OLD"));
+    const result = await sweep(ctx, returning());
+    expect(result.errors).toEqual([]);
+    expect(store.has(documentKey("/old"))).toBe(false);
+    expect(store.get(findingsKey("*"))).toEqual({ route: "*", findings: [] });
+  });
   it("marks missing or repeated pagination cursors incomplete", async () => {
     for (const cursor of [undefined, "repeat"]) {
       const { ctx, store } = host();
