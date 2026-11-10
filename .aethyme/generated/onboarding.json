@@ -83,7 +83,7 @@
         "member_count": 5,
         "ci_mentions": 0,
         "executable_entrypoints": 2,
-        "source_files": 233
+        "source_files": 235
       }
     },
     {
@@ -123,7 +123,7 @@
         "member_count": 0,
         "ci_mentions": 0,
         "executable_entrypoints": 2,
-        "source_files": 233
+        "source_files": 235
       }
     },
     {
@@ -319,7 +319,7 @@
       "member_count": 5,
       "ci_mentions": 0,
       "executable_entrypoints": 2,
-      "source_files": 233
+      "source_files": 235
     }
   },
   "commands": [
@@ -479,13 +479,13 @@
     ]
   },
   "freshness": {
-    "source_digest": "038ebbb319751bc4e3cd7c525025fbedbf1658044bc45b20bf07362647c6d66d",
+    "source_digest": "9914b33cd338f814ff041779874f4ae50993390d0e0d19fd0c9a6ae5845d8d22",
     "source_commit": null,
-    "source_file_count": 381,
+    "source_file_count": 391,
     "generator": "deterministic"
   },
   "notes": [
-    "EmDash WASM integration: run `npm ci --prefix packages/aexeo-emdash`, then `npm run build --prefix packages/aexeo-emdash` before `npm run test:wasm --prefix packages/aexeo-emdash`. The smoke tests import the bundled `dist/content.js`; building TypeScript and WASM alone does not create it.",
+    "EmDash tests: run `npm ci --prefix packages/aexeo-emdash` and the fast `npm test --prefix packages/aexeo-emdash` before generating WASM, as CI does; static runtime imports can otherwise hide a missing generated bridge dependency. For WASM integration, run `npm run build --prefix packages/aexeo-emdash` before `npm run test:wasm --prefix packages/aexeo-emdash`. The smoke tests import bundled `dist/content.js`; building TypeScript and WASM alone does not create it.",
     "Run `cargo fmt --all -- --check` after adding or moving a module: it also checks the parent `mod` declarations, which a focused test run does not.",
     "For a broker-coordinated `gh pr merge --match-head-commit`, pass the full `headRefOid` from `gh pr view --json headRefOid`; an abbreviated SHA is rejected.",
     "If a broker push fails with an internal remote hook error, keep the commit and read the error, then retry through the broker without force. If it persists, report the rejection and keep the session for recovery.",

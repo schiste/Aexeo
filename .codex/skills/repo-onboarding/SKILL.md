@@ -68,7 +68,7 @@ description: Use when starting work in an unfamiliar repository, when the task a
 
 ## Maintainer Notes
 
-- EmDash WASM integration: run `npm ci --prefix packages/aexeo-emdash`, then `npm run build --prefix packages/aexeo-emdash` before `npm run test:wasm --prefix packages/aexeo-emdash`. The smoke tests import the bundled `dist/content.js`; building TypeScript and WASM alone does not create it.
+- EmDash tests: run `npm ci --prefix packages/aexeo-emdash` and the fast `npm test --prefix packages/aexeo-emdash` before generating WASM, as CI does; static runtime imports can otherwise hide a missing generated bridge dependency. For WASM integration, run `npm run build --prefix packages/aexeo-emdash` before `npm run test:wasm --prefix packages/aexeo-emdash`. The smoke tests import bundled `dist/content.js`; building TypeScript and WASM alone does not create it.
 - Run `cargo fmt --all -- --check` after adding or moving a module: it also checks the parent `mod` declarations, which a focused test run does not.
 - For a broker-coordinated `gh pr merge --match-head-commit`, pass the full `headRefOid` from `gh pr view --json headRefOid`; an abbreviated SHA is rejected.
 - If a broker push fails with an internal remote hook error, keep the commit and read the error, then retry through the broker without force. If it persists, report the rejection and keep the session for recovery.
@@ -77,7 +77,7 @@ description: Use when starting work in an unfamiliar repository, when the task a
 
 ## Freshness
 
-- Source digest: `038ebbb319751bc4e3cd7c525025fbedbf1658044bc45b20bf07362647c6d66d`
-- Tracked source files: `381`
+- Source digest: `9914b33cd338f814ff041779874f4ae50993390d0e0d19fd0c9a6ae5845d8d22`
+- Tracked source files: `391`
 - Overrides applied: `True`
 - Sections generated: `repo, workspaces, primary_workspace, commands, areas, entrypoints, caution_zones, generated_paths, dangerous_paths, navigation_recipes, summon, freshness`
