@@ -24,6 +24,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   session-owned commits: old commits can still be replay candidates after a
   sync. Preserve a backup ref and reconcile the branch onto the current base
   with only the new commits before submitting; verify the resulting diff.
+- Root `package.json` sets `type: module`: use ES module imports for root
+  `.js` scripts and tests, or explicitly use `.cjs` for CommonJS. Run the
+  script directly with Node to verify its entrypoint as well as its tests.
 - Inspect caution zones before changing generated or vendored areas.
 
 ## Validation Checklist
