@@ -6,6 +6,7 @@ export interface ContentPresetEnv {
   CONTENT_EVIDENCE_SOURCES_JSON?: string;
   /** Optional Cloudflare service binding, configured by the operator. */
   CONTENT_GATE_PROVIDER?: { fetch(input: string, init: RequestInit): Promise<Response> };
+  CONTENT_GATE_TELEMETRY?: string;
 }
 
 const MAX_PROVIDER_BYTES = 2 * 1024 * 1024;
@@ -76,7 +77,16 @@ export async function contentPresetFindings(
     let extensionsJson: string | undefined;
     if (env.CONTENT_GATE_PROVIDER !== undefined) {
       if (!project) throw new Error("content gate projection is unavailable");
-      extensionsJson = await providerResults(env.CONTENT_GATE_PROVIDER, JSON.parse(project(documentJson, evidenceJson)), name, collection);
+      const started = env.CONTENT_GATE_TELEMETRY === "true" ? performance.now() : 0;
+      let status = "error";
+      try {
+        extensionsJson = await providerResults(env.CONTENT_GATE_PROVIDER, JSON.parse(project(documentJson, evidenceJson)), name, collection);
+        status = "success";
+      } finally {
+        if (env.CONTENT_GATE_TELEMETRY === "true") {
+          console.info(JSON.stringify({ event: "external_gate_provider", duration_ms: performance.now() - started, status }));
+        }
+      }
     }
     const report = JSON.parse(extensionsJson === undefined
       ? evaluate(documentJson, name, JSON.stringify(sources), evidenceJson)

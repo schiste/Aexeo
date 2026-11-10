@@ -81,3 +81,16 @@ it("reports provider errors and rejects invalid provider results", async () => {
   expect(invalidResult.ok).toBe(false);
   if (!invalidResult.ok) expect(invalidResult.detail).toContain("must return an array");
 });
+
+it("emits content-free provider telemetry without making evaluation depend on the observer", async () => {
+  const project = async () => ({ id: "/private", text: "private text", source_text: null, headings: null, metadata: null, evidence_sources: null });
+  const events: unknown[] = [];
+  const evaluator = withContentPreset(base, { name: "article" }, async () => ({ ...report, gates: [] }), async () => [], project, (event) => { events.push(event); throw new Error("observer failed"); });
+  expect((await evaluator([doc])).ok).toBe(true);
+  expect(events).toEqual([{ status: "success", duration_ms: expect.any(Number) }]);
+  expect(JSON.stringify(events)).not.toContain("private");
+  const errorEvents: unknown[] = [];
+  const failed = withContentPreset(base, { name: "article" }, async () => report, async () => { throw new Error("failed"); }, project, (event) => errorEvents.push(event));
+  expect((await failed([doc])).ok).toBe(false);
+  expect(errorEvents).toEqual([{ status: "error", duration_ms: expect.any(Number) }]);
+});

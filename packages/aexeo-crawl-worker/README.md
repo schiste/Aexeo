@@ -114,6 +114,9 @@ unauthenticated `GET` routes back.**
    input snapshot. Without a binding, no provider is called and custom gates
    remain incomplete. Configure access and retention of content in the provider;
    a service binding explicitly grants it access to each evaluated document.
+   Set `CONTENT_GATE_TELEMETRY = "true"` under `[vars]` to log only the
+   provider call's duration and success/error status, without content or
+   identifiers. This records provider execution, not the gate verdict.
 
 For local work, `wrangler dev` does not fetch secrets — put the value in
 `.dev.vars` (gitignored) instead:

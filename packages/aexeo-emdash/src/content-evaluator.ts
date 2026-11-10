@@ -19,6 +19,11 @@ export type ExternalGateProvider = (request: {
   collection: string | undefined;
 }) => Promise<ExternalGateResult[]>;
 
+export interface ExternalGateTelemetry {
+  duration_ms: number;
+  status: "success" | "error";
+}
+
 /** Add portable content findings to an existing evaluator without hiding skipped gates. */
 export function withContentPreset(
   base: EvaluatorFn,
@@ -26,6 +31,7 @@ export function withContentPreset(
   evaluate: (document: EmdashDocument, name: string, sources?: Record<string, string>, evidenceSources?: Record<string, string>, onTelemetry?: (event: ContentEvaluationTelemetry) => void, externalResults?: ExternalGateResult[]) => Promise<ContentReport>,
   provider?: ExternalGateProvider,
   project: typeof projectContentInput = projectContentInput,
+  onProviderTelemetry?: (event: ExternalGateTelemetry) => void,
 ): EvaluatorFn {
   if (!preset) return base;
   return async (documents, context) => {
@@ -43,10 +49,20 @@ export function withContentPreset(
           ? preset.byCollection[collection] : undefined;
         const name = selected ?? preset.name;
         if (!name) throw new Error(`empty preset name for collection ${collection}`);
-        const externalResults = provider === undefined ? undefined : await provider({
-          input: await project(document, preset.evidenceSources), preset: name, collection,
-        });
-        if (provider !== undefined && !Array.isArray(externalResults)) throw new Error("external gate provider must return an array");
+        let externalResults: ExternalGateResult[] | undefined;
+        if (provider !== undefined) {
+          const started = onProviderTelemetry ? performance.now() : 0;
+          let status: ExternalGateTelemetry["status"] = "error";
+          try {
+            externalResults = await provider({ input: await project(document, preset.evidenceSources), preset: name, collection });
+            if (!Array.isArray(externalResults)) throw new Error("external gate provider must return an array");
+            status = "success";
+          } finally {
+            if (onProviderTelemetry) {
+              try { onProviderTelemetry({ duration_ms: performance.now() - started, status }); } catch { /* telemetry is best effort */ }
+            }
+          }
+        }
         const report = externalResults !== undefined
           ? await evaluate(document, name, preset.sources, preset.evidenceSources, undefined, externalResults)
           : preset.evidenceSources === undefined

@@ -40,6 +40,17 @@ describe("sandbox content presets", () => {
     const oversized = { fetch: async () => new Response("x".repeat(2 * 1024 * 1024 + 1)) };
     await expect(contentPresetFindings([{}], undefined, { CONTENT_PRESET: "article", CONTENT_GATE_PROVIDER: oversized }, evaluate, project)).rejects.toThrow("too large");
   });
+  it("emits only optional provider timing and status", async () => {
+    const logger = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      const fetch = async () => new Response("[]");
+      await contentPresetFindings([{}], undefined, { CONTENT_PRESET: "article", CONTENT_GATE_PROVIDER: { fetch }, CONTENT_GATE_TELEMETRY: "true" }, () => '{"gates":[]}', () => '{"text":"private"}');
+      expect(logger).toHaveBeenCalledOnce();
+      const event = JSON.parse(logger.mock.calls[0]![0] as string);
+      expect(event).toEqual({ event: "external_gate_provider", status: "success", duration_ms: expect.any(Number) });
+      expect(JSON.stringify(event)).not.toContain("private");
+    } finally { logger.mockRestore(); }
+  });
   it("passes collection context to the sidecar", async () => {
     const fetch = vi.fn(async () => ({ ok: true, status: 200, text: async () => "[]" }));
     await evaluateViaSidecar({ fetch }, { url: "https://example.test", authToken: "secret" }, [], ["posts"]);

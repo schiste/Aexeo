@@ -58,6 +58,9 @@ custom gate. Aexeo reports stale or missing results as incomplete; a thrown
 provider error fails the evaluation. The input may include private content and
 evidence. The host owns provider trust, timeouts, resource limits and any
 network transfer. This runtime injection does not configure the sandbox worker.
+An optional `onExternalGateTelemetry` runtime callback receives only provider
+duration and success/error status, with no content or document identifiers.
+It measures the provider call, not whether the returned gates passed.
 
 ## Content coverage
 
