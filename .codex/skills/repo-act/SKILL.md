@@ -22,7 +22,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 
 - Run the fastest relevant test command first.
 - Check likely entrypoints and impacted callers before finishing.
-- Re-run lint/build only after the focused validation passes.
+- After focused validation, run `sh scripts/clippy-strict.sh` for Rust changes.
+  The CI applies extra lint rules beyond ordinary `cargo clippy -- -D warnings`;
+  passing the latter alone does not validate the repository policy.
+- Re-run other lint/build checks after the focused validation passes.
 - Document any override-based maintainer note that affected the change plan.
 
 ## Useful Commands
