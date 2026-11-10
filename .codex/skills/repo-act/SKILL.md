@@ -35,6 +35,8 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   passing the latter alone does not validate the repository policy. Also run
   `cargo clippy --workspace --all-targets -- -D warnings`: the strict script
   covers libraries and binaries, while CI separately lints test targets.
+- When changing CLI arguments, regenerate and verify the CLI reference with
+  `cargo run -q -p aexeo-cli -- docs generate .` and `cargo run -q -p aexeo-cli -- docs check .`; CI checks generated documentation.
 - For WASM bridge interface changes, synchronize the plugin and crawl-worker
   glue declarations and run `npm run check:dts --prefix packages/aexeo-crawl-worker`.
 - For EmDash source-mapping tests, external diagnostics must be within the
