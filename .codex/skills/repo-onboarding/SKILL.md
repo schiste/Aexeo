@@ -63,6 +63,7 @@ description: Use when starting work in an unfamiliar repository, when the task a
 ## Generated and Dangerous Paths
 
 - Generated/vendor `.aethyme/generated`: tracked generated or vendored surface; verify ownership before editing
+- Sensitive `.aethyme/gates.toml`: repository validation policy; changes affect every broker submission
 - Sensitive `.github/workflows`: repository automation; changes can affect publication or shared CI
 
 ## Maintainer Notes
@@ -72,10 +73,11 @@ description: Use when starting work in an unfamiliar repository, when the task a
 - For a broker-coordinated `gh pr merge --match-head-commit`, pass the full `headRefOid` from `gh pr view --json headRefOid`; an abbreviated SHA is rejected.
 - If a broker push fails with an internal remote hook error, keep the commit and read the error, then retry through the broker without force. If it persists, report the rejection and keep the session for recovery.
 - A refused preparation-status command does not mean every broker operation is blocked: report the exact refusal and check each authorized operation separately. Review an upgrade plan before applying it. Lease coordination and migration preconditions are separate: a migration can treat any live or stale session, including your own, as a blocker, so apply it from the main checkout with no session open and carry the result into a session for the pull request.
+- When a WASM export changes, the plugin build saves the new generated API declaration as a .wasm-bindgen file and restores the tracked declaration. Review and apply that diff, update the hand-maintained bg declaration and its crawl-worker copy, run the worker check:dts command, then rebuild and test the real WASM.
 
 ## Freshness
 
-- Source digest: `e03c4efc957bb6064a9c50e3f4f848d694a0ffb3d7a9b48eb502ce83d9a24ea3`
-- Tracked source files: `378`
+- Source digest: `038ebbb319751bc4e3cd7c525025fbedbf1658044bc45b20bf07362647c6d66d`
+- Tracked source files: `381`
 - Overrides applied: `True`
 - Sections generated: `repo, workspaces, primary_workspace, commands, areas, entrypoints, caution_zones, generated_paths, dangerous_paths, navigation_recipes, summon, freshness`
