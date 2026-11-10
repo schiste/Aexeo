@@ -42,6 +42,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For EmDash source-mapping tests, external diagnostics must be within the
   projected text. Use the valid position immediately after the last character
   to exercise an unmapped boundary; an out-of-range line is rejected earlier.
+- For content file confinement, test symlinks, non-files and root replacement.
+  Lexical checks and per-component no-follow opens alone do not prevent a
+  concurrent directory rename from escaping the root; use an atomic platform
+  primitive or fail closed, and run the tests on each supported platform.
 - Re-run other lint/build checks after the focused validation passes.
 - Document any override-based maintainer note that affected the change plan.
 
