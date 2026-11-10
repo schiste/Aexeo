@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod content_gate_protocol;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
