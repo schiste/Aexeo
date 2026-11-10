@@ -190,6 +190,27 @@ Limits are 32 MiB for the JSON payload, 100 results, 1,000 diagnostics per
 result and 4,096 UTF-8 bytes per message. No external program is sandboxed or
 executed by Aexeo.
 
+## Optional external link observations
+
+`aexeo-cli link-reachability article.md` explicitly contacts absolute HTTP(S)
+destinations from Markdown. For other adapters, use `--input-format json` with
+an array of destinations in occurrence order. The JSON output reports one-based
+occurrence indices, HTTP observations and reasons without echoing destination
+URLs. `--max-checks` (1–100, default 20) bounds unique destinations and
+`--timeout` (1–30 seconds, default 5) bounds each check including redirects.
+Duplicate URLs share a result; fragments are not checked. Results are advisory:
+404/410 are observed responses, not proof that a destination is permanently
+broken; authentication, rate limiting, transport errors, refused addresses,
+unsupported inputs and budget exhaustion remain uncertain or skipped. HEAD is
+tried first, with GET fallback for 405/501; bodies are not consumed.
+
+Private-network addresses and credentials in URLs are refused, proxies are
+disabled, and every redirect is checked (with a five-hop limit and no HTTPS to
+HTTP downgrade). Requests may expose the URL, including query parameters, to
+the destination. This command does not run as part of normal content gates,
+validate source reliability or claim that a destination is safe. `--telemetry`
+emits aggregate local counts and elapsed time without URLs or content.
+
 ## Corpus policy provenance
 
 The local corpus evaluator resolves the CLI preset before and after a run and

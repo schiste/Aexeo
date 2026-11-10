@@ -14,6 +14,7 @@ use crate::commands::{
     },
     intelligence::command_intelligence,
     link_graph::command_link_graph,
+    link_reachability::command_link_reachability,
     listings::{command_adapters, command_plugin_check, command_rules},
     runtime::{
         command_crawl, command_doctor, command_perf_baseline, command_perf_diff,
@@ -42,6 +43,7 @@ pub fn invocation(matches: &clap::ArgMatches) -> (String, String) {
 pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
     match matches.subcommand() {
         Some(("link-graph", submatches)) => command_link_graph(submatches),
+        Some(("link-reachability", submatches)) => command_link_reachability(submatches),
         Some(("content", submatches)) => command_content(submatches),
         Some(("feedback-capture", submatches)) => command_feedback(submatches),
         Some(("feedback-export", submatches)) => command_feedback_export(submatches),
