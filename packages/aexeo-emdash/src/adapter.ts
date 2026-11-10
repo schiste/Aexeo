@@ -222,7 +222,12 @@ function extractSelectedContent(data: Record<string, unknown>, fields: readonly 
     if (value === undefined || value === null) continue;
     observed = true;
     const part = extractFirstPortableText({ content: value }, mappings);
-    if (part === null) return { blocks, capabilities: [] };
+    if (part === null) {
+      // An unrecognized field cannot establish coverage, but later selected
+      // fields may still contain useful prose and must not be discarded.
+      capabilities = [];
+      continue;
+    }
     blocks.push(...part.blocks);
     capabilities = capabilities.filter((capability) => part.capabilities === undefined || part.capabilities.includes(capability));
   }
@@ -296,18 +301,22 @@ function isPortableTextArray(value: unknown): value is PortableTextBlock[] {
 }
 
 /** Portable Text can interleave ordinary text blocks with custom components. */
-function isMixedPortableTextArray(value: unknown): value is Array<Record<string, unknown>> {
-  return Array.isArray(value) && value.length > 0 && value.some((item) => isPortableTextArray([item])) &&
-    value.every((item) => isRecord(item) && typeof item["_type"] === "string" &&
-      (item["_type"] !== "block" || isPortableTextArray([item])));
+function isMixedPortableTextArray(value: unknown): value is unknown[] {
+  // One valid block identifies the format. Other items can be malformed or
+  // unknown; preserve the valid neighbors without asserting full coverage.
+  return Array.isArray(value) && value.some((item) => isPortableTextArray([item]));
 }
 
-function mapMixedPortableText(blocks: Array<Record<string, unknown>>, mappings?: CustomBlockMappings): ExtractedBody {
+function mapMixedPortableText(blocks: unknown[], mappings?: CustomBlockMappings): ExtractedBody {
   const result: PortableTextBlock[] = [];
   let complete = true;
   for (const block of blocks) {
     if (isPortableTextArray([block])) {
       result.push(block as unknown as PortableTextBlock);
+      continue;
+    }
+    if (!isRecord(block) || typeof block["_type"] !== "string" || block["_type"] === "block") {
+      complete = false;
       continue;
     }
     const mapped = mapCustomBlocks([block], mappings);

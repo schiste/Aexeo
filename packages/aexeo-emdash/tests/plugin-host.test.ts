@@ -82,6 +82,24 @@ describe("EmDash content adaptation", () => {
     expect(mapped.body?.map((block) => block.children[0]?.text)).toEqual(["Before", "Question", "After"]);
   });
 
+  it("retains valid mixed content around malformed items without claiming coverage", () => {
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: {
+      content: [...body("Before"), null, { _type: "block", children: "broken" }, { prompt: "untyped" }, ...body("After")],
+    } };
+    const document = contentItemToEmdashDocument(item);
+    expect(document.body?.map((block) => block.children[0]?.text)).toEqual(["Before", "After"]);
+    expect(document.body_capabilities).toEqual([]);
+  });
+
+  it("retains later selected fields after an unrecognized body field", () => {
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: {
+      introduction: body("Before"), custom: { unsupported: true }, conclusion: body("After"),
+    } };
+    const document = adaptContentItem(item, { contentFields: ["introduction", "custom", "conclusion"] }).document;
+    expect(document.body?.map((block) => block.children[0]?.text)).toEqual(["Before", "After"]);
+    expect(document.body_capabilities).toEqual([]);
+  });
+
   it("declares only the current capabilities and configured sidecar host", () => {
     expect(buildCapabilities(null)).toEqual(["content:read"]);
     expect(buildAllowedHosts(null)).toEqual([]);
