@@ -6,7 +6,14 @@ export type CustomBlockField =
   | { kind: "heading"; field: string; level?: 1 | 2 | 3 | 4 | 5 | 6; optional?: boolean }
   | { kind: "link"; field: string; hrefField: string; optional?: boolean }
   | { kind: "repeat"; field: string; fields: readonly CustomBlockField[]; optional?: boolean };
-export type CustomBlockMappings = Record<string, readonly CustomBlockField[]>;
+/** Capabilities that a host can establish for a component's rendered content. */
+export type BodyCapability = "text" | "headings" | "paragraphs" | "links";
+/** The object form asserts coverage only for the listed capabilities. */
+export type CustomBlockMapping = readonly CustomBlockField[] | {
+  fields: readonly CustomBlockField[];
+  capabilities: readonly BodyCapability[];
+};
+export type CustomBlockMappings = Record<string, CustomBlockMapping>;
 
 export interface EmdashContentItem {
   id: string;
@@ -208,7 +215,14 @@ function stringOrEmpty(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-type ExtractedBody = { blocks: PortableTextBlock[]; capabilities?: ("text" | "headings" | "paragraphs" | "links")[] };
+type ExtractedBody = { blocks: PortableTextBlock[]; capabilities?: BodyCapability[] };
+const BODY_CAPABILITIES: readonly BodyCapability[] = ["text", "headings", "paragraphs", "links"];
+function intersectCapabilities(current: readonly BodyCapability[], other?: readonly BodyCapability[]): BodyCapability[] {
+  return other === undefined ? [...current] : current.filter((capability) => other.includes(capability));
+}
+function bodyWithCapabilities(blocks: PortableTextBlock[], capabilities: BodyCapability[]): ExtractedBody {
+  return capabilities.length === BODY_CAPABILITIES.length ? { blocks } : { blocks, capabilities };
+}
 
 /** A selection asserts that the listed fields constitute the rendered body, in order. */
 function extractSelectedContent(data: Record<string, unknown>, fields: readonly string[], mappings?: CustomBlockMappings): ExtractedBody | null {
@@ -316,21 +330,21 @@ function isMixedPortableTextArray(value: unknown): value is unknown[] {
 function mapMixedPortableText(blocks: unknown[], mappings?: CustomBlockMappings, depth = 0): ExtractedBody {
   if (depth > 8) return { blocks: [], capabilities: [] };
   const result: PortableTextBlock[] = [];
-  let complete = true;
+  let capabilities = [...BODY_CAPABILITIES];
   for (const block of blocks) {
     if (isPortableTextArray([block])) {
       result.push(block as unknown as PortableTextBlock);
       continue;
     }
     if (!isRecord(block) || typeof block["_type"] !== "string" || block["_type"] === "block") {
-      complete = false;
+      capabilities = [];
       continue;
     }
     const mapped = mapCustomBlocks([block], mappings, depth + 1);
     result.push(...mapped.blocks);
-    if (mapped.capabilities !== undefined) complete = false;
+    capabilities = intersectCapabilities(capabilities, mapped.capabilities);
   }
-  return complete ? { blocks: result } : { blocks: result, capabilities: [] };
+  return bodyWithCapabilities(result, capabilities);
 }
 
 function isEmdashBlocksArray(
@@ -353,11 +367,11 @@ function mapCustomBlocks(
   blocks: Array<Record<string, unknown>>,
   mappings: CustomBlockMappings | undefined,
   depth = 0,
-): { blocks: PortableTextBlock[]; capabilities?: [] } {
+): ExtractedBody {
   if (depth > 8) return { blocks: [], capabilities: [] };
   const unavailable = () => ({ blocks: blocksToPortableText(blocks), capabilities: [] as [] });
   const result: PortableTextBlock[] = [];
-  let complete = true;
+  let capabilities = [...BODY_CAPABILITIES];
   const mapFields = (record: Record<string, unknown>, fields: readonly CustomBlockField[], depth: number): boolean => {
     if (depth > 8 || fields.length === 0) return false;
     for (const entry of fields) {
@@ -379,7 +393,7 @@ function mapCustomBlocks(
         } else if (isMixedPortableTextArray(value) || isEmdashBlocksArray(value, "blocks")) {
           const nested = mapMixedPortableText(value, mappings, depth + 1);
           result.push(...nested.blocks);
-          if (nested.capabilities !== undefined) complete = false;
+          capabilities = intersectCapabilities(capabilities, nested.capabilities);
         } else {
           return false;
         }
@@ -406,13 +420,22 @@ function mapCustomBlocks(
     return true;
   };
   for (const block of blocks) {
-    const fields = mappings?.[String(block["_type"])];
-    if (!Array.isArray(fields)) return unavailable();
-    // An empty mapping explicitly declares a component irrelevant to the body.
+    const mapping: unknown = mappings?.[String(block["_type"])];
+    let fields: readonly CustomBlockField[];
+    if (Array.isArray(mapping)) {
+      fields = mapping as CustomBlockField[];
+    } else if (isRecord(mapping) && Array.isArray(mapping["fields"]) && Array.isArray(mapping["capabilities"])) {
+      const declared: unknown[] = mapping["capabilities"];
+      if (declared.some((capability) => typeof capability !== "string" || !BODY_CAPABILITIES.includes(capability as BodyCapability)) ||
+          new Set(declared).size !== declared.length) return unavailable();
+      fields = mapping["fields"] as CustomBlockField[];
+      capabilities = intersectCapabilities(capabilities, declared as BodyCapability[]);
+    } else return unavailable();
+    // An empty legacy mapping declares the component irrelevant to the body.
     if (fields.length === 0) continue;
     if (!mapFields(block, fields, depth)) return unavailable();
   }
-  return complete ? { blocks: result } : { blocks: result, capabilities: [] };
+  return bodyWithCapabilities(result, capabilities);
 }
 
 function blocksToPortableText(

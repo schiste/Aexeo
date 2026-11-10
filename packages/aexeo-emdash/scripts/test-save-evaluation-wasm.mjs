@@ -213,6 +213,30 @@ kind="link_reachability"
   for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/mixed", rule), false);
 }
 
+// A host can establish text without claiming unobserved component headings.
+{
+  const page = item("partial-capability", { data: { content: [block("a", "Before"), { _type: "card", _key: "c", text: "Card" }, block("b", "After")] } });
+  const preset = `version=1
+name="partial"
+[[gates]]
+id="words"
+kind="word_count"
+min=1
+[[gates]]
+id="headings"
+kind="required_headings"
+headings=["Summary"]
+`;
+  const configured = createPlugin({ contentPreset: { name: "partial", sources: { partial: preset } },
+    blockMappings: { card: { fields: [{ kind: "paragraph", field: "text" }], capabilities: ["text"] } } });
+  const host = fakeHost([page]);
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  assert.deepEqual(host.store.get("document:/partial-capability").document.body_capabilities, ["text"]);
+  const gates = host.store.get("findings:/partial-capability").assessment.gates;
+  assert.equal(gates.find((gate) => gate.gate_id === "words").status, "passed");
+  assert.equal(gates.find((gate) => gate.gate_id === "headings").status, "not_checked");
+}
+
 // Malformed mixed items and unrecognized fields do not hide adjacent prose.
 {
   const partial = item("partial-projection", { data: {
