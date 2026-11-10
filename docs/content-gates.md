@@ -236,7 +236,23 @@ if (projection) {
 }
 ```
 
-This is the direct content API; configured save hooks do not run the checker.
+Configured EmDash save and refresh workflows can also use an explicitly installed
+runtime observer. The configured preset must include the reachability gate:
+
+```ts
+const plugin = createPlugin(
+  { contentPreset: { name: "custom", sources: { custom: presetToml } } },
+  { linkObservations: async ({ destinations }) => trustedHostChecker(destinations),
+    onLinkProviderTelemetry: (event) => recordAggregateEvent(event) },
+);
+```
+
+The callback receives a copy of the ordered destinations. Aexeo makes no network
+requests itself; the trusted host must apply its own egress restrictions, timeouts,
+request budget and consent policy. The observer runs only when the resolved preset
+requires reachability. Missing projections, invalid results or observer failures
+retain the initial report with the gate `not_checked`. Runtime telemetry reports
+only status and duration, without URLs or content.
 An observer must use `not_found` only for an observed 404/410 and keep timeouts,
 authentication failures, refused URLs and exhausted budgets `not_checked`.
 The batch is accepted only for the exact unchanged document and ordered

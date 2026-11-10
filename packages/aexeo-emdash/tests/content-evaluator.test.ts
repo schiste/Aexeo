@@ -117,3 +117,55 @@ it("continues assessing later documents when one has unavailable gates", async (
   expect(seen).toEqual(["/test", "/second"]);
   if (result.ok) expect(Object.keys(result.assessments ?? {})).toEqual(["/test", "/second"]);
 });
+
+it("runs a link provider only for selected presets with a reachability gate", async () => {
+  const gate = { gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const,
+    required_capability: "link_reachability" as const, findings: [], reason: "unavailable" };
+  const initial = { ...report, gates: [gate] };
+  const checked = { ...report, gates: [{ ...gate, status: "passed" as const, reason: null }] };
+  const evaluate = vi.fn(async (...args: Parameters<Parameters<typeof withContentPreset>[2]>) => args[6] ? checked : initial);
+  const provider = vi.fn(async () => ["reachable" as const]);
+  const project = vi.fn(async () => ({ document: doc, destinations: ["https://example.org"] }));
+  const telemetry = vi.fn();
+  const evaluator = withContentPreset(base, { name: "article", byCollection: { glossary: "glossary" } }, evaluate,
+    undefined, undefined, undefined, provider, project, telemetry);
+  const result = await evaluator([doc], { collections: ["glossary"] });
+  expect(result.ok).toBe(true);
+  if (result.ok) {
+    const assessment = result.assessments?.["/test"];
+    expect(assessment?.status).toBe("evaluated");
+    if (assessment?.status === "evaluated") expect(assessment.gates[0]?.status).toBe("passed");
+  }
+  expect(provider).toHaveBeenCalledWith({ destinations: ["https://example.org"], preset: "glossary", collection: "glossary" });
+  expect(evaluate).toHaveBeenCalledTimes(2);
+  expect(evaluate.mock.calls[1]?.[6]).toEqual({ document: doc, destinations: ["https://example.org"], observations: ["reachable"] });
+  expect(telemetry.mock.calls[0]?.[0]).toEqual({ status: "success", duration_ms: expect.any(Number) });
+  expect(JSON.stringify(telemetry.mock.calls)).not.toContain("example.org");
+  const noGate = withContentPreset(base, { name: "article" }, async () => report,
+    undefined, undefined, undefined, provider, project, telemetry);
+  await noGate([doc]);
+  expect(provider).toHaveBeenCalledTimes(1);
+});
+
+it("preserves not-checked findings if the link provider fails or the adapter lacks links", async () => {
+  const initial = { ...report, gates: [{ ...report.gates[0]!, status: "not_checked" as const,
+    required_capability: "link_reachability" as const, findings: [], reason: "unavailable" }] };
+  const evaluate = vi.fn(async () => initial);
+  const events: string[] = [];
+  const emit = (event: { status: string }) => { events.push(event.status); throw new Error("telemetry failure"); };
+  const failing = withContentPreset(base, { name: "article" }, evaluate, undefined, undefined, undefined,
+    async () => { throw new Error("network down"); }, async () => ({ document: doc, destinations: ["https://example.org"] }), emit);
+  const unavailable = withContentPreset(base, { name: "article" }, evaluate, undefined, undefined, undefined,
+    async () => ["reachable"], async () => null, emit);
+  for (const evaluator of [failing, unavailable]) {
+    const result = await evaluator([doc]);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const assessment = result.assessments?.["/test"];
+      expect(assessment?.status).toBe("evaluated");
+      if (assessment?.status === "evaluated") expect(assessment.gates[0]?.status).toBe("not_checked");
+    }
+  }
+  expect(events).toEqual(["error", "unavailable"]);
+  expect(evaluate).toHaveBeenCalledTimes(2);
+});

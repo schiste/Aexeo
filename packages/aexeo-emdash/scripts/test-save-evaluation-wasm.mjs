@@ -126,6 +126,41 @@ mode="strict"
   console.log("WASM configured provider runs on refresh and save");
 }
 
+// Explicit link observers run through both CMS workflows; provider errors
+// preserve the prior report with a not-checked gate.
+{
+  const preset = `version=1
+name="links"
+[[gates]]
+id="external-links"
+kind="link_reachability"
+`;
+  let fail = false;
+  const calls = [];
+  const telemetry = [];
+  const configured = createPlugin({ contentPreset: { name: "custom", sources: { custom: preset } } }, {
+    linkObservations: async ({ destinations, preset: selected, collection }) => {
+      calls.push({ destinations, selected, collection });
+      if (fail) throw new Error("observer unavailable");
+      return destinations.map(() => "not_found");
+    },
+    onLinkProviderTelemetry: (event) => telemetry.push(event),
+  });
+  const page = item("observed", { data: { body: [block("a", "Link", "normal", "https://example.org/missing")] } });
+  const host = fakeHost([page]);
+  await configured.routes.refresh.handler(host.ctx);
+  assert.equal(has(host, "/observed", "external-links"), true);
+  assert.equal(host.store.get("findings:/observed").assessment.gates[0].status, "failed");
+  fail = true;
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  assert.equal(host.store.get("findings:/observed").assessment.gates[0].status, "not_checked");
+  assert.equal(has(host, "/observed", "external-links"), false);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(telemetry.map((event) => event.status), ["success", "error"]);
+  assert.ok(!JSON.stringify(telemetry).includes("example.org"));
+  console.log("WASM configured link provider runs on refresh and save");
+}
+
 // --- A save must not invent findings from its one-page view -----------------
 
 {
