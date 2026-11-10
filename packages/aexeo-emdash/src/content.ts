@@ -134,11 +134,13 @@ export async function evaluateContent(
   return report;
 }
 
-/** Evaluate collection gates; callers must provide the complete collection. */
+/** Mark known incomplete collections explicitly; omitted options assume completeness. */
 export async function evaluateContentCollection(
   documents: EmdashDocument[],
   preset: string,
   sources: Record<string, string> = {},
+  options: { complete?: boolean } = {},
 ): Promise<ContentReport> {
-  return JSON.parse(await evaluateCollectionWasm(JSON.stringify(documents), preset, JSON.stringify(sources))) as ContentReport;
+  const input = options.complete === false ? { documents, complete: false } : documents;
+  return JSON.parse(await evaluateCollectionWasm(JSON.stringify(input), preset, JSON.stringify(sources))) as ContentReport;
 }

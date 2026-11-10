@@ -51,3 +51,42 @@ fn collection_cli_reports_duplicates_missing_data_and_private_telemetry() {
             .contains("IDs must be nonempty and unique")
     );
 }
+
+#[test]
+fn incomplete_collection_retains_observed_duplicates_without_passing() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    let input = dir.path().join("collection.json");
+    fs::write(&preset, "version=1\nname='collection'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n").unwrap();
+    fs::write(
+        &input,
+        r#"[{"id":"/a","metadata":{"slug":"same"}},{"id":"/b","metadata":{"slug":"same"}}]"#,
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "--no-text",
+            "--collection",
+            input.to_str().unwrap(),
+            "--collection-incomplete",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "not_checked");
+    assert_eq!(report["gates"][0]["findings"][0]["path"], "/b");
+    assert!(
+        report["gates"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("collection is incomplete")
+    );
+}

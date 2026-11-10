@@ -72,6 +72,11 @@ describe("portable content API", () => {
     expect(evaluateCollectionWasm).toHaveBeenCalledWith(JSON.stringify(documents), "custom", JSON.stringify({ custom: "version = 1" }));
     expect(report.gates[0]?.status).toBe("failed");
   });
+  it("passes incomplete collection state to the bridge", async () => {
+    const documents = [{ route: "/a", title: "Same", body: [] }];
+    await evaluateContentCollection(documents, "custom", {}, { complete: false });
+    expect(evaluateCollectionWasm).toHaveBeenCalledWith(JSON.stringify({ documents, complete: false }), "custom", "{}");
+  });
   it("passes explicitly supplied evidence snapshots to the bridge", async () => {
     const document = { route: "/sample", title: "Sample", body: [] };
     await evaluateContent(document, "custom", {}, { study: "14 participants" });

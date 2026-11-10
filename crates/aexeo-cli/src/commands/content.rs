@@ -321,14 +321,21 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     };
     let mut gate_timer = GateTimer::default();
     let mut report = if measuring {
-        preset.evaluate_with_gate_observer(
+        preset.evaluate_with_collection_completeness(
             &input,
             &capabilities,
             destinations.as_deref(),
-            &mut |event| gate_timer.observe(event),
+            !args.get_flag("collection-incomplete"),
+            Some(&mut |event| gate_timer.observe(event)),
         )?
     } else {
-        preset.evaluate_with_destinations(&input, &capabilities, destinations.as_deref())?
+        preset.evaluate_with_collection_completeness(
+            &input,
+            &capabilities,
+            destinations.as_deref(),
+            !args.get_flag("collection-incomplete"),
+            None,
+        )?
     };
     let evaluation_ms = started.elapsed().as_secs_f64() * 1000.0;
     report.applied_fixes = applied_fixes;

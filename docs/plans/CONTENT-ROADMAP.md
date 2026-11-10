@@ -204,3 +204,7 @@ Collection uniqueness checks retain the full duplicate count while bounding emit
 findings and recording omitted findings. EmDash rejects blank or repeated routes,
 matching the CLI collection identity requirement. A supplied collection must still
 be complete; these checks cannot detect omitted records.
+
+Known incomplete collections can be marked explicitly in the core, CLI and
+EmDash API. Duplicate findings are retained, while the uniqueness result is
+`not_checked`; a caller's completeness declaration is not independently verified.

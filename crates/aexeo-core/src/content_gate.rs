@@ -1080,7 +1080,7 @@ impl ContentPreset {
         capabilities: &ContentEvaluationContext<'_>,
         destinations: Option<&[String]>,
     ) -> Result<ContentReport> {
-        self.evaluate_with_observer_inner(input, capabilities, destinations, None)
+        self.evaluate_with_observer_inner(input, capabilities, destinations, true, None)
     }
 
     /// Evaluate while notifying the host before and after each gate, in preset order.
@@ -1092,7 +1092,20 @@ impl ContentPreset {
         destinations: Option<&[String]>,
         observer: &mut dyn FnMut(GateObservation),
     ) -> Result<ContentReport> {
-        self.evaluate_with_observer_inner(input, capabilities, destinations, Some(observer))
+        self.evaluate_with_observer_inner(input, capabilities, destinations, true, Some(observer))
+    }
+
+    /// Evaluate with an explicit completeness declaration for collection gates.
+    /// An incomplete collection retains observed findings but cannot pass.
+    pub fn evaluate_with_collection_completeness(
+        &self,
+        input: &ContentInput,
+        capabilities: &ContentEvaluationContext<'_>,
+        destinations: Option<&[String]>,
+        complete: bool,
+        observer: Option<&mut dyn FnMut(GateObservation)>,
+    ) -> Result<ContentReport> {
+        self.evaluate_with_observer_inner(input, capabilities, destinations, complete, observer)
     }
 
     fn evaluate_with_observer_inner(
@@ -1100,6 +1113,7 @@ impl ContentPreset {
         input: &ContentInput,
         capabilities: &ContentEvaluationContext<'_>,
         destinations: Option<&[String]>,
+        collection_complete: bool,
         mut observer: Option<&mut dyn FnMut(GateObservation)>,
     ) -> Result<ContentReport> {
         let site = capabilities.site;
@@ -1219,10 +1233,15 @@ impl ContentPreset {
                         }
                         measurements.insert("items_missing_field".into(), missing);
                         measurements.insert("duplicate_items".into(), duplicates);
-                        if missing > 0 {
-                            reason = Some(format!(
-                                "metadata field {field:?} is unavailable for {missing} collection item(s)"
-                            ));
+                        if missing > 0 || !collection_complete {
+                            let mut causes = Vec::new();
+                            if !collection_complete {
+                                causes.push("collection is incomplete".to_owned());
+                            }
+                            if missing > 0 {
+                                causes.push(format!("metadata field {field:?} is unavailable for {missing} collection item(s)"));
+                            }
+                            reason = Some(causes.join("; "));
                         }
                     }
                     None => reason = Some("collection is unavailable from this adapter".into()),
@@ -2696,6 +2715,58 @@ field = "slug"
         );
         assert!(!report.gates[1].findings.is_empty());
         assert_eq!(report.summary.blocking_not_checked, 2);
+    }
+
+    #[test]
+    fn incomplete_collection_never_certifies_uniqueness_and_preserves_findings() {
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n").unwrap();
+        let root = ContentInput {
+            id: "collection".into(),
+            ..Default::default()
+        };
+        let items = [
+            ContentInput {
+                id: "/a".into(),
+                metadata: Some(BTreeMap::from([("slug".into(), "same".into())])),
+                ..Default::default()
+            },
+            ContentInput {
+                id: "/b".into(),
+                metadata: Some(BTreeMap::from([("slug".into(), "same".into())])),
+                ..Default::default()
+            },
+            ContentInput {
+                id: "/c".into(),
+                ..Default::default()
+            },
+        ];
+        for observed in [&items[..], &items[..1], &items[..0]] {
+            let report = preset
+                .evaluate_with_collection_completeness(
+                    &root,
+                    &ContentEvaluationContext {
+                        collection: Some(observed),
+                        ..Default::default()
+                    },
+                    None,
+                    false,
+                    None,
+                )
+                .unwrap();
+            let gate = &report.gates[0];
+            assert_eq!(gate.status, GateStatus::NotChecked);
+            assert!(
+                gate.reason
+                    .as_ref()
+                    .unwrap()
+                    .contains("collection is incomplete")
+            );
+            if observed.len() == 3 {
+                assert_eq!(gate.findings.len(), 1);
+                assert_eq!(gate.findings[0].path, "/b");
+                assert!(gate.reason.as_ref().unwrap().contains("unavailable for 1"));
+            }
+        }
     }
 
     #[test]
