@@ -46,6 +46,28 @@ The [built-in TOML files](../crates/aexeo-core/presets) are embedded in native a
 
 Use `--explain` to print the resolved preset as TOML, or add `--format json` for JSON.
 
+## Editorial starter profiles
+
+`article-quality`, `glossary-quality`, and `product-editorial` compose the
+existing article or glossary checks with `editorial-structure`. Structure adds
+advisory sentence and paragraph length and duplicate headings. The limits are
+examples, not universal quality standards, and missing adapter capabilities are
+reported as `not_checked`. The word-based gates are unsuitable for languages
+without whitespace word boundaries without a tailored policy.
+
+`natural-style-en` and `natural-style-fr` are optional, separate literal phrase
+lists for editorial review. They do not detect AI authorship, measure human
+style, or ensure any detector outcome. Their examples may be appropriate in
+context. Inherit the content-type profile and one language profile explicitly;
+there is no automatic language detection. Projects should replace or disable
+`editorial.generic_phrases` according to their own editorial policy.
+
+```toml
+version = 1
+name = "French product page"
+extends = ["product-editorial", "natural-style-fr"]
+```
+
 ## Custom presets
 
 ```toml

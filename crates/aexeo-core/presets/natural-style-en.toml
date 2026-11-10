@@ -1,0 +1,9 @@
+version = 1
+name = "English generic-phrase review starter"
+
+[[gates]]
+id = "editorial.generic_phrases"
+kind = "forbidden_terms"
+terms = ["in today's fast-paced world", "in conclusion", "delve into"]
+case_insensitive = true
+blocking = false
