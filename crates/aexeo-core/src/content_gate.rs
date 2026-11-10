@@ -633,7 +633,7 @@ impl<'a> LiteralText<'a> {
     }
 
     fn crosses_block_end(&self, start: usize, end: usize) -> bool {
-        let next = self.block_ends.partition_point(|&block| block < start);
+        let next = self.block_ends.partition_point(|&block| block <= start);
         self.block_ends.get(next).is_some_and(|&block| block < end)
     }
 
@@ -651,26 +651,34 @@ impl<'a> LiteralText<'a> {
         }
         let (needle, _) = fold_literal(term, self.case_insensitive);
         let text = self.folded.as_str();
-        text.match_indices(needle.as_str())
-            .filter(|(offset, _)| {
-                !whole_words
-                    || ((!needle.chars().next().is_some_and(word)
-                        || text[..*offset]
-                            .chars()
-                            .next_back()
-                            .is_none_or(|ch| !word(ch)))
-                        && (!needle.chars().next_back().is_some_and(word)
-                            || text[*offset + needle.len()..]
-                                .chars()
-                                .next()
-                                .is_none_or(|ch| !word(ch))))
-            })
-            .filter_map(|(offset, _)| {
-                let start = self.original_offset(offset);
-                let end = self.original_offset(offset + needle.len());
-                (!self.crosses_block_end(start, end)).then_some(start)
-            })
-            .any(&mut visit)
+        if needle.is_empty() {
+            return false;
+        }
+        let mut cursor = 0;
+        while let Some(relative) = text[cursor..].find(&needle) {
+            let offset = cursor + relative;
+            let end = offset + needle.len();
+            let boundaries_match = !whole_words
+                || ((!needle.chars().next().is_some_and(word)
+                    || text[..offset]
+                        .chars()
+                        .next_back()
+                        .is_none_or(|ch| !word(ch)))
+                    && (!needle.chars().next_back().is_some_and(word)
+                        || text[end..].chars().next().is_none_or(|ch| !word(ch))));
+            let original_start = self.original_offset(offset);
+            let original_end = self.original_offset(end);
+            if boundaries_match && !self.crosses_block_end(original_start, original_end) {
+                if visit(original_start) {
+                    return true;
+                }
+                cursor = end;
+            } else {
+                // A rejected match must not hide an overlapping valid one.
+                cursor = offset + text[offset..].chars().next().unwrap().len_utf8();
+            }
+        }
+        false
     }
 }
 
@@ -2147,6 +2155,7 @@ mod tests {
             &[5]
         ));
         assert!(!claim_is_present("alpha  beta", "alpha beta", &[5]));
+        assert!(claim_is_present("aaa", "aa", &[1]));
     }
 
     #[test]
