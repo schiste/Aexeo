@@ -1,0 +1,71 @@
+{
+  "schema": "content-gate.verdict/v1",
+  "status": "fail",
+  "subject": {
+    "change_id": "chg-2026-11-10-0001",
+    "base": {
+      "kind": "git",
+      "revision": "3f5b0c1e9a7d2b4c6e8f0a1b2c3d4e5f6a7b8c9d"
+    },
+    "entries": [
+      {
+        "entity_id": "content/blog/launch.md",
+        "sha256": "037295ccd3047b65752228549e03e5048c995770987c68aec7e106624b558e0d"
+      },
+      {
+        "entity_id": "content/plans.md",
+        "sha256": "f87995a4a8dce74db966b69eeaa56d8140a2c4e3880a99998938d15664137c87"
+      },
+      {
+        "entity_id": "content/faq.md",
+        "sha256": "ab28131c90b576f8394b1534a47f9190a99bb7260eeb7e48cfd49a9b20f691e6"
+      }
+    ]
+  },
+  "validator": {
+    "name": "example-validator",
+    "version": "1.4.0",
+    "profile": "article"
+  },
+  "evaluated_at": "2026-11-10T09:30:04Z",
+  "summary": {
+    "checks": 3,
+    "passed": 2,
+    "failed": 1,
+    "not_checked": 0,
+    "blocking_failed": 1,
+    "blocking_not_checked": 0
+  },
+  "checks": [
+    {
+      "id": "structure.title",
+      "status": "passed",
+      "blocking": true
+    },
+    {
+      "id": "links.internal",
+      "status": "failed",
+      "blocking": true
+    },
+    {
+      "id": "length.words",
+      "status": "passed",
+      "blocking": false
+    }
+  ],
+  "findings": [
+    {
+      "rule_id": "links.internal.broken",
+      "severity": "error",
+      "check_id": "links.internal",
+      "entity_id": "content/index.md",
+      "location": {
+        "line": 8,
+        "column": 5
+      },
+      "subject": "/pricing/",
+      "message": "Link target /pricing/ no longer exists after content/pricing.md was renamed.",
+      "suggestion": "Add a redirect from /pricing/ to /plans/, or update the link."
+    }
+  ]
+}

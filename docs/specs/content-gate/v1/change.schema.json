@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "content-gate.change/v1",
+  "title": "Content gate change document, version 1",
+  "type": "object",
+  "required": ["schema", "change_id", "created_at", "origin", "base", "entries"],
+  "properties": {
+    "schema": { "const": "content-gate.change/v1" },
+    "change_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "origin": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["git", "mcp", "api", "manual"] },
+        "system": { "type": "string", "minLength": 1 },
+        "ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "base": { "$ref": "#/$defs/base" },
+    "content_root": { "type": "string", "minLength": 1 },
+    "site": {
+      "type": "object",
+      "minProperties": 1,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "base_url": { "type": "string", "format": "uri" }
+      }
+    },
+    "author": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "display_name": { "type": "string" },
+        "kind": { "enum": ["human", "agent", "system"] }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/entry" }
+    },
+    "extensions": { "type": "object" }
+  },
+  "$defs": {
+    "base": {
+      "type": "object",
+      "required": ["kind", "revision"],
+      "properties": {
+        "kind": { "enum": ["git", "opaque"] },
+        "revision": { "type": "string", "minLength": 1 }
+      },
+      "if": { "properties": { "kind": { "const": "git" } } },
+      "then": { "properties": { "revision": { "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$" } } }
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "content_state": {
+      "type": "object",
+      "required": ["sha256"],
+      "properties": {
+        "revision": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "inline": { "type": "string" },
+        "file": {
+          "type": "string",
+          "minLength": 1,
+          "not": { "pattern": "(^/|\\\\|(^|/)\\.\\.(/|$))" }
+        },
+        "uri": { "type": "string", "format": "uri" }
+      },
+      "oneOf": [
+        { "required": ["inline"] },
+        { "required": ["file"] },
+        { "required": ["uri"] }
+      ]
+    },
+    "entry": {
+      "type": "object",
+      "required": ["entity_id", "operation", "media_type"],
+      "properties": {
+        "entity_id": { "type": "string", "minLength": 1 },
+        "operation": { "enum": ["create", "update", "delete", "rename"] },
+        "previous_entity_id": { "type": "string", "minLength": 1 },
+        "media_type": { "type": "string", "minLength": 1 },
+        "public_path": { "type": "string", "pattern": "^/" },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "before": { "$ref": "#/$defs/content_state" },
+        "after": { "$ref": "#/$defs/content_state" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "operation": { "const": "create" } } },
+          "then": { "required": ["after"], "not": { "required": ["before"] } }
+        },
+        {
+          "if": { "properties": { "operation": { "const": "update" } } },
+          "then": { "required": ["after"] }
+        },
+        {
+          "if": { "properties": { "operation": { "const": "delete" } } },
+          "then": { "not": { "required": ["after"] } }
+        },
+        {
+          "if": { "properties": { "operation": { "const": "rename" } } },
+          "then": { "required": ["after", "previous_entity_id"] }
+        }
+      ]
+    }
+  }
+}
