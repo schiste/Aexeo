@@ -95,6 +95,29 @@ describe("EmDash content adaptation", () => {
     expect(mapped.body?.map((block) => block.children[0]?.text)).toEqual(["Before", "Question", "After"]);
   });
 
+  it("intersects declared component capabilities across mixed and nested content", () => {
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: {
+      content: [...body("Before"), { _type: "card", _key: "c", text: "Card" }, { _type: "badge", _key: "b", text: "Badge" }, ...body("After")],
+    } };
+    const mappings = {
+      card: { fields: [{ kind: "paragraph" as const, field: "text" }], capabilities: ["text" as const, "paragraphs" as const] },
+      badge: { fields: [{ kind: "paragraph" as const, field: "text" }], capabilities: ["text" as const, "headings" as const] },
+    };
+    const doc = contentItemToEmdashDocument(item, mappings);
+    expect(doc.body?.map((block) => block.children[0]?.text)).toEqual(["Before", "Card", "Badge", "After"]);
+    expect(doc.body_capabilities).toEqual(["text"]);
+    const nested = { ...item, data: { blocks: [{ _type: "section", _key: "s", body: item.data.content }] } };
+    const nestedDoc = contentItemToEmdashDocument(nested, { ...mappings, section: [{ kind: "richText", field: "body" }] });
+    expect(nestedDoc.body_capabilities).toEqual(["text"]);
+    const missing = contentItemToEmdashDocument(item, { ...mappings, card: { fields: [{ kind: "paragraph", field: "absent" }], capabilities: ["text"] } });
+    expect(missing.body_capabilities).toEqual([]);
+    const invalid = contentItemToEmdashDocument(item, { ...mappings, card: { fields: [], capabilities: ["text", "text"] } });
+    expect(invalid.body_capabilities).toEqual([]);
+    const ignoredPartially = contentItemToEmdashDocument(item, { ...mappings, card: { fields: [], capabilities: ["headings"] } });
+    expect(ignoredPartially.body_capabilities).toEqual(["headings"]);
+    expect(JSON.parse(JSON.stringify(aexeoPlugin({ blockMappings: mappings }).options)).blockMappings).toEqual(mappings);
+  });
+
   it("retains valid mixed content around malformed items without claiming coverage", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: {
       content: [...body("Before"), null, { _type: "block", children: "broken" }, { prompt: "untyped" }, ...body("After")],

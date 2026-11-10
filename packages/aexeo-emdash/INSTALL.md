@@ -124,6 +124,28 @@ unverified. Best-effort text extracted from an unknown component is bounded to
 it may therefore be incomplete and must not be treated as a complete body. A host may map a component to `[]` only when it has verified that
 the component contributes no content relevant to the evaluated body.
 
+The array form asserts that all four capabilities are complete. If a host can
+only establish some capabilities, use the object form instead:
+
+```js
+blockMappings: {
+  card: {
+    fields: [{ kind: "paragraph", field: "body" }],
+    capabilities: ["text", "paragraphs"],
+  },
+}
+```
+
+List a capability only when the projected fields faithfully represent **all**
+of that component's rendered content relevant to it, including content outside
+the listed fields. An empty `fields` array in the object form asserts only the
+listed capabilities; for example, `fields: [], capabilities: ["headings"]`
+asserts that the component contributes no headings, but says nothing about its
+text, paragraphs or links. Aexeo intersects capabilities across every component,
+selected field and nested rich-text block. Unknown, malformed or missing input
+still removes the affected coverage conservatively. These assertions require
+validation against the host renderer; they do not prove the content is correct.
+
 A block mapping is the site's assertion that those fields cover the rendered content,
 in order. `richText` accepts Portable Text arrays, including text mixed with
 mapped custom components, or arrays of mapped custom components alone, and
