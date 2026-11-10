@@ -253,6 +253,12 @@ missing and unspecified languages are not treated as an observed mismatch.
   qualify LNK001/LNK002 against, and its findings stay unqualified.
 - [ ] Run end-to-end fixtures and real-site comparisons for static and runtime
   sources, multiple locales, incomplete crawls, redirects and cross-origin URLs.
+  A local HTTP fixture now exercises a seeded English/French crawl end to end:
+  matching observed languages permit reconciliation, while a French inventory
+  entry served in English is `not_eligible` for a confirmed orphan. This does
+  not establish locale-region equivalence or substitute for a matching real site.
+  On 2026-11-10 the Preview CMS schema was accessible, but a direct article
+  request redirected to Cloudflare Access login; the HTML remained unobserved.
 - [x] Benchmark graph parsing independently and retain opt-in, aggregate-only
   operational telemetry. A calibrated CI budget enforces it in the perf budget
   step.
