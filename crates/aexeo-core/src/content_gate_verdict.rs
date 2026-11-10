@@ -9,7 +9,10 @@ use crate::{
         ContentEvaluationContext, ContentInput, ContentPreset, FINDINGS_OMITTED, GateStatus,
     },
     content_gate_sources::{ConfinedContentFiles, resolve_proposed_content},
-    markdown_adapter::markdown_input_with_source_map_and_destinations,
+    markdown_adapter::{
+        gate_source_positions, markdown_input_with_source_map_and_destinations,
+        prose_gate_has_positions,
+    },
 };
 use aexeo_contracts::content_gate_protocol::{
     self as protocol, Change, Check, CheckStatus, Operation, Subject, SubjectEntry, Summary,
@@ -48,7 +51,10 @@ pub fn evaluate_change<P: ConfinedContentFiles>(
         let Some(text) = resolved.text else {
             continue;
         };
-        let (mut input, context, link_count, destinations) = match entry.media_type.as_str() {
+        let (mut input, context, link_count, destinations, source_map) = match entry
+            .media_type
+            .as_str()
+        {
             "text/markdown" => {
                 let adapted =
                     markdown_input_with_source_map_and_destinations(&entry.entity_id, &text)?;
@@ -57,6 +63,7 @@ pub fn evaluate_change<P: ConfinedContentFiles>(
                     Some(adapted.context),
                     Some(adapted.link_count),
                     adapted.destinations,
+                    Some(adapted.source_map),
                 )
             }
             "text/plain" => (
@@ -66,6 +73,7 @@ pub fn evaluate_change<P: ConfinedContentFiles>(
                     source_text: Some(text),
                     ..Default::default()
                 },
+                None,
                 None,
                 None,
                 None,
@@ -91,7 +99,28 @@ pub fn evaluate_change<P: ConfinedContentFiles>(
         };
         let report =
             preset.evaluate_with_destinations(&input, &capabilities, destinations.as_deref())?;
-        for gate in report.gates {
+        let needs_plain_index = entry.media_type == "text/plain"
+            && preset
+                .gates
+                .iter()
+                .zip(&report.gates)
+                .any(|(definition, gate)| {
+                    prose_gate_has_positions(definition) && !gate.findings.is_empty()
+                });
+        let plain_index = needs_plain_index
+            .then(|| crate::text_index::LineIndex::new(input.text.as_deref().unwrap_or_default()));
+        for (definition, gate) in preset.gates.iter().zip(report.gates) {
+            let positions = source_map.as_ref().and_then(|map| {
+                gate_source_positions(
+                    map,
+                    input.source_text.as_deref()?,
+                    &input,
+                    definition,
+                    &gate,
+                    destinations.as_deref(),
+                    None,
+                )
+            });
             let check_id = scoped_id("gate", &entry.entity_id, &gate.gate_id);
             omitted = omitted.saturating_add(
                 gate.measurements
@@ -99,20 +128,37 @@ pub fn evaluate_change<P: ConfinedContentFiles>(
                     .copied()
                     .unwrap_or(0) as u64,
             );
-            for finding in gate.findings {
+            for (index, finding) in gate.findings.into_iter().enumerate() {
                 let severity = match finding.severity.as_str() {
                     "error" => protocol::Severity::Error,
                     "warning" => protocol::Severity::Warning,
                     "info" => protocol::Severity::Info,
                     _ => bail!("unsupported finding severity"),
                 };
+                let location = positions
+                    .as_ref()
+                    .and_then(|values| values.get(index))
+                    .copied()
+                    .flatten()
+                    .or_else(|| {
+                        let text = input.text.as_deref()?;
+                        let line_index = plain_index.as_ref()?;
+                        (prose_gate_has_positions(definition)
+                            && line_index
+                                .offset(text, finding.line, finding.column)
+                                .is_some())
+                        .then_some((finding.line, finding.column))
+                    });
                 findings.push(protocol::Finding {
                     rule_id: finding.rule_id,
                     severity,
                     message: finding.message,
                     entity_id: Some(finding.path),
                     check_id: Some(check_id.clone()),
-                    location: None,
+                    location: location.map(|(line, column)| protocol::Location {
+                        line: line as u64,
+                        column: column as u64,
+                    }),
                     subject: finding.subject,
                     suggestion: finding.suggestion,
                 });
@@ -263,6 +309,71 @@ mod tests {
             Some(fail.checks[0].id.as_str())
         );
         assert!(fail.findings[0].location.is_none());
+    }
+
+    #[test]
+    fn plain_text_verdict_uses_unicode_character_coordinates() {
+        use sha2::{Digest, Sha256};
+        let source = "first\né world";
+        let mut input = change();
+        let state = input.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['world']\n").unwrap();
+        let report = evaluate_change(
+            &input,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+        )
+        .unwrap();
+        assert_eq!(
+            report.findings[0].location,
+            Some(protocol::Location { line: 2, column: 3 })
+        );
+    }
+
+    #[test]
+    fn markdown_verdict_maps_findings_to_original_source_without_guessing() {
+        use sha2::{Digest, Sha256};
+        let source = "## Heading\n\nHello **world** and &amp;.\n\n[link](http://example.com)";
+        let mut input = change();
+        input.entries[0].media_type = "text/markdown".into();
+        let state = input.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='heading'\nkind='heading_length'\nmax_chars=3\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['world','&']\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\n").unwrap();
+        let report = evaluate_change(
+            &input,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+        )
+        .unwrap();
+        let location = |name: &str| {
+            report
+                .findings
+                .iter()
+                .filter(|finding| finding.check_id.as_deref().unwrap().ends_with(name))
+                .map(|finding| finding.location.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            location(":heading"),
+            vec![Some(protocol::Location { line: 1, column: 1 })]
+        );
+        assert_eq!(
+            location(":terms"),
+            vec![Some(protocol::Location { line: 3, column: 9 }), None]
+        );
+        assert_eq!(
+            location(":links"),
+            vec![Some(protocol::Location { line: 5, column: 1 })]
+        );
     }
 
     #[test]
