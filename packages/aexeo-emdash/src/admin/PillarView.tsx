@@ -205,7 +205,7 @@ export function PillarView({
       {findings.length === 0 ? (
         sitewide.length === 0 ? (
           <p className="text-sm text-kumo-subtle">
-            All clean on this layer.
+            No findings from the available CMS checks on this layer.
           </p>
         ) : null
       ) : (

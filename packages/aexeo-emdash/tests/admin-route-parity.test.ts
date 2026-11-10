@@ -221,16 +221,16 @@ const seedFindings = (kv: KvNamespace): void => {
 function withoutEmptyStateCopy(response: BlockResponse): unknown[] {
   const last = response.blocks[response.blocks.length - 1];
   const isEmptyState =
-    response.blocks.length === 5 &&
+    response.blocks.length === 6 &&
     (last as { type?: string }).type === "context";
   return isEmptyState
-    ? [...response.blocks.slice(0, 4), { type: "context" }]
+    ? [...response.blocks.slice(0, -1), { type: "context" }]
     : response.blocks;
 }
 
 function emptyStateCopy(response: BlockResponse): string | undefined {
   const last = response.blocks[response.blocks.length - 1];
-  return withoutEmptyStateCopy(response).length === 5
+  return withoutEmptyStateCopy(response).length === 6
     ? (last as { text?: string }).text
     : undefined;
 }

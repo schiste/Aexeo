@@ -539,3 +539,29 @@ this API. It cannot by itself establish that a crawl and CMS view describe the
 same publication, release and point in time.
 
 An optional `onTelemetry` callback receives only elapsed milliseconds and aggregate counts. It is disabled by default and does not receive URLs or content.
+
+### CMS coverage and rendered pages
+
+The CMS integration evaluates content records, not the rendered page.
+It does not report legacy SEO, social metadata, accessibility, page-size,
+answer-block or citation-context findings as if generated HTML were observed.
+Run Aexeo against the built site to assess those checks. The `aexeo.page_coverage`
+telemetry event marks rendered-page and generated-metadata coverage as not observed;
+`aexeo.content_coverage` describes body projection separately.
+
+The built-in `article` preset is a minimal non-empty text check, not a complete
+editorial or SEO assessment. Choose and compose the editorial presets appropriate
+to the content, or supply a project-specific preset.
+
+When the host renderer selects a description from collection fields, configure
+the same ordered fallback explicitly, for example:
+
+```ts
+aexeoPlugin({
+  descriptionFieldsByCollection: { blog_posts: ["seo_description", "excerpt"] },
+})
+```
+
+The mapping projects source values; it does not prove what metadata the page
+renderer generated. An absent value in a valid mapping is recorded separately
+from an unknown or invalid mapping.

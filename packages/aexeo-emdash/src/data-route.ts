@@ -101,6 +101,7 @@ export interface FindingRow {
 interface DataRouteOptions {
   blockMappings?: CustomBlockMappings | undefined;
   contentFieldsByCollection?: Record<string, readonly string[]> | undefined;
+  descriptionFieldsByCollection?: Record<string, readonly string[]> | undefined;
   collections: readonly string[];
   evaluator: EvaluatorFn;
   // Refresh: when true, the route runs evaluateAndPersistAll first
@@ -127,6 +128,7 @@ export async function handleDataRoute(
       evaluator: options.evaluator,
       blockMappings: options.blockMappings,
       contentFieldsByCollection: options.contentFieldsByCollection,
+      descriptionFieldsByCollection: options.descriptionFieldsByCollection,
       ...(options.suppressionFilter === undefined
         ? {}
         : { suppressionFilter: options.suppressionFilter }),

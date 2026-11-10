@@ -54,6 +54,19 @@ describe("EmDash content adaptation", () => {
     expect(adaptContentItem({ ...item, data: { introduction: body("intro"), sections: 42 } }, { contentFields: ["introduction", "sections"] }).document.body_capabilities).toEqual([]);
   });
 
+  it("projects explicit ordered description fields and distinguishes unknown mappings", () => {
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: { seo_description: "SEO copy", excerpt: "Excerpt" } };
+    const options = { descriptionFields: ["seo_description", "excerpt"] };
+    expect(adaptContentItem(item, options).document).toMatchObject({ description: "SEO copy", description_source_observed: true });
+    expect(adaptContentItem({ ...item, data: { seo_description: "", excerpt: "Excerpt" } }, options).document).toMatchObject({ description: "Excerpt", description_source_observed: true });
+    const absent = adaptContentItem({ ...item, data: {} }, options).document;
+    expect(absent.description).toBeUndefined();
+    expect(absent.description_source_observed).toBe(true);
+    expect(adaptContentItem(item).document.description_source_observed).toBeUndefined();
+    expect(adaptContentItem({ ...item, data: { seo_description: 42 } }, options).document.description_source_observed).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(aexeoPlugin({ descriptionFieldsByCollection: { posts: options.descriptionFields } }).options)).descriptionFieldsByCollection.posts).toEqual(options.descriptionFields);
+  });
+
   it("preserves mixed Portable Text and marks unmapped components unverified", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: {
       content: [...body("Before"), { _type: "askYourAi", _key: "ai", prompt: "Question" }, ...body("After")],

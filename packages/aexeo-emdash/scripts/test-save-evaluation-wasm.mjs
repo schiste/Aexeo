@@ -156,14 +156,39 @@ mode="strict"
   assert.equal(has(host, "/home", "LNK002"), false, "save reported a false orphan");
   console.log("WASM save keeps valid links and inbound links clean");
 
-  // Rules that only look at the saved document still update on save.
-  assert.equal(has(host, "/home", "SEO002"), false);
+  // CMS metadata is a projection, not evidence about the rendered page.
   const withoutDescription = { ...home, seo: { ...home.seo, description: null } };
   await save(host, withoutDescription);
-  assert.equal(has(host, "/home", "SEO002"), true, "save must re-evaluate the document's own rules");
-  await save(host, home);
-  assert.equal(has(host, "/home", "SEO002"), false, "save must clear fixed findings");
-  console.log("WASM save still updates document-level findings");
+  assert.equal(has(host, "/home", "SEO002"), false, "unobserved rendered metadata must not be reported missing");
+  for (const rule of ["SEO004", "SEO005", "SOC001", "SOC002", "SOC003", "SOC004", "SOC006", "A11Y005", "CNT001", "GEO008", "GEO010"]) {
+    assert.equal(has(host, "/home", rule), false, `${rule} requires rendered-page evidence`);
+  }
+  console.log("WASM CMS save does not report unobserved page elements");
+}
+
+// Mixed Portable Text retains prose on both sides of unrecognized components.
+{
+  const mixed = item("mixed", { data: { content: [block("a", "Before"), { _type: "askYourAi", _key: "ai", prompt: "Question" }, block("b", "Between"), { _type: "unknown", _key: "other" }, block("c", "After")] } });
+  const host = fakeHost([mixed]);
+  await save(host, mixed);
+  const document = host.store.get("document:/mixed")?.document;
+  assert.ok(document, "adapted document was persisted");
+  assert.deepEqual(document.body.filter((entry) => ["a", "b", "c"].includes(entry._key)).map((entry) => entry.children[0].text), ["Before", "Between", "After"]);
+  assert.deepEqual(document.body_capabilities, []);
+  for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/mixed", rule), false);
+}
+
+// Ordered host metadata mappings reach both save and Refresh.
+{
+  const mapped = item("mapped", { data: { body: [block("p", "Content")], seo_description: "Preferred", excerpt: "Fallback" } });
+  const host = fakeHost([mapped]);
+  const configured = createPlugin({ descriptionFieldsByCollection: { pages: ["seo_description", "excerpt"] } });
+  await configured.hooks["content:afterSave"].handler({ content: mapped, collection: "pages", isNew: false }, host.ctx);
+  assert.equal(host.store.get("document:/mapped").document.description, "Preferred");
+  assert.equal(host.store.get("document:/mapped").document.description_source_observed, true);
+  host.items[0] = { ...mapped, data: { ...mapped.data, seo_description: "" } };
+  await configured.routes.refresh.handler(host.ctx);
+  assert.equal(host.store.get("document:/mapped").document.description, "Fallback");
 }
 
 // --- A save must not erase what Refresh found --------------------------------
@@ -212,11 +237,7 @@ mode="strict"
     ["/subject", "LNK001"],
     ["/subject", "LNK002"],
     ["/subject", "LNK003"],
-    ["/subject", "SEO012"],
-    ["/subject", "SEO017"],
     ["/subject", "CNT005"],
-    ["/moved", "SEO009"],
-    ["/moved", "SEO016"],
   ];
   for (const [route, ruleId] of expected) {
     assert.equal(has(host, route, ruleId), true, `fixture must trigger ${ruleId} on ${route} at Refresh; got ${[...rulesAt(host, route)]}`);

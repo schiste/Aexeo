@@ -142,7 +142,7 @@ export function Findings(): React.JSX.Element {
           <h1 className="text-xl font-semibold">SEO findings</h1>
           <p className="mt-1 text-sm text-kumo-subtle">
             {payload.totals.findings === 0 ? (
-              <>No findings yet — click Refresh to evaluate the site.</>
+              <>No findings yet — click Refresh to evaluate CMS records.</>
             ) : (
               <>
                 {payload.totals.findings} findings across {payload.totals.routes} routes —{" "}
@@ -160,6 +160,8 @@ export function Findings(): React.JSX.Element {
           {refreshing ? "Refreshing…" : "Refresh"}
         </button>
       </header>
+
+      <p className="text-sm text-kumo-subtle">Rendered page markup and generated metadata are not checked here. Audit the built site for page-level findings.</p>
 
       {toast !== null && (
         <div className="rounded border border-kumo-line bg-kumo-tint p-3 text-sm">
@@ -186,7 +188,7 @@ export function Findings(): React.JSX.Element {
         <p className="text-sm text-kumo-subtle">
           {payload.totals.documentsIndexed === 0
             ? "No documents indexed — click Refresh to do an initial sweep."
-            : "All indexed documents are clean."}
+            : "No findings from the available CMS checks."}
         </p>
       ) : (
         <div className="overflow-x-auto rounded border border-kumo-line">

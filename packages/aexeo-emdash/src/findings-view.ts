@@ -172,6 +172,7 @@ export interface AdminViewTuning {
 export interface RefreshOptions {
   blockMappings?: CustomBlockMappings | undefined;
   contentFieldsByCollection?: Record<string, readonly string[]> | undefined;
+  descriptionFieldsByCollection?: Record<string, readonly string[]> | undefined;
   /**
    * Host context. `evaluateAndPersistAll` needs kv/http/content/log, and
    * the follow-up `renderFindingsPage` needs kv.
@@ -217,6 +218,7 @@ export async function handleRefresh(
       evaluator: options.evaluator,
       blockMappings: options.blockMappings,
       contentFieldsByCollection: options.contentFieldsByCollection,
+      descriptionFieldsByCollection: options.descriptionFieldsByCollection,
       // Always forwarded. See RefreshOptions.suppressionFilter.
       suppressionFilter: options.suppressionFilter,
     });
@@ -318,9 +320,10 @@ export async function renderFindingsPage(
       type: "context",
       text:
         findings.length === 0
-          ? "No findings yet — click Refresh to evaluate the site."
+          ? "No findings yet — click Refresh to evaluate CMS records."
           : `${findings.length} findings across ${routes.length} routes — ${errors.length} errors, ${warnings.length} warnings.`,
     },
+    { type: "context", text: "Rendered page markup and generated metadata are not checked here. Audit the built site for page-level findings." },
     { type: "divider" },
     {
       type: "actions",
@@ -493,9 +496,10 @@ export async function renderDocumentPanel(
         type: "context",
         text:
           findings.length === 0
-            ? `No findings for ${route} — the document is currently clean.`
+            ? `No findings for ${route} from the available CMS checks.`
             : `${findings.length} findings — ${errors.length} errors, ${warnings.length} warnings.`,
       },
+      { type: "context", text: "Rendered page markup and generated metadata are not checked here. Audit the built site for page-level findings." },
       ...(findings.length === 0
         ? []
         : [{ type: "divider" }, documentFindingsTable(sorted)]),

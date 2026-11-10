@@ -50,6 +50,8 @@ export interface EmdashDocument {
   route: string;
   title: string;
   description?: string;
+  /** A host mapping observed source fields; this does not establish rendered metadata. */
+  description_source_observed?: boolean;
   canonical?: string;
   lang?: string;
   alternates?: HreflangAlternate[];

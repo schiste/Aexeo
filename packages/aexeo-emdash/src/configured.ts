@@ -167,6 +167,7 @@ const inProcessEvaluator: EvaluatorFn = async (documents) => {
 export interface ConfiguredPluginOptions {
   blockMappings?: CustomBlockMappings;
   contentFieldsByCollection?: Record<string, readonly string[]>;
+  descriptionFieldsByCollection?: Record<string, readonly string[]>;
   /** Optional portable preset evaluated in addition to the existing site checks. */
   contentPreset?: ContentPresetOptions;
   /**
@@ -254,6 +255,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
           suppressionFilter,
           options.blockMappings,
           options.contentFieldsByCollection?.[event.content.type],
+          options.descriptionFieldsByCollection?.[event.content.type],
         ),
       "content:afterDelete": (event: ContentAfterDeleteEvent, ctx: SandboxCtx) =>
         handleAfterDelete(event, ctx),
@@ -271,7 +273,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
       admin: {
         permission: "plugins:read",
         handler: (ctx: RouteContext) =>
-          handleAdminRoute(ctx, collections, suppressionFilter, evaluator, options.blockMappings, options.contentFieldsByCollection),
+          handleAdminRoute(ctx, collections, suppressionFilter, evaluator, options.blockMappings, options.contentFieldsByCollection, options.descriptionFieldsByCollection),
       },
       // JSON data endpoint for the React adminEntry. Two routes:
       //   POST /_emdash/api/plugins/aexeo-emdash/data    — read current findings
@@ -290,6 +292,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
             suppressionFilter,
             blockMappings: options.blockMappings,
             contentFieldsByCollection: options.contentFieldsByCollection,
+            descriptionFieldsByCollection: options.descriptionFieldsByCollection,
           })).payload,
       },
       refresh: {
@@ -302,6 +305,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
             suppressionFilter,
             blockMappings: options.blockMappings,
             contentFieldsByCollection: options.contentFieldsByCollection,
+            descriptionFieldsByCollection: options.descriptionFieldsByCollection,
           }),
       },
       // /facts route serves the truth-manifest authoring UI. It
@@ -401,6 +405,7 @@ async function handleAdminRoute(
   evaluator: EvaluatorFn,
   blockMappings?: CustomBlockMappings,
   contentFieldsByCollection?: Record<string, readonly string[]>,
+  descriptionFieldsByCollection?: Record<string, readonly string[]>,
 ): Promise<BlockResponse> {
   const body = normalizeInteraction(ctx.input);
   if (body.type === "page_load") {
@@ -436,6 +441,7 @@ async function handleAdminRoute(
         tuning: adminViewTuning,
         blockMappings,
         contentFieldsByCollection,
+        descriptionFieldsByCollection,
       });
     }
     if (body.action_id.startsWith("filter:")) {
