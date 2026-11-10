@@ -537,7 +537,7 @@ export async function handleAfterSaveConfigured(
       detail: result.detail,
     });
     // Findings from a previous revision are not results for this one.
-    if (!(await isSuperseded(kv, document.route, adapted.meta.updatedAt))) {
+    if (!(await isSuperseded(kv, stored))) {
       await kv.set(findingsKey(document.route), {
         route: document.route, findings: [],
         assessment: { status: "error", reason: result.reason, detail: result.detail },
@@ -572,7 +572,7 @@ export async function handleAfterSaveConfigured(
   // The evaluator can take longer than the next save or delete of this entry.
   // Its findings describe a superseded revision if so; the newer writer owns
   // this route now.
-  if (await isSuperseded(kv, document.route, adapted.meta.updatedAt)) {
+  if (await isSuperseded(kv, stored)) {
     log?.info?.(`Aexeo afterSave discarded: ${document.route} changed while evaluating`);
     return;
   }
@@ -736,7 +736,7 @@ export async function evaluateAndPersistAll(
       assessment: { status: "error", reason: result.reason, detail: result.detail },
     });
     for (const [route, stored] of adaptedByRoute) {
-      if (!(await isSuperseded(kv, route, stored.meta.updatedAt))) {
+      if (!(await isSuperseded(kv, stored))) {
         await kv.set(findingsKey(route), {
           route, findings: [],
           assessment: { status: "error", reason: result.reason, detail: result.detail },
@@ -799,7 +799,7 @@ export async function evaluateAndPersistAll(
     // A save or delete that landed during the sweep owns this route now.
     if (
       stored !== undefined &&
-      (await isSuperseded(kv, route, stored.meta.updatedAt))
+      (await isSuperseded(kv, stored))
     ) {
       continue;
     }
@@ -844,15 +844,13 @@ async function refreshInputChanged(
   const current = await readAllStoredDocuments(kv);
   const currentByRoute = new Map(current.map((entry) => [entry.document.route, entry]));
   const initialByRoute = new Map(initial.map((entry) => [entry.document.route, entry]));
-  const same = (a: StoredDocument | undefined, b: StoredDocument | undefined) =>
-    a !== undefined && b !== undefined && JSON.stringify(a) === JSON.stringify(b);
   for (const [route, entry] of evaluated) {
-    if (!same(entry, currentByRoute.get(route))) return true;
+    if (!sameStoredDocument(entry, currentByRoute.get(route))) return true;
   }
   const selected = new Set(collections);
   for (const entry of current) {
     const route = entry.document.route;
-    if (!evaluated.has(route) && (entry.meta.collection === "" || selected.has(entry.meta.collection)) && !same(entry, initialByRoute.get(route))) return true;
+    if (!evaluated.has(route) && (entry.meta.collection === "" || selected.has(entry.meta.collection)) && !sameStoredDocument(entry, initialByRoute.get(route))) return true;
   }
   return false;
 }
@@ -874,17 +872,16 @@ async function readStoredDocument(
   return toStoredDocument(await kv.get<unknown>(documentKey(route)));
 }
 
-// True when the route's stored document was deleted, moved, or replaced by a
-// newer revision since `revision` was persisted.
-async function isSuperseded(
-  kv: KvNamespace,
-  route: string,
-  revision: string | undefined,
-): Promise<boolean> {
-  const current = await readStoredDocument(kv, route);
-  return (
-    current === null || isOlderRevision(revision, current.meta.updatedAt)
-  );
+// Compare the whole evaluated snapshot, including metadata. Timestamps can be
+// missing or equal for different saves, so they cannot establish identity.
+function sameStoredDocument(a: StoredDocument | null | undefined, b: StoredDocument | null | undefined): boolean {
+  return a != null && b != null && JSON.stringify(a) === JSON.stringify(b);
+}
+
+// True when the stored snapshot is gone or no longer matches what was evaluated.
+// The host KV offers no atomic compare-and-set; a later write can still race.
+async function isSuperseded(kv: KvNamespace, evaluated: StoredDocument): Promise<boolean> {
+  return !sameStoredDocument(evaluated, await readStoredDocument(kv, evaluated.document.route));
 }
 
 // Returns false, writing nothing, when a newer revision of this entry is
