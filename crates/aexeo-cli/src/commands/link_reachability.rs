@@ -32,8 +32,10 @@ pub fn command_link_reachability(args: &ArgMatches) -> Result<i32> {
     };
     let report = check_link_reachability(
         &destinations,
-        *args.get_one::<usize>("max-checks").unwrap(),
-        Duration::from_secs(*args.get_one::<u64>("timeout").unwrap()),
+        *args
+            .get_one::<usize>("max-checks")
+            .context("missing max-checks")?,
+        Duration::from_secs(*args.get_one::<u64>("timeout").context("missing timeout")?),
     )?;
     if args.get_flag("telemetry") {
         let count = |status| {
