@@ -278,6 +278,8 @@ pub enum ContentGate {
     UniqueCollectionMetadata {
         id: String,
         field: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group_by: Option<String>,
         #[serde(default)]
         severity: Severity,
         #[serde(default = "default_blocking")]
@@ -949,6 +951,15 @@ impl ContentPreset {
                         gate.id()
                     )
                 }
+                ContentGate::UniqueCollectionMetadata {
+                    group_by: Some(group),
+                    ..
+                } if group.trim().is_empty() => {
+                    bail!(
+                        "collection metadata group field must not be empty for {}",
+                        gate.id()
+                    );
+                }
                 ContentGate::EvidenceAnchors {
                     source,
                     claim,
@@ -1193,11 +1204,14 @@ impl ContentPreset {
                         None => reason = Some("text is unavailable from this adapter".into()),
                     }
                 }
-                ContentGate::UniqueCollectionMetadata { field, .. } => match collection {
+                ContentGate::UniqueCollectionMetadata {
+                    field, group_by, ..
+                } => match collection {
                     Some(items) => {
                         measurements.insert("collection_items".into(), items.len());
                         let mut first_by_value = BTreeMap::new();
                         let mut missing = 0;
+                        let mut missing_group = 0;
                         let mut duplicates = 0;
                         for item in items {
                             let value = item
@@ -1205,15 +1219,29 @@ impl ContentPreset {
                                 .as_ref()
                                 .and_then(|m| m.get(field))
                                 .filter(|v| !v.trim().is_empty());
-                            match value {
-                                Some(value) => {
-                                    if let Some(first_id) = first_by_value.get(value) {
-                                        duplicates += 1;
-                                        if findings.len() >= MAX_FINDINGS_PER_GATE {
-                                            omitted += 1;
-                                            continue;
-                                        }
-                                        findings.push(aexeo_contracts::Finding {
+                            let group = group_by.as_ref().and_then(|field| {
+                                item.metadata
+                                    .as_ref()
+                                    .and_then(|metadata| metadata.get(field))
+                                    .filter(|value| !value.trim().is_empty())
+                            });
+                            if value.is_none() {
+                                missing += 1;
+                            }
+                            if group_by.is_some() && group.is_none() {
+                                missing_group += 1;
+                            }
+                            if let (Some(value), true) =
+                                (value, group_by.is_none() || group.is_some())
+                            {
+                                let key = (group, value);
+                                if let Some(first_id) = first_by_value.get(&key) {
+                                    duplicates += 1;
+                                    if findings.len() >= MAX_FINDINGS_PER_GATE {
+                                        omitted += 1;
+                                        continue;
+                                    }
+                                    findings.push(aexeo_contracts::Finding {
                                                 rule_id: gate.id().to_owned(),
                                                 message: format!("Metadata field {field:?} duplicates the value in {first_id:?}"),
                                                 path: item.id.clone(),
@@ -1224,22 +1252,28 @@ impl ContentPreset {
                                                 scope: aexeo_contracts::FindingScope::Page,
                                                 subject: None,
                                             });
-                                    } else {
-                                        first_by_value.insert(value, &item.id);
-                                    }
+                                } else {
+                                    first_by_value.insert(key, &item.id);
                                 }
-                                None => missing += 1,
                             }
                         }
                         measurements.insert("items_missing_field".into(), missing);
+                        if group_by.is_some() {
+                            measurements.insert("items_missing_group".into(), missing_group);
+                        }
                         measurements.insert("duplicate_items".into(), duplicates);
-                        if missing > 0 || !collection_complete {
+                        if missing > 0 || missing_group > 0 || !collection_complete {
                             let mut causes = Vec::new();
                             if !collection_complete {
                                 causes.push("collection is incomplete".to_owned());
                             }
                             if missing > 0 {
                                 causes.push(format!("metadata field {field:?} is unavailable for {missing} collection item(s)"));
+                            }
+                            if let Some(group_field) =
+                                group_by.as_ref().filter(|_| missing_group > 0)
+                            {
+                                causes.push(format!("group metadata field {group_field:?} is unavailable for {missing_group} collection item(s)"));
                             }
                             reason = Some(causes.join("; "));
                         }
@@ -2479,6 +2513,81 @@ field = "slug"
                 .gates[0]
                 .status,
             GateStatus::Passed
+        );
+    }
+
+    #[test]
+    fn collection_uniqueness_can_be_scoped_by_metadata() {
+        let preset = ContentPreset::from_toml("version=1\nname='collection'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\ngroup_by='lang'\n").unwrap();
+        let item = |id: &str, slug: Option<&str>, lang: Option<&str>| {
+            let mut metadata = BTreeMap::new();
+            if let Some(value) = slug {
+                metadata.insert("slug".into(), value.into());
+            }
+            if let Some(value) = lang {
+                metadata.insert("lang".into(), value.into());
+            }
+            ContentInput {
+                id: id.into(),
+                metadata: Some(metadata),
+                ..Default::default()
+            }
+        };
+        let input = ContentInput::default();
+        let items = vec![
+            item("en", Some("shared"), Some("en")),
+            item("fr", Some("shared"), Some("fr")),
+        ];
+        let run = |items: &[ContentInput], complete| {
+            preset
+                .evaluate_with_collection_completeness(
+                    &input,
+                    &ContentEvaluationContext {
+                        collection: Some(items),
+                        ..Default::default()
+                    },
+                    None,
+                    complete,
+                    None,
+                )
+                .unwrap()
+        };
+        assert_eq!(run(&items, true).gates[0].status, GateStatus::Passed);
+        let duplicate = vec![
+            items[0].clone(),
+            items[1].clone(),
+            item("en2", Some("shared"), Some("en")),
+        ];
+        let result = run(&duplicate, true);
+        assert_eq!(result.gates[0].status, GateStatus::Failed);
+        assert_eq!(result.gates[0].measurements["duplicate_items"], 1);
+        assert_eq!(result.gates[0].findings[0].path, "en2");
+        let mut incomplete = duplicate.clone();
+        incomplete.push(item("unknown", Some("shared"), None));
+        incomplete.push(item("blank", None, Some(" ")));
+        let result = run(&incomplete, true);
+        assert_eq!(result.gates[0].status, GateStatus::NotChecked);
+        assert_eq!(result.gates[0].measurements["items_missing_field"], 1);
+        assert_eq!(result.gates[0].measurements["items_missing_group"], 2);
+        assert_eq!(result.gates[0].findings.len(), 1);
+        assert!(
+            result.gates[0]
+                .reason
+                .as_deref()
+                .unwrap()
+                .contains("group metadata field")
+        );
+        assert_eq!(
+            run(&duplicate, false).gates[0].status,
+            GateStatus::NotChecked
+        );
+        assert!(ContentPreset::from_toml("version=1\nname='bad'\n[[gates]]\nid='u'\nkind='unique_collection_metadata'\nfield='slug'\ngroup_by='  '\n").is_err());
+        let old = ContentPreset::from_toml("version=1\nname='old'\n[[gates]]\nid='u'\nkind='unique_collection_metadata'\nfield='slug'\n").unwrap();
+        assert!(
+            serde_json::to_value(&old.gates[0])
+                .unwrap()
+                .get("group_by")
+                .is_none()
         );
     }
 

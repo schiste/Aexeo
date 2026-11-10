@@ -90,3 +90,37 @@ fn incomplete_collection_retains_observed_duplicates_without_passing() {
             .contains("collection is incomplete")
     );
 }
+
+#[test]
+fn collection_grouping_reports_only_known_intra_group_duplicates() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    let input = dir.path().join("collection.json");
+    fs::write(&preset, "version=1\nname='collection'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\ngroup_by='lang'\n").unwrap();
+    fs::write(&input, r#"[{"id":"/en","metadata":{"slug":"same","lang":"en"}},{"id":"/fr","metadata":{"slug":"same","lang":"fr"}},{"id":"/en2","metadata":{"slug":"same","lang":"en"}},{"id":"/missing","metadata":{"slug":"same"}}]"#).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "--no-text",
+            "--collection",
+            input.to_str().unwrap(),
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--format",
+            "json",
+            "--telemetry",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let gate = &report["gates"][0];
+    assert_eq!(gate["status"], "not_checked");
+    assert_eq!(gate["measurements"]["duplicate_items"], 1);
+    assert_eq!(gate["measurements"]["items_missing_group"], 1);
+    assert_eq!(gate["findings"].as_array().unwrap().len(), 1);
+    assert_eq!(gate["findings"][0]["path"], "/en2");
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("same"));
+}
