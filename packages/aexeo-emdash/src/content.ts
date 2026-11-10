@@ -1,4 +1,4 @@
-import { evaluateContent as evaluateContentWasm, evaluateContentCollection as evaluateCollectionWasm } from "./wasm-init.js";
+import { evaluateContent as evaluateContentWasm, evaluateContentCollection as evaluateCollectionWasm, projectContentInput as projectContentInputWasm } from "./wasm-init.js";
 import type { EmdashDocument, Finding } from "./types.js";
 
 export interface ContentGateResult {
@@ -41,6 +41,28 @@ export interface ContentEvaluationTelemetry {
   link_destinations?: { checked: number; invalid: number };
 }
 
+/** Exact projected input bound to external extension results; may contain private content. */
+export interface ExtensionInput {
+  id: string;
+  text: string | null;
+  source_text: string | null;
+  headings: string[] | null;
+  metadata: Record<string, string> | null;
+  evidence_sources: Record<string, string> | null;
+}
+
+export interface ExternalGateResult {
+  extension: string;
+  parameters: Record<string, string>;
+  input: ExtensionInput;
+  diagnostics: Array<{ message: string; line: number; column: number }>;
+}
+
+/** Project the same input the evaluator will give a trusted extension. */
+export async function projectContentInput(document: EmdashDocument, evidenceSources?: Record<string, string>): Promise<ExtensionInput> {
+  return JSON.parse(await projectContentInputWasm(JSON.stringify(document), evidenceSources === undefined ? undefined : JSON.stringify(evidenceSources))) as ExtensionInput;
+}
+
 /** Evaluate a document locally using the built-in or supplied named TOML presets. */
 export async function evaluateContent(
   document: EmdashDocument,
@@ -48,13 +70,16 @@ export async function evaluateContent(
   sources: Record<string, string> = {},
   evidenceSources?: Record<string, string>,
   onTelemetry?: (event: ContentEvaluationTelemetry) => void,
+  externalResults?: ExternalGateResult[],
 ): Promise<ContentReport> {
   const started = onTelemetry ? performance.now() : 0;
   const documentJson = JSON.stringify(document);
   const sourcesJson = JSON.stringify(sources);
-  const result = evidenceSources === undefined
-    ? await evaluateContentWasm(documentJson, preset, sourcesJson)
-    : await evaluateContentWasm(documentJson, preset, sourcesJson, JSON.stringify(evidenceSources));
+  const result = externalResults !== undefined
+    ? await evaluateContentWasm(documentJson, preset, sourcesJson, evidenceSources === undefined ? undefined : JSON.stringify(evidenceSources), JSON.stringify(externalResults))
+    : evidenceSources === undefined
+      ? await evaluateContentWasm(documentJson, preset, sourcesJson)
+      : await evaluateContentWasm(documentJson, preset, sourcesJson, JSON.stringify(evidenceSources));
   const report = JSON.parse(result) as ContentReport;
   if (onTelemetry) {
     const event: ContentEvaluationTelemetry = { evaluation_ms: performance.now() - started, source_locations_mapped: report.source_locations?.length ?? 0 };

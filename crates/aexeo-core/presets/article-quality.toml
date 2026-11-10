@@ -1,0 +1,3 @@
+version = 1
+name = "Article quality starter"
+extends = ["article-editorial", "editorial-structure"]

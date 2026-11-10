@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// The smallest common input shared by content adapters. The identifier is
 /// opaque: it may be a file name, a URL, or a CMS document identifier.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContentInput {
     pub id: String,
@@ -85,6 +85,16 @@ pub enum ContentGate {
         #[serde(default = "default_blocking")]
         blocking: bool,
         max_words: usize,
+    },
+    /// Flags repeated literal paragraph openings; this is an editorial prompt.
+    RepeatedParagraphOpenings {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+        opening_words: usize,
+        max_occurrences: usize,
     },
     /// Limits Unicode scalar values in adapter-supplied paragraphs.
     ParagraphCharacterLength {
@@ -317,6 +327,7 @@ impl ContentGate {
             | Self::SentenceLength { severity, .. }
             | Self::SentenceCharacterLength { severity, .. }
             | Self::ParagraphLength { severity, .. }
+            | Self::RepeatedParagraphOpenings { severity, .. }
             | Self::ParagraphCharacterLength { severity, .. }
             | Self::RepeatedTerms { severity, .. }
             | Self::ForbiddenTerms { severity, .. }
@@ -341,6 +352,7 @@ impl ContentGate {
             | Self::SentenceLength { blocking, .. }
             | Self::SentenceCharacterLength { blocking, .. }
             | Self::ParagraphLength { blocking, .. }
+            | Self::RepeatedParagraphOpenings { blocking, .. }
             | Self::ParagraphCharacterLength { blocking, .. }
             | Self::RepeatedTerms { blocking, .. }
             | Self::ForbiddenTerms { blocking, .. }
@@ -368,7 +380,9 @@ impl ContentGate {
             Self::LinkCount { .. } => "links",
             Self::LinkDestinations { .. } => "link_destinations",
             Self::RequiredMetadata { .. } => "metadata",
-            Self::ParagraphLength { .. } | Self::ParagraphCharacterLength { .. } => "paragraphs",
+            Self::ParagraphLength { .. }
+            | Self::ParagraphCharacterLength { .. }
+            | Self::RepeatedParagraphOpenings { .. } => "paragraphs",
             Self::RequiredHeadings { .. }
             | Self::DuplicateHeadings { .. }
             | Self::HeadingLength { .. } => "headings",
@@ -389,6 +403,7 @@ impl ContentGate {
             | Self::SentenceLength { id, .. }
             | Self::SentenceCharacterLength { id, .. }
             | Self::ParagraphLength { id, .. }
+            | Self::RepeatedParagraphOpenings { id, .. }
             | Self::ParagraphCharacterLength { id, .. }
             | Self::RepeatedTerms { id, .. }
             | Self::ForbiddenTerms { id, .. }
@@ -803,6 +818,16 @@ impl ContentPreset {
                 }
                 ContentGate::HeadingLength { max_chars, .. } if *max_chars == 0 => {
                     bail!("heading length max_chars must be greater than zero");
+                }
+                ContentGate::RepeatedParagraphOpenings {
+                    opening_words,
+                    max_occurrences,
+                    ..
+                } if *opening_words == 0 || *opening_words > 16 || *max_occurrences == 0 => {
+                    bail!(
+                        "paragraph openings need 1 to 16 words and a positive occurrence limit for {}",
+                        gate.id()
+                    )
                 }
                 ContentGate::ParagraphLength { max_words, .. } if *max_words == 0 => {
                     bail!("paragraph length needs a positive limit for {}", gate.id())
@@ -1236,6 +1261,53 @@ impl ContentPreset {
                             measurements.insert("paragraph_count".into(), paragraphs.len());
                             measurements.insert("paragraphs_exceeding_limit".into(), exceeding);
                             measurements.insert(longest_key.into(), longest);
+                        }
+                        None => {
+                            reason = Some("paragraphs are unavailable from this adapter".into())
+                        }
+                    }
+                }
+                ContentGate::RepeatedParagraphOpenings {
+                    opening_words,
+                    max_occurrences,
+                    ..
+                } => {
+                    measurements.insert("opening_words".into(), *opening_words);
+                    measurements.insert("max_occurrences".into(), *max_occurrences);
+                    match context.and_then(|c| c.paragraphs.as_ref()) {
+                        Some(paragraphs) => {
+                            let mut openings = BTreeMap::<Vec<String>, usize>::new();
+                            let mut exceeding = 0;
+                            for paragraph in paragraphs {
+                                let words: Vec<String> = paragraph
+                                    .text
+                                    .split_whitespace()
+                                    .take(*opening_words)
+                                    .map(|word| {
+                                        word.trim_matches(|ch: char| !ch.is_alphanumeric())
+                                            .to_lowercase()
+                                    })
+                                    .collect();
+                                if words.len() != *opening_words
+                                    || words.iter().any(String::is_empty)
+                                {
+                                    continue;
+                                }
+                                let count = openings.entry(words).or_default();
+                                *count += 1;
+                                if *count > *max_occurrences {
+                                    exceeding += 1;
+                                    emit(
+                                        format!(
+                                            "Paragraph opening occurs {count} times; maximum is {max_occurrences}"
+                                        ),
+                                        paragraph.line,
+                                        paragraph.column,
+                                    );
+                                }
+                            }
+                            measurements.insert("paragraph_count".into(), paragraphs.len());
+                            measurements.insert("openings_exceeding_limit".into(), exceeding);
                         }
                         None => {
                             reason = Some("paragraphs are unavailable from this adapter".into())

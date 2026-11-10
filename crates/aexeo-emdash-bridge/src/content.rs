@@ -148,11 +148,13 @@ pub struct EmdashSourceLocation {
 fn positional_gate(gate: &ContentGate) -> bool {
     matches!(
         gate,
-        ContentGate::ForbiddenTerms { .. }
+        ContentGate::Custom { .. }
+            | ContentGate::ForbiddenTerms { .. }
             | ContentGate::RepeatedTerms { .. }
             | ContentGate::SentenceLength { .. }
             | ContentGate::SentenceCharacterLength { .. }
             | ContentGate::ParagraphLength { .. }
+            | ContentGate::RepeatedParagraphOpenings { .. }
             | ContentGate::ParagraphCharacterLength { .. }
     )
 }
@@ -422,6 +424,23 @@ pub fn evaluate_content_with_body_availability(
     evaluate_content_with_body_capabilities(document, preset, evidence_sources, [body_available; 4])
 }
 
+/// Return the exact input visible to extension hosts for this snapshot.
+pub fn extension_input(
+    document: &EmdashDocument,
+    evidence_sources: Option<BTreeMap<String, String>>,
+    capabilities: [bool; 4],
+) -> ContentInput {
+    let mut input = content_input(document);
+    input.evidence_sources = evidence_sources;
+    if !capabilities[0] {
+        input.text = None;
+    }
+    if !capabilities[1] {
+        input.headings = None;
+    }
+    input
+}
+
 /// Capabilities in order: text, headings, paragraphs, links. Partial adapters
 /// must not imply that a missing structure is an empty structure.
 pub fn evaluate_content_with_body_capabilities(
@@ -429,6 +448,17 @@ pub fn evaluate_content_with_body_capabilities(
     preset: &ContentPreset,
     evidence_sources: Option<BTreeMap<String, String>>,
     capabilities: [bool; 4],
+) -> anyhow::Result<ContentReport> {
+    evaluate_content_with_extensions(document, preset, evidence_sources, capabilities, None)
+}
+
+/// Evaluate a document with an explicitly trusted extension host.
+pub fn evaluate_content_with_extensions(
+    document: &EmdashDocument,
+    preset: &ContentPreset,
+    evidence_sources: Option<BTreeMap<String, String>>,
+    capabilities: [bool; 4],
+    extensions: Option<&dyn aexeo_core::content_gate::ContentGateExtensions>,
 ) -> anyhow::Result<ContentReport> {
     let [text, headings, paragraphs, links] = capabilities;
     let (mut input, mut context, link_count) = content_input_with_context(document);
@@ -454,6 +484,7 @@ pub fn evaluate_content_with_body_capabilities(
         &ContentEvaluationContext {
             adapter: Some(&context),
             link_count: links.then_some(link_count),
+            extensions,
             ..Default::default()
         },
         destinations.as_deref(),
@@ -506,6 +537,27 @@ mod tests {
         assert_eq!(emdash.gates[0].measurements["sentence_count"], 4);
         assert_eq!(emdash.gates[2].findings.len(), 1);
     }
+    #[test]
+    fn repeated_paragraph_opening_maps_to_emdash_block() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/t","title":"T","body":[{"children":[{"_type":"span","text":"The team reviews."}]},{"children":[{"_type":"span","text":"The team checks."}]},{"children":[{"_type":"span","text":"The team restores."}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='review'\n[[gates]]\nid='opening'\nkind='repeated_paragraph_openings'\nopening_words=2\nmax_occurrences=2\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        let locations = source_locations(&document, &preset, &report);
+        assert_eq!(locations.len(), 1);
+        assert_eq!(
+            (
+                locations[0].block_index,
+                locations[0].span_index,
+                locations[0].utf16_offset
+            ),
+            (2, 0, 0)
+        );
+        let unavailable =
+            evaluate_content_with_body_availability(&document, &preset, None, false).unwrap();
+        assert_eq!(unavailable.gates[0].status, GateStatus::NotChecked);
+    }
+
     #[test]
     fn findings_map_to_their_portable_text_span_and_utf16_offset() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"children":[{"_type":"span","text":"Heading"}]},{"children":[{"_type":"span","text":"😀 "},{"_type":"span","text":"pré target"}]}]}"#).unwrap();

@@ -49,6 +49,8 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("preset").long("preset").default_value("article"))
                 .arg(Arg::new("preset-source").long("preset-source").num_args(1).action(ArgAction::Append).help("Load a named TOML preset as NAME=PATH; may be repeated"))
                 .arg(Arg::new("metadata").long("metadata").num_args(1).help("JSON file containing string metadata fields"))
+                .arg(Arg::new("extension-results").long("extension-results").num_args(1).conflicts_with("crawl-url").help("Load explicitly supplied, input-bound external gate results as JSON"))
+                .arg(Arg::new("export-adapter-input").long("export-adapter-input").action(ArgAction::SetTrue).conflicts_with_all(["crawl-url", "telemetry", "fix", "list-presets", "list-site-groups", "explain"]).help("Print the projected content input as JSON; may contain private content"))
                 .arg(Arg::new("evidence-source").long("evidence-source").num_args(1).action(ArgAction::Append).conflicts_with("crawl-url").help("Load a named UTF-8 source snapshot as NAME=PATH; may be repeated"))
                 .arg(Arg::new("site").long("site").num_args(1).help("Load a static website for site gates"))
                 .arg(Arg::new("collection").long("collection").num_args(1).conflicts_with("crawl-url").help("Load a complete JSON array of content items for collection gates"))

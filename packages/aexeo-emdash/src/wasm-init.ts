@@ -146,9 +146,16 @@ export async function evaluateContent(
   presetName: string,
   sourcesJson?: string | null,
   evidenceJson?: string | null,
+  extensionsJson?: string | null,
 ): Promise<string> {
   await ensureInitialized();
-  return glue.evaluateContent(documentJson, presetName, sourcesJson, evidenceJson);
+  return glue.evaluateContent(documentJson, presetName, sourcesJson, evidenceJson, extensionsJson);
+}
+
+/** Return the exact input supplied to extension hosts. Contains content. */
+export async function projectContentInput(documentJson: string, evidenceJson?: string | null): Promise<string> {
+  await ensureInitialized();
+  return glue.projectContentInput(documentJson, evidenceJson);
 }
 
 /** Run a portable content preset over a complete EmDash collection. */

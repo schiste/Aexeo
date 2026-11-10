@@ -145,6 +145,12 @@ Options:
       --metadata <metadata>
           JSON file containing string metadata fields
 
+      --extension-results <extension-results>
+          Load explicitly supplied, input-bound external gate results as JSON
+
+      --export-adapter-input
+          Print the projected content input as JSON; may contain private content
+
       --evidence-source <evidence-source>
           Load a named UTF-8 source snapshot as NAME=PATH; may be repeated
 

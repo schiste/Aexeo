@@ -1,0 +1,9 @@
+version = 1
+name = "French generic-phrase review starter"
+
+[[gates]]
+id = "editorial.generic_phrases"
+kind = "forbidden_terms"
+terms = ["dans le monde en constante évolution", "il est important de noter que", "en conclusion"]
+case_insensitive = true
+blocking = false

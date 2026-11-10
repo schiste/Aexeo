@@ -1,6 +1,6 @@
 // Run after the plugin build: this exercises the real WASM, not the mock bridge.
 import assert from "node:assert/strict";
-import { evaluateContent, evaluateContentCollection } from "../dist/content.js";
+import { evaluateContent, evaluateContentCollection, projectContentInput } from "../dist/content.js";
 
 const preset = `version=1
 name="collection"
@@ -65,3 +65,23 @@ console.log("WASM body availability smoke test passed");
 const partialBodyReport = await evaluateContent({ route: "/partial", title: "Partial", body: [{ children: [{ _type: "span", text: "some text" }] }], body_capabilities: ["text"] }, "test", { test: linkPreset });
 assert.equal(partialBodyReport.gates[0].status, "not_checked");
 console.log("WASM partial body capability smoke test passed");
+
+const extensionDocument = { route: "/extension", title: "Extension", body: [{ children: [{ _type: "span", text: "Review this text." }] }] };
+const extensionPreset = `version=1
+name="external"
+[[gates]]
+id="external"
+kind="custom"
+extension="example.rule"
+blocking=false
+[gates.parameters]
+mode="strict"
+`;
+const extensionInput = await projectContentInput(extensionDocument);
+const results = [{ extension: "example.rule", parameters: { mode: "strict" }, input: extensionInput, diagnostics: [{ message: "Review opening", line: 1, column: 1 }] }];
+const externalReport = await evaluateContent(extensionDocument, "custom", { custom: extensionPreset }, undefined, undefined, results);
+assert.equal(externalReport.gates[0].status, "failed");
+assert.deepEqual(externalReport.source_locations, [{ gate_id: "external", finding_index: 0, block_index: 0, span_index: 0, utf16_offset: 0 }]);
+const staleReport = await evaluateContent({ ...extensionDocument, title: "Changed" }, "custom", { custom: extensionPreset }, undefined, undefined, results);
+assert.equal(staleReport.gates[0].status, "not_checked");
+console.log("WASM external extension smoke test passed");

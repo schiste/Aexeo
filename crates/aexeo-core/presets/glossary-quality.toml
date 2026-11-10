@@ -1,0 +1,3 @@
+version = 1
+name = "Glossary quality starter"
+extends = ["glossary-editorial", "editorial-structure"]
