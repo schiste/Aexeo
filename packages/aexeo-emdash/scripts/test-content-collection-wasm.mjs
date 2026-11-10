@@ -20,6 +20,12 @@ assert.equal(report.gates[0].status, "failed");
 assert.equal(report.gates[0].measurements.collection_items, 2);
 assert.equal(report.gates[0].measurements.duplicate_items, 1);
 assert.equal(report.gates[0].findings[0].path, "/b");
+const partialCollection = await evaluateContentCollection(documents, "test", { test: preset }, { complete: false });
+assert.equal(partialCollection.gates[0].status, "not_checked");
+assert.match(partialCollection.gates[0].reason, /collection is incomplete/);
+assert.equal(partialCollection.gates[0].findings[0].path, "/b");
+const partialEmpty = await evaluateContentCollection([], "test", { test: preset }, { complete: false });
+assert.equal(partialEmpty.gates[0].status, "not_checked");
 console.log("WASM collection smoke test passed");
 
 const positionalPreset = `version=1

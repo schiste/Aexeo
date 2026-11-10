@@ -171,11 +171,28 @@ pub fn evaluate_content_collection_js(
     sources_json: Option<String>,
 ) -> Result<String, JsError> {
     install_panic_hook();
-    let documents: Vec<EmdashDocument> = serde_json::from_str(documents_json)
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum CollectionRequest {
+        Complete(Vec<EmdashDocument>),
+        Explicit {
+            documents: Vec<EmdashDocument>,
+            complete: bool,
+        },
+    }
+    let request: CollectionRequest = serde_json::from_str(documents_json)
         .map_err(|error| JsError::new(&format!("failed to parse documents: {error}")))?;
+    let (documents, complete) = match request {
+        CollectionRequest::Complete(documents) => (documents, true),
+        CollectionRequest::Explicit {
+            documents,
+            complete,
+        } => (documents, complete),
+    };
     let preset = resolve_content_preset_js(preset_name, sources_json.as_deref())?;
-    let report = crate::content::evaluate_collection(&documents, &preset)
-        .map_err(|error| JsError::new(&format!("collection evaluation failed: {error:#}")))?;
+    let report =
+        crate::content::evaluate_collection_with_completeness(&documents, &preset, complete)
+            .map_err(|error| JsError::new(&format!("collection evaluation failed: {error:#}")))?;
     serde_json::to_string(&report)
         .map_err(|error| JsError::new(&format!("failed to serialize report: {error}")))
 }

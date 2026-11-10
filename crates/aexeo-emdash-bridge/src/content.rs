@@ -420,6 +420,16 @@ pub fn evaluate_collection(
     documents: &[EmdashDocument],
     preset: &ContentPreset,
 ) -> Result<ContentReport> {
+    evaluate_collection_with_completeness(documents, preset, true)
+}
+
+/// Evaluate an explicitly complete or incomplete collection. Findings from an
+/// incomplete collection remain visible, but the gate cannot pass.
+pub fn evaluate_collection_with_completeness(
+    documents: &[EmdashDocument],
+    preset: &ContentPreset,
+    complete: bool,
+) -> Result<ContentReport> {
     let mut routes = std::collections::BTreeSet::new();
     for document in documents {
         if document.route.trim().is_empty() || !routes.insert(&document.route) {
@@ -438,12 +448,15 @@ pub fn evaluate_collection(
         id: "collection".into(),
         ..Default::default()
     };
-    preset.evaluate_with_capabilities(
+    preset.evaluate_with_collection_completeness(
         &root,
         &ContentEvaluationContext {
             collection: Some(&items),
             ..Default::default()
         },
+        None,
+        complete,
+        None,
     )
 }
 

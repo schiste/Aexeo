@@ -482,8 +482,13 @@ slice of documents; document and site gates without their inputs remain
 `not_checked`. JavaScript hosts can use `evaluateContentCollection` from the
 EmDash content API. The CLI accepts a JSON array of content inputs with
 `--collection items.json --no-text`, for example `[{"id":"/a","metadata":{"slug":"a"}}]`.
-IDs must be unique and nonempty; provide the complete collection. Other gates
-that need an individual document still report `not_checked`. To check the
+IDs must be unique and nonempty. If a collection is known to be partial, use
+`--collection-incomplete`, `evaluate_with_collection_completeness(..., false, ...)` in Rust,
+or `evaluateContentCollection(documents, preset, sources, { complete: false })`
+in JavaScript. Observed duplicate findings remain visible, but uniqueness is
+`not_checked`, even for an empty partial collection. The default assumes the
+caller supplied a complete collection; Aexeo cannot detect silently omitted
+records. Other gates that need an individual document still report `not_checked`. To check the
 real WASM boundary locally, build the plugin and run `npm run test:wasm` in
 `packages/aexeo-emdash`; the ordinary TypeScript unit test uses a mock.
 
