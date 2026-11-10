@@ -275,6 +275,20 @@ kind="link_reachability"
   assert.ok(host.store.get("findings:/components-nested").assessment.gates.some((gate) => gate.status === "not_checked"));
 }
 
+// The fallback budget cannot break JSON/WASM input at a Unicode boundary.
+{
+  const oversized = item("bounded-fallback", { data: { content: [block("a", "Before"),
+    { _type: "unknown", _key: "u", text: "x".repeat(1_048_575) + "😀" }, block("b", "After")] } });
+  const host = fakeHost([oversized]);
+  const configured = createPlugin({ contentPreset: { name: "article", collections: ["pages"] } });
+  await configured.hooks["content:afterSave"].handler({ content: oversized, collection: "pages", isNew: false }, host.ctx);
+  const document = host.store.get("document:/bounded-fallback").document;
+  assert.equal(document.body[1].children[0].text.length, 1_048_575);
+  assert.equal(document.body[2].children[0].text, "After");
+  assert.deepEqual(document.body_capabilities, []);
+  assert.ok(host.store.get("findings:/bounded-fallback").assessment.gates.some((gate) => gate.status === "not_checked"));
+}
+
 // Ordered host metadata mappings reach both save and Refresh.
 {
   const mapped = item("mapped", { data: { body: [block("p", "Content")], seo_description: "Preferred", excerpt: "Fallback" } });

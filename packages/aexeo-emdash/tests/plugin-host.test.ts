@@ -138,6 +138,29 @@ describe("EmDash content adaptation", () => {
     expect(partial.body_capabilities).toEqual([]);
   });
 
+  it("bounds fallback extraction for deep, cyclic and oversized unknown components", () => {
+    const cycle: Record<string, unknown> = { _type: "unknown", _key: "u", text: "Visible" };
+    cycle.self = cycle;
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: { content: [cycle] } };
+    const cyclic = contentItemToEmdashDocument(item);
+    expect(cyclic.body?.[0]?.children[0]?.text).toBe("Visible");
+    expect(cyclic.body_capabilities).toEqual([]);
+    let deep: unknown = { text: "Too deep" };
+    for (let index = 0; index < 10_000; index++) deep = { child: deep };
+    const oversized = { _type: "unknown", _key: "u", text: "x".repeat(1_048_600), deep };
+    const bounded = contentItemToEmdashDocument({ ...item, data: { content: [oversized] } });
+    expect(bounded.body?.[0]?.children[0]?.text.length).toBe(1_048_576);
+    expect(bounded.body_capabilities).toEqual([]);
+    const unicode = contentItemToEmdashDocument({ ...item, data: { content: [{ _type: "unknown", _key: "u", text: "x".repeat(1_048_575) + "😀" }] } });
+    expect(unicode.body?.[0]?.children[0]?.text.length).toBe(1_048_575);
+    expect(unicode.body_capabilities).toEqual([]);
+    const deepOnly = contentItemToEmdashDocument({ ...item, data: { content: [{ _type: "unknown", _key: "u", deep }] } });
+    expect(deepOnly.body_capabilities).toEqual([]);
+    const wide = contentItemToEmdashDocument({ ...item, data: { content: [{ _type: "unknown", _key: "u", children: Array.from({ length: 50_100 }, () => "word") }] } });
+    expect(wide.body?.[0]?.children[0]?.text.split(" ").length).toBeLessThan(50_100);
+    expect(wide.body_capabilities).toEqual([]);
+  });
+
   it("bounds recursively mapped rich text and marks deep content incomplete", () => {
     let nested: unknown[] = body("Leaf");
     for (let index = 0; index < 12; index++) {

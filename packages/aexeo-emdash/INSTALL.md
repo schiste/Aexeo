@@ -118,7 +118,9 @@ In sandboxed mode, enter this object in `Content fields by collection (JSON)`.
 
 Portable Text can also interleave text blocks and custom components. An
 unknown component keeps its surrounding text but marks body capabilities
-unverified. A host may map a component to `[]` only when it has verified that
+unverified. Best-effort text extracted from an unknown component is bounded to
+64 nesting levels, 50,000 visited values and 1,048,576 UTF-16 code units;
+it may therefore be incomplete and must not be treated as a complete body. A host may map a component to `[]` only when it has verified that
 the component contributes no content relevant to the evaluated body.
 
 A block mapping is the site's assertion that those fields cover the rendered content,
