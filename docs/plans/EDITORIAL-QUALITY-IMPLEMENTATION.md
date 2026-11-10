@@ -27,5 +27,9 @@ Existing source and factuality work is outside this plan.
   article, English phrase and writing-pattern profiles. All eight gates passed;
   one end-to-end WASM invocation took 27.64 ms on this machine (cache state was not controlled). This
   is not a representative quality benchmark or latency guarantee.
+- On a local copy of that article, a deliberately inserted example phrase was
+  flagged and mapped to one span. Removing it restored the exact original and
+  cleared the finding. This seeded scenario exercises the loop, not an
+  independent human evaluation or an autonomous agent-writing trial.
 - The phrase lists and repeated-opening signal are review prompts. They do not
   establish authorship, detector outcomes or semantic quality.
