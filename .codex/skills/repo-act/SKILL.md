@@ -20,6 +20,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   preparation is not configured: cleanup can remove ignored `node_modules`.
   Restore them with the package lockfile (`npm ci`) before Node tests; avoid
   an `npx` invocation that could install an unpinned missing executable.
+- When reusing a squash-merged session branch, inspect ancestry and broker
+  session-owned commits: old commits can still be replay candidates after a
+  sync. Preserve a backup ref and reconcile the branch onto the current base
+  with only the new commits before submitting; verify the resulting diff.
 - Inspect caution zones before changing generated or vendored areas.
 
 ## Validation Checklist
