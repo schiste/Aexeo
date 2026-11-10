@@ -45,6 +45,13 @@ impl LinkFindingNotes {
             }
             Some(_) => {}
         }
+        if report
+            .legacy_findings
+            .iter()
+            .any(|finding| finding.conclusion == LegacyLinkConclusion::ConditionalInbound)
+        {
+            reasons.push("conditional link visibility unknown");
+        }
         let unverifiable_reason = if reasons.is_empty() {
             "page not eligible".to_string()
         } else {
@@ -81,7 +88,11 @@ impl LinkFindingNotes {
                 .get(&(rule_id.to_string(), path.to_string()))
             {
                 Some(LegacyLinkConclusion::Confirmed) => counts.confirmed += 1,
-                Some(LegacyLinkConclusion::NotEligible | LegacyLinkConclusion::NotInReport) => {
+                Some(
+                    LegacyLinkConclusion::NotEligible
+                    | LegacyLinkConclusion::NotInReport
+                    | LegacyLinkConclusion::ConditionalInbound,
+                ) => {
                     counts.not_verifiable += 1;
                 }
                 // Disproven findings are suppressed before rendering.

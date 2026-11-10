@@ -204,10 +204,14 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
 
 - Links inside `template` or `noscript` remain discoverable but use the
   `unknown` category, including under explicit nested markers. This prevents
-  conditional markup from inflating body or navigation counts. They still
-  contribute to observed-source totals and legacy qualification; a future
-  change must represent conditional visibility explicitly before relying on
-  those totals as evidence that a link is displayed.
+  conditional markup from inflating body or navigation counts. Separate
+  conditional and nonconditional source counts now cover direct and redirected
+  links. Solely conditional links cannot suppress a legacy orphan finding, and
+  conditional inputs keep orphan and low-link conclusions unverified. Existing
+  totals remain source-HTML observations, not proof of displayed links: dynamic
+  rendering and CSS visibility still require separate evidence. Legacy rules can
+  themselves count conditional markup before qualification and may emit no
+  finding at all; qualification cannot recover a finding that does not exist.
 
 ## EmDash preview integration update
 
