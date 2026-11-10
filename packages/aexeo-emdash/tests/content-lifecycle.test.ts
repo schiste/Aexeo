@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// The data route imports the WASM bridge; this suite tests storage and views.
+vi.mock("../src/wasm-init.js", () => ({}));
 
 import type { EmdashContentItem } from "../src/adapter.js";
 import {
