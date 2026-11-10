@@ -86,6 +86,45 @@ class FeedbackTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "metadata"):
             module.bind_review(self.corpus, note)
 
+    def test_bind_review_explicitly_resolves_conflict_without_changing_source(self):
+        note = module.capture(self.text, self.report, "length", "e1", "failed", "editor", "manual")
+        with self.assertRaisesRegex(ValueError, "differs"):
+            module.bind_review(self.corpus, note)
+        result = module.bind_review(self.corpus, note, accept_human_label=True)
+        item = result["examples"][0]
+        self.assertEqual(self.corpus["examples"][0]["expected"], "passed")
+        self.assertEqual(item["expected"], "failed")
+        self.assertEqual(item["review"]["previous_expected"], "passed")
+        self.assertEqual(item["review"]["expected"], "failed")
+        self.assertEqual(item["review"]["text_sha256"], note["text_sha256"])
+        self.assertEqual(item["review"]["reviewer"], "editor")
+        spec = importlib.util.spec_from_file_location("content_gate_evaluation", Path(__file__).with_name("evaluate-content-gates.py"))
+        evaluator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(evaluator)
+        evaluator.validate_corpus(result)
+        self.assertTrue(evaluator.review_is_bound(item))
+        with self.assertRaisesRegex(ValueError, "already has a review"):
+            module.bind_review(result, note, accept_human_label=True)
+        note["human_status"] = "uncertain"
+        with self.assertRaisesRegex(ValueError, "explicit human"):
+            module.bind_review(self.corpus, note, accept_human_label=True)
+
+    def test_cli_requires_opt_in_for_conflicting_label(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            note = module.capture(self.text, self.report, "length", "e1", "failed", "editor", "manual")
+            (root / "note").write_text(json.dumps(note))
+            (root / "corpus").write_text(json.dumps(self.corpus))
+            command = [sys.executable, str(SCRIPT), "bind-review", "--note", str(root / "note"), "--corpus", str(root / "corpus"), "--output", str(root / "bound")]
+            self.assertEqual(subprocess.run(command, capture_output=True).returncode, 2)
+            self.assertFalse((root / "bound").exists())
+            output = subprocess.run(command + ["--accept-human-label", "--telemetry"], capture_output=True, text=True)
+            self.assertEqual(output.returncode, 0, output.stderr)
+            self.assertEqual(json.loads((root / "bound").read_text())["examples"][0]["review"]["previous_expected"], "passed")
+            self.assertNotIn("editor", output.stderr)
+            self.assertTrue(json.loads(output.stderr)["label_changed"])
+            self.assertEqual((root / "bound").stat().st_mode & 0o077, 0)
+
     def test_bind_review_rejects_synthetic_fixture(self):
         self.corpus["fixture_kind"] = "synthetic_regression"
         note = module.capture(self.text, self.report, "length", "e1", "passed", "r", "manual")
@@ -147,6 +186,7 @@ class FeedbackTests(unittest.TestCase):
             output = subprocess.run(bind + ["--telemetry"], capture_output=True, text=True)
             self.assertEqual(output.returncode, 0)
             self.assertEqual(json.loads(output.stderr)["operation"], "bind-review")
+            self.assertFalse(json.loads(output.stderr)["label_changed"])
             self.assertEqual(json.loads((root / "bound").read_text())["examples"][0]["review_status"], "reviewed")
             self.assertEqual(subprocess.run(bind, capture_output=True).returncode, 2)
 

@@ -307,6 +307,30 @@ checks. Retain those separately when comparing runs. Existing human labels and
 historical review events are not bound to this fingerprint; they remain useful
 for comparison across policies and are not proof of independent review.
 
+### Resolving a human review disagreement
+
+A reviewer can explicitly replace an unreviewed proposed corpus label when their
+pass/fail verdict differs. First capture the human feedback and check its contents;
+then create a new private corpus copy:
+
+```sh
+python3 scripts/content-review-note.py bind-review \
+  --corpus corpus.json --note review-note.json \
+  --accept-human-label --output reviewed-corpus.json --telemetry
+```
+
+Without `--accept-human-label`, a disagreement is rejected. The new copy records
+`previous_expected` alongside the reviewer, method, input hashes and final label;
+the original corpus is untouched and existing reviews cannot be overwritten.
+Uncertain verdicts, stale input or metadata, synthetic regression fixtures and
+missing provenance are still rejected. Output creation refuses to overwrite a
+file and uses private permissions. The optional local telemetry records only the
+operation, duration and whether the label changed, not the reviewer or content.
+
+This records a reported human decision; it does not authenticate the reviewer,
+resolve disagreements among reviewers, or establish an independent gold label.
+Keep the original corpus and note securely when a complete audit trail is needed.
+
 ### Preventing source-group leakage
 
 Corpus examples can carry `source_group`, an opaque identifier shared by excerpts
