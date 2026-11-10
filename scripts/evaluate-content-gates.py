@@ -23,6 +23,30 @@ def metadata_hash(metadata):
     return digest.hexdigest()
 
 
+def resolve_policy(binary, preset, preset_source=None):
+    """Resolve the same preset as the evaluated CLI, without reading content."""
+    arguments = [binary, "content", "--preset", preset, "--format", "json", "--explain"]
+    if preset_source is not None:
+        arguments.extend(["--preset-source", preset_source])
+    result = subprocess.run(arguments, text=True, capture_output=True, check=False)
+    if result.returncode != 0:
+        raise ValueError(f"cannot resolve evaluation policy: exit {result.returncode}")
+    try:
+        policy = json.loads(result.stdout)
+    except (ValueError, TypeError) as error:
+        raise ValueError("resolved evaluation policy is not JSON") from error
+    if not isinstance(policy, dict) or not isinstance(policy.get("gates"), list):
+        raise ValueError("resolved evaluation policy is invalid")
+    return policy
+
+
+def policy_hash(policy):
+    """Hash canonical UTF-8 JSON; array order remains significant."""
+    encoded = json.dumps(policy, ensure_ascii=False, sort_keys=True,
+                         separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def review_is_bound(item):
     """Only count reviews bound to the current text, metadata and label."""
     review = item["review"]
@@ -155,10 +179,14 @@ def evaluate(binary, corpus, split, review_log=None):
         arguments = [binary, "content", "-", "--preset", corpus["preset"], "--format", "json"]
         if input_format:
             arguments.extend(["--input-format", input_format])
+        preset_source = None
         if "preset_toml" in corpus:
             preset_path = Path(directory) / "preset.toml"
             preset_path.write_text(corpus["preset_toml"], encoding="utf-8")
-            arguments.extend(["--preset-source", f"{corpus['preset']}={preset_path}"])
+            preset_source = f"{corpus['preset']}={preset_path}"
+            arguments.extend(["--preset-source", preset_source])
+        resolved_policy = resolve_policy(binary, corpus["preset"], preset_source)
+        resolved_policy_hash = policy_hash(resolved_policy)
         for index, (name, snapshot) in enumerate(corpus.get("evidence_sources", {}).items()):
             source_path = Path(directory) / f"evidence-{index}.txt"
             source_path.write_text(snapshot, encoding="utf-8")
@@ -186,8 +214,11 @@ def evaluate(binary, corpus, split, review_log=None):
                     record_result(reviewed_counts, actual, expected)
                 else:
                     unbound_reviewed_examples += 1
+        if policy_hash(resolve_policy(binary, corpus["preset"], preset_source)) != resolved_policy_hash:
+            raise ValueError("resolved evaluation policy changed during the run")
     durations.sort()
-    result = {"version": 1, "metric_scope": "checked_examples_only", "split": split,
+    result = {"version": 1, "resolved_policy_sha256": resolved_policy_hash,
+              "resolved_policy_hash_format": "canonical-json-utf8-v1", "metric_scope": "checked_examples_only", "split": split,
               **classification_metrics(counts, len(examples)), "reviewed_examples": reviewed_examples,
               "unbound_reviewed_examples": unbound_reviewed_examples,
               "reviewed_metrics": classification_metrics(reviewed_counts, reviewed_examples),
