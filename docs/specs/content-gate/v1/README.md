@@ -225,5 +225,20 @@ Aexeo's content report already carries the elements the verdict needs:
 | `Finding.path` | `entity_id` |
 | exit 1 (failed blocking gate), 2 (blocking gate not checked or invalid input), 70 (internal error) | exit codes 1, 2 and "any other" |
 
-Aexeo does not yet read a change document or write a verdict file. Adding that
-does not change its existing commands.
+Aexeo implements this invocation as `aexeo-cli content-change --preset NAME`.
+The runner supplies `CONTENT_GATE_CHANGE_FILE` and `CONTENT_GATE_VERDICT_FILE`;
+choose a preset deliberately because a passing verdict only covers its gates.
+Additional TOML presets can be loaded with `--preset-source NAME=PATH`.
+The implementation validates the documented structural subset, not the complete
+JSON Schema or every URI/timestamp constraint; runners must validate their inputs.
+Inline Markdown and plain text are supported. On Linux, file sources require an
+explicit `--content-root` matching the change's absolute `content_root`; the
+kernel must support `openat2`. Other platforms cannot currently read file
+sources. URI sources are not fetched. Deletions and renames do not establish
+site impact, so their blocking impact checks are reported as not checked.
+
+Aexeo enforces a 64 MiB change-document limit, a 16 MiB per-item limit and a
+64 MiB aggregate content limit. It writes a verdict via a temporary file and
+rename. If parsing, digest verification, evaluation or output fails, the command
+exits nonzero and may leave no new verdict; the runner must enforce all checks
+in section 5, including the exit code, even if a previous verdict file exists.

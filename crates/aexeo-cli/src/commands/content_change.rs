@@ -1,0 +1,173 @@
+//! CLI host for the content-gate change/verdict protocol.
+use super::exit_code::{EXIT_FINDINGS, EXIT_INTERNAL_ERROR, EXIT_SUCCESS, EXIT_UNSUPPORTED};
+use aexeo_contracts::content_gate_protocol::{Change, VerdictStatus};
+use aexeo_core::{
+    content_gate::MAX_CONTENT_INPUT_BYTES,
+    content_gate_sources::{ConfinedContentFiles, SourceError},
+    content_gate_verdict::evaluate_change,
+    content_presets::{builtin_content_presets, resolve_content_preset},
+    error::UserContext,
+    intelligence::presence::iso_now,
+    user_bail,
+};
+use anyhow::Result;
+use clap::ArgMatches;
+use std::{
+    fs::{self, File, OpenOptions},
+    io::{self, Read, Write},
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+};
+
+const MAX_CHANGE_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_TOTAL_CONTENT_BYTES: usize = 64 * 1024 * 1024;
+static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+
+struct HostFiles {
+    #[cfg(target_os = "linux")]
+    provider: Option<aexeo_core::content_gate_sources::LinuxConfinedContentFiles>,
+}
+
+impl HostFiles {
+    fn new(root: Option<&str>) -> Result<Self> {
+        #[cfg(target_os = "linux")]
+        {
+            let provider = root
+                .map(|path| {
+                    aexeo_core::content_gate_sources::LinuxConfinedContentFiles::new(Path::new(
+                        path,
+                    ))
+                })
+                .transpose()
+                .user_context("opening authorized content root")?;
+            Ok(Self { provider })
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            if root.is_some() {
+                user_bail!("confined local content files are not supported on this platform");
+            }
+            Ok(Self {})
+        }
+    }
+}
+
+impl ConfinedContentFiles for HostFiles {
+    type Reader = File;
+    fn open(&mut self, root: &Path, relative: &Path) -> io::Result<File> {
+        #[cfg(target_os = "linux")]
+        if let Some(provider) = &mut self.provider {
+            return provider.open(root, relative);
+        }
+        let _ = (root, relative);
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "local content files are not authorized",
+        ))
+    }
+}
+
+pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
+    let change_path = std::env::var_os("CONTENT_GATE_CHANGE_FILE")
+        .user_context("CONTENT_GATE_CHANGE_FILE is required")?;
+    let verdict_path = std::env::var_os("CONTENT_GATE_VERDICT_FILE")
+        .user_context("CONTENT_GATE_VERDICT_FILE is required")?;
+    if Path::new(&change_path) == Path::new(&verdict_path)
+        || fs::canonicalize(&change_path)
+            .ok()
+            .zip(fs::canonicalize(&verdict_path).ok())
+            .is_some_and(|(input, output)| input == output)
+    {
+        user_bail!("change and verdict paths must be different");
+    }
+    let mut bytes = Vec::new();
+    File::open(change_path)
+        .user_context("opening change document")?
+        .take(MAX_CHANGE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .user_context("reading change document")?;
+    if bytes.len() as u64 > MAX_CHANGE_BYTES {
+        user_bail!("change document exceeds the size limit");
+    }
+    let change: Change = serde_json::from_slice(&bytes).user_context("invalid change document")?;
+    let mut sources = builtin_content_presets();
+    if let Some(entries) = args.get_many::<String>("preset-source") {
+        for entry in entries {
+            let (name, path) = entry
+                .split_once('=')
+                .user_context("--preset-source requires NAME=PATH")?;
+            if name.is_empty() || path.is_empty() {
+                user_bail!("--preset-source requires NAME=PATH");
+            }
+            sources.insert(
+                name.into(),
+                fs::read_to_string(path).user_context("reading preset source")?,
+            );
+        }
+    }
+    let name = args
+        .get_one::<String>("preset")
+        .user_context("preset is required")?;
+    let preset = resolve_content_preset(name, &sources).user_context("invalid content preset")?;
+    let mut provider = HostFiles::new(args.get_one::<String>("content-root").map(String::as_str))?;
+    let verdict = match evaluate_change(
+        &change,
+        &mut provider,
+        &preset,
+        &iso_now(),
+        MAX_CONTENT_INPUT_BYTES,
+        MAX_TOTAL_CONTENT_BYTES,
+    ) {
+        Ok(verdict) => verdict,
+        Err(error) if error.downcast_ref::<SourceError>().is_some() => {
+            return Err(error).user_context("content change could not be evaluated");
+        }
+        Err(error) => return Err(error),
+    };
+    let code = match verdict.status {
+        VerdictStatus::Pass => EXIT_SUCCESS,
+        VerdictStatus::Fail => EXIT_FINDINGS,
+        VerdictStatus::NotChecked => EXIT_UNSUPPORTED,
+        VerdictStatus::Error => EXIT_INTERNAL_ERROR,
+    };
+    let json = serde_json::to_vec_pretty(&verdict)?;
+    write_atomic(Path::new(&verdict_path), &json).user_context("writing verdict")?;
+    Ok(code)
+}
+
+fn write_atomic(destination: &Path, contents: &[u8]) -> io::Result<()> {
+    let parent = destination
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    for _ in 0..32 {
+        let id = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
+        let path: PathBuf = parent.join(format!(".aexeo-verdict-{}-{id}.tmp", std::process::id()));
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = match options.open(&path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        };
+        let result = (|| {
+            file.write_all(contents)?;
+            file.write_all(b"\n")?;
+            drop(file);
+            fs::rename(&path, destination)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&path);
+        }
+        return result;
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "could not allocate verdict temporary file",
+    ))
+}

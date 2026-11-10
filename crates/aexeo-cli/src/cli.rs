@@ -52,6 +52,13 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue)),
         )
         .subcommand(
+            Command::new("content-change")
+                .about("Evaluate a content-gate change and write a bound verdict")
+                .arg(Arg::new("preset").long("preset").required(true).help("Explicit content preset name"))
+                .arg(Arg::new("preset-source").long("preset-source").num_args(1).action(ArgAction::Append).help("Load a named TOML preset as NAME=PATH; may be repeated"))
+                .arg(Arg::new("content-root").long("content-root").help("Authorize this absolute content root for local file references (Linux only)")),
+        )
+        .subcommand(
             Command::new("content")
                 .about("Run a portable content preset on a UTF-8 file or stdin")
                 .arg(Arg::new("path").default_value("-"))

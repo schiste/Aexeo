@@ -155,6 +155,29 @@ Options:
           Print help
 ```
 
+## `content-change`
+
+Evaluate a content-gate change and write a bound verdict
+
+```text
+Evaluate a content-gate change and write a bound verdict
+
+Usage: content-change [OPTIONS] --preset <preset>
+
+Options:
+      --preset <preset>
+          Explicit content preset name
+
+      --preset-source <preset-source>
+          Load a named TOML preset as NAME=PATH; may be repeated
+
+      --content-root <content-root>
+          Authorize this absolute content root for local file references (Linux only)
+
+  -h, --help
+          Print help
+```
+
 ## `content`
 
 Run a portable content preset on a UTF-8 file or stdin
