@@ -95,6 +95,9 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [x] Content-change evaluation accepts opt-in, snapshot-bound custom gate
   results across entries and a trusted host extension; missing results remain
   not checked. Telemetry exposes only the configured custom-gate count.
+- [x] Reuse the guarded HTTP client and run-scoped link observations across
+  a content-change evaluation, within one global check budget. Aggregate
+  telemetry counts only new checks; observations are discarded after the run.
 - [ ] Integrate optional host observers with other adapters and continue adding
   independently validated editorial gates.
 - [x] Explicit collection metadata uniqueness gate in core, CLI and EmDash/WASM
