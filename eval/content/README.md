@@ -56,6 +56,17 @@ Legacy `reviewed` examples without complete bindings remain accepted but are
 counted in `unbound_reviewed_examples`, not as reviewed metrics. A supplied
 binding that no longer matches causes evaluation to fail. Declared review is
 not proof of independent or correct review.
+For the selected split, `input_multiplicity` reports the number of examples
+with a unique exact text-and-metadata input, the number and size of duplicate
+input groups, and how many groups have conflicting labels. Missing metadata and
+an empty map are different inputs; map key order does not matter. The additional
+`unique_input_metrics` and `unique_reviewed_input_metrics` exclude every
+occurrence in a repeated input group, including reviewed examples repeated by
+unreviewed ones. Their rates are null when denominators are zero. Existing
+metrics and `--assert-regression` still use all examples. These aggregate counts
+expose no example text or identifiers. Exact uniqueness does not establish
+independence: paraphrases, related sources and reviewer independence still
+require separate assessment.
 `fresh_process_p95_ms` includes process startup and
 is not a cold-cache measurement. Results contain counts and timings, not text.
 `--assert-regression` returns a nonzero exit status if any example is

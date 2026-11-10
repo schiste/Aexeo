@@ -232,6 +232,27 @@ def classification_metrics(counts, examples):
             "actual_unchecked_rate": (counts["not_checked"] + counts["expected_not_checked"]) / examples if examples else None}
 
 
+def input_key(item):
+    """Exact evaluated text and metadata; absence differs from an empty map."""
+    metadata = tuple(sorted(item["metadata"].items())) if "metadata" in item else None
+    return item["text"], metadata
+
+
+def input_multiplicity(examples):
+    """Count repeated evaluated inputs and groups with conflicting labels."""
+    groups = {}
+    for item in examples:
+        key = input_key(item)
+        size, labels = groups.get(key, (0, set()))
+        labels.add(item["expected"])
+        groups[key] = (size + 1, labels)
+    duplicates = [group for group in groups.values() if group[0] > 1]
+    return groups, {"unique_input_examples": sum(size == 1 for size, _ in groups.values()),
+                    "duplicate_input_groups": len(duplicates),
+                    "duplicate_input_examples": sum(size for size, _ in duplicates),
+                    "conflicting_label_groups": sum(len(labels) > 1 for _, labels in duplicates)}
+
+
 def evaluate(binary, corpus, split, review_log=None):
     validate_corpus(corpus)
     for item in corpus["examples"]:
@@ -240,8 +261,12 @@ def evaluate(binary, corpus, split, review_log=None):
     examples = [item for item in corpus["examples"] if item["split"] == split]
     if not examples:
         raise ValueError("split must contain examples")
+    input_groups, input_coverage = input_multiplicity(examples)
     counts = empty_counts()
     reviewed_counts = empty_counts()
+    unique_counts = empty_counts()
+    unique_reviewed_counts = empty_counts()
+    unique_reviewed_examples = 0
     reviewed_examples = 0
     unbound_reviewed_examples = 0
     durations = []
@@ -287,10 +312,16 @@ def evaluate(binary, corpus, split, review_log=None):
                 raise ValueError(f"missing or invalid gate for {item['id']}")
             actual, expected = gates[0]["status"], item["expected"]
             record_result(counts, actual, expected)
+            unique = input_groups[input_key(item)][0] == 1
+            if unique:
+                record_result(unique_counts, actual, expected)
             if item.get("review_status") == "reviewed":
                 if review_is_bound(item):
                     reviewed_examples += 1
                     record_result(reviewed_counts, actual, expected)
+                    if unique:
+                        unique_reviewed_examples += 1
+                        record_result(unique_reviewed_counts, actual, expected)
                 else:
                     unbound_reviewed_examples += 1
         if policy_hash(resolve_policy(binary, corpus["preset"], preset_source)) != resolved_policy_hash:
@@ -307,6 +338,9 @@ def evaluate(binary, corpus, split, review_log=None):
                   "distinct_groups": len({item["source_group"] for item in examples if "source_group" in item}),
               },
               "reviewed_metrics": classification_metrics(reviewed_counts, reviewed_examples),
+              "input_multiplicity": input_coverage,
+              "unique_input_metrics": classification_metrics(unique_counts, input_coverage["unique_input_examples"]),
+              "unique_reviewed_input_metrics": classification_metrics(unique_reviewed_counts, unique_reviewed_examples),
               "fresh_process_p95_ms": durations[math.ceil(len(durations) * .95) - 1]}
     if review_metrics is not None:
         result["historical_review_events"] = review_metrics
