@@ -1,0 +1,8 @@
+version = 1
+name = "Intentionally strict sentence limit"
+
+[[gates]]
+id = "trial.short_sentences"
+kind = "sentence_length"
+max_words = 3
+blocking = true

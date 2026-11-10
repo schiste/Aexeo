@@ -43,7 +43,55 @@ Substitute the glossary or product file and matching preset, and compare its
 `-after.md` version. Inspect individual gate statuses, source locations and
 stderr telemetry; do not rely on exit code alone for advisory checks.
 
-Remaining work: exercise genuinely open-ended authoring and bounded failure
-cases across more formats, and assess outcomes against separately collected,
+Remaining work: expand open-ended authoring and bounded failure cases across
+more formats, and assess outcomes against separately collected,
 consented and independently reviewed examples. These trials cannot establish
 false-positive or false-negative rates.
+
+## Open-ended draft and retry exhaustion
+
+On 2026-11-10 the agent was asked to draft a practical handover note for a small
+team, without seeding a known lint defect. The resulting
+`eval/workflow-trials/open-article-before.md` and its metadata are synthetic;
+they were authored and assessed by the same agent, with no independent human
+review. The draft, evaluated against `article.toml`, passed all eight configured
+gates on its first attempt (216 measured words), so the agent did not edit it.
+This is a single authoring example, not a representative trial or a measurement
+of factual accuracy, usefulness, authorship, or AI detector behavior.
+
+A separate, deliberately unreasonable blocking preset (`bounded.toml`) limits
+sentences to three words. It is a stress case, not recommended editorial policy.
+Starting from that draft, the agent made three localized revisions to successive
+paragraphs, evaluating the same preset after each. The agent stopped at the
+three-revision budget with the failure still open; it did not weaken the preset
+or claim a pass. A real editor could reasonably stop earlier and question the
+rule rather than rewrite natural prose to fit it. Markdown headings are also
+included in this text-based sentence measurement.
+
+| Snapshot | Sentences exceeding the limit | Gate / CLI exit |
+| --- | ---: | --- |
+| Original | 16 | failed / 1 |
+| Revision 1 | 17 | failed / 1 |
+| Revision 2 | 18 | failed / 1 |
+| Revision 3 | 18 | failed / 1 |
+
+Every reported finding mapped to a Markdown source location in these four runs.
+The opt-in telemetry reported evaluation times of 0.129, 0.108, 0.104 and
+0.097 ms respectively; the initial open-ended run reported 0.638 ms. These are
+individual local debug-build measurements with uncontrolled caches and load,
+not benchmarks. They omit CLI startup and must not be compared as such. This
+exercise tests one bounded failure path; it does not prove that an automated
+agent enforces retry limits, generalize across adapters, or replace independent
+review.
+
+Reproduce the original and each revision (exit 1 is expected):
+
+```sh
+for file in eval/workflow-trials/open-article-before.md eval/workflow-trials/bounded-revision-{1,2,3}.md; do
+  target/debug/aexeo-cli content "$file" --input-format markdown --preset trial \
+    --preset-source trial=eval/workflow-trials/bounded.toml --format json --telemetry
+done
+```
+
+The open-ended eight-gate evaluation uses `article.toml` instead of `bounded.toml`
+and `--metadata eval/workflow-trials/open-article-metadata.json`.
