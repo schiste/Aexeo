@@ -307,7 +307,8 @@ function isMixedPortableTextArray(value: unknown): value is unknown[] {
   return Array.isArray(value) && value.some((item) => isPortableTextArray([item]));
 }
 
-function mapMixedPortableText(blocks: unknown[], mappings?: CustomBlockMappings): ExtractedBody {
+function mapMixedPortableText(blocks: unknown[], mappings?: CustomBlockMappings, depth = 0): ExtractedBody {
+  if (depth > 8) return { blocks: [], capabilities: [] };
   const result: PortableTextBlock[] = [];
   let complete = true;
   for (const block of blocks) {
@@ -319,7 +320,7 @@ function mapMixedPortableText(blocks: unknown[], mappings?: CustomBlockMappings)
       complete = false;
       continue;
     }
-    const mapped = mapCustomBlocks([block], mappings);
+    const mapped = mapCustomBlocks([block], mappings, depth + 1);
     result.push(...mapped.blocks);
     if (mapped.capabilities !== undefined) complete = false;
   }
@@ -345,9 +346,12 @@ function isEmdashBlocksArray(
 function mapCustomBlocks(
   blocks: Array<Record<string, unknown>>,
   mappings: CustomBlockMappings | undefined,
+  depth = 0,
 ): { blocks: PortableTextBlock[]; capabilities?: [] } {
+  if (depth > 8) return { blocks: [], capabilities: [] };
   const unavailable = () => ({ blocks: blocksToPortableText(blocks), capabilities: [] as [] });
   const result: PortableTextBlock[] = [];
+  let complete = true;
   const mapFields = (record: Record<string, unknown>, fields: readonly CustomBlockField[], depth: number): boolean => {
     if (depth > 8 || fields.length === 0) return false;
     for (const entry of fields) {
@@ -363,8 +367,16 @@ function mapCustomBlocks(
         continue;
       }
       if (entry.kind === "richText") {
-        if (!Array.isArray(value) || (value.length > 0 && !isPortableTextArray(value))) return false;
-        result.push(...value);
+        if (!Array.isArray(value)) return false;
+        if (value.length === 0 || isPortableTextArray(value)) {
+          result.push(...value);
+        } else if (isMixedPortableTextArray(value)) {
+          const nested = mapMixedPortableText(value, mappings, depth + 1);
+          result.push(...nested.blocks);
+          if (nested.capabilities !== undefined) complete = false;
+        } else {
+          return false;
+        }
       } else if (entry.kind === "heading" || entry.kind === "paragraph") {
         if (typeof value !== "string") return false;
         result.push({ ...portableTextBlock(value, ""), style: entry.kind === "heading" ? `h${entry.level ?? 2}` : "normal" });
@@ -392,9 +404,9 @@ function mapCustomBlocks(
     if (!Array.isArray(fields)) return unavailable();
     // An empty mapping explicitly declares a component irrelevant to the body.
     if (fields.length === 0) continue;
-    if (!mapFields(block, fields, 0)) return unavailable();
+    if (!mapFields(block, fields, depth)) return unavailable();
   }
-  return { blocks: result };
+  return complete ? { blocks: result } : { blocks: result, capabilities: [] };
 }
 
 function blocksToPortableText(

@@ -231,6 +231,27 @@ kind="link_reachability"
   for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/partial-projection", rule), false);
 }
 
+// Nested mixed rich text retains ordered blocks; unknown components stay unchecked.
+{
+  const nested = item("nested", { data: { blocks: [{ _type: "section", _key: "s", body: [
+    block("a", "Before", "h2", "https://example.org/source"), { _type: "notice", _key: "n", text: "Middle" }, block("b", "After"),
+  ] }] } });
+  const host = fakeHost([nested]);
+  const options = { contentPreset: { name: "article", collections: ["pages"] },
+    blockMappings: { section: [{ kind: "richText", field: "body" }] } };
+  const partial = createPlugin(options);
+  await partial.hooks["content:afterSave"].handler({ content: nested, collection: "pages", isNew: false }, host.ctx);
+  assert.deepEqual(host.store.get("document:/nested").document.body.map((entry) => entry.children[0].text), ["Before", "Middle", "After"]);
+  assert.deepEqual(host.store.get("document:/nested").document.body_capabilities, []);
+  assert.equal(host.store.get("document:/nested").document.body[0].style, "h2");
+  assert.equal(host.store.get("document:/nested").document.body[0].markDefs[0].href, "https://example.org/source");
+  assert.ok(host.store.get("findings:/nested").assessment.gates.some((gate) => gate.status === "not_checked"));
+  const mapped = createPlugin({ ...options, blockMappings: { ...options.blockMappings, notice: [{ kind: "paragraph", field: "text" }] } });
+  await mapped.routes.refresh.handler(host.ctx);
+  assert.equal(host.store.get("document:/nested").document.body_capabilities, undefined);
+  assert.ok(host.store.get("findings:/nested").assessment.gates.some((gate) => gate.status === "passed"));
+}
+
 // Ordered host metadata mappings reach both save and Refresh.
 {
   const mapped = item("mapped", { data: { body: [block("p", "Content")], seo_description: "Preferred", excerpt: "Fallback" } });
