@@ -3,6 +3,7 @@ mod egress;
 mod fetcher;
 mod graph;
 mod http;
+pub mod link_reachability;
 mod planner;
 mod playwright;
 mod robots;

@@ -8,6 +8,7 @@ pub mod feedback;
 pub mod integrations;
 pub mod intelligence;
 pub mod link_graph;
+pub mod link_reachability;
 pub mod listings;
 pub mod runtime;
 pub mod static_site;
