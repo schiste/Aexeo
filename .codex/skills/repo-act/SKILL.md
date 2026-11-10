@@ -46,6 +46,8 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   Lexical checks and per-component no-follow opens alone do not prevent a
   concurrent directory rename from escaping the root; use an atomic platform
   primitive or fail closed, and run the tests on each supported platform.
+- For JSON contracts, test omitted fields and explicit `null` separately when
+  the schema distinguishes them: Serde `Option` normally collapses both.
 - Re-run other lint/build checks after the focused validation passes.
 - Document any override-based maintainer note that affected the change plan.
 
