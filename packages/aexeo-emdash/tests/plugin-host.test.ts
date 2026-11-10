@@ -54,6 +54,19 @@ describe("EmDash content adaptation", () => {
     expect(adaptContentItem({ ...item, data: { introduction: body("intro"), sections: 42 } }, { contentFields: ["introduction", "sections"] }).document.body_capabilities).toEqual([]);
   });
 
+  it("marks absent selected fields incomplete while preserving observed empty fields", () => {
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: { introduction: body("Before"), conclusion: body("After") } };
+    const options = { contentFields: ["introduction", "sections", "conclusion"] };
+    const missing = adaptContentItem(item, options).document;
+    expect(missing.body?.map((entry) => entry.children[0]?.text)).toEqual(["Before", "After"]);
+    expect(missing.body_capabilities).toEqual([]);
+    const empty = adaptContentItem({ ...item, data: { ...item.data, sections: null } }, options).document;
+    expect(empty.body_capabilities).toBeUndefined();
+    expect(empty.body?.map((entry) => entry.children[0]?.text)).toEqual(["Before", "After"]);
+    expect(adaptContentItem({ ...item, data: { sections: null } }, { contentFields: ["sections"] }).document.body).toEqual([]);
+    expect(adaptContentItem({ ...item, data: {} }, { contentFields: ["sections"] }).document.body).toBeUndefined();
+  });
+
   it("projects explicit ordered description fields and distinguishes unknown mappings", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: { seo_description: "SEO copy", excerpt: "Excerpt" } };
     const options = { descriptionFields: ["seo_description", "excerpt"] };

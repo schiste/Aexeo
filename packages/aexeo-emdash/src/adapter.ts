@@ -219,8 +219,14 @@ function extractSelectedContent(data: Record<string, unknown>, fields: readonly 
   let observed = false;
   for (const field of fields) {
     const value = data[field];
-    if (value === undefined || value === null) continue;
+    if (value === undefined) {
+      // A selected field not present in this record has not been observed.
+      capabilities = [];
+      continue;
+    }
     observed = true;
+    // A present null explicitly represents an empty field.
+    if (value === null) continue;
     const part = extractFirstPortableText({ content: value }, mappings);
     if (part === null) {
       // An unrecognized field cannot establish coverage, but later selected

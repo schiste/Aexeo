@@ -231,6 +231,20 @@ kind="link_reachability"
   for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/partial-projection", rule), false);
 }
 
+// A selected but unobserved field cannot certify the remaining body as complete.
+{
+  const partial = item("missing-selected-field", { data: { introduction: [block("a", "Before")], conclusion: [block("b", "After")] } });
+  const host = fakeHost([partial]);
+  const configured = createPlugin({ contentPreset: { name: "article", collections: ["pages"] },
+    contentFieldsByCollection: { pages: ["introduction", "sections", "conclusion"] } });
+  await configured.hooks["content:afterSave"].handler({ content: partial, collection: "pages", isNew: false }, host.ctx);
+  const document = host.store.get("document:/missing-selected-field").document;
+  assert.deepEqual(document.body.map((entry) => entry.children[0].text), ["Before", "After"]);
+  assert.deepEqual(document.body_capabilities, []);
+  assert.ok(host.store.get("findings:/missing-selected-field").assessment.gates.some((gate) => gate.status === "not_checked"));
+  for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/missing-selected-field", rule), false);
+}
+
 // Nested mixed rich text retains ordered blocks; unknown components stay unchecked.
 {
   const nested = item("nested", { data: { blocks: [{ _type: "section", _key: "s", body: [
