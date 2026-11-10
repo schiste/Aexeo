@@ -2724,7 +2724,7 @@ field = "slug"
             id: "collection".into(),
             ..Default::default()
         };
-        let items = vec![
+        let items = [
             ContentInput {
                 id: "/a".into(),
                 metadata: Some(BTreeMap::from([("slug".into(), "same".into())])),
