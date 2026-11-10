@@ -753,14 +753,20 @@ export async function evaluateAndPersistAll(
   }
   const completeByRoute = new Map(documents.map((document) => [document.route, hasCompleteBody(document)]));
   const allBodiesComplete = documents.every(hasCompleteBody);
-  const globalCoverageComplete = summary.errors.length === 0 && allBodiesComplete;
-  try { ctx.log?.info?.("aexeo.sitewide_coverage", { status: globalCoverageComplete ? "complete" : summary.errors.length > 0 ? "inventory_incomplete" : "body_incomplete" }); } catch { /* best effort */ }
+  // Compare after evaluation: saves, deletions, and creations can invalidate
+  // every cross-document conclusion, even if their own page writes are guarded.
+  const changed = await refreshInputChanged(kv, collections, adaptedByRoute, storedAtStart);
+  const coverageStatus = !inventoryComplete ? "inventory_incomplete" : changed ? "changed_during_refresh" : !allBodiesComplete ? "body_incomplete" : "complete";
+  const globalCoverageComplete = coverageStatus === "complete";
+  try { ctx.log?.info?.("aexeo.sitewide_coverage", { status: coverageStatus }); } catch { /* best effort */ }
   const globalAssessment: DocumentAssessment | undefined = globalCoverageComplete ? undefined : {
     status: "error",
-    reason: summary.errors.length > 0 ? "inventory_incomplete" : "body_incomplete",
-    detail: "Sitewide and cross-document checks are unavailable because the CMS input is incomplete.",
+    reason: coverageStatus,
+    detail: coverageStatus === "changed_during_refresh" ? "Sitewide and cross-document checks are unavailable because content changed during refresh." : "Sitewide and cross-document checks are unavailable because the CMS input is incomplete.",
   };
-  if (!allBodiesComplete && summary.errors.length === 0) {
+  if (changed && inventoryComplete) {
+    summary.errors.push("Sitewide checks unavailable: content changed during refresh.");
+  } else if (!allBodiesComplete && inventoryComplete) {
     summary.errors.push("Sitewide checks unavailable: one or more document bodies are incomplete.");
   }
   for (const finding of result.findings) {
@@ -819,10 +825,36 @@ export async function evaluateAndPersistAll(
     totalAfterSuppression += filtered.length;
   }
   summary.totalFindings = totalAfterSuppression;
-  if (inventoryComplete) {
+  if (inventoryComplete && !changed) {
     await removeStaleDocuments(ctx, collections, documentRoutes, storedAtStart);
   }
   return summary;
+}
+
+// Compare the evaluated records with the currently stored snapshot. Existing
+// records absent from the CMS listing may be stale; only count them as changes
+// if they were created or modified since the sweep started. This is an
+// observation, not a transaction: the KV API has no compare-and-set.
+async function refreshInputChanged(
+  kv: KvNamespace,
+  collections: readonly string[],
+  evaluated: ReadonlyMap<string, StoredDocument>,
+  initial: readonly StoredDocument[],
+): Promise<boolean> {
+  const current = await readAllStoredDocuments(kv);
+  const currentByRoute = new Map(current.map((entry) => [entry.document.route, entry]));
+  const initialByRoute = new Map(initial.map((entry) => [entry.document.route, entry]));
+  const same = (a: StoredDocument | undefined, b: StoredDocument | undefined) =>
+    a !== undefined && b !== undefined && JSON.stringify(a) === JSON.stringify(b);
+  for (const [route, entry] of evaluated) {
+    if (!same(entry, currentByRoute.get(route))) return true;
+  }
+  const selected = new Set(collections);
+  for (const entry of current) {
+    const route = entry.document.route;
+    if (!evaluated.has(route) && (entry.meta.collection === "" || selected.has(entry.meta.collection)) && !same(entry, initialByRoute.get(route))) return true;
+  }
+  return false;
 }
 
 // True when `revision` is known to predate `other`. Entries stored before
