@@ -9,10 +9,18 @@ vi.mock("../src/wasm-init.js", () => ({
   })),
 }));
 
-import { evaluateContent, evaluateContentCollection } from "../src/content.js";
+import { evaluateContent, evaluateContentCollection, type ContentGateResult } from "../src/content.js";
 import { evaluateContent as evaluateWasm, evaluateContentCollection as evaluateCollectionWasm } from "../src/wasm-init.js";
 
 describe("portable content API", () => {
+  it("exposes unavailable reachability as a typed not-checked gate", async () => {
+    const gate: ContentGateResult = { gate_id: "external", status: "not_checked", blocking: false,
+      scope: "document", required_capability: "link_reachability", findings: [], reason: "observations unavailable" };
+    vi.mocked(evaluateWasm).mockResolvedValueOnce(JSON.stringify({ preset: "custom", input_id: "/sample", gates: [gate], applied_fixes: [] }));
+    const report = await evaluateContent({ route: "/sample", title: "Sample", body: [] }, "custom");
+    expect(report.gates[0]).toEqual(gate);
+  });
+
   it("passes the document and preset sources to the bridge", async () => {
     const document = { route: "/sample", title: "Sample", body: [] };
     const sources = { custom: "version = 1" };
