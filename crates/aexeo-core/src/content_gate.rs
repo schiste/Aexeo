@@ -675,7 +675,10 @@ impl<'a> LiteralText<'a> {
                 cursor = end;
             } else {
                 // A rejected match must not hide an overlapping valid one.
-                cursor = offset + text[offset..].chars().next().unwrap().len_utf8();
+                let Some(ch) = text[offset..].chars().next() else {
+                    break;
+                };
+                cursor = offset + ch.len_utf8();
             }
         }
         false
