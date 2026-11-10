@@ -1828,6 +1828,60 @@ fn a_seeded_crawl_confirms_an_unlinked_published_page_in_one_command() {
 }
 
 #[test]
+fn a_multilingual_seeded_crawl_requires_consistent_observed_languages() {
+    for (french_html_language, comparable) in [("fr-FR", true), ("en-US", false)] {
+        let site = Site::start(vec![
+            ("/", ("200 OK", "text/html", "<html lang='en'><body><main><a href='/en/article'>English</a></main></body></html>".to_owned())),
+            ("/en/article", ("200 OK", "text/html", "<html lang='en'><body><main>English article.</main></body></html>".to_owned())),
+            ("/fr/article", ("200 OK", "text/html", format!("<html lang='{french_html_language}'><body><main>Article français.</main></body></html>"))),
+        ]);
+        site.serve_header("X-Release", "r1");
+        let temp = tempfile::tempdir().unwrap();
+        let mut context = inventory_context(&site, &["/", "/en/article", "/fr/article"], &[]);
+        for (entry, locale) in context["inventory"]["pages"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .zip(["en", "en-US", "fr-FR"])
+        {
+            entry["locale"] = locale.into();
+        }
+        let (_, report) = seeded_crawl_with_report(
+            &site,
+            temp.path(),
+            &context["inventory"],
+            &["--release-header", "x-release"],
+        );
+        assert_eq!(report["crawl_complete"], true, "{report:#}");
+        assert_eq!(
+            report["reconciliation"]["comparable"], comparable,
+            "{report:#}"
+        );
+        let page = report["pages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|page| page["url"] == format!("{}/fr/article", site.base_url))
+            .unwrap();
+        assert_eq!(page["inventory_locale"], "fr-FR");
+        assert_eq!(page["document_language"], french_html_language);
+        assert_eq!(page["distinct_source_pages"], 0);
+        let finding = legacy_finding(&report, "LNK002", &format!("{}/fr/article", site.base_url));
+        if comparable {
+            assert_eq!(finding["conclusion"], "confirmed", "{report:#}");
+        } else {
+            assert_eq!(finding["conclusion"], "not_eligible", "{report:#}");
+            assert!(
+                report["issues"]
+                    .to_string()
+                    .contains("inventory_document_language_mismatch"),
+                "{report:#}"
+            );
+        }
+    }
+}
+
+#[test]
 fn a_seeded_crawl_suppresses_the_orphan_finding_of_a_verified_canonical_alias() {
     let site = Site::start(vec![
         ("/", html(r#"<main><a href="/guide">Guide</a></main>"#)),
