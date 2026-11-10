@@ -1,6 +1,8 @@
 //! CLI host for the content-gate change/verdict protocol.
 use super::exit_code::{EXIT_FINDINGS, EXIT_INTERNAL_ERROR, EXIT_SUCCESS, EXIT_UNSUPPORTED};
-use aexeo_contracts::content_gate_protocol::{Change, VerdictStatus};
+use aexeo_contracts::{
+    content_gate_change_validation::parse_validated_change, content_gate_protocol::VerdictStatus,
+};
 use aexeo_core::{
     content_gate::MAX_CONTENT_INPUT_BYTES,
     content_gate_sources::{ConfinedContentFiles, SourceError},
@@ -89,7 +91,7 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
     if bytes.len() as u64 > MAX_CHANGE_BYTES {
         user_bail!("change document exceeds the size limit");
     }
-    let change: Change = serde_json::from_slice(&bytes).user_context("invalid change document")?;
+    let change = parse_validated_change(&bytes).user_context("invalid change document")?;
     let mut sources = builtin_content_presets();
     if let Some(entries) = args.get_many::<String>("preset-source") {
         for entry in entries {

@@ -130,3 +130,68 @@ fn failed_run_does_not_replace_prior_verdict() {
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(fs::read_to_string(verdict).unwrap(), "prior verdict");
 }
+
+#[test]
+fn rejects_invalid_protocol_fields_without_producing_a_verdict() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
+    let mut invalid = Vec::new();
+    let mut value = input();
+    value["created_at"] = "not-a-date".into();
+    invalid.push(value);
+    let mut value = input();
+    value["origin"]["system"] = "".into();
+    invalid.push(value);
+    let mut value = input();
+    value["site"] = serde_json::json!({});
+    invalid.push(value);
+    let mut value = input();
+    value["site"] = serde_json::json!({"base_url": "not a URI"});
+    invalid.push(value);
+    let mut value = input();
+    value["author"] = serde_json::json!({"id": ""});
+    invalid.push(value);
+    let mut value = input();
+    value["entries"][0]["after"]["revision"] = "".into();
+    invalid.push(value);
+    let mut value = input();
+    value["entries"][0]["operation"] = "update".into();
+    value["entries"][0]["before"] = serde_json::json!({"uri": "not a URI", "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"});
+    invalid.push(value);
+    let mut value = input();
+    value["entries"][0]["before"] = serde_json::Value::Null;
+    invalid.push(value);
+    let mut value = input();
+    value["entries"][0]["after"]["uri"] = serde_json::Value::Null;
+    invalid.push(value);
+    let mut value = input();
+    value["entries"][0]["after"]["inline"] = serde_json::Value::Null;
+    invalid.push(value);
+    for value in invalid {
+        let output = run(dir.path(), &value, preset, &[]);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "accepted {value}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!dir.path().join("verdict.json").exists());
+    }
+}
+
+#[test]
+fn allows_valid_extensions_and_rfc3339_offsets() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
+    let mut change = input();
+    change["created_at"] = "2026-02-28T12:34:56.123+01:00".into();
+    change["site"] = serde_json::json!({"base_url": "https://example.org/", "future_field": true});
+    change["future_field"] = serde_json::json!(null);
+    let output = run(dir.path(), &change, preset, &[]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
