@@ -32,6 +32,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 ## Validation Checklist
 
 - Run the fastest relevant test command first.
+- Python test scripts with hyphens in their filenames are not discovered by
+  `unittest discover`; run the relevant files directly, or use the repository
+  check script that invokes them explicitly. Confirm the reported test count.
 - Check likely entrypoints and impacted callers before finishing.
 - After focused validation, run `sh scripts/clippy-strict.sh` for Rust changes.
   The CI applies extra lint rules beyond ordinary `cargo clippy -- -D warnings`;
