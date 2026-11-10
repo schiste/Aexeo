@@ -44,6 +44,82 @@ pub(super) fn text_hash(text: &[u8]) -> String {
         .collect()
 }
 
+// The policy fingerprint encodes JSON types explicitly, including IEEE-754
+// bits for floating point values. It is shared with the offline evaluator.
+pub(super) fn policy_hash(value: &Value) -> Result<String> {
+    fn framed(ctx: &mut ring::digest::Context, bytes: &[u8]) {
+        ctx.update(&(bytes.len() as u64).to_be_bytes());
+        ctx.update(bytes);
+    }
+    fn encode(ctx: &mut ring::digest::Context, value: &Value) -> Result<()> {
+        match value {
+            Value::Null => ctx.update(b"n"),
+            Value::Bool(false) => ctx.update(b"f"),
+            Value::Bool(true) => ctx.update(b"t"),
+            Value::Number(number) if number.is_f64() => {
+                ctx.update(b"d");
+                ctx.update(
+                    &number
+                        .as_f64()
+                        .context("invalid floating point number")?
+                        .to_bits()
+                        .to_be_bytes(),
+                );
+            }
+            Value::Number(number) => {
+                ctx.update(b"i");
+                framed(ctx, number.to_string().as_bytes());
+            }
+            Value::String(value) => {
+                ctx.update(b"s");
+                framed(ctx, value.as_bytes());
+            }
+            Value::Array(values) => {
+                ctx.update(b"a");
+                ctx.update(&(values.len() as u64).to_be_bytes());
+                for value in values {
+                    encode(ctx, value)?;
+                }
+            }
+            Value::Object(values) => {
+                ctx.update(b"o");
+                ctx.update(&(values.len() as u64).to_be_bytes());
+                let mut entries: Vec<_> = values.iter().collect();
+                entries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+                for (key, value) in entries {
+                    framed(ctx, key.as_bytes());
+                    encode(ctx, value)?;
+                }
+            }
+        }
+        Ok(())
+    }
+    let mut ctx = ring::digest::Context::new(&SHA256);
+    encode(&mut ctx, value)?;
+    Ok(ctx
+        .finish()
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+fn policy_fingerprint(value: &Value) -> Result<&Value> {
+    let digest = value
+        .get("sha256")
+        .and_then(Value::as_str)
+        .context("invalid policy fingerprint")?;
+    if value.get("version").and_then(Value::as_u64) != Some(1)
+        || digest.len() != 64
+        || !digest
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        bail!("invalid policy fingerprint");
+    }
+    Ok(value)
+}
+
 fn build_note(
     text: &[u8],
     report: &Value,
@@ -118,6 +194,9 @@ fn build_note(
         }
     };
     note["report_binding"] = json!(binding);
+    if let Some(fingerprint) = report.get("resolved_policy_fingerprint") {
+        note["resolved_policy_fingerprint"] = policy_fingerprint(fingerprint)?.clone();
+    }
     Ok(note)
 }
 
@@ -269,6 +348,9 @@ fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
         bail!("invalid model status");
     }
     let mut event = json!({"example_id":note["example_id"],"text_sha256":hash,"model_status":model,"reviewer_status":status,"reviewer":note["reviewer"],"method":note["method"]});
+    if let Some(fingerprint) = note.get("resolved_policy_fingerprint") {
+        event["resolved_policy_fingerprint"] = policy_fingerprint(fingerprint)?.clone();
+    }
     if let Some(binding) = note.get("report_binding") {
         if !["verified", "unverified"].contains(&binding.as_str().unwrap_or("")) {
             bail!("invalid report binding");
@@ -317,6 +399,15 @@ fn write_new(path: &str, value: &Value) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn typed_policy_hash_matches_python_for_json_types() {
+        let value =
+            json!({"z": [null, true, false, -2, u64::MAX, 0.000001, -0.0, "Été"], "a": {"x": []}});
+        assert_eq!(
+            policy_hash(&value).unwrap(),
+            "559524b71198cb4b0b14d0728e4f901dad0a00d9bf3bd8bcdee1ee0552189280"
+        );
+    }
     #[test]
     fn metadata_hash_is_order_independent_and_matches_portable_format() {
         let expected = "c2dd6ca92cc1c5c1a1208812e55ddfac14cbdbcb54ef0f9441d0deb31e3d541e";

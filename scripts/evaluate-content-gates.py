@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import subprocess
+import struct
 import tempfile
 import time
 from pathlib import Path
@@ -45,6 +46,54 @@ def policy_hash(policy):
     encoded = json.dumps(policy, ensure_ascii=False, sort_keys=True,
                          separators=(",", ":"), allow_nan=False).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def typed_policy_hash(policy):
+    """SHA-256 of tagged, length-framed JSON values (typed-json-v1)."""
+    digest = hashlib.sha256()
+    def framed(data):
+        digest.update(len(data).to_bytes(8, "big"))
+        digest.update(data)
+    def encode(value):
+        if value is None:
+            digest.update(b"n")
+        elif isinstance(value, bool):
+            digest.update(b"t" if value else b"f")
+        elif isinstance(value, int):
+            digest.update(b"i")
+            framed(str(value).encode("ascii"))
+        elif isinstance(value, float):
+            if not math.isfinite(value):
+                raise ValueError("non-finite policy number")
+            digest.update(b"d")
+            digest.update(struct.pack(">d", value))
+        elif isinstance(value, str):
+            digest.update(b"s")
+            framed(value.encode("utf-8"))
+        elif isinstance(value, list):
+            digest.update(b"a")
+            digest.update(len(value).to_bytes(8, "big"))
+            for item in value:
+                encode(item)
+        elif isinstance(value, dict) and all(isinstance(key, str) for key in value):
+            digest.update(b"o")
+            digest.update(len(value).to_bytes(8, "big"))
+            for key in sorted(value):
+                framed(key.encode("utf-8"))
+                encode(value[key])
+        else:
+            raise ValueError("policy must be JSON")
+    encode(policy)
+    return digest.hexdigest()
+
+
+def validate_policy_fingerprint(value):
+    if (not isinstance(value, dict) or type(value.get("version")) is not int
+            or value["version"] != 1 or not isinstance(value.get("sha256"), str)
+            or len(value["sha256"]) != 64
+            or any(char not in "0123456789abcdef" for char in value["sha256"])):
+        raise ValueError("invalid policy fingerprint")
+    return value
 
 
 def review_is_bound(item):
@@ -93,7 +142,7 @@ def validate_corpus(corpus):
                 raise ValueError("reviewed examples require reviewer and method provenance")
 
 
-def aggregate_review_events(corpus, split, review_log):
+def aggregate_review_events(corpus, split, review_log, current_policy=None):
     """Summarize supplied historical reviews without exposing IDs or text."""
     if review_log.get("version") != 1 or review_log.get("gate_id") != corpus["gate_id"]:
         raise ValueError("review log version or gate does not match corpus")
@@ -101,6 +150,8 @@ def aggregate_review_events(corpus, split, review_log):
     seen = set()
     counts = {"agreed": 0, "overrides_to_pass": 0, "overrides_to_fail": 0, "resolved_unchecked": 0}
     binding_counts = {"verified": 0, "unverified": 0}
+    policy_counts = {"matching": 0, "different": 0, "unbound": 0}
+    policy_decisions = {key: dict.fromkeys(counts, 0) for key in policy_counts}
     for event in review_log["events"]:
         identifier = event["example_id"]
         if identifier not in by_id or identifier in seen:
@@ -123,18 +174,27 @@ def aggregate_review_events(corpus, split, review_log):
         binding = event.get("report_binding", "unverified")
         if not isinstance(binding, str) or binding not in binding_counts:
             raise ValueError("invalid report binding")
+        fingerprint = event.get("resolved_policy_fingerprint")
+        if "resolved_policy_fingerprint" in event:
+            validate_policy_fingerprint(fingerprint)
         if item["split"] != split:
             continue
+        policy_group = "unbound" if fingerprint is None else "matching" if fingerprint["sha256"] == current_policy else "different"
+        if current_policy is not None:
+            policy_counts[policy_group] += 1
         binding_counts[binding] += 1
-        if model == "not_checked":
-            counts["resolved_unchecked"] += 1
-        elif model == reviewer:
-            counts["agreed"] += 1
-        else:
-            counts["overrides_to_pass" if reviewer == "passed" else "overrides_to_fail"] += 1
+        outcome = ("resolved_unchecked" if model == "not_checked" else "agreed" if model == reviewer
+                   else "overrides_to_pass" if reviewer == "passed" else "overrides_to_fail")
+        counts[outcome] += 1
+        if current_policy is not None:
+            policy_decisions[policy_group][outcome] += 1
     decisions = counts["agreed"] + counts["overrides_to_pass"] + counts["overrides_to_fail"]
-    return {"events": sum(counts.values()), "counts": counts, "report_binding_counts": binding_counts,
-            "override_rate": (counts["overrides_to_pass"] + counts["overrides_to_fail"]) / decisions if decisions else None}
+    result = {"events": sum(counts.values()), "counts": counts, "report_binding_counts": binding_counts,
+              "override_rate": (counts["overrides_to_pass"] + counts["overrides_to_fail"]) / decisions if decisions else None}
+    if current_policy is not None:
+        result["policy_binding_counts"] = policy_counts
+        result["policy_decisions"] = policy_decisions
+    return result
 
 
 def empty_counts():
@@ -168,7 +228,6 @@ def evaluate(binary, corpus, split, review_log=None):
     for item in corpus["examples"]:
         if item.get("review_status") == "reviewed":
             review_is_bound(item)
-    review_metrics = aggregate_review_events(corpus, split, review_log) if review_log is not None else None
     examples = [item for item in corpus["examples"] if item["split"] == split]
     if not examples:
         raise ValueError("split must contain examples")
@@ -192,6 +251,8 @@ def evaluate(binary, corpus, split, review_log=None):
             arguments.extend(["--preset-source", preset_source])
         resolved_policy = resolve_policy(binary, corpus["preset"], preset_source)
         resolved_policy_hash = policy_hash(resolved_policy)
+        resolved_typed_hash = typed_policy_hash(resolved_policy)
+        review_metrics = aggregate_review_events(corpus, split, review_log, resolved_typed_hash) if review_log is not None else None
         for index, (name, snapshot) in enumerate(corpus.get("evidence_sources", {}).items()):
             source_path = Path(directory) / f"evidence-{index}.txt"
             source_path.write_text(snapshot, encoding="utf-8")
@@ -208,6 +269,10 @@ def evaluate(binary, corpus, split, review_log=None):
             if result.returncode not in (0, 1, 2):
                 raise ValueError(f"CLI failed for {item['id']}: exit {result.returncode}")
             report = json.loads(result.stdout)
+            if "resolved_policy_fingerprint" in report:
+                fingerprint = validate_policy_fingerprint(report["resolved_policy_fingerprint"])
+                if fingerprint["sha256"] != resolved_typed_hash:
+                    raise ValueError("evaluated report policy differs from resolved policy")
             gates = [gate for gate in report["gates"] if gate["gate_id"] == corpus["gate_id"]]
             if len(gates) != 1 or gates[0]["status"] not in {"passed", "failed", "not_checked"}:
                 raise ValueError(f"missing or invalid gate for {item['id']}")
@@ -223,7 +288,8 @@ def evaluate(binary, corpus, split, review_log=None):
             raise ValueError("resolved evaluation policy changed during the run")
     durations.sort()
     result = {"version": 1, "resolved_policy_sha256": resolved_policy_hash,
-              "resolved_policy_hash_format": "canonical-json-utf8-v1", "metric_scope": "checked_examples_only", "split": split,
+              "resolved_policy_hash_format": "canonical-json-utf8-v1",
+              "resolved_policy_fingerprint": {"version": 1, "sha256": resolved_typed_hash}, "metric_scope": "checked_examples_only", "split": split,
               **classification_metrics(counts, len(examples)), "reviewed_examples": reviewed_examples,
               "unbound_reviewed_examples": unbound_reviewed_examples,
               "reviewed_metrics": classification_metrics(reviewed_counts, reviewed_examples),

@@ -42,6 +42,15 @@ class FeedbackTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "fingerprint"):
             module.capture(self.text, self.report, "length", "e1")
 
+    def test_policy_fingerprint_is_retained_in_export(self):
+        fingerprint = {"version": 1, "sha256": "a" * 64}
+        self.report["resolved_policy_fingerprint"] = fingerprint
+        note = module.capture(self.text, self.report, "length", "e1", "passed", "r", "manual")
+        self.assertEqual(module.export_review(self.corpus, note)["events"][0]["resolved_policy_fingerprint"], fingerprint)
+        self.report["resolved_policy_fingerprint"] = {"version": 1, "sha256": "bad"}
+        with self.assertRaisesRegex(ValueError, "invalid policy"):
+            module.capture(self.text, self.report, "length", "e1")
+
     def test_metadata_is_bound_without_being_recorded(self):
         metadata = {"titre": "Été", "lang": "fr"}
         self.corpus["examples"][0]["metadata"] = metadata
