@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { unstable_startWorker } from "wrangler";
+import { createTestHarness, unstable_startWorker } from "wrangler";
 
 const TOKEN = "t".repeat(64);
 const SITE_URL = "https://example.com";
@@ -151,6 +151,32 @@ describe("worker", () => {
       const response = await worker.fetch("https://worker.test/findings/latest");
       await assertJsonError(response, 404, /not found/);
     });
+  });
+});
+
+describe("external gate service binding", () => {
+  it("evaluates bound results in real WASM and rejects a stale snapshot", async () => {
+    const preset = `version=1\nname="custom"\n[[gates]]\nid="external"\nkind="custom"\nextension="example.rule"\nblocking=false\n[gates.parameters]\nmode="strict"\n`;
+    const harness = createTestHarness({ workers: [
+      { config: { name: "aexeo-test", main: fileURLToPath(new URL("../src/worker.ts", import.meta.url)), compatibility_date: "2026-10-01",
+        vars: { SITE_URL, EVAL_TOKEN: TOKEN, CONTENT_PRESET: "custom", CONTENT_PRESET_SOURCES_JSON: JSON.stringify({ custom: preset }) },
+        services: [{ binding: "CONTENT_GATE_PROVIDER", service: "gate-provider" }] } },
+      { config: { name: "gate-provider", main: fileURLToPath(new URL("./gate-provider.mjs", import.meta.url)), compatibility_date: "2026-10-01" } },
+    ] });
+    try {
+      await harness.listen();
+      const worker = harness.getWorker("aexeo-test");
+      const body = (route) => JSON.stringify({ documents: [{ route, title: "Page", body: [{ children: [{ _type: "span", text: "A draft" }] }] }], collections: ["pages"] });
+      const response = await post(worker, body("/page"));
+      assert.equal(response.status, 200, await response.clone().text());
+      const findings = await response.json();
+      assert.ok(findings.some((finding) => finding.rule_id === "external" && finding.message === "Review this opening"));
+      const stale = await post(worker, body("/stale"));
+      assert.equal(stale.status, 500);
+      assert.match((await stale.json()).error, /content preset incomplete/);
+    } finally {
+      await harness.close();
+    }
   });
 });
 

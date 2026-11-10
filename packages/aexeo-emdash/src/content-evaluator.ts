@@ -1,4 +1,4 @@
-import type { ContentReport } from "./content.js";
+import type { ContentReport, ContentEvaluationTelemetry, ExtensionInput, ExternalGateResult } from "./content.js";
 import type { EvaluatorFn } from "./plugin.js";
 import type { EmdashDocument } from "./types.js";
 
@@ -11,11 +11,26 @@ export interface ContentPresetOptions {
   collections?: readonly string[];
 }
 
+/** Trusted host code, installed explicitly at runtime; presets never load providers. */
+export type ExternalGateProvider = (request: {
+  input: ExtensionInput;
+  preset: string;
+  collection: string | undefined;
+}) => Promise<ExternalGateResult[]>;
+
+export interface ExternalGateTelemetry {
+  duration_ms: number;
+  status: "success" | "error";
+}
+
 /** Add portable content findings to an existing evaluator without hiding skipped gates. */
 export function withContentPreset(
   base: EvaluatorFn,
   preset: ContentPresetOptions | undefined,
-  evaluate: (document: EmdashDocument, name: string, sources?: Record<string, string>, evidenceSources?: Record<string, string>) => Promise<ContentReport>,
+  evaluate: (document: EmdashDocument, name: string, sources?: Record<string, string>, evidenceSources?: Record<string, string>, onTelemetry?: (event: ContentEvaluationTelemetry) => void, externalResults?: ExternalGateResult[]) => Promise<ContentReport>,
+  provider?: ExternalGateProvider,
+  project?: (document: EmdashDocument, evidenceSources?: Record<string, string>) => Promise<ExtensionInput>,
+  onProviderTelemetry?: (event: ExternalGateTelemetry) => void,
 ): EvaluatorFn {
   if (!preset) return base;
   return async (documents, context) => {
@@ -33,7 +48,24 @@ export function withContentPreset(
           ? preset.byCollection[collection] : undefined;
         const name = selected ?? preset.name;
         if (!name) throw new Error(`empty preset name for collection ${collection}`);
-        const report = preset.evidenceSources === undefined
+        let externalResults: ExternalGateResult[] | undefined;
+        if (provider !== undefined) {
+          const started = onProviderTelemetry ? performance.now() : 0;
+          let status: ExternalGateTelemetry["status"] = "error";
+          try {
+            if (!project) throw new Error("content gate projection is unavailable");
+            externalResults = await provider({ input: await project(document, preset.evidenceSources), preset: name, collection });
+            if (!Array.isArray(externalResults)) throw new Error("external gate provider must return an array");
+            status = "success";
+          } finally {
+            if (onProviderTelemetry) {
+              try { onProviderTelemetry({ duration_ms: performance.now() - started, status }); } catch { /* telemetry is best effort */ }
+            }
+          }
+        }
+        const report = externalResults !== undefined
+          ? await evaluate(document, name, preset.sources, preset.evidenceSources, undefined, externalResults)
+          : preset.evidenceSources === undefined
           ? await evaluate(document, name, preset.sources)
           : await evaluate(document, name, preset.sources, preset.evidenceSources);
         const incomplete = report.gates.filter((gate) => gate.status === "not_checked");
