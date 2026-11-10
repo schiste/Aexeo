@@ -6,6 +6,12 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-10
+
+### Fixed
+
+- Preserve ordered Portable Text when it is mixed with custom components. Unmapped components leave coverage unverified; explicitly mapped components can be included or deliberately excluded from editorial body evaluation.
+
 ## [0.9.0] - 2026-11-10
 
 ### Added
