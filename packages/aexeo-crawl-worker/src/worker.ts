@@ -24,7 +24,7 @@
 // different one. Every response carries Access-Control-Allow-Origin
 // matching the SITE_URL var so the browser admits the response.
 
-import { ensureInitialized, evaluateContent, evaluateDocuments } from "./wasm/init.js";
+import { ensureInitialized, evaluateContent, evaluateDocuments, projectContentInput } from "./wasm/init.js";
 import { contentPresetFindings } from "./content-presets.js";
 import { WORKER_VERSION } from "./version.js";
 
@@ -47,6 +47,8 @@ export interface Env {
   CONTENT_PRESET_BY_COLLECTION_JSON?: string;
   CONTENT_PRESET_SOURCES_JSON?: string;
   CONTENT_EVIDENCE_SOURCES_JSON?: string;
+  CONTENT_GATE_PROVIDER?: { fetch(input: string, init: RequestInit): Promise<Response> };
+  CONTENT_GATE_TELEMETRY?: string;
 }
 
 export default {
@@ -163,7 +165,7 @@ async function evaluateRoute(request: Request, env: Env): Promise<Response> {
     raw = evaluateDocuments(JSON.stringify(body.documents), body.configJson);
     const existing: unknown = JSON.parse(raw);
     if (!Array.isArray(existing)) throw new Error("invalid website findings returned by bridge");
-    const additional = contentPresetFindings(body.documents, body.collections, env, evaluateContent);
+    const additional = await contentPresetFindings(body.documents, body.collections, env, evaluateContent, projectContentInput);
     raw = JSON.stringify([...existing, ...additional]);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

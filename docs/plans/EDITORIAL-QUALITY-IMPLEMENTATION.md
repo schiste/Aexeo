@@ -9,10 +9,11 @@ Existing source and factuality work is outside this plan.
 - [ ] Add explainable, configurable writing-pattern checks with regression cases,
   predictable resource bounds and explicit unsupported inputs. Assess each
   signal as an editorial prompt, not a claim about AI authorship.
-- [ ] Extend the custom gate contract to CLI and adapters with explicit opt-in,
+- [x] Extend the custom gate contract to CLI and adapters with explicit opt-in,
   bounded input and precise unavailable/error behavior. CLI and direct EmDash
-  API accept input-bound external results; configured save hooks and sidecar do
-  not yet invoke a provider. Presets do not execute code.
+  API accept input-bound external results; configured save hooks and refreshes
+  accept a trusted host-injected provider. The sidecar can call an explicitly
+  configured service binding. Presets do not execute code.
 - [ ] Exercise agent authoring, localized revision, re-evaluation, feedback and
   bounded retries on representative scenarios; measure latency and outcomes,
   disclose that fixtures do not substitute for independent human evaluation.
@@ -33,3 +34,6 @@ Existing source and factuality work is outside this plan.
   independent human evaluation or an autonomous agent-writing trial.
 - The phrase lists and repeated-opening signal are review prompts. They do not
   establish authorship, detector outcomes or semantic quality.
+- A configured EmDash plugin and real WASM were exercised across refresh and
+  save with an explicitly injected provider. A workerd test exercises the
+  sidecar's service binding, actual WASM, and rejection of stale results.

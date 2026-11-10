@@ -92,6 +92,32 @@ unauthenticated `GET` routes back.**
    names; incomplete evaluations return an error instead of silently passing.
    See [content gates](../../docs/content-gates.md) for preset syntax.
 
+   To run trusted external gates, deploy your own provider as a Cloudflare Worker
+   and explicitly add a service binding at the top level of `wrangler.toml`:
+
+   ```toml
+   [[services]]
+   binding = "CONTENT_GATE_PROVIDER"
+   service = "my-content-gate-provider"
+   ```
+
+   For each selected document, the sidecar POSTs to `/evaluate` on that
+   binding with JSON `{ input, preset, collection }`. `input` is the exact
+   projected snapshot and can contain private content, metadata and evidence.
+   The provider must return a JSON array of external gate results, including
+   each extension name, parameters, the unchanged input and diagnostics in
+   projected-text coordinates. It must know the gate parameters for the
+   selected preset. The engine checks the returned input and parameters against
+   the current gate; missing or stale results leave the gate incomplete. A
+   non-2xx response, invalid response, timeout (5 seconds) or response larger
+   than 2 MiB fails the evaluation. The response limit includes the repeated
+   input snapshot. Without a binding, no provider is called and custom gates
+   remain incomplete. Configure access and retention of content in the provider;
+   a service binding explicitly grants it access to each evaluated document.
+   Set `CONTENT_GATE_TELEMETRY = "true"` under `[vars]` to log only the
+   provider call's duration and success/error status, without content or
+   identifiers. This records provider execution, not the gate verdict.
+
 For local work, `wrangler dev` does not fetch secrets — put the value in
 `.dev.vars` (gitignored) instead:
 
