@@ -42,6 +42,9 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
   boundaries ([PR #126](https://github.com/schiste/Aexeo/pull/126)), with
   Markdown/EmDash parity and explicit `not_checked` for missing paragraphs.
   It counts Unicode scalar values, not grapheme clusters or words.
+- [x] Sentence word and character limits can opt into paragraph-only input,
+  excluding headings while preserving adapter locations. Missing paragraph
+  capability remains `not_checked`; existing presets keep their prior behavior.
 - [x] Optional sentence character-length gate ([PR #128](https://github.com/schiste/Aexeo/pull/128))
   uses the same configurable sentence boundaries and abbreviation exceptions;
   its Unicode scalar counts are not linguistic segmentation.

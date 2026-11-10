@@ -767,6 +767,28 @@ min = 2
     }
 
     #[test]
+    fn paragraph_only_sentences_ignore_headings_and_keep_positions() {
+        use crate::content_gate::GateStatus;
+        let source = "# A heading that exceeds the limit\n\nShort text.\n\nA longer sentence spans\nmultiple lines here.\n";
+        for (kind, limit) in [
+            ("sentence_length", "max_words=3"),
+            ("sentence_character_length", "max_chars=15"),
+        ] {
+            let standard = report(source, &format!("kind='{kind}'\n{limit}"));
+            let scoped = report(
+                source,
+                &format!("kind='{kind}'\n{limit}\nparagraphs_only=true"),
+            );
+            assert_eq!(standard.measurements["sentence_count"], 3);
+            assert_eq!(scoped.measurements["sentence_count"], 2);
+            assert_eq!(scoped.status, GateStatus::Failed);
+            assert_eq!(scoped.findings.len(), 1);
+            assert_eq!((scoped.findings[0].line, scoped.findings[0].column), (3, 1));
+            assert_eq!(scoped.required_capability, "paragraphs");
+        }
+    }
+
+    #[test]
     fn sentence_abbreviations_are_explicit_and_preserve_block_boundaries() {
         use crate::content_gate::GateStatus;
         let preset = crate::content_gate::ContentPreset::from_toml(
