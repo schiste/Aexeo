@@ -80,6 +80,10 @@ it("reports provider errors and rejects invalid provider results", async () => {
   const invalidResult = await invalid([doc]);
   expect(invalidResult.ok).toBe(false);
   if (!invalidResult.ok) expect(invalidResult.detail).toContain("must return an array");
+  const noProjection = withContentPreset(base, { name: "article" }, async () => report, async () => []);
+  const unavailable = await noProjection([doc]);
+  expect(unavailable.ok).toBe(false);
+  if (!unavailable.ok) expect(unavailable.detail).toContain("projection is unavailable");
 });
 
 it("emits content-free provider telemetry without making evaluation depend on the observer", async () => {

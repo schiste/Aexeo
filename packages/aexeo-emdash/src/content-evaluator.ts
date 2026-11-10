@@ -1,4 +1,3 @@
-import { projectContentInput } from "./content.js";
 import type { ContentReport, ContentEvaluationTelemetry, ExtensionInput, ExternalGateResult } from "./content.js";
 import type { EvaluatorFn } from "./plugin.js";
 import type { EmdashDocument } from "./types.js";
@@ -30,7 +29,7 @@ export function withContentPreset(
   preset: ContentPresetOptions | undefined,
   evaluate: (document: EmdashDocument, name: string, sources?: Record<string, string>, evidenceSources?: Record<string, string>, onTelemetry?: (event: ContentEvaluationTelemetry) => void, externalResults?: ExternalGateResult[]) => Promise<ContentReport>,
   provider?: ExternalGateProvider,
-  project: typeof projectContentInput = projectContentInput,
+  project?: (document: EmdashDocument, evidenceSources?: Record<string, string>) => Promise<ExtensionInput>,
   onProviderTelemetry?: (event: ExternalGateTelemetry) => void,
 ): EvaluatorFn {
   if (!preset) return base;
@@ -54,6 +53,7 @@ export function withContentPreset(
           const started = onProviderTelemetry ? performance.now() : 0;
           let status: ExternalGateTelemetry["status"] = "error";
           try {
+            if (!project) throw new Error("content gate projection is unavailable");
             externalResults = await provider({ input: await project(document, preset.evidenceSources), preset: name, collection });
             if (!Array.isArray(externalResults)) throw new Error("external gate provider must return an array");
             status = "success";
