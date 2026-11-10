@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// The smallest common input shared by content adapters. The identifier is
 /// opaque: it may be a file name, a URL, or a CMS document identifier.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContentInput {
     pub id: String,

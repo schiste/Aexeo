@@ -151,6 +151,40 @@ term = "example"
 
 A Rust host implements `ContentGateExtensions` and calls `evaluate_with_extensions`, providing diagnostics in projected-text coordinates. The engine supplies each finding's rule ID and severity from the preset. Returning `None`, or running in an adapter that has no extension host, reports `not_checked`. Extension code executes in the host process and must be trusted; the preset is data and cannot execute a program by itself. The CLI and existing EmDash/WASM adapters do not load external extensions; they report such gates as unavailable. Built-in gates remain portable across these adapters.
 
+### Explicit external extension results
+
+The CLI and the direct EmDash content API can consume results produced by an
+external tool. A preset declares `kind = "custom"` and names an extension; it
+never runs a command. The operator invokes and trusts the external tool
+separately. Results contain the **complete projected input**, including any
+metadata, source text and evidence provided. Handle the files and data as
+private content; no automatic transmission occurs.
+
+To obtain the CLI input, run the same command with `--export-adapter-input`;
+it prints JSON instead of evaluating gates. Capture it in a suitably private
+file, run the external tool, and pass its JSON result array via
+`--extension-results path.json`. For each result supply `extension`, a string
+map `parameters`, the exact exported `input` object, and `diagnostics` with
+`message`, one-based `line` and one-based Unicode-scalar `column` in projected
+text. An empty diagnostic array means the external check passed. Missing or
+stale inputs and changed parameters produce `not_checked`; malformed records,
+invalid locations and exceeded size limits are errors. Source mapping is
+provided where the adapter can map the projected position.
+
+```json
+[{"extension":"my_project.rule","parameters":{"mode":"strict"},"input":{"id":"draft.md","text":"Example","source_text":"Example","headings":null,"metadata":null,"evidence_sources":null},"diagnostics":[{"message":"Review this opening","line":1,"column":1}]}]
+```
+
+The EmDash `@aeptus/aexeo-emdash/content` API exposes
+`projectContentInput(document, evidenceSources?)` and accepts the same result
+array as the sixth `evaluateContent` argument. This is the direct API; configured
+save hooks and the sidecar do not automatically invoke external tools. The
+caller must collect results for each exact snapshot. The binding prevents stale
+reuse but does not prove who produced the results or that they are correct.
+Limits are 32 MiB for the JSON payload, 100 results, 1,000 diagnostics per
+result and 4,096 UTF-8 bytes per message. No external program is sandboxed or
+executed by Aexeo.
+
 ## Local latency measurement
 
 For local content and crawl evaluation, `--telemetry` also emits `gate_timings_ms`, an

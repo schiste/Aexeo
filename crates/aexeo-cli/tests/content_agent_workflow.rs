@@ -94,3 +94,52 @@ fn repeated_paragraph_openings_are_advisory_and_located() {
         1
     );
 }
+
+#[test]
+fn external_extension_results_are_bound_to_the_projected_input_and_parameters() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    let draft = dir.path().join("draft.md");
+    let results = dir.path().join("results.json");
+    fs::write(&draft, "# Guide\n\nReview this text.\n").unwrap();
+    fs::write(&preset, "version=1\nname='External'\n[[gates]]\nid='external'\nkind='custom'\nextension='example.rule'\nblocking=false\n[gates.parameters]\nmode='strict'\n").unwrap();
+    let source = format!("review={}", preset.display());
+    let base = [
+        "content",
+        draft.to_str().unwrap(),
+        "--input-format",
+        "markdown",
+        "--preset",
+        "review",
+        "--preset-source",
+        &source,
+    ];
+    let export = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(base)
+        .arg("--export-adapter-input")
+        .output()
+        .unwrap();
+    assert!(export.status.success());
+    let input: serde_json::Value = serde_json::from_slice(&export.stdout).unwrap();
+    let external = serde_json::json!([{"extension":"example.rule", "parameters":{"mode":"strict"}, "input":input, "diagnostics":[{"message":"Review opening", "line":2, "column":1}]}]);
+    fs::write(&results, serde_json::to_vec(&external).unwrap()).unwrap();
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args(base)
+            .args([
+                "--extension-results",
+                results.to_str().unwrap(),
+                "--format",
+                "json",
+            ])
+            .output()
+            .unwrap()
+    };
+    let output = run();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(status(&report, "external"), "failed");
+    fs::write(&draft, "# Guide\n\nChanged text.\n").unwrap();
+    let stale: serde_json::Value = serde_json::from_slice(&run().stdout).unwrap();
+    assert_eq!(status(&stale, "external"), "not_checked");
+}

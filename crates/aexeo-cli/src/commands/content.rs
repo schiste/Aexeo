@@ -254,6 +254,27 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     };
     input.metadata = metadata;
     input.evidence_sources = evidence_sources;
+    if args.get_flag("export-adapter-input") {
+        println!("{}", serde_json::to_string_pretty(&input)?);
+        return Ok(EXIT_SUCCESS);
+    }
+    let external = args
+        .get_one::<String>("extension-results")
+        .map(|path| -> Result<_> {
+            const LIMIT: u64 = 32 * 1024 * 1024;
+            let mut data = Vec::new();
+            fs::File::open(path)
+                .user_context(format!("reading extension results {path}"))?
+                .take(LIMIT + 1)
+                .read_to_end(&mut data)?;
+            if data.len() as u64 > LIMIT {
+                user_bail!("external gate results exceed the size limit");
+            }
+            let results =
+                serde_json::from_slice(&data).user_context("invalid external gate results JSON")?;
+            aexeo_core::content_extensions::ExternalGateResults::new(results)
+        })
+        .transpose()?;
     let adapter_ms = adapter_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
     let started = std::time::Instant::now();
     let capabilities = ContentEvaluationContext {
@@ -261,7 +282,9 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         adapter: context.as_ref(),
         link_count,
         collection: collection.as_deref(),
-        ..Default::default()
+        extensions: external
+            .as_ref()
+            .map(|host| host as &dyn aexeo_core::content_gate::ContentGateExtensions),
     };
     let mut gate_timer = GateTimer::default();
     let mut report = if measuring {
@@ -342,7 +365,8 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 }
             } else if matches!(
                 gate,
-                ContentGate::ForbiddenTerms { .. }
+                ContentGate::Custom { .. }
+                    | ContentGate::ForbiddenTerms { .. }
                     | ContentGate::RepeatedTerms { .. }
                     | ContentGate::SentenceLength { .. }
                     | ContentGate::SentenceCharacterLength { .. }
