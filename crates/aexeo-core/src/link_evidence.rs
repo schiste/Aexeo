@@ -42,6 +42,9 @@ pub struct LinkEvidence {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HtmlLinkMetadata {
+    /// Language declared on the document root, not a verified CMS locale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_language: Option<String>,
     pub base_href: Option<String>,
     pub robots_directives: Vec<String>,
     pub canonical_hrefs: Vec<String>,
@@ -167,6 +170,10 @@ pub fn extract_document(
     let mut metadata = HtmlLinkMetadata::default();
     let mut nodes = vec![dom.document.clone()];
     while let Some(node) = nodes.pop() {
+        if is_element(&node, "html") {
+            metadata.document_language =
+                attribute(&node, "lang").filter(|lang| !lang.trim().is_empty());
+        }
         if base.is_none()
             && matches!(&node.data, NodeData::Element { name, .. } if name.local.as_ref() == "base")
         {
