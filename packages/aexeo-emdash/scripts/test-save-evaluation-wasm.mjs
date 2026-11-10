@@ -340,6 +340,36 @@ headings=["Summary"]
   assert.equal(host.store.get("document:/mapped").document.description, "Fallback");
 }
 
+// Required metadata never treats an unobserved description as missing.
+{
+  const preset = `version=1
+name="metadata-test"
+[[gates]]
+id="description"
+kind="required_metadata"
+fields=["description"]
+`;
+  const unconfigured = createPlugin({ contentPreset: { name: "metadata-test", sources: { "metadata-test": preset } } });
+  const legacy = item("unmapped-description");
+  const legacyHost = fakeHost([legacy]);
+  await unconfigured.hooks["content:afterSave"].handler({ content: legacy, collection: "pages", isNew: false }, legacyHost.ctx);
+  assert.equal(legacyHost.store.get("findings:/unmapped-description").assessment.gates[0].status, "not_checked");
+  const configured = createPlugin({ contentPreset: { name: "metadata-test", sources: { "metadata-test": preset } },
+    descriptionFieldsByCollection: { pages: ["seo_description", "excerpt"] } });
+  for (const [slug, data, status] of [
+    ["unknown-description", { seo_description: null }, "not_checked"],
+    ["absent-description", { seo_description: null, excerpt: null }, "failed"],
+    ["present-description", { seo_description: "", excerpt: "Observed" }, "passed"],
+  ]) {
+    const page = item(slug, { data: { ...data, body: [block("p", "Content")] } });
+    const host = fakeHost([page]);
+    await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+    const result = host.store.get(`findings:/${slug}`);
+    assert.equal(result.assessment.gates.find((gate) => gate.gate_id === "description").status, status);
+    assert.equal(result.findings.some((finding) => finding.rule_id === "description"), status === "failed");
+  }
+}
+
 // A partially projected body does not abort the preset or later documents.
 {
   const mixed = item("partial", { data: { content: [block("a", "Before"), { _type: "askYourAi", _key: "ai" }, block("b", "After")] } });

@@ -32,6 +32,7 @@ mod tests {
             route: route.to_string(),
             title: title.to_string(),
             description: Some(format!("{title} description")),
+            description_source_observed: None,
             canonical: None,
             lang: Some("en".to_string()),
             alternates: Vec::new(),

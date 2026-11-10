@@ -17,6 +17,9 @@ pub struct EmdashDocument {
     pub title: String,
     #[serde(default)]
     pub description: Option<String>,
+    /// Whether the host observed the source fields used for the description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_source_observed: Option<bool>,
     #[serde(default)]
     pub canonical: Option<String>,
     #[serde(default)]

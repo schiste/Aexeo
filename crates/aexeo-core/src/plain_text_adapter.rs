@@ -46,7 +46,7 @@ pub fn paragraph_text_context(source: &str) -> Result<ContentContext, &'static s
     Ok(ContentContext {
         paragraphs: Some(paragraphs),
         block_ends: Some(block_ends),
-        input_limit: None,
+        ..Default::default()
     })
 }
 

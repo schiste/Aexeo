@@ -72,11 +72,17 @@ describe("EmDash content adaptation", () => {
     const options = { descriptionFields: ["seo_description", "excerpt"] };
     expect(adaptContentItem(item, options).document).toMatchObject({ description: "SEO copy", description_source_observed: true });
     expect(adaptContentItem({ ...item, data: { seo_description: "", excerpt: "Excerpt" } }, options).document).toMatchObject({ description: "Excerpt", description_source_observed: true });
-    const absent = adaptContentItem({ ...item, data: {} }, options).document;
+    const absent = adaptContentItem({ ...item, data: { seo_description: null, excerpt: null } }, options).document;
     expect(absent.description).toBeUndefined();
     expect(absent.description_source_observed).toBe(true);
-    expect(adaptContentItem(item).document.description_source_observed).toBeUndefined();
-    expect(adaptContentItem({ ...item, data: { seo_description: 42 } }, options).document.description_source_observed).toBeUndefined();
+    const unobserved = adaptContentItem({ ...item, data: { excerpt: "Fallback" } }, options).document;
+    expect(unobserved.description).toBeUndefined();
+    expect(unobserved.description_source_observed).toBe(false);
+    expect(adaptContentItem({ ...item, data: { seo_description: "Selected" } }, options).document).toMatchObject({ description: "Selected", description_source_observed: true });
+    expect(adaptContentItem({ ...item, data: { seo_description: null } }, options).document.description_source_observed).toBe(false);
+    expect(adaptContentItem({ ...item, data: { seo_description: undefined, excerpt: "Fallback" } }, options).document.description_source_observed).toBe(false);
+    expect(adaptContentItem(item).document.description_source_observed).toBe(false);
+    expect(adaptContentItem({ ...item, data: { seo_description: 42 } }, options).document.description_source_observed).toBe(false);
     expect(JSON.parse(JSON.stringify(aexeoPlugin({ descriptionFieldsByCollection: { posts: options.descriptionFields } }).options)).descriptionFieldsByCollection.posts).toEqual(options.descriptionFields);
   });
 

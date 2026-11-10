@@ -128,6 +128,7 @@ export const CONFIG_TOKEN_KEY = "config:eval_token";
 export const SETTINGS_TOKEN_KEY = "eval_token";
 export const SETTINGS_BLOCK_MAPPINGS_KEY = "block_mappings";
 export const SETTINGS_CONTENT_FIELDS_KEY = "content_fields_by_collection";
+export const SETTINGS_DESCRIPTION_FIELDS_KEY = "description_fields_by_collection";
 
 // Local mirror of the host's `SecretSettingField` variant of `SettingField`
 // (emdash 0.41). Kept local so this package still typechecks without the
@@ -150,6 +151,12 @@ export const PLUGIN_SETTINGS_SCHEMA: Record<string, PluginSettingField> = {
     type: "string",
     label: "Content fields by collection (JSON)",
     description: "Ordered rendered body fields per collection.",
+    multiline: true,
+  },
+  [SETTINGS_DESCRIPTION_FIELDS_KEY]: {
+    type: "string",
+    label: "Description fields by collection (JSON)",
+    description: "Ordered renderer description fallback fields per collection.",
     multiline: true,
   },
   [SETTINGS_BLOCK_MAPPINGS_KEY]: {
@@ -352,6 +359,9 @@ function recordContentCoverage(ctx: SandboxCtx, documents: readonly EmdashDocume
   try {
     ctx.log?.info?.("aexeo.content_coverage", counts);
     ctx.log?.info?.("aexeo.page_coverage", { documents: documents.length, rendered_page: "not_observed", generated_metadata: "not_observed" });
+    const observed = documents.filter((document) => document.description_source_observed === true).length;
+    const withValue = documents.filter((document) => document.description_source_observed === true && !!document.description).length;
+    ctx.log?.info?.("aexeo.description_coverage", { documents: documents.length, observed, with_value: withValue, unverified: documents.length - observed });
   } catch {
     // Optional diagnostics must never break an editor workflow.
   }
@@ -424,10 +434,10 @@ export async function readSandboxBlockMappings(ctx: SandboxCtx): Promise<CustomB
 }
 
 /** Read an optional JSON mapping from collection names to ordered field names. */
-export async function readSandboxContentFields(ctx: SandboxCtx): Promise<Record<string, readonly string[]> | undefined> {
+async function readSandboxFields(ctx: SandboxCtx, key: string, warning: string): Promise<Record<string, readonly string[]> | undefined> {
   if (!ctx.settings) return undefined;
   try {
-    const raw = await ctx.settings.get<unknown>(SETTINGS_CONTENT_FIELDS_KEY);
+    const raw = await ctx.settings.get<unknown>(key);
     if (raw === null || raw === "") return undefined;
     if (typeof raw !== "string" || raw.length > 65536) throw new Error("invalid selection size or type");
     const value: unknown = JSON.parse(raw);
@@ -435,9 +445,17 @@ export async function readSandboxContentFields(ctx: SandboxCtx): Promise<Record<
       !Object.values(value).every((fields) => Array.isArray(fields) && fields.length > 0 && fields.every((field) => typeof field === "string" && field.length > 0))) throw new Error("invalid selection");
     return value as Record<string, readonly string[]>;
   } catch {
-    ctx.log?.warn?.("Aexeo content field selection unavailable; multiple fields remain unverified");
+    ctx.log?.warn?.(warning);
     return undefined;
   }
+}
+
+export function readSandboxContentFields(ctx: SandboxCtx): Promise<Record<string, readonly string[]> | undefined> {
+  return readSandboxFields(ctx, SETTINGS_CONTENT_FIELDS_KEY, "Aexeo content field selection unavailable; multiple fields remain unverified");
+}
+
+export function readSandboxDescriptionFields(ctx: SandboxCtx): Promise<Record<string, readonly string[]> | undefined> {
+  return readSandboxFields(ctx, SETTINGS_DESCRIPTION_FIELDS_KEY, "Aexeo description field selection unavailable; description remains unverified");
 }
 
 // EmDash 0.41 keeps the sandbox bridge available for afterSave work.
@@ -454,7 +472,7 @@ export async function handleAfterSave(
     );
     return;
   }
-  const [blockMappings, fields] = await Promise.all([readSandboxBlockMappings(ctx), readSandboxContentFields(ctx)]);
+  const [blockMappings, fields, descriptions] = await Promise.all([readSandboxBlockMappings(ctx), readSandboxContentFields(ctx), readSandboxDescriptionFields(ctx)]);
   await handleAfterSaveConfigured(event, ctx, (documents, context) =>
     evaluateViaSidecar(
       ctx.http,
@@ -465,6 +483,7 @@ export async function handleAfterSave(
     undefined,
     blockMappings,
     fields?.[event.content.type],
+    descriptions?.[event.content.type],
   );
 }
 

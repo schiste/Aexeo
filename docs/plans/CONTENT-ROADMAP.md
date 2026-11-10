@@ -100,6 +100,9 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [x] Count reused EmDash link marks as separate destination occurrences, matching
   link counting and Markdown; emit opt-in aggregate destination-check telemetry
   ([PR #138](https://github.com/schiste/Aexeo/pull/138)).
+- [x] The EmDash sandbox accepts per-collection ordered description fields for
+  save and refresh. Missing source fields remain unverified and aggregate
+  description-coverage telemetry excludes values and identifiers.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
 - [x] Include a fingerprint of the CLI-resolved preset in corpus evaluation
   results and reject a policy change observed during a run. This identifies the

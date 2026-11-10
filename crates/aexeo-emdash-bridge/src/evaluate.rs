@@ -24,6 +24,7 @@ mod tests {
             route: "/about".to_string(),
             title: "About Acme Robotics".to_string(),
             description: Some("The story behind our company and team.".to_string()),
+            description_source_observed: None,
             canonical: Some("https://example.com/about".to_string()),
             lang: Some("en".to_string()),
             alternates: Vec::new(),
