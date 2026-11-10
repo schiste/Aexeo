@@ -59,6 +59,8 @@ struct Scope {
     explicit: bool,
     /// Inside an `aside` or `header`, which `article` and `main` cannot promote to body.
     non_body_landmark: bool,
+    /// Source-only markup may not be displayed in the evaluated page.
+    conditional_markup: bool,
 }
 
 fn attribute(handle: &Handle, key: &str) -> Option<String> {
@@ -151,7 +153,9 @@ fn is_element(node: &Handle, tag: &str) -> bool {
 /// Links inside `<template>` and `<noscript>` count, as they do for the audit
 /// and the crawl: the document is parsed with scripting off, so `<noscript>`
 /// content is markup rather than text, and template contents are walked.
-/// Document metadata ignores both, since a scripting browser applies neither.
+/// Their context is unknown, even under explicit markers, because the HTML alone
+/// does not establish that a browser displays them. Document metadata ignores
+/// both, since a scripting browser applies neither.
 pub fn extract_document(
     html: &str,
     source_url: &str,
@@ -213,6 +217,7 @@ pub fn extract_document(
         locale: None,
         explicit: false,
         non_body_landmark: false,
+        conditional_markup: false,
     };
     // Keep the document alive while traversing: RcDom drains descendants when
     // the last handle to a node is dropped, even if descendants were cloned.
@@ -221,11 +226,20 @@ pub fn extract_document(
     while let Some((node, mut scope)) = stack.pop() {
         if let NodeData::Element { name, .. } = &node.data {
             let tag = name.local.as_ref();
+            if matches!(tag, "template" | "noscript") && !scope.conditional_markup {
+                scope.conditional_markup = true;
+                scope.context = LinkContext::Unknown;
+                scope.component = Some(tag.to_string());
+                scope.paragraph = None;
+            }
             if let Some(lang) = attribute(&node, "lang").filter(|lang| !lang.trim().is_empty()) {
                 scope.locale = Some(lang);
             }
-            let explicit = attribute(&node, "data-aexeo-link-context");
+            let explicit = (!scope.conditional_markup)
+                .then(|| attribute(&node, "data-aexeo-link-context"))
+                .flatten();
             let semantic = match tag {
+                _ if scope.conditional_markup => None,
                 "article" | "main"
                     if !scope.explicit
                         && !scope.non_body_landmark
@@ -406,7 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn template_and_noscript_links_count_with_their_surrounding_context() {
+    fn conditional_markup_links_remain_discoverable_but_have_unknown_context() {
         let html = r#"<html><head><noscript><meta name="robots" content="noindex"></noscript></head><body><main><noscript><p><a href="/plain">plain</a></p></noscript></main><footer><template><a href="/legal-notice">Legal</a></template></footer></body></html>"#;
         let (links, metadata) =
             extract_document(html, "https://example.org/", "https://example.org", None);
@@ -416,10 +430,25 @@ mod tests {
                 .map(|link| (link.href.as_str(), link.context, link.anchor.as_str()))
                 .collect::<Vec<_>>(),
             [
-                ("/plain", LinkContext::Body, "plain"),
-                ("/legal-notice", LinkContext::Footer, "Legal")
+                ("/plain", LinkContext::Unknown, "plain"),
+                ("/legal-notice", LinkContext::Unknown, "Legal")
             ]
         );
+        assert_eq!(links[0].component.as_deref(), Some("noscript"));
+        assert_eq!(links[1].component.as_deref(), Some("template"));
+        assert_eq!(
+            routes(html, "https://example.org/"),
+            ["plain", "legal-notice"]
+        );
+        let nested = extract_links(
+            "<main><template><div data-aexeo-link-context='body'><nav><a href='/nested'>x</a></nav></div></template><p><a href='/real'>y</a></p></main>",
+            "https://example.org/",
+            "https://example.org",
+            None,
+        );
+        assert_eq!(nested[0].context, LinkContext::Unknown);
+        assert_eq!(nested[0].component.as_deref(), Some("template"));
+        assert_eq!(nested[1].context, LinkContext::Body);
         assert!(
             metadata.robots_directives.is_empty(),
             "a scripting browser ignores <noscript> metadata"

@@ -129,6 +129,13 @@ an unmarked `div` inside `main` counts as `body`, because class names are not
 treated as semantics, and needs an explicit marker. The parser cannot reliably
 preserve source line and column, so these are null.
 
+Links in `template` and `noscript` remain in discovery and evidence but have
+`unknown` context and identify the outer conditional component. The source HTML
+does not establish that these links were displayed; even an explicit context
+marker inside such markup cannot establish visibility. Unknown links still
+contribute to observed-source totals and must not be treated as confirmed
+visible links. Dynamic script rendering and CSS visibility are not evaluated.
+
 Add `--telemetry` to write a single JSON event containing only duration, page,
 link and issue counts to standard error. It is opt-in and does not include page
 URLs or content. The normal report contains the evidence and should be handled

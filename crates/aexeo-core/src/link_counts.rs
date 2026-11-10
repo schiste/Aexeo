@@ -141,6 +141,27 @@ mod tests {
     }
 
     #[test]
+    fn conditional_markup_does_not_inflate_body_or_footer_counts() {
+        let links = extract_links(
+            "<main><noscript><a href='/target'>fallback</a></noscript><a href='/target'>body</a></main><footer><template><a href='/target'>template</a></template></footer>",
+            "https://example.org/source",
+            "https://example.org",
+            None,
+        );
+        let counts = count_links(links);
+        let target = &counts.destinations[0];
+        assert_eq!(target.distinct_source_pages, 1);
+        assert_eq!(target.source_pages_by_context[&LinkContext::Body], 1);
+        assert_eq!(target.source_pages_by_context[&LinkContext::Unknown], 1);
+        assert!(
+            !target
+                .source_pages_by_context
+                .contains_key(&LinkContext::Footer)
+        );
+        assert_eq!(target.evidence.len(), 3);
+    }
+
+    #[test]
     fn preserves_uncertain_and_non_http_links() {
         let links = extract_links(
             "<a href='/a'>a</a><a href='mailto:a@example.org'>email</a>",

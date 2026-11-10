@@ -202,6 +202,13 @@ publications and non-page collections even when a collection is marked
 routable. The EmDash inventory adapter must use an explicit publication/surface
 mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
 
+- Links inside `template` or `noscript` remain discoverable but use the
+  `unknown` category, including under explicit nested markers. This prevents
+  conditional markup from inflating body or navigation counts. They still
+  contribute to observed-source totals and legacy qualification; a future
+  change must represent conditional visibility explicitly before relying on
+  those totals as evidence that a link is displayed.
+
 ## EmDash preview integration update
 
 - Configured and sandboxed plugins support ordered, host-declared mappings for
