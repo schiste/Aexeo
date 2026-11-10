@@ -4,6 +4,39 @@
 
 ## Commands
 
+## `link-reachability`
+
+Explicitly check external HTTP(S) destinations; results are advisory
+
+```text
+Explicitly check external HTTP(S) destinations; results are advisory
+
+Usage: link-reachability [OPTIONS] <input>
+
+Arguments:
+  <input>
+          Markdown file or JSON array of destinations
+
+Options:
+      --input-format <input-format>
+          [default: markdown]
+          [possible values: markdown, json]
+
+      --max-checks <max-checks>
+          [default: 20]
+
+      --timeout <timeout>
+          Maximum seconds per unique destination including redirects
+
+          [default: 5]
+
+      --telemetry
+          Emit aggregate counts to stderr
+
+  -h, --help
+          Print help
+```
+
 ## `link-graph`
 
 Analyze explicitly identified rendered pages and inventory

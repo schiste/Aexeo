@@ -64,7 +64,11 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [x] Markdown heading-node and EmDash heading-block locations for duplicate and length findings.
 - [x] Truncated site crawls mark site-scoped gates `not_checked` while retaining partial findings; native link rules suppress incomplete graph conclusions.
 - [x] Optional, bounded paragraph-count gate shared by Markdown and EmDash; unavailable paragraph capability remains `not_checked`.
-- [ ] Additional editorial gates and external destination reachability validation.
+- [x] Optional bounded HTTP link observations for Markdown or adapter-supplied
+  JSON destinations, with non-public egress protection and aggregate telemetry.
+  This advisory command is separate from content presets and does not establish
+  destination safety, source reliability or long-term availability.
+- [ ] Additional editorial gates and composable reachability gate integration.
 - [x] Explicit collection metadata uniqueness gate in core, CLI and EmDash/WASM
   ([PR #40](https://github.com/schiste/Aexeo/pull/40)); callers must supply the
   complete collection and missing metadata remains `not_checked`.

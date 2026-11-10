@@ -6,6 +6,15 @@ pub fn build_cli() -> Command {
     Command::new("aexeo-cli")
         .about("SEO and GEO linting for static websites")
         .subcommand(
+            Command::new("link-reachability")
+                .about("Explicitly check external HTTP(S) destinations; results are advisory")
+                .arg(Arg::new("input").required(true).help("Markdown file or JSON array of destinations"))
+                .arg(Arg::new("input-format").long("input-format").value_parser(["markdown", "json"]).default_value("markdown"))
+                .arg(Arg::new("max-checks").long("max-checks").value_parser(value_parser!(usize)).default_value("20"))
+                .arg(Arg::new("timeout").long("timeout").value_parser(value_parser!(u64).range(1..=30)).default_value("5").help("Maximum seconds per unique destination including redirects"))
+                .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate counts to stderr")),
+        )
+        .subcommand(
             Command::new("link-graph")
                 .about("Analyze explicitly identified rendered pages and inventory")
                 .arg(Arg::new("input").required(true).help("Versioned JSON input file"))
