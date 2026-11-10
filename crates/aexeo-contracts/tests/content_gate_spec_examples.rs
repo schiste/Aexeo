@@ -1,6 +1,7 @@
 //! Keeps the content gate protocol examples consistent with their schemas and
 //! with each other: the example verdict must bind to the example change.
 
+use aexeo_contracts::content_gate_change_validation::validate_change_structure;
 use aexeo_contracts::content_gate_protocol::{CHANGE_SCHEMA, Change, VERDICT_SCHEMA, Verdict};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -12,6 +13,56 @@ fn spec_file(relative: &str) -> Value {
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
     serde_json::from_str(&text).unwrap_or_else(|error| panic!("parse {}: {error}", path.display()))
+}
+
+#[test]
+fn change_structure_rejects_ambiguous_or_unsafe_entries() {
+    let example = spec_file("examples/markdown-change.json");
+    let validate =
+        |value: Value| validate_change_structure(&serde_json::from_value::<Change>(value).unwrap());
+    assert!(validate(example.clone()).is_ok());
+    let mut cases = Vec::new();
+    let mut value = example.clone();
+    value["entries"][1]["entity_id"] = value["entries"][0]["entity_id"].clone();
+    cases.push(value);
+    let mut value = example.clone();
+    value["base"]["revision"] = "abc".into();
+    cases.push(value);
+    let mut value = example.clone();
+    value["entries"][0]["after"]["sha256"] = "A".repeat(64).into();
+    cases.push(value);
+    let mut value = example.clone();
+    value["entries"][0]["after"]["inline"] = "extra source".into();
+    cases.push(value);
+    let mut value = example.clone();
+    value["entries"][0]["after"]["file"] = "../private".into();
+    cases.push(value);
+    let mut value = example.clone();
+    value["content_root"] = "relative".into();
+    cases.push(value);
+    let mut value = example.clone();
+    value["entries"][2]["before"] = value["entries"][2]["after"].clone();
+    cases.push(value);
+    let mut value = example.clone();
+    value["entries"][1]
+        .as_object_mut()
+        .unwrap()
+        .remove("previous_entity_id");
+    cases.push(value);
+    let mut value = example.clone();
+    value["entries"][0]["public_path"] = "relative".into();
+    cases.push(value);
+    for case in cases {
+        assert!(validate(case).is_err());
+    }
+}
+
+#[test]
+fn change_structure_does_not_claim_to_verify_content() {
+    let mut value = spec_file("examples/markdown-change.json");
+    value["entries"][2]["after"]["inline"] = "different content".into();
+    let change: Change = serde_json::from_value(value).unwrap();
+    assert!(validate_change_structure(&change).is_ok());
 }
 
 #[test]
