@@ -142,6 +142,11 @@ not zero. A nonconditional source observation does not prove visibility: dynamic
 For legacy `LNK002`, a solely conditional incoming link does not suppress the
 finding or confirm an orphan; `conditional_inbound` means not verifiable.
 Conditional incoming links also prevent confirmation of `LNK004` link counts.
+Each page's `conditional_only_inbound` is true when its observed incoming
+links from other pages, including redirect credits, are exclusively conditional
+or unclassified. This also exposes uncertainty where a legacy rule emitted no
+finding because it counted those links. False is not proof of visible links or
+of a complete crawl. The field is absent in older reports.
 
 Add `--telemetry` to write a single JSON event containing only duration, page,
 link and issue counts to standard error, including counts of conditional and

@@ -459,6 +459,50 @@ mod tests {
     }
 
     #[test]
+    fn conditional_only_inbound_is_reported_even_when_legacy_rule_is_silent() {
+        let artifact = audit(
+            vec![
+                page("", "<main><template><a href='/a'>A</a></template></main>"),
+                page("a", "<main><a href='/a'>Self</a></main>"),
+                page("b", "<main>Unlinked</main>"),
+            ],
+            &Config::default(),
+        );
+        let report = build_link_report_from_audit(&artifact).unwrap();
+        assert!(
+            !artifact
+                .findings
+                .iter()
+                .any(|finding| finding.rule_id == "LNK002" && finding.path == "crawl/a/index.html")
+        );
+        let a = report
+            .pages
+            .iter()
+            .find(|page| page.url.ends_with("/a"))
+            .unwrap();
+        assert_eq!(a.conditional_only_inbound, Some(true));
+        let b = report
+            .pages
+            .iter()
+            .find(|page| page.url.ends_with("/b"))
+            .unwrap();
+        assert_eq!(b.conditional_only_inbound, Some(false));
+        let mut json = serde_json::to_value(&report).unwrap();
+        for page in json["pages"].as_array_mut().unwrap() {
+            page.as_object_mut()
+                .unwrap()
+                .remove("conditional_only_inbound");
+        }
+        let older: crate::link_report::LinkReport = serde_json::from_value(json).unwrap();
+        assert!(
+            older
+                .pages
+                .iter()
+                .all(|page| page.conditional_only_inbound.is_none())
+        );
+    }
+
+    #[test]
     fn conditional_inbound_withholds_low_link_count_confirmation() {
         let config = Config {
             min_inbound_links: 3,
@@ -490,6 +534,7 @@ mod tests {
             .unwrap();
         assert_eq!(target.conditional_source_pages, Some(1));
         assert_eq!(target.nonconditional_source_pages, Some(1));
+        assert_eq!(target.conditional_only_inbound, Some(false));
         let rendered = crate::link_notes::LinkFindingNotes::from_report(&report, None);
         let counts = rendered.count([("LNK004", "crawl/a/index.html")]);
         assert_eq!(counts.not_verifiable, 1);
@@ -533,6 +578,15 @@ mod tests {
             .unwrap();
         assert_eq!(credit.conditional_source_pages, Some(1));
         assert_eq!(credit.nonconditional_source_pages, Some(0));
+        assert_eq!(
+            report
+                .pages
+                .iter()
+                .find(|page| page.url.ends_with("/new"))
+                .unwrap()
+                .conditional_only_inbound,
+            Some(true)
+        );
         // Older serialized reports do not have redirect visibility counts.
         // Unknown provenance must not become proof of a nonconditional link.
         let mut old_report = report.clone();

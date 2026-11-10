@@ -70,6 +70,11 @@ pub struct ObservedPageLinks {
     pub conditional_source_pages: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nonconditional_source_pages: Option<usize>,
+    /// Other pages link only through conditional or unclassified markup,
+    /// including observed redirect paths. This is an uncertainty signal,
+    /// not an orphan finding or proof of browser visibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conditional_only_inbound: Option<bool>,
     /// Sources with a link free of `nofollow`, `ugc` and `sponsored`. Zero while
     /// `distinct_source_pages` is positive means every observed link is qualified.
     #[serde(default)]
@@ -759,7 +764,10 @@ fn redirect_credit(
         .iter()
         .filter_map(|url| by_destination.get(url.as_str()))
         .flat_map(|destination| &destination.evidence)
-        .filter(|link| link.source != page.url)
+        .filter(|link| {
+            let source = Url::parse(&link.source).ok().map(String::from);
+            source.as_deref().unwrap_or(&link.source) != own.as_deref().unwrap_or(&page.url)
+        })
     {
         sources.insert(link.source.as_str());
         if link.conditional_markup == Some(false) {
@@ -1220,6 +1228,31 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
                 .as_deref()
                 .and_then(|url| by_destination.get(url));
             let redirected = redirected_from(page);
+            let via_redirect = redirect_credit(page, &by_destination);
+            let mut conditional = false;
+            let mut nonconditional = false;
+            if let Some(destination) = inbound {
+                for link in &destination.evidence {
+                    let source = Url::parse(&link.source).ok().map(String::from);
+                    if source.as_deref().unwrap_or(&link.source)
+                        == normalized_url.as_deref().unwrap_or(&page.url)
+                    {
+                        continue;
+                    }
+                    if link.conditional_markup == Some(false) {
+                        nonconditional = true;
+                    } else {
+                        conditional = true;
+                    }
+                }
+            }
+            if let Some(credit) = &via_redirect {
+                conditional |= credit
+                    .conditional_source_pages
+                    .unwrap_or(credit.distinct_source_pages)
+                    > 0;
+                nonconditional |= credit.nonconditional_source_pages.unwrap_or(0) > 0;
+            }
             let mut contexts = [
                 LinkContext::Body,
                 LinkContext::RelatedContent,
@@ -1263,6 +1296,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
                         .and_then(|destination| destination.nonconditional_source_pages)
                         .unwrap_or(0),
                 ),
+                conditional_only_inbound: Some(conditional && !nonconditional),
                 source_pages_by_context: contexts,
                 followed_source_pages: inbound
                     .map_or(0, |destination| destination.followed_source_pages),
@@ -1287,7 +1321,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
                 redirected_from: redirected,
                 redirect_chain: page.redirect_chain.clone(),
                 redirected_arrivals: page.redirected_arrivals.clone(),
-                via_redirect: redirect_credit(page, &by_destination),
+                via_redirect,
                 inventory_aliases: aliases
                     .extract_if(.., |(at, _)| *at == index)
                     .map(|(_, alias)| alias)
@@ -1989,6 +2023,32 @@ mod tests {
                 .iter()
                 .any(|issue| RELEASE_ISSUES.contains(&issue.as_str()))
         );
+    }
+
+    #[test]
+    fn redirect_credit_excludes_self_with_normalized_url_spelling() {
+        let report = build_link_report(&LinkReportInput {
+            version: 1,
+            identity: None,
+            snapshot_date: None,
+            crawl_complete: false,
+            pages: vec![RenderedPage {
+                url: "https://EXAMPLE.org/new".into(),
+                html: "<template><a href='/old'>Self</a></template>".into(),
+                status_code: Some(200),
+                response_headers: None,
+                requested_url: Some("https://example.org/old".into()),
+                redirect_chain: vec![RedirectHop {
+                    url: "https://example.org/old".into(),
+                    status_code: 301,
+                }],
+                redirected_arrivals: Vec::new(),
+            }],
+            inventory: None,
+        })
+        .unwrap();
+        assert!(report.pages[0].via_redirect.is_none());
+        assert_eq!(report.pages[0].conditional_only_inbound, Some(false));
     }
 
     fn redirect_report(chain: Vec<RedirectHop>) -> LinkReport {
