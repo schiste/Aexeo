@@ -6,7 +6,7 @@ use aexeo_contracts::{
 use aexeo_core::{
     content_gate::MAX_CONTENT_INPUT_BYTES,
     content_gate_sources::{ConfinedContentFiles, SourceError},
-    content_gate_verdict::evaluate_change_with_observer,
+    content_gate_verdict::{ChangeEvaluationOptions, evaluate_change_with_options},
     content_presets::{builtin_content_presets, resolve_content_preset},
     error::UserContext,
     intelligence::presence::iso_now,
@@ -142,14 +142,17 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
     } else {
         None
     };
-    let verdict = match evaluate_change_with_observer(
+    let verdict = match evaluate_change_with_options(
         &change,
         &mut provider,
         &preset,
         &iso_now(),
         MAX_CONTENT_INPUT_BYTES,
         MAX_TOTAL_CONTENT_BYTES,
-        observer,
+        ChangeEvaluationOptions {
+            link_observer: observer,
+            plain_text_paragraphs: args.get_flag("plain-text-paragraphs"),
+        },
     ) {
         Ok(verdict) => verdict,
         Err(error) if error.downcast_ref::<SourceError>().is_some() => {
@@ -157,6 +160,20 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         }
         Err(error) => return Err(error),
     };
+    if telemetry && args.get_flag("plain-text-paragraphs") {
+        let entries = change
+            .entries
+            .iter()
+            .filter(|entry| entry.media_type == "text/plain" && entry.after.is_some())
+            .count();
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "event": "content_change_paragraph_adapter", "version": 1,
+                "eligible_entries": entries
+            })
+        );
+    }
     let code = match verdict.status {
         VerdictStatus::Pass => EXIT_SUCCESS,
         VerdictStatus::Fail => EXIT_FINDINGS,

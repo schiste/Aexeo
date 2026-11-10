@@ -257,3 +257,16 @@ Aexeo enforces a 64 MiB change-document limit, a 16 MiB per-item limit and a
 rename. If parsing, digest verification, evaluation or output fails, the command
 exits nonzero and may leave no new verdict; the runner must enforce all checks
 in section 5, including the exit code, even if a previous verdict file exists.
+
+### Plain-text paragraph capability
+
+`content-change --plain-text-paragraphs` explicitly interprets `text/plain`
+entries as blank-line-separated paragraphs, using the same bounded adapter as
+`content --input-format paragraph-text`. Without this option the existing
+raw-text interpretation is retained and paragraph-dependent checks remain
+not checked. Source locations refer to the verified input snapshot. When the
+paragraph limit is exceeded, content-dependent capabilities are unavailable;
+no partial paragraph evaluation is reported as complete. This option does not
+change Markdown or unsupported media types. With `--telemetry`, a local
+`content_change_paragraph_adapter` event reports only the number of eligible
+text entries, not the content or whether each entry was successfully adapted.

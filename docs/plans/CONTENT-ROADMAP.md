@@ -77,6 +77,9 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
   observations, preserves partial results and maps findings to source spans.
 - [x] Allow configured EmDash save and refresh workflows to use an explicitly
   installed link observer, preserving `not_checked` on incomplete observations.
+- [x] Optional blank-line paragraph interpretation for `text/plain` content-change
+  entries, retaining the raw-text default and source locations. Overflow remains
+  not checked; opt-in telemetry records only eligible entry counts.
 - [ ] Integrate optional host observers with other adapters and continue adding
   independently validated editorial gates.
 - [x] Explicit collection metadata uniqueness gate in core, CLI and EmDash/WASM

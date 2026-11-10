@@ -174,6 +174,9 @@ Options:
       --content-root <content-root>
           Authorize this absolute content root for local file references (Linux and supported macOS kernels)
 
+      --plain-text-paragraphs
+          Interpret text/plain entries as blank-line-separated paragraphs
+
       --check-link-reachability
           Explicitly enable bounded external HTTP observations for reachability gates
 
