@@ -35,6 +35,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   passing the latter alone does not validate the repository policy.
 - For WASM bridge interface changes, synchronize the plugin and crawl-worker
   glue declarations and run `npm run check:dts --prefix packages/aexeo-crawl-worker`.
+- For EmDash source-mapping tests, external diagnostics must be within the
+  projected text. Use the valid position immediately after the last character
+  to exercise an unmapped boundary; an out-of-range line is rejected earlier.
 - Re-run other lint/build checks after the focused validation passes.
 - Document any override-based maintainer note that affected the change plan.
 
