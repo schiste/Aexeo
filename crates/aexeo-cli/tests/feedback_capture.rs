@@ -156,6 +156,23 @@ fn export_matches_existing_python_validator_on_representative_inputs() {
         .unwrap()
         .push(json!({"id":"e2","split":"holdout","text":"abc\r\n","expected":"passed"}));
     cases.push((duplicate, note.clone()));
+    let mut grouped = corpus.clone();
+    grouped["examples"][0]["source_group"] = json!("source-1");
+    grouped["examples"].as_array_mut().unwrap().push(json!({"id":"e2","split":"development","text":"different","expected":"passed","source_group":"source-1"}));
+    cases.push((grouped.clone(), note.clone()));
+    grouped["examples"][1]["split"] = json!("holdout");
+    cases.push((grouped, note.clone()));
+    for invalid in [
+        json!(null),
+        json!(""),
+        json!("é"),
+        json!("bad/id"),
+        json!("x".repeat(129)),
+    ] {
+        let mut invalid_group = corpus.clone();
+        invalid_group["examples"][0]["source_group"] = invalid;
+        cases.push((invalid_group, note.clone()));
+    }
     let mut duplicate_id = corpus.clone();
     duplicate_id["examples"]
         .as_array_mut()

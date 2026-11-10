@@ -208,3 +208,7 @@ be complete; these checks cannot detect omitted records.
 Known incomplete collections can be marked explicitly in the core, CLI and
 EmDash API. Duplicate findings are retained, while the uniqueness result is
 `not_checked`; a caller's completeness declaration is not independently verified.
+
+Optional opaque source groups prevent known related excerpts crossing corpus splits.
+Coverage is aggregated for the selected split; incomplete grouping and related
+sources with different identifiers remain undetected and require human review.
