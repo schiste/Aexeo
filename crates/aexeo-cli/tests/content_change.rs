@@ -85,7 +85,7 @@ fn digest_mismatch_and_unapproved_files_cannot_succeed() {
     let output = run(dir.path(), &change, preset, &[]);
     assert_eq!(output.status.code(), Some(2));
     assert!(!dir.path().join("verdict.json").exists());
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         let output = run(
             dir.path(),

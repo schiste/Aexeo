@@ -25,26 +25,27 @@ const MAX_CHANGE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_TOTAL_CONTENT_BYTES: usize = 64 * 1024 * 1024;
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(target_os = "linux")]
+type PlatformProvider = aexeo_core::content_gate_sources::LinuxConfinedContentFiles;
+#[cfg(target_os = "macos")]
+type PlatformProvider = aexeo_core::content_gate_sources::MacosConfinedContentFiles;
+
 struct HostFiles {
-    #[cfg(target_os = "linux")]
-    provider: Option<aexeo_core::content_gate_sources::LinuxConfinedContentFiles>,
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    provider: Option<PlatformProvider>,
 }
 
 impl HostFiles {
     fn new(root: Option<&str>) -> Result<Self> {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             let provider = root
-                .map(|path| {
-                    aexeo_core::content_gate_sources::LinuxConfinedContentFiles::new(Path::new(
-                        path,
-                    ))
-                })
+                .map(|path| PlatformProvider::new(Path::new(path)))
                 .transpose()
                 .user_context("opening authorized content root")?;
             Ok(Self { provider })
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
             if root.is_some() {
                 user_bail!("confined local content files are not supported on this platform");
@@ -57,7 +58,7 @@ impl HostFiles {
 impl ConfinedContentFiles for HostFiles {
     type Reader = File;
     fn open(&mut self, root: &Path, relative: &Path) -> io::Result<File> {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         if let Some(provider) = &mut self.provider {
             return provider.open(root, relative);
         }

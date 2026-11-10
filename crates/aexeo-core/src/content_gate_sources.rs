@@ -88,6 +88,87 @@ impl ConfinedContentFiles for LinuxConfinedContentFiles {
     }
 }
 
+/// macOS directory-capability provider using a single confined kernel lookup.
+/// Unsupported kernels fail closed rather than silently ignoring the flags.
+#[cfg(target_os = "macos")]
+pub struct MacosConfinedContentFiles {
+    root_path: std::path::PathBuf,
+    root: std::fs::File,
+}
+
+#[cfg(target_os = "macos")]
+impl MacosConfinedContentFiles {
+    pub fn new(root: &Path) -> io::Result<Self> {
+        use rustix::fs::{Mode, OFlags, openat};
+        if !root.is_absolute() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "content root must be absolute",
+            ));
+        }
+        let directory = std::fs::File::open(root)?;
+        if !directory.metadata()?.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "content root must be a directory",
+            ));
+        }
+        // Darwin's ENOTCAPABLE is 107. Do not accept a generic error: an older
+        // kernel may ignore O_RESOLVE_BENEATH or reject it for another reason.
+        let flags = OFlags::RDONLY | OFlags::CLOEXEC | OFlags::from_bits_retain(0x1000);
+        match openat(&directory, "..", flags, Mode::empty()) {
+            Err(error) if error.raw_os_error() == 107 => {}
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "kernel does not enforce O_RESOLVE_BENEATH",
+                ));
+            }
+        }
+        // O_NOFOLLOW_ANY was introduced before O_RESOLVE_BENEATH. BENEATH is
+        // the containment boundary even if a platform ignores NOFOLLOW_ANY.
+        Ok(Self {
+            root_path: root.to_path_buf(),
+            root: directory,
+        })
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl ConfinedContentFiles for MacosConfinedContentFiles {
+    type Reader = std::fs::File;
+    fn open(&mut self, root: &Path, relative: &Path) -> io::Result<Self::Reader> {
+        use rustix::fs::{Mode, OFlags, openat};
+        use std::path::Component;
+        if root != self.root_path
+            || relative.as_os_str().is_empty()
+            || !relative
+                .components()
+                .all(|part| matches!(part, Component::Normal(_)))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "unapproved content root or path",
+            ));
+        }
+        // O_RESOLVE_BENEATH is currently absent from rustix's Darwin bindings.
+        // Its ABI value is defined by Apple's sys/fcntl.h.
+        let flags = OFlags::RDONLY
+            | OFlags::CLOEXEC
+            | OFlags::NONBLOCK
+            | OFlags::NOFOLLOW_ANY
+            | OFlags::from_bits_retain(0x1000);
+        let file = std::fs::File::from(openat(&self.root, relative, flags, Mode::empty())?);
+        if !file.metadata()?.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "content is not a regular file",
+            ));
+        }
+        Ok(file)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceError {
     InvalidChange,
@@ -208,8 +289,13 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
+    type PlatformProvider = LinuxConfinedContentFiles;
+    #[cfg(target_os = "macos")]
+    type PlatformProvider = MacosConfinedContentFiles;
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
-    fn linux_provider_refuses_escape_symlinks_and_non_files() {
+    fn platform_provider_refuses_escape_symlinks_and_non_files() {
         use std::{fs, os::unix::fs::symlink};
         let root = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
@@ -222,7 +308,7 @@ mod tests {
             root.path().join("linked-file"),
         )
         .unwrap();
-        let mut provider = LinuxConfinedContentFiles::new(root.path()).unwrap();
+        let mut provider = PlatformProvider::new(root.path()).unwrap();
         let mut text = String::new();
         provider
             .open(root.path(), Path::new("posts/article.md"))
@@ -245,15 +331,15 @@ mod tests {
         assert!(provider.open(outside.path(), Path::new("secret")).is_err());
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
-    fn linux_provider_pins_root_when_path_is_replaced() {
+    fn platform_provider_pins_root_when_path_is_replaced() {
         use std::fs;
         let parent = tempfile::tempdir().unwrap();
         let root = parent.path().join("root");
         fs::create_dir(&root).unwrap();
         fs::write(root.join("article"), "original").unwrap();
-        let mut provider = LinuxConfinedContentFiles::new(&root).unwrap();
+        let mut provider = PlatformProvider::new(&root).unwrap();
         fs::rename(&root, parent.path().join("old")).unwrap();
         fs::create_dir(&root).unwrap();
         fs::write(root.join("article"), "replacement").unwrap();
@@ -264,6 +350,35 @@ mod tests {
             .read_to_string(&mut text)
             .unwrap();
         assert_eq!(text, "original");
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn platform_provider_confines_concurrent_directory_replacement() {
+        use std::{fs, os::unix::fs::symlink};
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("pivot")).unwrap();
+        fs::write(root.path().join("pivot/article"), "inside").unwrap();
+        fs::write(outside.path().join("article"), "outside").unwrap();
+        let mut provider = PlatformProvider::new(root.path()).unwrap();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                for _ in 0..1000 {
+                    fs::rename(root.path().join("pivot"), root.path().join("held")).unwrap();
+                    symlink(outside.path(), root.path().join("pivot")).unwrap();
+                    fs::remove_file(root.path().join("pivot")).unwrap();
+                    fs::rename(root.path().join("held"), root.path().join("pivot")).unwrap();
+                }
+            });
+            for _ in 0..4000 {
+                if let Ok(mut file) = provider.open(root.path(), Path::new("pivot/article")) {
+                    let mut contents = String::new();
+                    file.read_to_string(&mut contents).unwrap();
+                    assert_eq!(contents, "inside");
+                }
+            }
+        });
     }
 
     #[test]
