@@ -219,11 +219,12 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         text,
     ) {
         (Some("markdown"), Some(text)) => {
-            let (input, capabilities, links, map) = if preset
-                .gates
-                .iter()
-                .any(|gate| matches!(gate, ContentGate::LinkDestinations { .. }))
-            {
+            let (input, capabilities, links, map) = if preset.gates.iter().any(|gate| {
+                matches!(
+                    gate,
+                    ContentGate::LinkDestinations { .. } | ContentGate::LinkReachability { .. }
+                )
+            }) {
                 let adapted =
                     aexeo_core::markdown_adapter::markdown_input_with_source_map_and_destinations(
                         id, &text,
@@ -275,12 +276,43 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             aexeo_core::content_extensions::ExternalGateResults::new(results)
         })
         .transpose()?;
+    // Network access is an explicit host choice, never implied by a preset.
+    let link_observations = if args.get_flag("check-link-reachability")
+        && preset
+            .gates
+            .iter()
+            .any(|gate| matches!(gate, ContentGate::LinkReachability { .. }))
+    {
+        destinations.as_deref().map(|values| -> Result<_> {
+            use aexeo_core::content_gate::LinkReachabilityObservation as Observation;
+            use aexeo_core::runtime::link_reachability::{check_link_reachability, ReachabilityStatus};
+            let report = check_link_reachability(values,
+                *args.get_one::<usize>("link-max-checks").context("missing link-max-checks")?,
+                std::time::Duration::from_secs(*args.get_one::<u64>("link-timeout").context("missing link-timeout")?))?;
+            if measuring {
+                eprintln!("{}", serde_json::json!({"event":"content_link_reachability", "version":1,
+                    "elapsed_ms":report.elapsed_ms, "destinations":report.observations.len(), "network_checks":report.network_checks}));
+            }
+            Ok(report.observations.iter().map(|observation| match observation.status {
+                ReachabilityStatus::Reachable => Observation::Reachable,
+                ReachabilityStatus::NotFound => Observation::NotFound,
+                ReachabilityStatus::Skipped if observation.reason == "non_http_destination"
+                    || (observation.reason == "relative_or_invalid_destination"
+                        && aexeo_core::content_gate::valid_link_destination(
+                            &values[observation.index - 1], &[], true)) => Observation::NotApplicable,
+                ReachabilityStatus::Uncertain | ReachabilityStatus::Skipped => Observation::NotChecked,
+            }).collect::<Vec<_>>())
+        }).transpose()?
+    } else {
+        None
+    };
     let adapter_ms = adapter_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
     let started = std::time::Instant::now();
     let capabilities = ContentEvaluationContext {
         site: site.as_ref().map(|(site, config)| (site, config)),
         adapter: context.as_ref(),
         link_count,
+        link_reachability: link_observations.as_deref(),
         collection: collection.as_deref(),
         extensions: external
             .as_ref()
@@ -342,6 +374,27 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                                 column,
                             });
                         }
+                    }
+                }
+            } else if matches!(gate, ContentGate::LinkReachability { .. })
+                && let Some(observations) = link_observations.as_deref()
+            {
+                use aexeo_core::content_gate::LinkReachabilityObservation;
+                let indices = observations
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, observation)| {
+                        (*observation == LinkReachabilityObservation::NotFound).then_some(index)
+                    });
+                positional_findings += result.findings.len();
+                for (finding_index, index) in indices.take(result.findings.len()).enumerate() {
+                    if let Some((line, column)) = map.link_source_position(source, index) {
+                        source_locations.push(SourceLocation {
+                            gate_id: &result.gate_id,
+                            finding_index,
+                            line,
+                            column,
+                        });
                     }
                 }
             } else if let Some(headings) = input.headings.as_deref()

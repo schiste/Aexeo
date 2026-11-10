@@ -68,7 +68,10 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
   JSON destinations, with non-public egress protection and aggregate telemetry.
   This advisory command is separate from content presets and does not establish
   destination safety, source reliability or long-term availability.
-- [ ] Additional editorial gates and composable reachability gate integration.
+- [x] Composable advisory reachability gate in the core and Markdown CLI; network
+  checks require explicit opt-in, and partial observations remain `not_checked`.
+- [ ] Extend composable reachability observations to additional host adapters and
+  continue adding independently validated editorial gates.
 - [x] Explicit collection metadata uniqueness gate in core, CLI and EmDash/WASM
   ([PR #40](https://github.com/schiste/Aexeo/pull/40)); callers must supply the
   complete collection and missing metadata remains `not_checked`.

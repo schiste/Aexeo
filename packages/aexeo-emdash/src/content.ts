@@ -6,7 +6,7 @@ export interface ContentGateResult {
   status: "passed" | "failed" | "not_checked";
   blocking: boolean;
   scope: "document" | "collection" | "site";
-  required_capability: "text" | "source_text" | "metadata" | "headings" | "paragraphs" | "links" | "link_destinations" | "collection_metadata" | "site" | "extension" | "text_and_evidence";
+  required_capability: "text" | "source_text" | "metadata" | "headings" | "paragraphs" | "links" | "link_destinations" | "link_reachability" | "collection_metadata" | "site" | "extension" | "text_and_evidence";
   findings: Finding[];
   reason: string | null;
   measurements?: Record<string, number>;
