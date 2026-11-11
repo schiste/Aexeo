@@ -233,6 +233,10 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   binds content digests and base only; runners must independently retain and
   compare the other inputs or fail closed. Do not claim an optional extension
   protects legacy runners that ignore it.
+  Draft work in PR #315 adds a standalone manifest, independently checked JSON
+  Schema and an experimental Rust offline receipt. It is not yet a v2 verdict,
+  a cross-implementation runner or integrated with the CLI and EmDash; external
+  observations, artifact formats, freshness and trusted build identity remain open.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
 - [x] Preserve preset and input-report provenance when binding human feedback; report policy-matched reviewed metrics separately from legacy metrics. Fingerprints do not authenticate people or bind external evidence.
 - [x] Include a fingerprint of the CLI-resolved preset in corpus evaluation
