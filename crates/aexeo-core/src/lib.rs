@@ -47,6 +47,7 @@ pub mod schema_rules;
 pub mod site;
 pub mod sitemap_rules;
 pub mod social_rules;
+mod source_mapping;
 pub mod static_check;
 pub mod structure_rules;
 pub mod surface_rules;

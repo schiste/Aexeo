@@ -362,7 +362,7 @@ pub fn html_source_map(source: &str, projected: &str) -> Option<HtmlSourceMap> {
     })
 }
 
-impl crate::markdown_adapter::ContentSourceMap for HtmlSourceMap {
+impl crate::source_mapping::ContentSourceMap for HtmlSourceMap {
     fn prose_position(
         &self,
         source: &str,
@@ -424,7 +424,7 @@ pub fn gate_source_positions_with_links(
             return None;
         }
     }
-    crate::markdown_adapter::map_gate_source_positions(
+    crate::source_mapping::map_gate_source_positions(
         map,
         source,
         input,
