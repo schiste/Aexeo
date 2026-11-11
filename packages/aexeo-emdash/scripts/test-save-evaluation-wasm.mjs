@@ -132,6 +132,41 @@ mode="strict"
   console.log("WASM configured provider runs on refresh and save");
 }
 
+// A failing provider must not discard unrelated editorial findings.
+{
+  const preset = `version=1
+name="partial"
+[[gates]]
+id="words"
+kind="word_count"
+min=100
+[[gates]]
+id="external"
+kind="custom"
+extension="example.rule"
+blocking=true
+`;
+  const telemetry = [];
+  const configured = createPlugin({ contentPreset: { name: "partial", sources: { partial: preset } } }, {
+    externalGates: async () => { throw new Error("private provider failure"); },
+    onExternalGateTelemetry: (event) => telemetry.push(event),
+  });
+  const page = item("provider-failure");
+  const host = fakeHost([page]);
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  const saved = host.store.get("findings:/provider-failure");
+  assert.ok(saved, "partial assessment was not persisted");
+  assert.ok(saved.findings.some((finding) => finding.rule_id === "words"));
+  assert.deepEqual(saved.assessment.gates.find((gate) => gate.gate_id === "external"), {
+    gate_id: "external", status: "not_checked", blocking: true, scope: "document",
+    required_capability: "extension", reason: "external gate provider failed",
+  });
+  assert.equal(telemetry[0].status, "error");
+  assert.ok(!JSON.stringify(saved).includes("private provider failure"));
+  assert.deepEqual(host.logged, []);
+  console.log("WASM keeps local findings when an external provider fails");
+}
+
 // A configured provider must never receive documents whose resolved preset has
 // no custom gate, on either refresh or save.
 {

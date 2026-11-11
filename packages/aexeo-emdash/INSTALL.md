@@ -55,13 +55,15 @@ The callback runs on save and refresh only when the resolved preset has a custom
 gate. It receives the selected document’s
 projected input, selected preset and collection, and returns results bound to
 the input and the gate's exact parameters. The preset must declare the matching
-custom gate. Aexeo reports stale or missing results as incomplete; a thrown
-provider error fails the evaluation. The input may include private content and
+custom gate. Aexeo reports stale or missing results as incomplete. If the
+provider fails, modern reports retain other findings and mark external gates as
+not checked; older sidecar clients that cannot represent coverage still fail.
+The input may include private content and
 evidence. The host owns provider trust, timeouts, resource limits and any
 network transfer. This runtime injection does not configure the sandbox worker.
 An optional `onExternalGateTelemetry` runtime callback receives only provider
 duration and success/error status, with no content or document identifiers.
-It measures the provider call, not whether the returned gates passed.
+It measures projection, provider call and result evaluation, not whether the returned gates passed.
 
 ## Content coverage
 
