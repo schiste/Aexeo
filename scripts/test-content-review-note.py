@@ -86,6 +86,18 @@ class FeedbackTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "metadata"):
             module.bind_review(self.corpus, note)
 
+    def test_bind_review_preserves_report_and_policy_provenance(self):
+        fingerprint = {"version": 1, "sha256": "a" * 64}
+        self.report["input_fingerprint"] = {"version": 1, "text_sha256": hashlib.sha256(self.text.encode()).hexdigest(), "metadata_sha256": None}
+        self.report["resolved_policy_fingerprint"] = fingerprint
+        note = module.capture(self.text, self.report, "length", "e1", "passed", "r", "manual")
+        result = module.bind_review(self.corpus, note)
+        review = result["examples"][0]["review"]
+        self.assertEqual(review["report_binding"], "verified")
+        self.assertEqual(review["resolved_policy_fingerprint"], fingerprint)
+        fingerprint["sha256"] = "b" * 64
+        self.assertEqual(review["resolved_policy_fingerprint"]["sha256"], "a" * 64)
+
     def test_bind_review_explicitly_resolves_conflict_without_changing_source(self):
         note = module.capture(self.text, self.report, "length", "e1", "failed", "editor", "manual")
         with self.assertRaisesRegex(ValueError, "differs"):

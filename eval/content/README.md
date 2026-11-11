@@ -52,6 +52,16 @@ by the number of examples and are null when there are none. `reviewed_metrics` s
 precision, recall and unchecked rate for examples declared reviewed; rates are
 null when their denominator is zero. Overall metrics still include all examples.
 Only reviews bound to the current example are included in `reviewed_metrics`.
+When `bind-review` has a report fingerprint it preserves the policy fingerprint
+and whether the report text and metadata were verified. The additive
+`review_policy_binding_counts` classifies otherwise bound reviews as matching,
+different, unbound, unverified input, or unverified evaluation run. The separate
+`policy_bound_reviewed_metrics` includes only matching reviews for which the
+current CLI report also binds its policy and exact text and metadata. Legacy
+reviews and results remain in the original metrics. A supplied malformed or
+mismatched current input fingerprint is rejected. These fingerprints do not
+authenticate the reviewer or report, identify the executable, or bind external
+evidence and site context; they do not establish independence or accuracy.
 Legacy `reviewed` examples without complete bindings remain accepted but are
 counted in `unbound_reviewed_examples`, not as reviewed metrics. A supplied
 binding that no longer matches causes evaluation to fail. Declared review is
