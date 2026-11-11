@@ -201,6 +201,7 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] Count reused EmDash link marks as separate destination occurrences, matching
   link counting and Markdown; emit opt-in aggregate destination-check telemetry
   ([PR #138](https://github.com/schiste/Aexeo/pull/138)).
+- [x] An unreadable sandbox body-field selection preserves recognized prose but withholds body capabilities for save and refresh; aggregate coverage telemetry reflects the unavailable projection.
 - [x] The EmDash sandbox accepts per-collection ordered description fields for
   save and refresh. Missing source fields remain unverified and aggregate
   description-coverage telemetry excludes values and identifiers.

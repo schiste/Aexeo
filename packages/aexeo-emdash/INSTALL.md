@@ -119,6 +119,9 @@ collection, in order. It is an explicit assertion of completeness, so include
 all rendered fields. A selected field absent from the record makes the body
 incomplete, while an explicitly present `null` is treated as empty. If no selected
 field is present, the body remains unavailable. In sandboxed mode, enter this object in `Content fields by collection (JSON)`.
+If this setting is malformed or cannot be read, save and Refresh keep recognized
+prose but mark all body capabilities unavailable; check the plugin warning and
+repair the setting. An unset setting uses automatic detection as usual.
 
 Portable Text can also interleave text blocks and custom components. An
 unknown component keeps its surrounding text but marks body capabilities

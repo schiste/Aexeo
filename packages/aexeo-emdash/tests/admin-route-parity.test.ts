@@ -472,6 +472,20 @@ describe("Refresh applies suppressions on every path", () => {
     expect(request).toMatchObject({ documents: [{ description: "Description from CMS", description_source_observed: true }] });
   });
 
+  it("withholds body coverage during sandbox refresh when content field settings are invalid", async () => {
+    const kv = fakeKv({ "config:evaluator_url": "https://evaluator.test" });
+    const ctx = fakeCtx(kv, new Map([["eval_token", "token"], ["content_fields_by_collection", "{"]]));
+    ctx.content.list = async (collection) => ({ items: collection === "posts" ? [{ ...helloDoc, data: { title: "Hello", content: [{ _type: "block", _key: "p", children: [{ _type: "span", text: "Observed", marks: [] }] }] } }] as never : [], hasMore: false });
+    let request: { documents: Array<{ body: Array<{ children: Array<{ text: string }> }>; body_capabilities: string[] }> } | undefined;
+    ctx.http.fetch = async (_url, init) => {
+      request = JSON.parse(init?.body ?? "{}");
+      return { ok: true, status: 200, text: async () => "[]" };
+    };
+    await sandboxAdmin()({ input: { type: "block_action", action_id: "refresh_findings" } }, ctx);
+    expect(request?.documents[0]?.body[0]?.children[0]?.text).toBe("Observed");
+    expect(request?.documents[0]?.body_capabilities).toEqual([]);
+  });
+
   it("keeps the sandbox entry's refresh sweep answering", async () => {
     // The sandboxed descriptor exposes no suppressions option, so its
     // filter is the identity one. The point here is that the argument is

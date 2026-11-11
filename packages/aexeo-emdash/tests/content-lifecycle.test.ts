@@ -321,6 +321,38 @@ describe("custom block mappings", () => {
     expect(JSON.stringify(coverage)).not.toContain("Private fallback");
   });
 
+  it("keeps observed prose but withholds body coverage when sandbox field settings fail", async () => {
+    for (const failure of ["malformed", "throw"] as const) {
+      const content = item(`broken-${failure}`, NEW);
+      content.data.content = [{ _type: "block", _key: "one", children: [{ _type: "span", text: "Observed prose", marks: [] }] }];
+      const { ctx, store } = host([content]);
+      await ctx.kv.set(CONFIG_URL_KEY, "https://example.org");
+      ctx.settings = {
+        get: async <T>(key: string) => {
+          if (key === SETTINGS_CONTENT_FIELDS_KEY) {
+            if (failure === "throw") throw new Error("private settings error");
+            return "{" as T;
+          }
+          return (key === SETTINGS_TOKEN_KEY ? "token" : null) as T | null;
+        },
+        set: async () => {},
+      };
+      let request: { documents: Array<{ body: Array<{ children: Array<{ text: string }> }>; body_capabilities: string[] }> } | undefined;
+      ctx.http = { fetch: async (_url, init) => {
+        request = JSON.parse(init?.body ?? "{}");
+        return { status: 200, ok: true, text: async () => "[]" };
+      } };
+      const events: unknown[] = [];
+      ctx.log = { info: (message, data) => { if (message === "aexeo.content_coverage") events.push(data); }, warn: () => {}, error: () => {} };
+      await handleAfterSave({ content, collection: "pages", isNew: false }, ctx);
+      expect(request?.documents[0]?.body[0]?.children[0]?.text).toBe("Observed prose");
+      expect(request?.documents[0]?.body_capabilities).toEqual([]);
+      expect(events).toEqual([{ documents: 1, complete: 0, partial: 0, unavailable: 1 }]);
+      expect(JSON.stringify(store.get(documentKey(`/broken-${failure}`)))).toContain('"body_capabilities":[]');
+      expect(JSON.stringify(events)).not.toContain("Observed prose");
+    }
+  });
+
   it("uses the same mapping for afterSave and refresh", async () => {
     const content = item("mapped", NEW);
     content.data.blocks = [{ _type: "hero", _key: "one", _version: 1, headline: "Mapped" }];
