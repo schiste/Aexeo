@@ -40,6 +40,8 @@ export interface EmdashContentMeta {
   title: string;
   /** Exact URL returned by EmDash, or null when this entry has no public route. */
   publicUrl: string | null;
+  /** The content could not be adapted; route and title are from the previous snapshot. */
+  adaptationFailed?: true;
   /** Original paths for unchanged Portable Text blocks in this exact snapshot. */
   bodySourcePaths?: Array<Array<string | number> | null>;
   /** The host's `updatedAt` for the row this entry was adapted from. */

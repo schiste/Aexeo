@@ -570,14 +570,45 @@ export async function handleAfterSaveConfigured(
   contentFields?: readonly string[],
   descriptionFields?: readonly string[],
 ): Promise<void> {
-  const adapted = await adaptContentItemWithContext(
-    event.content,
-    ctx.content,
-    ctx.site?.locale,
-    blockMappings,
-    contentFields,
-    descriptionFields,
+  // Capture the prior identity before host calls: a later save or delete must
+  // not be overwritten if adaptation fails while it is in progress.
+  const prior = (await readAllStoredDocuments(ctx.kv)).filter((stored) =>
+    stored.meta.id === event.content.id && stored.meta.collection === event.content.type,
   );
+  let adapted: Awaited<ReturnType<typeof adaptContentItemWithContext>>;
+  try {
+    adapted = await adaptContentItemWithContext(
+      event.content,
+      ctx.content,
+      ctx.site?.locale,
+      blockMappings,
+      contentFields,
+      descriptionFields,
+    );
+  } catch {
+    // No reliable route exists for a new item or an ambiguous prior identity.
+    try { ctx.log?.info?.("aexeo.adaptation_coverage", { failed: 1 }); } catch { /* best effort */ }
+    ctx.log?.error?.("Aexeo afterSave adaptation failed");
+    const previous = prior.length === 1 ? prior[0] : undefined;
+    if (previous === undefined || isOlderRevision(event.content.updatedAt, previous.meta.updatedAt) ||
+        await isSuperseded(ctx.kv, previous)) return;
+    const unavailable: StoredDocument = {
+      document: { route: previous.document.route, title: previous.document.title },
+      meta: {
+        id: event.content.id, collection: event.content.type, slug: event.content.slug,
+        status: event.content.status, title: previous.meta.title, publicUrl: null,
+        adaptationFailed: true,
+        ...(event.content.updatedAt === undefined ? {} : { updatedAt: event.content.updatedAt }),
+      },
+    };
+    if (!(await persistDocument(ctx, unavailable)) || await isSuperseded(ctx.kv, unavailable)) return;
+    recordContentCoverage(ctx, [unavailable.document]);
+    await ctx.kv.set(findingsKey(unavailable.document.route), {
+      route: unavailable.document.route, findings: [],
+      assessment: { status: "error", reason: "adaptation_failed", detail: "The CMS record could not be adapted." },
+    });
+    return;
+  }
   const document = adapted.document;
   recordContentCoverage(ctx, [document]);
   const { kv, log } = ctx;
