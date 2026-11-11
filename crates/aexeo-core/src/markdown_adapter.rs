@@ -15,6 +15,8 @@ pub const MAX_LABEL_NESTING: usize = 100;
 /// Emphasis delimiter runs accepted in one block, which also bounds how deeply
 /// emphasis can nest.
 pub const MAX_EMPHASIS_RUNS: usize = 1000;
+/// Bound extra mappings for a single transformed multiline text node.
+const MAX_MAPPED_CONTAINER_LINES: usize = 10_000;
 
 /// A conservative mapping from extracted text back to exact Markdown text spans.
 /// Transformed or synthetic text has no mapping.
@@ -419,6 +421,45 @@ fn map_text_spans(
         }
         return;
     }
+    // A soft-wrapped node may retain newlines while Markdown container
+    // prefixes (`>` and indentation) are removed at the start of each line.
+    // Only map this case when every line matches exactly after such a prefix;
+    // transformed entities and escapes remain on the conservative path.
+    if !raw.contains(['&', '\\']) && raw.contains('\n') {
+        let raw_lines = raw.split('\n');
+        let value_lines = value.split('\n');
+        let line_count = raw_lines.clone().count();
+        if line_count <= MAX_MAPPED_CONTAINER_LINES && line_count == value_lines.clone().count() {
+            let mut mapped = Vec::new();
+            let mut raw_offset = 0;
+            let mut value_offset = 0;
+            let mut exact = true;
+            for (raw_line, value_line) in raw_lines.zip(value_lines) {
+                if let Some(container) = raw_line.strip_suffix(value_line)
+                    && container
+                        .bytes()
+                        .all(|byte| matches!(byte, b' ' | b'\t' | b'>'))
+                {
+                    if !value_line.is_empty() {
+                        mapped.push((
+                            projected_start + value_offset,
+                            projected_start + value_offset + value_line.len(),
+                            source_start + raw_offset + container.len(),
+                        ));
+                    }
+                } else {
+                    exact = false;
+                    break;
+                }
+                raw_offset += raw_line.len() + 1;
+                value_offset += value_line.len() + 1;
+            }
+            if exact {
+                spans.extend(mapped);
+                return;
+            }
+        }
+    }
     let mut prefix = 0;
     for (source, projected) in raw.chars().zip(value.chars()) {
         if source != projected || matches!(source, '&' | '\\') {
@@ -634,6 +675,60 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn maps_exact_wrapped_quote_lines_without_guessing_transformed_text() {
+        let source = "> Premier élan\n> second terme\n> troisième terme\n";
+        let (input, _, _, map) = markdown_input_with_source_map("t.md", source).unwrap();
+        let text = input.text.unwrap();
+        assert_eq!(text, "Premier élan\nsecond terme\ntroisième terme\n");
+        assert_eq!(map.source_position(source, &text, 1, 9), Some((1, 11)));
+        assert_eq!(map.source_position(source, &text, 2, 1), Some((2, 3)));
+        assert_eq!(map.source_position(source, &text, 3, 1), Some((3, 3)));
+
+        let escaped = "> first\n> second &amp; transformed\n> last\n";
+        let (input, _, _, map) = markdown_input_with_source_map("t.md", escaped).unwrap();
+        let text = input.text.unwrap();
+        assert_eq!(map.source_position(escaped, &text, 2, 8), None);
+    }
+
+    #[test]
+    fn bounds_extra_mappings_for_very_long_wrapped_nodes() {
+        let raw = (0..=MAX_MAPPED_CONTAINER_LINES)
+            .map(|_| "> line")
+            .collect::<Vec<_>>()
+            .join("\n");
+        let value = (0..=MAX_MAPPED_CONTAINER_LINES)
+            .map(|_| "line")
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut spans = Vec::new();
+        map_text_spans(&raw, &value, 0, 0, &mut spans);
+        assert!(spans.len() <= 2);
+    }
+
+    #[test]
+    fn maps_findings_on_the_middle_line_of_a_wrapped_quote() {
+        let source = "> Introduction\n> forbidden phrase\n> conclusion\n";
+        let (input, context, links, map) = markdown_input_with_source_map("t.md", source).unwrap();
+        let preset = crate::content_gate::ContentPreset::from_toml(
+            "version=1\nname='t'\n[[gates]]\nid='g'\nkind='forbidden_terms'\nterms=['forbidden']\n",
+        )
+        .unwrap();
+        let report = preset
+            .evaluate_with_links(&input, None, None, Some(&context), Some(links))
+            .unwrap();
+        let finding = &report.gates[0].findings[0];
+        assert_eq!(
+            map.source_position(
+                source,
+                input.text.as_deref().unwrap(),
+                finding.line,
+                finding.column
+            ),
+            Some((2, 3))
+        );
     }
 
     #[test]
