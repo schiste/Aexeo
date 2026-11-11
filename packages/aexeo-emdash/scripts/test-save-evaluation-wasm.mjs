@@ -132,6 +132,23 @@ mode="strict"
   console.log("WASM configured provider runs on refresh and save");
 }
 
+// A configured provider must never receive documents whose resolved preset has
+// no custom gate, on either refresh or save.
+{
+  let calls = 0;
+  const configured = createPlugin({ contentPreset: { name: "article" } }, {
+    externalGates: async () => { calls += 1; throw new Error("unexpected provider call"); },
+  });
+  const page = item("provider-not-needed");
+  const host = fakeHost([page]);
+  await configured.routes.refresh.handler(host.ctx);
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  assert.equal(calls, 0);
+  assert.deepEqual(host.logged, []);
+  assert.ok(host.store.get("findings:/provider-not-needed"));
+  console.log("WASM skips provider when the resolved preset has no custom gate");
+}
+
 // Explicit link observers run through both CMS workflows; provider errors
 // preserve the prior report with a not-checked gate.
 {

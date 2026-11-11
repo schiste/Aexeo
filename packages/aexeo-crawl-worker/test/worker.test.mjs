@@ -155,6 +155,23 @@ describe("worker", () => {
 });
 
 describe("external gate service binding", () => {
+  it("does not send content when the resolved preset has no custom gate", async () => {
+    // This provider rejects every preset except custom, so a successful article
+    // request proves that no service request was attempted.
+    const harness = createTestHarness({ workers: [
+      { config: { name: "aexeo-test", main: fileURLToPath(new URL("../src/worker.ts", import.meta.url)), compatibility_date: "2026-10-01",
+        vars: { SITE_URL, EVAL_TOKEN: TOKEN, CONTENT_PRESET: "article" },
+        services: [{ binding: "CONTENT_GATE_PROVIDER", service: "gate-provider" }] } },
+      { config: { name: "gate-provider", main: fileURLToPath(new URL("./gate-provider.mjs", import.meta.url)), compatibility_date: "2026-10-01" } },
+    ] });
+    try {
+      await harness.listen();
+      const response = await post(harness.getWorker("aexeo-test"), JSON.stringify({ documents: [{ route: "/private", title: "Page", body: [{ children: [{ _type: "span", text: "Private draft" }] }] }], collections: ["pages"] }));
+      assert.equal(response.status, 200, await response.clone().text());
+    } finally {
+      await harness.close();
+    }
+  });
   it("evaluates bound results in real WASM and rejects a stale snapshot", async () => {
     const preset = `version=1\nname="custom"\n[[gates]]\nid="external"\nkind="custom"\nextension="example.rule"\nblocking=false\n[gates.parameters]\nmode="strict"\n`;
     const harness = createTestHarness({ workers: [

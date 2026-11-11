@@ -51,7 +51,8 @@ export function createPlugin(options: ConfiguredPluginOptions) {
 
 In the host's configuration, use
 `{ ...aexeoPlugin({ contentPreset: { name: "custom", sources: { custom: "..." } } }), entrypoint: "@example/aexeo-runtime" }`.
-The callback runs for each selected document on save and refresh, receives its
+The callback runs on save and refresh only when the resolved preset has a custom
+gate. It receives the selected document’s
 projected input, selected preset and collection, and returns results bound to
 the input and the gate's exact parameters. The preset must declare the matching
 custom gate. Aexeo reports stale or missing results as incomplete; a thrown

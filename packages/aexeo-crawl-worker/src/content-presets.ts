@@ -75,8 +75,15 @@ export async function contentPresetFindings(
     if (!name) continue;
     const documentJson = JSON.stringify(document);
     const evidenceJson = evidence === undefined ? undefined : JSON.stringify(evidence);
+    type Report = {
+      gates: Array<{ gate_id: string; status: string; blocking: boolean; scope: string; required_capability: string; reason: string | null; measurements?: Record<string, number>; findings: unknown[] }>;
+      source_mapping?: { eligible: number; mapped: number; unmapped: number };
+      source_locations?: Array<{ gate_id: string; finding_index: number; block_index: number; span_index: number; utf16_offset: number }>;
+    };
+    const sourcesJson = JSON.stringify(sources);
+    let report = JSON.parse(evaluate(documentJson, name, sourcesJson, evidenceJson)) as Report;
     let extensionsJson: string | undefined;
-    if (env.CONTENT_GATE_PROVIDER !== undefined) {
+    if (env.CONTENT_GATE_PROVIDER !== undefined && report.gates.some((gate) => gate.required_capability === "extension")) {
       if (!project) throw new Error("content gate projection is unavailable");
       const started = env.CONTENT_GATE_TELEMETRY === "true" ? performance.now() : 0;
       let status = "error";
@@ -89,13 +96,9 @@ export async function contentPresetFindings(
         }
       }
     }
-    const report = JSON.parse(extensionsJson === undefined
-      ? evaluate(documentJson, name, JSON.stringify(sources), evidenceJson)
-      : evaluate(documentJson, name, JSON.stringify(sources), evidenceJson, extensionsJson)) as {
-      gates: Array<{ gate_id: string; status: string; blocking: boolean; scope: string; required_capability: string; reason: string | null; measurements?: Record<string, number>; findings: unknown[] }>;
-      source_mapping?: { eligible: number; mapped: number; unmapped: number };
-      source_locations?: Array<{ gate_id: string; finding_index: number; block_index: number; span_index: number; utf16_offset: number }>;
-    };
+    if (extensionsJson !== undefined) {
+      report = JSON.parse(evaluate(documentJson, name, sourcesJson, evidenceJson, extensionsJson)) as Report;
+    }
     if (assessments !== undefined) {
       if (typeof document !== "object" || document === null || !("route" in document) || typeof document.route !== "string") throw new Error("document route is required for assessments");
       assessments[document.route] = {

@@ -64,8 +64,12 @@ export function withContentPreset(
           ? preset.byCollection[collection] : undefined;
         const name = selected ?? preset.name;
         if (!name) throw new Error(`empty preset name for collection ${collection}`);
+        // Inspect the resolved gates before sending private content to a host.
+        let report = preset.evidenceSources === undefined
+          ? await evaluate(document, name, preset.sources)
+          : await evaluate(document, name, preset.sources, preset.evidenceSources);
         let externalResults: ExternalGateResult[] | undefined;
-        if (provider !== undefined) {
+        if (provider !== undefined && report.gates.some((gate) => gate.required_capability === "extension")) {
           const started = onProviderTelemetry ? performance.now() : 0;
           let status: ExternalGateTelemetry["status"] = "error";
           try {
@@ -79,11 +83,9 @@ export function withContentPreset(
             }
           }
         }
-        let report = externalResults !== undefined
-          ? await evaluate(document, name, preset.sources, preset.evidenceSources, undefined, externalResults)
-          : preset.evidenceSources === undefined
-          ? await evaluate(document, name, preset.sources)
-          : await evaluate(document, name, preset.sources, preset.evidenceSources);
+        if (externalResults !== undefined) {
+          report = await evaluate(document, name, preset.sources, preset.evidenceSources, undefined, externalResults);
+        }
         // Do not invoke the host observer unless the resolved preset actually
         // contains a reachability gate. Provider errors retain the initial report.
         if (linkProvider && report.gates.some((gate) => gate.required_capability === "link_reachability")) {
