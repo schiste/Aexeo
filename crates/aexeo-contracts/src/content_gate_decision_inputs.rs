@@ -15,14 +15,14 @@ const MAX_MANIFEST_BYTES: usize = 8192;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Component {
-    Absent,
+    Absent {},
     Present { sha256: String },
 }
 
 impl Component {
     fn from_bytes(bytes: Option<&[u8]>) -> Self {
         match bytes {
-            None => Self::Absent,
+            None => Self::Absent {},
             Some(bytes) => Self::Present {
                 sha256: format!("{:x}", Sha256::digest(bytes)),
             },
@@ -31,7 +31,7 @@ impl Component {
 
     fn valid(&self) -> bool {
         match self {
-            Self::Absent => true,
+            Self::Absent {} => true,
             Self::Present { sha256 } => {
                 sha256.len() == 64
                     && sha256
