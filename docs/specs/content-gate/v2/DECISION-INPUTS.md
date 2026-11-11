@@ -41,7 +41,7 @@ parse and compare this object against independently acquired byte slices. The
 caller must still verify the actual verdict and status, content hashes,
 publication state, evaluator identity, source freshness and completeness,
 artifact authenticity and all other policy requirements. Neither a matching
-manifest nor a hash is an authentication, freshness or truth guarantee. The
+manifest nor a hash is an authentication, freshness or truth guarantee.
 Aexeo's experimental offline receipts embed a manifest, but neither the manifest
 nor the receipt is a v2 verdict.
 
