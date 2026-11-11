@@ -469,3 +469,53 @@ fn allows_valid_extensions_and_rfc3339_offsets() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn explicit_collection_snapshot_is_bound_and_conservative() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("collection.json");
+    let mut change = input();
+    change["entries"][0]["metadata"] = serde_json::json!({"slug":"private-slug"});
+    let preset = "version=1\nname='test'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n";
+    let mut snapshot = serde_json::json!({"change_id":"example", "complete":true,
+        "items":[{"id":"article", "metadata":{"slug":"private-slug"}}]});
+    for (complete, expected_code, expected_status) in [(true, 0, "pass"), (false, 2, "not_checked")]
+    {
+        snapshot["complete"] = complete.into();
+        fs::write(&path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+        let output = run(
+            dir.path(),
+            &change,
+            preset,
+            &[
+                "--collection-snapshot",
+                path.to_str().unwrap(),
+                "--telemetry",
+            ],
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(expected_code),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let verdict: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+        assert_eq!(verdict["status"], expected_status);
+        let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(telemetry["items"], 1);
+        assert_eq!(telemetry["complete"], complete);
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("private-slug"));
+    }
+    snapshot["change_id"] = "different".into();
+    fs::write(&path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    fs::remove_file(dir.path().join("verdict.json")).unwrap();
+    let output = run(
+        dir.path(),
+        &change,
+        preset,
+        &["--collection-snapshot", path.to_str().unwrap()],
+    );
+    assert!(!output.status.success());
+    assert!(!dir.path().join("verdict.json").exists());
+}

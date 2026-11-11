@@ -599,6 +599,19 @@ the result `not_checked`; observed duplicates with known groups remain visible.
 host must supply the group metadata consistently; Aexeo does not infer locale
 fallbacks or normalize language tags. Omitting `group_by` retains collection-wide
 matching. The host is responsible for collection completeness.
+For `content-change`, a host can explicitly supply a post-change collection
+with `--collection-snapshot snapshot.json`. Its JSON shape is
+`{"change_id":"example","complete":false,"items":[{"id":"article","metadata":{"slug":"article"}}]}`.
+The change ID must match, item IDs must be unique, proposed item metadata must
+match the change, and deleted or old renamed IDs must be absent. The snapshot
+must represent one common collection scope. The host asserts completeness and
+revision consistency; Aexeo cannot detect omitted unchanged records. A partial
+snapshot preserves observed duplicates while keeping the check `not_checked`.
+The collection gate runs once for the change, including delete-only changes;
+site impact of deletion and rename remains separately `not_checked`. Optional
+telemetry reports only item count and the supplied completeness flag. Rust hosts
+can use `evaluate_change_with_collection` and `ChangeCollection`.
+
 Rust EmDash hosts can use `content::evaluate_collection` to adapt a complete
 slice of documents; document and site gates without their inputs remain
 `not_checked`. JavaScript hosts can use `evaluateContentCollection` from the
