@@ -91,6 +91,7 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   and its location. They can opt into paragraph-only input,
   excluding headings while preserving adapter locations. Missing paragraph
   capability remains `not_checked`; existing presets keep their prior behavior.
+- [x] Sentence length checks do not invent sentences from closing quotation marks or brackets after a delimiter; standalone quote and bracket tokens are excluded from sentence word counts. This remains a heuristic, not language-aware segmentation.
 - [x] Optional sentence character-length gate ([PR #128](https://github.com/schiste/Aexeo/pull/128))
   uses the same configurable sentence boundaries and abbreviation exceptions;
   its Unicode scalar counts are not linguistic segmentation.

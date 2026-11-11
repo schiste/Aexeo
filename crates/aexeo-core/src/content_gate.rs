@@ -1798,6 +1798,8 @@ impl ContentPreset {
                             let mut segment_start = 0;
                             let mut first_position = None;
                             let mut next_block = 0;
+                            let mut after_delimiter = false;
+                            let mut adjacent_to_delimiter = false;
                             for (offset, ch) in text
                                 .char_indices()
                                 .map(|(offset, ch)| (offset, Some(ch)))
@@ -1810,6 +1812,23 @@ impl ContentPreset {
                                     next_block += 1;
                                 }
                                 let block_end = segment_block_ends.get(next_block) == Some(&offset);
+                                // Closing marks belong to the preceding sentence. ASCII
+                                // quotes are ambiguous, so skip them only when adjacent.
+                                if after_delimiter && !block_end {
+                                    if ch.is_some_and(char::is_whitespace) {
+                                        adjacent_to_delimiter = false;
+                                    } else if let Some(c) = ch.filter(|c| {
+                                        matches!(c, '»' | '”' | '’' | ')' | ']' | '}')
+                                            || (adjacent_to_delimiter && matches!(c, '\'' | '"'))
+                                    }) {
+                                        segment_start = offset + c.len_utf8();
+                                        first_position = None;
+                                        column += 1;
+                                        continue;
+                                    } else {
+                                        after_delimiter = false;
+                                    }
+                                }
                                 // A block boundary precedes the character at its byte offset.
                                 // A separator is not required, and decimal/abbreviation
                                 // context must not cross into the next block.
@@ -1838,11 +1857,35 @@ impl ContentPreset {
                                     && !abbreviation
                                     && ch.is_none_or(|ch| delimiters.contains(ch));
                                 if block_end || delimiter {
+                                    after_delimiter = delimiter && ch.is_some();
+                                    adjacent_to_delimiter = after_delimiter;
                                     let segment = &text[segment_start..offset];
                                     let count = if chars {
                                         segment.trim().chars().count()
                                     } else {
-                                        segment.split_whitespace().count()
+                                        segment
+                                            .split_whitespace()
+                                            .filter(|word| {
+                                                !word.chars().all(|ch| {
+                                                    matches!(
+                                                        ch,
+                                                        '«' | '»'
+                                                            | '“'
+                                                            | '”'
+                                                            | '‘'
+                                                            | '’'
+                                                            | '('
+                                                            | ')'
+                                                            | '['
+                                                            | ']'
+                                                            | '{'
+                                                            | '}'
+                                                            | '\''
+                                                            | '"'
+                                                    )
+                                                })
+                                            })
+                                            .count()
                                     };
                                     if count > 0 {
                                         sentence_count += 1;
@@ -2469,6 +2512,68 @@ mod tests {
                 "{kind}"
             );
         }
+    }
+
+    #[test]
+    fn sentence_gates_do_not_treat_closing_quotes_as_sentences() {
+        for (kind, limit) in [
+            ("sentence_length", "max_words=1"),
+            ("sentence_character_length", "max_chars=4"),
+        ] {
+            let preset = ContentPreset::from_toml(&format!(
+                "version=1\nname='t'\n[[gates]]\nid='g'\nkind='{kind}'\n{limit}\n"
+            ))
+            .unwrap();
+            for (text, expected) in [
+                ("« Oui ! »", 1),
+                ("“Yes!”", 1),
+                ("(Yes.)", 1),
+                ("Yes. \"Long words\"", 2),
+                ("« Oui ! » Long words.", 2),
+            ] {
+                let report = preset.evaluate(&literal_input(text)).unwrap();
+                assert_eq!(
+                    report.gates[0].measurements["sentence_count"], expected,
+                    "{kind}: {text}"
+                );
+            }
+            if kind == "sentence_length" {
+                let short = preset.evaluate(&literal_input("« Oui ! »")).unwrap();
+                assert_eq!(short.gates[0].measurements["longest_sentence_words"], 1);
+                assert!(short.gates[0].findings.is_empty());
+            }
+            let report = preset
+                .evaluate(&literal_input("« Oui ! » Long words."))
+                .unwrap();
+            let finding = report.gates[0].findings.last().unwrap();
+            assert_eq!((finding.line, finding.column), (1, 11), "{kind}");
+        }
+    }
+
+    #[test]
+    fn paragraph_only_sentence_closers_preserve_original_coordinates() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='g'\nkind='sentence_length'\nmax_words=1\nparagraphs_only=true\n").unwrap();
+        let paragraph = "« Oui ! » Long words.";
+        let context = ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: paragraph.into(),
+                line: 7,
+                column: 4,
+            }]),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&literal_input(paragraph), None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].measurements["sentence_count"], 2);
+        assert_eq!(report.gates[0].findings.len(), 1);
+        assert_eq!(
+            (
+                report.gates[0].findings[0].line,
+                report.gates[0].findings[0].column
+            ),
+            (7, 14)
+        );
     }
 
     #[test]
