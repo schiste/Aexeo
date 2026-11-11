@@ -293,19 +293,28 @@ def input_multiplicity(examples):
                     "conflicting_label_groups": sum(len(labels) > 1 for _, labels in duplicates)}
 
 
-def normalized_split_overlap(examples):
-    """Count cross-split text matches after Unicode, case and whitespace normalization."""
+def normalized_split_overlap(examples, include_examples=False):
+    """Count normalized cross-split matches; disclose identifiers only on request."""
     groups = {}
     for item in examples:
         normalized = " ".join(unicodedata.normalize("NFKC", item["text"]).casefold().split())
         digest = hashlib.sha256(normalized.encode("utf-8")).digest()
-        counts = groups.setdefault(digest, {"development": 0, "holdout": 0})
-        counts[item["split"]] += 1
-    overlaps = [counts for counts in groups.values() if all(counts.values())]
-    return {"normalization": "nfkc-casefold-whitespace-v1",
-            "cross_split_groups": len(overlaps),
-            "development_examples": sum(group["development"] for group in overlaps),
-            "holdout_examples": sum(group["holdout"] for group in overlaps)}
+        if digest not in groups:
+            groups[digest] = {"development": [], "holdout": []} if include_examples else {"development": 0, "holdout": 0}
+        group = groups[digest]
+        if include_examples:
+            group[item["split"]].append(item["id"])
+        else:
+            group[item["split"]] += 1
+    overlaps = [group for group in groups.values() if all(group.values())]
+    count = len if include_examples else lambda value: value
+    result = {"normalization": "nfkc-casefold-whitespace-v1",
+              "cross_split_groups": len(overlaps),
+              "development_examples": sum(count(group["development"]) for group in overlaps),
+              "holdout_examples": sum(count(group["holdout"]) for group in overlaps)}
+    if include_examples:
+        result["groups"] = overlaps
+    return result
 
 
 def evaluate(binary, corpus, split, review_log=None, reject_normalized_overlap=False):
@@ -459,15 +468,28 @@ def evaluate(binary, corpus, split, review_log=None, reject_normalized_overlap=F
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("corpus", type=Path)
-    parser.add_argument("--binary", required=True)
+    parser.add_argument("--binary", help="Aexeo CLI binary (required except for --list-normalized-overlaps)")
     parser.add_argument("--split", choices=["development", "holdout"], default="holdout")
     parser.add_argument("--review-events", type=Path, help="Optional local historical review log")
     parser.add_argument("--assert-regression", action="store_true", help="Exit nonzero on mismatches or unchecked examples")
     parser.add_argument("--reject-normalized-overlap", action="store_true",
                         help="Reject cross-split text matches after Unicode, case and whitespace normalization")
+    parser.add_argument("--list-normalized-overlaps", action="store_true",
+                        help="List matching example IDs without evaluating; output is private")
     args = parser.parse_args()
+    if not args.binary and not args.list_normalized_overlaps:
+        parser.error("--binary is required for evaluation")
+    if args.list_normalized_overlaps and (args.binary or args.review_events or args.assert_regression):
+        parser.error("--list-normalized-overlaps cannot be combined with evaluation options")
     try:
         corpus = json.loads(args.corpus.read_text(encoding="utf-8"))
+        if args.list_normalized_overlaps:
+            validate_corpus(corpus)
+            overlap = normalized_split_overlap(corpus["examples"], include_examples=True)
+            print(json.dumps({"version": 1, **overlap}, ensure_ascii=False, indent=2))
+            if args.reject_normalized_overlap and overlap["cross_split_groups"]:
+                parser.exit(1, "normalized cross-split overlap found\n")
+            return
         review_log = json.loads(args.review_events.read_text(encoding="utf-8")) if args.review_events else None
         result = evaluate(args.binary, corpus, args.split, review_log, args.reject_normalized_overlap)
         print(json.dumps(result, indent=2))

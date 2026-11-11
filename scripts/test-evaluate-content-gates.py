@@ -82,6 +82,38 @@ class EvaluateTests(unittest.TestCase):
             result = eval_module.evaluate("cli", corpus, "holdout", reject_normalized_overlap=True)
         self.assertEqual(result["normalized_split_overlap"]["cross_split_groups"], 0)
 
+    def test_overlap_curation_cli_lists_only_cross_split_ids_without_evaluator(self):
+        corpus = {"version": 1, "examples": [
+            {"id": "dev-a", "split": "development", "text": "Private Café", "expected": "passed"},
+            {"id": "dev-b", "split": "development", "text": "  PRIVATE CAFÉ ", "expected": "failed"},
+            {"id": "hold-a", "split": "holdout", "text": "private cafe\u0301", "expected": "passed", "metadata": {"secret": "value"}},
+            {"id": "hold-b", "split": "holdout", "text": "different private text", "expected": "passed"},
+        ]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "corpus.json"
+            path.write_text(json.dumps(corpus), encoding="utf-8")
+            command = [sys.executable, str(Path(__file__).with_name("evaluate-content-gates.py")),
+                       str(path), "--list-normalized-overlaps"]
+            result = subprocess.run(command, text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["groups"], [{"development": ["dev-a", "dev-b"], "holdout": ["hold-a"]}])
+            self.assertEqual(report["cross_split_groups"], 1)
+            self.assertNotIn("Private", result.stdout)
+            self.assertNotIn("secret", result.stdout)
+            self.assertNotIn("hold-b", result.stdout)
+            strict = subprocess.run(command + ["--reject-normalized-overlap"], text=True, capture_output=True, check=False)
+            self.assertEqual(strict.returncode, 1)
+            self.assertEqual(json.loads(strict.stdout), report)
+            self.assertNotIn("dev-a", strict.stderr)
+            incompatible = subprocess.run(command + ["--binary", "cli"], text=True, capture_output=True, check=False)
+            self.assertEqual(incompatible.returncode, 2)
+            corpus["examples"][2]["text"] = "unrelated"
+            path.write_text(json.dumps(corpus), encoding="utf-8")
+            clean = subprocess.run(command + ["--reject-normalized-overlap"], text=True, capture_output=True, check=False)
+            self.assertEqual(clean.returncode, 0)
+            self.assertEqual(json.loads(clean.stdout)["groups"], [])
+
     def test_strata_metrics_separate_reviewed_and_unlabeled_examples(self):
         reviewed = {"reviewer": "r", "method": "manual", "text_sha256": hashlib.sha256(b"private one").hexdigest(), "expected": "failed"}
         items = [

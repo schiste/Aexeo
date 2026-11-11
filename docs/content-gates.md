@@ -413,6 +413,20 @@ python3 scripts/evaluate-content-gates.py corpus.json --binary target/release/ae
   --split holdout --reject-normalized-overlap
 ```
 
+To identify the examples for a private review, without invoking Aexeo, run:
+
+```sh
+python3 scripts/evaluate-content-gates.py corpus.json --list-normalized-overlaps
+```
+
+This explicit inspection prints a JSON `groups` array of development and holdout
+example IDs, plus the same aggregate counts. It does not print corpus text,
+metadata or hashes; IDs may nevertheless be sensitive. Protect the terminal,
+logs and any redirected output. The command validates the corpus and exits 0
+when successful. Adding `--reject-normalized-overlap` still prints the groups,
+then exits 1 when overlaps exist; invalid inputs exit 2. It does not change
+corpus labels or move examples. The normal evaluation report remains aggregate-only.
+
 This is a conservative curation signal: case or Unicode differences can be
 meaningful, and this check ignores metadata. Review matches before changing
 splits or labels. Unicode behavior depends on the Python runtime's Unicode
