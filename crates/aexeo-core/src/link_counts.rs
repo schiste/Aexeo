@@ -14,7 +14,7 @@ pub struct DestinationLinks {
     /// Sources with conditional, hidden or legacy unclassified markup; may overlap other counts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conditional_source_pages: Option<usize>,
-    /// Sources outside conditional markup and without an HTML hidden attribute (not proof of visibility).
+    /// Sources outside known conditional, hidden or collapsed markup (not proof of visibility).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nonconditional_source_pages: Option<usize>,
     /// Source pages with at least one link carrying no `nofollow`, `ugc` or

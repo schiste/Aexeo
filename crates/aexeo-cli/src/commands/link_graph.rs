@@ -67,26 +67,37 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
         + report.links.external.len()
         + report.links.unsupported.len()
         + report.links.indeterminate.len();
-    let (conditional, unclassified, hidden, hidden_unobserved) = report
-        .links
-        .destinations
-        .iter()
-        .flat_map(|destination| &destination.evidence)
-        .chain(&report.links.same_document)
-        .chain(&report.links.external)
-        .chain(&report.links.unsupported)
-        .chain(&report.links.indeterminate)
-        .fold(
-            (0, 0, 0, 0),
-            |(conditional, unclassified, hidden, hidden_unobserved), link| {
-                (
-                    conditional + usize::from(link.conditional_markup == Some(true)),
-                    unclassified + usize::from(link.conditional_markup.is_none()),
-                    hidden + usize::from(link.hidden_attribute == Some(true)),
-                    hidden_unobserved + usize::from(link.hidden_attribute.is_none()),
-                )
-            },
-        );
+    let (conditional, unclassified, hidden, hidden_unobserved, collapsed, collapsed_unobserved) =
+        report
+            .links
+            .destinations
+            .iter()
+            .flat_map(|destination| &destination.evidence)
+            .chain(&report.links.same_document)
+            .chain(&report.links.external)
+            .chain(&report.links.unsupported)
+            .chain(&report.links.indeterminate)
+            .fold(
+                (0, 0, 0, 0, 0, 0),
+                |(
+                    conditional,
+                    unclassified,
+                    hidden,
+                    hidden_unobserved,
+                    collapsed,
+                    collapsed_unobserved,
+                ),
+                 link| {
+                    (
+                        conditional + usize::from(link.conditional_markup == Some(true)),
+                        unclassified + usize::from(link.conditional_markup.is_none()),
+                        hidden + usize::from(link.hidden_attribute == Some(true)),
+                        hidden_unobserved + usize::from(link.hidden_attribute.is_none()),
+                        collapsed + usize::from(link.collapsed_details == Some(true)),
+                        collapsed_unobserved + usize::from(link.collapsed_details.is_none()),
+                    )
+                },
+            );
     let telemetry = serde_json::json!({
         "event": "link_graph_analysis",
         "version": 1,
@@ -97,6 +108,8 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
         "unclassified_markup_link_count": unclassified,
         "hidden_attribute_link_count": hidden,
         "hidden_attribute_unobserved_link_count": hidden_unobserved,
+        "collapsed_details_link_count": collapsed,
+        "collapsed_details_unobserved_link_count": collapsed_unobserved,
         "indeterminate_count": report.links.indeterminate.len(),
         "issue_count": report.issues.len(),
     });
