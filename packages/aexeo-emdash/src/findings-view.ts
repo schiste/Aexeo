@@ -34,8 +34,8 @@ import type {
 import {
   isSiteGraphFinding,
   evaluateAndPersistAll,
+  findingsKey,
   readAssessment,
-  readFindings,
 } from "./plugin.js";
 import type { SuppressionFilter } from "./suppressions.js";
 
@@ -269,26 +269,46 @@ export interface FindingRow extends Finding {
   document_route: string;
 }
 
-export async function readAllFindings(kv: KvNamespace): Promise<FindingRow[]> {
-  // emdash's kv.list returns parsed values inline, so we don't need a
-  // second get-per-key pass — both the route key and the stored
-  // {route, findings} payload come back in one call.
-  const entries = await kv.list<{ route: string; findings: Finding[]; assessment?: DocumentAssessment }>(
-    "findings:",
-  );
-  const out: FindingRow[] = [];
-  const incomplete = entries.find((entry) => entry.key === "findings:*")?.value?.assessment?.status === "error";
+interface FindingsSnapshot {
+  findings: FindingRow[];
+  documentRoutes: string[];
+  sitewideAssessment: DocumentAssessment | undefined;
+  failedAssessments: number;
+  uncheckedGates: number;
+}
+
+async function readFindingsSnapshot(kv: KvNamespace): Promise<FindingsSnapshot> {
+  // Values are returned inline; include assessments with no findings so editors
+  // can inspect passing, incomplete and failed evaluations from the picker.
+  const entries = await kv.list<{ route: string; findings: Finding[]; assessment?: DocumentAssessment }>("findings:");
+  const sitewideAssessment = entries.find((entry) => entry.key === "findings:*")?.value?.assessment;
+  const incomplete = sitewideAssessment?.status === "error";
+  const findings: FindingRow[] = [];
+  const routes = new Set<string>();
+  let failedAssessments = 0;
+  let uncheckedGates = 0;
   for (const entry of entries) {
-    if (entry.value === null) {
-      continue;
-    }
+    if (entry.value === null) continue;
     const route = entry.key.replace(/^findings:/, "");
+    if (route !== "*") {
+      routes.add(route);
+      const assessment = entry.value.assessment;
+      if (assessment?.status === "error") failedAssessments++;
+      if (assessment?.status === "evaluated") {
+        uncheckedGates += assessment.gates.filter((gate) => gate.status === "not_checked").length;
+      }
+    }
     for (const finding of entry.value.findings) {
       if (!isCmsObservableFinding(finding) || (incomplete && isSiteGraphFinding(finding))) continue;
-      out.push({ ...finding, document_route: route });
+      findings.push({ ...finding, document_route: route });
+      if (route === "*") routes.add(route);
     }
   }
-  return out;
+  return { findings, documentRoutes: [...routes].sort(), sitewideAssessment, failedAssessments, uncheckedGates };
+}
+
+export async function readAllFindings(kv: KvNamespace): Promise<FindingRow[]> {
+  return (await readFindingsSnapshot(kv)).findings;
 }
 
 export function severityFirst(a: Finding, b: Finding): number {
@@ -312,8 +332,7 @@ export async function renderFindingsPage(
   kv: KvNamespace,
   tuning: AdminViewTuning,
 ): Promise<BlockResponse> {
-  const findings = await readAllFindings(kv);
-  const sitewideAssessment = await readAssessment(kv, "*");
+  const { findings, documentRoutes, sitewideAssessment, failedAssessments, uncheckedGates } = await readFindingsSnapshot(kv);
   const errors = findings.filter((finding) => finding.severity === "error");
   const warnings = findings.filter(
     (finding) => finding.severity === "warning",
@@ -326,10 +345,11 @@ export async function renderFindingsPage(
       type: "context",
       text:
         findings.length === 0
-          ? "No findings yet — click Refresh to evaluate CMS records."
+          ? documentRoutes.length === 0 ? "No CMS document results available — click Refresh to evaluate records." : "No findings reported for the available CMS checks. Inspect assessments for unchecked or failed evaluations."
           : `${findings.length} findings across ${routes.length} routes — ${errors.length} errors, ${warnings.length} warnings.`,
     },
     { type: "context", text: "Rendered page markup, generated metadata and sitewide link inventory are not checked here. Audit the built site for page-level and link findings." },
+    ...(failedAssessments || uncheckedGates ? [{ type: "context", text: `${failedAssessments} document evaluations failed; ${uncheckedGates} preset checks were not checked. Inspect individual documents for details.` }] : []),
     ...(sitewideAssessment?.status === "error" ? [{ type: "context", text: `Sitewide checks unavailable: ${sitewideAssessment.reason}. ${sitewideAssessment.detail}` }] : []),
     { type: "divider" },
     {
@@ -356,7 +376,7 @@ export async function renderFindingsPage(
     sorted.length === 0
       ? {
           type: "context",
-          text: tuning.emptyFindingsText,
+          text: documentRoutes.length === 0 ? tuning.emptyFindingsText : "Select a document to inspect its assessment.",
         }
       : findingsTable(sorted),
   ];
@@ -364,7 +384,7 @@ export async function renderFindingsPage(
   // interactive elements, so per-row View buttons would be dead. The
   // route-selection flow lives below the table as a select + submit
   // form whose form_submit dispatch routes to the document panel.
-  if (routes.length > 0) {
+  if (documentRoutes.length > 0) {
     blocks.push({
       type: "form",
       fields: [
@@ -372,7 +392,7 @@ export async function renderFindingsPage(
           type: "select",
           action_id: "route_picker",
           label: "Document to inspect",
-          options: routes.map((route) => ({ label: route, value: route })),
+          options: documentRoutes.map((route) => ({ label: route, value: route })),
         },
       ],
       submit: { label: "View document SEO", action_id: "view_document" },
@@ -438,8 +458,9 @@ export async function renderDocumentPanel(
     };
   }
   const incomplete = (await readAssessment(kv, "*"))?.status === "error";
-  const findings = (await readFindings(kv, route)).filter((finding) => isCmsObservableFinding(finding) && (!incomplete || !isSiteGraphFinding(finding)));
-  const assessment = await readAssessment(kv, route);
+  const record = await kv.get<{ findings: Finding[]; assessment?: DocumentAssessment }>(findingsKey(route));
+  const findings = (record?.findings ?? []).filter((finding) => isCmsObservableFinding(finding) && (!incomplete || !isSiteGraphFinding(finding)));
+  const assessment = record?.assessment;
   const errors = findings.filter((finding) => finding.severity === "error");
   const warnings = findings.filter(
     (finding) => finding.severity === "warning",
@@ -451,9 +472,13 @@ export async function renderDocumentPanel(
       {
         type: "context",
         text:
-          findings.length === 0
-            ? `No findings for ${route} from the available CMS checks.`
-            : `${findings.length} findings — ${errors.length} errors, ${warnings.length} warnings.`,
+          !record
+            ? `No evaluation is available for ${route}. Save the document or refresh to evaluate it.`
+            : assessment?.status === "error"
+              ? `Evaluation failed for ${route}; findings are unavailable for this revision.`
+              : findings.length === 0
+                ? `No findings for ${route} from the available CMS checks.`
+                : `${findings.length} findings — ${errors.length} errors, ${warnings.length} warnings.`,
       },
       { type: "context", text: "Rendered page markup, generated metadata and sitewide link inventory are not checked here. Audit the built site for page-level and link findings." },
       ...(incomplete ? [{ type: "context", text: "Sitewide and cross-document checks are unavailable; refresh after resolving the CMS input error." }] : []),
