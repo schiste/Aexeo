@@ -123,6 +123,29 @@ all inputs and configuration that affected its decision; if it cannot establish
 they are unchanged, it must treat the verdict as stale. The v1 verdict alone
 cannot provide this assurance.
 
+#### Aexeo offline input fingerprint (optional)
+
+For an evaluation without a host link observer or external gate extension,
+Aexeo adds `extensions["aexeo.offline-input-binding.v1"]`: a SHA-256
+fingerprint of its parsed change, resolved preset, collection snapshot and
+completeness, content-size limits, paragraph option, and Aexeo engine version.
+The Rust host API `verify_offline_input_binding` recomputes this fingerprint
+from the inputs the host intends to apply and fails if it is missing or differs.
+It must be called using the same engine version and trusted build; the version
+string alone does not establish the build identity. The implementation streams
+serialization into the hash and does not place the inputs in the extension.
+
+This is an Aexeo-specific, versioned mechanism, not a replacement for a
+cross-implementation protocol binding. Existing v1 runners can ignore it, so
+it protects only hosts that explicitly call the verifier and reject failures.
+It is not a signature: hosts must protect the verdict and inputs against
+substitution, validate the verdict and content digests, and independently
+establish snapshot completeness, revision, and freshness. A missing extension
+must not be interpreted as a match. Evaluations using an external callback have
+no offline fingerprint because its observations are not covered; verifying
+those inputs requires a separate mechanism. Hashes may themselves disclose
+information about low-entropy inputs and should be handled accordingly.
+
 ### 3.3 Findings
 
 | Field | Required | Meaning |
