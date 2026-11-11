@@ -49,6 +49,39 @@ class EvaluateTests(unittest.TestCase):
         self.assertIsNone(result["unique_input_metrics"]["recall"])
         self.assertIsNone(result["unique_reviewed_input_metrics"]["unchecked_rate"])
 
+    def test_normalized_cross_split_overlap_is_reported_and_can_be_rejected(self):
+        items = [
+            {"id": "private-a", "split": "development", "text": "  Café\nSTRAẞE  ", "expected": "passed"},
+            {"id": "private-b", "split": "development", "text": "CAFÉ STRASSE", "expected": "passed"},
+            {"id": "private-c", "split": "holdout", "text": "cafe\u0301 strasse", "expected": "passed"},
+            {"id": "private-d", "split": "holdout", "text": "Different", "expected": "passed"},
+        ]
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": items}
+        response = SimpleNamespace(returncode=0, stdout='{"gates":[{"gate_id":"g","status":"passed"}]}')
+        with patch.object(eval_module.subprocess, "run", return_value=response):
+            result = eval_module.evaluate("cli", corpus, "holdout")
+            self.assertEqual(result["normalized_split_overlap"], {
+                "normalization": "nfkc-casefold-whitespace-v1", "cross_split_groups": 1,
+                "development_examples": 2, "holdout_examples": 1})
+            self.assertNotIn("private", json.dumps(result))
+            self.assertNotIn("strasse", json.dumps(result).lower())
+            with self.assertRaisesRegex(ValueError, "normalized example text"):
+                eval_module.evaluate("cli", corpus, "holdout", reject_normalized_overlap=True)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "corpus.json"
+            path.write_text(json.dumps(corpus), encoding="utf-8")
+            run = subprocess.run([sys.executable, str(Path(__file__).with_name("evaluate-content-gates.py")),
+                                  str(path), "--binary", "missing-binary", "--reject-normalized-overlap"],
+                                 text=True, capture_output=True, check=False)
+            self.assertEqual(run.returncode, 2)
+            self.assertIn("normalized example text", run.stderr)
+            self.assertNotIn("private", run.stderr)
+        items[2]["text"] = "unrelated"
+        self.assertEqual(eval_module.normalized_split_overlap(items)["cross_split_groups"], 0)
+        with patch.object(eval_module.subprocess, "run", return_value=response):
+            result = eval_module.evaluate("cli", corpus, "holdout", reject_normalized_overlap=True)
+        self.assertEqual(result["normalized_split_overlap"]["cross_split_groups"], 0)
+
     def test_strata_metrics_separate_reviewed_and_unlabeled_examples(self):
         reviewed = {"reviewer": "r", "method": "manual", "text_sha256": hashlib.sha256(b"private one").hexdigest(), "expected": "failed"}
         items = [

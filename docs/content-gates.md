@@ -399,6 +399,28 @@ for the selected split, without group identifiers. Grouping is optional for lega
 corpora; absent or incorrectly assigned groups, paraphrases and related sources
 cannot be detected automatically and do not establish independence.
 
+### Detecting normalized cross-split matches
+
+Each evaluation reports `normalized_split_overlap` across the entire corpus,
+not only the selected split. It counts groups and examples on each side whose
+text matches after NFKC Unicode normalization, Unicode case folding and
+collapsing whitespace; it contains neither text nor identifiers. Exact
+cross-split text duplicates remain rejected by corpus validation. To reject
+normalized matches before invoking the evaluator as well, use:
+
+```sh
+python3 scripts/evaluate-content-gates.py corpus.json --binary target/release/aexeo-cli \
+  --split holdout --reject-normalized-overlap
+```
+
+This is a conservative curation signal: case or Unicode differences can be
+meaningful, and this check ignores metadata. Review matches before changing
+splits or labels. Unicode behavior depends on the Python runtime's Unicode
+database. A zero count does not rule out paraphrases, partial excerpts,
+incorrect source groups, review leakage or other shared sources; it does not
+prove independence. The counts are local report telemetry and are not sent
+anywhere by the script.
+
 ## Local latency measurement
 
 For local content and crawl evaluation, `--telemetry` also emits `gate_timings_ms`, an

@@ -23,7 +23,7 @@ for fixture in duplicate-headings heading-length link-destinations required-meta
     for split in development holdout; do
         aexeo_run_timed "${prefix}content-corpus-${fixture}-${split}" "cache-light" \
             python3 scripts/evaluate-content-gates.py "eval/content/${fixture}.json" \
-                --binary "${CARGO_TARGET_DIR:-target}/debug/aexeo-cli" --split "$split" --assert-regression
+                --binary "${CARGO_TARGET_DIR:-target}/debug/aexeo-cli" --split "$split" --assert-regression --reject-normalized-overlap
 done
 done
 # The workspace build above unifies features across members, which hides a
