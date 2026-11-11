@@ -588,7 +588,9 @@ An optional `onTelemetry` callback receives only elapsed milliseconds and aggreg
 The CMS integration evaluates content records, not the rendered page.
 It does not report legacy SEO, social metadata, accessibility, page-size,
 answer-block or citation-context findings as if generated HTML were observed.
-Run Aexeo against the built site to assess those checks. The `aexeo.page_coverage`
+The CMS dashboard score widget is unavailable for the same reason: CMS records
+do not establish rendered-page coverage or a complete site inventory. Run Aexeo
+against the built site to assess those checks. The `aexeo.page_coverage`
 telemetry event marks rendered-page and generated-metadata coverage as not observed;
 `aexeo.content_coverage` describes body projection separately.
 

@@ -158,9 +158,8 @@ export interface AdminViewTuning {
    */
   refreshFailureVariant: "alert" | "error";
   /**
-   * Backing scorer for the dashboard widget. Configured mode passes the
-   * manifest-aware in-process scorer; sandbox mode passes the
-   * sidecar-backed `scoreSite`.
+   * Retained for compatibility; CMS-only widget inputs do not establish the
+   * rendered-page coverage required to show a site score.
    */
   score: (
     documents: readonly EmdashDocument[],
@@ -404,7 +403,7 @@ export function findingsTable(rows: FindingRow[]): unknown {
 export async function renderScoreWidget(
   kv: KvNamespace,
   tuning: AdminViewTuning,
-  log?: { error(message: string, data?: unknown): void },
+  _log?: { error(message: string, data?: unknown): void },
 ): Promise<BlockResponse> {
   const documents = await readAllDocuments(kv);
   if (documents.length === 0) {
@@ -418,55 +417,14 @@ export async function renderScoreWidget(
       ],
     };
   }
-  let score: Awaited<ReturnType<AdminViewTuning["score"]>>;
-  try {
-    score = await tuning.score(documents, kv);
-  } catch (error) {
-    log?.error("Aexeo score widget failed to initialize", { error });
-    return {
-      blocks: [
-        { type: "banner", title: "SEO score is temporarily unavailable", variant: "alert" },
-        { type: "context", text: "The authoring interface remains available. Retry after the evaluator runtime has been checked." },
-      ],
-    };
-  }
-  if (score === null) {
-    return {
-      blocks: [
-        { type: "header", text: "SEO score" },
-        {
-          type: "context",
-          text: "The site score is unavailable in sandboxed mode. Findings are not affected.",
-        },
-      ],
-    };
-  }
-  const blocks: unknown[] = [
-    {
-      type: "stats",
-      items: [
-        {
-          label: "Citation",
-          value: score.citation_readiness_score?.toString() ?? "unknown",
-        },
-        {
-          label: tuning.truthLabel(score),
-          value: score.truth_consistency_score?.toString() ?? "unknown",
-        },
-        {
-          label: "Answers",
-          value: `${score.answer_pack.routes_with_answer_blocks}/${score.answer_pack.routes_analyzed} routes`,
-        },
-      ],
-    },
-  ];
-  if (score.blockers.length > 0) {
-    blocks.push({
-      type: "context",
-      text: topBlockersLine(score),
-    });
-  }
-  return { blocks };
+  // CMS records cannot establish the rendered page, generated metadata,
+  // or a complete site inventory. Do not compute or present a site score.
+  return {
+    blocks: [
+      { type: "header", text: "SEO score unavailable" },
+      { type: "context", text: "CMS records do not include the rendered site. Run an Aexeo site audit on the built site to assess SEO and page-level signals." },
+    ],
+  };
 }
 
 export function topBlockersLine(score: SiteIntelligenceScore): string {
