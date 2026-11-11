@@ -642,6 +642,12 @@ an action. This does not authenticate the observer, verify response freshness,
 prove collection completeness or bind hidden external state. Custom gate
 extensions remain unsupported and do not receive this binding. Older consumers
 that ignore the extension are not protected; the CLI revalidation remains offline-only.
+The observation hash is SHA-256 initialized with the UTF-8 extension identifier;
+each actual callback adds an eight-byte big-endian length followed by compact
+UTF-8 JSON `[entity_id, destinations, observations]`, in callback order. Each
+observation uses its snake-case enum name. The input digest uses the existing
+engine-specific offline binding, so this is not yet a general interoperable
+contract for independent implementations.
 
 Rust EmDash hosts can use `content::evaluate_collection` to adapt a complete
 slice of documents; document and site gates without their inputs remain

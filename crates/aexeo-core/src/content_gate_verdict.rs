@@ -1588,6 +1588,10 @@ mod tests {
         };
         let first = run(Observation::Reachable, "2026-01-01T00:00:00Z");
         let fresh = run(Observation::Reachable, "2026-01-02T00:00:00Z");
+        assert_eq!(
+            first.extensions.as_ref().unwrap()[OBSERVED_LINK_BINDING_EXTENSION]["observations_sha256"],
+            "e0c98059de803cb05ba85f45666e3cdd775ca525ee5f266b6e7ca587e1e9ddb8"
+        );
         let verify = |old: &Verdict, new: &Verdict, change: &Change, limit| {
             verify_observed_link_verdict(old, new, change, &policy, limit, 1024, false, None)
         };
