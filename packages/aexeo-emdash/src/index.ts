@@ -56,7 +56,7 @@ export interface ConfiguredPluginDescriptor {
 }
 
 import type { CustomBlockMappings } from "./adapter.js";
-export type { BodyCapability, CustomBlockMapping, CustomBlockMappings, CustomBlockField } from "./adapter.js";
+export type { BodyCapability, CustomBlockMapping, CustomBlockMappings, CustomBlockField, InlineComponentField } from "./adapter.js";
 
 export interface AexeoPluginOptions {
   /** Ordered field mappings for project-specific blocks. */

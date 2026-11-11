@@ -1,4 +1,4 @@
-import type { EmdashDocument, PortableTextBlock } from "./types.js";
+import type { EmdashDocument, PortableTextBlock, PortableTextSpan, MarkDef } from "./types.js";
 
 /** Ordered fields that the host declares constitute a custom block's content. */
 export type CustomBlockField =
@@ -8,10 +8,17 @@ export type CustomBlockField =
   | { kind: "repeat"; field: string; fields: readonly CustomBlockField[]; optional?: boolean };
 /** Capabilities that a host can establish for a component's rendered content. */
 export type BodyCapability = "text" | "headings" | "paragraphs" | "links";
+/** Ordered fields projected within the surrounding Portable Text block. */
+export type InlineComponentField =
+  | { kind: "text"; field: string; optional?: boolean }
+  | { kind: "link"; field: string; hrefField: string; optional?: boolean };
 /** The object form asserts coverage only for the listed capabilities. */
 export type CustomBlockMapping = readonly CustomBlockField[] | {
   fields: readonly CustomBlockField[];
   capabilities: readonly BodyCapability[];
+} | {
+  inline: readonly InlineComponentField[];
+  capabilities?: readonly BodyCapability[];
 };
 export type CustomBlockMappings = Record<string, CustomBlockMapping>;
 
@@ -410,11 +417,9 @@ function mapMixedPortableText(blocks: unknown[], mappings?: CustomBlockMappings,
       continue;
     }
     if (isPortableTextBlockCandidate(block)) {
-      // Inline objects can interrupt otherwise valid spans. Keep the known
-      // fragments in order, but do not assert that any body capability is complete.
-      const children = (block["children"] as unknown[]).filter(isPortableTextSpan);
-      result.push({ ...block, children } as unknown as PortableTextBlock);
-      capabilities = [];
+      const projected = projectInlineBlock(block, mappings);
+      result.push(projected.block);
+      capabilities = intersectCapabilities(capabilities, projected.capabilities);
       continue;
     }
     if (!isRecord(block) || typeof block["_type"] !== "string" || block["_type"] === "block") {
@@ -426,6 +431,61 @@ function mapMixedPortableText(blocks: unknown[], mappings?: CustomBlockMappings,
     capabilities = intersectCapabilities(capabilities, mapped.capabilities);
   }
   return bodyWithCapabilities(result, capabilities);
+}
+
+/** An inline declaration asserts that its fields represent the host renderer.
+ * Failure leaves known spans intact and withholds body coverage. */
+function projectInlineBlock(block: Record<string, unknown>, mappings?: CustomBlockMappings): { block: PortableTextBlock; capabilities: BodyCapability[] } {
+  const children: PortableTextSpan[] = [];
+  const defs = Array.isArray(block["markDefs"]) ? [...block["markDefs"]] : [];
+  const keys = new Set(defs.flatMap((def) => isRecord(def) && typeof def["_key"] === "string" ? [def["_key"]] : []));
+  let sequence = 0;
+  let capabilities = block["markDefs"] === undefined || Array.isArray(block["markDefs"]) ? [...BODY_CAPABILITIES] : [];
+  for (const child of block["children"] as unknown[]) {
+    if (isRecord(child) && Array.isArray(child["marks"])) {
+      for (const mark of child["marks"]) if (typeof mark === "string") keys.add(mark);
+    }
+  }
+  for (const child of block["children"] as unknown[]) {
+    if (isPortableTextSpan(child)) {
+      children.push(child as PortableTextSpan);
+      continue;
+    }
+    const type = isRecord(child) ? child["_type"] : undefined;
+    const mapping: unknown = typeof type === "string" && mappings && Object.hasOwn(mappings, type) ? mappings[type] : undefined;
+    if (!isRecord(child) || !isRecord(mapping) || !Array.isArray(mapping["inline"])) {
+      capabilities = [];
+      continue;
+    }
+    const declared = mapping["capabilities"];
+    if (declared !== undefined && (!Array.isArray(declared) || declared.some((value) => typeof value !== "string" || !BODY_CAPABILITIES.includes(value as BodyCapability)) || new Set(declared).size !== declared.length)) {
+      capabilities = [];
+      continue;
+    }
+    const newChildren: PortableTextSpan[] = [];
+    const newDefs: MarkDef[] = [];
+    let valid = true;
+    for (const field of mapping["inline"] as unknown[]) {
+      if (!isRecord(field) || (field["kind"] !== "text" && field["kind"] !== "link") || typeof field["field"] !== "string" || !field["field"] || (field["optional"] !== undefined && typeof field["optional"] !== "boolean") || (field["kind"] === "link" && (typeof field["hrefField"] !== "string" || !field["hrefField"]))) { valid = false; break; }
+      const value = child[field["field"]];
+      const href = field["kind"] === "link" && typeof field["hrefField"] === "string" && field["hrefField"] ? child[field["hrefField"]] : undefined;
+      if ((value == null || value === "") && field["optional"] === true && (field["kind"] !== "link" || href == null || href === "")) continue;
+      if (typeof value !== "string" || (field["kind"] === "link" && (typeof href !== "string" || !href))) { valid = false; break; }
+      if (field["kind"] === "text") newChildren.push({ _type: "span", text: value, marks: [] });
+      else {
+        let key: string;
+        do { key = `aexeo-inline-${sequence++}`; } while (keys.has(key));
+        keys.add(key);
+        newDefs.push({ _key: key, _type: "link", href });
+        newChildren.push({ _type: "span", text: value, marks: [key] });
+      }
+    }
+    if (!valid) { capabilities = []; continue; }
+    children.push(...newChildren);
+    defs.push(...newDefs);
+    if (Array.isArray(declared)) capabilities = intersectCapabilities(capabilities, declared as BodyCapability[]);
+  }
+  return { block: { ...block, children, markDefs: defs } as PortableTextBlock, capabilities };
 }
 
 function isEmdashBlocksArray(

@@ -195,6 +195,32 @@ describe("EmDash content adaptation", () => {
     expect(nestedDocument.body_capabilities).toEqual([]);
   });
 
+  it("maps inline text and links without changing surrounding block structure", () => {
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: { content: [
+      { _type: "block", style: "h2", markDefs: [{ _key: "aexeo-inline-0", _type: "link", href: "/original" }], children: [
+        { _type: "span", text: "Before ", marks: ["aexeo-inline-1"] },
+        { _type: "badge", label: "Badge", linkText: "docs", href: "/docs" },
+        { _type: "span", text: " after", marks: [] },
+      ] },
+    ] } };
+    const mappings = { badge: { inline: [{ kind: "text" as const, field: "label" }, { kind: "link" as const, field: "linkText", hrefField: "href" }] } };
+    const doc = contentItemToEmdashDocument(item, mappings);
+    expect(doc.body_capabilities).toBeUndefined();
+    expect(doc.body?.[0]?.style).toBe("h2");
+    expect(doc.body?.[0]?.children.map((span) => span.text)).toEqual(["Before ", "Badge", "docs", " after"]);
+    expect(doc.body?.[0]?.children[2]?.marks).toEqual(["aexeo-inline-2"]);
+    expect(doc.body?.[0]?.markDefs?.[1]).toEqual({ _key: "aexeo-inline-2", _type: "link", href: "/docs" });
+    expect(JSON.parse(JSON.stringify(aexeoPlugin({ blockMappings: mappings }).options)).blockMappings).toEqual(mappings);
+    const partial = contentItemToEmdashDocument(item, { badge: { ...mappings.badge, capabilities: ["text"] } });
+    expect(partial.body_capabilities).toEqual(["text"]);
+    const ignored = contentItemToEmdashDocument(item, { badge: { inline: [] } });
+    expect(ignored.body_capabilities).toBeUndefined();
+    expect(ignored.body?.[0]?.children.map((span) => span.text)).toEqual(["Before ", " after"]);
+    const invalid = contentItemToEmdashDocument(item, { badge: { inline: [{ kind: "link", field: "linkText", hrefField: "missing" }] } });
+    expect(invalid.body_capabilities).toEqual([]);
+    expect(invalid.body?.[0]?.children.map((span) => span.text)).toEqual(["Before ", " after"]);
+  });
+
   it("retains valid mixed content around malformed items without claiming coverage", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: {
       content: [...body("Before"), null, { _type: "block", children: "broken" }, { prompt: "untyped" }, ...body("After")],
