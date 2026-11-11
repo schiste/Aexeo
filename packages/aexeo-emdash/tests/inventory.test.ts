@@ -108,6 +108,17 @@ describe("conservative EmDash link inventory", () => {
     expect(JSON.stringify(onTelemetry.mock.calls)).not.toContain("example.org");
   });
 
+  it("serializes an unspecified CMS locale as null", async () => {
+    const list = vi.fn(async () => ({ items: [{ ...item("article"), locale: undefined }], hasMore: false }) as never);
+    const getPublicUrl = vi.fn(async () => "https://example.org/article");
+    for (const classify of [undefined, () => ({ disposition: "unknown" as const })]) {
+      const result = await exportLinkInventory({ list, getPublicUrl }, { collections: ["posts"], identity: null, ...(classify ? { classify } : {}) });
+      expect(JSON.parse(JSON.stringify(result.inventory.pages))).toEqual([
+        { url: "https://example.org/article", disposition: "unknown", target: null, locale: null },
+      ]);
+    }
+  });
+
   it("keeps earlier pages and continues other collections after invalid pagination", async () => {
     const list = vi.fn(async (collection: string, options?: { cursor?: string }) => {
       if (collection === "posts") {
