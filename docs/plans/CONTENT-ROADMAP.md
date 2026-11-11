@@ -217,9 +217,10 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   compare the other inputs or fail closed. Do not claim an optional extension
   protects legacy runners that ignore it.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
+- [x] Preserve preset and input-report provenance when binding human feedback; report policy-matched reviewed metrics separately from legacy metrics. Fingerprints do not authenticate people or bind external evidence.
 - [x] Include a fingerprint of the CLI-resolved preset in corpus evaluation
   results and reject a policy change observed during a run. This identifies the
-  evaluated configuration; historical human labels are not bound to it, and
+  evaluated configuration; legacy human labels may not be bound to it, and
   the digest does not identify executable versions or evidence.
 - [x] Allow explicit acceptance of a conflicting human verdict into a new private
   corpus copy, preserving the former proposed label and review provenance. This

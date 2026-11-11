@@ -157,6 +157,10 @@ def validate_corpus(corpus):
             review = item.get("review")
             if not isinstance(review, dict) or any(not isinstance(review.get(key), str) or not review[key].strip() for key in ("reviewer", "method")):
                 raise ValueError("reviewed examples require reviewer and method provenance")
+            if "resolved_policy_fingerprint" in review:
+                validate_policy_fingerprint(review["resolved_policy_fingerprint"])
+            if "report_binding" in review and (not isinstance(review["report_binding"], str) or review["report_binding"] not in {"verified", "unverified"}):
+                raise ValueError("invalid review report binding")
 
 
 def aggregate_review_events(corpus, split, review_log, current_policy=None):
@@ -299,6 +303,8 @@ def evaluate(binary, corpus, split, review_log=None):
     input_groups, input_coverage = input_multiplicity(examples)
     counts = empty_counts()
     reviewed_counts = empty_counts()
+    policy_reviewed_counts = empty_counts()
+    policy_review_bindings = {"matching": 0, "different": 0, "unbound": 0, "unverified_input": 0, "unverified_run": 0}
     unique_counts = empty_counts()
     unique_reviewed_counts = empty_counts()
     unique_reviewed_examples = 0
@@ -339,10 +345,21 @@ def evaluate(binary, corpus, split, review_log=None):
             if result.returncode not in (0, 1, 2):
                 raise ValueError(f"CLI failed for {item['id']}: exit {result.returncode}")
             report = json.loads(result.stdout)
-            if "resolved_policy_fingerprint" in report:
+            report_has_policy = "resolved_policy_fingerprint" in report
+            if report_has_policy:
                 fingerprint = validate_policy_fingerprint(report["resolved_policy_fingerprint"])
                 if fingerprint["sha256"] != resolved_typed_hash:
                     raise ValueError("evaluated report policy differs from resolved policy")
+            input_fingerprint = report.get("input_fingerprint")
+            report_has_input = "input_fingerprint" in report
+            if report_has_input:
+                expected_metadata = metadata_hash(item["metadata"]) if "metadata" in item else None
+                if (not isinstance(input_fingerprint, dict) or type(input_fingerprint.get("version")) is not int
+                        or input_fingerprint["version"] != 1
+                        or input_fingerprint.get("text_sha256") != hashlib.sha256(item["text"].encode("utf-8")).hexdigest()
+                        or "metadata_sha256" not in input_fingerprint
+                        or input_fingerprint["metadata_sha256"] != expected_metadata):
+                    raise ValueError("evaluated report input fingerprint differs from corpus example")
             gates = [gate for gate in report["gates"] if gate["gate_id"] == corpus["gate_id"]]
             if len(gates) != 1 or gates[0]["status"] not in {"passed", "failed", "not_checked"}:
                 raise ValueError(f"missing or invalid gate for {item['id']}")
@@ -365,6 +382,20 @@ def evaluate(binary, corpus, split, review_log=None):
                 if bound_review:
                     reviewed_examples += 1
                     record_result(reviewed_counts, actual, expected)
+                    review = item["review"]
+                    policy = review.get("resolved_policy_fingerprint")
+                    if policy is None:
+                        category = "unbound"
+                    elif review.get("report_binding") != "verified":
+                        category = "unverified_input"
+                    elif policy["sha256"] != resolved_typed_hash:
+                        category = "different"
+                    elif not report_has_policy or not report_has_input:
+                        category = "unverified_run"
+                    else:
+                        category = "matching"
+                        record_result(policy_reviewed_counts, actual, expected)
+                    policy_review_bindings[category] += 1
                     if unique:
                         unique_reviewed_examples += 1
                         record_result(unique_reviewed_counts, actual, expected)
@@ -384,6 +415,8 @@ def evaluate(binary, corpus, split, review_log=None):
                   "distinct_groups": len({item["source_group"] for item in examples if "source_group" in item}),
               },
               "reviewed_metrics": classification_metrics(reviewed_counts, reviewed_examples),
+              "review_policy_binding_counts": policy_review_bindings,
+              "policy_bound_reviewed_metrics": classification_metrics(policy_reviewed_counts, policy_review_bindings["matching"]),
               "input_multiplicity": input_coverage,
               "unique_input_metrics": classification_metrics(unique_counts, input_coverage["unique_input_examples"]),
               "unique_reviewed_input_metrics": classification_metrics(unique_reviewed_counts, unique_reviewed_examples),

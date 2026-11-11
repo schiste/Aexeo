@@ -125,6 +125,9 @@ def bind_review(corpus, note, accept_human_label=False):
                       "text_sha256": event["text_sha256"], "expected": item["expected"]}
     if "metadata_sha256" in event:
         item["review"]["metadata_sha256"] = event["metadata_sha256"]
+    for key in ("resolved_policy_fingerprint", "report_binding"):
+        if key in event:
+            item["review"][key] = copy.deepcopy(event[key])
     if label_changed:
         item["review"]["previous_expected"] = previous_expected
     return result
