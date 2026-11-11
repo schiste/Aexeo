@@ -39,6 +39,10 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 
 ## Delivery tracker
 
+- [x] Resolve shared preset ancestors once per call and limit inheritance paths to
+  64 presets, including when a cached ancestor is reused. No cross-call cache is
+  retained, so updated sources are reflected on the next resolution.
+
 - [x] Optional portable literal required-terms gate with explicit word and case
   behavior, bounded configuration, aggregate measurements and unavailable-text
   handling across text, Markdown, EmDash and content-change evaluation. It is not

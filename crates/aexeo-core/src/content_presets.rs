@@ -23,6 +23,9 @@ struct PresetSource {
     gates: Vec<ContentGate>,
 }
 
+/// Maximum number of presets on one inheritance path.
+pub const MAX_PRESET_INHERITANCE_DEPTH: usize = 64;
+
 /// Resolve named TOML sources. Parents are applied from left to right; gates
 /// with the same ID are replaced in place, keeping the original order.
 pub fn resolve_content_preset(
@@ -33,10 +36,22 @@ pub fn resolve_content_preset(
         name: &str,
         sources: &BTreeMap<String, String>,
         stack: &mut Vec<String>,
-    ) -> Result<ContentPreset> {
+        memo: &mut BTreeMap<String, (ContentPreset, usize)>,
+    ) -> Result<(ContentPreset, usize)> {
         if stack.iter().any(|item| item == name) {
             stack.push(name.to_owned());
             bail!("preset inheritance cycle: {}", stack.join(" -> "));
+        }
+        if let Some((preset, height)) = memo.get(name) {
+            if stack.len() + height > MAX_PRESET_INHERITANCE_DEPTH {
+                bail!(
+                    "preset inheritance exceeds the maximum depth of {MAX_PRESET_INHERITANCE_DEPTH}"
+                );
+            }
+            return Ok((preset.clone(), *height));
+        }
+        if stack.len() >= MAX_PRESET_INHERITANCE_DEPTH {
+            bail!("preset inheritance exceeds the maximum depth of {MAX_PRESET_INHERITANCE_DEPTH}");
         }
         let source = sources
             .get(name)
@@ -60,8 +75,10 @@ pub fn resolve_content_preset(
         }
         stack.push(name.to_owned());
         let mut gates: Vec<ContentGate> = Vec::new();
+        let mut height = 1;
         for parent in &spec.extends {
-            let resolved = visit(parent, sources, stack)?;
+            let (resolved, parent_height) = visit(parent, sources, stack, memo)?;
+            height = height.max(parent_height + 1);
             for gate in resolved.gates {
                 merge_gate(&mut gates, gate);
             }
@@ -88,9 +105,11 @@ pub fn resolve_content_preset(
                 .validate()
                 .with_context(|| format!("invalid resolved preset {name}"))?;
         }
-        Ok(preset)
+        memo.insert(name.to_owned(), (preset.clone(), height));
+        Ok((preset, height))
     }
-    let preset = visit(name, sources, &mut Vec::new()).map_err(into_user_error)?;
+    let (preset, _) =
+        visit(name, sources, &mut Vec::new(), &mut BTreeMap::new()).map_err(into_user_error)?;
     if preset.gates.is_empty() {
         crate::user_bail!("preset {name} resolves to no gates, so it would check nothing");
     }
@@ -196,6 +215,67 @@ mod tests {
                 .gates
                 .len(),
             1
+        );
+    }
+
+    #[test]
+    fn shared_ancestors_in_a_deep_diamond_resolve() {
+        let mut sources = BTreeMap::from([(
+            "base".to_owned(),
+            "version=1\nname='base'\n[[gates]]\nid='w'\nkind='word_count'\nmin=1\n".to_owned(),
+        )]);
+        let mut parents = ["base".to_owned(), "base".to_owned()];
+        for level in 0..45 {
+            let next = [format!("a{level}"), format!("b{level}")];
+            for name in &next {
+                sources.insert(
+                    name.clone(),
+                    format!(
+                        "version=1\nname='{name}'\nextends=['{}','{}']",
+                        parents[0], parents[1]
+                    ),
+                );
+            }
+            parents = next;
+        }
+        let result = resolve_content_preset(&parents[0], &sources).unwrap();
+        assert_eq!(result.gates.len(), 1);
+        assert_eq!(result.gates[0].id(), "w");
+    }
+
+    #[test]
+    fn inheritance_depth_is_bounded_even_for_cached_ancestors() {
+        let mut sources = BTreeMap::from([(
+            "n0".to_owned(),
+            "version=1\nname='n0'\n[[gates]]\nid='w'\nkind='word_count'\nmin=1\n".to_owned(),
+        )]);
+        for level in 1..=64 {
+            sources.insert(
+                format!("n{level}"),
+                format!("version=1\nname='n{level}'\nextends=['n{}']", level - 1),
+            );
+        }
+        assert!(resolve_content_preset("n63", &sources).is_ok());
+        assert!(
+            resolve_content_preset("n64", &sources)
+                .unwrap_err()
+                .to_string()
+                .contains("maximum depth")
+        );
+        sources.insert(
+            "root".into(),
+            "version=1\nname='root'\nextends=['n20','n62']".into(),
+        );
+        assert!(resolve_content_preset("root", &sources).is_ok());
+        sources.insert(
+            "root".into(),
+            "version=1\nname='root'\nextends=['n20','n63']".into(),
+        );
+        assert!(
+            resolve_content_preset("root", &sources)
+                .unwrap_err()
+                .to_string()
+                .contains("maximum depth")
         );
     }
 
