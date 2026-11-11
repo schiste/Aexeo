@@ -60,13 +60,15 @@ def capture(text, report, gate_id, example_id, human_status=None, reviewer=None,
     return note
 
 
-def _review_event(corpus, note, module):
+def _review_event(corpus, note, module, version):
     if note.get("version") != 1 or note.get("kind") != "reported_human_feedback":
         raise ValueError("unsupported feedback note")
     if note.get("gate_id") != corpus.get("gate_id"):
         raise ValueError("feedback gate does not match corpus")
-    if note.get("human_status") not in {"passed", "failed"}:
-        raise ValueError("an explicit human pass or fail is required")
+    statuses = {"passed", "failed", "uncertain"} if version == 3 else {"passed", "failed"}
+    if note.get("human_status") not in statuses:
+        raise ValueError("an explicit human pass or fail is required" if version != 3
+                         else "an explicit human pass, fail or uncertain status is required")
     if any(not isinstance(note.get(k), str) or not note[k].strip() for k in ("reviewer", "method")):
         raise ValueError("reviewer and method provenance are required")
     event = {"example_id": note.get("example_id"), "text_sha256": note.get("text_sha256"),
@@ -83,7 +85,7 @@ def _review_event(corpus, note, module):
     return event
 
 
-def export_reviews(corpus, notes, version=2):
+def export_reviews(corpus, notes, version=None):
     """Export validated reported reviews without resolving disagreements."""
     if not notes:
         raise ValueError("at least one feedback note is required")
@@ -91,7 +93,9 @@ def export_reviews(corpus, notes, version=2):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     module.validate_corpus(corpus)
-    events = [_review_event(corpus, note, module) for note in notes]
+    if version is None:
+        version = 3 if any(note.get("human_status") == "uncertain" for note in notes) else 2
+    events = [_review_event(corpus, note, module, version) for note in notes]
     log = {"version": version, "gate_id": corpus["gate_id"], "events": events}
     module.aggregate_review_events(corpus, "development", log)
     return log
@@ -193,7 +197,10 @@ def main():
                 for review in value["events"]:
                     opinions.setdefault(review["example_id"], set()).add(review["reviewer_status"])
                 event.update(review_count=len(value["events"]), example_count=len(opinions),
-                             disagreement_count=sum(len(statuses) > 1 for statuses in opinions.values()))
+                             disagreement_count=sum({"passed", "failed"} <= statuses for statuses in opinions.values()))
+                if value["version"] == 3:
+                    event["uncertain_count"] = sum(review["reviewer_status"] == "uncertain" for review in value["events"])
+                    event["uncertain_example_count"] = sum("uncertain" in statuses for statuses in opinions.values())
             print(json.dumps(event), file=sys.stderr)
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
         parser.exit(2, f"feedback operation failed: {error}\n")

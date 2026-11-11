@@ -162,15 +162,20 @@ def validate_corpus(corpus):
 def aggregate_review_events(corpus, split, review_log, current_policy=None):
     """Summarize supplied historical reviews without exposing IDs or text."""
     version = review_log.get("version")
-    if type(version) is not int or version not in {1, 2} or review_log.get("gate_id") != corpus["gate_id"]:
+    if type(version) is not int or version not in {1, 2, 3} or review_log.get("gate_id") != corpus["gate_id"]:
         raise ValueError("review log version or gate does not match corpus")
     by_id = {item["id"]: item for item in corpus["examples"]}
     seen = set()
     opinions = {}
+    uncertain_examples = set()
+    uncertain_reviews = 0
     counts = {"agreed": 0, "overrides_to_pass": 0, "overrides_to_fail": 0, "resolved_unchecked": 0}
     binding_counts = {"verified": 0, "unverified": 0}
     policy_counts = {"matching": 0, "different": 0, "unbound": 0}
     policy_decisions = {key: dict.fromkeys(counts, 0) for key in policy_counts}
+    if version == 3:
+        for decisions in policy_decisions.values():
+            decisions["uncertain"] = 0
     for event in review_log["events"]:
         identifier = event["example_id"]
         if identifier not in by_id:
@@ -192,7 +197,8 @@ def aggregate_review_events(corpus, split, review_log, current_policy=None):
         elif "metadata_sha256" in event:
             raise ValueError("review event contains metadata absent from the example")
         model, reviewer = event["model_status"], event["reviewer_status"]
-        if model not in {"passed", "failed", "not_checked"} or reviewer not in {"passed", "failed"}:
+        valid_reviews = {"passed", "failed", "uncertain"} if version == 3 else {"passed", "failed"}
+        if model not in {"passed", "failed", "not_checked"} or reviewer not in valid_reviews:
             raise ValueError("invalid review event status")
         if any(not isinstance(event.get(key), str) or not event[key].strip() for key in ("reviewer", "method")):
             raise ValueError("review event requires reviewer and method provenance")
@@ -204,23 +210,31 @@ def aggregate_review_events(corpus, split, review_log, current_policy=None):
             validate_policy_fingerprint(fingerprint)
         if item["split"] != split:
             continue
-        if version == 2:
+        if version in {2, 3}:
             opinions.setdefault(identifier, set()).add(reviewer)
         policy_group = "unbound" if fingerprint is None else "matching" if fingerprint["sha256"] == current_policy else "different"
         if current_policy is not None:
             policy_counts[policy_group] += 1
         binding_counts[binding] += 1
-        outcome = ("resolved_unchecked" if model == "not_checked" else "agreed" if model == reviewer
-                   else "overrides_to_pass" if reviewer == "passed" else "overrides_to_fail")
-        counts[outcome] += 1
+        if reviewer == "uncertain":
+            uncertain_reviews += 1
+            uncertain_examples.add(identifier)
+            outcome = "uncertain"
+        else:
+            outcome = ("resolved_unchecked" if model == "not_checked" else "agreed" if model == reviewer
+                       else "overrides_to_pass" if reviewer == "passed" else "overrides_to_fail")
+            counts[outcome] += 1
         if current_policy is not None:
             policy_decisions[policy_group][outcome] += 1
     decisions = counts["agreed"] + counts["overrides_to_pass"] + counts["overrides_to_fail"]
-    result = {"events": sum(counts.values()), "counts": counts, "report_binding_counts": binding_counts,
+    result = {"events": sum(counts.values()) + uncertain_reviews, "counts": counts, "report_binding_counts": binding_counts,
               "override_rate": (counts["overrides_to_pass"] + counts["overrides_to_fail"]) / decisions if decisions else None}
-    if version == 2:
+    if version in {2, 3}:
         result["reviewed_examples"] = len(opinions)
-        result["disagreed_examples"] = sum(len(statuses) > 1 for statuses in opinions.values())
+        result["disagreed_examples"] = sum({"passed", "failed"} <= statuses for statuses in opinions.values())
+    if version == 3:
+        result["uncertain_reviews"] = uncertain_reviews
+        result["uncertain_examples"] = len(uncertain_examples)
     if current_policy is not None:
         result["policy_binding_counts"] = policy_counts
         result["policy_decisions"] = policy_decisions
