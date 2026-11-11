@@ -68,7 +68,7 @@
     "typecheck": "npm run sync-version && npm run typecheck:src && npm run typecheck:tests",
     "typecheck:src": "tsc --noEmit",
     "typecheck:tests": "tsc -p tsconfig.test.json",
-    "test": "vitest run",
+    "test": "node scripts/check-native-families.mjs && vitest run",
     "test:wasm": "node scripts/test-content-collection-wasm.mjs && node scripts/test-save-evaluation-wasm.mjs",
     "prepublishOnly": "npm run build"
   },

@@ -379,7 +379,8 @@ describe("assessment persistence", () => {
     await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator });
     expect(store.get(findingsKey("/a"))).toMatchObject({ findings: [{ aexeo_cms_location: expected }] });
     expect(events.filter(([name]) => name === "aexeo.cms_location_coverage").map(([, value]) => value)).toEqual([{ eligible: 1, mapped: 1, unmapped: 0 }, { eligible: 1, mapped: 1, unmapped: 0 }]);
-    expect(JSON.stringify(events)).not.toContain("body");
+    expect(JSON.stringify(events)).not.toContain("😀 text");
+    expect(JSON.stringify(events)).not.toContain('"body"');
     const invalid: EvaluatorFn = async () => ({ ok: true, findings: [{ ...located, aexeo_source_location: { ...located.aexeo_source_location, utf16_offset: 1 }, aexeo_cms_location: expected }] });
     await save(ctx, subject, invalid);
     expect((store.get(findingsKey("/a")) as { findings: Finding[] }).findings[0]).not.toHaveProperty("aexeo_cms_location");
@@ -394,9 +395,25 @@ describe("assessment persistence", () => {
     expect(store.get(findingsKey("/a"))).toMatchObject({ findings: [tagged] });
     expect((await readAllFindings(ctx.kv)).map((entry) => entry.rule_id)).toEqual(["CNT005"]);
     expect(events.find(([name]) => name === "aexeo.preset_coverage")).toEqual(["aexeo.preset_coverage", { status: "evaluated", documents: 1, assessed_documents: 0, missing_assessments: 1, assessment_errors: 0, passed: 0, failed: 0, not_checked: 0, colliding_findings: 1, mapping_reports: 0, mapping_eligible: 0, mapping_mapped: 0, mapping_unmapped: 0 }]);
-    expect(events.find(([name]) => name === "aexeo.cms_finding_coverage")).toEqual(["aexeo.cms_finding_coverage", { status: "evaluated", rendered_findings_withheld: 1 }]);
+    expect(events.find(([name]) => name === "aexeo.cms_finding_coverage")).toEqual(["aexeo.cms_finding_coverage", { status: "evaluated", rendered_findings_withheld: 1, incomplete_body_findings_withheld: 0 }]);
     expect(JSON.stringify(events)).not.toContain("CNT005");
     expect(JSON.stringify(events)).not.toContain("/a");
+  });
+  it("counts body findings withheld for incomplete or unknown documents without exposing identifiers", async () => {
+    const { ctx, store } = host([item("a", OLD)]);
+    const events: Array<[string, unknown]> = [];
+    ctx.log = { info: (name, data) => events.push([name, data]), warn: () => {}, error: () => {} };
+    const evaluator: EvaluatorFn = async () => ({ ok: true, findings: [
+      finding("/a", "CNT006"), finding("/unknown", "LNK003"), finding("/a", "ROB001"),
+      { ...finding("/a", "CNT006"), aexeo_origin: "content_preset" },
+    ] });
+    await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator });
+    expect(store.get(findingsKey("/a"))).toMatchObject({ findings: [{ rule_id: "CNT006", aexeo_origin: "content_preset" }] });
+    expect(events.find(([name]) => name === "aexeo.cms_finding_coverage")).toEqual(["aexeo.cms_finding_coverage", {
+      status: "evaluated", rendered_findings_withheld: 1, incomplete_body_findings_withheld: 2,
+    }]);
+    expect(JSON.stringify(events)).not.toContain("/unknown");
+    expect(JSON.stringify(events)).not.toContain("LNK003");
   });
   it("replaces previous findings with an explicit error for a failed newer evaluation", async () => {
     const { ctx, store } = host();

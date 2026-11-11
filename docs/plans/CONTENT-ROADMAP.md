@@ -39,6 +39,8 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 
 ## Delivery tracker
 
+- [x] Report aggregate body findings withheld due to incomplete CMS projections; guard known native families against drift with a registry test. Unknown custom rules remain host-managed.
+
 - [x] Withhold findings from known native rule families in CMS-only views, including old stored findings, except explicitly tagged content-preset results and two page-level checks supported by a complete body. Unknown host rule IDs remain the host evaluator’s responsibility; the native-family list must track new native rules.
 
 - [x] Aggregate gate coverage and measurements for word count, required metadata,
