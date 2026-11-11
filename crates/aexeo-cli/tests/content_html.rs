@@ -146,6 +146,52 @@ fn html_literal_fragment_maps_prose_and_reports_capability() {
 }
 
 #[test]
+fn html_headings_and_link_occurrences_map_to_source_tags() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("article.html");
+    let preset = dir.path().join("preset.toml");
+    let html = "<h1>Long title</h1>\n<h2>Long title</h2>\n<p><a href='http://bad'>x</a> <a href='https://ok'>y</a><a href='http://bad'>z</a></p>";
+    fs::write(&input, html).unwrap();
+    fs::write(&preset, "version=1\nname='test'\n[[gates]]\nid='length'\nkind='heading_length'\nmax_chars=3\n[[gates]]\nid='dup'\nkind='duplicate_headings'\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            input.to_str().unwrap(),
+            "--input-format",
+            "html",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--format",
+            "json",
+            "--telemetry",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["source_locations"],
+        serde_json::json!([
+            {"gate_id":"length", "finding_index":0, "line":1, "column":1},
+            {"gate_id":"length", "finding_index":1, "line":2, "column":1},
+            {"gate_id":"dup", "finding_index":0, "line":2, "column":1},
+            {"gate_id":"links", "finding_index":0, "line":3, "column":4},
+            {"gate_id":"links", "finding_index":1, "line":3, "column":57}
+        ])
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let event: serde_json::Value = stderr
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|event| event["event"] == "content_evaluation")
+        .unwrap();
+    assert_eq!(event["source_mapping"]["mapped"], 5);
+    assert!(!stderr.contains("http://bad"));
+}
+
+#[test]
 fn html_limit_telemetry_reports_unavailable_without_fabricated_counts() {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("large.html");

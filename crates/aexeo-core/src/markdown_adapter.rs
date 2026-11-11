@@ -85,10 +85,53 @@ pub fn prose_gate_has_positions(gate: &crate::content_gate::ContentGate) -> bool
     )
 }
 
+/// Adapter-specific exact positions used by the shared gate mapper.
+pub(crate) trait ContentSourceMap {
+    fn prose_position(
+        &self,
+        source: &str,
+        projected: &str,
+        line: usize,
+        column: usize,
+    ) -> Option<(usize, usize)>;
+    fn heading_position(&self, source: &str, index: usize) -> Option<(usize, usize)>;
+    fn link_position(&self, source: &str, index: usize) -> Option<(usize, usize)>;
+}
+
+impl ContentSourceMap for MarkdownSourceMap {
+    fn prose_position(
+        &self,
+        source: &str,
+        projected: &str,
+        line: usize,
+        column: usize,
+    ) -> Option<(usize, usize)> {
+        self.source_position(source, projected, line, column)
+    }
+    fn heading_position(&self, source: &str, index: usize) -> Option<(usize, usize)> {
+        self.heading_source_position(source, index)
+    }
+    fn link_position(&self, source: &str, index: usize) -> Option<(usize, usize)> {
+        self.link_source_position(source, index)
+    }
+}
+
 /// Map positional gate findings to exact source positions. `None` means the
 /// gate has no positional semantics; missing positions are never guessed.
 pub fn gate_source_positions(
     map: &MarkdownSourceMap,
+    source: &str,
+    input: &ContentInput,
+    gate: &crate::content_gate::ContentGate,
+    result: &crate::content_gate::ContentGateResult,
+    destinations: Option<&[String]>,
+    observations: Option<&[crate::content_gate::LinkReachabilityObservation]>,
+) -> Option<Vec<Option<(usize, usize)>>> {
+    map_gate_source_positions(map, source, input, gate, result, destinations, observations)
+}
+
+pub(crate) fn map_gate_source_positions(
+    map: &dyn ContentSourceMap,
     source: &str,
     input: &ContentInput,
     gate: &crate::content_gate::ContentGate,
@@ -117,7 +160,7 @@ pub fn gate_source_positions(
             .collect();
         if indices.len() == result.total_findings() {
             for (position, index) in positions.iter_mut().zip(indices) {
-                *position = map.link_source_position(source, index);
+                *position = map.link_position(source, index);
             }
         }
     } else if matches!(gate, ContentGate::LinkReachability { .. }) {
@@ -128,7 +171,7 @@ pub fn gate_source_positions(
                 (*observation == LinkReachabilityObservation::NotFound).then_some(index)
             });
         for (position, index) in positions.iter_mut().zip(indices) {
-            *position = map.link_source_position(source, index);
+            *position = map.link_position(source, index);
         }
     } else if let Some(indices) = input
         .headings
@@ -137,13 +180,13 @@ pub fn gate_source_positions(
     {
         if indices.len() == result.total_findings() {
             for (position, index) in positions.iter_mut().zip(indices) {
-                *position = map.heading_source_position(source, index);
+                *position = map.heading_position(source, index);
             }
         }
     } else if prose_gate_has_positions(gate) {
         let projected = input.text.as_deref()?;
         for (position, finding) in positions.iter_mut().zip(&result.findings) {
-            *position = map.source_position(source, projected, finding.line, finding.column);
+            *position = map.prose_position(source, projected, finding.line, finding.column);
         }
     } else {
         return None;

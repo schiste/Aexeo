@@ -1057,12 +1057,14 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
                     )
                 })
                 .or_else(|| {
-                    crate::html_content_adapter::gate_source_positions(
+                    crate::html_content_adapter::gate_source_positions_with_links(
                         html_map.as_ref()?,
                         input.source_text.as_deref()?,
                         &input,
                         definition,
                         &gate,
+                        destinations.as_deref(),
+                        observations.as_deref(),
                     )
                 })
                 .or_else(|| {
@@ -2261,6 +2263,50 @@ mod tests {
                 .map(|p| (p.line, p.column)),
             Some((1, 40))
         );
+    }
+
+    #[test]
+    fn html_change_maps_link_observations_to_their_source_occurrences() {
+        use crate::content_gate::LinkReachabilityObservation as Observation;
+        use sha2::{Digest, Sha256};
+        let source = "<p><a href='/a'>one</a> <a href='/b'>two</a> <a href='/a'>three</a></p>";
+        let mut change = change();
+        change.entries[0].media_type = "text/html".into();
+        let state = change.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let policy = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\n",
+        )
+        .unwrap();
+        let mut observe = |_: &str, values: &[String]| {
+            assert_eq!(values, ["/a", "/b", "/a"]);
+            Ok(vec![
+                Observation::NotFound,
+                Observation::Reachable,
+                Observation::NotFound,
+            ])
+        };
+        let verdict = evaluate_change_with_observer(
+            &change,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+            Some(&mut observe),
+        )
+        .unwrap();
+        let positions: Vec<_> = verdict
+            .findings
+            .iter()
+            .map(|finding| finding.location.as_ref().map(|p| (p.line, p.column)))
+            .collect();
+        let anchors: Vec<_> = source
+            .match_indices("<a ")
+            .map(|(offset, _)| (offset + 1) as u64)
+            .collect();
+        assert_eq!(positions, [Some((1, anchors[0])), Some((1, anchors[2]))]);
     }
 
     #[test]
