@@ -764,7 +764,7 @@ enum ReliabilityVerdict {
 
 /// A diagnostic returned by a trusted host extension. Positions refer to the
 /// input's projected text, matching the built-in content gate convention.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExtensionDiagnostic {
     pub message: String,
     pub line: usize,

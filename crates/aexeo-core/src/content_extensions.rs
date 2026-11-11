@@ -31,9 +31,32 @@ pub struct ExternalGateResult {
     pub diagnostics: Vec<ExternalDiagnostic>,
 }
 
+#[derive(Serialize)]
+#[serde(transparent)]
 pub struct ExternalGateResults(Vec<ExternalGateResult>);
 
 impl ExternalGateResults {
+    /// A fingerprint of the validated snapshot, including unconsumed records.
+    /// It is not an authentication mechanism or evidence of producer quality.
+    pub fn fingerprint(&self) -> Result<String> {
+        use sha2::{Digest, Sha256};
+        use std::io::{self, Write};
+        struct HashWriter(Sha256);
+        impl Write for HashWriter {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.update(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut writer = HashWriter(Sha256::new());
+        writer.0.update(b"aexeo.external-snapshot.v1");
+        serde_json::to_writer(&mut writer, self)?;
+        Ok(format!("{:x}", writer.0.finalize()))
+    }
+
     pub fn new(results: Vec<ExternalGateResult>) -> Result<Self> {
         Self::validate(results, false)
     }
