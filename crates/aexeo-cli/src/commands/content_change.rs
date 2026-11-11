@@ -227,7 +227,7 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         Err(error) => return Err(error),
     };
     if let Some(mut previous) = previous_verdict {
-        aexeo_core::content_gate_verdict::verify_offline_input_binding(
+        let binding = aexeo_core::content_gate_verdict::verify_offline_input_binding(
             &previous,
             &change,
             &preset,
@@ -242,12 +242,21 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
                     complete: snapshot.complete,
                 })
                 .as_ref(),
-        )
-        .user_context("previous verdict does not match the current offline inputs")?;
+        );
         // Compare the complete result with a fresh local evaluation. A fingerprint
         // alone does not authenticate or establish the correctness of a verdict.
         previous.evaluated_at.clone_from(&verdict.evaluated_at);
-        if previous != verdict {
+        let matched = binding.is_ok() && previous == verdict;
+        if telemetry {
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "event": "content_change_revalidation", "version": 1, "matched": matched
+                })
+            );
+        }
+        binding.user_context("previous verdict does not match the current offline inputs")?;
+        if !matched {
             user_bail!("previous verdict differs from the current offline evaluation");
         }
     }

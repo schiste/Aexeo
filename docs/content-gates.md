@@ -624,6 +624,8 @@ the evaluation timestamp. A mismatch, missing fingerprint, or unreadable input
 returns exit code 2 and does not write a new verdict. On a match, it writes the
 fresh verdict and returns its usual status code (0, 1, or 2). Always check the
 exit code; an output path may contain an older file from a previous invocation.
+Opt-in `--telemetry` reports `content_change_revalidation` with a boolean match
+result, without the content, paths, or identifiers.
 This mode rejects `--extension-results` and `--check-link-reachability` because
 external observations cannot be replayed this way. It does not authenticate the
 previous timestamp, verify collection completeness or revision, or replace the

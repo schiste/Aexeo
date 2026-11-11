@@ -532,7 +532,17 @@ fn revalidates_previous_verdict_against_current_inputs_and_result() {
     fs::copy(dir.path().join("verdict.json"), &previous).unwrap();
     let path = previous.to_str().unwrap();
     let args = ["--verify-verdict", path];
-    let valid = run(dir.path(), &input(), policy, &args);
+    let valid = run(
+        dir.path(),
+        &input(),
+        policy,
+        &["--verify-verdict", path, "--telemetry"],
+    );
+    let event: serde_json::Value = serde_json::from_slice(&valid.stderr).unwrap();
+    assert_eq!(
+        event,
+        serde_json::json!({"event":"content_change_revalidation", "version":1, "matched":true})
+    );
     assert_eq!(
         valid.status.code(),
         Some(0),
@@ -542,10 +552,20 @@ fn revalidates_previous_verdict_against_current_inputs_and_result() {
 
     let mut changed = input();
     changed["entries"][0]["metadata"] = serde_json::json!({"slug":"different"});
-    assert_eq!(
-        run(dir.path(), &changed, policy, &args).status.code(),
-        Some(2)
+    let rejected = run(
+        dir.path(),
+        &changed,
+        policy,
+        &["--verify-verdict", path, "--telemetry"],
     );
+    assert_eq!(rejected.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&rejected.stderr);
+    let event: serde_json::Value = serde_json::from_str(stderr.lines().next().unwrap()).unwrap();
+    assert_eq!(
+        event,
+        serde_json::json!({"event":"content_change_revalidation", "version":1, "matched":false})
+    );
+    assert!(!stderr.contains("different"));
     let other_policy = policy.replace("min=1", "min=2");
     assert_eq!(
         run(dir.path(), &input(), &other_policy, &args)
