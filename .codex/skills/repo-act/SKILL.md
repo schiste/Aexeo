@@ -48,6 +48,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   covers libraries and binaries, while CI separately lints test targets.
 - When changing CLI arguments, regenerate and verify the CLI reference with
   `cargo run -q -p aexeo-cli -- docs generate .` and `cargo run -q -p aexeo-cli -- docs check .`; CI checks generated documentation.
+- EmDash Vitest runs in the plugin test host, whose filesystem is sandboxed;
+  checks that must read repository files should run as a separate Node script
+  outside the host. Test paths containing spaces as well as CI paths.
 - Before EmDash `npm run test:wasm`, rebuild the plugin bundle after TypeScript
   changes (`npm run build:bundle`); `build:ts` alone leaves bundled entrypoints
   stale. Rebuild the WASM bridge too when Rust bridge code changes. When
