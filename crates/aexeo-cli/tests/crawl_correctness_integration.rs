@@ -1756,6 +1756,20 @@ fn links_through_a_redirect_are_neither_broken_nor_orphaned_once_the_report_prov
             .unwrap();
     assert!(rule_findings(&stored["findings"], "LNK002").is_empty());
     assert_eq!(stored["summary"], payload["artifact"]["summary"]);
+    let rendered = Command::new(bin())
+        .current_dir(temp.path())
+        .args([
+            "report",
+            "render",
+            payload["audit_path"].as_str().unwrap(),
+            "--link-graph",
+            graph.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(rendered.status.success());
+    assert!(!String::from_utf8_lossy(&rendered.stderr).contains("qualifications were not applied"));
+    assert!(String::from_utf8_lossy(&rendered.stdout).contains("1 suppressed as disproven"));
 }
 
 /// A seeded crawl of `site` with the link rules only, writing its own link

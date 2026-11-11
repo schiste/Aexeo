@@ -273,9 +273,9 @@ missing and unspecified languages are not treated as an observed mismatch.
 - [x] Integrate coverage-aware graph observations into existing site reports;
   validate legacy rule semantics and preserve contracts and baseline compatibility.
   Crawl and `report render --link-graph` carry the qualified findings and link
-  graph notes. The static `audit` command is out of scope: it reads local files
-  without a crawl, so it has no release, snapshot or completeness evidence to
-  qualify LNK001/LNK002 against, and its findings stay unqualified.
+  graph notes. Static `check` can opt into graph qualifications using an explicit
+  URL map, but local files alone do not establish a deployed release or complete
+  crawl and therefore cannot confirm an orphan.
 - [ ] Run end-to-end fixtures and real-site comparisons for static and runtime
   sources, multiple locales, incomplete crawls, redirects and cross-origin URLs.
   A local HTTP fixture now exercises a seeded English/French crawl end to end:

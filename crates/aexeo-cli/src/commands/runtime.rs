@@ -491,8 +491,8 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
             );
             full_audit_artifact.summary =
                 aexeo_core::reporting::summarize_findings(&full_audit_artifact.findings);
+            graph.bind_audit(&full_audit_artifact)?;
         }
-        graph.bind_audit(&full_audit_artifact)?;
         if submatches.get_flag("link-graph-summary") {
             graph_summary = Some(super::link_graph::link_graph_summary(&graph));
         }
