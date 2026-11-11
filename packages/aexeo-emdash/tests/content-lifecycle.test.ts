@@ -483,6 +483,51 @@ describe("sitewide refresh coverage", () => {
       expect(JSON.stringify(store.get(findingsKey(route)))).not.toContain("private draft text");
     }
   });
+  it("continues a refresh after an item adaptation fails and marks its prior findings unavailable", async () => {
+    const { ctx, store } = host([item("a", NEW), item("b", NEW), item("c", NEW)]);
+    await save(ctx, item("b", OLD), returning("OLD"));
+    const events: Array<[string, unknown]> = [];
+    ctx.log = { info: (name, value) => events.push([name, value]), warn: () => {}, error: () => {} };
+    ctx.content.getPublicUrl = async (_collection, id) => {
+      if (id === "b") throw new Error("private draft text");
+      return `https://example.com/${id}`;
+    };
+    const summary = await sweep(ctx, returning("CURRENT"));
+    expect(summary.documentsScanned).toBe(2);
+    expect(summary.errors).toContain("pages: content adaptation failed");
+    expect(rulesAt(store, "/a")).toEqual(["CURRENT"]);
+    expect(rulesAt(store, "/c")).toEqual(["CURRENT"]);
+    expect(store.get(findingsKey("/b"))).toMatchObject({ findings: [], assessment: { status: "error", reason: "adaptation_failed" } });
+    expect(store.get(findingsKey("*"))).toMatchObject({ assessment: { status: "error", reason: "inventory_incomplete" } });
+    expect(events).toContainEqual(["aexeo.adaptation_coverage", { failed: 1 }]);
+    expect(JSON.stringify({ summary, events, value: store.get(findingsKey("/b")) })).not.toContain("private draft text");
+  });
+  it("does not replace a save that finishes while adaptation is failing", async () => {
+    const { ctx, store } = host([item("b", OLD)]);
+    await save(ctx, item("b", OLD), returning("OLD"));
+    let release = (): void => {};
+    let entered = (): void => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    let first = true;
+    ctx.content.getPublicUrl = async (_collection, id) => {
+      if (first) { first = false; entered(); await gate; throw new Error("unavailable"); }
+      return `https://example.com/${id}`;
+    };
+    const pending = sweep(ctx, returning());
+    await started;
+    await save(ctx, item("b", NEW), returning("CURRENT"));
+    release();
+    await pending;
+    expect(rulesAt(store, "/b")).toEqual(["CURRENT"]);
+  });
+  it("preserves a newer stored revision when an older listed item fails adaptation", async () => {
+    const { ctx, store } = host([item("b", OLD)]);
+    await save(ctx, item("b", NEW), returning("CURRENT"));
+    ctx.content.getPublicUrl = async () => { throw new Error("unavailable"); };
+    await sweep(ctx, returning());
+    expect(rulesAt(store, "/b")).toEqual(["CURRENT"]);
+  });
   it("does not emit graph or global conclusions from an incomplete listing", async () => {
     const { ctx, store } = host();
     ctx.content.list = async () => { throw new Error("list unavailable"); };

@@ -743,6 +743,7 @@ export async function evaluateAndPersistAll(
   const documentCollections: string[] = [];
   const adaptedByRoute = new Map<string, StoredDocument>();
   const documentRoutes = new Set<string>();
+  const adaptationFailures: Array<{ item: EmdashContentItem; collection: string }> = [];
   for (const collection of collections) {
     let cursor: string | undefined;
     const seenCursors = new Set<string>();
@@ -753,21 +754,28 @@ export async function evaluateAndPersistAll(
           ...(cursor === undefined ? {} : { cursor }),
         });
         for (const item of page.items) {
-          const adapted = await adaptContentItemWithContext(
-            item,
-            ctx.content,
-            ctx.site?.locale,
-            options.blockMappings,
-            options.contentFieldsByCollection?.[collection],
-            options.descriptionFieldsByCollection?.[collection],
-          );
-          documents.push(adapted.document);
-          documentCollections.push(adapted.meta.collection);
-          documentRoutes.add(adapted.document.route);
-          adaptedByRoute.set(adapted.document.route, {
-            document: adapted.document,
-            meta: adapted.meta,
-          });
+          try {
+            const adapted = await adaptContentItemWithContext(
+              item,
+              ctx.content,
+              ctx.site?.locale,
+              options.blockMappings,
+              options.contentFieldsByCollection?.[collection],
+              options.descriptionFieldsByCollection?.[collection],
+            );
+            documents.push(adapted.document);
+            documentCollections.push(adapted.meta.collection);
+            documentRoutes.add(adapted.document.route);
+            adaptedByRoute.set(adapted.document.route, {
+              document: adapted.document,
+              meta: adapted.meta,
+            });
+          } catch {
+            // Continue the listing, but never treat this inventory as complete.
+            // Exception messages may contain content or credentials.
+            adaptationFailures.push({ item, collection });
+            summary.errors.push(`${collection}: content adaptation failed`);
+          }
         }
         if (page.hasMore) {
           if (!page.cursor || seenCursors.has(page.cursor)) throw new Error("incomplete pagination: missing or repeated cursor");
@@ -786,6 +794,27 @@ export async function evaluateAndPersistAll(
   const inventoryComplete = summary.errors.length === 0;
   summary.documentsScanned = documents.length;
   recordContentCoverage(ctx, documents);
+  if (adaptationFailures.length > 0) {
+    try { ctx.log?.info?.("aexeo.adaptation_coverage", { failed: adaptationFailures.length }); } catch { /* best effort */ }
+    const storedByCollection = new Map<string, Map<string, StoredDocument[]>>();
+    for (const stored of storedAtStart) {
+      const byId = storedByCollection.get(stored.meta.collection) ?? new Map<string, StoredDocument[]>();
+      const entries = byId.get(stored.meta.id) ?? [];
+      entries.push(stored);
+      byId.set(stored.meta.id, entries);
+      storedByCollection.set(stored.meta.collection, byId);
+    }
+    for (const { item, collection } of adaptationFailures) {
+      for (const stored of storedByCollection.get(collection)?.get(item.id) ?? []) {
+        if (isOlderRevision(item.updatedAt, stored.meta.updatedAt) || documentRoutes.has(stored.document.route) ||
+            await isSuperseded(kv, stored)) continue;
+        await kv.set(findingsKey(stored.document.route), {
+          route: stored.document.route, findings: [],
+          assessment: { status: "error", reason: "adaptation_failed", detail: "The CMS record could not be adapted." },
+        });
+      }
+    }
+  }
 
   // 2. Persist documents (with metadata) in KV — the score widget
   //    and admin findings page both read these. Metadata carries the
