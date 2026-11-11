@@ -189,6 +189,46 @@ class FeedbackTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate"):
             evaluator.aggregate_review_events(self.corpus, "development", dict(log, version=1))
 
+    def test_uncertain_review_is_preserved_without_becoming_a_verdict(self):
+        uncertain = module.capture(self.text, self.report, "length", "e1", "uncertain", "editor-a", "manual")
+        passed = module.capture(self.text, self.report, "length", "e1", "passed", "editor-b", "manual")
+        log = module.export_reviews(self.corpus, [uncertain, passed])
+        self.assertEqual(log["version"], 3)
+        self.assertEqual(log["events"][0]["reviewer_status"], "uncertain")
+        evaluator_spec = importlib.util.spec_from_file_location("evaluator", Path(__file__).with_name("evaluate-content-gates.py"))
+        evaluator = importlib.util.module_from_spec(evaluator_spec)
+        evaluator_spec.loader.exec_module(evaluator)
+        metrics = evaluator.aggregate_review_events(self.corpus, "development", log, "a" * 64)
+        self.assertEqual((metrics["events"], metrics["reviewed_examples"], metrics["uncertain_reviews"], metrics["uncertain_examples"]), (2, 1, 1, 1))
+        self.assertEqual(metrics["disagreed_examples"], 0)
+        self.assertEqual(metrics["override_rate"], 1.0)
+        self.assertEqual(metrics["policy_decisions"]["unbound"]["uncertain"], 1)
+        only_uncertain = module.export_reviews(self.corpus, [uncertain])
+        only_uncertain["events"][0]["model_status"] = "not_checked"
+        metrics = evaluator.aggregate_review_events(self.corpus, "development", only_uncertain)
+        self.assertIsNone(metrics["override_rate"])
+        self.assertEqual(metrics["counts"]["resolved_unchecked"], 0)
+        with self.assertRaisesRegex(ValueError, "status"):
+            evaluator.aggregate_review_events(self.corpus, "development", dict(log, version=2))
+        with self.assertRaisesRegex(ValueError, "explicit human"):
+            module.bind_review(self.corpus, uncertain, accept_human_label=True)
+
+    def test_cli_combines_uncertain_reviews_without_counting_disagreement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "corpus").write_text(json.dumps(self.corpus))
+            for reviewer, status in [("one", "passed"), ("two", "uncertain")]:
+                note = module.capture(self.text, self.report, "length", "e1", status, reviewer, "manual")
+                (root / reviewer).write_text(json.dumps(note))
+            command = [sys.executable, str(SCRIPT), "combine-reviews", "--corpus", str(root / "corpus"),
+                       "--note", str(root / "one"), "--note", str(root / "two"), "--output", str(root / "log"), "--telemetry"]
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads((root / "log").read_text())["version"], 3)
+            telemetry = json.loads(result.stderr)
+            self.assertEqual((telemetry["disagreement_count"], telemetry["uncertain_count"], telemetry["uncertain_example_count"]), (0, 1, 1))
+            self.assertNotIn("e1", result.stderr)
+
     def test_cli_combines_reviews_privately_and_does_not_overwrite(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

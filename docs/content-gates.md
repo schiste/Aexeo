@@ -327,7 +327,7 @@ local and do not transmit data automatically.
 ### Combining independent reported reviews
 
 When several people review examples, create a separate feedback note for each
-person and combine explicit pass/fail notes against the same corpus:
+person and combine explicit pass/fail/uncertain notes against the same corpus:
 
 ```sh
 python3 scripts/content-review-note.py combine-reviews --corpus corpus.json \
@@ -336,23 +336,30 @@ python3 scripts/evaluate-content-gates.py corpus.json --binary target/release/ae
   --split development --review-events reviews.json
 ```
 
-The output is a version 2 review-event log accepted by the corpus evaluator's
-`--review-events` option. It retains each reported verdict, validates each note
+The output is a version 2 review-event log, or version 3 when a note is
+uncertain, accepted by the current corpus evaluator's `--review-events` option.
+Older evaluator versions may reject version 3. It retains each reported verdict,
+validates each note
 against the corpus text and metadata, and rejects repeated example/reviewer pairs
 (reviewer identifiers are compared after trimming outer whitespace). It does not
 modify corpus labels, resolve disagreement, authenticate reviewers, or prove their
-independence. Uncertain notes stay in their original private files and are not
-accepted into this pass/fail log. Keep those files for context: exported events
+independence. Keep the original private notes for context: exported events
 exclude reasons and other private notes.
 
-For version 2, review metrics add `reviewed_examples` and `disagreed_examples`
-for the selected split. Existing event and override counts are per review, so an
+For versions 2 and 3, review metrics add `reviewed_examples` and `disagreed_examples`
+for the selected split. An example counts as disagreed only when both pass and
+fail were reported. Version 3 also reports `uncertain_reviews` and
+`uncertain_examples`; an example with only uncertain reviews is included in
+`reviewed_examples`, but uncertainty is excluded from override rates, agreement
+and resolved-unchecked counts. Policy breakdowns include uncertain events.
+Existing event and override counts are per review, so an
 example with more reviewers has greater weight; disagreement compares reported
 human statuses and does not account for differences in model policy or time.
 The log contains reviewer identifiers and input hashes, and must remain private.
 The command creates a new file with private permissions and refuses overwrite.
-Opt-in local telemetry contains only duration and aggregate counts, with no text,
-identifiers or reasons. It does not transmit data.
+Opt-in local telemetry contains only duration and aggregate counts, including
+uncertainty for version 3, with no text, identifiers or reasons. It does not
+transmit data.
 
 ### Resolving a human review disagreement
 
