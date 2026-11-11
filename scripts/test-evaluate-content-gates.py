@@ -353,6 +353,13 @@ class EvaluateTests(unittest.TestCase):
             self.assertEqual(report["historical_review_events"]["counts"]["overrides_to_pass"], 1)
             self.assertNotIn("private", output.stdout)
             self.assertEqual(output.stderr, "")
+            second = dict(event, reviewer="another reviewer", reviewer_status="failed")
+            (root / "reviews.json").write_text(json.dumps({"version": 2, "gate_id": "g", "events": [event, second]}))
+            output = subprocess.run([sys.executable, str(Path(eval_module.__file__)), str(root / "corpus.json"), "--binary", str(binary), "--review-events", str(root / "reviews.json")], text=True, capture_output=True, check=True)
+            historical = json.loads(output.stdout)["historical_review_events"]
+            self.assertEqual((historical["events"], historical["reviewed_examples"], historical["disagreed_examples"]), (2, 1, 1))
+            self.assertNotIn("private", output.stdout)
+            self.assertNotIn("another reviewer", output.stdout)
 
     def test_assert_regression_exits_on_unchecked_and_mismatches(self):
         for key in ("false_positive", "false_negative", "not_checked"):

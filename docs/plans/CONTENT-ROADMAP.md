@@ -154,6 +154,10 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] Optional corpus strata report aggregate metrics and separately bound-review
   metrics by declared language or content category, including missing labels.
   The labels are unverified and results can contain repeated inputs.
+- [x] Combine explicitly reported reviews from multiple reviewers into a version 2
+  event log; preserve disagreement and report event-weighted override metrics and
+  per-example disagreement counts. This does not authenticate reviewers or
+  establish independence, and leaves uncertain reviews in their private notes.
 - [ ] Independently reviewed, diverse evaluation corpus and held-out metrics.
   A synthetic, explicitly unreviewed starter and evaluator were delivered in
   [PR #32](https://github.com/schiste/Aexeo/pull/32); they do not establish
