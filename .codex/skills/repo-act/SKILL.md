@@ -29,6 +29,8 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   the new commit to a distinct branch through `broker advanced git`, open its
   PR through `broker advanced gh`, and retain the recorded checkout branch for
   submit and finish. Never overwrite the old branch without verified authority.
+  Run a broker-coordinated push with `HEAD` from the session worktree: from
+  another checkout, `HEAD` resolves there and the broker refuses the push.
 - Root `package.json` sets `type: module`: use ES module imports for root
   `.js` scripts and tests, or explicitly use `.cjs` for CommonJS. Run the
   script directly with Node to verify its entrypoint as well as its tests.
