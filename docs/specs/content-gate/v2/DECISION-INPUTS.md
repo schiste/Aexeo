@@ -61,3 +61,9 @@ identity, collection completeness and publication state. Unknown fields in a
 change parsed by v1 may already have been discarded. A matching receipt does
 not prove that an external input was absent, fresh, true or authenticated.
 No CLI or EmDash workflow automatically produces or consumes these receipts.
+
+Run `python -m pip install -r docs/specs/content-gate/v2/requirements-test.txt`
+in an isolated environment, then run
+`python docs/specs/content-gate/v2/test_manifest_schema.py` to check the schema
+and positive and negative examples with Python `jsonschema`. Schema validation
+cannot detect duplicate JSON keys after parsing or enforce the raw byte limit.
