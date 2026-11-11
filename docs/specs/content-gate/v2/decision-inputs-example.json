@@ -1,0 +1,26 @@
+{
+  "schema": "content-gate.decision-inputs/v1",
+  "change": {
+    "state": "present",
+    "sha256": "aa9fc60242a78079729a80d3d536abd8d29d116d2dde61cf9ac49236359b49f5"
+  },
+  "resolved_policy": {
+    "state": "present",
+    "sha256": "72993b6cb83904d39a8c73bd0651aa6251288ede5dbc2c7bcbdc54cc5bbf5d77"
+  },
+  "host_options": {
+    "state": "present",
+    "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+  },
+  "evaluator": {
+    "state": "present",
+    "sha256": "5db765dba9182925f4a20746a7a63251c2873b3a423b482c659914dadd5101a6"
+  },
+  "collection": {
+    "state": "absent"
+  },
+  "external_evidence": {
+    "state": "present",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}
