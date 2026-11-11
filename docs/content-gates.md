@@ -326,6 +326,42 @@ representative; these metrics include repeated inputs, so also inspect the
 existing unique-input metrics and source-group coverage. Corpus results are
 local and do not transmit data automatically.
 
+### Preparing a blind review packet
+
+A reviewer can assess examples without receiving the proposed labels, the split,
+or Aexeo's decisions. Supply a clear rubric, create a private packet, and give it
+only to an authorized reviewer:
+
+```sh
+python3 scripts/content-review-note.py blind-packet --corpus corpus.json \
+  --split holdout --rubric-file rubric.txt --output review-packet.json --telemetry
+```
+
+For each reviewed example, the reviewer fills in `human_status` with `passed`,
+`failed`, or `uncertain`; leaving it `null` skips it. Then import those explicit
+opinions into a new private corpus copy:
+
+```sh
+python3 scripts/content-review-note.py bind-blind-reviews --corpus corpus.json \
+  --packet review-packet.json --reviewer reviewer-id --method 'independent manual' \
+  --output reviewed-corpus.json --telemetry
+```
+
+If a pass/fail differs from the proposed label, the entire import fails unless
+`--accept-human-label` is explicitly provided; the former label is retained in
+`previous_expected`. Changed text or metadata, unknown or duplicate IDs and
+already-reviewed examples are rejected. Uncertain and unanswered examples remain
+unreviewed; retain the packet to preserve those responses. At least one pass or
+fail is needed to create a reviewed corpus copy. The review records the text,
+metadata and supplied rubric hashes, reviewer and method, but no model decision.
+It does not prove reviewer identity, independence, what material they actually
+saw, or that the rubric corresponds to a particular policy. The packet can itself
+reveal information through the supplied rubric, identifiers or content; it
+contains full text and metadata and should be handled as sensitive. Never use
+synthetic regression fixtures as independent human evidence. Output files are
+created with private permissions and cannot overwrite existing files. Optional
+local telemetry contains only aggregate counts and duration.
+
 ### Combining independent reported reviews
 
 When several people review examples, create a separate feedback note for each

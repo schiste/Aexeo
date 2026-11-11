@@ -133,6 +133,95 @@ def bind_review(corpus, note, accept_human_label=False):
     return result
 
 
+def _corpus_module():
+    spec = importlib.util.spec_from_file_location("content_gate_evaluation", Path(__file__).with_name("evaluate-content-gates.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def blind_packet(corpus, split, rubric):
+    """Prepare a private review copy without proposed labels or model output."""
+    module = _corpus_module()
+    module.validate_corpus(corpus)
+    if split not in {"development", "holdout"} or not isinstance(rubric, str) or not rubric.strip():
+        raise ValueError("a valid split and nonempty review rubric are required")
+    if corpus.get("fixture_kind") == "synthetic_regression":
+        raise ValueError("synthetic regression fixtures cannot be marked reviewed")
+    examples = []
+    for item in corpus["examples"]:
+        if item["split"] != split or item.get("review_status", "not_reviewed") == "reviewed":
+            continue
+        entry = {"id": item["id"], "text": item["text"], "human_status": None}
+        if "metadata" in item:
+            entry["metadata"] = copy.deepcopy(item["metadata"])
+        examples.append(entry)
+    if not examples:
+        raise ValueError("no unreviewed examples in the selected split")
+    return {"version": 1, "kind": "blind_content_review", "gate_id": corpus["gate_id"],
+            "rubric": rubric, "examples": examples}
+
+
+def bind_blind_reviews(corpus, packet, reviewer, method, accept_human_label=False):
+    """Bind explicit independent opinions without fabricating model decisions."""
+    module = _corpus_module()
+    module.validate_corpus(corpus)
+    if corpus.get("fixture_kind") == "synthetic_regression":
+        raise ValueError("synthetic regression fixtures cannot be marked reviewed")
+    if any(not isinstance(value, str) or not value.strip() for value in (reviewer, method)):
+        raise ValueError("reviewer and method provenance are required")
+    if (not isinstance(packet, dict) or type(packet.get("version")) is not int or packet["version"] != 1
+            or packet.get("kind") != "blind_content_review" or packet.get("gate_id") != corpus["gate_id"]
+            or not isinstance(packet.get("rubric"), str) or not packet["rubric"].strip()
+            or not isinstance(packet.get("examples"), list)):
+        raise ValueError("invalid blind review packet")
+    result = copy.deepcopy(corpus)
+    by_id = {item["id"]: item for item in result["examples"]}
+    seen = set()
+    applied = uncertain = 0
+    for entry in packet["examples"]:
+        if not isinstance(entry, dict) or not isinstance(entry.get("id"), str):
+            raise ValueError("invalid blind review example")
+        identifier = entry["id"]
+        if identifier in seen or identifier not in by_id:
+            raise ValueError("duplicate or unknown blind review example")
+        seen.add(identifier)
+        item = by_id[identifier]
+        if entry.get("text") != item["text"] or ("metadata" in entry) != ("metadata" in item):
+            raise ValueError("blind review does not match current example")
+        if "metadata" in item and module.metadata_hash(entry["metadata"]) != module.metadata_hash(item["metadata"]):
+            raise ValueError("blind review does not match current metadata")
+        status = entry.get("human_status")
+        if status is None:
+            continue
+        if status not in {"passed", "failed", "uncertain"}:
+            raise ValueError("invalid blind human status")
+        if status == "uncertain":
+            uncertain += 1
+            continue
+        if item.get("review_status", "not_reviewed") == "reviewed":
+            raise ValueError("example already has a review; preserve its provenance")
+        old = item["expected"]
+        if old != status and not accept_human_label:
+            raise ValueError("human verdict differs from the proposed label; resolve explicitly")
+        item["expected"] = status
+        item["review_status"] = "reviewed"
+        review = {"reviewer": reviewer, "method": method,
+                  "text_sha256": hashlib.sha256(item["text"].encode("utf-8")).hexdigest(),
+                  "expected": status,
+                  "rubric_sha256": hashlib.sha256(packet["rubric"].encode("utf-8")).hexdigest()}
+        if "metadata" in item:
+            review["metadata_sha256"] = module.metadata_hash(item["metadata"])
+        if old != status:
+            review["previous_expected"] = old
+        item["review"] = review
+        applied += 1
+    if not applied:
+        raise ValueError("no explicit pass or fail reviews to bind")
+    module.validate_corpus(result)
+    return result, applied, uncertain
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     actions = parser.add_subparsers(dest="action", required=True)
@@ -166,9 +255,24 @@ def main():
     bind.add_argument("--output", type=Path, required=True)
     bind.add_argument("--accept-human-label", action="store_true", help="Explicitly replace a conflicting unreviewed label with the human verdict")
     bind.add_argument("--telemetry", action="store_true", help="Emit aggregate local timing to stderr")
+    packet = actions.add_parser("blind-packet", help="Create a private review packet without model or proposed labels")
+    packet.add_argument("--corpus", type=Path, required=True)
+    packet.add_argument("--split", choices=["development", "holdout"], required=True)
+    packet.add_argument("--rubric-file", type=Path, required=True)
+    packet.add_argument("--output", type=Path, required=True)
+    packet.add_argument("--telemetry", action="store_true")
+    blind = actions.add_parser("bind-blind-reviews", help="Bind explicit blinded opinions to a new private corpus copy")
+    blind.add_argument("--corpus", type=Path, required=True)
+    blind.add_argument("--packet", type=Path, required=True)
+    blind.add_argument("--reviewer", required=True)
+    blind.add_argument("--method", required=True)
+    blind.add_argument("--accept-human-label", action="store_true")
+    blind.add_argument("--output", type=Path, required=True)
+    blind.add_argument("--telemetry", action="store_true")
     args = parser.parse_args()
     started = time.perf_counter()
     label_changed = False
+    applied = uncertain = 0
     try:
         if args.action == "capture":
             metadata = read_json(args.metadata) if args.metadata is not None else None
@@ -183,6 +287,10 @@ def main():
             value = export_review(read_json(args.corpus), read_json(args.note))
         elif args.action == "combine-reviews":
             value = export_reviews(read_json(args.corpus), [read_json(path) for path in args.note])
+        elif args.action == "blind-packet":
+            value = blind_packet(read_json(args.corpus), args.split, args.rubric_file.read_text(encoding="utf-8"))
+        elif args.action == "bind-blind-reviews":
+            value, applied, uncertain = bind_blind_reviews(read_json(args.corpus), read_json(args.packet), args.reviewer, args.method, args.accept_human_label)
         else:
             corpus = read_json(args.corpus)
             note = read_json(args.note)
@@ -193,7 +301,11 @@ def main():
         if args.telemetry:
             event = {"event": "content_review_note", "version": 1, "operation": args.action,
                      "elapsed_ms": (time.perf_counter() - started) * 1000}
-            if args.action == "bind-review":
+            if args.action == "blind-packet":
+                event["example_count"] = len(value["examples"])
+            elif args.action == "bind-blind-reviews":
+                event.update(applied_count=applied, uncertain_count=uncertain)
+            elif args.action == "bind-review":
                 event["label_changed"] = label_changed
             elif args.action == "combine-reviews":
                 opinions = {}

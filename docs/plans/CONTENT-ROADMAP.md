@@ -269,6 +269,11 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   separate them from override metrics and report aggregate uncertainty.
 - [x] Report normalized cross-split text overlap and optionally reject it before evaluation; this does not detect paraphrases or establish independence.
 - [x] Provide an explicit local-only overlap inspection listing example IDs for curation, without exposing content in the aggregate report. IDs may be sensitive.
+- [x] Prepare a private human-review packet without proposed labels, split or
+  model decisions; import explicit pass/fail responses into a new corpus copy
+  after matching text and metadata, retaining prior conflicting labels and
+  aggregate-only telemetry. Uncertain opinions remain in the packet. This does
+  not establish reviewer independence, rubric-policy equivalence or accuracy.
 - [ ] Independently reviewed, diverse evaluation corpus and held-out metrics.
   A synthetic, explicitly unreviewed starter and evaluator were delivered in
   [PR #32](https://github.com/schiste/Aexeo/pull/32); they do not establish

@@ -20,6 +20,70 @@ class FeedbackTests(unittest.TestCase):
         self.corpus = {"version": 1, "gate_id": "length", "examples": [
             {"id": "e1", "split": "development", "text": self.text, "expected": "passed"}]}
 
+    def test_blind_packet_hides_labels_and_binds_actual_reported_review(self):
+        self.corpus["examples"][0]["metadata"] = {"title": "Private title"}
+        self.corpus["examples"].append({"id": "e2", "split": "development", "text": "Other", "expected": "failed"})
+        packet = module.blind_packet(self.corpus, "development", "Assess the length.")
+        serialized = json.dumps(packet)
+        self.assertNotIn('"expected"', serialized)
+        self.assertNotIn('"split"', serialized)
+        self.assertNotIn('"model_status"', serialized)
+        packet["examples"][0]["human_status"] = "failed"
+        packet["examples"][1]["human_status"] = "uncertain"
+        with self.assertRaisesRegex(ValueError, "differs"):
+            module.bind_blind_reviews(self.corpus, packet, "person", "blind manual")
+        result, applied, uncertain = module.bind_blind_reviews(self.corpus, packet, "person", "blind manual", True)
+        self.assertEqual((applied, uncertain), (1, 1))
+        self.assertEqual(result["examples"][0]["review"]["previous_expected"], "passed")
+        self.assertEqual(result["examples"][0]["expected"], "failed")
+        self.assertEqual(result["examples"][1]["expected"], "failed")
+        self.assertNotIn("review", self.corpus["examples"][0])
+        self.assertNotIn("review", result["examples"][1])
+        self.assertNotIn("model_status", result["examples"][0]["review"])
+        evaluator = module._corpus_module()
+        self.assertTrue(evaluator.review_is_bound(result["examples"][0]))
+
+    def test_blind_packet_rejects_stale_duplicate_or_unattributed_review(self):
+        self.corpus["examples"][0]["metadata"] = {"lang": "fr"}
+        packet = module.blind_packet(self.corpus, "development", "Assess.")
+        packet["examples"][0]["human_status"] = "passed"
+        with self.assertRaisesRegex(ValueError, "provenance"):
+            module.bind_blind_reviews(self.corpus, packet, "", "manual")
+        packet["examples"][0]["metadata"]["lang"] = "en"
+        with self.assertRaisesRegex(ValueError, "metadata"):
+            module.bind_blind_reviews(self.corpus, packet, "r", "manual")
+        packet = module.blind_packet(self.corpus, "development", "Assess.")
+        packet["examples"][0]["human_status"] = "passed"
+        packet["examples"].append(dict(packet["examples"][0]))
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            module.bind_blind_reviews(self.corpus, packet, "r", "manual")
+        self.corpus["fixture_kind"] = "synthetic_regression"
+        with self.assertRaisesRegex(ValueError, "synthetic"):
+            module.blind_packet(self.corpus, "development", "Assess.")
+
+    def test_blind_cli_uses_private_new_files_and_aggregate_telemetry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            corpus = base / "corpus.json"
+            rubric = base / "rubric.txt"
+            packet = base / "packet.json"
+            reviewed = base / "reviewed.json"
+            corpus.write_text(json.dumps(self.corpus), encoding="utf-8")
+            rubric.write_text("Assess length.", encoding="utf-8")
+            create = subprocess.run([sys.executable, str(SCRIPT), "blind-packet", "--corpus", str(corpus), "--split", "development", "--rubric-file", str(rubric), "--output", str(packet), "--telemetry"], capture_output=True, text=True)
+            self.assertEqual(create.returncode, 0, create.stderr)
+            self.assertEqual(packet.stat().st_mode & 0o777, 0o600)
+            data = json.loads(packet.read_text())
+            data["examples"][0]["human_status"] = "passed"
+            packet.write_text(json.dumps(data), encoding="utf-8")
+            command = [sys.executable, str(SCRIPT), "bind-blind-reviews", "--corpus", str(corpus), "--packet", str(packet), "--reviewer", "person", "--method", "manual", "--output", str(reviewed), "--telemetry"]
+            completed = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(reviewed.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(json.loads(completed.stderr)["applied_count"], 1)
+            self.assertNotIn("Private", completed.stderr)
+            self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)
+
     def test_note_preserves_hash_not_content_and_exports_explicit_review(self):
         note = module.capture(self.text, self.report, "length", "e1", "passed", "reviewer-1", "manual")
         self.assertEqual(note["text_sha256"], hashlib.sha256(self.text.encode()).hexdigest())
