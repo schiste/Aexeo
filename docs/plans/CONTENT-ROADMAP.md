@@ -248,8 +248,11 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   its output is not a v1 verdict or a portable v2 verdict.
   CLI receipt mode rejects duplicate keys in changes, collections and previous receipts, and fields discarded by typed parsing in changes and receipts. Direct Rust hosts must independently ensure their typed inputs preserve all semantics.
   An independent Python reference verifier compares bounded, explicitly supplied
-  artifact files against the standalone manifest; it does not verify a receipt
-  or establish artifact freshness, authenticity or publication safety.
+  artifact files against the standalone manifest. An independent Python
+  comparator also checks two Aexeo offline receipts against host-supplied
+  artifact bytes and compares their verdicts except the evaluation timestamp.
+  It does not fully validate the verdict schema, produce a fresh evaluation,
+  establish artifact freshness or authenticity, or authorize publication.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
 - [x] Preserve preset and input-report provenance when binding human feedback; report policy-matched reviewed metrics separately from legacy metrics. Fingerprints do not authenticate people or bind external evidence.
 - [x] Include a fingerprint of the CLI-resolved preset in corpus evaluation

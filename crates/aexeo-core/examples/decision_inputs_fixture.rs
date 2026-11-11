@@ -52,6 +52,7 @@ fn main() -> anyhow::Result<()> {
         let artifacts = context.artifacts()?;
         fixtures.push(serde_json::json!({
             "manifest": receipt.decision_inputs,
+            "receipt": receipt,
             "artifacts": {"change": artifacts.change, "resolved_policy": artifacts.resolved_policy,
                 "host_options": artifacts.host_options, "evaluator": artifacts.evaluator,
                 "collection": artifacts.collection, "external_evidence": null}

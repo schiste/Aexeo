@@ -11,6 +11,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[4]
 VERIFIER = Path(__file__).with_name("verify_decision_inputs.py")
+COMPARATOR = Path(__file__).with_name("compare_offline_receipts.py")
 ROLES = ("change", "resolved_policy", "host_options", "evaluator", "collection", "external_evidence")
 
 
@@ -39,6 +40,18 @@ class ReceiptInterop(unittest.TestCase):
                         paths[role] = directory / (role + ".bin")
                         paths[role].write_bytes(bytes(value))
                         args.extend([flag, str(paths[role])])
+                previous = directory / "previous-receipt.json"
+                fresh = directory / "fresh-receipt.json"
+                previous.write_text(json.dumps(fixture["receipt"]), encoding="utf-8")
+                changed_receipt = json.loads(json.dumps(fixture["receipt"]))
+                changed_receipt["verdict"]["evaluated_at"] = "2026-01-02T00:00:00Z"
+                fresh.write_text(json.dumps(changed_receipt), encoding="utf-8")
+                comparison_args = [sys.executable, str(COMPARATOR), str(previous), str(fresh)] + args[3:]
+                comparison = subprocess.run(comparison_args, capture_output=True, text=True)
+                self.assertEqual(comparison.returncode, 0, comparison.stderr)
+                changed_receipt["verdict"]["status"] = "fail"
+                fresh.write_text(json.dumps(changed_receipt), encoding="utf-8")
+                self.assertNotEqual(subprocess.run(comparison_args, capture_output=True).returncode, 0)
                 valid = subprocess.run(args, capture_output=True, text=True)
                 self.assertEqual(valid.returncode, 0, valid.stderr)
                 for role, path in paths.items():
