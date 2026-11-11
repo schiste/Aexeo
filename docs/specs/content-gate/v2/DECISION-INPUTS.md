@@ -128,17 +128,27 @@ python3 docs/specs/content-gate/v2/compare_offline_receipts.py old.json fresh.js
   --evaluator evaluator.bin --collection-absent --external-evidence-absent --telemetry
 ```
 
-The comparison checks the verdict envelope but **does not validate the full v1
-verdict schema or its internal consistency**, independently execute an evaluator,
+Without the optional validation mode, the comparison checks only the verdict
+envelope. It does not independently execute an evaluator,
 authenticate either receipt or its inputs, or enforce a pass decision. Identical
-invalid or fabricated verdicts can compare equal. The caller must supply a
-trusted fresh evaluation and independently validate the schema, exit code,
-subject, status, required checks, provenance, freshness and publication race
+invalid verdicts can compare equal without validation, and fabricated but
+well-formed verdicts can match in either mode. The caller must supply a trusted
+fresh evaluation and independently validate the exit code, subject, required
+checks, provenance, freshness and publication race
 boundary. Files may change during reads. A match is not publication authorization
 or a v2 verdict. The exact artifact format remains Aexeo-specific.
 
-The optional local telemetry contains only status, elapsed time and aggregate
-artifact counts and sizes. Receipt and artifact files can contain private content.
+The opt-in `--validate-verdicts` additionally checks both v1 verdicts against
+`v1/verdict.schema.json`, including RFC 3339 timestamps, and verifies summary
+counts and status precedence against the reported checks. Install the pinned
+`requirements-test.txt` dependencies in an isolated environment first. Missing
+schema-validation or date-time support fails closed. Without this flag the
+comparator continues to check only the envelope. Schema and consistency checks
+do not verify the subject against the intended change, validator exit code,
+required gates, actual evaluator behavior or content authenticity.
+
+The optional local telemetry contains only status, whether verdict validation was
+requested, elapsed time and aggregate artifact counts and sizes. Receipt and artifact files can contain private content.
 Run `python3 docs/specs/content-gate/v2/test_compare_offline_receipts.py` and
 `python3 docs/specs/content-gate/v2/test_receipt_interop.py` for the standalone
 and Rust-to-Python checks.

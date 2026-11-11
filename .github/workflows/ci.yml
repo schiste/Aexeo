@@ -34,7 +34,7 @@ jobs:
           "$RUNNER_TEMP/aexeo-schema-venv/bin/python" -m pip install -r docs/specs/content-gate/v2/requirements-test.txt
           "$RUNNER_TEMP/aexeo-schema-venv/bin/python" docs/specs/content-gate/v2/test_manifest_schema.py
           python3 docs/specs/content-gate/v2/test_verify_decision_inputs.py
-          python3 docs/specs/content-gate/v2/test_compare_offline_receipts.py
+          "$RUNNER_TEMP/aexeo-schema-venv/bin/python" docs/specs/content-gate/v2/test_compare_offline_receipts.py
 
   emdash-plugin:
     name: emdash-plugin (typecheck, test, audit)
