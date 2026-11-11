@@ -196,6 +196,12 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   except the evaluation timestamp. The CLI shares the comparison logic.
   External callbacks, build authenticity, collection completeness and freshness
   remain outside this offline mechanism.
+- [x] For Rust hosts using a link observer without custom gate extensions, hash
+  the ordered observer requests and responses with the change inputs, and compare
+  the complete verdict against a fresh trusted evaluation. This detects changed
+  observations even if gate checks are unchanged; it does not authenticate the
+  observer, establish freshness, or protect consumers that ignore the extension.
+  CLI revalidation remains offline-only.
 - [ ] Bind change verdicts to all decision inputs, including entry metadata,
   collection snapshots, effective policy, host options and external evidence,
   with a versioned interoperable verification contract. The current v1 subject

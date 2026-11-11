@@ -115,6 +115,10 @@ pub struct ChangeCollection<'a> {
 /// Identifier of Aexeo's opt-in offline evaluation-input fingerprint.
 pub const OFFLINE_BINDING_EXTENSION: &str = "aexeo.offline-input-binding.v1";
 
+/// Fingerprint for evaluations using a link observer and no custom extensions.
+/// Only the digest is retained, not the observed URLs or their statuses.
+pub const OBSERVED_LINK_BINDING_EXTENSION: &str = "aexeo.observed-link-binding.v1";
+
 #[derive(serde::Serialize)]
 struct OfflineBinding<'a> {
     domain: &'static str,
@@ -261,6 +265,71 @@ pub fn verify_offline_verdict(
     Ok(())
 }
 
+/// Compare a verdict using a link observer with a fresh, trusted evaluation.
+/// The fingerprint binds the content-change inputs and the ordered observer
+/// requests and responses actually used. It does not authenticate the observer,
+/// establish network freshness, or bind unobserved external state. Custom gate
+/// extensions are not supported by this binding. As with offline verification,
+/// the caller must obtain `fresh` by re-evaluating the current trusted inputs.
+#[allow(clippy::too_many_arguments)]
+pub fn verify_observed_link_verdict(
+    previous: &Verdict,
+    fresh: &Verdict,
+    change: &Change,
+    preset: &ContentPreset,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    plain_text_paragraphs: bool,
+    collection: Option<&ChangeCollection<'_>>,
+) -> Result<()> {
+    let base = offline_binding_digest(
+        change,
+        preset,
+        max_entry_bytes,
+        max_total_bytes,
+        plain_text_paragraphs,
+        collection,
+    )?;
+    for verdict in [previous, fresh] {
+        if verdict.validator.name != "aexeo"
+            || verdict.validator.version != env!("CARGO_PKG_VERSION")
+            || verdict.schema != VERDICT_SCHEMA
+            || verdict.subject != subject_for_change(change)
+        {
+            bail!("observed link verdict requires the same engine and change");
+        }
+        let binding = verdict
+            .extensions
+            .as_ref()
+            .and_then(|extensions| extensions.get(OBSERVED_LINK_BINDING_EXTENSION))
+            .and_then(serde_json::Value::as_object)
+            .ok_or_else(|| anyhow::anyhow!("observed link binding is missing"))?;
+        let observations = binding
+            .get("observations_sha256")
+            .and_then(serde_json::Value::as_str);
+        if binding.len() != 2
+            || binding
+                .get("inputs_sha256")
+                .and_then(serde_json::Value::as_str)
+                != Some(base.as_str())
+            || observations.is_none_or(|value| {
+                value.len() != 64
+                    || !value
+                        .bytes()
+                        .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+            })
+        {
+            bail!("observed link binding is invalid or does not match the inputs");
+        }
+    }
+    let mut previous = previous.clone();
+    previous.evaluated_at.clone_from(&fresh.evaluated_at);
+    if previous != *fresh {
+        bail!("previous verdict differs from the current observed link evaluation");
+    }
+    Ok(())
+}
+
 /// Re-evaluate confined content without external callbacks and compare every
 /// result field with a previously issued offline verdict, except its timestamp.
 /// The provider, policy and optional collection must be trusted by the caller.
@@ -365,7 +434,22 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
     mut host: ChangeEvaluationHost<'_, '_>,
     collection: Option<ChangeCollection<'_>>,
 ) -> Result<Verdict> {
+    use sha2::{Digest, Sha256};
     preset.validate()?;
+    let observed_binding = if host.options.link_observer.is_some() && host.extensions.is_none() {
+        Some(offline_binding_digest(
+            change,
+            preset,
+            max_entry_bytes,
+            max_total_bytes,
+            host.options.plain_text_paragraphs,
+            collection.as_ref(),
+        )?)
+    } else {
+        None
+    };
+    let mut observed_digest = Sha256::new();
+    observed_digest.update(OBSERVED_LINK_BINDING_EXTENSION.as_bytes());
     let offline_binding = if host.options.link_observer.is_none() && host.extensions.is_none() {
         Some(offline_binding_digest(
             change,
@@ -527,6 +611,14 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
                     let values = observe(&entry.entity_id, destinations)?;
                     if values.len() != destinations.len() {
                         bail!("link observer returned a different number of observations");
+                    }
+                    if observed_binding.is_some() {
+                        // Length-frame each ordered request/response so separate calls
+                        // cannot be confused with a single concatenated call.
+                        let record =
+                            serde_json::to_vec(&(&entry.entity_id, destinations, &values))?;
+                        observed_digest.update((record.len() as u64).to_be_bytes());
+                        observed_digest.update(&record);
                     }
                     Some(values)
                 }
@@ -738,13 +830,26 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
         checks,
         findings,
         findings_omitted: (omitted > 0).then_some(omitted),
-        extensions: offline_binding.map(|digest| {
-            std::iter::once((
-                OFFLINE_BINDING_EXTENSION.into(),
-                serde_json::Value::String(digest),
-            ))
-            .collect()
-        }),
+        extensions: offline_binding
+            .map(|digest| {
+                std::iter::once((
+                    OFFLINE_BINDING_EXTENSION.into(),
+                    serde_json::Value::String(digest),
+                ))
+                .collect()
+            })
+            .or_else(|| {
+                observed_binding.map(|digest| {
+                    std::iter::once((
+                        OBSERVED_LINK_BINDING_EXTENSION.into(),
+                        serde_json::json!({
+                            "inputs_sha256": digest,
+                            "observations_sha256": format!("{:x}", observed_digest.finalize()),
+                        }),
+                    ))
+                    .collect()
+                })
+            }),
     })
 }
 
@@ -1391,6 +1496,30 @@ mod tests {
                 .is_err()
         );
         assert_eq!(extension.0.get(), 2);
+        let mut observer = |_: &str, _: &[String]| Ok(vec![]);
+        let with_both = evaluate_change_with_host(
+            &input,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+            ChangeEvaluationHost {
+                options: ChangeEvaluationOptions {
+                    link_observer: Some(&mut observer),
+                    plain_text_paragraphs: false,
+                },
+                extensions: Some(&extension),
+            },
+        )
+        .unwrap();
+        assert!(with_both.extensions.is_none());
+        assert!(
+            verify_observed_link_verdict(
+                &with_both, &with_both, &input, &policy, 1024, 1024, false, None
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -1425,6 +1554,93 @@ mod tests {
         assert_eq!(verdict.status, VerdictStatus::Fail);
         assert_eq!(verdict.findings.len(), 1);
         assert!(verdict.findings[0].location.is_none());
+    }
+
+    #[test]
+    fn observed_link_binding_requires_current_matching_results_and_inputs() {
+        use crate::content_gate::LinkReachabilityObservation as Observation;
+        use sha2::{Digest, Sha256};
+        let mut input = change();
+        input.entries[0].media_type = "text/markdown".into();
+        let source = "[link](https://example.org/private)";
+        let state = input.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let policy = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\n",
+        )
+        .unwrap();
+        let run = |observation: Observation, timestamp: &str| {
+            let mut observer = |_: &str, destinations: &[String]| {
+                assert_eq!(destinations, ["https://example.org/private"]);
+                Ok(vec![observation])
+            };
+            evaluate_change_with_observer(
+                &input,
+                &mut NoFiles,
+                &policy,
+                timestamp,
+                1024,
+                1024,
+                Some(&mut observer),
+            )
+            .unwrap()
+        };
+        let first = run(Observation::Reachable, "2026-01-01T00:00:00Z");
+        let fresh = run(Observation::Reachable, "2026-01-02T00:00:00Z");
+        assert_eq!(
+            first.extensions.as_ref().unwrap()[OBSERVED_LINK_BINDING_EXTENSION]["observations_sha256"],
+            "e0c98059de803cb05ba85f45666e3cdd775ca525ee5f266b6e7ca587e1e9ddb8"
+        );
+        let verify = |old: &Verdict, new: &Verdict, change: &Change, limit| {
+            verify_observed_link_verdict(old, new, change, &policy, limit, 1024, false, None)
+        };
+        assert!(verify(&first, &fresh, &input, 1024).is_ok());
+        assert!(
+            !first.extensions.as_ref().unwrap()[OBSERVED_LINK_BINDING_EXTENSION]
+                .to_string()
+                .contains("example.org")
+        );
+        // The status/checks are unchanged, but an observation still changed.
+        let not_applicable = run(Observation::NotApplicable, "2026-01-02T00:00:00Z");
+        assert_eq!(first.checks, not_applicable.checks);
+        assert_eq!(first.findings, not_applicable.findings);
+        assert!(verify(&first, &not_applicable, &input, 1024).is_err());
+        assert!(
+            verify(
+                &first,
+                &run(Observation::NotFound, "2026-01-02T00:00:00Z"),
+                &input,
+                1024
+            )
+            .is_err()
+        );
+        assert!(verify(&first, &fresh, &input, 1023).is_err());
+        let mut changed = input.clone();
+        changed.entries[0].metadata = Some(std::collections::BTreeMap::from([(
+            "title".into(),
+            "changed".into(),
+        )]));
+        assert!(verify(&first, &fresh, &changed, 1024).is_err());
+        let mut tampered = first.clone();
+        tampered.extensions = None;
+        assert!(verify(&tampered, &fresh, &input, 1024).is_err());
+        let mut tampered = first.clone();
+        tampered.status = VerdictStatus::Fail;
+        assert!(verify(&tampered, &fresh, &input, 1024).is_err());
+        let offline = evaluate_change(
+            &input,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+        )
+        .unwrap();
+        assert!(verify(&offline, &fresh, &input, 1024).is_err());
+        assert!(
+            verify_offline_input_binding(&first, &input, &policy, 1024, 1024, false, None).is_err()
+        );
     }
 
     #[test]
