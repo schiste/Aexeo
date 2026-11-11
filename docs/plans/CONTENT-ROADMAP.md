@@ -191,6 +191,11 @@ An open PR is not yet delivered. Update this tracker when each change lands and
 when its acceptance criteria are met, rather than inferring completion from a
 partial implementation.
 
+A bounded read-only retest of the five reported Preview CMS records is documented
+in [CMS Preview validation](CMS-PREVIEW-VALIDATION-2026-11.md). It verifies the
+CMS projection and reports its limitations; rendered-page and independent
+editorial validation remain open.
+
 ## Priorities and acceptance criteria
 
 1. **Explain the result.** Show configured-gate coverage, missing capabilities,
