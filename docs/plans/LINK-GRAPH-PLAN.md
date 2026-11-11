@@ -239,6 +239,14 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
 - The CMS and rendered preview are different access surfaces: MCP access to CMS
   content alone does not prove snapshot equivalence or grant browser access to
   the Cloudflare Access-protected preview.
+- On 2026-11-11, a read-only Preview CMS listing returned 22 published
+  `blog_posts` across five locales. Feeding their metadata to the exporter in
+  five simulated batches produced 22 entries, no omissions and the expected
+  `transactional_snapshot_unavailable` issue. The test used a provisional route
+  mapping, did not exercise the actual EmDash pagination or URL resolver, and did
+  not compare rendered pages. It therefore does not close the matching-site task.
+  The website checkout was behind; route definitions were inspected from its
+  locally available `origin/main` commit `4aac9b632422`, not the old checkout.
 
 ## Remaining integration and validation
 
