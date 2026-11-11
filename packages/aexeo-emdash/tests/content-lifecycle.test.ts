@@ -559,7 +559,7 @@ describe("assessment persistence", () => {
     const events: Array<[string, unknown]> = [];
     ctx.log = { info: (name, data) => { events.push([name, data]); }, warn: () => {}, error: () => {} };
     const evaluator: EvaluatorFn = async () => ({ ok: true, findings: [], assessments: {
-      "/one": { status: "evaluated", preset: "article", gates: [{ gate_id: "word-count", status: "passed", blocking: true, scope: "document", required_capability: "text" }] },
+      "/one": { status: "evaluated", preset: "article", gates: [{ gate_id: "word-count", status: "passed", blocking: true, scope: "document", required_capability: "text", reason: null }] },
       "/two": { status: "error", reason: "unavailable", detail: "error" },
       "/extra": { status: "evaluated", preset: "article", gates: [] },
     } });
