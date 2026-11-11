@@ -218,6 +218,19 @@ pub enum ContentGate {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         case_insensitive: bool,
     },
+    /// Require every configured literal term in the adapter-supplied text.
+    RequiredTerms {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+        terms: Vec<String>,
+        #[serde(default = "default_whole_words")]
+        whole_words: bool,
+        #[serde(default)]
+        case_insensitive: bool,
+    },
     ForbiddenTerms {
         id: String,
         #[serde(default)]
@@ -389,6 +402,7 @@ impl ContentGate {
             | Self::DuplicateParagraphs { severity, .. }
             | Self::ParagraphCharacterLength { severity, .. }
             | Self::RepeatedTerms { severity, .. }
+            | Self::RequiredTerms { severity, .. }
             | Self::ForbiddenTerms { severity, .. }
             | Self::RequiredMetadata { severity, .. }
             | Self::RequiredHeadings { severity, .. }
@@ -417,6 +431,7 @@ impl ContentGate {
             | Self::DuplicateParagraphs { blocking, .. }
             | Self::ParagraphCharacterLength { blocking, .. }
             | Self::RepeatedTerms { blocking, .. }
+            | Self::RequiredTerms { blocking, .. }
             | Self::ForbiddenTerms { blocking, .. }
             | Self::RequiredMetadata { blocking, .. }
             | Self::RequiredHeadings { blocking, .. }
@@ -446,6 +461,7 @@ impl ContentGate {
             | Self::SentenceLength { .. }
             | Self::SentenceCharacterLength { .. }
             | Self::RepeatedTerms { .. }
+            | Self::RequiredTerms { .. }
             | Self::ForbiddenTerms { .. } => "text",
             Self::LinkCount { .. } => "links",
             Self::LinkDestinations { .. } => "link_destinations",
@@ -482,6 +498,7 @@ impl ContentGate {
             | Self::DuplicateParagraphs { id, .. }
             | Self::ParagraphCharacterLength { id, .. }
             | Self::RepeatedTerms { id, .. }
+            | Self::RequiredTerms { id, .. }
             | Self::ForbiddenTerms { id, .. }
             | Self::RequiredMetadata { id, .. }
             | Self::RequiredHeadings { id, .. }
@@ -1030,6 +1047,25 @@ impl ContentPreset {
                 {
                     bail!(
                         "repeated terms must be nonempty and unique for {}",
+                        gate.id()
+                    )
+                }
+                ContentGate::RequiredTerms {
+                    terms,
+                    case_insensitive,
+                    ..
+                } if terms.is_empty()
+                    || terms.len() > 256
+                    || terms.iter().any(|term| term.trim().is_empty())
+                    || terms
+                        .iter()
+                        .map(|term| fold_literal(term, *case_insensitive).0)
+                        .collect::<BTreeSet<_>>()
+                        .len()
+                        != terms.len() =>
+                {
+                    bail!(
+                        "required terms must contain 1 to 256 nonempty, distinct literals for {}",
                         gate.id()
                     )
                 }
@@ -1906,6 +1942,29 @@ impl ContentPreset {
                             }
                             measurements.insert("matching_occurrences".into(), total);
                             measurements.insert("exceeded_terms".into(), exceeded);
+                        }
+                        None => reason = Some("text is unavailable from this adapter".into()),
+                    }
+                }
+                ContentGate::RequiredTerms {
+                    terms,
+                    whole_words,
+                    case_insensitive,
+                    ..
+                } => {
+                    measurements.insert("configured_terms".into(), terms.len());
+                    match &input.text {
+                        Some(text) => {
+                            let literal = LiteralText::new(text, block_ends, *case_insensitive);
+                            let mut missing = 0;
+                            for term in terms {
+                                if !literal.visit_matches(term, *whole_words, |_| true) {
+                                    missing += 1;
+                                    emit(format!("Required term is missing: {term}"), 1, 1);
+                                }
+                            }
+                            measurements.insert("present_terms".into(), terms.len() - missing);
+                            measurements.insert("missing_terms".into(), missing);
                         }
                         None => reason = Some("text is unavailable from this adapter".into()),
                     }
@@ -3717,5 +3776,68 @@ terms = ["bad"]
         assert!(!complete.blocking);
         let passed = evaluate(Some(&[Reachable, Reachable, NotApplicable]));
         assert_eq!(passed.status, GateStatus::Passed);
+    }
+    #[test]
+    fn required_terms_report_presence_and_unavailable_text() {
+        let config = "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='required_terms'\nterms=['café', 'best price']\ncase_insensitive=true\nblocking=false\n";
+        let preset = ContentPreset::from_toml(config).unwrap();
+        let input = ContentInput {
+            text: Some("CAFÉ: best\nprice".into()),
+            ..Default::default()
+        };
+        let report = preset.evaluate(&input).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Passed);
+        assert_eq!(report.gates[0].measurements["present_terms"], 2);
+        let missing = preset
+            .evaluate(&ContentInput {
+                text: Some("cafétéria".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(missing.gates[0].status, GateStatus::Failed);
+        assert!(!missing.gates[0].blocking);
+        assert_eq!(missing.gates[0].measurements["missing_terms"], 2);
+        assert_eq!(missing.gates[0].findings.len(), 2);
+        assert_eq!(
+            preset.evaluate(&ContentInput::default()).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+        assert_eq!(
+            preset
+                .evaluate(&ContentInput {
+                    text: Some(String::new()),
+                    ..Default::default()
+                })
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::Failed
+        );
+        let distinct_blocks = ContentContext {
+            block_ends: Some(vec![4]),
+            ..Default::default()
+        };
+        let split = ContentInput {
+            text: Some("best price café".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            preset
+                .evaluate_with_context(&split, None, None, Some(&distinct_blocks))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::Failed
+        );
+        assert!(
+            ContentPreset::from_toml(&config.replace("['café', 'best price']", "['café', 'CAFÉ']"))
+                .is_err()
+        );
+        assert!(ContentPreset::from_toml(&config.replace("['café', 'best price']", "[]")).is_err());
+        let many = (0..257)
+            .map(|i| format!("'term{i}'"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(ContentPreset::from_toml(&config.replace("'café', 'best price'", &many)).is_err());
     }
 }

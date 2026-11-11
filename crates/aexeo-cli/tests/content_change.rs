@@ -71,6 +71,23 @@ fn emits_bound_pass_fail_and_not_checked_verdicts() {
 }
 
 #[test]
+fn required_terms_gate_is_available_to_content_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='required_terms'\nterms=['abc','missing']\n";
+    let output = run(dir.path(), &input(), preset, &[]);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let verdict: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+    assert_eq!(verdict["status"], "fail");
+    assert!(verdict["findings"][0]["location"].is_null());
+}
+
+#[test]
 fn link_observer_requires_opt_in_and_does_not_fetch_relative_links() {
     let dir = tempfile::tempdir().unwrap();
     let mut change = input();

@@ -26,9 +26,9 @@ By default the CLI reads the supplied UTF-8 bytes as raw text, including Markdow
 
 Markdown and EmDash adapters report where each heading, paragraph, list item and table cell ends. Those block ends terminate a sentence and a literal term cannot match across one. Soft-wrapped lines remain one sentence. Raw text has no known block structure.
 
-Literal matching for `forbidden_terms`, `repeated_terms` and the claim of an evidence gate ignores whitespace differences: `best price` matches `best` and `price` separated by any run of whitespace without a blank line. Finding positions stay in the original text. Quote anchors in evidence sources remain exact.
+Literal matching for `forbidden_terms`, `required_terms`, `repeated_terms` and the claim of an evidence gate ignores whitespace differences: `best price` matches `best` and `price` separated by any run of whitespace without a blank line. Finding positions stay in the original text. Quote anchors in evidence sources remain exact.
 
-`forbidden_terms` and `repeated_terms` accept `whole_words` (default `true`; set `false` for substring matches) and `case_insensitive` (default `false`). Case-insensitive matching lowercases each character, without full Unicode case folding. Word boundaries use Unicode alphanumeric characters and underscores. Adapter block boundaries also separate words even when no separator is inserted; a term never matches across a known block boundary. Thai, Lao, Myanmar, Khmer, CJK and Hangul characters do not act as word characters, because these scripts do not reliably separate words with spaces; a term in them matches inside surrounding text.
+`forbidden_terms`, `required_terms` and `repeated_terms` accept `whole_words` (default `true`; set `false` for substring matches) and `case_insensitive` (default `false`). Case-insensitive matching lowercases each character, without full Unicode case folding. Word boundaries use Unicode alphanumeric characters and underscores. Adapter block boundaries also separate words even when no separator is inserted; a term never matches across a known block boundary. Thai, Lao, Myanmar, Khmer, CJK and Hangul characters do not act as word characters, because these scripts do not reliably separate words with spaces; a term in them matches inside surrounding text.
 
 ### Input limits
 
@@ -472,6 +472,28 @@ The review itself is **trusted input**: Aexeo does not authenticate the reviewer
 An optional [Jev adapter](../adapters/jev/README.md) produces this review format from an explicit remote model call and a separately supplied source-reliability judgment. It is not part of the default offline engine.
 
 ### Paragraph count
+
+### Required literal terms
+
+`required_terms` checks that every configured term occurs in the supplied text.
+It accepts 1–256 nonempty, distinct literals, `whole_words` (default `true`),
+`case_insensitive` (default `false`), `severity` and `blocking`. Missing text is
+`not_checked`; observed empty text fails. It stops searching each term at its
+first match and reports aggregate `configured_terms`, `present_terms` and
+`missing_terms`. A missing term is a whole-document finding, not a source
+location. The check establishes literal presence only, not meaning, coverage,
+accuracy, relevance or that a term is used appropriately. Existing local per-gate
+telemetry applies; it contains no terms or content.
+
+```toml
+[[gates]]
+id = "article.required_terms"
+kind = "required_terms"
+terms = ["incident response", "support"]
+case_insensitive = true
+blocking = false
+severity = "warning"
+```
 
 `paragraph_count` checks optional inclusive `min` and `max` bounds against the
 paragraphs provided by the adapter. At least one bound is required; zero is a
