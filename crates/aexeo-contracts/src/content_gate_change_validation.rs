@@ -75,6 +75,98 @@ pub fn parse_validated_change(bytes: &[u8]) -> Result<Change, ChangeValidationEr
     Ok(change)
 }
 
+/// Decode JSON without discarding duplicate keys or fields unknown to `T`.
+/// Callers must bound the input before calling this function. This is intended
+/// for strict, versioned bindings; the ordinary v1 parser remains permissive.
+pub fn parse_lossless_json<T>(bytes: &[u8]) -> Result<T, ChangeValidationError>
+where
+    T: serde::de::DeserializeOwned + serde::Serialize,
+{
+    let value = parse_unique_json_value(bytes)?;
+    let decoded: T = serde_json::from_value(value.clone())
+        .map_err(|_| ChangeValidationError("invalid JSON fields"))?;
+    if serde_json::to_value(&decoded).map_err(|_| ChangeValidationError("invalid JSON fields"))?
+        != value
+    {
+        return Err(ChangeValidationError("unrepresented JSON field or value"));
+    }
+    Ok(decoded)
+}
+
+/// Parse JSON while rejecting duplicate keys at every depth. Callers must
+/// bound the input and validate its shape and semantics independently.
+pub fn parse_unique_json_value(bytes: &[u8]) -> Result<serde_json::Value, ChangeValidationError> {
+    let UniqueJson(value) = serde_json::from_slice(bytes)
+        .map_err(|_| ChangeValidationError("invalid or duplicate JSON field"))?;
+    Ok(value)
+}
+
+/// Strict variant for binding a complete v1 change in an experimental receipt.
+pub fn parse_strict_validated_change(bytes: &[u8]) -> Result<Change, ChangeValidationError> {
+    let _: Change = parse_lossless_json(bytes)?;
+    parse_validated_change(bytes)
+}
+
+struct UniqueJson(serde_json::Value);
+
+impl<'de> serde::Deserialize<'de> for UniqueJson {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::{Error, MapAccess, SeqAccess, Visitor};
+        struct UniqueVisitor;
+        impl<'de> Visitor<'de> for UniqueVisitor {
+            type Value = UniqueJson;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("JSON without duplicate keys")
+            }
+            fn visit_bool<E: Error>(self, v: bool) -> Result<Self::Value, E> {
+                Ok(UniqueJson(v.into()))
+            }
+            fn visit_i64<E: Error>(self, v: i64) -> Result<Self::Value, E> {
+                Ok(UniqueJson(v.into()))
+            }
+            fn visit_u64<E: Error>(self, v: u64) -> Result<Self::Value, E> {
+                Ok(UniqueJson(v.into()))
+            }
+            fn visit_f64<E: Error>(self, v: f64) -> Result<Self::Value, E> {
+                serde_json::Number::from_f64(v)
+                    .map(|n| UniqueJson(n.into()))
+                    .ok_or_else(|| E::custom("invalid number"))
+            }
+            fn visit_str<E: Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(UniqueJson(v.into()))
+            }
+            fn visit_string<E: Error>(self, v: String) -> Result<Self::Value, E> {
+                Ok(UniqueJson(v.into()))
+            }
+            fn visit_none<E: Error>(self) -> Result<Self::Value, E> {
+                Ok(UniqueJson(serde_json::Value::Null))
+            }
+            fn visit_unit<E: Error>(self) -> Result<Self::Value, E> {
+                Ok(UniqueJson(serde_json::Value::Null))
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut values = Vec::new();
+                while let Some(UniqueJson(value)) = seq.next_element()? {
+                    values.push(value);
+                }
+                Ok(UniqueJson(values.into()))
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut values = serde_json::Map::new();
+                while let Some(key) = map.next_key::<String>()? {
+                    if values.contains_key(&key) {
+                        return Err(A::Error::custom("duplicate JSON key"));
+                    }
+                    let UniqueJson(value) = map.next_value()?;
+                    values.insert(key, value);
+                }
+                Ok(UniqueJson(values.into()))
+            }
+        }
+        deserializer.deserialize_any(UniqueVisitor)
+    }
+}
+
 fn valid_uri(value: &str) -> bool {
     iri_string::types::UriStr::new(value).is_ok()
 }
@@ -246,4 +338,28 @@ fn validate_state(state: &ContentState, root: Option<&str>) -> Result<(), Change
         return Err(ChangeValidationError("empty content URI"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod strict_json_tests {
+    use super::*;
+
+    #[derive(Debug, serde::Serialize, serde::Deserialize)]
+    struct Example {
+        payload: serde_json::Value,
+    }
+
+    #[test]
+    fn strict_json_rejects_duplicates_at_all_depths_and_unrepresented_fields() {
+        let valid = br#"{"payload":{"array":[null,true,0,-2,1.5,"text",{"x":1}]}}"#;
+        assert!(parse_lossless_json::<Example>(valid).is_ok());
+        for invalid in [
+            br#"{"payload":null,"payload":null}"#.as_slice(),
+            br#"{"payload":{"x":1,"x":2}}"#.as_slice(),
+            br#"{"payload":[{"x":1,"x":1}]}"#.as_slice(),
+            br#"{"payload":null,"unknown":1}"#.as_slice(),
+        ] {
+            assert!(parse_lossless_json::<Example>(invalid).is_err());
+        }
+    }
 }

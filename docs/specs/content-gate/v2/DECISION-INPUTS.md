@@ -66,8 +66,7 @@ independently. The normal receipt path continues to hash JSON without buffering
 all artifacts. Matching exported bytes does not verify the receipt or its verdict.
 
 Consumers must independently protect and establish the current inputs, build
-identity, collection completeness and publication state. Unknown fields in a
-change parsed by v1 may already have been discarded. A matching receipt does
+identity, collection completeness and publication state. The CLI receipt mode rejects duplicate JSON keys at any depth in changes, collection snapshots and previous receipts, and rejects change or previous receipt fields that its typed model would discard. Ordinary v1 evaluation remains permissive, and Rust hosts that construct typed changes themselves must ensure no semantics were discarded before calling the API. A matching receipt does
 not prove that an external input was absent, fresh, true or authenticated.
 The CLI supports an explicit offline receipt mode; it does not use the v2
 verdict protocol. EmDash does not produce or consume these receipts.
