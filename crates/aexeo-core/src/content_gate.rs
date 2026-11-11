@@ -1777,19 +1777,22 @@ impl ContentPreset {
                                 let (mut cursor, mut line, mut column) = (0, 1, 1);
                                 literal.visit_matches(term, *whole_words, |offset| {
                                     matches += 1;
-                                    for ch in text[cursor..offset].chars() {
-                                        if ch == '\n' {
-                                            line += 1;
-                                            column = 1;
-                                        } else {
-                                            column += 1;
+                                    if matches <= MAX_FINDINGS_PER_GATE {
+                                        for ch in text[cursor..offset].chars() {
+                                            if ch == '\n' {
+                                                line += 1;
+                                                column = 1;
+                                            } else {
+                                                column += 1;
+                                            }
                                         }
+                                        emit(format!("Forbidden term: {term}"), line, column);
+                                        cursor = offset;
                                     }
-                                    emit(format!("Forbidden term: {term}"), line, column);
-                                    cursor = offset;
                                     false
                                 });
                             }
+                            omitted += matches.saturating_sub(MAX_FINDINGS_PER_GATE);
                             measurements.insert("matches".into(), matches);
                         }
                         None => reason = Some("text is unavailable from this adapter".into()),
@@ -2356,6 +2359,27 @@ mod tests {
         assert_eq!(result.measurements[FINDINGS_OMITTED], 5);
         assert_eq!(result.measurements["matches"], MAX_FINDINGS_PER_GATE + 5);
         assert_eq!(result.total_findings(), MAX_FINDINGS_PER_GATE + 5);
+    }
+
+    #[test]
+    fn forbidden_cap_across_terms_preserves_positions_and_total_count() {
+        let text = format!("{}\nété fin fin", "x ".repeat(MAX_FINDINGS_PER_GATE - 1));
+        let result = forbidden("terms=['x','été','fin']", &text);
+        assert_eq!(result.findings.len(), MAX_FINDINGS_PER_GATE);
+        assert_eq!(
+            result.findings.last().unwrap().message,
+            "Forbidden term: été"
+        );
+        assert_eq!(
+            (
+                result.findings.last().unwrap().line,
+                result.findings.last().unwrap().column
+            ),
+            (2, 1)
+        );
+        assert_eq!(result.measurements["matches"], MAX_FINDINGS_PER_GATE + 2);
+        assert_eq!(result.measurements[FINDINGS_OMITTED], 2);
+        assert_eq!(result.total_findings(), MAX_FINDINGS_PER_GATE + 2);
     }
 
     #[test]
