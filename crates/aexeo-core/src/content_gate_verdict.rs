@@ -267,7 +267,9 @@ pub fn evaluate_change_with_host<P: ConfinedContentFiles>(
         };
         let report =
             preset.evaluate_with_destinations(&input, &capabilities, destinations.as_deref())?;
-        let needs_plain_index = entry.media_type == "text/plain"
+        let identity_projection = input.text.as_deref().is_some()
+            && input.text.as_deref() == input.source_text.as_deref();
+        let needs_plain_index = identity_projection
             && preset
                 .gates
                 .iter()
@@ -648,6 +650,41 @@ mod tests {
         assert_eq!(verdict.status, VerdictStatus::Fail);
         assert_eq!(verdict.findings.len(), 1);
         assert!(verdict.findings[0].location.is_none());
+    }
+
+    #[test]
+    fn html_identity_projection_maps_prose_without_guessing_transformed_content() {
+        use sha2::{Digest, Sha256};
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['world']\n").unwrap();
+        for (source, expected) in [
+            ("hello world", Some((1, 7))),
+            ("<p>hello world</p>", None),
+            ("hello &#119;orld", None),
+        ] {
+            let mut input = change();
+            input.entries[0].media_type = "text/html".into();
+            let state = input.entries[0].after.as_mut().unwrap();
+            state.inline = Some(source.into());
+            state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+            let verdict = evaluate_change(
+                &input,
+                &mut NoFiles,
+                &policy,
+                "2026-01-01T00:00:00Z",
+                1024,
+                1024,
+            )
+            .unwrap();
+            assert_eq!(verdict.findings.len(), 1);
+            assert_eq!(
+                verdict.findings[0]
+                    .location
+                    .as_ref()
+                    .map(|p| (p.line, p.column)),
+                expected,
+                "{source}"
+            );
+        }
     }
 
     #[test]
