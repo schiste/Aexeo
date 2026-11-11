@@ -124,6 +124,25 @@ unverified. Best-effort text extracted from an unknown component is bounded to
 it may therefore be incomplete and must not be treated as a complete body. A host may map a component to `[]` only when it has verified that
 the component contributes no content relevant to the evaluated body.
 
+For an inline object inside a Portable Text block, use an explicit `inline`
+mapping. It projects text and links in place without creating a new paragraph:
+
+```js
+blockMappings: {
+  badge: { inline: [
+    { kind: "text", field: "label" },
+    { kind: "link", field: "linkLabel", hrefField: "href", optional: true },
+  ] },
+}
+```
+
+An empty `inline` array asserts the component adds no relevant body content.
+An optional `capabilities` array limits the assertion just as for block mappings;
+omitting it asserts all body capabilities. Only declare these mappings after
+verifying the host renderer. Unknown components or invalid fields keep surrounding
+spans but leave the body unverified. Mapped spans do not have original CMS source
+locations because they are derived from component fields.
+
 The array form asserts that all four capabilities are complete. If a host can
 only establish some capabilities, use the object form instead:
 

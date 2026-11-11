@@ -306,6 +306,24 @@ min=1
   for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/inline-component", rule), false);
 }
 
+// Host-mapped inline content reaches the real evaluator in place.
+{
+  const page = item("mapped-inline", { data: { content: [{ _type: "block", children: [
+    { _type: "span", text: "Read ", marks: [] },
+    { _type: "inlineLink", label: "the guide", href: "/guide" },
+    { _type: "span", text: " now.", marks: [] },
+  ] }] } });
+  const host = fakeHost([page]);
+  const configured = createPlugin({ contentPreset: { name: "article", collections: ["pages"] },
+    blockMappings: { inlineLink: { inline: [{ kind: "link", field: "label", hrefField: "href" }] } } });
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  const doc = host.store.get("document:/mapped-inline").document;
+  assert.deepEqual(doc.body[0].children.map((span) => span.text), ["Read ", "the guide", " now."]);
+  assert.equal(doc.body[0].markDefs[0].href, "/guide");
+  assert.equal(doc.body_capabilities, undefined);
+  assert.ok(host.store.get("findings:/mapped-inline").assessment.gates.some((gate) => gate.status === "passed"));
+}
+
 // A selected but unobserved field cannot certify the remaining body as complete.
 {
   const partial = item("missing-selected-field", { data: { introduction: [block("a", "Before")], conclusion: [block("b", "After")] } });
