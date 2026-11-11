@@ -291,41 +291,73 @@ pub fn verify_observed_link_verdict(
         collection,
     )?;
     for verdict in [previous, fresh] {
-        if verdict.validator.name != "aexeo"
-            || verdict.validator.version != env!("CARGO_PKG_VERSION")
-            || verdict.schema != VERDICT_SCHEMA
-            || verdict.subject != subject_for_change(change)
-        {
-            bail!("observed link verdict requires the same engine and change");
-        }
-        let binding = verdict
-            .extensions
-            .as_ref()
-            .and_then(|extensions| extensions.get(OBSERVED_LINK_BINDING_EXTENSION))
-            .and_then(serde_json::Value::as_object)
-            .ok_or_else(|| anyhow::anyhow!("observed link binding is missing"))?;
-        let observations = binding
-            .get("observations_sha256")
-            .and_then(serde_json::Value::as_str);
-        if binding.len() != 2
-            || binding
-                .get("inputs_sha256")
-                .and_then(serde_json::Value::as_str)
-                != Some(base.as_str())
-            || observations.is_none_or(|value| {
-                value.len() != 64
-                    || !value
-                        .bytes()
-                        .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
-            })
-        {
-            bail!("observed link binding is invalid or does not match the inputs");
-        }
+        verify_observed_link_binding_with_digest(verdict, change, &base)?;
     }
     let mut previous = previous.clone();
     previous.evaluated_at.clone_from(&fresh.evaluated_at);
     if previous != *fresh {
         bail!("previous verdict differs from the current observed link evaluation");
+    }
+    Ok(())
+}
+
+/// Check the non-observation inputs of an observed-link verdict before making
+/// external requests. This only checks the shape of the observation digest; it
+/// cannot verify observations or the verdict until a fresh evaluation is compared.
+pub fn verify_observed_link_input_binding(
+    verdict: &Verdict,
+    change: &Change,
+    preset: &ContentPreset,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    plain_text_paragraphs: bool,
+    collection: Option<&ChangeCollection<'_>>,
+) -> Result<()> {
+    let base = offline_binding_digest(
+        change,
+        preset,
+        max_entry_bytes,
+        max_total_bytes,
+        plain_text_paragraphs,
+        collection,
+    )?;
+    verify_observed_link_binding_with_digest(verdict, change, &base)
+}
+
+fn verify_observed_link_binding_with_digest(
+    verdict: &Verdict,
+    change: &Change,
+    base: &str,
+) -> Result<()> {
+    if verdict.validator.name != "aexeo"
+        || verdict.validator.version != env!("CARGO_PKG_VERSION")
+        || verdict.schema != VERDICT_SCHEMA
+        || verdict.subject != subject_for_change(change)
+    {
+        bail!("observed link verdict requires the same engine and change");
+    }
+    let binding = verdict
+        .extensions
+        .as_ref()
+        .and_then(|extensions| extensions.get(OBSERVED_LINK_BINDING_EXTENSION))
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| anyhow::anyhow!("observed link binding is missing"))?;
+    let observations = binding
+        .get("observations_sha256")
+        .and_then(serde_json::Value::as_str);
+    if binding.len() != 2
+        || binding
+            .get("inputs_sha256")
+            .and_then(serde_json::Value::as_str)
+            != Some(base)
+        || observations.is_none_or(|value| {
+            value.len() != 64
+                || !value
+                    .bytes()
+                    .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        })
+    {
+        bail!("observed link binding is invalid or does not match the inputs");
     }
     Ok(())
 }

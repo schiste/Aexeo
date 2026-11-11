@@ -190,7 +190,7 @@ Options:
           Host-supplied post-change collection JSON with explicit completeness
 
       --verify-verdict <verify-verdict>
-          Re-evaluate offline and compare a previous verdict before writing a fresh verdict
+          Re-evaluate and compare a previous verdict before writing a fresh verdict
 
       --check-link-reachability
           Explicitly enable bounded external HTTP observations for reachability gates
