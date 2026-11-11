@@ -52,3 +52,14 @@ neutrality, source support, or the quality of either language's prose.
 The regression tests in `packages/aexeo-emdash/scripts/test-save-evaluation-wasm.mjs`
 use synthetic records and exercise the same configured handler and WASM bridge.
 The five CMS copies used here were temporary and are not part of the repository.
+
+### GEO010 citation limitation
+
+The rendered-page rule checks whether a qualifying block's plain text contains
+one of a small set of English source words. It does not inspect link destinations,
+associate a claim with a citation, or check a reference list elsewhere on the
+page. Its finding now describes that limited observation and asks for manual
+review; it is not a determination that sources are absent. A regression fixture
+includes both a linked study and a separate reference section. CMS-record audits
+continue to withhold this rendered-context rule. The fixture does not verify the
+actual rendered Preview pages or the reliability and relevance of their sources.
