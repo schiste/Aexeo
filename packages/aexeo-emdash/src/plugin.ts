@@ -1,4 +1,4 @@
-import { hasCompleteBody, isCmsObservableFinding } from "./cms-coverage.js";
+import { hasCompleteBody, isCmsObservableFinding, isLegacyCmsObservableFinding } from "./cms-coverage.js";
 import type { CustomBlockMappings } from "./adapter.js";
 import type { SuppressionFilter } from "./suppressions.js";
 import type { EmdashDocument, Finding } from "./types.js";
@@ -378,7 +378,9 @@ function recordAssessmentCoverage(ctx: SandboxCtx, result: EvaluationOutcome): v
       else notChecked++;
     }
   }
-  try { ctx.log?.info?.("aexeo.preset_coverage", { status: result.ok ? "evaluated" : "error", passed, failed, not_checked: notChecked }); } catch { /* best effort */ }
+  const collidingFindings = result.ok ? result.findings.filter((finding) => finding.aexeo_origin === "content_preset" &&
+    (SITE_GRAPH_RULE_IDS.has(finding.rule_id) || !isLegacyCmsObservableFinding(finding))).length : 0;
+  try { ctx.log?.info?.("aexeo.preset_coverage", { status: result.ok ? "evaluated" : "error", passed, failed, not_checked: notChecked, colliding_findings: collidingFindings }); } catch { /* best effort */ }
 }
 
 // Shape emdash's runtime hands to content:afterSave handlers. The
@@ -508,6 +510,11 @@ export const SITE_GRAPH_RULE_IDS: ReadonlySet<string> = new Set([
   "CNT005", // visible text duplicated on another route
 ]);
 
+/** A content preset may deliberately reuse a legacy site rule identifier. */
+export function isSiteGraphFinding(finding: Finding): boolean {
+  return finding.aexeo_origin !== "content_preset" && SITE_GRAPH_RULE_IDS.has(finding.rule_id);
+}
+
 // Parameterized afterSave for the configured plugin path. Runs in
 // the host's request context so all bridge calls are valid; replaces
 // just this document's findings (sitewide/template findings stay
@@ -568,12 +575,12 @@ export async function handleAfterSaveConfigured(
   // Page-scoped findings replace this route's stored set; site-graph,
   // sitewide and template-scoped findings are left for the next Refresh.
   const storedGraphFindings = (await readFindings(kv, document.route)).filter(
-    (finding) => SITE_GRAPH_RULE_IDS.has(finding.rule_id) && isCmsObservableFinding(finding, hasCompleteBody(document)),
+    (finding) => isSiteGraphFinding(finding) && isCmsObservableFinding(finding, hasCompleteBody(document)),
   );
   const pageFindings = [
     ...result.findings.filter(
       (finding) =>
-        finding.scope === "page" && !SITE_GRAPH_RULE_IDS.has(finding.rule_id) && isCmsObservableFinding(finding, hasCompleteBody(document)),
+        finding.scope === "page" && !isSiteGraphFinding(finding) && isCmsObservableFinding(finding, hasCompleteBody(document)),
     ),
     ...storedGraphFindings,
   ];
@@ -789,7 +796,7 @@ export async function evaluateAndPersistAll(
     summary.errors.push("Sitewide checks unavailable: one or more document bodies are incomplete.");
   }
   for (const finding of result.findings) {
-    if (!globalCoverageComplete && (finding.scope !== "page" || SITE_GRAPH_RULE_IDS.has(finding.rule_id))) continue;
+    if (!globalCoverageComplete && (finding.scope !== "page" || isSiteGraphFinding(finding))) continue;
     const complete = finding.scope === "page" ? completeByRoute.get(finding.path) ?? false : allBodiesComplete;
     if (!isCmsObservableFinding(finding, complete)) continue;
     // The bridge tags page-scope findings with a path that maps to

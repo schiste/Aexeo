@@ -9,6 +9,10 @@ const RENDERED_CONTEXT_RULES = new Set(["CNT001", "CNT002", "GEO008", "GEO010"])
 const UNVERIFIED_SITE_GRAPH_RULES = new Set(["LNK001", "LNK002", "LNK004"]);
 
 export function isCmsObservableFinding(finding: Finding, bodyComplete = true): boolean {
+  return finding.aexeo_origin === "content_preset" || isLegacyCmsObservableFinding(finding, bodyComplete);
+}
+
+export function isLegacyCmsObservableFinding(finding: Finding, bodyComplete = true): boolean {
   return !RENDERED_PAGE_RULE.test(finding.rule_id) && !RENDERED_CONTEXT_RULES.has(finding.rule_id) &&
     !UNVERIFIED_SITE_GRAPH_RULES.has(finding.rule_id) &&
     (bodyComplete || !/^(?:CNT|GEO|LNK)\d{3}$/.test(finding.rule_id));

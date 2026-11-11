@@ -19,7 +19,7 @@ describe("sandbox content presets", () => {
       { gate_id: "headings", status: "not_checked", blocking: true, scope: "document", required_capability: "headings", reason: "unavailable", findings: [] },
     ] });
     const findings = await contentPresetFindings([{ route: "/article" }], ["posts"], { CONTENT_PRESET: "article" }, evaluate, undefined, assessments);
-    expect(findings).toEqual([{ rule_id: "words" }]);
+    expect(findings).toEqual([{ rule_id: "words", aexeo_origin: "content_preset" }]);
     expect(assessments["/article"]).toEqual({ status: "evaluated", preset: "article", gates: [
       { gate_id: "words", status: "failed", blocking: false, scope: "document", required_capability: "text", reason: null, measurements: { word_count: 0, min_words: 1 } },
       { gate_id: "headings", status: "not_checked", blocking: true, scope: "document", required_capability: "headings", reason: "unavailable" },

@@ -116,7 +116,7 @@ export function withContentPreset(
           gates: report.gates.map(({ gate_id, status, blocking, scope, required_capability, reason, measurements }) =>
             ({ gate_id, status, blocking, scope, required_capability, reason, ...(measurements === undefined ? {} : { measurements }) })),
         };
-        for (const gate of report.gates) findings.push(...gate.findings);
+        for (const gate of report.gates) findings.push(...gate.findings.map((finding) => ({ ...finding, aexeo_origin: "content_preset" as const })));
       }
       return { ok: true, findings, assessments };
     } catch (error) {

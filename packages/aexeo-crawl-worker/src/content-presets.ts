@@ -104,7 +104,11 @@ export async function contentPresetFindings(
     }
     for (const gate of report.gates) {
       if (gate.status === "not_checked" && assessments === undefined) throw new Error(`content preset incomplete: ${gate.gate_id}: ${gate.reason}`);
-      findings.push(...gate.findings);
+      findings.push(...gate.findings.map((finding) => {
+        if (assessments === undefined) return finding; // Keep the legacy response shape.
+        if (typeof finding !== "object" || finding === null || Array.isArray(finding)) throw new Error("invalid content finding");
+        return { ...finding, aexeo_origin: "content_preset" };
+      }));
     }
   }
   return findings;
