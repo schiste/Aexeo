@@ -482,6 +482,24 @@ describe("assessment persistence", () => {
     const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator: returning() });
     expect(payload.routes.find((route) => route.route === "/a")?.assessment).toMatchObject({ gates: [{ measurements: { word_count: 50, min_words: 20 } }] });
   });
+  it("makes passing, unchecked, and failed assessments inspectable without findings", async () => {
+    const { ctx, store } = host();
+    const gate = { gate_id: "words", blocking: false, scope: "document", required_capability: "text" };
+    store.set(findingsKey("/passed"), { route: "/passed", findings: [], assessment: { status: "evaluated", preset: "article", gates: [{ ...gate, status: "passed" }] } });
+    store.set(findingsKey("/unchecked"), { route: "/unchecked", findings: [], assessment: { status: "evaluated", preset: "article", gates: [{ ...gate, status: "not_checked", reason: "text unavailable" }] } });
+    store.set(findingsKey("/failed"), { route: "/failed", findings: [], assessment: { status: "error", reason: "adaptation_failed", detail: "unavailable" } });
+    const page = JSON.stringify(await renderFindingsPage(ctx.kv, { emptyFindingsText: "empty", emptyScoreText: "empty", refreshFailureVariant: "error", score: async () => null, truthLabel: () => "" }));
+    for (const route of ["/passed", "/unchecked", "/failed"]) expect(page).toContain(route);
+    expect(page).toContain("1 document evaluations failed; 1 preset checks were not checked");
+    expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/passed"))).toContain("words passed");
+    expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/unchecked"))).toContain("words not checked: text unavailable");
+    const failed = JSON.stringify(await renderDocumentPanel(ctx.kv, "/failed"));
+    expect(failed).toContain("Evaluation failed");
+    expect(failed).not.toContain("No findings");
+    const missing = JSON.stringify(await renderDocumentPanel(ctx.kv, "/missing"));
+    expect(missing).toContain("No evaluation is available");
+    expect(missing).not.toContain("No findings");
+  });
   it("stores not-checked gate details alongside current findings", async () => {
     const { ctx, store } = host();
     await save(ctx, item("a", NEW), async () => ({ ok: true, findings: [finding("/a", "current")], assessments: { "/a": { status: "evaluated", preset: "article", gates: [{ gate_id: "words", status: "not_checked", blocking: true, scope: "document", required_capability: "text", reason: "text unavailable" }] } } }));
