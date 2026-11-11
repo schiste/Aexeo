@@ -209,6 +209,72 @@ fn is_void_element(tag: &str) -> bool {
     )
 }
 
+// Skip raw-text elements using HTML end-tag boundaries, including whitespace
+// before `>`. Template elements may contain nested templates and raw text.
+fn inert_element_end(raw: &str, lowercase: &str, tag: &str, mut cursor: usize) -> usize {
+    if tag != "template" {
+        let prefix = format!("</{tag}");
+        while let Some(offset) = lowercase[cursor..].find(&prefix) {
+            let start = cursor + offset;
+            let boundary = start + prefix.len();
+            if raw
+                .as_bytes()
+                .get(boundary)
+                .is_some_and(|byte| byte.is_ascii_whitespace() || matches!(*byte, b'/' | b'>'))
+                && let Some(end) = tag_end(raw, start)
+            {
+                return end + 1;
+            }
+            cursor = boundary;
+        }
+        return raw.len();
+    }
+
+    let mut depth = 1usize;
+    while let Some(offset) = raw[cursor..].find('<') {
+        let start = cursor + offset;
+        if raw[start..].starts_with("<!--") {
+            cursor = raw[start + 4..]
+                .find("-->")
+                .map(|end| start + 4 + end + 3)
+                .unwrap_or(raw.len());
+            continue;
+        }
+        let Some(end) = tag_end(raw, start) else {
+            return raw.len();
+        };
+        if raw[start..].starts_with("</") {
+            if closing_tag_name(raw, start, end).as_deref() == Some("template") {
+                depth -= 1;
+                if depth == 0 {
+                    return end + 1;
+                }
+            }
+        } else if let Some((name, _)) = parse_tag_name_and_attributes(&raw[start..=end]) {
+            if name == "template" {
+                depth += 1;
+            } else if name == "plaintext" {
+                return raw.len();
+            } else if matches!(
+                name.as_str(),
+                "script"
+                    | "style"
+                    | "textarea"
+                    | "title"
+                    | "xmp"
+                    | "iframe"
+                    | "noembed"
+                    | "noframes"
+            ) {
+                cursor = inert_element_end(raw, lowercase, &name, end + 1);
+                continue;
+            }
+        }
+        cursor = end + 1;
+    }
+    raw.len()
+}
+
 fn parse_elements(raw: &str) -> (Vec<HtmlElement>, Cow<'_, str>) {
     let mut elements = Vec::new();
     let mut open_elements: Vec<OpenElement> = Vec::new();
@@ -271,11 +337,7 @@ fn parse_elements(raw: &str) -> (Vec<HtmlElement>, Cow<'_, str>) {
             }
         } else if let Some((tag, attributes)) = parse_tag_name_and_attributes(&raw[start..=end]) {
             if matches!(tag.as_str(), "script" | "style" | "template") {
-                let closing_tag = format!("</{}>", tag);
-                cursor = lowercase_raw[end + 1..]
-                    .find(&closing_tag)
-                    .map(|offset| end + 1 + offset + closing_tag.len())
-                    .unwrap_or(raw.len());
+                cursor = inert_element_end(raw, &lowercase_raw, &tag, end + 1);
                 suppressed_ranges.push((start, cursor));
                 continue;
             }
@@ -863,6 +925,48 @@ mod tests {
             .map(|finding| finding.rule_id.as_str())
             .collect();
         assert_eq!(ids, BTreeSet::from(["EDT001", "EDT002", "EDT003"]));
+    }
+
+    #[test]
+    fn skips_nested_templates_and_accepts_whitespace_in_raw_text_end_tags() {
+        let raw = r#"<h1>Visible</h1><script>ignored</SCRIPT >
+            <style>ignored</style  ><template>outer
+            <script>const example = "</template>";</script>
+            <!-- </template> --><textarea></template></textarea>
+            <template><h2>inner</h2></template>
+            <p>still inert</p></template  ><p>visible after</p>"#;
+        let (elements, visible) = parse_elements(raw);
+        assert_eq!(
+            elements
+                .iter()
+                .map(|element| element.tag.as_str())
+                .collect::<Vec<_>>(),
+            ["h1", "p"]
+        );
+        assert!(visible.contains("visible after"));
+        assert!(!visible.contains("still inert"));
+        assert!(!visible.contains("ignored"));
+    }
+
+    #[test]
+    fn raw_text_end_tag_does_not_match_a_longer_name() {
+        let raw = "<script>before </scripted> still hidden</script ><p>visible</p>";
+        let (elements, visible) = parse_elements(raw);
+        assert_eq!(elements.len(), 1);
+        assert_eq!(elements[0].tag, "p");
+        assert!(!visible.contains("still hidden"));
+        assert!(visible.contains("visible"));
+    }
+
+    #[test]
+    fn inert_markup_does_not_hide_or_displace_the_actual_summary() {
+        let site = site_with_html(
+            r#"<h1>Compare</h1><script>ignored</script >
+            <template><template>inner</template><p>inert text</p></template>
+            <p id="answer-summary">First sentence. Second sentence.</p>"#,
+        );
+        let findings = run_editorial_rules(&site, &config_with_brief());
+        assert!(!findings.iter().any(|finding| finding.rule_id == "EDT001"));
     }
 
     #[test]
