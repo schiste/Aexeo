@@ -33,6 +33,12 @@ describe("CMS observation boundaries", () => {
     expect(isCmsObservableFinding(finding("LNK003"), false)).toBe(false);
     expect(isCmsObservableFinding(finding("CNT006"), true)).toBe(true);
     expect(isCmsObservableFinding(finding("CNT006"), false)).toBe(false);
+    for (const rule of ["ROB001", "SCH001", "IMG001", "EDT001", "MAP001", "QLT004", "LNK020", "A11Y005"]) {
+      expect(isCmsObservableFinding(finding(rule), true), rule).toBe(false);
+      expect(isCmsObservableFinding({ ...finding(rule), aexeo_origin: "content_preset" }, false), rule).toBe(true);
+    }
+    expect(isCmsObservableFinding(finding("EDIT001"), true)).toBe(true);
+    expect(isCmsObservableFinding({ ...finding("CNT006"), scope: "sitewide" }, true)).toBe(false);
     for (const rule of ["GEO007", "GEO009", "CNT005", "LNK003"]) {
       expect(isCmsObservableFinding({ ...finding(rule), aexeo_origin: "content_preset" }, false)).toBe(true);
     }
