@@ -621,3 +621,27 @@ fields=["description"]
     assert.equal(has(host, route, ruleId), true, `Refresh must recompute ${ruleId} on ${route}`);
   }
 }
+
+// Quoted French prose must not produce phantom sentences or count guillemets as words.
+{
+  const preset = `version=1
+name="quoted"
+[[gates]]
+id="sentence"
+kind="sentence_length"
+max_words=1
+paragraphs_only=true
+`;
+  const configured = createPlugin({ contentPreset: { name: "quoted", sources: { quoted: preset } } });
+  const page = item("quoted-french", { locale: "fr", data: { content: [block("p", "« Oui ! »")] } });
+  const host = fakeHost([page]);
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  assert.equal(host.store.get("findings:/quoted-french").assessment.gates[0].status, "passed");
+  page.data.content[0].children[0].text = "« Oui ! » Long words.";
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  const saved = host.store.get("findings:/quoted-french");
+  assert.equal(saved.assessment.gates[0].status, "failed");
+  const finding = saved.findings.find((entry) => entry.rule_id === "sentence");
+  assert.deepEqual(finding.aexeo_source_location, { block_index: 0, span_index: 0, utf16_offset: 10 });
+  assert.deepEqual(finding.aexeo_cms_location, { path: ["data", "content", 0, "children", 0, "text"], utf16_offset: 10 });
+}
