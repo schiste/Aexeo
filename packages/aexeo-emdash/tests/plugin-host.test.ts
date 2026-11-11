@@ -47,6 +47,22 @@ describe("plugin configuration", () => {
 });
 
 describe("EmDash content adaptation", () => {
+  it("records source paths for unchanged blocks across fields and nested custom content", () => {
+    const before = body("Before");
+    const after = body("After");
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: {
+      intro: before, sections: [{ _type: "panel", _key: "p", rich: after, title: "Generated" }],
+    } };
+    const mapped = adaptContentItem(item, { contentFields: ["intro", "sections"], blockMappings: { panel: [{ kind: "heading", field: "title" }, { kind: "richText", field: "rich" }] } });
+    expect(mapped.meta.bodySourcePaths).toEqual([["data", "intro", 0], null, ["data", "sections", 0, "rich", 0]]);
+    const shared = body("Shared")[0];
+    const ambiguous = adaptContentItem({ ...item, data: { intro: [shared], sections: [shared] } }, { contentFields: ["intro", "sections"] });
+    expect(ambiguous.meta.bodySourcePaths).toBeUndefined();
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    expect(adaptContentItem({ ...item, data: { intro: before, cyclic } }, { contentFields: ["intro"] }).meta.bodySourcePaths).toBeUndefined();
+    expect(adaptContentItem({ ...item, data: { intro: before, oversized: new Array(50_001).fill(null) } }, { contentFields: ["intro"] }).meta.bodySourcePaths).toBeUndefined();
+  });
   it("distinguishes an absent body from an explicitly empty one without hiding another rich text field", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: {} };
     expect(contentItemToEmdashDocument(item).body).toBeUndefined();

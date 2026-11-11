@@ -707,3 +707,10 @@ re-evaluated to obtain them.
 The `aexeo.preset_coverage` event also aggregates the number of reports with
 mapping data and their eligible, mapped and unmapped finding counts. Older
 bridges omit coverage; `mapping_reports` distinguishes that from zero findings.
+
+For unchanged Portable Text blocks, EmDash additionally records the path to the
+original text span in the evaluated CMS record and its UTF-16 offset. Paths are
+snapshot-specific; re-evaluate after changes. Synthesized blocks and ambiguous,
+cyclic or excessively large inputs do not receive a CMS source path. The local
+`aexeo.cms_location_coverage` event reports eligible, mapped and unmapped counts
+without paths, content or identifiers.

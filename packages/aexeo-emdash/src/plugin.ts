@@ -521,6 +521,34 @@ export function isSiteGraphFinding(finding: Finding): boolean {
   return finding.aexeo_origin !== "content_preset" && SITE_GRAPH_RULE_IDS.has(finding.rule_id);
 }
 
+/** Bind a projected position only when the adapter preserved its source block. */
+function withCmsSourceLocation(finding: Finding, stored: StoredDocument | undefined): Finding {
+  if (finding.aexeo_cms_location !== undefined) {
+    finding = { ...finding };
+    delete finding.aexeo_cms_location;
+  }
+  const location = finding.aexeo_source_location;
+  if (finding.aexeo_origin !== "content_preset" || !location || !stored) return finding;
+  const path = stored.meta.bodySourcePaths?.[location.block_index];
+  const text = stored.document.body?.[location.block_index]?.children[location.span_index]?.text;
+  const offset = location.utf16_offset;
+  if (!path || typeof text !== "string" || !Number.isSafeInteger(offset) || offset < 0 || offset > text.length ||
+      (offset > 0 && offset < text.length && /[\uD800-\uDBFF]/.test(text[offset - 1]!) && /[\uDC00-\uDFFF]/.test(text[offset]!))) return finding;
+  return { ...finding, aexeo_cms_location: { path: [...path, "children", location.span_index, "text"], utf16_offset: offset } };
+}
+
+function countCmsLocations(counts: { eligible: number; mapped: number }, findings: readonly Finding[]): void {
+  for (const finding of findings) {
+    if (finding.aexeo_origin !== "content_preset" || finding.aexeo_source_location === undefined) continue;
+    counts.eligible++;
+    if (finding.aexeo_cms_location !== undefined) counts.mapped++;
+  }
+}
+
+function recordCmsLocationCoverage(ctx: SandboxCtx, counts: { eligible: number; mapped: number }): void {
+  try { ctx.log?.info?.("aexeo.cms_location_coverage", { ...counts, unmapped: counts.eligible - counts.mapped }); } catch { /* best effort */ }
+}
+
 // Parameterized afterSave for the configured plugin path. Runs in
 // the host's request context so all bridge calls are valid; replaces
 // just this document's findings (sitewide/template findings stay
@@ -587,7 +615,7 @@ export async function handleAfterSaveConfigured(
     ...result.findings.filter(
       (finding) =>
         finding.scope === "page" && !isSiteGraphFinding(finding) && isCmsObservableFinding(finding, hasCompleteBody(document)),
-    ),
+    ).map((finding) => withCmsSourceLocation(finding, stored)),
     ...storedGraphFindings,
   ];
   const filtered =
@@ -608,6 +636,9 @@ export async function handleAfterSaveConfigured(
     log?.info?.(`Aexeo afterSave discarded: ${document.route} changed while evaluating`);
     return;
   }
+  const cmsLocationCounts = { eligible: 0, mapped: 0 };
+  countCmsLocations(cmsLocationCounts, filtered);
+  recordCmsLocationCoverage(ctx, cmsLocationCounts);
   await kv.set(findingsKey(document.route), {
     route: document.route,
     findings: filtered,
@@ -811,7 +842,7 @@ export async function evaluateAndPersistAll(
     // dedicated row.
     const bucket = finding.scope === "page" ? finding.path : "*";
     const list = findingsByRoute.get(bucket) ?? [];
-    list.push(finding);
+    list.push(withCmsSourceLocation(finding, adaptedByRoute.get(bucket)));
     findingsByRoute.set(bucket, list);
   }
 
@@ -826,6 +857,7 @@ export async function evaluateAndPersistAll(
   //    collection/status selectors on those rules are no-ops, by
   //    design (sitewide findings are inherently cross-document).
   let totalAfterSuppression = 0;
+  const cmsLocationCounts = { eligible: 0, mapped: 0 };
   for (const [route, findings] of findingsByRoute) {
     const stored = adaptedByRoute.get(route);
     // A save or delete that landed during the sweep owns this route now.
@@ -848,6 +880,7 @@ export async function evaluateAndPersistAll(
       suppressionFilter === undefined
         ? findings
         : suppressionFilter.apply(context, findings);
+    countCmsLocations(cmsLocationCounts, filtered);
     await kv.set(findingsKey(route), {
       route, findings: filtered,
       ...(route === "*" && globalAssessment !== undefined ? { assessment: globalAssessment } :
@@ -856,6 +889,7 @@ export async function evaluateAndPersistAll(
     summary.routesUpdated += 1;
     totalAfterSuppression += filtered.length;
   }
+  recordCmsLocationCoverage(ctx, cmsLocationCounts);
   summary.totalFindings = totalAfterSuppression;
   if (inventoryComplete && !changed) {
     await removeStaleDocuments(ctx, collections, documentRoutes, storedAtStart);
