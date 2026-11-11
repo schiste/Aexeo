@@ -528,16 +528,15 @@ export function documentFindingsTable(findings: Finding[]): unknown {
       { key: "rule", label: "Rule", format: "code" },
       { key: "severity", label: "Severity", format: "badge" },
       { key: "message", label: "Message" },
-      { key: "block", label: "Block", format: "code" },
+      { key: "block", label: "Location", format: "code" },
     ],
     rows: findings.map((finding) => ({
       rule: finding.rule_id,
       severity: finding.severity,
       message: finding.message,
-      // The bridge stamps every Portable Text block with id + data-pt-key
-      // when rendering; surfacing the path:line locator here lets authors
-      // locate the failing block via the editor's ⌘-F.
-      block: `${finding.path}:${finding.line}`,
+      block: finding.aexeo_source_location
+        ? `Projected body: block ${finding.aexeo_source_location.block_index + 1}, span ${finding.aexeo_source_location.span_index + 1}, UTF-16 offset ${finding.aexeo_source_location.utf16_offset}`
+        : finding.aexeo_origin === "content_preset" ? "Projected location unavailable" : `Reported line ${finding.line}`,
     })),
   };
 }

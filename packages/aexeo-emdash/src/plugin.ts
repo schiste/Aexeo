@@ -369,9 +369,15 @@ function recordContentCoverage(ctx: SandboxCtx, documents: readonly EmdashDocume
 
 // Aggregate counts only; never log routes, gate identifiers, source text or reasons.
 function recordAssessmentCoverage(ctx: SandboxCtx, result: EvaluationOutcome): void {
-  let passed = 0, failed = 0, notChecked = 0;
+  let passed = 0, failed = 0, notChecked = 0, mappingReports = 0, mappingEligible = 0, mappingMapped = 0, mappingUnmapped = 0;
   if (result.ok) for (const assessment of Object.values(result.assessments ?? {})) {
     if (assessment.status !== "evaluated") continue;
+    if (assessment.source_mapping) {
+      mappingReports++;
+      mappingEligible += assessment.source_mapping.eligible;
+      mappingMapped += assessment.source_mapping.mapped;
+      mappingUnmapped += assessment.source_mapping.unmapped;
+    }
     for (const gate of assessment.gates) {
       if (gate.status === "passed") passed++;
       else if (gate.status === "failed") failed++;
@@ -380,7 +386,7 @@ function recordAssessmentCoverage(ctx: SandboxCtx, result: EvaluationOutcome): v
   }
   const collidingFindings = result.ok ? result.findings.filter((finding) => finding.aexeo_origin === "content_preset" &&
     (SITE_GRAPH_RULE_IDS.has(finding.rule_id) || !isLegacyCmsObservableFinding(finding))).length : 0;
-  try { ctx.log?.info?.("aexeo.preset_coverage", { status: result.ok ? "evaluated" : "error", passed, failed, not_checked: notChecked, colliding_findings: collidingFindings }); } catch { /* best effort */ }
+  try { ctx.log?.info?.("aexeo.preset_coverage", { status: result.ok ? "evaluated" : "error", passed, failed, not_checked: notChecked, colliding_findings: collidingFindings, mapping_reports: mappingReports, mapping_eligible: mappingEligible, mapping_mapped: mappingMapped, mapping_unmapped: mappingUnmapped }); } catch { /* best effort */ }
 }
 
 // Shape emdash's runtime hands to content:afterSave handlers. The
@@ -625,7 +631,7 @@ export interface RefreshSummary {
 // failure. The `reason` discriminator is opaque to evaluateAndPersistAll;
 // it just gets surfaced in the RefreshSummary.errors list.
 export type DocumentAssessment =
-  | { status: "evaluated"; preset: string; gates: Pick<import("./content.js").ContentGateResult, "gate_id" | "status" | "blocking" | "scope" | "required_capability" | "reason" | "measurements">[] }
+  | { status: "evaluated"; preset: string; gates: Pick<import("./content.js").ContentGateResult, "gate_id" | "status" | "blocking" | "scope" | "required_capability" | "reason" | "measurements">[]; source_mapping?: { eligible: number; mapped: number; unmapped: number } }
   | { status: "error"; reason: string; detail: string };
 
 export type EvaluationOutcome =

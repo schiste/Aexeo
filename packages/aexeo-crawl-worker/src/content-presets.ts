@@ -93,21 +93,27 @@ export async function contentPresetFindings(
       ? evaluate(documentJson, name, JSON.stringify(sources), evidenceJson)
       : evaluate(documentJson, name, JSON.stringify(sources), evidenceJson, extensionsJson)) as {
       gates: Array<{ gate_id: string; status: string; blocking: boolean; scope: string; required_capability: string; reason: string | null; measurements?: Record<string, number>; findings: unknown[] }>;
+      source_mapping?: { eligible: number; mapped: number; unmapped: number };
+      source_locations?: Array<{ gate_id: string; finding_index: number; block_index: number; span_index: number; utf16_offset: number }>;
     };
     if (assessments !== undefined) {
       if (typeof document !== "object" || document === null || !("route" in document) || typeof document.route !== "string") throw new Error("document route is required for assessments");
       assessments[document.route] = {
         status: "evaluated", preset: name,
+        ...(report.source_mapping === undefined ? {} : { source_mapping: report.source_mapping }),
         gates: report.gates.map(({ gate_id, status, blocking, scope, required_capability, reason, measurements }) =>
           ({ gate_id, status, blocking, scope, required_capability, reason, ...(measurements === undefined ? {} : { measurements }) })),
       };
     }
+    const locations = new Map((report.source_locations ?? []).map((location) => [`${location.gate_id}:${location.finding_index}`, location]));
     for (const gate of report.gates) {
       if (gate.status === "not_checked" && assessments === undefined) throw new Error(`content preset incomplete: ${gate.gate_id}: ${gate.reason}`);
-      findings.push(...gate.findings.map((finding) => {
+      findings.push(...gate.findings.map((finding, index) => {
         if (assessments === undefined) return finding; // Keep the legacy response shape.
         if (typeof finding !== "object" || finding === null || Array.isArray(finding)) throw new Error("invalid content finding");
-        return { ...finding, aexeo_origin: "content_preset" };
+        const location = locations.get(`${gate.gate_id}:${index}`);
+        return { ...finding, aexeo_origin: "content_preset",
+          ...(location === undefined ? {} : { aexeo_source_location: { block_index: location.block_index, span_index: location.span_index, utf16_offset: location.utf16_offset } }) };
       }));
     }
   }

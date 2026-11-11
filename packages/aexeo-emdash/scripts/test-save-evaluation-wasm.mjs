@@ -115,6 +115,10 @@ mode="strict"
   const host = fakeHost([page]);
   await pluginWithProvider.routes.refresh.handler(host.ctx);
   assert.equal(has(host, "/external", "external"), true);
+  const saved = host.store.get("findings:/external");
+  assert.deepEqual(saved.findings.find((finding) => finding.rule_id === "external").aexeo_source_location,
+    { block_index: 0, span_index: 0, utf16_offset: 0 });
+  assert.deepEqual(saved.assessment.source_mapping, { eligible: 1, mapped: 1, unmapped: 0 });
   issue = false;
   await pluginWithProvider.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
   assert.equal(has(host, "/external", "external"), false);

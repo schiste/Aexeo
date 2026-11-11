@@ -696,3 +696,14 @@ remain subject to conservative CMS filtering; re-evaluate records after upgradin
 both the plugin and sidecar. Preset coverage logs add an aggregate
 `colliding_findings` count, without rule IDs or content. The tag identifies the
 evaluation path; it does not independently verify the source or the finding.
+
+EmDash configured and version 2 sidecar evaluations attach available projected
+block, span and UTF-16 offsets to each matching finding. These refer to the
+exact adapted body snapshot, not necessarily a field or block in the original
+CMS record: custom mappings and merged fields can change the structure. The
+admin displays unavailable locations explicitly; older stored findings must be
+re-evaluated to obtain them.
+
+The `aexeo.preset_coverage` event also aggregates the number of reports with
+mapping data and their eligible, mapped and unmapped finding counts. Older
+bridges omit coverage; `mapping_reports` distinguishes that from zero findings.

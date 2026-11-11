@@ -86,6 +86,8 @@ export interface RouteSummary {
 }
 
 export interface FindingRow {
+  aexeo_origin?: "content_preset";
+  aexeo_source_location?: Finding["aexeo_source_location"];
   route: string;
   rule_id: string;
   severity: string;

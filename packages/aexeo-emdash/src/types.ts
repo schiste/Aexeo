@@ -87,6 +87,8 @@ export interface RuleLayers {
 export interface Finding {
   /** Added by content preset evaluators; absent on legacy site findings. */
   aexeo_origin?: "content_preset";
+  /** Coordinates in the evaluated projected body, not necessarily the CMS source field. */
+  aexeo_source_location?: { block_index: number; span_index: number; utf16_offset: number };
   rule_id: string;
   message: string;
   path: string;

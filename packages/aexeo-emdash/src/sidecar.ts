@@ -124,7 +124,18 @@ export async function evaluateViaSidecar(
         !("assessments" in value) || !value.assessments || typeof value.assessments !== "object" || Array.isArray(value.assessments)) {
       return { ok: false, reason: "invalid_response", detail: "sidecar returned invalid assessment envelope" };
     }
+    for (const finding of value.findings) {
+      if (finding && typeof finding === "object" && "aexeo_source_location" in finding &&
+          !validCounts(finding.aexeo_source_location, ["block_index", "span_index", "utf16_offset"])) {
+        return { ok: false, reason: "invalid_response", detail: "sidecar returned invalid source location" };
+      }
+    }
     for (const assessment of Object.values(value.assessments)) {
+      if (assessment && typeof assessment === "object" && "source_mapping" in assessment &&
+          (!validCounts(assessment.source_mapping, ["eligible", "mapped", "unmapped"]) ||
+           assessment.source_mapping.mapped + assessment.source_mapping.unmapped !== assessment.source_mapping.eligible)) {
+        return { ok: false, reason: "invalid_response", detail: "sidecar returned invalid source mapping coverage" };
+      }
       if (!assessment || typeof assessment !== "object" || !("status" in assessment) || assessment.status !== "evaluated" ||
           !("preset" in assessment) || typeof assessment.preset !== "string" || !("gates" in assessment) || !Array.isArray(assessment.gates) ||
           assessment.gates.some((gate: unknown) => !gate || typeof gate !== "object" || !("gate_id" in gate) || typeof gate.gate_id !== "string" ||
@@ -142,6 +153,13 @@ export async function evaluateViaSidecar(
     const detail = err instanceof Error ? err.message : String(err);
     return { ok: false, reason: "invalid_response", detail };
   }
+}
+
+function validCounts<K extends string>(value: unknown, keys: readonly K[]): value is Record<K, number> {
+  return value !== null && typeof value === "object" && !Array.isArray(value) && keys.every((key) => {
+    const count = (value as Record<string, unknown>)[key];
+    return typeof count === "number" && Number.isSafeInteger(count) && count >= 0;
+  });
 }
 
 function trimTrailingSlash(url: string): string {

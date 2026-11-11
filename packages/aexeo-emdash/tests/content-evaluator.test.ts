@@ -15,6 +15,14 @@ describe("configured content preset", () => {
     const result = await withContentPreset(base, { name: "custom" }, async () => report)([doc]);
     expect(result.ok && result.findings[0]).toMatchObject({ rule_id: "heading", aexeo_origin: "content_preset" });
   });
+  it("attaches projected snapshot coordinates to the matching finding only", async () => {
+    const located: ContentReport = { ...report, source_mapping: { eligible: 2, mapped: 1, unmapped: 1 }, source_locations: [{ gate_id: "heading", finding_index: 0, block_index: 2, span_index: 1, utf16_offset: 3 }] };
+    const result = await withContentPreset(base, { name: "custom" }, async () => located)([doc]);
+    expect(result.ok && result.assessments?.["/test"]).toMatchObject({ source_mapping: { eligible: 2, mapped: 1, unmapped: 1 } });
+    expect(result.ok && result.findings[0]).toMatchObject({ aexeo_source_location: { block_index: 2, span_index: 1, utf16_offset: 3 } });
+    const unlocated = await withContentPreset(base, { name: "custom" }, async () => report)([doc]);
+    expect(unlocated.ok && unlocated.findings[0]).not.toHaveProperty("aexeo_source_location");
+  });
   it("reports unavailable gates as incomplete", async () => {
     const incomplete: ContentReport = { ...report, gates: [{ ...report.gates[0]!, status: "not_checked", findings: [], reason: "site unavailable" }] };
     const result = await withContentPreset(base, { name: "custom" }, async () => incomplete)([doc]);

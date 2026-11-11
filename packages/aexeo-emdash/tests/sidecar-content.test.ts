@@ -14,13 +14,13 @@ describe("sandbox content presets", () => {
   });
   it("returns partial findings with per-document assessment to upgraded clients", async () => {
     const assessments: Record<string, unknown> = Object.create(null);
-    const evaluate = () => JSON.stringify({ gates: [
+    const evaluate = () => JSON.stringify({ source_mapping: { eligible: 1, mapped: 1, unmapped: 0 }, source_locations: [{ gate_id: "words", finding_index: 0, block_index: 1, span_index: 2, utf16_offset: 3 }], gates: [
       { gate_id: "words", status: "failed", blocking: false, scope: "document", required_capability: "text", reason: null, measurements: { word_count: 0, min_words: 1 }, findings: [{ rule_id: "words" }] },
       { gate_id: "headings", status: "not_checked", blocking: true, scope: "document", required_capability: "headings", reason: "unavailable", findings: [] },
     ] });
     const findings = await contentPresetFindings([{ route: "/article" }], ["posts"], { CONTENT_PRESET: "article" }, evaluate, undefined, assessments);
-    expect(findings).toEqual([{ rule_id: "words", aexeo_origin: "content_preset" }]);
-    expect(assessments["/article"]).toEqual({ status: "evaluated", preset: "article", gates: [
+    expect(findings).toEqual([{ rule_id: "words", aexeo_origin: "content_preset", aexeo_source_location: { block_index: 1, span_index: 2, utf16_offset: 3 } }]);
+    expect(assessments["/article"]).toEqual({ status: "evaluated", preset: "article", source_mapping: { eligible: 1, mapped: 1, unmapped: 0 }, gates: [
       { gate_id: "words", status: "failed", blocking: false, scope: "document", required_capability: "text", reason: null, measurements: { word_count: 0, min_words: 1 } },
       { gate_id: "headings", status: "not_checked", blocking: true, scope: "document", required_capability: "headings", reason: "unavailable" },
     ] });
@@ -34,6 +34,10 @@ describe("sandbox content presets", () => {
     expect(JSON.parse((fetch.mock.calls[0] as unknown as [string, { body: string }])[1].body).responseFormat).toBe(2);
     const invalid = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ findings: [], assessments: { "/article": { ...assessment, gates: [{ ...gate, status: "mystery" }] } } }) });
     expect(await evaluateViaSidecar({ fetch: invalid }, { url: "https://example.test", authToken: "secret" }, [])).toMatchObject({ ok: false, reason: "invalid_response" });
+    const invalidLocation = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ findings: [{ aexeo_source_location: { block_index: -1, span_index: 0, utf16_offset: 0 } }], assessments: {} }) });
+    expect(await evaluateViaSidecar({ fetch: invalidLocation }, { url: "https://example.test", authToken: "secret" }, [])).toMatchObject({ ok: false, reason: "invalid_response" });
+    const invalidCoverage = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ findings: [], assessments: { "/article": { ...assessment, source_mapping: { eligible: 2, mapped: 2, unmapped: 1 } } } }) });
+    expect(await evaluateViaSidecar({ fetch: invalidCoverage }, { url: "https://example.test", authToken: "secret" }, [])).toMatchObject({ ok: false, reason: "invalid_response" });
     const invalidMeasurements = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ findings: [], assessments: { "/article": { ...assessment, gates: [{ ...gate, measurements: { count: "zero" } }] } } }) });
     expect(await evaluateViaSidecar({ fetch: invalidMeasurements }, { url: "https://example.test", authToken: "secret" }, [])).toMatchObject({ ok: false, reason: "invalid_response" });
   });
