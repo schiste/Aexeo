@@ -23,7 +23,12 @@ use crate::output::{
 
 // Reject paths that would overwrite the build or inputs before writing anything.
 // Resolving the existing parent also detects symlinks in directory components.
-fn check_graph_output_path(output: &Path, site_root: &Path, protected: &[&Path]) -> Result<()> {
+fn check_graph_output_path(
+    output: &Path,
+    site_root: &Path,
+    audit_root: &Path,
+    protected: &[&Path],
+) -> Result<()> {
     let metadata = match fs::symlink_metadata(output) {
         Ok(metadata) => {
             if metadata.file_type().is_symlink() {
@@ -55,6 +60,15 @@ fn check_graph_output_path(output: &Path, site_root: &Path, protected: &[&Path])
     };
     if resolved.starts_with(site_root.canonicalize()?) {
         user_bail!("link graph output must be outside the static site directory");
+    }
+    if let Ok(report_dir) = aexeo_core::reports_dir(audit_root).canonicalize()
+        && resolved.parent() == Some(report_dir.as_path())
+        && resolved
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("check-") && name.ends_with(".json"))
+    {
+        user_bail!("link graph output conflicts with a check audit artifact");
     }
     for input in protected {
         if input.canonicalize().is_ok_and(|path| path == resolved) {
@@ -95,7 +109,7 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
         }
         let default_config = root.join("aexeo.toml");
         protected.push(explicit_config.as_deref().unwrap_or(&default_config));
-        check_graph_output_path(Path::new(path), &site_root, &protected)?;
+        check_graph_output_path(Path::new(path), &site_root, &root, &protected)?;
         let urls = super::link_graph::read_static_url_map(required_arg(
             submatches,
             "link-graph-url-map",

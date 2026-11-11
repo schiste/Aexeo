@@ -1174,3 +1174,33 @@ fn static_check_never_overwrites_the_build_or_direct_inputs_with_the_graph() {
     assert!(graph.exists());
     assert_eq!(fs::read_to_string(&page).unwrap(), html);
 }
+
+#[test]
+fn static_check_rejects_graph_output_at_its_own_audit_path() {
+    let temp = tempfile::tempdir().unwrap();
+    let site = temp.path().join("dist");
+    fs::create_dir(&site).unwrap();
+    fs::write(site.join("index.html"), "<main>Page</main>").unwrap();
+    fs::write(temp.path().join("astro.config.mjs"), "").unwrap();
+    let map = temp.path().join("map.json");
+    fs::write(&map, r#"{"index.html":"https://example.org/"}"#).unwrap();
+    let reports = temp.path().join(".aexeo-reports");
+    fs::create_dir(&reports).unwrap();
+    let audit = reports.join("check-latest.json");
+    fs::write(&audit, "previous audit").unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "check",
+            temp.path().to_str().unwrap(),
+            "--link-graph-output",
+            audit.to_str().unwrap(),
+            "--link-graph-site-origin",
+            "https://example.org",
+            "--link-graph-url-map",
+            map.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert_eq!(fs::read_to_string(&audit).unwrap(), "previous audit");
+}

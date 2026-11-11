@@ -577,7 +577,8 @@ aexeo-cli check ./dist --link-graph-output graph.json \
 ```
 
 Place the graph output outside the resolved build directory and separately from
-the explicit URL map, context, baseline and primary config files. Existing graph
+the explicit URL map, context, baseline, primary config and generated `check-*.json`
+audit files. Existing graph
 files at a separate path can be updated. Symbolic-link output paths are refused;
 on Unix, existing hard-linked output files are refused too. These checks prevent
 common accidental collisions; they are not protection against concurrent file
