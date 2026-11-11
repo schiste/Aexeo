@@ -7,7 +7,8 @@ use aexeo_core::{
     content_gate::MAX_CONTENT_INPUT_BYTES,
     content_gate_sources::{ConfinedContentFiles, SourceError},
     content_gate_verdict::{
-        ChangeEvaluationHost, ChangeEvaluationOptions, evaluate_change_with_host,
+        ChangeCollection, ChangeEvaluationHost, ChangeEvaluationOptions,
+        evaluate_change_with_collection,
     },
     content_presets::{builtin_content_presets, resolve_content_preset},
     error::UserContext,
@@ -26,6 +27,14 @@ use std::{
 const MAX_CHANGE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_TOTAL_CONTENT_BYTES: usize = 64 * 1024 * 1024;
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CollectionSnapshot {
+    change_id: String,
+    complete: bool,
+    items: Vec<aexeo_core::content_gate::ContentInput>,
+}
 
 #[cfg(target_os = "linux")]
 type PlatformProvider = aexeo_core::content_gate_sources::LinuxConfinedContentFiles;
@@ -118,6 +127,21 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         .get_one::<String>("extension-results")
         .map(|path| super::content::load_external_gate_results(path, true))
         .transpose()?;
+    let collection: Option<CollectionSnapshot> = args
+        .get_one::<String>("collection-snapshot")
+        .map(|path| -> Result<_> {
+            let mut data = Vec::new();
+            File::open(path)
+                .user_context("opening collection snapshot")?
+                .take(MAX_CHANGE_BYTES + 1)
+                .read_to_end(&mut data)
+                .user_context("reading collection snapshot")?;
+            if data.len() as u64 > MAX_CHANGE_BYTES {
+                user_bail!("collection snapshot exceeds the size limit");
+            }
+            serde_json::from_slice(&data).user_context("invalid collection snapshot")
+        })
+        .transpose()?;
     let mut provider = HostFiles::new(args.get_one::<String>("content-root").map(String::as_str))?;
     let max_checks = *args
         .get_one::<u64>("link-max-checks")
@@ -150,7 +174,7 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
     } else {
         None
     };
-    let verdict = match evaluate_change_with_host(
+    let verdict = match evaluate_change_with_collection(
         &change,
         &mut provider,
         &preset,
@@ -166,6 +190,11 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
                 .as_ref()
                 .map(|host| host as &dyn aexeo_core::content_gate::ContentGateExtensions),
         },
+        collection.as_ref().map(|snapshot| ChangeCollection {
+            change_id: &snapshot.change_id,
+            items: &snapshot.items,
+            complete: snapshot.complete,
+        }),
     ) {
         Ok(verdict) => verdict,
         Err(error) if error.downcast_ref::<SourceError>().is_some() => {
@@ -173,6 +202,15 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         }
         Err(error) => return Err(error),
     };
+    if telemetry && let Some(snapshot) = &collection {
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "event": "content_change_collection", "version": 1,
+                "items": snapshot.items.len(), "complete": snapshot.complete
+            })
+        );
+    }
     if telemetry && args.get_flag("plain-text-paragraphs") {
         let entries = change
             .entries

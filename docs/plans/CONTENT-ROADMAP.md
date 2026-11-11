@@ -167,6 +167,12 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] The EmDash sandbox accepts per-collection ordered description fields for
   save and refresh. Missing source fields remain unverified and aggregate
   description-coverage telemetry excludes values and identifiers.
+- [x] Content-change hosts can supply one explicitly scoped, post-change collection
+  with declared completeness. Its change ID, entry metadata, IDs and removed or
+  renamed entries are checked; the host remains responsible for omitted unchanged
+  records and revision consistency. Collection gates run once per change, including
+  delete-only changes; site impact remains separately not checked. CLI telemetry
+  reports aggregate collection size and the completeness assertion only.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
 - [x] Include a fingerprint of the CLI-resolved preset in corpus evaluation
   results and reject a policy change observed during a run. This identifies the

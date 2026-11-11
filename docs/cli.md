@@ -186,6 +186,9 @@ Options:
       --plain-text-paragraphs
           Interpret text/plain entries as blank-line-separated paragraphs
 
+      --collection-snapshot <collection-snapshot>
+          Host-supplied post-change collection JSON with explicit completeness
+
       --check-link-reachability
           Explicitly enable bounded external HTTP observations for reachability gates
 
