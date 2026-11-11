@@ -1,7 +1,10 @@
 //! CLI host for the content-gate change/verdict protocol.
 use super::exit_code::{EXIT_FINDINGS, EXIT_INTERNAL_ERROR, EXIT_SUCCESS, EXIT_UNSUPPORTED};
 use aexeo_contracts::{
-    content_gate_change_validation::parse_validated_change,
+    content_gate_change_validation::{
+        parse_lossless_json, parse_strict_validated_change, parse_unique_json_value,
+        parse_validated_change,
+    },
     content_gate_protocol::{Verdict, VerdictStatus},
 };
 use aexeo_core::{
@@ -168,7 +171,12 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
     if bytes.len() as u64 > MAX_CHANGE_BYTES {
         user_bail!("change document exceeds the size limit");
     }
-    let change = parse_validated_change(&bytes).user_context("invalid change document")?;
+    let change = if args.get_flag("offline-receipt") {
+        parse_strict_validated_change(&bytes)
+    } else {
+        parse_validated_change(&bytes)
+    }
+    .user_context("invalid change document")?;
     let mut sources = builtin_content_presets();
     if let Some(entries) = args.get_many::<String>("preset-source") {
         for entry in entries {
@@ -217,7 +225,13 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             if data.len() as u64 > MAX_CHANGE_BYTES {
                 user_bail!("collection snapshot exceeds the size limit");
             }
-            serde_json::from_slice(&data).user_context("invalid collection snapshot")
+            if args.get_flag("offline-receipt") {
+                let value =
+                    parse_unique_json_value(&data).user_context("invalid collection snapshot")?;
+                serde_json::from_value(value).user_context("invalid collection snapshot")
+            } else {
+                serde_json::from_slice(&data).user_context("invalid collection snapshot")
+            }
         })
         .transpose()?;
     let mut provider = HostFiles::new(
@@ -478,7 +492,7 @@ fn command_offline_receipt(
             user_bail!("previous receipt exceeds the size limit");
         }
         let previous: OfflineDecisionReceipt =
-            serde_json::from_slice(&data).user_context("invalid previous receipt")?;
+            parse_lossless_json(&data).user_context("invalid previous receipt")?;
         let result = revalidate_offline_receipt(&previous, &context, provider, &iso_now());
         if args.get_flag("telemetry") {
             eprintln!(

@@ -1102,3 +1102,121 @@ fn offline_receipt_is_explicit_bound_and_revalidated() {
     );
     assert_eq!(fs::read(&path).unwrap(), before);
 }
+
+#[test]
+fn offline_receipt_rejects_unrepresented_and_duplicate_inputs() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
+    let options = ["--offline-receipt", "--evaluator-identity", "build"];
+    assert_eq!(
+        run(dir.path(), &input(), policy, &options).status.code(),
+        Some(0)
+    );
+    let output_path = dir.path().join("verdict.json");
+    let original = fs::read(&output_path).unwrap();
+    let mut changed = input();
+    changed["entries"][0]["after"]["future_semantics"] = serde_json::json!("unknown");
+    assert_ne!(
+        run(dir.path(), &changed, policy, &options).status.code(),
+        Some(0)
+    );
+    assert_eq!(fs::read(&output_path).unwrap(), original);
+    // Duplicate keys in the original change cannot be represented by serde_json::Value.
+    let raw_change = serde_json::to_string(&input()).unwrap().replacen(
+        "\"change_id\":\"example\"",
+        "\"change_id\":\"example\",\"change_id\":\"example\"",
+        1,
+    );
+    assert_eq!(raw_change.matches("\"change_id\"").count(), 2);
+    let change_file = dir.path().join("change.json");
+    fs::write(&change_file, raw_change).unwrap();
+    let preset_file = dir.path().join("preset.toml");
+    let duplicate = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content-change",
+            "--preset",
+            "test",
+            "--preset-source",
+            &format!("test={}", preset_file.display()),
+        ])
+        .args(options)
+        .env("CONTENT_GATE_CHANGE_FILE", &change_file)
+        .env("CONTENT_GATE_VERDICT_FILE", &output_path)
+        .output()
+        .unwrap();
+    assert_ne!(duplicate.status.code(), Some(0));
+    assert_eq!(fs::read(&output_path).unwrap(), original);
+    // Ordinary v1 evaluation retains its documented permissive behavior.
+    let other = tempfile::tempdir().unwrap();
+    assert_eq!(
+        run(other.path(), &changed, policy, &[]).status.code(),
+        Some(0)
+    );
+
+    let previous = dir.path().join("previous.json");
+    let mut forged: serde_json::Value = serde_json::from_slice(&original).unwrap();
+    forged["verdict"]["future_semantics"] = serde_json::json!(true);
+    fs::write(&previous, serde_json::to_vec(&forged).unwrap()).unwrap();
+    let verify = [
+        "--offline-receipt",
+        "--evaluator-identity",
+        "build",
+        "--verify-offline-receipt",
+        previous.to_str().unwrap(),
+    ];
+    assert_ne!(
+        run(dir.path(), &input(), policy, &verify).status.code(),
+        Some(0)
+    );
+    assert_eq!(fs::read(&output_path).unwrap(), original);
+    let duplicate = String::from_utf8(original.clone()).unwrap().replacen(
+        "\"status\": \"pass\"",
+        "\"status\": \"pass\", \"status\": \"pass\"",
+        1,
+    );
+    assert_ne!(duplicate.as_bytes(), original);
+    fs::write(&previous, duplicate).unwrap();
+    assert_ne!(
+        run(dir.path(), &input(), policy, &verify).status.code(),
+        Some(0)
+    );
+    assert_eq!(fs::read(&output_path).unwrap(), original);
+}
+
+#[test]
+fn offline_receipt_rejects_duplicate_collection_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
+    let mut change = input();
+    change["entries"][0]["metadata"] = serde_json::json!({"title":"x"});
+    let snapshot = dir.path().join("collection.json");
+    let valid = r#"{"change_id":"example","complete":true,"items":[{"id":"article","text":"abc","metadata":{"title":"x"}}]}"#;
+    fs::write(&snapshot, valid).unwrap();
+    let options = [
+        "--offline-receipt",
+        "--evaluator-identity",
+        "build",
+        "--collection-snapshot",
+        snapshot.to_str().unwrap(),
+    ];
+    let output = run(dir.path(), &change, policy, &options);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let before = fs::read(dir.path().join("verdict.json")).unwrap();
+    for duplicate in [
+        valid.replace("\"complete\":true", "\"complete\":true,\"complete\":true"),
+        valid.replace("\"title\":\"x\"", "\"title\":\"x\",\"title\":\"x\""),
+    ] {
+        assert_ne!(duplicate, valid);
+        fs::write(&snapshot, duplicate).unwrap();
+        assert_ne!(
+            run(dir.path(), &change, policy, &options).status.code(),
+            Some(0)
+        );
+        assert_eq!(fs::read(dir.path().join("verdict.json")).unwrap(), before);
+    }
+}
