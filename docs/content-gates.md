@@ -626,7 +626,10 @@ the mapping does not claim positions inside encoded entities or escapes.
 These locations apply to positional prose gates and to `link_destinations`,
 `heading_length` and `duplicate_headings` findings, not metadata, site or
 collection findings. Soft-wrapped text maps directly only where the wrapped
-source is unchanged; a wrapped line inside a block quote has no location. Inline
+source is unchanged. Multiline container prefixes, such as block-quote markers,
+are mapped when every line in the text node matches exactly after those prefixes;
+entities and escapes retain the conservative edge-only behavior. This mapping is
+limited to 10,000 lines per node and otherwise falls back to its exact edges. Inline
 code maps to its value inside the backticks. The map is local; opt-in telemetry includes only mapped and
 unmapped counts and mapping duration, without positions or content.
 

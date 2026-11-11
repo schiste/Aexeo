@@ -129,6 +129,9 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] Exact Markdown source locations and aggregate local mapping telemetry
   ([PR #42](https://github.com/schiste/Aexeo/pull/42)); transformed spans can
   remain unmapped, and projected finding coordinates are preserved.
+- [x] Map exact lines in soft-wrapped Markdown containers, including block quotes,
+  while keeping transformed text conservative and bounding extra mapping work.
+  Existing opt-in telemetry reports mapped and unmapped counts without content.
 - [x] Markdown invalid-link source locations and aggregate mapping telemetry
   ([PR #48](https://github.com/schiste/Aexeo/pull/48)); locations identify link
   occurrences, including reference uses.
