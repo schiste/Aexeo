@@ -125,7 +125,7 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
                     )
                 },
             );
-    let telemetry = serde_json::json!({
+    let mut telemetry = serde_json::json!({
         "event": "link_graph_analysis",
         "version": 1,
         "elapsed_us": started.elapsed().as_micros(),
@@ -140,5 +140,10 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
         "indeterminate_count": report.links.indeterminate.len(),
         "issue_count": report.issues.len(),
     });
+    if let Some(mapping) = &report.static_url_mapping {
+        telemetry["static_mapping_matched_count"] = mapping.matched_count.into();
+        telemetry["static_mapping_missing_count"] = mapping.missing_paths.len().into();
+        telemetry["static_mapping_unused_count"] = mapping.unused_paths.len().into();
+    }
     eprintln!("{telemetry}");
 }
