@@ -168,6 +168,11 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] Exact Markdown source locations and aggregate local mapping telemetry
   ([PR #42](https://github.com/schiste/Aexeo/pull/42)); transformed spans can
   remain unmapped, and projected finding coordinates are preserved.
+- [x] Bound repeated UTF-16 source-position lookup in EmDash for many Unicode
+  findings with a sparse index; keep a lightweight path for few findings and
+  reject coordinate arithmetic overflow. Existing mapping telemetry stays aggregate-only.
+  `cargo run --release -p aexeo-emdash-bridge --example emdash_source_mapping_bench`
+  measures a long multilingual span with 250 findings using synthetic data.
 - [x] Map exact lines in soft-wrapped Markdown containers, including block quotes,
   while keeping transformed text conservative and bounding extra mapping work.
   Existing opt-in telemetry reports mapped and unmapped counts without content.

@@ -43,7 +43,9 @@ impl LineIndex {
             .line_starts
             .get(line + 1)
             .map_or(text.len(), |next| next - 1);
-        let target = self.char_index(text, start)? + column.checked_sub(1)?;
+        let target = self
+            .char_index(text, start)?
+            .checked_add(column.checked_sub(1)?)?;
         let checkpoint = *self.checkpoints.get(target / CHECKPOINT_CHARS)?;
         let (within, _) = text
             .get(checkpoint..)?
@@ -97,6 +99,7 @@ mod tests {
         assert_eq!(index.offset("é\nb", 0, 1), None);
         assert_eq!(index.offset("é\nb", 1, 0), None);
         assert_eq!(index.offset("é\nb", 3, 1), None);
+        assert_eq!(index.offset("é\nb", 2, usize::MAX), None);
         assert_eq!(index.position("é\nb", 1), None);
         assert_eq!(index.position("é\nb", 99), None);
         assert_eq!(LineIndex::new("").offset("", 1, 1), None);
