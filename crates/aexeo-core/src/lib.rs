@@ -17,6 +17,7 @@ pub mod error;
 pub mod fix;
 pub mod generate;
 pub mod header_rules;
+pub mod html_content_adapter;
 pub mod html_rules;
 pub mod image_rules;
 #[cfg(feature = "net")]
