@@ -44,24 +44,30 @@ type PlatformProvider = aexeo_core::content_gate_sources::MacosConfinedContentFi
 
 struct HostFiles {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
+    verdict_path: PathBuf,
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     provider: Option<PlatformProvider>,
 }
 
 impl HostFiles {
-    fn new(root: Option<&str>) -> Result<Self> {
+    fn new(root: Option<&str>, verdict_path: &Path) -> Result<Self> {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             let provider = root
                 .map(|path| PlatformProvider::new(Path::new(path)))
                 .transpose()
                 .user_context("opening authorized content root")?;
-            Ok(Self { provider })
+            Ok(Self {
+                provider,
+                verdict_path: verdict_path.to_owned(),
+            })
         }
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
             if root.is_some() {
                 user_bail!("confined local content files are not supported on this platform");
             }
+            let _ = verdict_path;
             Ok(Self {})
         }
     }
@@ -72,7 +78,16 @@ impl ConfinedContentFiles for HostFiles {
     fn open(&mut self, root: &Path, relative: &Path) -> io::Result<File> {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         if let Some(provider) = &mut self.provider {
-            return provider.open(root, relative);
+            let file = provider.open(root, relative)?;
+            if paths_alias(&root.join(relative), &self.verdict_path)
+                || metadata_aliases(&file.metadata()?, &self.verdict_path)
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "verdict path aliases a content input",
+                ));
+            }
+            return Ok(file);
         }
         let _ = (root, relative);
         Err(io::Error::new(
@@ -82,30 +97,56 @@ impl ConfinedContentFiles for HostFiles {
     }
 }
 
+// Atomic rename replaces the output path. Detect direct and common filesystem
+// aliases before reading inputs so it cannot replace a file being evaluated.
+// Concurrent filesystem changes still require host-level coordination.
+fn paths_alias(input: &Path, output: &Path) -> bool {
+    input == output
+        || fs::canonicalize(input)
+            .ok()
+            .zip(fs::canonicalize(output).ok())
+            .is_some_and(|(left, right)| left == right)
+        || fs::metadata(input)
+            .ok()
+            .is_some_and(|metadata| metadata_aliases(&metadata, output))
+}
+
+fn metadata_aliases(input: &fs::Metadata, output: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        fs::metadata(output)
+            .ok()
+            .is_some_and(|other| input.dev() == other.dev() && input.ino() == other.ino())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (input, output);
+        false
+    }
+}
+
+fn protect_input(input: &Path, output: &Path, label: &str) -> Result<()> {
+    if paths_alias(input, output) {
+        user_bail!("{label} and verdict paths must be different");
+    }
+    Ok(())
+}
+
 pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
     let change_path = std::env::var_os("CONTENT_GATE_CHANGE_FILE")
         .user_context("CONTENT_GATE_CHANGE_FILE is required")?;
     let verdict_path = std::env::var_os("CONTENT_GATE_VERDICT_FILE")
         .user_context("CONTENT_GATE_VERDICT_FILE is required")?;
-    if Path::new(&change_path) == Path::new(&verdict_path)
-        || fs::canonicalize(&change_path)
-            .ok()
-            .zip(fs::canonicalize(&verdict_path).ok())
-            .is_some_and(|(input, output)| input == output)
-    {
-        user_bail!("change and verdict paths must be different");
-    }
+    protect_input(Path::new(&change_path), Path::new(&verdict_path), "change")?;
     let previous_verdict = args
         .get_one::<String>("verify-verdict")
         .map(|path| -> Result<Verdict> {
-            if Path::new(path) == Path::new(&verdict_path)
-                || fs::canonicalize(path)
-                    .ok()
-                    .zip(fs::canonicalize(&verdict_path).ok())
-                    .is_some_and(|(input, output)| input == output)
-            {
-                user_bail!("previous verdict and output paths must be different");
-            }
+            protect_input(
+                Path::new(path),
+                Path::new(&verdict_path),
+                "previous verdict",
+            )?;
             let mut data = Vec::new();
             File::open(path)
                 .user_context("opening previous verdict")?
@@ -137,6 +178,7 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             if name.is_empty() || path.is_empty() {
                 user_bail!("--preset-source requires NAME=PATH");
             }
+            protect_input(Path::new(path), Path::new(&verdict_path), "preset source")?;
             sources.insert(
                 name.into(),
                 fs::read_to_string(path).user_context("reading preset source")?,
@@ -149,11 +191,23 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
     let preset = resolve_content_preset(name, &sources).user_context("invalid content preset")?;
     let external = args
         .get_one::<String>("extension-results")
-        .map(|path| super::content::load_external_gate_results(path, true))
+        .map(|path| {
+            protect_input(
+                Path::new(path),
+                Path::new(&verdict_path),
+                "external results",
+            )?;
+            super::content::load_external_gate_results(path, true)
+        })
         .transpose()?;
     let collection: Option<CollectionSnapshot> = args
         .get_one::<String>("collection-snapshot")
         .map(|path| -> Result<_> {
+            protect_input(
+                Path::new(path),
+                Path::new(&verdict_path),
+                "collection snapshot",
+            )?;
             let mut data = Vec::new();
             File::open(path)
                 .user_context("opening collection snapshot")?
@@ -166,7 +220,10 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             serde_json::from_slice(&data).user_context("invalid collection snapshot")
         })
         .transpose()?;
-    let mut provider = HostFiles::new(args.get_one::<String>("content-root").map(String::as_str))?;
+    let mut provider = HostFiles::new(
+        args.get_one::<String>("content-root").map(String::as_str),
+        Path::new(&verdict_path),
+    )?;
     let max_checks = *args
         .get_one::<u64>("link-max-checks")
         .user_context("missing link-max-checks")? as usize;

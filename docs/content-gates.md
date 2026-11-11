@@ -616,6 +616,13 @@ site impact of deletion and rename remains separately `not_checked`. Optional
 telemetry reports only item count and the supplied completeness flag. Rust hosts
 can use `evaluate_change_with_collection` and `ChangeCollection`.
 
+The verdict output path must differ from every input file, including preset
+sources, external results, collection snapshots, previous verdicts and confined
+content files. Aexeo rejects direct paths, resolvable symlink aliases and, on
+Unix, hard-link aliases. Hosts must prevent concurrent replacement of these paths
+while evaluation runs; the alias check is not a filesystem transaction. Always
+use a dedicated output path and check the exit code before consuming it.
+
 To revalidate a previous offline verdict, pass `--verify-verdict previous.json`
 to the same `content-change` invocation, with its current change, preset,
 collection, options, and a **different** `CONTENT_GATE_VERDICT_FILE` output path.
