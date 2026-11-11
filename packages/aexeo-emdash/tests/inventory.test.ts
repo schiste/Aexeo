@@ -88,6 +88,47 @@ describe("conservative EmDash link inventory", () => {
     await expect(exportLinkInventory({ list, getPublicUrl }, { collections: [], identity: null })).rejects.toThrow();
   });
 
+  it("preserves other collections and valid entries when CMS responses are malformed", async () => {
+    const list = vi.fn(async (collection: string) => {
+      if (collection === "broken") return null as never;
+      if (collection === "invalid-pagination") return { items: [], hasMore: "no" } as never;
+      return { items: [item("a"), null, { id: "", locale: "fr" }, { id: "b", locale: 7 }, item("c")], hasMore: false } as never;
+    });
+    const getPublicUrl = vi.fn(async (_collection: string, id: string) => `https://example.org/${id}`);
+    const onTelemetry = vi.fn();
+    const result = await exportLinkInventory({ list, getPublicUrl }, {
+      collections: ["broken", "invalid-pagination", "posts"], identity: null, onTelemetry,
+    });
+    expect(result.inventory.pages.map((page) => page.url)).toEqual(["https://example.org/a", "https://example.org/c"]);
+    expect(result.issues).toEqual(expect.arrayContaining(["invalid_collection_response", "invalid_collection_item"]));
+    expect(result.scanned).toBe(5);
+    expect(result.omitted).toBe(3);
+    expect(result.inventory.complete).toBe(false);
+    expect(onTelemetry.mock.calls[0]?.[0].malformed_entries).toBe(3);
+    expect(JSON.stringify(onTelemetry.mock.calls)).not.toContain("example.org");
+  });
+
+  it("keeps earlier pages and continues other collections after invalid pagination", async () => {
+    const list = vi.fn(async (collection: string, options?: { cursor?: string }) => {
+      if (collection === "posts") {
+        if (options?.cursor) return { items: null, hasMore: false } as never;
+        return { items: [item("first")], hasMore: true, cursor: "next" };
+      }
+      if (collection === "bad-cursor") return { items: [item("second")], hasMore: true, cursor: 42 } as never;
+      return { items: [item("third")], hasMore: false };
+    });
+    const getPublicUrl = vi.fn(async (_collection: string, id: string) => `https://example.org/${id}`);
+    const result = await exportLinkInventory({ list, getPublicUrl }, {
+      collections: ["posts", "bad-cursor", "pages"], identity: null,
+    });
+    expect(result.inventory.pages.map((page) => page.url)).toEqual([
+      "https://example.org/first", "https://example.org/second", "https://example.org/third",
+    ]);
+    expect(result.issues).toEqual(expect.arrayContaining(["invalid_collection_response", "invalid_or_repeated_cursor"]));
+    expect(list).toHaveBeenCalledTimes(4);
+    expect(result.inventory.complete).toBe(false);
+  });
+
   it("keeps other entries when host classification fails or returns malformed data", async () => {
     const list = vi.fn(async () => ({ items: [item("a"), item("b"), item("c")], hasMore: false }));
     const getPublicUrl = vi.fn(async (_collection: string, id: string) => `https://example.org/${id}`);

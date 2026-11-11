@@ -50,7 +50,7 @@ export async function exportLinkInventory(
     /** Maximum simultaneous public URL resolutions, from 1 to 100 (default 8). */
     urlResolutionConcurrency?: number;
     /** Optional aggregate-only local telemetry; no URLs or content are included. */
-    onTelemetry?: (event: { event: "link_inventory_export"; elapsed_ms: number; scanned: number; omitted: number; page_count: number; issue_count: number; classification_failures: number }) => void;
+    onTelemetry?: (event: { event: "link_inventory_export"; elapsed_ms: number; scanned: number; omitted: number; page_count: number; issue_count: number; classification_failures: number; malformed_entries: number }) => void;
     /** Override URL resolution when the host renderer uses a different route mapping. */
     resolveUrl?: (collection: string, item: EmdashContentItem) => Promise<string | null>;
     /** Classify using host-owned publication rules; locale defaults to the CMS value. */
@@ -79,6 +79,7 @@ export async function exportLinkInventory(
   let scanned = 0;
   let omitted = 0;
   let classificationFailures = 0;
+  let malformedEntries = 0;
   for (const collection of collections) {
     let cursor: string | undefined;
     const seen = new Set<string>();
@@ -90,9 +91,15 @@ export async function exportLinkInventory(
         issues.add("collection_read_failed");
         break;
       }
+      // Host APIs are runtime boundaries: preserve earlier and other collections
+      // if a page has an invalid shape rather than crashing or claiming coverage.
+      if (!batch || !Array.isArray(batch.items) || typeof batch.hasMore !== "boolean") {
+        issues.add("invalid_collection_response");
+        break;
+      }
       // Resolve concurrently without changing classification order or allowing an
       // unbounded number of CMS requests. A failed item does not abort a batch.
-      const urls: ({ url: string | null } | { error: true })[] = new Array(batch.items.length);
+      const urls: ({ url: string | null } | { error: true } | { malformed: true })[] = new Array(batch.items.length);
       let next = 0;
       await Promise.all(Array.from({ length: Math.min(concurrency, batch.items.length) }, async () => {
         for (;;) {
@@ -100,6 +107,11 @@ export async function exportLinkInventory(
           if (index >= batch.items.length) return;
           try {
             const item = batch.items[index]!;
+            if (!item || typeof item !== "object" || typeof item.id !== "string" || item.id.trim() === ""
+                || (item.locale != null && typeof item.locale !== "string")) {
+              urls[index] = { malformed: true };
+              continue;
+            }
             const url = options.resolveUrl
               ? await options.resolveUrl(collection, item)
               : await content.getPublicUrl(collection, item.id);
@@ -113,6 +125,12 @@ export async function exportLinkInventory(
       for (const [index, item] of batch.items.entries()) {
         scanned += 1;
         const resolution = urls[index]!;
+        if ("malformed" in resolution) {
+          issues.add("invalid_collection_item");
+          malformedEntries += 1;
+          omitted += 1;
+          continue;
+        }
         if ("error" in resolution) {
           issues.add("url_resolution_failed");
           omitted += 1;
@@ -148,7 +166,7 @@ export async function exportLinkInventory(
         pages.push({ url, disposition, target, locale });
       }
       if (!batch.hasMore) break;
-      if (!batch.cursor || seen.has(batch.cursor)) {
+      if (typeof batch.cursor !== "string" || batch.cursor.trim() === "" || seen.has(batch.cursor)) {
         issues.add("invalid_or_repeated_cursor");
         break;
       }
@@ -161,7 +179,7 @@ export async function exportLinkInventory(
   const result: LinkInventoryExport = { inventory: { identity: options.identity, complete: false, pages }, issues: [...issues].sort(), scanned, omitted };
   if (options.onTelemetry) {
     try {
-      options.onTelemetry({ event: "link_inventory_export", elapsed_ms: Math.max(0, Date.now() - started), scanned, omitted, page_count: pages.length, issue_count: issues.size, classification_failures: classificationFailures });
+      options.onTelemetry({ event: "link_inventory_export", elapsed_ms: Math.max(0, Date.now() - started), scanned, omitted, page_count: pages.length, issue_count: issues.size, classification_failures: classificationFailures, malformed_entries: malformedEntries });
     } catch {
       // Optional instrumentation must not change the inventory result.
     }

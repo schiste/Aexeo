@@ -571,7 +571,9 @@ The export resolves public URLs through EmDash and paginates each selected
 collection. Entries without public URLs are reported as omitted, and entries
 with URLs default to `unknown` disposition. A host may supply `classify` when
 it has authoritative indexability and alias information. Repeated or missing
-cursors, failures, and page limits are reported. The inventory is always marked
+cursors, failures, malformed collection responses or entries, and page limits are reported.
+Malformed entries are omitted; a malformed collection page stops that collection
+without discarding other collections. The inventory is always marked
 incomplete because pagination alone cannot establish a transactional snapshot or
 include routes outside the chosen collections. No HTTP endpoint is installed by
 this API. It cannot by itself establish that a crawl and CMS view describe the
