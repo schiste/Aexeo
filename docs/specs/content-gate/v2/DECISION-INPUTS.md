@@ -4,6 +4,9 @@ This standalone manifest is experimental and is **not** a v2 verdict or a
 verdict verifier. No current runner is protected merely by receiving it. The
 complete interoperable protocol remains unfinished; see [DESIGN.md](DESIGN.md).
 
+The [JSON Schema](decision-inputs.schema.json) describes the object structure;
+parsers must separately reject duplicate keys and enforce the byte limit.
+
 The object has exactly these fields: `schema`, `change`, `resolved_policy`,
 `host_options`, `evaluator`, `collection`, `external_evidence`. The schema is
 `content-gate.decision-inputs/v1`. Each of the six components is either
