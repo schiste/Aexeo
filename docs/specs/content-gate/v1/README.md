@@ -135,6 +135,16 @@ It must be called using the same engine version and trusted build; the version
 string alone does not establish the build identity. The implementation streams
 serialization into the hash and does not place the inputs in the extension.
 
+The Rust host API `revalidate_offline_verdict` first checks this binding, then
+re-reads confined content, runs a fresh offline evaluation and compares all
+verdict fields except `evaluated_at`. It returns the fresh verdict only on a
+match. `verify_offline_verdict` provides the same comparison when the host
+already has a fresh, trusted evaluation; callers must not supply an untrusted
+or cached verdict as that evaluation. The CLI uses this comparison when
+`--verify-verdict` is selected. These APIs do not authenticate inputs or
+verdicts, establish collection completeness or source freshness, or cover
+external callbacks. A successful match is not a claim of factual truth.
+
 This is an Aexeo-specific, versioned mechanism, not a replacement for a
 cross-implementation protocol binding. Existing v1 runners can ignore it, so
 it protects only hosts that explicitly call the verifier and reject failures.
