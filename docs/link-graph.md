@@ -675,3 +675,5 @@ with URLs redacted in persisted artifacts. Client-side navigations, custom runne
 without hop data, and older artifacts do not establish a redirect chain. Browser crawls establish completeness only when provenance is observed and
 consistent for every response and redirected arrival. All other coverage and
 inventory requirements still apply before an orphan conclusion is reliable.
+
+A link’s observed `locale` comes from the nearest HTML `lang` declaration. An explicitly empty or whitespace-only declaration resets the inherited language to unknown until a nested declaration supplies one. This is an HTML language observation, not a verified CMS locale or proof of regional equivalence.
