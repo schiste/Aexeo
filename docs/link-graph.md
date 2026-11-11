@@ -559,6 +559,26 @@ response or off the site leaves no analyzed page, so links to it remain
 as one from an older browser artifact or custom runner without hop data. Static exports record no redirects and are
 unchanged. This does not depend on a link report.
 
+## Built static sites
+
+Analyze an existing build directory without running a build or making network
+requests. Supply its public origin and an explicit JSON mapping from paths
+relative to that directory to public URLs:
+
+```sh
+aexeo-cli link-graph ./dist --static-site --site-origin https://example.org \
+  --static-url-map urls.json --telemetry > link-graph.json
+```
+
+For example, `urls.json` can contain
+`{"en/index.html":"https://example.org/en/","fr/index.html":"https://example.org/fr/"}`.
+The same optional `--context` input as `--audit` can be supplied. Only mapped
+pages are included; missing mappings remain visible in `issues`. The supplied
+URLs and HTML are observations of a local artifact, not HTTP responses. The
+report does not attest deployment, redirects, status, headers, release identity
+or completeness and cannot confirm an orphan. Telemetry is opt-in, aggregate,
+and written to stderr. This command does not perform the other `check` rules.
+
 ## Static audit artifacts
 
 For a `static_export` audit artifact, `--audit --static-url-map urls.json`
