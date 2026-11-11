@@ -12,6 +12,7 @@ import os
 import re
 import stat
 import sys
+import time
 
 SCHEMA = "content-gate.decision-inputs/v1"
 MAX_MANIFEST_BYTES = 8192
@@ -88,7 +89,7 @@ def _digest_file(path, max_bytes):
                 digest.update(chunk)
     except OSError as error:
         raise VerificationError("cannot read artifact") from error
-    return digest.hexdigest()
+    return digest.hexdigest(), count
 
 
 def verify_files(manifest_bytes, artifacts, max_bytes=MAX_ARTIFACT_BYTES):
@@ -96,14 +97,22 @@ def verify_files(manifest_bytes, artifacts, max_bytes=MAX_ARTIFACT_BYTES):
     manifest = parse_manifest(manifest_bytes)
     if set(artifacts) != set(REQUIRED + OPTIONAL) or not isinstance(max_bytes, int) or max_bytes < 0:
         raise VerificationError("invalid verifier inputs")
+    files = total_bytes = 0
     for role in REQUIRED + OPTIONAL:
         path = artifacts[role]
         component = manifest[role]
         if path is None:
             if role in REQUIRED or component["state"] != "absent":
                 raise VerificationError("decision inputs differ")
-        elif component["state"] != "present" or not hmac.compare_digest(component["sha256"], _digest_file(path, max_bytes)):
-            raise VerificationError("decision inputs differ")
+        else:
+            if component["state"] != "present":
+                raise VerificationError("decision inputs differ")
+            digest, count = _digest_file(path, max_bytes)
+            if not hmac.compare_digest(component["sha256"], digest):
+                raise VerificationError("decision inputs differ")
+            files += 1
+            total_bytes += count
+    return {"files": files, "bytes": total_bytes}
 
 
 def main(argv=None):
@@ -115,18 +124,33 @@ def main(argv=None):
         group = parser.add_mutually_exclusive_group(required=True)
         group.add_argument("--" + role.replace("_", "-"))
         group.add_argument("--" + role.replace("_", "-") + "-absent", action="store_true")
+    parser.add_argument("--telemetry", action="store_true", help="emit aggregate timing and byte counts to stderr")
     args = parser.parse_args(argv)
+    started = time.perf_counter() if args.telemetry else 0
+    def telemetry(status, stats=None):
+        if args.telemetry:
+            event = {"event": "decision_input_verification", "status": status,
+                     "duration_ms": round((time.perf_counter() - started) * 1000, 3)}
+            if stats is not None:
+                event.update(stats)
+            try:
+                print(json.dumps(event, separators=(",", ":")), file=sys.stderr)
+            except (OSError, ValueError):
+                pass  # Optional telemetry cannot change verification.
     try:
         with _open_regular(args.manifest) as source:
             data = source.read(MAX_MANIFEST_BYTES + 1)
         artifacts = {role: getattr(args, role) for role in REQUIRED + OPTIONAL}
-        verify_files(data, artifacts)
+        stats = verify_files(data, artifacts)
     except OSError:
+        telemetry("error")
         print("Decision input verification failed: cannot read manifest", file=sys.stderr)
         return 1
     except VerificationError as error:
+        telemetry("error")
         print(f"Decision input verification failed: {error}", file=sys.stderr)
         return 1
+    telemetry("matched", stats)
     print("Decision inputs match supplied bytes; verdict and publication are not verified.")
     return 0
 

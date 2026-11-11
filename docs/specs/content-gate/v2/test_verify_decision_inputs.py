@@ -31,7 +31,7 @@ class DecisionInputTests(unittest.TestCase):
         self.artifacts["collection"] = None
 
     def test_shared_example_and_altered_inputs(self):
-        verifier.verify_files(EXAMPLE, self.artifacts)
+        self.assertEqual(verifier.verify_files(EXAMPLE, self.artifacts), {"files": 5, "bytes": 34})
         for role in verifier.REQUIRED + ("external_evidence",):
             with self.subTest(role=role):
                 original = self.artifacts[role].read_bytes()
@@ -101,10 +101,24 @@ class DecisionInputTests(unittest.TestCase):
         passed = subprocess.run(args + ["--collection-absent"], capture_output=True, text=True, check=False)
         self.assertEqual(passed.returncode, 0, passed.stderr)
         self.assertIn("verdict and publication are not verified", passed.stdout)
+        measured = subprocess.run(args + ["--collection-absent", "--telemetry"], capture_output=True, text=True, check=False)
+        self.assertEqual(measured.returncode, 0)
+        event = json.loads(measured.stderr)
+        self.assertEqual(event["status"], "matched")
+        self.assertEqual(event["files"], 5)
+        self.assertEqual(event["bytes"], 34)
+        self.assertGreaterEqual(event["duration_ms"], 0)
+        self.assertNotIn(str(self.root), measured.stderr)
         self.artifacts["change"].write_bytes(b"changed")
         failed = subprocess.run(args + ["--collection-absent"], capture_output=True, text=True, check=False)
         self.assertNotEqual(failed.returncode, 0)
         self.assertNotIn("changed", failed.stderr)
+        measured_failure = subprocess.run(args + ["--collection-absent", "--telemetry"], capture_output=True, text=True, check=False)
+        self.assertNotEqual(measured_failure.returncode, 0)
+        event = json.loads(measured_failure.stderr.splitlines()[0])
+        self.assertEqual(event["status"], "error")
+        self.assertNotIn("bytes", event)
+        self.assertNotIn(str(self.root), measured_failure.stderr)
 
 
 if __name__ == "__main__":

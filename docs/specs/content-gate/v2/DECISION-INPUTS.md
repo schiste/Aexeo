@@ -91,6 +91,8 @@ not produce those artifacts, verify a receipt or verdict, authenticate the
 producer, ensure file immutability during reading, or prevent publication races.
 The experimental Aexeo receipt's Rust-specific serialization remains outside an
 interoperable artifact format. A successful comparison is not authorization.
+The optional `--telemetry` flag emits local aggregate duration, status and, on
+success, file and byte counts to stderr; it contains no paths or artifact data.
 
 Run `python3 docs/specs/content-gate/v2/test_verify_decision_inputs.py` to test
 the verifier against the same UTF-8 and empty/absent vector used by Rust, plus
