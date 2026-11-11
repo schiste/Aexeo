@@ -120,6 +120,8 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
         unclassified: usize,
         hidden: usize,
         hidden_unobserved: usize,
+        inline_hidden: usize,
+        inline_hidden_unobserved: usize,
         collapsed: usize,
         collapsed_unobserved: usize,
         anchor_with_label: usize,
@@ -139,6 +141,8 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
             counts.unclassified += usize::from(link.conditional_markup.is_none());
             counts.hidden += usize::from(link.hidden_attribute == Some(true));
             counts.hidden_unobserved += usize::from(link.hidden_attribute.is_none());
+            counts.inline_hidden += usize::from(link.hidden_inline_style == Some(true));
+            counts.inline_hidden_unobserved += usize::from(link.hidden_inline_style.is_none());
             counts.collapsed += usize::from(link.collapsed_details == Some(true));
             counts.collapsed_unobserved += usize::from(link.collapsed_details.is_none());
             if link.anchor.is_empty() {
@@ -159,6 +163,8 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
         "unclassified_markup_link_count": counts.unclassified,
         "hidden_attribute_link_count": counts.hidden,
         "hidden_attribute_unobserved_link_count": counts.hidden_unobserved,
+        "hidden_inline_style_link_count": counts.inline_hidden,
+        "hidden_inline_style_unobserved_link_count": counts.inline_hidden_unobserved,
         "collapsed_details_link_count": counts.collapsed,
         "collapsed_details_unobserved_link_count": counts.collapsed_unobserved,
         "anchor_with_label_count": counts.anchor_with_label,

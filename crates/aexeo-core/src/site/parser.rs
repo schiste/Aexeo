@@ -324,6 +324,10 @@ fn has_hidden_inline_style(snippet: &str) -> bool {
     let Some(style) = attr_value(snippet, "style") else {
         return false;
     };
+    style_hides_content(&style)
+}
+
+pub(crate) fn style_hides_content(style: &str) -> bool {
     style.split(';').any(|declaration| {
         let Some((property, value)) = declaration.split_once(':') else {
             return false;

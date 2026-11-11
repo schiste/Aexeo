@@ -2,6 +2,7 @@
 pub(crate) mod markup;
 #[path = "site/parser.rs"]
 mod parser;
+pub(crate) use parser::style_hides_content;
 #[path = "site/sitemap.rs"]
 mod sitemap;
 
