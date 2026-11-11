@@ -590,7 +590,7 @@ export async function handleAfterSaveConfigured(
     return;
   }
 
-  const result = await evaluator([document], { collections: [adapted.meta.collection] });
+  const result = await evaluateSafely(evaluator, [document], { collections: [adapted.meta.collection] });
   recordAssessmentCoverage(ctx, result);
   if (!result.ok) {
     log?.error?.(`afterSave evaluator failure (${result.reason})`, {
@@ -686,6 +686,20 @@ export type EvaluatorFn = (
   documents: readonly EmdashDocument[],
   context?: { collections: readonly string[] },
 ) => Promise<EvaluationOutcome>;
+
+// Evaluators are host-provided and may throw, including on a WASM trap.
+// Do not persist exception text: it can contain content or credentials.
+async function evaluateSafely(
+  evaluator: EvaluatorFn,
+  documents: readonly EmdashDocument[],
+  context: { collections: readonly string[] },
+): Promise<EvaluationOutcome> {
+  try {
+    return await evaluator(documents, context);
+  } catch {
+    return { ok: false, reason: "evaluator_exception", detail: "The evaluator failed unexpectedly." };
+  }
+}
 
 // Walks the content collections, evaluates the full set via the
 // supplied evaluator, and writes findings per-route into KV. This
@@ -786,7 +800,7 @@ export async function evaluateAndPersistAll(
   // 3. Evaluate via the supplied evaluator and group findings by
   //    route. The evaluator strategy (in-process WASM vs sidecar
   //    fetch) is the only configured-vs-sandboxed difference.
-  const result = await options.evaluator(documents, { collections: documentCollections });
+  const result = await evaluateSafely(options.evaluator, documents, { collections: documentCollections });
   recordAssessmentCoverage(ctx, result);
   if (!result.ok) {
     log?.error?.(`aexeo evaluator failure (${result.reason})`, {
