@@ -17,6 +17,26 @@ Metadata must be supplied when evaluating an exported Markdown file. An SEO
 preset without a site adapter is not assessed. Use this case as a regression
 scenario, not as a representative benchmark or an assessment of Aeptus overall.
 
+### Preview CMS regression, 2026-11-11
+
+A read-only copy of the mixed-component evidence-room article from the original
+0.9.0 report was run through the current configured after-save hook and freshly
+built WASM with an in-memory CMS host. The adapter retained all 18 Portable Text
+blocks among 20 body items. Without a mapping for the two custom components,
+body capabilities were unavailable; the article preset recorded its minimum-word
+check as `not_checked` and persisted the assessment. Default evaluation did not
+emit the reported unobservable page or empty-body rules. An experimental host
+mapping that ignores those components retained the 18 text blocks and let that
+minimal check pass; this experiment does not establish that ignoring those
+components is correct for the site's renderer.
+
+On local copies of the report's English webinar and French small-business records,
+`descriptionFields: ["seo_description", "excerpt"]` selected the same nonempty
+source value as the documented renderer fallback and marked that source observed.
+No CMS content was changed. These checks did not inspect rendered HTML, the hosted
+admin UI, translations, the deployed package, or every article; they do not prove
+rendered metadata, full editorial quality, or a matching site snapshot.
+
 ## Delivery tracker
 
 - [x] Aggregate gate coverage and measurements for word count, required metadata,
