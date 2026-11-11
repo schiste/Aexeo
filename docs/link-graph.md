@@ -153,6 +153,12 @@ regenerate a report to assess these links. CSS can override `hidden`, and CSS
 and script-driven visibility are not evaluated, so neither the attribute nor
 its absence proves what a reader saw. Opt-in telemetry includes aggregate
 `hidden_attribute_link_count` and `hidden_attribute_unobserved_link_count`.
+Links outside the first direct `summary` of a closed `details` element are also
+conditional; `collapsed_details` records this observation. Nested closed details
+remain conditional even inside a nested summary. An absent field in an older
+report is unobserved and cannot establish a nonconditional link. The opt-in
+telemetry includes aggregate `collapsed_details_link_count` and
+`collapsed_details_unobserved_link_count`. Scripts can change the open state.
 A nonconditional observation does not prove visibility.
 For legacy `LNK002`, a solely conditional incoming link does not suppress the
 finding or confirm an orphan; `conditional_inbound` means not verifiable.

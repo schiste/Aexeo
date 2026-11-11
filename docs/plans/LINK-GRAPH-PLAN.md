@@ -246,6 +246,10 @@ missing and unspecified languages are not treated as an observed mismatch.
 - [x] Mark links with `hidden` on themselves or an ancestor as conditional
   observations, including redirect credit; expose evidence and aggregate opt-in
   telemetry. HTML alone does not establish CSS or script visibility.
+- [x] Treat links outside the first summary of a closed `details` element as
+  conditional, including nested elements and redirect credit. Record evidence
+  and aggregate opt-in telemetry; older observations without this field are
+  unverified and scripts may change the open state.
 - [x] Withhold orphan eligibility when any observed link destination is
   indeterminate; retain evidence and the `indeterminate_links` reason. Known
   unsupported non-HTTP destinations do not block comparison.

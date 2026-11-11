@@ -118,7 +118,7 @@ fn hidden_link_evidence_and_private_telemetry_are_reported() {
         "identity":{"origin":"https://example.org","release":"r1","surface":"public","snapshot":"s1"},
         "snapshot_date":"2026-11-05T00:00:00Z", "crawl_complete":false,
         "pages":[
-            {"url":"https://example.org/a", "status_code":200, "response_headers":{}, "html":"<main><div hidden><a href='/b'>private anchor</a></div></main>"},
+            {"url":"https://example.org/a", "status_code":200, "response_headers":{}, "html":"<main><div hidden><a href='/b'>private anchor</a></div><details><summary>More</summary><a href='/b'>collapsed</a></details></main>"},
             {"url":"https://example.org/b", "status_code":200, "response_headers":{}, "html":"<main>B</main>"}
         ]
     });
@@ -142,6 +142,8 @@ fn hidden_link_evidence_and_private_telemetry_are_reported() {
     let event: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
     assert_eq!(event["hidden_attribute_link_count"], 1);
     assert_eq!(event["hidden_attribute_unobserved_link_count"], 0);
+    assert_eq!(event["collapsed_details_link_count"], 1);
+    assert_eq!(event["collapsed_details_unobserved_link_count"], 0);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("private anchor"));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("example.org"));
 }

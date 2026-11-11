@@ -38,6 +38,10 @@ pub struct LinkEvidence {
     /// Absent in older reports; CSS and scripts can alter actual visibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hidden_attribute: Option<bool>,
+    /// Whether the link is outside the first summary of a closed details element.
+    /// Absent in older reports; scripts may change the element state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collapsed_details: Option<bool>,
     /// `nofollow`, `ugc` and `sponsored` tokens of the anchor's `rel`, lowercase
     /// and sorted. Other tokens, such as `noopener`, do not qualify a link.
     #[serde(default)]
@@ -49,9 +53,11 @@ pub struct LinkEvidence {
 }
 
 impl LinkEvidence {
-    /// True only when both source-only markup and HTML hidden state were observed absent.
+    /// True only when all observed conditional states are absent.
     pub fn is_nonconditional(&self) -> bool {
-        self.conditional_markup == Some(false) && self.hidden_attribute == Some(false)
+        self.conditional_markup == Some(false)
+            && self.hidden_attribute == Some(false)
+            && self.collapsed_details == Some(false)
     }
 }
 
@@ -77,6 +83,7 @@ struct Scope {
     /// Source-only markup may not be displayed in the evaluated page.
     conditional_markup: bool,
     hidden_attribute: bool,
+    collapsed_details: bool,
 }
 
 fn attribute(handle: &Handle, key: &str) -> Option<String> {
@@ -235,6 +242,7 @@ pub fn extract_document(
         non_body_landmark: false,
         conditional_markup: false,
         hidden_attribute: false,
+        collapsed_details: false,
     };
     // Keep the document alive while traversing: RcDom drains descendants when
     // the last handle to a node is dropped, even if descendants were cloned.
@@ -319,6 +327,7 @@ pub fn extract_document(
                     paragraph: scope.paragraph.clone(),
                     conditional_markup: Some(scope.conditional_markup),
                     hidden_attribute: Some(scope.hidden_attribute),
+                    collapsed_details: Some(scope.collapsed_details),
                     rel: crawl_rel_tokens(attribute(&node, "rel")),
                     line: None,
                     column: None,
@@ -326,11 +335,29 @@ pub fn extract_document(
                 });
             }
         }
+        let children = children_with_template_contents(&node);
+        // Only the first direct summary of a closed details element is shown.
+        // An ancestor may already be collapsed, including around this summary.
+        let closed_details = is_element(&node, "details") && attribute(&node, "open").is_none();
+        let first_summary = closed_details
+            .then(|| {
+                children
+                    .iter()
+                    .position(|child| is_element(child, "summary"))
+            })
+            .flatten();
         stack.extend(
-            children_with_template_contents(&node)
+            children
                 .into_iter()
+                .enumerate()
                 .rev()
-                .map(|child| (child, scope.clone())),
+                .map(|(index, child)| {
+                    let mut child_scope = scope.clone();
+                    if closed_details && Some(index) != first_summary {
+                        child_scope.collapsed_details = true;
+                    }
+                    (child, child_scope)
+                }),
         );
     }
     metadata.base_href = base;
@@ -439,6 +466,38 @@ mod tests {
         assert_eq!(routes(html, "https://example.org/fr/page"), ["en/intro"]);
         let foreign = r#"<head><base href="https://cdn.example.net/"></head><a href="x">X</a>"#;
         assert!(routes(foreign, "https://example.org/").is_empty());
+    }
+
+    #[test]
+    fn closed_details_mark_only_content_outside_the_first_summary() {
+        let html = "<main><details><summary><a href='/summary'>summary</a></summary><p><a href='/closed'>closed</a></p><summary><a href='/second'>second</a></summary><details open><summary><a href='/nested'>nested</a></summary></details></details><details open><summary><a href='/open-summary'>summary</a></summary><a href='/open'>open</a></details></main>";
+        let links = extract_links(html, "https://example.org/", "https://example.org", None);
+        let states: Vec<_> = links
+            .iter()
+            .map(|link| {
+                (
+                    link.href.as_str(),
+                    link.collapsed_details,
+                    link.is_nonconditional(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            states,
+            vec![
+                ("/summary", Some(false), true),
+                ("/closed", Some(true), false),
+                ("/second", Some(true), false),
+                ("/nested", Some(true), false),
+                ("/open-summary", Some(false), true),
+                ("/open", Some(false), true)
+            ]
+        );
+        let mut old = serde_json::to_value(&links[0]).unwrap();
+        old.as_object_mut().unwrap().remove("collapsed_details");
+        let old: LinkEvidence = serde_json::from_value(old).unwrap();
+        assert_eq!(old.collapsed_details, None);
+        assert!(!old.is_nonconditional());
     }
 
     #[test]

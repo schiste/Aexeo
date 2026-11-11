@@ -622,21 +622,22 @@ mod tests {
     }
 
     #[test]
-    fn hidden_inbound_links_remain_uncertain() {
+    fn hidden_and_collapsed_inbound_links_remain_uncertain() {
         let artifact = audit(
             vec![
                 page(
                     "",
-                    "<main><div hidden><a href='/a'>A</a></div><a hidden='until-found' href='/b'>B</a><a href='/c'>C</a></main>",
+                    "<main><div hidden><a href='/a'>A</a></div><a hidden='until-found' href='/b'>B</a><a href='/c'>C</a><details><summary>More</summary><a href='/d'>D</a></details></main>",
                 ),
                 page("a", "<main>A</main>"),
                 page("b", "<main>B</main>"),
                 page("c", "<main>C</main>"),
+                page("d", "<main>D</main>"),
             ],
             &Config::default(),
         );
         let report = build_link_report_from_audit(&artifact).unwrap();
-        for (path, expected) in [("/a", true), ("/b", true), ("/c", false)] {
+        for (path, expected) in [("/a", true), ("/b", true), ("/c", false), ("/d", true)] {
             let page = report
                 .pages
                 .iter()
@@ -691,35 +692,35 @@ mod tests {
     }
 
     #[test]
-    fn hidden_redirect_link_does_not_suppress_an_orphan_finding() {
-        let mut new = page("new", "<main>New</main>");
-        new["crawl_response"]["requested_url"] = "https://example.org/old".into();
-        new["crawl_response"]["redirect_chain"] =
-            serde_json::json!([{"url":"https://example.org/old", "status_code":301}]);
-        let artifact = audit(
-            vec![
-                page("", "<main><div hidden><a href='/old'>Old</a></div></main>"),
-                new,
-            ],
-            &Config::default(),
-        );
-        let report = build_link_report_from_audit(&artifact).unwrap();
-        assert_eq!(
-            qualified(&report, "LNK002", "new").conclusion,
-            LegacyLinkConclusion::ConditionalInbound
-        );
-        assert!(
-            kept(&artifact, &report).contains(&("LNK002".into(), "crawl/new/index.html".into()))
-        );
-        let new_page = report
-            .pages
-            .iter()
-            .find(|page| page.url.ends_with("/new"))
-            .unwrap();
-        let credit = new_page.via_redirect.as_ref().unwrap();
-        assert_eq!(credit.conditional_source_pages, Some(1));
-        assert_eq!(credit.nonconditional_source_pages, Some(0));
-        assert_eq!(new_page.conditional_only_inbound, Some(true));
+    fn hidden_and_collapsed_redirect_links_do_not_suppress_an_orphan_finding() {
+        for html in [
+            "<main><div hidden><a href='/old'>Old</a></div></main>",
+            "<main><details><summary>More</summary><a href='/old'>Old</a></details></main>",
+        ] {
+            let mut new = page("new", "<main>New</main>");
+            new["crawl_response"]["requested_url"] = "https://example.org/old".into();
+            new["crawl_response"]["redirect_chain"] =
+                serde_json::json!([{"url":"https://example.org/old", "status_code":301}]);
+            let artifact = audit(vec![page("", html), new], &Config::default());
+            let report = build_link_report_from_audit(&artifact).unwrap();
+            assert_eq!(
+                qualified(&report, "LNK002", "new").conclusion,
+                LegacyLinkConclusion::ConditionalInbound
+            );
+            assert!(
+                kept(&artifact, &report)
+                    .contains(&("LNK002".into(), "crawl/new/index.html".into()))
+            );
+            let new_page = report
+                .pages
+                .iter()
+                .find(|page| page.url.ends_with("/new"))
+                .unwrap();
+            let credit = new_page.via_redirect.as_ref().unwrap();
+            assert_eq!(credit.conditional_source_pages, Some(1));
+            assert_eq!(credit.nonconditional_source_pages, Some(0));
+            assert_eq!(new_page.conditional_only_inbound, Some(true));
+        }
     }
 
     #[test]
