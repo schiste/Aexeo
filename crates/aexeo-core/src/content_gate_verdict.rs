@@ -104,6 +104,14 @@ pub fn evaluate_change_with_options<P: ConfinedContentFiles>(
     )
 }
 
+/// A host-attested post-change collection. Completeness is an explicit host
+/// assertion; Aexeo cannot independently establish that no items are omitted.
+pub struct ChangeCollection<'a> {
+    pub change_id: &'a str,
+    pub items: &'a [ContentInput],
+    pub complete: bool,
+}
+
 /// Explicitly supplied host capabilities. No extension is executed by a preset.
 #[derive(Default)]
 pub struct ChangeEvaluationHost<'a, 'b> {
@@ -119,13 +127,44 @@ pub fn evaluate_change_with_host<P: ConfinedContentFiles>(
     evaluated_at: &str,
     max_entry_bytes: usize,
     max_total_bytes: usize,
+    host: ChangeEvaluationHost<'_, '_>,
+) -> Result<Verdict> {
+    evaluate_change_with_collection(
+        change,
+        provider,
+        preset,
+        evaluated_at,
+        max_entry_bytes,
+        max_total_bytes,
+        host,
+        None,
+    )
+}
+
+/// Evaluate against a host-attested post-change collection, after digest verification.
+/// The host asserts that the supplied collection represents one common scope and
+/// that its completeness declaration is accurate. Checks run per evaluated entry;
+/// delete-only changes still report site impact as not checked. Collection data
+/// is not independently bound to a CMS revision or verified for omitted items.
+#[allow(clippy::too_many_arguments)]
+pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
+    change: &Change,
+    provider: &mut P,
+    preset: &ContentPreset,
+    evaluated_at: &str,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
     mut host: ChangeEvaluationHost<'_, '_>,
+    collection: Option<ChangeCollection<'_>>,
 ) -> Result<Verdict> {
     preset.validate()?;
     if evaluated_at.is_empty() {
         bail!("evaluation timestamp is empty");
     }
     let resolved = resolve_proposed_content(change, provider, max_entry_bytes, max_total_bytes)?;
+    if let Some(collection) = &collection {
+        validate_collection(change, collection)?;
+    }
     let mut checks = Vec::new();
     let mut findings = Vec::new();
     let mut omitted = 0u64;
@@ -263,10 +302,17 @@ pub fn evaluate_change_with_host<P: ConfinedContentFiles>(
             adapter: context.as_ref(),
             link_count,
             link_reachability: observations.as_deref(),
-            collection: None,
+            collection: collection.as_ref().map(|collection| collection.items),
         };
-        let report =
-            preset.evaluate_with_destinations(&input, &capabilities, destinations.as_deref())?;
+        let report = preset.evaluate_with_collection_completeness(
+            &input,
+            &capabilities,
+            destinations.as_deref(),
+            collection
+                .as_ref()
+                .is_some_and(|collection| collection.complete),
+            None,
+        )?;
         let identity_projection = input.text.as_deref().is_some()
             && input.text.as_deref() == input.source_text.as_deref();
         let needs_plain_index = identity_projection
@@ -412,6 +458,43 @@ pub fn evaluate_change_with_host<P: ConfinedContentFiles>(
     })
 }
 
+fn validate_collection(change: &Change, collection: &ChangeCollection<'_>) -> Result<()> {
+    use std::collections::BTreeMap;
+    if collection.change_id != change.change_id {
+        bail!("collection belongs to a different change");
+    }
+    let mut items = BTreeMap::new();
+    for item in collection.items {
+        if item.id.trim().is_empty() || items.insert(item.id.as_str(), item).is_some() {
+            bail!("collection item IDs must be nonempty and unique");
+        }
+    }
+    for entry in &change.entries {
+        match entry.operation {
+            Operation::Create | Operation::Update | Operation::Rename => {
+                let item = items.get(entry.entity_id.as_str());
+                if item.is_none_or(|item| item.metadata != entry.metadata) {
+                    bail!("collection does not match proposed entry metadata");
+                }
+                if entry.operation == Operation::Rename
+                    && entry
+                        .previous_entity_id
+                        .as_deref()
+                        .is_some_and(|id| items.contains_key(id))
+                {
+                    bail!("collection still contains renamed entry");
+                }
+            }
+            Operation::Delete => {
+                if items.contains_key(entry.entity_id.as_str()) {
+                    bail!("collection still contains deleted entry");
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn scoped_id(kind: &str, entity: &str, gate: &str) -> String {
     format!("{kind}:{}:{entity}:{gate}", entity.len())
 }
@@ -457,6 +540,116 @@ mod tests {
             1024,
             1024,
         )
+    }
+
+    #[test]
+    fn collection_context_is_bound_and_partial_never_passes() {
+        use std::collections::BTreeMap;
+        let mut input = change();
+        input.entries[0].metadata = Some(BTreeMap::from([("slug".into(), "same".into())]));
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n").unwrap();
+        let item = |id: &str, slug: &str| ContentInput {
+            id: id.into(),
+            metadata: Some(BTreeMap::from([("slug".into(), slug.into())])),
+            ..Default::default()
+        };
+        let unique = vec![item("article", "same")];
+        let duplicate = vec![item("article", "same"), item("other", "same")];
+        let run = |items: &[ContentInput], complete, id: &str| {
+            evaluate_change_with_collection(
+                &input,
+                &mut NoFiles,
+                &policy,
+                "2026-01-01T00:00:00Z",
+                1024,
+                1024,
+                ChangeEvaluationHost::default(),
+                Some(ChangeCollection {
+                    change_id: id,
+                    items,
+                    complete,
+                }),
+            )
+        };
+        assert_eq!(run(&unique, true, "x").unwrap().status, VerdictStatus::Pass);
+        assert_eq!(
+            run(&unique, false, "x").unwrap().status,
+            VerdictStatus::NotChecked
+        );
+        let report = run(&duplicate, false, "x").unwrap();
+        assert_eq!(report.status, VerdictStatus::NotChecked);
+        assert!(!report.findings.is_empty());
+        assert!(run(&unique, true, "other").is_err());
+        assert!(run(&[item("article", "stale")], true, "x").is_err());
+        assert!(
+            run(
+                &[item("article", "same"), item("article", "same")],
+                true,
+                "x"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn collection_rejects_deleted_and_old_renamed_entries() {
+        let mut input = change();
+        let old = ContentInput {
+            id: "old".into(),
+            ..Default::default()
+        };
+        let new = ContentInput {
+            id: "article".into(),
+            ..Default::default()
+        };
+        input.entries[0].operation = Operation::Rename;
+        input.entries[0].previous_entity_id = Some("old".into());
+        let items = vec![old.clone(), new.clone()];
+        assert!(
+            validate_collection(
+                &input,
+                &ChangeCollection {
+                    change_id: "x",
+                    items: &items,
+                    complete: true
+                }
+            )
+            .is_err()
+        );
+        assert!(
+            validate_collection(
+                &input,
+                &ChangeCollection {
+                    change_id: "x",
+                    items: std::slice::from_ref(&new),
+                    complete: true
+                }
+            )
+            .is_ok()
+        );
+        input.entries[0].operation = Operation::Delete;
+        assert!(
+            validate_collection(
+                &input,
+                &ChangeCollection {
+                    change_id: "x",
+                    items: &[new],
+                    complete: true
+                }
+            )
+            .is_err()
+        );
+        assert!(
+            validate_collection(
+                &input,
+                &ChangeCollection {
+                    change_id: "x",
+                    items: &[],
+                    complete: true
+                }
+            )
+            .is_ok()
+        );
     }
 
     #[test]
