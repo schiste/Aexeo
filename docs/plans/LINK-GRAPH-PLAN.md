@@ -295,3 +295,7 @@ missing and unspecified languages are not treated as an observed mismatch.
   with explicit origin and URL map, optional inventory context, qualified
   findings, persisted evidence and aggregate telemetry. This does not attest a
   deployment or complete crawl; real site and inventory validation remains open.
+
+- Saved graph reports bind to the serialized audit they qualify. `report render`
+  withholds qualifications for unbound or mismatched reports; the binding detects
+  accidental mixups but is not authentication or proof of graph integrity.

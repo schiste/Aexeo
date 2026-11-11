@@ -481,7 +481,15 @@ reached and finding counts still rank first. The JSON `priorities` gain an
 additive `link_graph` object (`confirmed`, `not_verifiable`) on the problems
 the report qualifies. `report render <audit> --format md --link-graph
 graph.json` (or `--format text`) shows the same for a stored crawl audit and
-its report. Rule IDs, severities, messages and fingerprints are unchanged.
+its report. Graphs produced from audits include a SHA-256 binding to the
+serialized audit. `report render` applies qualifications only when that binding
+matches; old unbound or mismatched graphs remain readable but generate a warning
+and leave findings unqualified. Rebuild a graph from the matching stored audit to
+obtain a binding; a newly built graph cannot recover findings that an older run
+already suppressed from its saved audit. This binding detects accidental mixups;
+it does not authenticate the producer or prevent someone changing the graph and
+its binding. Opt-in graph telemetry exposes only whether a binding is present,
+not the digest. Rule IDs, severities, messages and fingerprints are unchanged.
 Without a report, every output is byte for byte what it was. Static `check` can
 also create and attach a graph with an explicit URL map, as described below.
 

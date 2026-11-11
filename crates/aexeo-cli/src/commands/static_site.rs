@@ -68,7 +68,7 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
             &site,
             Some(required_arg(submatches, "link-graph-site-origin")?),
         ));
-        let graph = aexeo_core::link_report::build_link_report_from_audit_with_static_urls(
+        let mut graph = aexeo_core::link_report::build_link_report_from_audit_with_static_urls(
             &artifact,
             context.as_ref(),
             Some(&urls),
@@ -76,6 +76,7 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
         aexeo_core::link_findings::remove_suppressed_findings(&mut findings, &graph);
         aexeo_core::link_findings::remove_suppressed_findings(&mut artifact.findings, &graph);
         artifact.summary = aexeo_core::reporting::summarize_findings(&artifact.findings);
+        graph.bind_audit(&artifact)?;
         fs::write(path, serde_json::to_vec_pretty(&graph)?)
             .map_err(|error| anyhow::anyhow!("cannot write link graph report {path}: {error}"))?;
         if submatches.get_flag("link-graph-telemetry") {

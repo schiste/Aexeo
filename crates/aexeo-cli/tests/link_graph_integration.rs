@@ -481,6 +481,8 @@ fn built_static_site_link_graph_uses_explicit_urls_without_claiming_coverage() {
     );
     let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
     assert_eq!(telemetry["event"], "link_graph_analysis");
+    assert_eq!(telemetry["audit_bound"], false);
+    assert!(report.get("audit_sha256").is_none());
     assert_eq!(telemetry["static_mapping_matched_count"], 2);
     assert_eq!(telemetry["static_mapping_missing_count"], 1);
     assert_eq!(telemetry["static_mapping_unused_count"], 1);
@@ -1104,6 +1106,7 @@ fn static_check_graph_uses_the_audited_site_and_preserves_uncertainty() {
     assert!(text.contains("not verifiable: crawl incomplete"), "{text}");
     assert!(!text.contains("confirmed orphan"), "{text}");
     let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["audit_bound"], true);
     assert_eq!(telemetry["static_mapping_missing_count"], 1);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("unmapped.html"));
     let missing = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
