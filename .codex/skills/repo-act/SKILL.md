@@ -24,6 +24,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   session-owned commits: old commits can still be replay candidates after a
   sync. Preserve a backup ref and reconcile the branch onto the current base
   with only the new commits before submitting; verify the resulting diff.
+  Check the old remote branch before pushing: the new session may not own the
+  previous session’s recorded push. If the broker refuses replacement, publish
+  the new commit to a distinct branch through `broker advanced git`, open its
+  PR through `broker advanced gh`, and retain the recorded checkout branch for
+  submit and finish. Never overwrite the old branch without verified authority.
 - Root `package.json` sets `type: module`: use ES module imports for root
   `.js` scripts and tests, or explicitly use `.cjs` for CommonJS. Run the
   script directly with Node to verify its entrypoint as well as its tests.
