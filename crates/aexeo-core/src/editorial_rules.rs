@@ -12,6 +12,8 @@ struct OpenElement {
     attributes: BTreeMap<String, String>,
     start: usize,
     open_end: usize,
+    line: usize,
+    column: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -206,27 +208,27 @@ fn is_void_element(tag: &str) -> bool {
     )
 }
 
-fn line_column(raw: &str, index: usize) -> (usize, usize) {
-    let mut line = 1;
-    let mut column = 1;
-    for ch in raw[..index.min(raw.len())].chars() {
-        if ch == '\n' {
-            line += 1;
-            column = 1;
-        } else {
-            column += 1;
-        }
-    }
-    (line, column)
-}
-
 fn parse_elements(raw: &str) -> Vec<HtmlElement> {
     let mut elements = Vec::new();
     let mut open_elements: Vec<OpenElement> = Vec::new();
     let lowercase_raw = raw.to_ascii_lowercase();
     let mut cursor = 0;
+    let mut position_offset = 0;
+    let mut line = 1;
+    let mut column = 1;
     while let Some(relative_start) = raw[cursor..].find('<') {
         let start = cursor + relative_start;
+        // Each character is visited at most once, including skipped script and
+        // comment text. Columns count Unicode scalar values as before.
+        for ch in raw[position_offset..start].chars() {
+            if ch == '\n' {
+                line += 1;
+                column = 1;
+            } else {
+                column += 1;
+            }
+        }
+        position_offset = start;
         if raw[start..].starts_with("<!--") {
             cursor = raw[start + 4..]
                 .find("-->")
@@ -247,7 +249,6 @@ fn parse_elements(raw: &str) -> Vec<HtmlElement> {
             {
                 let open = open_elements.remove(open_index);
                 open_elements.truncate(open_index);
-                let (line, column) = line_column(raw, open.start);
                 elements.push(HtmlElement {
                     tag: open.tag,
                     attributes: open.attributes,
@@ -255,8 +256,8 @@ fn parse_elements(raw: &str) -> Vec<HtmlElement> {
                     open_end: open.open_end,
                     close_start: start,
                     end: end + 1,
-                    line,
-                    column,
+                    line: open.line,
+                    column: open.column,
                 });
             }
         } else if let Some((tag, attributes)) = parse_tag_name_and_attributes(&raw[start..=end]) {
@@ -273,13 +274,14 @@ fn parse_elements(raw: &str) -> Vec<HtmlElement> {
                 attributes,
                 start,
                 open_end: end + 1,
+                line,
+                column,
             };
             let self_closing = raw[start..=end]
                 .trim_end_matches('>')
                 .trim_end()
                 .ends_with('/');
             if is_void_element(&tag) || self_closing {
-                let (line, column) = line_column(raw, start);
                 elements.push(HtmlElement {
                     tag: open.tag,
                     attributes: open.attributes,
@@ -297,7 +299,6 @@ fn parse_elements(raw: &str) -> Vec<HtmlElement> {
         cursor = end + 1;
     }
     for open in open_elements {
-        let (line, column) = line_column(raw, open.start);
         elements.push(HtmlElement {
             tag: open.tag,
             attributes: open.attributes,
@@ -305,8 +306,8 @@ fn parse_elements(raw: &str) -> Vec<HtmlElement> {
             open_end: open.open_end,
             close_start: raw.len(),
             end: raw.len(),
-            line,
-            column,
+            line: open.line,
+            column: open.column,
         });
     }
     elements.sort_by_key(|element| (element.start, element.end));
@@ -777,6 +778,20 @@ mod tests {
             },
         );
         config
+    }
+
+    #[test]
+    fn element_positions_preserve_unicode_columns_across_skipped_and_unclosed_markup() {
+        let raw = "é<div>\n<!-- ignored\n <fake> -->\n<script>\n fake <tag>\n</script>\n  <h2>é</h2><br>\n  <p>unfinished";
+        let elements = parse_elements(raw);
+        let positions: Vec<(&str, usize, usize)> = elements
+            .iter()
+            .map(|element| (element.tag.as_str(), element.line, element.column))
+            .collect();
+        assert_eq!(
+            positions,
+            vec![("div", 1, 2), ("h2", 7, 3), ("br", 7, 13), ("p", 8, 3)]
+        );
     }
 
     #[test]
