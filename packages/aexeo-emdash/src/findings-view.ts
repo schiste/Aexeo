@@ -32,7 +32,7 @@ import type {
   SandboxCtx,
 } from "./plugin.js";
 import {
-  SITE_GRAPH_RULE_IDS,
+  isSiteGraphFinding,
   evaluateAndPersistAll,
   readAllDocuments,
   readAssessment,
@@ -286,7 +286,7 @@ export async function readAllFindings(kv: KvNamespace): Promise<FindingRow[]> {
     }
     const route = entry.key.replace(/^findings:/, "");
     for (const finding of entry.value.findings) {
-      if (!isCmsObservableFinding(finding) || (incomplete && SITE_GRAPH_RULE_IDS.has(finding.rule_id))) continue;
+      if (!isCmsObservableFinding(finding) || (incomplete && isSiteGraphFinding(finding))) continue;
       out.push({ ...finding, document_route: route });
     }
   }
@@ -493,7 +493,7 @@ export async function renderDocumentPanel(
     };
   }
   const incomplete = (await readAssessment(kv, "*"))?.status === "error";
-  const findings = (await readFindings(kv, route)).filter((finding) => isCmsObservableFinding(finding) && (!incomplete || !SITE_GRAPH_RULE_IDS.has(finding.rule_id)));
+  const findings = (await readFindings(kv, route)).filter((finding) => isCmsObservableFinding(finding) && (!incomplete || !isSiteGraphFinding(finding)));
   const assessment = await readAssessment(kv, route);
   const errors = findings.filter((finding) => finding.severity === "error");
   const warnings = findings.filter(

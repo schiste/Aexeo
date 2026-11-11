@@ -17,7 +17,7 @@ import type {
   StoredDocument,
 } from "./plugin.js";
 import {
-  SITE_GRAPH_RULE_IDS,
+  isSiteGraphFinding,
   evaluateAndPersistAll,
   readAllDocuments,
   readAllStoredDocuments,
@@ -175,7 +175,7 @@ async function buildFindingsPayload(
     const route = entry.key.replace(/^findings:/, "");
     if (route === "*") {
       sitewide.push(...entry.value.findings.filter((finding) => isCmsObservableFinding(finding) &&
-        !(sitewideAssessment?.status === "error" && SITE_GRAPH_RULE_IDS.has(finding.rule_id))));
+        !(sitewideAssessment?.status === "error" && isSiteGraphFinding(finding))));
       continue;
     }
     let bucket = perRoute.get(route);
@@ -184,7 +184,7 @@ async function buildFindingsPayload(
       perRoute.set(route, bucket);
     }
     for (const finding of entry.value.findings) {
-      if (!isCmsObservableFinding(finding) || (sitewideAssessment?.status === "error" && SITE_GRAPH_RULE_IDS.has(finding.rule_id))) continue;
+      if (!isCmsObservableFinding(finding) || (sitewideAssessment?.status === "error" && isSiteGraphFinding(finding))) continue;
       bucket.findings.push(finding);
       if (finding.severity === "error") bucket.errors += 1;
       else if (finding.severity === "warning") bucket.warnings += 1;

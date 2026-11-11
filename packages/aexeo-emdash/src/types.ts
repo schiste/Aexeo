@@ -85,6 +85,8 @@ export interface RuleLayers {
 }
 
 export interface Finding {
+  /** Added by content preset evaluators; absent on legacy site findings. */
+  aexeo_origin?: "content_preset";
   rule_id: string;
   message: string;
   path: string;

@@ -685,3 +685,14 @@ max_chars = 100
 delimiters = ".!?。！？"
 blocking = false
 ```
+
+### EmDash finding provenance
+
+EmDash tags content-preset findings with `aexeo_origin: "content_preset"` so
+a custom gate can reuse a legacy site-rule identifier without being filtered as
+an unobserved rendered-page or site-graph finding. The configured plugin and
+the version 2 sidecar response provide the tag. Legacy untagged stored findings
+remain subject to conservative CMS filtering; re-evaluate records after upgrading
+both the plugin and sidecar. Preset coverage logs add an aggregate
+`colliding_findings` count, without rule IDs or content. The tag identifies the
+evaluation path; it does not independently verify the source or the finding.

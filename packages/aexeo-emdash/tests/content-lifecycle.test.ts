@@ -339,6 +339,29 @@ describe("custom block mappings", () => {
 });
 
 describe("assessment persistence", () => {
+  it("retains content-preset findings even when IDs collide with site rules", async () => {
+    const { ctx, store } = host();
+    const presetFindings = ["SEO004", "LNK003", "CNT005"].map((id) => ({ ...finding("/a", id), aexeo_origin: "content_preset" as const }));
+    const evaluator: EvaluatorFn = async () => ({ ok: true, findings: [...presetFindings, finding("/a", "SEO004")] });
+    await save(ctx, item("a", NEW), evaluator);
+    expect(store.get(findingsKey("/a"))).toMatchObject({ findings: presetFindings });
+    const panel = JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"));
+    for (const id of ["SEO004", "LNK003", "CNT005"]) expect(panel).toContain(id);
+    const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator });
+    expect(payload.findings.map((entry) => entry.rule_id)).toEqual(["SEO004", "LNK003", "CNT005"]);
+  });
+  it("keeps colliding preset findings after an incomplete site refresh and records aggregate telemetry", async () => {
+    const { ctx, store } = host([item("a", OLD)]);
+    const events: Array<[string, unknown]> = [];
+    ctx.log = { info: (name, data) => events.push([name, data]), warn: () => {}, error: () => {} };
+    const tagged = { ...finding("/a", "CNT005"), aexeo_origin: "content_preset" as const };
+    const evaluator: EvaluatorFn = async () => ({ ok: true, findings: [tagged, finding("/a", "CNT005")] });
+    await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator });
+    expect(store.get(findingsKey("/a"))).toMatchObject({ findings: [tagged] });
+    expect((await readAllFindings(ctx.kv)).map((entry) => entry.rule_id)).toEqual(["CNT005"]);
+    expect(events.find(([name]) => name === "aexeo.preset_coverage")).toEqual(["aexeo.preset_coverage", { status: "evaluated", passed: 0, failed: 0, not_checked: 0, colliding_findings: 1 }]);
+    expect(JSON.stringify(events)).not.toContain("CNT005");
+  });
   it("replaces previous findings with an explicit error for a failed newer evaluation", async () => {
     const { ctx, store } = host();
     await save(ctx, item("a", OLD), returning("OLD"));

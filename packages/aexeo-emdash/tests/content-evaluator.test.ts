@@ -13,7 +13,7 @@ const report: ContentReport = { preset: "custom", input_id: "/test", applied_fix
 describe("configured content preset", () => {
   it("adds findings without replacing the existing evaluator", async () => {
     const result = await withContentPreset(base, { name: "custom" }, async () => report)([doc]);
-    expect(result.ok && result.findings[0]?.rule_id).toBe("heading");
+    expect(result.ok && result.findings[0]).toMatchObject({ rule_id: "heading", aexeo_origin: "content_preset" });
   });
   it("reports unavailable gates as incomplete", async () => {
     const incomplete: ContentReport = { ...report, gates: [{ ...report.gates[0]!, status: "not_checked", findings: [], reason: "site unavailable" }] };
