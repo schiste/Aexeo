@@ -144,7 +144,7 @@ export async function exportLinkInventory(
         }
         let disposition: LinkInventoryDisposition = "unknown";
         let target: string | null = null;
-        let locale = item.locale;
+        let locale = item.locale ?? null;
         if (options.classify) {
           try {
             const classification = options.classify(item, url, collection);
@@ -155,7 +155,7 @@ export async function exportLinkInventory(
             }
             disposition = classification.disposition;
             target = classification.target ?? null;
-            locale = classification.locale === undefined ? item.locale : classification.locale;
+            if (classification.locale !== undefined) locale = classification.locale;
           } catch {
             // A host failure cannot turn an unclassified page into a known one,
             // nor discard other pages. Never expose host error details.
