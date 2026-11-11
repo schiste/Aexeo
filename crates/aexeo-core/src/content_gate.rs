@@ -1633,7 +1633,18 @@ impl ContentPreset {
                                 .map(|(offset, ch)| (offset, Some(ch)))
                                 .chain(std::iter::once((text.len(), None)))
                             {
-                                let decimal_point = ch == Some('.')
+                                while segment_block_ends
+                                    .get(next_block)
+                                    .is_some_and(|&end| end < offset)
+                                {
+                                    next_block += 1;
+                                }
+                                let block_end = segment_block_ends.get(next_block) == Some(&offset);
+                                // A block boundary precedes the character at its byte offset.
+                                // A separator is not required, and decimal/abbreviation
+                                // context must not cross into the next block.
+                                let decimal_point = !block_end
+                                    && ch == Some('.')
                                     && text[..offset]
                                         .chars()
                                         .next_back()
@@ -1642,7 +1653,8 @@ impl ContentPreset {
                                         .chars()
                                         .next()
                                         .is_some_and(|c| c.is_ascii_digit());
-                                let abbreviation = ch == Some('.')
+                                let abbreviation = !block_end
+                                    && ch == Some('.')
                                     && !abbreviations.is_empty()
                                     && text[segment_start..offset]
                                         .split_whitespace()
@@ -1652,18 +1664,10 @@ impl ContentPreset {
                                                 .iter()
                                                 .any(|abbr| abbr.strip_suffix('.') == Some(word))
                                         });
-                                while segment_block_ends
-                                    .get(next_block)
-                                    .is_some_and(|&end| end < offset)
-                                {
-                                    next_block += 1;
-                                }
-                                let block_end = segment_block_ends.get(next_block) == Some(&offset);
-                                if block_end
-                                    || !decimal_point
-                                        && !abbreviation
-                                        && ch.is_none_or(|ch| delimiters.contains(ch))
-                                {
+                                let delimiter = !decimal_point
+                                    && !abbreviation
+                                    && ch.is_none_or(|ch| delimiters.contains(ch));
+                                if block_end || delimiter {
                                     let segment = &text[segment_start..offset];
                                     let count = if chars {
                                         segment.trim().chars().count()
@@ -1686,8 +1690,18 @@ impl ContentPreset {
                                             );
                                         }
                                     }
-                                    segment_start = offset + ch.map_or(0, char::len_utf8);
-                                    first_position = None;
+                                    segment_start = offset
+                                        + if delimiter {
+                                            ch.map_or(0, char::len_utf8)
+                                        } else {
+                                            0
+                                        };
+                                    first_position =
+                                        if !delimiter && ch.is_some_and(|ch| !ch.is_whitespace()) {
+                                            Some((line, column))
+                                        } else {
+                                            None
+                                        };
                                 } else if ch.is_some_and(|ch| !ch.is_whitespace())
                                     && first_position.is_none()
                                 {
@@ -2225,6 +2239,68 @@ mod tests {
         ));
         assert!(!claim_is_present("alpha  beta", "alpha beta", &[5]));
         assert!(claim_is_present("aaa", "aa", &[1]));
+    }
+
+    #[test]
+    fn sentence_gates_preserve_text_at_adjacent_block_boundaries() {
+        for (kind, limit, longest) in [
+            ("sentence_length", "max_words=1", "longest_sentence_words"),
+            (
+                "sentence_character_length",
+                "max_chars=3",
+                "longest_sentence_chars",
+            ),
+        ] {
+            let preset = ContentPreset::from_toml(&format!(
+                "version=1\nname='t'\n[[gates]]\nid='g'\nkind='{kind}'\n{limit}\n"
+            ))
+            .unwrap();
+            let context = ContentContext {
+                block_ends: Some(vec![0, 1, 1, 10]),
+                ..Default::default()
+            };
+            let report = preset
+                .evaluate_with_context(&literal_input("Aété fin"), None, None, Some(&context))
+                .unwrap();
+            let gate = &report.gates[0];
+            assert_eq!(gate.measurements["sentence_count"], 2, "{kind}");
+            assert_eq!(
+                gate.measurements[longest],
+                if kind == "sentence_length" { 2 } else { 7 },
+                "{kind}"
+            );
+            assert_eq!(gate.findings.len(), 1, "{kind}");
+            assert_eq!(
+                (gate.findings[0].line, gate.findings[0].column),
+                (1, 2),
+                "{kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn punctuation_at_adjacent_block_boundary_starts_a_new_context() {
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='t'\n[[gates]]\nid='g'\nkind='sentence_length'\nmax_words=1\n",
+        )
+        .unwrap();
+        for (text, boundary, position) in [("1.2 trois", 1, (1, 3)), ("Un.deux trois", 3, (1, 4))] {
+            let context = ContentContext {
+                block_ends: Some(vec![boundary]),
+                ..Default::default()
+            };
+            let report = preset
+                .evaluate_with_context(&literal_input(text), None, None, Some(&context))
+                .unwrap();
+            let gate = &report.gates[0];
+            assert_eq!(gate.measurements["sentence_count"], 2, "{text}");
+            assert_eq!(gate.findings.len(), 1, "{text}");
+            assert_eq!(
+                (gate.findings[0].line, gate.findings[0].column),
+                position,
+                "{text}"
+            );
+        }
     }
 
     #[test]
