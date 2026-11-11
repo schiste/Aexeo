@@ -142,6 +142,9 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] Markdown invalid-link source locations and aggregate mapping telemetry
   ([PR #48](https://github.com/schiste/Aexeo/pull/48)); locations identify link
   occurrences, including reference uses.
+- [x] EmDash automatic field selection retains recognized prose but withholds body
+  capabilities when another conventional body field is opaque; explicit host
+  field selection can establish which fields comprise the body.
 - [x] EmDash retains observed block boundaries for text checks when paragraph
   extraction is unavailable; paragraph-specific gates remain `not_checked`.
 - [x] EmDash block/span coordinates and opt-in local aggregate telemetry

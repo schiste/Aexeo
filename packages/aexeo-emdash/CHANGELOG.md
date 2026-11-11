@@ -6,6 +6,10 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve available prose while marking body coverage unverified when automatic selection encounters an unrecognized conventional body field. Hosts can still explicitly select the fields constituting the rendered body.
+
 ## [0.9.1] - 2026-11-10
 
 ### Fixed

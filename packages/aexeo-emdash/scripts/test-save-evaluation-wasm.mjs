@@ -219,6 +219,19 @@ kind="link_reachability"
   for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/mixed", rule), false);
 }
 
+// An unrecognized conventional body field cannot certify another field as complete.
+{
+  const mixedFields = item("opaque-body", { data: { body: { document: "opaque" }, content: [block("a", "Preserved prose")] } });
+  const host = fakeHost([mixedFields]);
+  const configured = createPlugin({ contentPreset: { name: "article", collections: ["pages"] } });
+  await configured.hooks["content:afterSave"].handler({ content: mixedFields, collection: "pages", isNew: false }, host.ctx);
+  const document = host.store.get("document:/opaque-body").document;
+  assert.equal(document.body[0].children[0].text, "Preserved prose");
+  assert.deepEqual(document.body_capabilities, []);
+  assert.equal(host.store.get("findings:/opaque-body").assessment.gates[0].status, "not_checked");
+  for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/opaque-body", rule), false);
+}
+
 // A host can establish text without claiming unobserved component headings.
 {
   const page = item("partial-capability", { data: { content: [block("a", "Before"), { _type: "card", _key: "c", text: "Card" }, block("b", "After")] } });

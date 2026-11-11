@@ -91,6 +91,22 @@ describe("EmDash content adaptation", () => {
     expect(adaptContentItem({ ...item, data: { introduction: body("intro"), sections: 42 } }, { contentFields: ["introduction", "sections"] }).document.body_capabilities).toEqual([]);
   });
 
+  it("withholds automatic coverage when another conventional body field is unrecognized", () => {
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: {} };
+    for (const field of ["body", "content", "blocks"]) {
+      const document = contentItemToEmdashDocument({ ...item, data: { introduction: body("Preserved"), [field]: { opaque: "other content" } } });
+      expect(document.body?.map((entry) => entry.children[0]?.text)).toEqual(["Preserved"]);
+      expect(document.body_capabilities).toEqual([]);
+    }
+    const mixed = contentItemToEmdashDocument({ ...item, data: { body: { opaque: true }, content: body("Preserved") } });
+    expect(mixed.body?.[0]?.children[0]?.text).toBe("Preserved");
+    expect(mixed.body_capabilities).toEqual([]);
+    for (const empty of [null, [], "", "  "]) {
+      expect(contentItemToEmdashDocument({ ...item, data: { body: empty, content: body("Preserved") } }).body_capabilities).toBeUndefined();
+    }
+    expect(adaptContentItem({ ...item, data: { body: { opaque: true }, content: body("Preserved") } }, { contentFields: ["content"] }).document.body_capabilities).toBeUndefined();
+  });
+
   it("marks absent selected fields incomplete while preserving observed empty fields", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: { introduction: body("Before"), conclusion: body("After") } };
     const options = { contentFields: ["introduction", "sections", "conclusion"] };
