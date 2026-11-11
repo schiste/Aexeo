@@ -63,6 +63,18 @@ describe("EmDash content adaptation", () => {
     expect(adaptContentItem({ ...item, data: { intro: before, cyclic } }, { contentFields: ["intro"] }).meta.bodySourcePaths).toBeUndefined();
     expect(adaptContentItem({ ...item, data: { intro: before, oversized: new Array(50_001).fill(null) } }, { contentFields: ["intro"] }).meta.bodySourcePaths).toBeUndefined();
   });
+  it("does not traverse unrelated data to calculate discarded source paths", () => {
+    const visited = vi.fn(() => "unrelated");
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: {
+      body: body("Text"), extra: { get nested() { return visited(); } },
+    } };
+    const direct = contentItemToEmdashDocument(item);
+    expect(visited).not.toHaveBeenCalled();
+    const adapted = adaptContentItem(item);
+    expect(adapted.document).toEqual(direct);
+    expect(adapted.meta.bodySourcePaths).toEqual([["data", "body", 0]]);
+    expect(visited).toHaveBeenCalledOnce();
+  });
   it("distinguishes an absent body from an explicitly empty one without hiding another rich text field", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: {} };
     expect(contentItemToEmdashDocument(item).body).toBeUndefined();
