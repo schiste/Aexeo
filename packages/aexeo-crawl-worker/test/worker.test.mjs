@@ -172,6 +172,31 @@ describe("external gate service binding", () => {
       await harness.close();
     }
   });
+  it("retains local findings on provider failure only for clients that support coverage", async () => {
+    const preset = `version=1\nname="partial"\n[[gates]]\nid="words"\nkind="word_count"\nmin=100\n[[gates]]\nid="external"\nkind="custom"\nextension="example.rule"\nblocking=true\n`;
+    const harness = createTestHarness({ workers: [
+      { config: { name: "aexeo-test", main: fileURLToPath(new URL("../src/worker.ts", import.meta.url)), compatibility_date: "2026-10-01",
+        vars: { SITE_URL, EVAL_TOKEN: TOKEN, CONTENT_PRESET: "partial", CONTENT_PRESET_SOURCES_JSON: JSON.stringify({ partial: preset }) },
+        services: [{ binding: "CONTENT_GATE_PROVIDER", service: "gate-provider" }] } },
+      { config: { name: "gate-provider", main: fileURLToPath(new URL("./gate-provider.mjs", import.meta.url)), compatibility_date: "2026-10-01" } },
+    ] });
+    try {
+      await harness.listen();
+      const worker = harness.getWorker("aexeo-test");
+      const request = { documents: [{ route: "/page", title: "Page", body: [{ children: [{ _type: "span", text: "Short draft" }] }] }], collections: ["pages"] };
+      const legacy = await post(worker, JSON.stringify(request));
+      assert.equal(legacy.status, 500);
+      const modern = await post(worker, JSON.stringify({ ...request, responseFormat: 2 }));
+      assert.equal(modern.status, 200, await modern.clone().text());
+      const payload = await modern.json();
+      assert.ok(payload.findings.some((finding) => finding.rule_id === "words"));
+      assert.deepEqual(payload.assessments["/page"].gates.find((gate) => gate.gate_id === "external"), {
+        gate_id: "external", status: "not_checked", blocking: true, scope: "document", required_capability: "extension", reason: "external gate provider failed",
+      });
+    } finally {
+      await harness.close();
+    }
+  });
   it("evaluates bound results in real WASM and rejects a stale snapshot", async () => {
     const preset = `version=1\nname="custom"\n[[gates]]\nid="external"\nkind="custom"\nextension="example.rule"\nblocking=false\n[gates.parameters]\nmode="strict"\n`;
     const harness = createTestHarness({ workers: [

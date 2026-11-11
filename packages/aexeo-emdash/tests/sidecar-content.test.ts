@@ -78,6 +78,17 @@ describe("sandbox content presets", () => {
     const oversized = { fetch: async () => new Response("x".repeat(2 * 1024 * 1024 + 1)) };
     await expect(contentPresetFindings([{}], undefined, { CONTENT_PRESET: "article", CONTENT_GATE_PROVIDER: oversized }, evaluate, project)).rejects.toThrow("too large");
   });
+  it("retains findings and reports failed providers as unchecked for modern clients", async () => {
+    const assessments: Record<string, unknown> = Object.create(null);
+    const gate = { gate_id: "external", status: "not_checked", blocking: true, scope: "document", required_capability: "extension", reason: "missing", findings: [] };
+    const finding = { rule_id: "words" };
+    const evaluate = () => JSON.stringify({ gates: [{ ...gate, gate_id: "words", required_capability: "text", status: "failed", findings: [finding] }, gate] });
+    const fetch = async () => new Response("private", { status: 503 });
+    const findings = await contentPresetFindings([{ route: "/page" }], ["pages"], { CONTENT_PRESET: "article", CONTENT_GATE_PROVIDER: { fetch } }, evaluate, () => "{}", assessments);
+    expect(findings).toEqual([{ ...finding, aexeo_origin: "content_preset" }]);
+    expect(assessments["/page"]).toMatchObject({ gates: [{ gate_id: "words", status: "failed" }, { gate_id: "external", blocking: true, status: "not_checked", reason: "external gate provider failed" }] });
+    expect(JSON.stringify(assessments)).not.toContain("private");
+  });
   it("emits only optional provider timing and status", async () => {
     const logger = vi.spyOn(console, "info").mockImplementation(() => {});
     try {

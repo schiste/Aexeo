@@ -82,22 +82,24 @@ export async function contentPresetFindings(
     };
     const sourcesJson = JSON.stringify(sources);
     let report = JSON.parse(evaluate(documentJson, name, sourcesJson, evidenceJson)) as Report;
-    let extensionsJson: string | undefined;
     if (env.CONTENT_GATE_PROVIDER !== undefined && report.gates.some((gate) => gate.required_capability === "extension")) {
-      if (!project) throw new Error("content gate projection is unavailable");
       const started = env.CONTENT_GATE_TELEMETRY === "true" ? performance.now() : 0;
       let status = "error";
       try {
-        extensionsJson = await providerResults(env.CONTENT_GATE_PROVIDER, JSON.parse(project(documentJson, evidenceJson)), name, collection);
+        if (!project) throw new Error("content gate projection is unavailable");
+        const extensionsJson = await providerResults(env.CONTENT_GATE_PROVIDER, JSON.parse(project(documentJson, evidenceJson)), name, collection);
+        report = JSON.parse(evaluate(documentJson, name, sourcesJson, evidenceJson, extensionsJson)) as Report;
         status = "success";
+      } catch (error) {
+        // Legacy clients cannot represent unchecked gates, so retain their failure.
+        if (assessments === undefined) throw error;
+        report = { ...report, gates: report.gates.map((gate) => gate.required_capability === "extension" && gate.status === "not_checked"
+          ? { ...gate, reason: "external gate provider failed" } : gate) };
       } finally {
         if (env.CONTENT_GATE_TELEMETRY === "true") {
           console.info(JSON.stringify({ event: "external_gate_provider", duration_ms: performance.now() - started, status }));
         }
       }
-    }
-    if (extensionsJson !== undefined) {
-      report = JSON.parse(evaluate(documentJson, name, sourcesJson, evidenceJson, extensionsJson)) as Report;
     }
     if (assessments !== undefined) {
       if (typeof document !== "object" || document === null || !("route" in document) || typeof document.route !== "string") throw new Error("document route is required for assessments");

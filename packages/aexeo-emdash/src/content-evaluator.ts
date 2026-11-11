@@ -69,6 +69,7 @@ export function withContentPreset(
           ? await evaluate(document, name, preset.sources)
           : await evaluate(document, name, preset.sources, preset.evidenceSources);
         let externalResults: ExternalGateResult[] | undefined;
+        let externalFailure = false;
         if (provider !== undefined && report.gates.some((gate) => gate.required_capability === "extension")) {
           const started = onProviderTelemetry ? performance.now() : 0;
           let status: ExternalGateTelemetry["status"] = "error";
@@ -76,15 +77,17 @@ export function withContentPreset(
             if (!project) throw new Error("content gate projection is unavailable");
             externalResults = await provider({ input: await project(document, preset.evidenceSources), preset: name, collection });
             if (!Array.isArray(externalResults)) throw new Error("external gate provider must return an array");
+            report = await evaluate(document, name, preset.sources, preset.evidenceSources, undefined, externalResults);
             status = "success";
+          } catch {
+            // Preserve local findings; external gates remain explicitly unchecked.
+            externalResults = undefined;
+            externalFailure = true;
           } finally {
             if (onProviderTelemetry) {
               try { onProviderTelemetry({ duration_ms: performance.now() - started, status }); } catch { /* telemetry is best effort */ }
             }
           }
-        }
-        if (externalResults !== undefined) {
-          report = await evaluate(document, name, preset.sources, preset.evidenceSources, undefined, externalResults);
         }
         // Do not invoke the host observer unless the resolved preset actually
         // contains a reachability gate. Provider errors retain the initial report.
@@ -111,6 +114,10 @@ export function withContentPreset(
               try { onLinkProviderTelemetry({ duration_ms: performance.now() - started, status }); } catch { /* best effort */ }
             }
           }
+        }
+        if (externalFailure) {
+          report = { ...report, gates: report.gates.map((gate) => gate.required_capability === "extension" && gate.status === "not_checked"
+            ? { ...gate, reason: "external gate provider failed" } : gate) };
         }
         assessments[document.route] = {
           status: "evaluated",

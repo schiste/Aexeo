@@ -98,20 +98,30 @@ it("does not project or send content when the selected preset has no custom gate
   expect(evaluate).toHaveBeenCalledTimes(1);
 });
 
-it("reports provider errors and rejects invalid provider results", async () => {
+it("preserves local findings and marks external gates unchecked on provider failure", async () => {
   const project = async () => ({ id: "/test", text: null, source_text: null, headings: null, metadata: null, evidence_sources: null });
-  const failed = withContentPreset(base, { name: "article" }, async () => externalReport, async () => { throw new Error("provider unavailable"); }, project);
-  const result = await failed([doc]);
-  expect(result.ok).toBe(false);
-  if (!result.ok) expect(result.detail).toContain("provider unavailable");
-  const invalid = withContentPreset(base, { name: "article" }, async () => externalReport, async () => undefined as never, project);
-  const invalidResult = await invalid([doc]);
-  expect(invalidResult.ok).toBe(false);
-  if (!invalidResult.ok) expect(invalidResult.detail).toContain("must return an array");
-  const noProjection = withContentPreset(base, { name: "article" }, async () => externalReport, async () => []);
-  const unavailable = await noProjection([doc]);
-  expect(unavailable.ok).toBe(false);
-  if (!unavailable.ok) expect(unavailable.detail).toContain("projection is unavailable");
+  const combined: ContentReport = { ...report, gates: [...report.gates, ...externalReport.gates] };
+  const cases = [
+    withContentPreset(base, { name: "article" }, async () => combined, async () => { throw new Error("private provider details"); }, project),
+    withContentPreset(base, { name: "article" }, async () => combined, async () => undefined as never, project),
+    withContentPreset(base, { name: "article" }, async () => combined, async () => []),
+    withContentPreset(base, { name: "article" }, async (_doc, _name, _sources, _evidence, _telemetry, results) => {
+      if (results) throw new Error("malformed result");
+      return combined;
+    }, async () => [], project),
+  ];
+  for (const evaluator of cases) {
+    const result = await evaluator([doc, { ...doc, route: "/second" }]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) continue;
+    expect(result.findings.some((finding) => finding.rule_id === "heading")).toBe(true);
+    for (const route of ["/test", "/second"]) expect(result.assessments?.[route]).toMatchObject({
+      status: "evaluated", gates: expect.arrayContaining([expect.objectContaining({
+        gate_id: "external", status: "not_checked", blocking: true, reason: "external gate provider failed",
+      })]),
+    });
+    expect(JSON.stringify(result)).not.toContain("private provider details");
+  }
 });
 
 it("emits content-free provider telemetry without making evaluation depend on the observer", async () => {
@@ -123,7 +133,7 @@ it("emits content-free provider telemetry without making evaluation depend on th
   expect(JSON.stringify(events)).not.toContain("private");
   const errorEvents: unknown[] = [];
   const failed = withContentPreset(base, { name: "article" }, async () => externalReport, async () => { throw new Error("failed"); }, project, (event) => errorEvents.push(event));
-  expect((await failed([doc])).ok).toBe(false);
+  expect((await failed([doc])).ok).toBe(true);
   expect(errorEvents).toEqual([{ status: "error", duration_ms: expect.any(Number) }]);
 });
 
@@ -166,6 +176,23 @@ it("runs a link provider only for selected presets with a reachability gate", as
     undefined, undefined, undefined, provider, project, telemetry);
   await noGate([doc]);
   expect(provider).toHaveBeenCalledTimes(1);
+});
+
+it("retains an external failure after successful link observation", async () => {
+  const link = { gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const,
+    required_capability: "link_reachability" as const, findings: [], reason: "unavailable" };
+  const evaluate = async (...args: Parameters<Parameters<typeof withContentPreset>[2]>): Promise<ContentReport> => ({
+    ...report, gates: [...externalReport.gates, args[6] ? { ...link, status: "passed", reason: null } : link],
+  });
+  const input = async () => ({ id: "/test", text: null, source_text: null, headings: null, metadata: null, evidence_sources: null });
+  const evaluator = withContentPreset(base, { name: "article" }, evaluate,
+    async () => { throw new Error("private"); }, input, undefined,
+    async () => ["reachable"], async () => ({ document: doc, destinations: ["https://example.org"] }));
+  const result = await evaluator([doc]);
+  expect(result.ok).toBe(true);
+  if (result.ok) expect(result.assessments?.["/test"]).toMatchObject({ gates: [
+    { status: "not_checked", reason: "external gate provider failed" }, { status: "passed" },
+  ] });
 });
 
 it("preserves not-checked findings if the link provider fails or the adapter lacks links", async () => {
