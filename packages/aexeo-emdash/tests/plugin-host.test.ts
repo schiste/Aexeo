@@ -177,6 +177,24 @@ describe("EmDash content adaptation", () => {
     expect(JSON.parse(JSON.stringify(aexeoPlugin({ blockMappings: mappings }).options)).blockMappings).toEqual(mappings);
   });
 
+  it("keeps text around unknown inline components without claiming complete coverage", () => {
+    const partial = { _type: "block", _key: "p", children: [
+      { _type: "span", text: "Before ", marks: [] },
+      { _type: "inlineWidget", text: "untrusted" },
+      { _type: "inlineWidget", payload: "opaque" },
+      { _type: "span", text: "after", marks: [] },
+    ] };
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: { content: [partial] } };
+    const document = contentItemToEmdashDocument(item);
+    expect(document.body?.[0]?.children.map((child) => child.text)).toEqual(["Before ", "after"]);
+    expect(document.body_capabilities).toEqual([]);
+    expect(partial.children).toHaveLength(4);
+    const nested = { ...item, data: { blocks: [{ _type: "section", _key: "s", body: [partial] }] } };
+    const nestedDocument = contentItemToEmdashDocument(nested, { section: [{ kind: "richText", field: "body" }] });
+    expect(nestedDocument.body?.[0]?.children.map((child) => child.text)).toEqual(["Before ", "after"]);
+    expect(nestedDocument.body_capabilities).toEqual([]);
+  });
+
   it("retains valid mixed content around malformed items without claiming coverage", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: {
       content: [...body("Before"), null, { _type: "block", children: "broken" }, { prompt: "untyped" }, ...body("After")],

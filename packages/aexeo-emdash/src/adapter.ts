@@ -379,17 +379,25 @@ function isPortableTextArray(value: unknown): value is PortableTextBlock[] {
         item["_type"] === "block" &&
         Array.isArray(item["children"]) &&
         item["children"].every(
-          (child) => isRecord(child) && typeof child["text"] === "string",
+          (child) => isPortableTextSpan(child),
         ),
     )
   );
+}
+
+function isPortableTextSpan(value: unknown): boolean {
+  return isRecord(value) && value["_type"] === "span" && typeof value["text"] === "string";
+}
+
+function isPortableTextBlockCandidate(value: unknown): value is Record<string, unknown> {
+  return isRecord(value) && value["_type"] === "block" && Array.isArray(value["children"]);
 }
 
 /** Portable Text can interleave ordinary text blocks with custom components. */
 function isMixedPortableTextArray(value: unknown): value is unknown[] {
   // One valid block identifies the format. Other items can be malformed or
   // unknown; preserve the valid neighbors without asserting full coverage.
-  return Array.isArray(value) && value.some((item) => isPortableTextArray([item]));
+  return Array.isArray(value) && value.some(isPortableTextBlockCandidate);
 }
 
 function mapMixedPortableText(blocks: unknown[], mappings?: CustomBlockMappings, depth = 0): ExtractedBody {
@@ -399,6 +407,14 @@ function mapMixedPortableText(blocks: unknown[], mappings?: CustomBlockMappings,
   for (const block of blocks) {
     if (isPortableTextArray([block])) {
       result.push(block as unknown as PortableTextBlock);
+      continue;
+    }
+    if (isPortableTextBlockCandidate(block)) {
+      // Inline objects can interrupt otherwise valid spans. Keep the known
+      // fragments in order, but do not assert that any body capability is complete.
+      const children = (block["children"] as unknown[]).filter(isPortableTextSpan);
+      result.push({ ...block, children } as unknown as PortableTextBlock);
+      capabilities = [];
       continue;
     }
     if (!isRecord(block) || typeof block["_type"] !== "string" || block["_type"] === "block") {

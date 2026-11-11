@@ -289,6 +289,23 @@ min=1
   for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/partial-projection", rule), false);
 }
 
+// Unknown inline objects must not discard neighboring prose or certify coverage.
+{
+  const partial = item("inline-component", { data: { content: [{ _type: "block", children: [
+    { _type: "span", text: "Before ", marks: [] },
+    { _type: "widget", payload: "opaque" },
+    { _type: "span", text: "after", marks: [] },
+  ] }] } });
+  const host = fakeHost([partial]);
+  const configured = createPlugin({ contentPreset: { name: "article", collections: ["pages"] } });
+  await configured.hooks["content:afterSave"].handler({ content: partial, collection: "pages", isNew: false }, host.ctx);
+  const document = host.store.get("document:/inline-component").document;
+  assert.deepEqual(document.body[0].children.map((child) => child.text), ["Before ", "after"]);
+  assert.deepEqual(document.body_capabilities, []);
+  assert.ok(host.store.get("findings:/inline-component").assessment.gates.some((gate) => gate.status === "not_checked"));
+  for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/inline-component", rule), false);
+}
+
 // A selected but unobserved field cannot certify the remaining body as complete.
 {
   const partial = item("missing-selected-field", { data: { introduction: [block("a", "Before")], conclusion: [block("b", "After")] } });
