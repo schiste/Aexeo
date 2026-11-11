@@ -51,6 +51,8 @@ export interface EmdashContentMeta {
   adaptationFailed?: true;
   /** Original paths for unchanged Portable Text blocks in this exact snapshot. */
   bodySourcePaths?: Array<Array<string | number> | null>;
+  /** Original text paths for unchanged spans within projected blocks. */
+  bodySourceSpanPaths?: Array<Array<Array<string | number> | null> | null>;
   /** The host's `updatedAt` for the row this entry was adapted from. */
   updatedAt?: string;
 }
@@ -207,6 +209,7 @@ function adaptContentItemInternal(content: EmdashContentItem, options: AdaptCont
   }
 
   const bodySourcePaths = body === null || !includeSourcePaths ? undefined : portableTextSourcePaths(content.data, body.blocks);
+  const bodySourceSpanPaths = body === null || !includeSourcePaths ? undefined : portableTextSourceSpanPaths(content.data, body.blocks, bodySourcePaths);
   return {
     document,
     meta: {
@@ -217,6 +220,7 @@ function adaptContentItemInternal(content: EmdashContentItem, options: AdaptCont
       title,
       publicUrl: options.publicUrl ?? null,
       ...(bodySourcePaths === undefined ? {} : { bodySourcePaths }),
+      ...(bodySourceSpanPaths === undefined ? {} : { bodySourceSpanPaths }),
       ...(content.updatedAt === undefined ? {} : { updatedAt: content.updatedAt }),
     },
   };
@@ -287,6 +291,65 @@ function bodyWithCapabilities(blocks: PortableTextBlock[], capabilities: BodyCap
 }
 
 /** A selection asserts that the listed fields constitute the rendered body, in order. */
+/** Locate unchanged span objects inside projected blocks. Ambiguous aliases,
+ * cycles and oversized inputs fail closed; generated spans have no CMS path. */
+function portableTextSourceSpanPaths(
+  data: Record<string, unknown>,
+  blocks: readonly PortableTextBlock[],
+  blockPaths?: Array<Array<string | number> | null>,
+): Array<Array<Array<string | number> | null> | null> | undefined {
+  const targets = new WeakSet<object>();
+  let targetCount = 0;
+  for (let i = 0; i < blocks.length; i++) {
+    if (blockPaths?.[i]) continue;
+    for (const child of blocks[i]!.children) {
+      if (++targetCount > 50_000) return undefined;
+      targets.add(child);
+    }
+  }
+  if (targetCount === 0) return undefined;
+  const paths = new WeakMap<object, Array<string | number>>();
+  const seen = new WeakSet<object>();
+  const stack: Array<{ value: unknown; path: Array<string | number>; portableChild: boolean }> = [
+    { value: data, path: ["data"], portableChild: false },
+  ];
+  let count = 0;
+  let inspected = 0;
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (typeof current.value !== "object" || current.value === null) continue;
+    if (++count > 50_000 || current.path.length > 64 || seen.has(current.value)) return undefined;
+    seen.add(current.value);
+    if (current.portableChild && targets.has(current.value) && isPortableTextSpan(current.value)) {
+      paths.set(current.value, [...current.path, "text"]);
+    }
+    if (Array.isArray(current.value)) {
+      for (let i = 0; i < current.value.length; i++) {
+        if (++inspected > 50_000) return undefined;
+        const value: unknown = current.value[i];
+        if (typeof value === "object" && value !== null) stack.push({ value, path: [...current.path, i], portableChild: current.portableChild });
+      }
+    } else {
+      for (const key in current.value) {
+        if (!Object.hasOwn(current.value, key)) continue;
+        if (++inspected > 50_000) return undefined;
+        const value = (current.value as Record<string, unknown>)[key];
+        if (typeof value === "object" && value !== null) stack.push({ value, path: [...current.path, key], portableChild: key === "children" && isPortableTextBlockCandidate(current.value) });
+      }
+    }
+  }
+  let mapped = false;
+  const result = blocks.map((block, index) => {
+    if (blockPaths?.[index]) return null;
+    return block.children.map((child) => {
+      const path = paths.get(child) ?? null;
+      if (path !== null) mapped = true;
+      return path;
+    });
+  });
+  return mapped ? result : undefined;
+}
+
 function extractSelectedContent(data: Record<string, unknown>, fields: readonly string[], mappings?: CustomBlockMappings): ExtractedBody | null {
   if (fields.length === 0 || new Set(fields).size !== fields.length || fields.some((field) => typeof field !== "string" || field.length === 0)) return null;
   const all = ["text", "headings", "paragraphs", "links"] as const;

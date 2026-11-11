@@ -139,6 +139,27 @@ describe("EmDash content adaptation", () => {
     expect(JSON.parse(JSON.stringify(aexeoPlugin({ descriptionFieldsByCollection: { posts: options.descriptionFields } }).options)).descriptionFieldsByCollection.posts).toEqual(options.descriptionFields);
   });
 
+  it("maps unchanged spans through inline projection and rejects ambiguous aliases", () => {
+    const before = { _type: "span", text: "Before ", marks: [] };
+    const after = { _type: "span", text: "after", marks: [] };
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: {
+      content: [{ _type: "block", children: [before, { _type: "badge", label: "Badge" }, after] }],
+    } };
+    const mapped = adaptContentItem(item, { blockMappings: { badge: { inline: [{ kind: "text", field: "label" }] } } });
+    expect(mapped.meta.bodySourcePaths).toBeUndefined();
+    expect(mapped.meta.bodySourceSpanPaths).toEqual([[
+      ["data", "content", 0, "children", 0, "text"], null, ["data", "content", 0, "children", 2, "text"],
+    ]]);
+    const ignored = adaptContentItem(item, { blockMappings: { badge: { inline: [] } } });
+    expect(ignored.meta.bodySourceSpanPaths).toEqual([[
+      ["data", "content", 0, "children", 0, "text"], ["data", "content", 0, "children", 2, "text"],
+    ]]);
+    const ambiguous = adaptContentItem({ ...item, data: { ...item.data, alias: after } }, { blockMappings: { badge: { inline: [] } } });
+    expect(ambiguous.meta.bodySourceSpanPaths).toBeUndefined();
+    const cycle: Record<string, unknown> = {}; cycle.self = cycle;
+    expect(adaptContentItem({ ...item, data: { ...item.data, cycle } }, { blockMappings: { badge: { inline: [] } } }).meta.bodySourceSpanPaths).toBeUndefined();
+  });
+
   it("preserves mixed Portable Text and marks unmapped components unverified", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: {
       content: [...body("Before"), { _type: "askYourAi", _key: "ai", prompt: "Question" }, ...body("After")],
