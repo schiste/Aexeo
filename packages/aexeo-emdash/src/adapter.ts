@@ -40,6 +40,8 @@ export interface EmdashContentMeta {
   title: string;
   /** Exact URL returned by EmDash, or null when this entry has no public route. */
   publicUrl: string | null;
+  /** Original paths for unchanged Portable Text blocks in this exact snapshot. */
+  bodySourcePaths?: Array<Array<string | number> | null>;
   /** The host's `updatedAt` for the row this entry was adapted from. */
   updatedAt?: string;
 }
@@ -192,6 +194,7 @@ export function adaptContentItem(
     if (body.capabilities !== undefined) document.body_capabilities = body.capabilities;
   }
 
+  const bodySourcePaths = body === null ? undefined : portableTextSourcePaths(content.data, body.blocks);
   return {
     document,
     meta: {
@@ -201,6 +204,7 @@ export function adaptContentItem(
       status: content.status,
       title,
       publicUrl: options.publicUrl ?? null,
+      ...(bodySourcePaths === undefined ? {} : { bodySourcePaths }),
       ...(content.updatedAt === undefined ? {} : { updatedAt: content.updatedAt }),
     },
   };
@@ -224,6 +228,41 @@ function routeFromPublicUrl(publicUrl: string): string {
 
 function stringOrEmpty(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+/** Map unchanged blocks by identity. Ambiguous aliases, cycles and excessive
+ * input fail closed; synthesized components intentionally have no source path. */
+function portableTextSourcePaths(data: Record<string, unknown>, blocks: readonly PortableTextBlock[]): Array<Array<string | number> | null> | undefined {
+  if (blocks.length === 0) return undefined;
+  const targets = new WeakSet<object>(blocks);
+  const paths = new WeakMap<object, Array<string | number>>();
+  const seen = new WeakSet<object>();
+  const stack: Array<{ value: unknown; path: Array<string | number> }> = [{ value: data, path: ["data"] }];
+  let count = 0;
+  let inspected = 0;
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (typeof current.value !== "object" || current.value === null) continue;
+    if (++count > 50_000 || current.path.length > 64 || seen.has(current.value)) return undefined;
+    seen.add(current.value);
+    if (targets.has(current.value)) { paths.set(current.value, current.path); continue; }
+    if (Array.isArray(current.value)) {
+      for (let i = 0; i < current.value.length; i++) {
+        if (++inspected > 50_000) return undefined;
+        const value: unknown = current.value[i];
+        if (typeof value === "object" && value !== null) stack.push({ value, path: [...current.path, i] });
+      }
+    } else {
+      for (const key in current.value) {
+        if (!Object.hasOwn(current.value, key)) continue;
+        if (++inspected > 50_000) return undefined;
+        const value = (current.value as Record<string, unknown>)[key];
+        if (typeof value === "object" && value !== null) stack.push({ value, path: [...current.path, key] });
+      }
+    }
+  }
+  const result = blocks.map((block) => paths.get(block) ?? null);
+  return result.some((path) => path !== null) ? result : undefined;
 }
 
 type ExtractedBody = { blocks: PortableTextBlock[]; capabilities?: BodyCapability[] };

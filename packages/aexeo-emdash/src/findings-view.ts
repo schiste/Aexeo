@@ -534,7 +534,9 @@ export function documentFindingsTable(findings: Finding[]): unknown {
       rule: finding.rule_id,
       severity: finding.severity,
       message: finding.message,
-      block: finding.aexeo_source_location
+      block: finding.aexeo_cms_location
+        ? `CMS path ${JSON.stringify(finding.aexeo_cms_location.path)}, UTF-16 offset ${finding.aexeo_cms_location.utf16_offset}`
+        : finding.aexeo_source_location
         ? `Projected body: block ${finding.aexeo_source_location.block_index + 1}, span ${finding.aexeo_source_location.span_index + 1}, UTF-16 offset ${finding.aexeo_source_location.utf16_offset}`
         : finding.aexeo_origin === "content_preset" ? "Projected location unavailable" : `Reported line ${finding.line}`,
     })),

@@ -364,6 +364,26 @@ describe("assessment persistence", () => {
     const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator: returning() });
     expect(payload.findings.find((entry) => entry.rule_id === "words")?.aexeo_source_location).toEqual(located.aexeo_source_location);
   });
+  it("binds projected positions to unchanged CMS blocks on save and refresh", async () => {
+    const subject = item("a", OLD);
+    subject.data.body = [{ _type: "block", _key: "b", children: [{ _type: "span", text: "😀 text", marks: [] }] }];
+    const { ctx, store } = host([subject]);
+    const events: Array<[string, unknown]> = [];
+    ctx.log = { info: (name, data) => events.push([name, data]), warn: () => {}, error: () => {} };
+    const located = { ...finding("/a", "words"), aexeo_origin: "content_preset" as const, aexeo_source_location: { block_index: 0, span_index: 0, utf16_offset: 3 } };
+    const evaluator: EvaluatorFn = async () => ({ ok: true, findings: [located] });
+    const expected = { path: ["data", "body", 0, "children", 0, "text"], utf16_offset: 3 };
+    await save(ctx, subject, evaluator);
+    expect(store.get(findingsKey("/a"))).toMatchObject({ findings: [{ aexeo_cms_location: expected }] });
+    expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"))).toContain("CMS path");
+    await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator });
+    expect(store.get(findingsKey("/a"))).toMatchObject({ findings: [{ aexeo_cms_location: expected }] });
+    expect(events.filter(([name]) => name === "aexeo.cms_location_coverage").map(([, value]) => value)).toEqual([{ eligible: 1, mapped: 1, unmapped: 0 }, { eligible: 1, mapped: 1, unmapped: 0 }]);
+    expect(JSON.stringify(events)).not.toContain("body");
+    const invalid: EvaluatorFn = async () => ({ ok: true, findings: [{ ...located, aexeo_source_location: { ...located.aexeo_source_location, utf16_offset: 1 }, aexeo_cms_location: expected }] });
+    await save(ctx, subject, invalid);
+    expect((store.get(findingsKey("/a")) as { findings: Finding[] }).findings[0]).not.toHaveProperty("aexeo_cms_location");
+  });
   it("keeps colliding preset findings after an incomplete site refresh and records aggregate telemetry", async () => {
     const { ctx, store } = host([item("a", OLD)]);
     const events: Array<[string, unknown]> = [];

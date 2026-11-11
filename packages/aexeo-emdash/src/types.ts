@@ -89,6 +89,8 @@ export interface Finding {
   aexeo_origin?: "content_preset";
   /** Coordinates in the evaluated projected body, not necessarily the CMS source field. */
   aexeo_source_location?: { block_index: number; span_index: number; utf16_offset: number };
+  /** Path to unchanged Portable Text in the evaluated CMS record. */
+  aexeo_cms_location?: { path: Array<string | number>; utf16_offset: number };
   rule_id: string;
   message: string;
   path: string;
