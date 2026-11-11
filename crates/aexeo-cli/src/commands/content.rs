@@ -14,7 +14,43 @@ use std::{
     collections::BTreeMap,
     fs,
     io::{self, Read, Write},
+    path::Path,
 };
+
+// Content itself has a separate 16 MiB limit. Bound auxiliary inputs across the
+// whole command as well, so many individually valid files cannot grow unbounded.
+const MAX_AUXILIARY_TOTAL_BYTES: usize = 64 * 1024 * 1024;
+
+struct AuxiliaryBudget {
+    remaining: usize,
+    telemetry: bool,
+}
+
+impl AuxiliaryBudget {
+    fn read(&mut self, path: &str, kind: &'static str, limit: usize) -> Result<String> {
+        let limit = limit.min(self.remaining);
+        let mut bytes = Vec::new();
+        fs::File::open(Path::new(path))
+            .user_context(format!("reading {kind} {path}"))?
+            .take(limit as u64 + 1)
+            .read_to_end(&mut bytes)
+            .user_context(format!("reading {kind} {path}"))?;
+        if bytes.len() > limit {
+            if self.telemetry {
+                eprintln!(
+                    "{}",
+                    serde_json::json!({
+                        "event": "content_auxiliary_input_limit", "version": 1,
+                        "kind": kind, "limit_bytes": limit
+                    })
+                );
+            }
+            user_bail!("{kind} exceeds the auxiliary input byte limit ({limit} bytes)");
+        }
+        self.remaining -= bytes.len();
+        String::from_utf8(bytes).user_context(format!("{kind} is not valid UTF-8"))
+    }
+}
 
 #[derive(Default)]
 struct GateTimer {
@@ -58,6 +94,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         }
         return Ok(EXIT_SUCCESS);
     }
+    let mut auxiliary = AuxiliaryBudget {
+        remaining: MAX_AUXILIARY_TOTAL_BYTES,
+        telemetry: args.get_flag("telemetry"),
+    };
     let mut sources = builtin_content_presets();
     if let Some(entries) = args.get_many::<String>("preset-source") {
         for entry in entries {
@@ -67,7 +107,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             if name.is_empty() || path.is_empty() {
                 user_bail!("--preset-source requires NAME=PATH");
             }
-            let source = fs::read_to_string(path).user_context(format!("reading preset {path}"))?;
+            let source = auxiliary.read(path, "preset", MAX_CONTENT_INPUT_BYTES)?;
             sources.insert(name.to_owned(), source);
         }
     }
@@ -123,8 +163,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     let metadata: Option<BTreeMap<String, String>> = args
         .get_one::<String>("metadata")
         .map(|path| -> Result<_> {
-            let input =
-                fs::read_to_string(path).user_context(format!("reading metadata {path}"))?;
+            let input = auxiliary.read(path, "metadata", MAX_CONTENT_INPUT_BYTES)?;
             serde_json::from_str(&input)
                 .user_context("metadata must be a JSON object of string values")
         })
@@ -140,8 +179,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 if name.is_empty() || path.is_empty() {
                     user_bail!("--evidence-source requires NAME=PATH");
                 }
-                let snapshot = fs::read_to_string(path)
-                    .user_context(format!("reading evidence source {path}"))?;
+                let snapshot = auxiliary.read(path, "evidence source", MAX_CONTENT_INPUT_BYTES)?;
                 if sources.insert(name.to_owned(), snapshot).is_some() {
                     user_bail!("duplicate evidence source: {name}");
                 }
@@ -152,8 +190,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     let collection: Option<Vec<ContentInput>> = args
         .get_one::<String>("collection")
         .map(|path| -> Result<_> {
-            let data =
-                fs::read_to_string(path).user_context(format!("reading collection {path}"))?;
+            let data = auxiliary.read(path, "collection", MAX_AUXILIARY_TOTAL_BYTES)?;
             let items: Vec<ContentInput> = serde_json::from_str(&data)
                 .user_context("collection must be a JSON array of content inputs")?;
             let mut ids = std::collections::BTreeSet::new();
@@ -809,4 +846,33 @@ fn append_final_newline(path: &std::path::Path, original: &str, suffix: &str) ->
     }
     file.write_all(suffix.as_bytes())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod auxiliary_budget_tests {
+    use super::*;
+
+    #[test]
+    fn enforces_per_file_and_aggregate_bounds_without_partial_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("first");
+        let second = dir.path().join("second");
+        fs::write(&first, "123").unwrap();
+        fs::write(&second, "45").unwrap();
+        let mut budget = AuxiliaryBudget {
+            remaining: 5,
+            telemetry: false,
+        };
+        assert_eq!(
+            budget.read(first.to_str().unwrap(), "test", 3).unwrap(),
+            "123"
+        );
+        assert!(budget.read(second.to_str().unwrap(), "test", 1).is_err());
+        assert_eq!(budget.remaining, 2);
+        assert_eq!(
+            budget.read(second.to_str().unwrap(), "test", 3).unwrap(),
+            "45"
+        );
+        assert!(budget.read(first.to_str().unwrap(), "test", 3).is_err());
+    }
 }
