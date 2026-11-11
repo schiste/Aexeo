@@ -41,8 +41,9 @@ parse and compare this object against independently acquired byte slices. The
 caller must still verify the actual verdict and status, content hashes,
 publication state, evaluator identity, source freshness and completeness,
 artifact authenticity and all other policy requirements. Neither a matching
-manifest nor a hash is an authentication, freshness or truth guarantee. The
-current Aexeo content-change command does not produce or consume this format.
+manifest nor a hash is an authentication, freshness or truth guarantee.
+Aexeo's experimental offline receipts embed a manifest, but neither the manifest
+nor the receipt is a v2 verdict.
 
 ## Experimental Aexeo offline host API
 
@@ -68,3 +69,32 @@ in an isolated environment, then run
 `python docs/specs/content-gate/v2/test_manifest_schema.py` to check the schema
 and positive and negative examples with Python `jsonschema`. Schema validation
 cannot detect duplicate JSON keys after parsing or enforce the raw byte limit.
+
+## Independent reference verifier
+
+`verify_decision_inputs.py` is a separate Python implementation of manifest
+parsing and exact artifact-byte comparison. It uses only the standard library,
+rejects duplicate or unknown keys, malformed digests and unsupported schemas,
+and bounds the manifest and each artifact. It reads regular files in chunks;
+each artifact is limited to 64 MiB. For example:
+
+```sh
+python3 docs/specs/content-gate/v2/verify_decision_inputs.py manifest.json \
+  --change change.bin --resolved-policy policy.bin --host-options options.bin \
+  --evaluator evaluator.bin --collection-absent --external-evidence-absent
+```
+
+Optional artifacts must be provided as a file or explicitly declared absent;
+an empty file is present. The caller must independently obtain and protect
+current, stable artifact bytes and decide when absence is valid. The tool does
+not produce those artifacts, verify a receipt or verdict, authenticate the
+producer, ensure file immutability during reading, or prevent publication races.
+The experimental Aexeo receipt's Rust-specific serialization remains outside an
+interoperable artifact format. A successful comparison is not authorization.
+The optional `--telemetry` flag emits local aggregate duration, status and, on
+success, file and byte counts to stderr; it contains no paths or artifact data.
+
+Run `python3 docs/specs/content-gate/v2/test_verify_decision_inputs.py` to test
+the verifier against the same UTF-8 and empty/absent vector used by Rust, plus
+malformed and changed inputs. The separate JSON Schema test still checks the
+schema with an independent library.
