@@ -403,6 +403,25 @@ describe("assessment persistence", () => {
     expect(store.get(findingsKey("/a"))).toMatchObject({ findings: [], assessment: { status: "error", reason: "unavailable" } });
     expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"))).toContain("Evaluation failed: unavailable");
   });
+  it("clears stale results when an evaluator throws without exposing exception text", async () => {
+    const { ctx, store } = host();
+    await save(ctx, item("a", OLD), returning("OLD"));
+    await save(ctx, item("a", NEW), async () => { throw new Error("private draft text"); });
+    expect(store.get(findingsKey("/a"))).toMatchObject({ findings: [], assessment: { status: "error", reason: "evaluator_exception" } });
+    expect(JSON.stringify(store.get(findingsKey("/a")))).not.toContain("private draft text");
+    expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"))).toContain("Evaluation failed: evaluator_exception");
+  });
+  it("does not let a thrown older evaluation replace newer findings", async () => {
+    const { ctx, store } = host();
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const pending = save(ctx, item("a", OLD), async () => { await gate; throw new Error("failed"); });
+    await new Promise((resolve) => setTimeout(resolve));
+    await save(ctx, item("a", NEW), returning("CURRENT"));
+    release();
+    await pending;
+    expect(rulesAt(store, "/a")).toEqual(["CURRENT"]);
+  });
   it("shows passed checks and measurements in the document panel", async () => {
     const { ctx } = host();
     await save(ctx, item("a", NEW), async () => ({ ok: true, findings: [], assessments: { "/a": { status: "evaluated", preset: "article", gates: [{ gate_id: "words", status: "passed", blocking: false, scope: "document", required_capability: "text", reason: null, measurements: { word_count: 50, min_words: 20 } }] } } }));
@@ -452,6 +471,17 @@ describe("sitewide refresh coverage", () => {
     const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator: returning() });
     expect(payload.sitewideAssessment).toMatchObject({ status: "error", reason: "network_error" });
     expect(payload.findings.map((f) => f.rule_id)).toEqual(["OTHER"]);
+  });
+  it("marks site and current page checks unavailable when the evaluator throws", async () => {
+    const { ctx, store } = host([item("a", OLD)]);
+    store.set(findingsKey("*"), { route: "*", findings: [globalFinding] });
+    store.set(findingsKey("/a"), { route: "/a", findings: [finding("/a", "OLD")] });
+    const summary = await sweep(ctx, async () => { throw new Error("private draft text"); });
+    expect(summary.errors).toEqual(["evaluator_exception: The evaluator failed unexpectedly."]);
+    for (const route of ["*", "/a"]) {
+      expect(store.get(findingsKey(route))).toMatchObject({ findings: [], assessment: { status: "error", reason: "evaluator_exception" } });
+      expect(JSON.stringify(store.get(findingsKey(route)))).not.toContain("private draft text");
+    }
   });
   it("does not emit graph or global conclusions from an incomplete listing", async () => {
     const { ctx, store } = host();
