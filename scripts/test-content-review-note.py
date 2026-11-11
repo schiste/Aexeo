@@ -20,6 +20,56 @@ class FeedbackTests(unittest.TestCase):
         self.corpus = {"version": 1, "gate_id": "length", "examples": [
             {"id": "e1", "split": "development", "text": self.text, "expected": "passed"}]}
 
+    def test_combines_blind_opinions_without_fabricating_model_verdicts(self):
+        self.corpus["examples"][0]["metadata"] = {"lang": "fr"}
+        first = module.blind_packet(self.corpus, "development", "Assess length.")
+        second = module.blind_packet(self.corpus, "development", "Assess length.")
+        third = module.blind_packet(self.corpus, "development", "Assess length.")
+        first["examples"][0]["human_status"] = "passed"
+        second["examples"][0]["human_status"] = "failed"
+        third["examples"][0]["human_status"] = "uncertain"
+        log = module.combine_blind_reviews(self.corpus, [(first, "r1", "manual"), (second, "r2", "manual"), (third, "r3", "manual")])
+        self.assertEqual(log["version"], 4)
+        self.assertNotIn("model_status", json.dumps(log))
+        self.assertNotIn(self.text, json.dumps(log))
+        evaluation = module._corpus_module().aggregate_review_events(self.corpus, "development", log, "a" * 64)
+        self.assertEqual(evaluation["events"], 3)
+        self.assertEqual(evaluation["disagreed_examples"], 1)
+        self.assertEqual(evaluation["multiple_reviewed_examples"], 1)
+        self.assertEqual(evaluation["uncertain_reviews"], 1)
+        self.assertFalse(evaluation["model_comparison_available"])
+        self.assertIsNone(evaluation["override_rate"])
+        self.assertIsNone(evaluation["counts"])
+        self.assertEqual(module._corpus_module().aggregate_review_events(self.corpus, "holdout", log)["events"], 0)
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            module.combine_blind_reviews(self.corpus, [(first, "r1", "manual"), (second, " r1 ", "manual")])
+        second["rubric"] = "Different rubric"
+        with self.assertRaisesRegex(ValueError, "different rubrics"):
+            module.combine_blind_reviews(self.corpus, [(first, "r1", "manual"), (second, "r2", "manual")])
+        first["examples"][0]["metadata"]["lang"] = "en"
+        with self.assertRaisesRegex(ValueError, "metadata"):
+            module.combine_blind_reviews(self.corpus, [(first, "r1", "manual")])
+
+    def test_combined_blind_cli_produces_private_log_and_aggregate_telemetry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            corpus = base / "corpus.json"
+            corpus.write_text(json.dumps(self.corpus))
+            packet = module.blind_packet(self.corpus, "development", "Assess length.")
+            packet["examples"][0]["human_status"] = "uncertain"
+            path = base / "packet.json"
+            path.write_text(json.dumps(packet))
+            output = base / "log.json"
+            command = [sys.executable, str(SCRIPT), "combine-blind-reviews", "--corpus", str(corpus), "--packet", str(path), "--reviewer", "person", "--method", "manual", "--output", str(output), "--telemetry"]
+            process = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(process.returncode, 0, process.stderr)
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(json.loads(output.read_text())["events"][0]["reviewer_status"], "uncertain")
+            self.assertEqual(json.loads(process.stderr)["review_count"], 1)
+            self.assertNotIn("person", process.stderr)
+            self.assertNotIn("Private", process.stderr)
+            self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)
+
     def test_blind_packet_hides_labels_and_binds_actual_reported_review(self):
         self.corpus["examples"][0]["metadata"] = {"title": "Private title"}
         self.corpus["examples"].append({"id": "e2", "split": "development", "text": "Other", "expected": "failed"})

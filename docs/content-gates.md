@@ -362,6 +362,37 @@ synthetic regression fixtures as independent human evidence. Output files are
 created with private permissions and cannot overwrite existing files. Optional
 local telemetry contains only aggregate counts and duration.
 
+### Combining blind reviews from several people
+
+Give separate copies of the same packet to reviewers. Once they have recorded
+opinions, combine the copies in matching packet, reviewer and method order:
+
+```sh
+python3 scripts/content-review-note.py combine-blind-reviews --corpus corpus.json \
+  --packet review-a.json --reviewer reviewer-a --method manual \
+  --packet review-b.json --reviewer reviewer-b --method manual \
+  --output blind-reviews.json --telemetry
+python3 scripts/evaluate-content-gates.py corpus.json --binary target/release/aexeo-cli \
+  --split holdout --review-events blind-reviews.json
+```
+
+This produces a private version 4 review log. It preserves each reported
+pass, fail or uncertain response, the reviewer and method, and hashes of the
+text, metadata and rubric; it contains no model decision or full text. Repeated
+example/reviewer pairs, stale inputs and different rubrics for the same example
+are rejected. Retain the packets when the full rubric or unanswered entries are
+needed. The command creates a new file with private permissions and refuses to
+overwrite one. Optional telemetry contains only aggregate review count and time.
+
+The corpus report counts examples with multiple reviews, pass/fail disagreement,
+and uncertain opinions. Since these reviews contain no model decision, its
+`counts` and `override_rate` are null and `model_comparison_available` is false.
+The report does not pick a winning label or change the corpus: adjudication is a
+separate human decision. Reported identities and matching rubric hashes do not
+prove independence or that reviewers saw the same material. Older evaluators may
+reject version 4 logs; keep those logs private because they contain reviewer and
+example identifiers and input hashes.
+
 ### Combining independent reported reviews
 
 When several people review examples, create a separate feedback note for each

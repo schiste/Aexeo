@@ -274,6 +274,10 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   after matching text and metadata, retaining prior conflicting labels and
   aggregate-only telemetry. Uncertain opinions remain in the packet. This does
   not establish reviewer independence, rubric-policy equivalence or accuracy.
+- [x] Combine multiple blind review packets as a version 4 review log, preserving
+  uncertainty and measuring disagreement without inventing model verdicts.
+  Matching text, metadata and rubric hashes are required; reviewer independence
+  and the actual review conditions remain unverified. No labels are adjudicated.
 - [ ] Independently reviewed, diverse evaluation corpus and held-out metrics.
   A synthetic, explicitly unreviewed starter and evaluator were delivered in
   [PR #32](https://github.com/schiste/Aexeo/pull/32); they do not establish
