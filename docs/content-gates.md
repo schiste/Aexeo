@@ -627,7 +627,7 @@ therefore depends on the fragment or page the host supplies. HTML parsing does
 not preserve trustworthy source offsets, so findings refer to the projected
 text and do not claim source locations. Network checks remain explicit opt-in.
 Inputs exceeding 16 MiB or 100,000 traversed DOM nodes are `not_checked`, not empty.
-The content-change protocol supports `text/html` with the same rules.
+The content-change protocol supports `text/html` with the same rules. For the single-content CLI, opt-in telemetry includes `html_projection`: a complete projection reports aggregate heading, paragraph and link counts; an unavailable projection reports its status without counts. These describe parsed markup, not browser visibility or page completeness, and contain no content, paths or URLs.
 
 ### Plain-text source locations
 

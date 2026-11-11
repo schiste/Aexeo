@@ -215,6 +215,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     let mut link_count = None;
     let mut source_map = None;
     let mut destinations = None;
+    // The event exists only on request and never contains content, paths, or URLs.
+    let mut html_projection = (measuring
+        && args.get_one::<String>("input-format").map(String::as_str) == Some("html"))
+    .then(|| serde_json::json!({"status": "unavailable"}));
     let mut input = match (
         args.get_one::<String>("input-format").map(String::as_str),
         text,
@@ -248,6 +252,14 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         (Some("html"), Some(text)) => {
             match aexeo_core::html_content_adapter::html_content(&id, &text) {
                 Ok(adapted) => {
+                    if html_projection.is_some() {
+                        html_projection = Some(serde_json::json!({
+                            "status": "complete",
+                            "headings": adapted.input.headings.as_ref().map_or(0, Vec::len),
+                            "paragraphs": adapted.context.paragraphs.as_ref().map_or(0, Vec::len),
+                            "links": adapted.destinations.len(),
+                        }));
+                    }
                     link_count = Some(adapted.destinations.len());
                     destinations = Some(adapted.destinations);
                     context = Some(adapted.context);
@@ -444,6 +456,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             input_load_ms.zip(adapter_ms),
             mapping,
             Some(&gate_timer.timings_ms),
+            html_projection.as_ref(),
         )?;
     }
     if args.get_one::<String>("format").map(String::as_str) == Some("json") {
@@ -631,6 +644,7 @@ fn evaluate_crawl(
             None,
             None,
             Some(&gate_timer.timings_ms),
+            None,
         )?;
     }
     if args.get_one::<String>("format").map(String::as_str) == Some("json") {
@@ -703,6 +717,7 @@ fn print_telemetry(
     stages: Option<(f64, f64)>,
     source_mapping: Option<(usize, usize, f64)>,
     gate_timings_ms: Option<&[f64]>,
+    html_projection: Option<&serde_json::Value>,
 ) -> Result<()> {
     let mut event = serde_json::json!({"schema_version": 1, "event": "content_evaluation", "evaluation_ms": evaluation_ms, "summary": report.summary});
     let mut length_checks = 0usize;
@@ -731,6 +746,9 @@ fn print_telemetry(
     }
     if let Some(timings) = gate_timings_ms {
         event["gate_timings_ms"] = serde_json::json!(timings);
+    }
+    if let Some(projection) = html_projection {
+        event["html_projection"] = projection.clone();
     }
     eprintln!("{}", serde_json::to_string(&event)?);
     Ok(())
