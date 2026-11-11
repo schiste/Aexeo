@@ -82,6 +82,13 @@ credited to that page, since a server may treat those URLs differently. It raise
 the page's `near_variant_destinations`. Until this is resolved, zero counts on
 that page say nothing about its inbound links.
 
+Each link reports an `anchor`. Existing text takes precedence; when no text is
+observed, the extractor falls back to the literal `aria-label`, then nonempty
+descendant image `alt` values. These are source-markup observations, not computed
+accessibility names: they do not resolve `aria-labelledby`, visibility, CSS, or
+browser state. The optional telemetry counts empty and nonempty labels without
+including label text. Older reports retain the anchor values they recorded.
+
 Each link's evidence has a `rel` list with its `nofollow`, `ugc` and `sponsored`
 tokens. Destinations and pages report `followed_source_pages`, the sources with
 at least one link free of those tokens, and `source_pages_by_rel`, the sources

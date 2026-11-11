@@ -117,6 +117,41 @@ pub(crate) fn text_content(root: &Handle) -> String {
     result.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Report a literal label; this does not implement the browser's
+/// accessible-name algorithm or infer rendered visibility.
+fn anchor_label(node: &Handle) -> String {
+    let text = text_content(node);
+    if !text.is_empty() {
+        return text;
+    }
+    if let Some(label) = attribute(node, "aria-label") {
+        let label = label.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !label.is_empty() {
+            return label;
+        }
+    }
+    let mut alternatives = Vec::new();
+    let mut stack = node
+        .children
+        .borrow()
+        .iter()
+        .rev()
+        .cloned()
+        .collect::<Vec<_>>();
+    while let Some(child) = stack.pop() {
+        if is_element(&child, "img")
+            && let Some(alt) = attribute(&child, "alt")
+        {
+            let alt = alt.split_whitespace().collect::<Vec<_>>().join(" ");
+            if !alt.is_empty() {
+                alternatives.push(alt);
+            }
+        }
+        stack.extend(child.children.borrow().iter().rev().cloned());
+    }
+    alternatives.join(" ")
+}
+
 fn explicit_context(value: &str) -> LinkContext {
     match value.trim().to_ascii_lowercase().as_str() {
         "body" => LinkContext::Body,
@@ -317,10 +352,11 @@ pub fn extract_document(
             };
             if let Some(href) = href {
                 let resolution = resolve_link(&href, source_url, site_origin, base.as_deref());
+                let anchor = anchor_label(&node);
                 links.push(LinkEvidence {
                     source: source_url.to_string(),
                     href,
-                    anchor: text_content(&node),
+                    anchor,
                     locale: scope.locale.clone(),
                     snapshot_date: snapshot_date.map(str::to_string),
                     context: scope.context,
@@ -421,6 +457,29 @@ mod tests {
             .into_iter()
             .map(|link| link.route)
             .collect()
+    }
+
+    #[test]
+    fn labels_text_image_and_aria_links_without_changing_report_shape() {
+        let html = r#"<main><p>Before <a href='/text' aria-label='Other'>Visible <img alt='Icon'></a>
+          <a href='/aria' aria-label='  Read   more  '><img alt='Ignored'></a>
+          <a href='/image'><img alt='First'><span><img alt=' Deux '></span></a>
+          <a href='/empty'><img alt=''></a></p></main>"#;
+        let links = extract_links(html, "https://example.org/a", "https://example.org", None);
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| link.anchor.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Visible", "Read more", "First Deux", ""]
+        );
+        assert!(links.iter().all(|link| link.context == LinkContext::Body));
+        assert!(
+            serde_json::to_value(&links[0])
+                .unwrap()
+                .get("anchor_source")
+                .is_none()
+        );
     }
 
     #[test]
