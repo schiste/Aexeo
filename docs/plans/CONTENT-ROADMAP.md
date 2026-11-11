@@ -187,6 +187,11 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   writing a verdict. Optional telemetry reports a match boolean only. This does
   not cover external callbacks, prove collection freshness or completeness, or
   protect consumers that do not perform the verification.
+- [x] Expose offline verdict revalidation to Rust hosts: verify the input
+  fingerprint, re-evaluate confined content, and compare all result fields
+  except the evaluation timestamp. The CLI shares the comparison logic.
+  External callbacks, build authenticity, collection completeness and freshness
+  remain outside this offline mechanism.
 - [ ] Bind change verdicts to all decision inputs, including entry metadata,
   collection snapshots, effective policy, host options and external evidence,
   with a versioned interoperable verification contract. The current v1 subject

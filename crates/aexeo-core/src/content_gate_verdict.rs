@@ -227,6 +227,99 @@ pub fn verify_offline_input_binding(
     Ok(())
 }
 
+/// Compare a previous offline verdict with a fresh evaluation of the same inputs.
+/// The caller must obtain `fresh` from a trusted, current offline evaluation;
+/// this comparison does not authenticate either verdict or the source data.
+/// Timestamps are ignored because a fresh evaluation occurs at a different time.
+#[allow(clippy::too_many_arguments)]
+pub fn verify_offline_verdict(
+    previous: &Verdict,
+    fresh: &Verdict,
+    change: &Change,
+    preset: &ContentPreset,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    plain_text_paragraphs: bool,
+    collection: Option<&ChangeCollection<'_>>,
+) -> Result<()> {
+    for verdict in [previous, fresh] {
+        verify_offline_input_binding(
+            verdict,
+            change,
+            preset,
+            max_entry_bytes,
+            max_total_bytes,
+            plain_text_paragraphs,
+            collection,
+        )?;
+    }
+    let mut previous = previous.clone();
+    previous.evaluated_at.clone_from(&fresh.evaluated_at);
+    if previous != *fresh {
+        bail!("previous verdict differs from the current offline evaluation");
+    }
+    Ok(())
+}
+
+/// Re-evaluate confined content without external callbacks and compare every
+/// result field with a previously issued offline verdict, except its timestamp.
+/// The provider, policy and optional collection must be trusted by the caller.
+/// This detects changed inputs and results, not authenticity, truth, or omitted
+/// collection entries. Failures must never be interpreted as a passing verdict.
+#[allow(clippy::too_many_arguments)]
+pub fn revalidate_offline_verdict<P: ConfinedContentFiles>(
+    previous: &Verdict,
+    change: &Change,
+    provider: &mut P,
+    preset: &ContentPreset,
+    evaluated_at: &str,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    plain_text_paragraphs: bool,
+    collection: Option<ChangeCollection<'_>>,
+) -> Result<Verdict> {
+    verify_offline_input_binding(
+        previous,
+        change,
+        preset,
+        max_entry_bytes,
+        max_total_bytes,
+        plain_text_paragraphs,
+        collection.as_ref(),
+    )?;
+    let fresh = evaluate_change_with_collection(
+        change,
+        provider,
+        preset,
+        evaluated_at,
+        max_entry_bytes,
+        max_total_bytes,
+        ChangeEvaluationHost {
+            options: ChangeEvaluationOptions {
+                link_observer: None,
+                plain_text_paragraphs,
+            },
+            extensions: None,
+        },
+        collection.as_ref().map(|value| ChangeCollection {
+            change_id: value.change_id,
+            items: value.items,
+            complete: value.complete,
+        }),
+    )?;
+    verify_offline_verdict(
+        previous,
+        &fresh,
+        change,
+        preset,
+        max_entry_bytes,
+        max_total_bytes,
+        plain_text_paragraphs,
+        collection.as_ref(),
+    )?;
+    Ok(fresh)
+}
+
 /// Explicitly supplied host capabilities. No extension is executed by a preset.
 #[derive(Default)]
 pub struct ChangeEvaluationHost<'a, 'b> {
@@ -779,6 +872,106 @@ mod tests {
         let mut wrong_version = verdict.clone();
         wrong_version.validator.version = "different".into();
         assert!(verify(&wrong_version, &input, &policy, 1024, false, None).is_err());
+    }
+
+    #[test]
+    fn revalidates_offline_verdict_against_fresh_evaluation() {
+        let input = change();
+        let policy = preset(1);
+        let original = evaluate(&input, 1).unwrap();
+        let revalidate = |previous: &Verdict, input: &Change, policy: &ContentPreset| {
+            revalidate_offline_verdict(
+                previous,
+                input,
+                &mut NoFiles,
+                policy,
+                "2026-02-01T00:00:00Z",
+                1024,
+                1024,
+                false,
+                None,
+            )
+        };
+        let fresh = revalidate(&original, &input, &policy).unwrap();
+        assert_ne!(fresh.evaluated_at, original.evaluated_at);
+        let mut altered = original.clone();
+        altered.checks[0].status = CheckStatus::Failed;
+        assert!(
+            verify_offline_input_binding(&altered, &input, &policy, 1024, 1024, false, None)
+                .is_ok()
+        );
+        assert!(revalidate(&altered, &input, &policy).is_err());
+        altered = original.clone();
+        altered.status = VerdictStatus::Fail;
+        assert!(revalidate(&altered, &input, &policy).is_err());
+        assert!(revalidate(&original, &input, &preset(2)).is_err());
+        let mut changed = input.clone();
+        changed.entries[0].metadata = Some(std::collections::BTreeMap::from([(
+            "slug".into(),
+            "other".into(),
+        )]));
+        assert!(revalidate(&original, &changed, &policy).is_err());
+        let mut forged_fresh = fresh.clone();
+        forged_fresh.extensions = None;
+        assert!(
+            verify_offline_verdict(
+                &original,
+                &forged_fresh,
+                &input,
+                &policy,
+                1024,
+                1024,
+                false,
+                None
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn revalidation_reads_content_again_and_rejects_changed_bytes() {
+        struct Bytes(Vec<u8>);
+        impl ConfinedContentFiles for Bytes {
+            type Reader = Cursor<Vec<u8>>;
+            fn open(&mut self, root: &Path, relative: &Path) -> io::Result<Self::Reader> {
+                assert_eq!(root, Path::new("/trusted"));
+                assert_eq!(relative, Path::new("article.txt"));
+                Ok(Cursor::new(self.0.clone()))
+            }
+        }
+        let mut json = serde_json::to_value(change()).unwrap();
+        json["content_root"] = "/trusted".into();
+        let after = json["entries"][0]["after"].as_object_mut().unwrap();
+        after.remove("inline");
+        after.insert("file".into(), "article.txt".into());
+        let input: Change = serde_json::from_value(json).unwrap();
+        let policy = preset(1);
+        let previous = evaluate_change(
+            &input,
+            &mut Bytes(b"abc".to_vec()),
+            &policy,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+        )
+        .unwrap();
+        let error = revalidate_offline_verdict(
+            &previous,
+            &input,
+            &mut Bytes(b"xyz".to_vec()),
+            &policy,
+            "2026-02-01T00:00:00Z",
+            1024,
+            1024,
+            false,
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .downcast_ref::<crate::content_gate_sources::SourceError>()
+                .is_some()
+        );
     }
 
     #[test]
