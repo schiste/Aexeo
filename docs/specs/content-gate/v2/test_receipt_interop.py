@@ -18,8 +18,9 @@ class ReceiptInterop(unittest.TestCase):
     def test_rust_receipt_inputs_against_python_cli(self):
         result = subprocess.run(
             ["cargo", "run", "--quiet", "-p", "aexeo-core", "--example", "decision_inputs_fixture"],
-            cwd=ROOT, check=True, capture_output=True, text=True,
+            cwd=ROOT, capture_output=True, text=True,
         )
+        self.assertEqual(result.returncode, 0, result.stderr)
         fixtures = json.loads(result.stdout)
         self.assertEqual(len(fixtures), 2)
         with tempfile.TemporaryDirectory(prefix="aexeo interop ") as temp:
