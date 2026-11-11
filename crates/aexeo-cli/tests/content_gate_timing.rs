@@ -90,3 +90,32 @@ fn length_counts_appear_in_reports_without_leaking_into_telemetry() {
     assert_eq!(event["length_checks"]["exceedances"], 2);
     assert!(!telemetry.contains("exceeding_limit"));
 }
+
+#[test]
+fn duplicate_paragraphs_do_not_count_as_length_checks() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    let article = dir.path().join("article.md");
+    fs::write(&preset, "version=1\nname='test'\n[[gates]]\nid='duplicate'\nkind='duplicate_paragraphs'\nmax_occurrences=1\n[[gates]]\nid='length'\nkind='paragraph_length'\nmax_words=2\nblocking=false\n").unwrap();
+    fs::write(&article, "three words here\n\nthree words here\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            article.to_str().unwrap(),
+            "--input-format",
+            "markdown",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--format",
+            "json",
+            "--telemetry",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let event: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(event["length_checks"]["measured_gates"], 1);
+    assert_eq!(event["length_checks"]["exceedances"], 2);
+}

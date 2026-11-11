@@ -313,16 +313,20 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             evidence_sources: None,
         },
     };
+    let adapter_ms = adapter_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
     input.metadata = metadata;
     input.evidence_sources = evidence_sources;
     if args.get_flag("export-adapter-input") {
         println!("{}", serde_json::to_string_pretty(&input)?);
         return Ok(EXIT_SUCCESS);
     }
+    let external_started =
+        (measuring && args.contains_id("extension-results")).then(std::time::Instant::now);
     let external = args
         .get_one::<String>("extension-results")
         .map(|path| load_external_gate_results(path, false))
         .transpose()?;
+    let external_load_ms = external_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
     // Network access is an explicit host choice, never implied by a preset.
     let link_observations = if args.get_flag("check-link-reachability")
         && preset
@@ -344,7 +348,6 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     } else {
         None
     };
-    let adapter_ms = adapter_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
     let started = std::time::Instant::now();
     let capabilities = ContentEvaluationContext {
         site: site.as_ref().map(|(site, config)| (site, config)),
@@ -449,8 +452,11 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         });
         print_telemetry(
             &report,
+            &preset,
             evaluation_ms,
-            input_load_ms.zip(adapter_ms),
+            input_load_ms
+                .zip(adapter_ms)
+                .map(|(input, adapter)| (input, adapter, external_load_ms)),
             mapping,
             Some(&gate_timer.timings_ms),
             html_projection.as_ref(),
@@ -643,6 +649,7 @@ fn evaluate_crawl(
     if args.get_flag("telemetry") {
         print_telemetry(
             &report.content,
+            preset,
             started.elapsed().as_secs_f64() * 1000.0,
             None,
             None,
@@ -716,8 +723,9 @@ fn print_summary(report: &aexeo_core::content_gate::ContentReport) {
 
 fn print_telemetry(
     report: &aexeo_core::content_gate::ContentReport,
+    preset: &aexeo_core::content_gate::ContentPreset,
     evaluation_ms: f64,
-    stages: Option<(f64, f64)>,
+    stages: Option<(f64, f64, Option<f64>)>,
     source_mapping: Option<(usize, usize, f64)>,
     gate_timings_ms: Option<&[f64]>,
     html_projection: Option<&serde_json::Value>,
@@ -725,7 +733,16 @@ fn print_telemetry(
     let mut event = serde_json::json!({"schema_version": 1, "event": "content_evaluation", "evaluation_ms": evaluation_ms, "summary": report.summary});
     let mut length_checks = 0usize;
     let mut length_exceedances = 0usize;
-    for gate in &report.gates {
+    for (gate, configuration) in report.gates.iter().zip(&preset.gates) {
+        if !matches!(
+            configuration,
+            ContentGate::ParagraphLength { .. }
+                | ContentGate::ParagraphCharacterLength { .. }
+                | ContentGate::SentenceLength { .. }
+                | ContentGate::SentenceCharacterLength { .. }
+        ) {
+            continue;
+        }
         for key in ["paragraphs_exceeding_limit", "sentences_exceeding_limit"] {
             if let Some(&count) = gate.measurements.get(key) {
                 length_checks += 1;
@@ -739,9 +756,12 @@ fn print_telemetry(
             "exceedances": length_exceedances,
         });
     }
-    if let Some((input_load_ms, adapter_ms)) = stages {
+    if let Some((input_load_ms, adapter_ms, external_load_ms)) = stages {
         event["stages"] =
             serde_json::json!({"input_load_ms": input_load_ms, "adapter_ms": adapter_ms});
+        if let Some(duration) = external_load_ms {
+            event["stages"]["external_results_load_ms"] = serde_json::json!(duration);
+        }
     }
     if let Some((mapped, unmapped, duration_ms)) = source_mapping {
         event["source_mapping"] =
