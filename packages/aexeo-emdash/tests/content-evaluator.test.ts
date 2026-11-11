@@ -10,6 +10,8 @@ const report: ContentReport = { preset: "custom", input_id: "/test", applied_fix
   findings: [{ rule_id: "heading", path: "/test", message: "Missing heading", line: 1, column: 1, severity: "warning", suggestion: null, scope: "page" }], reason: null,
 }] };
 
+const externalReport: ContentReport = { ...report, gates: [{ ...report.gates[0]!, gate_id: "external", required_capability: "extension", status: "not_checked", findings: [], reason: "extension unavailable" }] };
+
 describe("configured content preset", () => {
   it("adds findings without replacing the existing evaluator", async () => {
     const result = await withContentPreset(base, { name: "custom" }, async () => report)([doc]);
@@ -77,7 +79,7 @@ it("runs the explicit provider on the projected document and selected preset", a
   const results = [{ extension: "custom", parameters: {}, input, diagnostics: [] }];
   const project = vi.fn(async () => input);
   const provider = vi.fn(async () => results);
-  const evaluate = vi.fn(async () => ({ ...report, gates: [] }));
+  const evaluate = vi.fn(async () => externalReport);
   const evaluator = withContentPreset(base, { name: "article", byCollection: { glossary: "glossary" }, evidenceSources: { source: "text" } }, evaluate, provider, project);
   expect((await evaluator([doc], { collections: ["glossary"] })).ok).toBe(true);
   expect(project).toHaveBeenCalledWith(doc, { source: "text" });
@@ -85,17 +87,28 @@ it("runs the explicit provider on the projected document and selected preset", a
   expect(evaluate).toHaveBeenCalledWith(doc, "glossary", undefined, { source: "text" }, undefined, results);
 });
 
+it("does not project or send content when the selected preset has no custom gate", async () => {
+  const project = vi.fn();
+  const provider = vi.fn();
+  const evaluate = vi.fn(async () => report);
+  const result = await withContentPreset(base, { name: "article" }, evaluate, provider, project)([doc]);
+  expect(result.ok).toBe(true);
+  expect(project).not.toHaveBeenCalled();
+  expect(provider).not.toHaveBeenCalled();
+  expect(evaluate).toHaveBeenCalledTimes(1);
+});
+
 it("reports provider errors and rejects invalid provider results", async () => {
   const project = async () => ({ id: "/test", text: null, source_text: null, headings: null, metadata: null, evidence_sources: null });
-  const failed = withContentPreset(base, { name: "article" }, async () => report, async () => { throw new Error("provider unavailable"); }, project);
+  const failed = withContentPreset(base, { name: "article" }, async () => externalReport, async () => { throw new Error("provider unavailable"); }, project);
   const result = await failed([doc]);
   expect(result.ok).toBe(false);
   if (!result.ok) expect(result.detail).toContain("provider unavailable");
-  const invalid = withContentPreset(base, { name: "article" }, async () => report, async () => undefined as never, project);
+  const invalid = withContentPreset(base, { name: "article" }, async () => externalReport, async () => undefined as never, project);
   const invalidResult = await invalid([doc]);
   expect(invalidResult.ok).toBe(false);
   if (!invalidResult.ok) expect(invalidResult.detail).toContain("must return an array");
-  const noProjection = withContentPreset(base, { name: "article" }, async () => report, async () => []);
+  const noProjection = withContentPreset(base, { name: "article" }, async () => externalReport, async () => []);
   const unavailable = await noProjection([doc]);
   expect(unavailable.ok).toBe(false);
   if (!unavailable.ok) expect(unavailable.detail).toContain("projection is unavailable");
@@ -104,12 +117,12 @@ it("reports provider errors and rejects invalid provider results", async () => {
 it("emits content-free provider telemetry without making evaluation depend on the observer", async () => {
   const project = async () => ({ id: "/private", text: "private text", source_text: null, headings: null, metadata: null, evidence_sources: null });
   const events: unknown[] = [];
-  const evaluator = withContentPreset(base, { name: "article" }, async () => ({ ...report, gates: [] }), async () => [], project, (event) => { events.push(event); throw new Error("observer failed"); });
+  const evaluator = withContentPreset(base, { name: "article" }, async () => externalReport, async () => [], project, (event) => { events.push(event); throw new Error("observer failed"); });
   expect((await evaluator([doc])).ok).toBe(true);
   expect(events).toEqual([{ status: "success", duration_ms: expect.any(Number) }]);
   expect(JSON.stringify(events)).not.toContain("private");
   const errorEvents: unknown[] = [];
-  const failed = withContentPreset(base, { name: "article" }, async () => report, async () => { throw new Error("failed"); }, project, (event) => errorEvents.push(event));
+  const failed = withContentPreset(base, { name: "article" }, async () => externalReport, async () => { throw new Error("failed"); }, project, (event) => errorEvents.push(event));
   expect((await failed([doc])).ok).toBe(false);
   expect(errorEvents).toEqual([{ status: "error", duration_ms: expect.any(Number) }]);
 });

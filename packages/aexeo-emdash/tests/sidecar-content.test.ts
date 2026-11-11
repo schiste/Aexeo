@@ -50,15 +50,24 @@ describe("sandbox content presets", () => {
     const input = { id: "/page", text: "draft" };
     const results = [{ extension: "example", input, parameters: {}, diagnostics: [] }];
     const fetch = vi.fn(async () => new Response(JSON.stringify(results)));
-    const evaluate = vi.fn(() => JSON.stringify({ gates: [] }));
+    const evaluate = vi.fn((_doc: string, _name: string, _sources?: string | null, _evidence?: string | null, extensions?: string | null) => JSON.stringify({ gates: extensions ? [] : [{ required_capability: "extension" }] }));
     const project = vi.fn(() => JSON.stringify(input));
     await contentPresetFindings([{}], ["pages"], { CONTENT_PRESET: "article", CONTENT_GATE_PROVIDER: { fetch } }, evaluate, project);
     const request = fetch.mock.calls[0] as unknown as [string, RequestInit];
     expect(JSON.parse(request[1].body as string)).toEqual({ input, preset: "article", collection: "pages" });
     expect(evaluate).toHaveBeenCalledWith("{}", "article", "{}", undefined, JSON.stringify(results));
   });
+  it("does not send private content to a provider when the selected preset has no custom gate", async () => {
+    const fetch = vi.fn();
+    const project = vi.fn();
+    const evaluate = vi.fn(() => JSON.stringify({ gates: [] }));
+    await contentPresetFindings([{ route: "/private" }], ["pages"], { CONTENT_PRESET: "article", CONTENT_GATE_PROVIDER: { fetch } }, evaluate, project);
+    expect(project).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(evaluate).toHaveBeenCalledTimes(1);
+  });
   it("rejects provider failures and invalid results instead of silently passing", async () => {
-    const evaluate = () => JSON.stringify({ gates: [] });
+    const evaluate = () => JSON.stringify({ gates: [{ required_capability: "extension" }] });
     const project = () => "{}";
     const failed = { fetch: async () => new Response("", { status: 503 }) };
     await expect(contentPresetFindings([{}], undefined, { CONTENT_PRESET: "article", CONTENT_GATE_PROVIDER: failed }, evaluate, project)).rejects.toThrow("HTTP 503");
@@ -73,7 +82,7 @@ describe("sandbox content presets", () => {
     const logger = vi.spyOn(console, "info").mockImplementation(() => {});
     try {
       const fetch = async () => new Response("[]");
-      await contentPresetFindings([{}], undefined, { CONTENT_PRESET: "article", CONTENT_GATE_PROVIDER: { fetch }, CONTENT_GATE_TELEMETRY: "true" }, () => '{"gates":[]}', () => '{"text":"private"}');
+      await contentPresetFindings([{}], undefined, { CONTENT_PRESET: "article", CONTENT_GATE_PROVIDER: { fetch }, CONTENT_GATE_TELEMETRY: "true" }, (_doc, _name, _sources, _evidence, extensions) => extensions ? '{"gates":[]}' : '{"gates":[{"required_capability":"extension"}]}', () => '{"text":"private"}');
       expect(logger).toHaveBeenCalledOnce();
       const event = JSON.parse(logger.mock.calls[0]![0] as string);
       expect(event).toEqual({ event: "external_gate_provider", status: "success", duration_ms: expect.any(Number) });
