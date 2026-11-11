@@ -295,8 +295,7 @@ pub fn source_locations_with_reachability(
         .take(8)
         .count()
         == 8;
-    let mut utf16_indices: Vec<Option<Option<Utf16Index>>> =
-        (0..spans.len()).map(|_| None).collect();
+    let mut utf16_indices: BTreeMap<usize, Option<Utf16Index>> = BTreeMap::new();
     let heading_blocks: Vec<_> = document
         .body
         .iter()
@@ -427,8 +426,9 @@ pub fn source_locations_with_reachability(
             }
             let relative = offset - start;
             let utf16_offset = if many_prose_findings && text.len() >= 8192 {
-                let index = utf16_indices[index]
-                    .get_or_insert_with(|| (!text.is_ascii()).then(|| Utf16Index::new(text)));
+                let index = utf16_indices
+                    .entry(index)
+                    .or_insert_with(|| (!text.is_ascii()).then(|| Utf16Index::new(text)));
                 if let Some(index) = index {
                     let Some(units) = index.position(text, relative) else {
                         continue;
