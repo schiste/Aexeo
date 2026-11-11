@@ -930,3 +930,21 @@ Missing paragraphs are `not_checked`. The check also reports `not_checked` if
 a paragraph exceeds 16 KiB, there are more than 100,000 paragraphs, or its
 10,000-key / 4 MiB distinct-key budget is exceeded; findings already observed
 remain available. Locations are supplied where the adapter can map them.
+
+### Experimental offline change receipts
+
+`content-change --offline-receipt --evaluator-identity BUILD_ID` writes an
+`aexeo.offline-decision-receipt/v1` object to `CONTENT_GATE_VERDICT_FILE` in
+place of the usual v1 verdict. It is an Aexeo-specific experimental format,
+not a `content-gate.verdict/v2`. A v1-only runner must reject it. The host must
+supply an identity for its trusted evaluator build and independently establish
+that it is correct; Aexeo does not authenticate the supplied value.
+
+Use `--verify-offline-receipt PATH` with the same mode to compare the current
+inputs and a fresh evaluation before writing a new receipt. Errors do not write
+a new output; runners must check the exit code and not reuse an old file on
+failure. This mode rejects `--verify-verdict`, `--extension-results` and
+`--check-link-reachability`; external observations are not evaluated. It does
+not prove collection completeness, input authenticity, build identity or
+freshness at publication. Coordinate concurrent changes at the host boundary.
+`--telemetry` reports only an aggregate receipt-revalidation match boolean.

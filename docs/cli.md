@@ -192,6 +192,15 @@ Options:
       --verify-verdict <verify-verdict>
           Re-evaluate and compare a previous verdict before writing a fresh verdict
 
+      --offline-receipt
+          Write an experimental offline receipt instead of a v1 verdict
+
+      --evaluator-identity <evaluator-identity>
+          Host-asserted trusted evaluator build identity (not authenticated by Aexeo)
+
+      --verify-offline-receipt <verify-offline-receipt>
+          Re-evaluate and compare a previous experimental offline receipt
+
       --check-link-reachability
           Explicitly enable bounded external HTTP observations for reachability gates
 

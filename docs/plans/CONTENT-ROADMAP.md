@@ -235,8 +235,10 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   protects legacy runners that ignore it.
   Draft work in PR #315 adds a standalone manifest, independently checked JSON
   Schema and an experimental Rust offline receipt. It is not yet a v2 verdict,
-  a cross-implementation runner or integrated with the CLI and EmDash; external
+  a cross-implementation runner or integrated with EmDash; external
   observations, artifact formats, freshness and trusted build identity remain open.
+  An opt-in CLI mode can write and revalidate Aexeo-specific offline receipts;
+  its output is not a v1 verdict or a portable v2 verdict.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
 - [x] Preserve preset and input-report provenance when binding human feedback; report policy-matched reviewed metrics separately from legacy metrics. Fingerprints do not authenticate people or bind external evidence.
 - [x] Include a fingerprint of the CLI-resolved preset in corpus evaluation

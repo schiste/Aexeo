@@ -224,6 +224,16 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         args.get_one::<String>("content-root").map(String::as_str),
         Path::new(&verdict_path),
     )?;
+    if args.get_flag("offline-receipt") {
+        return command_offline_receipt(
+            args,
+            &change,
+            &preset,
+            &collection,
+            &mut provider,
+            Path::new(&verdict_path),
+        );
+    }
     let max_checks = *args
         .get_one::<u64>("link-max-checks")
         .user_context("missing link-max-checks")? as usize;
@@ -422,6 +432,73 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
     };
     let json = serde_json::to_vec_pretty(&verdict)?;
     write_atomic(Path::new(&verdict_path), &json).user_context("writing verdict")?;
+    Ok(code)
+}
+
+fn command_offline_receipt(
+    args: &ArgMatches,
+    change: &aexeo_contracts::content_gate_protocol::Change,
+    preset: &aexeo_core::content_gate::ContentPreset,
+    collection: &Option<CollectionSnapshot>,
+    provider: &mut HostFiles,
+    output: &Path,
+) -> Result<i32> {
+    use aexeo_core::content_gate_verdict::{
+        OfflineDecisionContext, OfflineDecisionReceipt, evaluate_offline_receipt,
+        revalidate_offline_receipt,
+    };
+    let identity = args
+        .get_one::<String>("evaluator-identity")
+        .user_context("evaluator identity is required")?;
+    if identity.is_empty() || identity.len() > 256 {
+        user_bail!("evaluator identity must contain 1 to 256 bytes");
+    }
+    let context = OfflineDecisionContext {
+        change,
+        preset,
+        max_entry_bytes: MAX_CONTENT_INPUT_BYTES,
+        max_total_bytes: MAX_TOTAL_CONTENT_BYTES,
+        plain_text_paragraphs: args.get_flag("plain-text-paragraphs"),
+        collection: collection.as_ref().map(|snapshot| ChangeCollection {
+            change_id: &snapshot.change_id,
+            items: &snapshot.items,
+            complete: snapshot.complete,
+        }),
+        evaluator_identity: identity.as_bytes(),
+    };
+    let receipt = if let Some(path) = args.get_one::<String>("verify-offline-receipt") {
+        protect_input(Path::new(path), output, "previous receipt")?;
+        let mut data = Vec::new();
+        File::open(path)
+            .user_context("opening previous receipt")?
+            .take(MAX_CHANGE_BYTES + 1)
+            .read_to_end(&mut data)
+            .user_context("reading previous receipt")?;
+        if data.len() as u64 > MAX_CHANGE_BYTES {
+            user_bail!("previous receipt exceeds the size limit");
+        }
+        let previous: OfflineDecisionReceipt =
+            serde_json::from_slice(&data).user_context("invalid previous receipt")?;
+        let result = revalidate_offline_receipt(&previous, &context, provider, &iso_now());
+        if args.get_flag("telemetry") {
+            eprintln!(
+                "{}",
+                serde_json::json!({"event":"content_change_receipt_revalidation", "version":1, "matched":result.is_ok()})
+            );
+        }
+        result.user_context("previous receipt does not match current inputs or evaluation")?
+    } else {
+        evaluate_offline_receipt(&context, provider, &iso_now())
+            .user_context("offline receipt evaluation failed")?
+    };
+    let code = match receipt.verdict.status {
+        VerdictStatus::Pass => EXIT_SUCCESS,
+        VerdictStatus::Fail => EXIT_FINDINGS,
+        VerdictStatus::NotChecked => EXIT_UNSUPPORTED,
+        VerdictStatus::Error => EXIT_INTERNAL_ERROR,
+    };
+    write_atomic(output, &serde_json::to_vec_pretty(&receipt)?)
+        .user_context("writing offline receipt")?;
     Ok(code)
 }
 

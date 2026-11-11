@@ -60,7 +60,8 @@ Consumers must independently protect and establish the current inputs, build
 identity, collection completeness and publication state. Unknown fields in a
 change parsed by v1 may already have been discarded. A matching receipt does
 not prove that an external input was absent, fresh, true or authenticated.
-No CLI or EmDash workflow automatically produces or consumes these receipts.
+The CLI supports an explicit offline receipt mode; it does not use the v2
+verdict protocol. EmDash does not produce or consume these receipts.
 
 Run `python -m pip install -r docs/specs/content-gate/v2/requirements-test.txt`
 in an isolated environment, then run
