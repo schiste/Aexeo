@@ -1000,3 +1000,120 @@ fn a_recorded_redirect_chain_is_reported_in_order_and_credited_separately() {
     assert!(has_issue(&report["issues"], "redirect_observed"));
     assert_issues_sorted(&report);
 }
+
+#[test]
+fn static_check_graph_uses_the_audited_site_and_preserves_uncertainty() {
+    let temp = tempfile::tempdir().unwrap();
+    let site = temp.path().join("dist");
+    fs::create_dir_all(site.join("source")).unwrap();
+    fs::create_dir_all(site.join("orphan")).unwrap();
+    fs::write(
+        site.join("source/index.html"),
+        "<html><main><p><a href='/orphan/'>Link</a></p></main></html>",
+    )
+    .unwrap();
+    fs::write(
+        site.join("orphan/index.html"),
+        "<html><main>Orphan</main></html>",
+    )
+    .unwrap();
+    fs::write(site.join("unmapped.html"), "<main>Unmapped</main>").unwrap();
+    let map = temp.path().join("map.json");
+    let graph = temp.path().join("graph.json");
+    fs::write(&map, r#"{"source/index.html":"https://example.org/source/","orphan/index.html":"https://example.org/orphan/"}"#).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "check",
+            site.to_str().unwrap(),
+            "--format",
+            "json",
+            "--link-graph-output",
+            graph.to_str().unwrap(),
+            "--link-graph-site-origin",
+            "https://example.org",
+            "--link-graph-url-map",
+            map.to_str().unwrap(),
+            "--link-graph-telemetry",
+        ])
+        .output()
+        .unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr)));
+    let report: serde_json::Value = serde_json::from_slice(&fs::read(&graph).unwrap()).unwrap();
+    assert_eq!(report["crawl_complete"], false);
+    assert_eq!(payload["link_graph_summary"]["crawl_complete"], false);
+    assert_eq!(
+        report["static_url_mapping"]["missing_paths"],
+        serde_json::json!(["unmapped.html"])
+    );
+    assert!(
+        report["legacy_findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|finding| finding["conclusion"] != "confirmed")
+    );
+    assert_eq!(report["pages"].as_array().unwrap().len(), 2);
+    let saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(payload["audit_path"].as_str().unwrap()).unwrap())
+            .unwrap();
+    assert_eq!(saved["site"]["pages"].as_array().unwrap().len(), 3);
+    assert!(payload["artifact"]["site"].is_null());
+    assert!(
+        report["legacy_findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["rule_id"] == "LNK002")
+    );
+    let direct = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "check",
+            site.to_str().unwrap(),
+            "--link-graph-output",
+            graph.to_str().unwrap(),
+            "--link-graph-site-origin",
+            "https://example.org",
+            "--link-graph-url-map",
+            map.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    let direct_text = String::from_utf8_lossy(&direct.stdout);
+    assert!(
+        direct_text.contains("not verifiable: crawl incomplete"),
+        "{direct_text}"
+    );
+    assert!(!direct_text.contains("confirmed orphan"), "{direct_text}");
+    let rendered = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "report",
+            "render",
+            payload["audit_path"].as_str().unwrap(),
+            "--link-graph",
+            graph.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&rendered.stdout);
+    assert!(
+        rendered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rendered.stderr)
+    );
+    assert!(text.contains("not verifiable: crawl incomplete"), "{text}");
+    assert!(!text.contains("confirmed orphan"), "{text}");
+    let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["static_mapping_missing_count"], 1);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("unmapped.html"));
+    let missing = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "check",
+            site.to_str().unwrap(),
+            "--link-graph-output",
+            graph.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!missing.status.success());
+}

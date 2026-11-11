@@ -290,3 +290,8 @@ missing and unspecified languages are not treated as an observed mismatch.
 - [ ] Finish the independent, diverse human-reviewed evaluation corpus and the
   outstanding broader content-quality roadmap. Fact/source verification remains
   later in that roadmap and must not be presented as already validated.
+
+- Static `check` can opt into an observational graph from the same loaded build,
+  with explicit origin and URL map, optional inventory context, qualified
+  findings, persisted evidence and aggregate telemetry. This does not attest a
+  deployment or complete crawl; real site and inventory validation remains open.

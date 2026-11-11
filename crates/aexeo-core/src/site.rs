@@ -818,7 +818,8 @@ pub fn load_site(root: &Path) -> Result<Site> {
     load_site_with_site_url(root, None)
 }
 
-pub(crate) fn load_site_with_site_url(root: &Path, site_url: Option<&str>) -> Result<Site> {
+/// Load a static site using the configured site URL when interpreting its sitemap.
+pub fn load_site_with_site_url(root: &Path, site_url: Option<&str>) -> Result<Site> {
     read_site(root, site_url).user_context(format!("cannot load site at {}", root.display()))
 }
 

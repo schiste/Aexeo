@@ -101,6 +101,11 @@ pub fn build_cli() -> Command {
         .subcommand(
             Command::new("check")
                 .about("Run static checks against a site directory")
+                .arg(Arg::new("link-graph-output").long("link-graph-output").num_args(1).requires_all(["link-graph-site-origin", "link-graph-url-map"]).help("Write an observational link graph report for the existing static site"))
+                .arg(Arg::new("link-graph-site-origin").long("link-graph-site-origin").num_args(1).requires("link-graph-output").help("Public origin of the static site"))
+                .arg(Arg::new("link-graph-url-map").long("link-graph-url-map").num_args(1).requires("link-graph-output").help("JSON map of build-relative paths to public URLs"))
+                .arg(Arg::new("link-graph-context").long("link-graph-context").num_args(1).requires("link-graph-output").help("Optional inventory and identity context JSON"))
+                .arg(Arg::new("link-graph-telemetry").long("link-graph-telemetry").action(ArgAction::SetTrue).requires("link-graph-output").help("Emit aggregate link graph timing and counts to stderr"))
                 .arg(Arg::new("path").default_value("."))
                 .arg(Arg::new("config").long("config").num_args(1))
                 .arg(Arg::new("baseline").long("baseline").num_args(1))
