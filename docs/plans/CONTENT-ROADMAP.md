@@ -107,6 +107,7 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] Markdown heading-node and EmDash heading-block locations for duplicate and length findings.
 - [x] Truncated site crawls mark site-scoped gates `not_checked` while retaining partial findings; native link rules suppress incomplete graph conclusions.
 - [x] Optional, bounded paragraph-count gate shared by Markdown and EmDash; unavailable paragraph capability remains `not_checked`.
+- [x] Optional bounded duplicate-paragraph gate with measurements and Markdown / EmDash locations; incomplete capability remains `not_checked`.
 - [x] Optional bounded HTTP link observations for Markdown or adapter-supplied
   JSON destinations, with non-public egress protection and aggregate telemetry.
   This advisory command is separate from content presets and does not establish

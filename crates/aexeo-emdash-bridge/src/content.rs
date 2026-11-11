@@ -146,6 +146,7 @@ fn positional_gate(gate: &ContentGate) -> bool {
             | ContentGate::SentenceCharacterLength { .. }
             | ContentGate::ParagraphLength { .. }
             | ContentGate::RepeatedParagraphOpenings { .. }
+            | ContentGate::DuplicateParagraphs { .. }
             | ContentGate::ParagraphCharacterLength { .. }
     )
 }
@@ -767,6 +768,19 @@ mod tests {
             ),
             (2, 0, 0)
         );
+        let unavailable =
+            evaluate_content_with_body_availability(&document, &preset, None, false).unwrap();
+        assert_eq!(unavailable.gates[0].status, GateStatus::NotChecked);
+    }
+
+    #[test]
+    fn duplicate_paragraph_maps_to_emdash_block() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/t","title":"T","body":[{"children":[{"_type":"span","text":"Repeated prose."}]},{"children":[{"_type":"span","text":"Repeated prose."}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='review'\n[[gates]]\nid='dupe'\nkind='duplicate_paragraphs'\nmax_occurrences=1\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        let locations = source_locations(&document, &preset, &report);
+        assert_eq!((locations[0].block_index, locations[0].span_index), (1, 0));
         let unavailable =
             evaluate_content_with_body_availability(&document, &preset, None, false).unwrap();
         assert_eq!(unavailable.gates[0].status, GateStatus::NotChecked);
