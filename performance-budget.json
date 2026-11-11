@@ -68,5 +68,9 @@
   "content/html_projection_and_evaluation": {
     "max_avg_ms": 30,
     "max_p95_ms": 60
+  },
+  "content/dense_forbidden_terms": {
+    "max_avg_ms": 50,
+    "max_p95_ms": 100
   }
 }

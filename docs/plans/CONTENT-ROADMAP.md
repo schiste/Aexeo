@@ -86,7 +86,10 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] Configurable link-count gate for Markdown and EmDash ([PR #35](https://github.com/schiste/Aexeo/pull/35)); this does not validate destinations.
 - [x] Literal matching streams occurrences instead of retaining all offsets; claim
   anchors also respect known block boundaries. Counts still include occurrences
-  beyond the finding limit. This does not verify factual support.
+  beyond the finding limit. Forbidden-term checks avoid constructing discarded
+  findings or computing their positions. A synthetic 400 KB, 200,000-match case
+  has a separate p50/p95 benchmark and conservative CI budget; it does not
+  represent normal authoring latency. This does not verify factual support.
 - [x] Configurable exact repeated-term check, with whole-word and substring modes
   ([PR #38](https://github.com/schiste/Aexeo/pull/38)).
 - [x] Repeated terms can opt into per-character Unicode lowercase matching, with

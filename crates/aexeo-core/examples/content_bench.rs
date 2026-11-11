@@ -1,6 +1,6 @@
 //! Reproducible content evaluation and adapter benchmarks.
 use aexeo_core::{
-    content_gate::{ContentEvaluationContext, ContentPreset},
+    content_gate::{ContentEvaluationContext, ContentInput, ContentPreset, MAX_FINDINGS_PER_GATE},
     html_content_adapter::html_content,
     markdown_adapter::{
         markdown_input, markdown_input_with_links, markdown_input_with_source_map,
@@ -80,10 +80,26 @@ headings = ["Summary"]
         ..Default::default()
     };
     let input = markdown_input("benchmark.md", &source)?;
+    let dense_source = "x ".repeat(200_000);
+    let dense_input = ContentInput {
+        id: "dense.txt".into(),
+        text: Some(dense_source.clone()),
+        ..Default::default()
+    };
+    let dense_preset = ContentPreset::from_toml(
+        "version=1\nname='dense'\n[[gates]]\nid='term'\nkind='forbidden_terms'\nterms=['x']\n",
+    )?;
+    let dense_check = dense_preset.evaluate(&dense_input)?;
+    anyhow::ensure!(
+        dense_check.gates[0].measurements["matches"] == 200_000
+            && dense_check.gates[0].findings.len() == MAX_FINDINGS_PER_GATE,
+        "dense benchmark lost matches"
+    );
     let mut html_projection = Vec::new();
     let mut html_eval = Vec::new();
     let mut openings_eval = Vec::new();
     let mut eval = Vec::new();
+    let mut dense_eval = Vec::new();
     let mut parse_and_eval = Vec::new();
     let mut repeated_eval = Vec::new();
     let mut batch_eval = Vec::new();
@@ -116,6 +132,9 @@ headings = ["Summary"]
                 .evaluate_with_capabilities(black_box(&openings_input), &openings_capabilities)?,
         );
         openings_eval.push(start.elapsed().as_micros());
+        let start = Instant::now();
+        black_box(dense_preset.evaluate(black_box(&dense_input))?);
+        dense_eval.push(start.elapsed().as_micros());
         let start = Instant::now();
         black_box(preset.evaluate(black_box(&input))?);
         eval.push(start.elapsed().as_micros());
@@ -169,6 +188,7 @@ headings = ["Summary"]
     html_eval.sort_unstable();
     openings_eval.sort_unstable();
     eval.sort_unstable();
+    dense_eval.sort_unstable();
     parse_and_eval.sort_unstable();
     repeated_eval.sort_unstable();
     batch_eval.sort_unstable();
@@ -180,6 +200,7 @@ headings = ["Summary"]
             ("content/html_projection_and_evaluation", &html_eval),
             ("content/repeated_paragraph_openings", &openings_eval),
             ("content/evaluation", &eval),
+            ("content/dense_forbidden_terms", &dense_eval),
             ("content/markdown_and_evaluation", &parse_and_eval),
             ("content/batch_50", &batch_eval),
             ("content/markdown_links_and_evaluation", &links_eval),
@@ -191,7 +212,7 @@ headings = ["Summary"]
             let avg_ms = samples.iter().sum::<u128>() as f64 / samples.len() as f64 / 1000.0;
             println!(
                 "{}",
-                serde_json::json!({"name": name, "avg_ms": avg_ms, "p50_ms": samples[49] as f64 / 1000.0, "p95_ms": samples[94] as f64 / 1000.0, "iterations": samples.len(), "input_bytes": if name.starts_with("content/html_") { html_source.len() } else if name.starts_with("content/markdown_links_") { link_source.len() } else { source.len() }})
+                serde_json::json!({"name": name, "avg_ms": avg_ms, "p50_ms": samples[49] as f64 / 1000.0, "p95_ms": samples[94] as f64 / 1000.0, "iterations": samples.len(), "input_bytes": if name == "content/dense_forbidden_terms" { dense_source.len() } else if name.starts_with("content/html_") { html_source.len() } else if name.starts_with("content/markdown_links_") { link_source.len() } else { source.len() }})
             );
         }
         return Ok(());
@@ -210,6 +231,10 @@ headings = ["Summary"]
         openings_eval[49], openings_eval[94]
     );
     println!("evaluation_us p50={} p95={}", eval[49], eval[94]);
+    println!(
+        "dense_forbidden_terms_us p50={} p95={}",
+        dense_eval[49], dense_eval[94]
+    );
     println!(
         "markdown_links_and_evaluation_us p50={} p95={}",
         links_eval[49], links_eval[94]
