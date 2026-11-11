@@ -72,6 +72,12 @@ pub use crate::source_mapping::prose_gate_has_positions;
 use crate::source_mapping::{ContentSourceMap, map_gate_source_positions};
 
 impl ContentSourceMap for MarkdownSourceMap {
+    fn heading_count(&self) -> usize {
+        self.heading_starts.len()
+    }
+    fn link_count(&self) -> usize {
+        self.link_starts.len()
+    }
     fn prose_position(
         &self,
         source: &str,
@@ -91,6 +97,8 @@ impl ContentSourceMap for MarkdownSourceMap {
 
 /// Map positional gate findings to exact source positions. `None` means the
 /// gate has no positional semantics; missing positions are never guessed.
+/// Counts are checked, but callers must still pass the same source, input,
+/// destinations and observations used to evaluate the report.
 pub fn gate_source_positions(
     map: &MarkdownSourceMap,
     source: &str,
@@ -602,6 +610,96 @@ fn extract_markdown_from_root(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn source_mapping_rejects_mismatched_heading_and_link_counts() {
+        use crate::content_gate::{
+            ContentEvaluationContext, ContentPreset, LinkReachabilityObservation as Observation,
+        };
+        let source = "# Heading\n\n[first](/a) and [second](/b)";
+        let mut adapted = markdown_input_with_source_map_and_destinations("x", source).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='heading'\nkind='heading_length'\nmax_chars=1\n[[gates]]\nid='links'\nkind='link_reachability'\n").unwrap();
+        let observations = [Observation::NotFound, Observation::Reachable];
+        let context = ContentEvaluationContext {
+            link_reachability: Some(&observations),
+            ..Default::default()
+        };
+        let destinations = adapted.destinations.as_deref().unwrap();
+        let report = preset
+            .evaluate_with_destinations(&adapted.input, &context, Some(destinations))
+            .unwrap();
+        let map = &adapted.source_map;
+        assert!(
+            gate_source_positions(
+                map,
+                source,
+                &adapted.input,
+                &preset.gates[1],
+                &report.gates[1],
+                Some(destinations),
+                Some(&observations)
+            )
+            .unwrap()[0]
+                .is_some()
+        );
+        let too_few = &destinations[..1];
+        assert!(
+            gate_source_positions(
+                map,
+                source,
+                &adapted.input,
+                &preset.gates[1],
+                &report.gates[1],
+                Some(too_few),
+                Some(&observations)
+            )
+            .is_none()
+        );
+        assert!(
+            gate_source_positions(
+                map,
+                source,
+                &adapted.input,
+                &preset.gates[1],
+                &report.gates[1],
+                Some(destinations),
+                Some(&observations[..1])
+            )
+            .is_none()
+        );
+        let changed = [Observation::NotFound, Observation::NotFound];
+        assert_eq!(
+            gate_source_positions(
+                map,
+                source,
+                &adapted.input,
+                &preset.gates[1],
+                &report.gates[1],
+                Some(destinations),
+                Some(&changed)
+            )
+            .unwrap(),
+            vec![None]
+        );
+        adapted
+            .input
+            .headings
+            .as_mut()
+            .unwrap()
+            .push("extra".into());
+        assert!(
+            gate_source_positions(
+                map,
+                source,
+                &adapted.input,
+                &preset.gates[0],
+                &report.gates[0],
+                Some(destinations),
+                None
+            )
+            .is_none()
+        );
+    }
+
     #[test]
     fn combined_adapter_matches_independent_extraction() {
         for source in [

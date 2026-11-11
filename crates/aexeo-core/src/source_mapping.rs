@@ -20,6 +20,8 @@ pub fn prose_gate_has_positions(gate: &crate::content_gate::ContentGate) -> bool
 
 /// Adapter-specific exact positions used by the shared gate mapper.
 pub(crate) trait ContentSourceMap {
+    fn heading_count(&self) -> usize;
+    fn link_count(&self) -> usize;
     fn prose_position(
         &self,
         source: &str,
@@ -43,6 +45,24 @@ pub(crate) fn map_gate_source_positions(
     use crate::content_gate::{
         ContentGate, LinkReachabilityObservation, heading_finding_indices, valid_link_destination,
     };
+    let heading_indices = input
+        .headings
+        .as_deref()
+        .and_then(|headings| heading_finding_indices(gate, headings));
+    if heading_indices.is_some() && input.headings.as_ref()?.len() != map.heading_count() {
+        return None;
+    }
+    if matches!(
+        gate,
+        ContentGate::LinkDestinations { .. } | ContentGate::LinkReachability { .. }
+    ) {
+        if destinations?.len() != map.link_count() {
+            return None;
+        }
+        if observations.is_some_and(|values| values.len() != map.link_count()) {
+            return None;
+        }
+    }
     let size = result.findings.len();
     let mut positions = vec![None; size];
     if let ContentGate::LinkDestinations {
@@ -65,20 +85,19 @@ pub(crate) fn map_gate_source_positions(
             }
         }
     } else if matches!(gate, ContentGate::LinkReachability { .. }) {
-        let indices = observations?
+        let indices: Vec<_> = observations?
             .iter()
             .enumerate()
             .filter_map(|(index, observation)| {
                 (*observation == LinkReachabilityObservation::NotFound).then_some(index)
-            });
-        for (position, index) in positions.iter_mut().zip(indices) {
-            *position = map.link_position(source, index);
+            })
+            .collect();
+        if indices.len() == result.total_findings() {
+            for (position, index) in positions.iter_mut().zip(indices) {
+                *position = map.link_position(source, index);
+            }
         }
-    } else if let Some(indices) = input
-        .headings
-        .as_deref()
-        .and_then(|headings| heading_finding_indices(gate, headings))
-    {
+    } else if let Some(indices) = heading_indices {
         if indices.len() == result.total_findings() {
             for (position, index) in positions.iter_mut().zip(indices) {
                 *position = map.heading_position(source, index);
