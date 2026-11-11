@@ -114,37 +114,46 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
         + report.links.external.len()
         + report.links.unsupported.len()
         + report.links.indeterminate.len();
-    let (conditional, unclassified, hidden, hidden_unobserved, collapsed, collapsed_unobserved) =
-        report
-            .links
-            .destinations
-            .iter()
-            .flat_map(|destination| &destination.evidence)
-            .chain(&report.links.same_document)
-            .chain(&report.links.external)
-            .chain(&report.links.unsupported)
-            .chain(&report.links.indeterminate)
-            .fold(
-                (0, 0, 0, 0, 0, 0),
-                |(
-                    conditional,
-                    unclassified,
-                    hidden,
-                    hidden_unobserved,
-                    collapsed,
-                    collapsed_unobserved,
-                ),
-                 link| {
-                    (
-                        conditional + usize::from(link.conditional_markup == Some(true)),
-                        unclassified + usize::from(link.conditional_markup.is_none()),
-                        hidden + usize::from(link.hidden_attribute == Some(true)),
-                        hidden_unobserved + usize::from(link.hidden_attribute.is_none()),
-                        collapsed + usize::from(link.collapsed_details == Some(true)),
-                        collapsed_unobserved + usize::from(link.collapsed_details.is_none()),
-                    )
-                },
-            );
+    #[derive(Default)]
+    struct Counts {
+        conditional: usize,
+        unclassified: usize,
+        hidden: usize,
+        hidden_unobserved: usize,
+        collapsed: usize,
+        collapsed_unobserved: usize,
+        anchor_text: usize,
+        anchor_aria: usize,
+        anchor_image_alt: usize,
+        anchor_unavailable: usize,
+        anchor_unobserved: usize,
+    }
+    use aexeo_core::link_evidence::AnchorSource;
+    let counts = report
+        .links
+        .destinations
+        .iter()
+        .flat_map(|destination| &destination.evidence)
+        .chain(&report.links.same_document)
+        .chain(&report.links.external)
+        .chain(&report.links.unsupported)
+        .chain(&report.links.indeterminate)
+        .fold(Counts::default(), |mut counts, link| {
+            counts.conditional += usize::from(link.conditional_markup == Some(true));
+            counts.unclassified += usize::from(link.conditional_markup.is_none());
+            counts.hidden += usize::from(link.hidden_attribute == Some(true));
+            counts.hidden_unobserved += usize::from(link.hidden_attribute.is_none());
+            counts.collapsed += usize::from(link.collapsed_details == Some(true));
+            counts.collapsed_unobserved += usize::from(link.collapsed_details.is_none());
+            match link.anchor_source {
+                Some(AnchorSource::Text) => counts.anchor_text += 1,
+                Some(AnchorSource::AriaLabel) => counts.anchor_aria += 1,
+                Some(AnchorSource::ImageAlt) => counts.anchor_image_alt += 1,
+                Some(AnchorSource::Unavailable) => counts.anchor_unavailable += 1,
+                None => counts.anchor_unobserved += 1,
+            }
+            counts
+        });
     let mut telemetry = serde_json::json!({
         "event": "link_graph_analysis",
         "version": 1,
@@ -152,12 +161,17 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
         "elapsed_us": started.elapsed().as_micros(),
         "page_count": report.pages.len(),
         "link_count": observed,
-        "conditional_link_count": conditional,
-        "unclassified_markup_link_count": unclassified,
-        "hidden_attribute_link_count": hidden,
-        "hidden_attribute_unobserved_link_count": hidden_unobserved,
-        "collapsed_details_link_count": collapsed,
-        "collapsed_details_unobserved_link_count": collapsed_unobserved,
+        "conditional_link_count": counts.conditional,
+        "unclassified_markup_link_count": counts.unclassified,
+        "hidden_attribute_link_count": counts.hidden,
+        "hidden_attribute_unobserved_link_count": counts.hidden_unobserved,
+        "collapsed_details_link_count": counts.collapsed,
+        "collapsed_details_unobserved_link_count": counts.collapsed_unobserved,
+        "anchor_text_count": counts.anchor_text,
+        "anchor_aria_label_count": counts.anchor_aria,
+        "anchor_image_alt_count": counts.anchor_image_alt,
+        "anchor_unavailable_count": counts.anchor_unavailable,
+        "anchor_unobserved_count": counts.anchor_unobserved,
         "indeterminate_count": report.links.indeterminate.len(),
         "issue_count": report.issues.len(),
     });

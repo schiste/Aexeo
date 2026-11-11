@@ -1204,3 +1204,63 @@ fn static_check_rejects_graph_output_at_its_own_audit_path() {
     assert!(!result.status.success());
     assert_eq!(fs::read_to_string(&audit).unwrap(), "previous audit");
 }
+
+#[test]
+fn graph_exposes_anchor_label_sources_and_aggregate_only_telemetry() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("input.json");
+    let input = serde_json::json!({
+        "version": 1,
+        "identity": {"origin":"https://example.org", "release":"r1", "surface":"public", "snapshot":"s1"},
+        "crawl_complete": false,
+        "pages": [
+            {"url":"https://example.org/a", "status_code":200, "response_headers":{},
+             "html":"<main><a href='/b'>Words</a><a href='/b' aria-label='Private label'></a><a href='/b'><img alt='Picture label'></a><a href='/b'></a></main>"},
+            {"url":"https://example.org/b", "status_code":200, "response_headers":{}, "html":"<main>B</main>"}
+        ]
+    });
+    fs::write(&path, serde_json::to_vec(&input).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .arg("link-graph")
+        .arg(path)
+        .arg("--telemetry")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let evidence = report["links"]["destinations"][0]["evidence"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        evidence
+            .iter()
+            .map(|item| (
+                item["anchor"].as_str().unwrap(),
+                item["anchor_source"].as_str().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            ("Words", "text"),
+            ("Private label", "aria_label"),
+            ("Picture label", "image_alt"),
+            ("", "unavailable")
+        ]
+    );
+    let event: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    for field in [
+        "anchor_text_count",
+        "anchor_aria_label_count",
+        "anchor_image_alt_count",
+        "anchor_unavailable_count",
+    ] {
+        assert_eq!(event[field], 1, "{field}");
+    }
+    assert_eq!(event["anchor_unobserved_count"], 0);
+    let telemetry = String::from_utf8(output.stderr).unwrap();
+    assert!(!telemetry.contains("Private label"));
+    assert!(!telemetry.contains("example.org"));
+}
