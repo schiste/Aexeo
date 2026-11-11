@@ -61,6 +61,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   artifacts in reused worktrees may come from another revision.
 - For WASM bridge interface changes, synchronize the plugin and crawl-worker
   glue declarations and run `npm run check:dts --prefix packages/aexeo-crawl-worker`.
+- For EmDash adapter configuration changes, test absent, valid, malformed and
+  unreadable settings through both save and refresh. A failed settings read must
+  not certify body capabilities via an automatic fallback; verify coverage
+  telemetry and that recognized prose remains available.
 - For EmDash source-mapping tests, external diagnostics must be within the
   projected text. Use the valid position immediately after the last character
   to exercise an unmapped boundary; an out-of-range line is rejected earlier.
