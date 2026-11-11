@@ -132,6 +132,9 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] Map exact lines in soft-wrapped Markdown containers, including block quotes,
   while keeping transformed text conservative and bounding extra mapping work.
   Existing opt-in telemetry reports mapped and unmapped counts without content.
+- [x] Plain-text and paragraph-text CLI reports include validated source
+  coordinates for positional prose findings, using the same mapping rules as
+  content-change verdicts and opt-in aggregate mapping telemetry.
 - [x] Markdown invalid-link source locations and aggregate mapping telemetry
   ([PR #48](https://github.com/schiste/Aexeo/pull/48)); locations identify link
   occurrences, including reference uses.

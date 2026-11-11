@@ -1,6 +1,30 @@
 //! Explicit blank-line paragraph interpretation of plain UTF-8 text.
 use crate::content_gate::{ContentContext, ContentParagraph};
 
+/// Resolve positional prose findings only when their coordinates identify a
+/// character in the unchanged source. Other gate coordinates are not locations.
+pub fn gate_source_positions(
+    index: &crate::text_index::LineIndex,
+    source: &str,
+    gate: &crate::content_gate::ContentGate,
+    result: &crate::content_gate::ContentGateResult,
+) -> Option<Vec<Option<(usize, usize)>>> {
+    if !crate::markdown_adapter::prose_gate_has_positions(gate) {
+        return None;
+    }
+    Some(
+        result
+            .findings
+            .iter()
+            .map(|finding| {
+                index
+                    .offset(source, finding.line, finding.column)
+                    .map(|_| (finding.line, finding.column))
+            })
+            .collect(),
+    )
+}
+
 /// Limit allocations even when the input is a large sequence of tiny paragraphs.
 pub const MAX_PLAIN_TEXT_PARAGRAPHS: usize = 100_000;
 
@@ -53,6 +77,35 @@ pub fn paragraph_text_context(source: &str) -> Result<ContentContext, &'static s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_mapping_rejects_out_of_range_and_nonpositional_findings() {
+        use crate::content_gate::{ContentInput, ContentPreset};
+        let preset: ContentPreset = toml::from_str(
+            "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['é']\n[[gates]]\nid='words'\nkind='word_count'\nmin=5\n",
+        ).unwrap();
+        let source = "é\n";
+        let input = ContentInput {
+            id: "test".into(),
+            text: Some(source.into()),
+            ..Default::default()
+        };
+        let mut report = preset.evaluate(&input).unwrap();
+        let index = crate::text_index::LineIndex::new(source);
+        assert_eq!(
+            gate_source_positions(&index, source, &preset.gates[0], &report.gates[0]),
+            Some(vec![Some((1, 1))])
+        );
+        report.gates[0].findings[0].column = 2;
+        assert_eq!(
+            gate_source_positions(&index, source, &preset.gates[0], &report.gates[0]),
+            Some(vec![None])
+        );
+        assert_eq!(
+            gate_source_positions(&index, source, &preset.gates[1], &report.gates[1]),
+            None
+        );
+    }
 
     #[test]
     fn preserves_source_lines_and_paragraph_boundaries() {

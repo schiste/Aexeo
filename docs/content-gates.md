@@ -614,6 +614,14 @@ records. Other gates that need an individual document still report `not_checked`
 real WASM boundary locally, build the plugin and run `npm run test:wasm` in
 `packages/aexeo-emdash`; the ordinary TypeScript unit test uses a mock.
 
+### Plain-text source locations
+
+For `text` and `paragraph-text` inputs, JSON reports include `source_locations`
+for positional prose findings whose coordinates identify an actual character in
+the unchanged input. Line and column are one-based Unicode-character coordinates.
+Whole-document findings and invalid coordinates have no precise source location.
+Opt-in source-mapping telemetry reports aggregate mapped and unmapped counts only.
+
 ### Markdown source locations
 
 For Markdown CLI reports, finding `line` and `column` retain their existing
