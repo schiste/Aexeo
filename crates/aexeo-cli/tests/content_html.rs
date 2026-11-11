@@ -146,6 +146,43 @@ fn html_literal_fragment_maps_prose_and_reports_capability() {
 }
 
 #[test]
+fn html_entities_map_findings_to_their_source_spelling() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("article.html");
+    let preset = dir.path().join("preset.toml");
+    fs::write(&input, "<p>É &#x62;ad &amp; bad</p>").unwrap();
+    fs::write(
+        &preset,
+        "version=1\nname='test'\n[[gates]]\nid='words'\nkind='forbidden_terms'\nterms=['bad']\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            input.to_str().unwrap(),
+            "--input-format",
+            "html",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["source_locations"],
+        serde_json::json!([
+            {"gate_id":"words", "finding_index":0, "line":1, "column":6},
+            {"gate_id":"words", "finding_index":1, "line":1, "column":21}
+        ])
+    );
+}
+
+#[test]
 fn html_headings_and_link_occurrences_map_to_source_tags() {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("article.html");

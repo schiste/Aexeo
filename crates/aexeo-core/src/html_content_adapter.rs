@@ -153,7 +153,7 @@ pub fn html_content(id: impl Into<String>, source: &str) -> Result<HtmlContent, 
 /// Unsupported markup and transformed text return no map, never guessed positions.
 #[derive(Debug)]
 pub struct HtmlSourceMap {
-    spans: Vec<(usize, usize, usize)>,
+    spans: Vec<(usize, usize, usize, bool)>,
     heading_starts: Vec<usize>,
     link_starts: Vec<usize>,
     source_index: crate::text_index::LineIndex,
@@ -161,7 +161,7 @@ pub struct HtmlSourceMap {
 }
 
 impl HtmlSourceMap {
-    /// Source coordinates for a character in the unchanged projected text.
+    /// Source coordinates for projected text; decoded characters point to their entity start.
     pub fn source_position(
         &self,
         source: &str,
@@ -172,13 +172,15 @@ impl HtmlSourceMap {
         let offset = self.projected_index.offset(projected, line, column)?;
         let index = self
             .spans
-            .partition_point(|(start, _, _)| *start <= offset)
+            .partition_point(|(start, _, _, _)| *start <= offset)
             .checked_sub(1)?;
-        let &(start, end, source_start) = self.spans.get(index)?;
+        let &(start, end, source_start, entity) = self.spans.get(index)?;
         (offset < end)
             .then(|| {
-                self.source_index
-                    .position(source, source_start + offset - start)
+                self.source_index.position(
+                    source,
+                    source_start + if entity { 0 } else { offset - start },
+                )
             })
             .flatten()
     }
@@ -229,9 +231,33 @@ fn safe_mapping_attributes(mut rest: &str, void: bool) -> bool {
     }
 }
 
+// Deliberately limited to single-scalar, semicolon-terminated entities. The
+// full reconstructed projection must still match html5ever before mapping.
+fn mapping_entity(entity: &str) -> Option<char> {
+    match entity {
+        "amp" => Some('&'),
+        "lt" => Some('<'),
+        "gt" => Some('>'),
+        "quot" => Some('"'),
+        "apos" => Some('\''),
+        "nbsp" => Some('\u{a0}'),
+        numeric => {
+            let digits = numeric.strip_prefix('#')?;
+            let (digits, radix) = digits
+                .strip_prefix(['x', 'X'])
+                .map_or((digits, 10), |hex| (hex, 16));
+            if digits.is_empty() || digits.len() > 8 {
+                return None;
+            }
+            let ch = char::from_u32(u32::from_str_radix(digits, radix).ok()?)?;
+            (!ch.is_control()).then_some(ch)
+        }
+    }
+}
+
 /// Build a mapping only when a conservative lexical reconstruction exactly
-/// matches the parser's projection. This does not cover entities, raw-text or
-/// hidden elements, malformed HTML, or browser-generated content.
+/// matches the parser's projection. Unsupported entities, raw-text or hidden
+/// elements, malformed HTML, and browser-generated content remain unmapped.
 pub fn html_source_map(source: &str, projected: &str) -> Option<HtmlSourceMap> {
     use crate::site::markup::{open_tag_end, tag_breaks_text};
     if source.len() > MAX_CONTENT_INPUT_BYTES || source.contains(['\r', '\0', '\x0b']) {
@@ -249,12 +275,28 @@ pub fn html_source_map(source: &str, projected: &str) -> Option<HtmlSourceMap> {
                 .find('<')
                 .map_or(source.len(), |n| cursor + n);
             let literal = &source[cursor..end];
-            if literal.contains('&') {
-                return None;
+            let mut within = 0;
+            while within < literal.len() {
+                let rest = &literal[within..];
+                if rest.starts_with('&') {
+                    let semicolon = rest.find(';')?;
+                    // Bound both parsing work and accepted source spelling.
+                    if semicolon > 16 {
+                        return None;
+                    }
+                    let ch = mapping_entity(&rest[1..semicolon])?;
+                    let start = output.len();
+                    output.push(ch);
+                    spans.push((start, output.len(), cursor + within, true));
+                    within += semicolon + 1;
+                } else {
+                    let length = rest.find('&').unwrap_or(rest.len());
+                    let start = output.len();
+                    output.push_str(&rest[..length]);
+                    spans.push((start, output.len(), cursor + within, false));
+                    within += length;
+                }
             }
-            let start = output.len();
-            output.push_str(literal);
-            spans.push((start, output.len(), cursor));
             cursor = end;
             continue;
         }
@@ -466,7 +508,7 @@ mod tests {
         assert_eq!(map.source_position(source, projected, 2, 6), Some((2, 27)));
         assert_eq!(map.source_position(source, projected, 3, 1), Some((2, 45)));
         for html in [
-            "<p>hello &amp; world</p>",
+            "<p>hello &copy; world</p>",
             "<p hidden>hidden</p><p>world</p>",
             "<p><div>world</div></p>",
             "<p>world",
@@ -479,6 +521,42 @@ mod tests {
                 "{html}"
             );
         }
+    }
+
+    #[test]
+    fn maps_decoded_entities_and_surrounding_unicode_to_exact_source() {
+        let html = "<p>É &amp; &#x1F600; &#233; fin</p>";
+        let adapted = html_content("x", html).unwrap();
+        let projected = adapted.input.text.as_deref().unwrap();
+        assert_eq!(projected, "É & 😀 é fin\n");
+        let map = html_source_map(html, projected).unwrap();
+        let source_index = crate::text_index::LineIndex::new(html);
+        for (column, needle) in [
+            (1, "É"),
+            (3, "&amp;"),
+            (5, "&#x1F600;"),
+            (7, "&#233;"),
+            (9, "fin"),
+        ] {
+            assert_eq!(
+                map.source_position(html, projected, 1, column),
+                source_index.position(html, html.find(needle).unwrap())
+            );
+        }
+        for html in [
+            "<p>&copy;</p>",
+            "<p>&amp</p>",
+            "<p>&#0;</p>",
+            "<p>&#x80;</p>",
+            "<p>&notanentity;</p>",
+        ] {
+            let adapted = html_content("x", html).unwrap();
+            assert!(
+                html_source_map(html, adapted.input.text.as_deref().unwrap()).is_none(),
+                "{html}"
+            );
+        }
+        assert!(html_source_map(html, "wrong").is_none());
     }
 
     #[test]

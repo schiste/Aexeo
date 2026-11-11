@@ -156,7 +156,7 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   can carry source positions for byte-identical text and a verified, well-nested
   literal HTML subset in CLI and content-change reports. Heading and link findings
   in that subset map to opening tags, including ordered reachability observations.
-  Entity decoding, hidden content, unsupported or malformed markup remain unmapped. Browser-rendered visibility remains unverified. CLI JSON and opt-in
+  Common semicolon-terminated named and non-control numeric entities map decoded characters to the opening ampersand; unsupported entities, hidden content and unsupported or malformed markup remain unmapped. Browser-rendered visibility remains unverified. CLI JSON and opt-in
   telemetry identify the mapping capability; telemetry also reports projection
   availability and aggregate heading, paragraph and link counts.
 - [ ] Integrate optional host observers with other adapters and continue adding
