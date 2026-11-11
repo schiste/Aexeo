@@ -1,7 +1,8 @@
 //! CLI host for the content-gate change/verdict protocol.
 use super::exit_code::{EXIT_FINDINGS, EXIT_INTERNAL_ERROR, EXIT_SUCCESS, EXIT_UNSUPPORTED};
 use aexeo_contracts::{
-    content_gate_change_validation::parse_validated_change, content_gate_protocol::VerdictStatus,
+    content_gate_change_validation::parse_validated_change,
+    content_gate_protocol::{Verdict, VerdictStatus},
 };
 use aexeo_core::{
     content_gate::MAX_CONTENT_INPUT_BYTES,
@@ -94,6 +95,29 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
     {
         user_bail!("change and verdict paths must be different");
     }
+    let previous_verdict = args
+        .get_one::<String>("verify-verdict")
+        .map(|path| -> Result<Verdict> {
+            if Path::new(path) == Path::new(&verdict_path)
+                || fs::canonicalize(path)
+                    .ok()
+                    .zip(fs::canonicalize(&verdict_path).ok())
+                    .is_some_and(|(input, output)| input == output)
+            {
+                user_bail!("previous verdict and output paths must be different");
+            }
+            let mut data = Vec::new();
+            File::open(path)
+                .user_context("opening previous verdict")?
+                .take(MAX_CHANGE_BYTES + 1)
+                .read_to_end(&mut data)
+                .user_context("reading previous verdict")?;
+            if data.len() as u64 > MAX_CHANGE_BYTES {
+                user_bail!("previous verdict exceeds the size limit");
+            }
+            serde_json::from_slice(&data).user_context("invalid previous verdict")
+        })
+        .transpose()?;
     let mut bytes = Vec::new();
     File::open(change_path)
         .user_context("opening change document")?
@@ -202,6 +226,40 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         }
         Err(error) => return Err(error),
     };
+    if let Some(mut previous) = previous_verdict {
+        let binding = aexeo_core::content_gate_verdict::verify_offline_input_binding(
+            &previous,
+            &change,
+            &preset,
+            MAX_CONTENT_INPUT_BYTES,
+            MAX_TOTAL_CONTENT_BYTES,
+            args.get_flag("plain-text-paragraphs"),
+            collection
+                .as_ref()
+                .map(|snapshot| ChangeCollection {
+                    change_id: &snapshot.change_id,
+                    items: &snapshot.items,
+                    complete: snapshot.complete,
+                })
+                .as_ref(),
+        );
+        // Compare the complete result with a fresh local evaluation. A fingerprint
+        // alone does not authenticate or establish the correctness of a verdict.
+        previous.evaluated_at.clone_from(&verdict.evaluated_at);
+        let matched = binding.is_ok() && previous == verdict;
+        if telemetry {
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "event": "content_change_revalidation", "version": 1, "matched": matched
+                })
+            );
+        }
+        binding.user_context("previous verdict does not match the current offline inputs")?;
+        if !matched {
+            user_bail!("previous verdict differs from the current offline evaluation");
+        }
+    }
     if telemetry && let Some(snapshot) = &collection {
         eprintln!(
             "{}",

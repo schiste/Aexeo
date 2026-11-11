@@ -173,6 +173,11 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   records and revision consistency. Collection gates run once per change, including
   delete-only changes; site impact remains separately not checked. CLI telemetry
   reports aggregate collection size and the completeness assertion only.
+- [x] Offline content-change verdicts include an optional Aexeo input fingerprint;
+  CLI hosts can revalidate the current inputs and compare a fresh result before
+  writing a verdict. Optional telemetry reports a match boolean only. This does
+  not cover external callbacks, prove collection freshness or completeness, or
+  protect consumers that do not perform the verification.
 - [ ] Bind change verdicts to all decision inputs, including entry metadata,
   collection snapshots, effective policy, host options and external evidence,
   with a versioned interoperable verification contract. The current v1 subject
