@@ -22,7 +22,7 @@ aexeo-cli content --preset seo-website --site ./dist --no-text --format json
 aexeo-cli content --preset seo-website --crawl-url https://example.org --crawl-max-pages 200 --format json
 ```
 
-By default the CLI reads the supplied UTF-8 bytes as raw text, including Markdown syntax. With `--input-format markdown`, it parses CommonMark with GFM extensions and projects text and headings while excluding front matter, code blocks and HTML; link labels, image alt text and inline code text are included, matching EmDash, which keeps the text of code-marked spans. Word counts split on whitespace. Locations in raw-text mode refer to the supplied text. Markdown and EmDash findings refer to their extracted plain-text projection, not source line positions.
+By default the CLI reads the supplied UTF-8 bytes as raw text, including Markdown syntax. With `--input-format markdown`, it parses CommonMark with GFM extensions and projects text and headings while excluding front matter, code blocks and HTML; link labels, image alt text and inline code text are included, matching EmDash, which keeps the text of code-marked spans. Word counts split on whitespace and on known adapter block boundaries. Locations in raw-text mode refer to the supplied text. Markdown and EmDash findings refer to their extracted plain-text projection, not source line positions.
 
 Markdown and EmDash adapters report where each heading, paragraph, list item and table cell ends. Those block ends terminate a sentence and a literal term cannot match across one. Soft-wrapped lines remain one sentence. Raw text has no known block structure.
 

@@ -86,6 +86,8 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] Configurable paragraph-length gate with Markdown and EmDash adapter
   capabilities ([PR #33](https://github.com/schiste/Aexeo/pull/33)).
 - [x] Configurable link-count gate for Markdown and EmDash ([PR #35](https://github.com/schiste/Aexeo/pull/35)); this does not validate destinations.
+- [x] Word-count gates treat known block ends as word separators, including
+  adjacent projected blocks without whitespace; raw text retains whitespace counting.
 - [x] Literal matching streams occurrences instead of retaining all offsets; claim
   anchors also respect known block boundaries. Word-level checks treat adjacent
   blocks as separate words even without inserted separators. Counts still include occurrences

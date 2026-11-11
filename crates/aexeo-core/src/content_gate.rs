@@ -39,7 +39,8 @@ pub struct ContentContext {
     pub paragraphs: Option<Vec<ContentParagraph>>,
     /// Sorted byte offsets in the projected text where a block ends: a heading,
     /// paragraph, list item or table cell. A sentence ends there and a literal
-    /// term does not match across it. Raw text has no known block structure.
+    /// term does not match across it. Word counts treat it as a separator.
+    /// Raw text has no known block structure.
     pub block_ends: Option<Vec<usize>>,
     /// Why the adapter withheld the input. It explains the `not_checked` status
     /// of each gate that needed that input.
@@ -703,6 +704,29 @@ impl<'a> LiteralText<'a> {
     }
 }
 
+// Whitespace remains the word heuristic; known block ends add boundaries
+// only when they split a run of non-whitespace characters.
+fn count_words(text: &str, block_ends: &[usize]) -> usize {
+    let mut count = text.split_whitespace().count();
+    let mut previous = None;
+    for &end in block_ends {
+        if previous == Some(end) {
+            continue;
+        }
+        previous = Some(end);
+        if let (Some(before), Some(after)) = (text.get(..end), text.get(end..))
+            && before
+                .chars()
+                .next_back()
+                .is_some_and(|ch| !ch.is_whitespace())
+            && after.chars().next().is_some_and(|ch| !ch.is_whitespace())
+        {
+            count += 1;
+        }
+    }
+    count
+}
+
 /// Whether a claim anchor occurs, allowing for how the content happens to wrap.
 fn claim_is_present(text: &str, claim: &str, block_ends: &[usize]) -> bool {
     (block_ends.is_empty() && text.contains(claim))
@@ -1222,7 +1246,7 @@ impl ContentPreset {
                     match &input.text {
                         Some(text) => {
                             let count =
-                                *word_count.get_or_insert_with(|| text.split_whitespace().count());
+                                *word_count.get_or_insert_with(|| count_words(text, block_ends));
                             measurements.insert("word_count".into(), count);
                             if let Some(minimum) = min.filter(|n| count < *n) {
                                 emit(
@@ -2626,6 +2650,28 @@ term="draft"
             .unwrap();
         assert_eq!(clean.gates[0].status, GateStatus::Passed);
         assert!(ContentPreset::from_toml(&preset.to_toml().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn word_count_respects_adjacent_adapter_blocks() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='min'\nkind='word_count'\nmin=3\n[[gates]]\nid='max'\nkind='word_count'\nmax=2\n").unwrap();
+        assert_eq!(count_words("é a", &[0, 1, 2, 3, 4, 20]), 2);
+        let input = literal_input("étéchat chien");
+        let context = ContentContext {
+            block_ends: Some(vec![0, 5, 5, 10, input.text.as_ref().unwrap().len()]),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].measurements["word_count"], 3);
+        assert_eq!(report.gates[0].status, GateStatus::Passed);
+        assert_eq!(report.gates[1].measurements["word_count"], 3);
+        assert_eq!(report.gates[1].status, GateStatus::Failed);
+        assert_eq!(
+            preset.evaluate(&input).unwrap().gates[0].measurements["word_count"],
+            2
+        );
     }
 
     #[test]
