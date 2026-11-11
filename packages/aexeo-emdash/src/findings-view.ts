@@ -1,5 +1,5 @@
 import { describeGate, summarizeGates } from "./assessment-display.js";
-import { isCmsObservableFinding } from "./cms-coverage.js";
+import { cmsBodyCoverageNotice, isCmsObservableFinding, type CmsBodyCoverage } from "./cms-coverage.js";
 import type { CustomBlockMappings } from "./adapter.js";
 // Shared Block Kit view layer for both plugin entrypoints.
 //
@@ -275,23 +275,29 @@ interface FindingsSnapshot {
   sitewideAssessment: DocumentAssessment | undefined;
   failedAssessments: number;
   uncheckedGates: number;
+  incompleteBodies: number;
+  unknownBodies: number;
 }
 
 async function readFindingsSnapshot(kv: KvNamespace): Promise<FindingsSnapshot> {
   // Values are returned inline; include assessments with no findings so editors
   // can inspect passing, incomplete and failed evaluations from the picker.
-  const entries = await kv.list<{ route: string; findings: Finding[]; assessment?: DocumentAssessment }>("findings:");
+  const entries = await kv.list<{ route: string; findings: Finding[]; assessment?: DocumentAssessment; body_coverage?: CmsBodyCoverage }>("findings:");
   const sitewideAssessment = entries.find((entry) => entry.key === "findings:*")?.value?.assessment;
   const incomplete = sitewideAssessment?.status === "error";
   const findings: FindingRow[] = [];
   const routes = new Set<string>();
   let failedAssessments = 0;
   let uncheckedGates = 0;
+  let incompleteBodies = 0;
+  let unknownBodies = 0;
   for (const entry of entries) {
     if (entry.value === null) continue;
     const route = entry.key.replace(/^findings:/, "");
     if (route !== "*") {
       routes.add(route);
+      if (entry.value.body_coverage === undefined) unknownBodies++;
+      else if (entry.value.body_coverage !== "complete") incompleteBodies++;
       const assessment = entry.value.assessment;
       if (assessment?.status === "error") failedAssessments++;
       if (assessment?.status === "evaluated") {
@@ -299,12 +305,12 @@ async function readFindingsSnapshot(kv: KvNamespace): Promise<FindingsSnapshot> 
       }
     }
     for (const finding of entry.value.findings) {
-      if (!isCmsObservableFinding(finding) || (incomplete && isSiteGraphFinding(finding))) continue;
+      if (!isCmsObservableFinding(finding, route === "*" || entry.value.body_coverage === "complete") || (incomplete && isSiteGraphFinding(finding))) continue;
       findings.push({ ...finding, document_route: route });
       if (route === "*") routes.add(route);
     }
   }
-  return { findings, documentRoutes: [...routes].sort(), sitewideAssessment, failedAssessments, uncheckedGates };
+  return { findings, documentRoutes: [...routes].sort(), sitewideAssessment, failedAssessments, uncheckedGates, incompleteBodies, unknownBodies };
 }
 
 export async function readAllFindings(kv: KvNamespace): Promise<FindingRow[]> {
@@ -332,7 +338,7 @@ export async function renderFindingsPage(
   kv: KvNamespace,
   tuning: AdminViewTuning,
 ): Promise<BlockResponse> {
-  const { findings, documentRoutes, sitewideAssessment, failedAssessments, uncheckedGates } = await readFindingsSnapshot(kv);
+  const { findings, documentRoutes, sitewideAssessment, failedAssessments, uncheckedGates, incompleteBodies, unknownBodies } = await readFindingsSnapshot(kv);
   const errors = findings.filter((finding) => finding.severity === "error");
   const warnings = findings.filter(
     (finding) => finding.severity === "warning",
@@ -349,6 +355,7 @@ export async function renderFindingsPage(
           : `${findings.length} findings across ${routes.length} routes — ${errors.length} errors, ${warnings.length} warnings.`,
     },
     { type: "context", text: "Rendered page markup, semantic sections, generated metadata, duplicate pages and sitewide links are not checked here. Audit the built site for page-level and link findings." },
+    ...(incompleteBodies || unknownBodies ? [{ type: "context", text: `${incompleteBodies} document bodies were incomplete or unavailable; coverage is unknown for ${unknownBodies} older or failed evaluations. Inspect individual documents.` }] : []),
     ...(failedAssessments || uncheckedGates ? [{ type: "context", text: `${failedAssessments} document evaluations failed; ${uncheckedGates} preset checks were not checked. Inspect individual documents for details.` }] : []),
     ...(sitewideAssessment?.status === "error" ? [{ type: "context", text: `Sitewide checks unavailable: ${sitewideAssessment.reason}. ${sitewideAssessment.detail}` }] : []),
     { type: "divider" },
@@ -458,9 +465,10 @@ export async function renderDocumentPanel(
     };
   }
   const incomplete = (await readAssessment(kv, "*"))?.status === "error";
-  const record = await kv.get<{ findings: Finding[]; assessment?: DocumentAssessment }>(findingsKey(route));
-  const findings = (record?.findings ?? []).filter((finding) => isCmsObservableFinding(finding) && (!incomplete || !isSiteGraphFinding(finding)));
+  const record = await kv.get<{ findings: Finding[]; assessment?: DocumentAssessment; body_coverage?: CmsBodyCoverage }>(findingsKey(route));
+  const findings = (record?.findings ?? []).filter((finding) => isCmsObservableFinding(finding, record?.body_coverage === "complete") && (!incomplete || !isSiteGraphFinding(finding)));
   const assessment = record?.assessment;
+  const bodyNotice = record && assessment?.status !== "error" ? cmsBodyCoverageNotice(record.body_coverage) : undefined;
   const errors = findings.filter((finding) => finding.severity === "error");
   const warnings = findings.filter(
     (finding) => finding.severity === "warning",
@@ -481,6 +489,7 @@ export async function renderDocumentPanel(
                 : `${findings.length} findings — ${errors.length} errors, ${warnings.length} warnings.`,
       },
       { type: "context", text: "Rendered page markup, semantic sections, generated metadata, duplicate pages and sitewide links are not checked here. Audit the built site for page-level and link findings." },
+      ...(bodyNotice ? [{ type: "context", text: bodyNotice }] : []),
       ...(incomplete ? [{ type: "context", text: "Sitewide and cross-document checks are unavailable; refresh after resolving the CMS input error." }] : []),
       ...(assessment?.status === "error" ? [{ type: "context", text: `Evaluation failed: ${assessment.reason}. Findings are unavailable for this revision.` }] : []),
       ...(assessment?.status === "evaluated" ? [{ type: "context", text: `Content preset: ${assessment.preset}. ${summarizeGates(assessment.gates)}. Results cover only these configured checks.` }, ...assessment.gates.map((gate) => ({ type: "context", text: describeGate(gate) }))] : []),

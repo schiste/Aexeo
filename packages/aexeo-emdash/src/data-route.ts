@@ -1,4 +1,4 @@
-import { isCmsObservableFinding } from "./cms-coverage.js";
+import { isCmsObservableFinding, type CmsBodyCoverage } from "./cms-coverage.js";
 import type { CustomBlockMappings } from "./adapter.js";
 // Data route for the React admin findings page.
 //
@@ -83,6 +83,7 @@ export interface RouteSummary {
   errorCount: number;
   warningCount: number;
   assessment?: DocumentAssessment;
+  body_coverage?: CmsBodyCoverage;
 }
 
 export interface FindingRow {
@@ -163,7 +164,7 @@ async function buildFindingsPayload(
 
   // Walk the findings KV namespace once. Each entry is keyed by
   // findings:<route> and the value is { route, findings: Finding[] }.
-  const entries = await ctx.kv.list<{ route: string; findings: Finding[]; assessment?: DocumentAssessment }>(
+  const entries = await ctx.kv.list<{ route: string; findings: Finding[]; assessment?: DocumentAssessment; body_coverage?: CmsBodyCoverage }>(
     "findings:",
   );
   const findings: FindingRow[] = [];
@@ -171,7 +172,7 @@ async function buildFindingsPayload(
   const sitewideAssessment = entries.find((entry) => entry.key === "findings:*")?.value?.assessment;
   const perRoute = new Map<
     string,
-    { findings: Finding[]; errors: number; warnings: number; assessment?: DocumentAssessment }
+    { findings: Finding[]; errors: number; warnings: number; assessment?: DocumentAssessment; body_coverage?: CmsBodyCoverage }
   >();
   for (const entry of entries) {
     if (entry.value === null) continue;
@@ -183,11 +184,11 @@ async function buildFindingsPayload(
     }
     let bucket = perRoute.get(route);
     if (bucket === undefined) {
-      bucket = { findings: [], errors: 0, warnings: 0, ...(entry.value.assessment === undefined ? {} : { assessment: entry.value.assessment }) };
+      bucket = { findings: [], errors: 0, warnings: 0, ...(entry.value.body_coverage === undefined ? {} : { body_coverage: entry.value.body_coverage }), ...(entry.value.assessment === undefined ? {} : { assessment: entry.value.assessment }) };
       perRoute.set(route, bucket);
     }
     for (const finding of entry.value.findings) {
-      if (!isCmsObservableFinding(finding) || (sitewideAssessment?.status === "error" && isSiteGraphFinding(finding))) continue;
+      if (!isCmsObservableFinding(finding, entry.value.body_coverage === "complete") || (sitewideAssessment?.status === "error" && isSiteGraphFinding(finding))) continue;
       bucket.findings.push(finding);
       if (finding.severity === "error") bucket.errors += 1;
       else if (finding.severity === "warning") bucket.warnings += 1;
@@ -211,6 +212,7 @@ async function buildFindingsPayload(
       errorCount: bucket.errors,
       warningCount: bucket.warnings,
       ...(bucket.assessment === undefined ? {} : { assessment: bucket.assessment }),
+      ...(bucket.body_coverage === undefined ? {} : { body_coverage: bucket.body_coverage }),
     });
   }
   routes.sort((a, b) => b.errorCount - a.errorCount || a.route.localeCompare(b.route));

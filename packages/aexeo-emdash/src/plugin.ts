@@ -1,4 +1,4 @@
-import { hasCompleteBody, isCmsObservableFinding, isLegacyCmsObservableFinding } from "./cms-coverage.js";
+import { cmsBodyCoverage, hasCompleteBody, isCmsObservableFinding, isLegacyCmsObservableFinding } from "./cms-coverage.js";
 import type { CustomBlockMappings } from "./adapter.js";
 import type { SuppressionFilter } from "./suppressions.js";
 import type { EmdashDocument, Finding } from "./types.js";
@@ -349,12 +349,7 @@ export interface SandboxCtx {
 function recordContentCoverage(ctx: SandboxCtx, documents: readonly EmdashDocument[]): void {
   const counts = { documents: documents.length, complete: 0, partial: 0, unavailable: 0 };
   for (const document of documents) {
-    if (document.body === undefined || document.body_capabilities?.length === 0) counts.unavailable++;
-    else if (document.body_capabilities === undefined ||
-      ["text", "headings", "paragraphs", "links"].every((capability) =>
-        document.body_capabilities?.includes(capability as "text" | "headings" | "paragraphs" | "links"),
-      )) counts.complete++;
-    else counts.partial++;
+    counts[cmsBodyCoverage(document)]++;
   }
   try {
     ctx.log?.info?.("aexeo.content_coverage", counts);
@@ -662,6 +657,7 @@ export async function handleAfterSaveConfigured(
   await kv.set(findingsKey(document.route), {
     route: document.route,
     findings: filtered,
+    body_coverage: cmsBodyCoverage(document),
     ...(result.assessments?.[document.route] === undefined ? {} : { assessment: result.assessments[document.route] }),
   });
 }
@@ -965,6 +961,7 @@ export async function evaluateAndPersistAll(
     countCmsLocations(cmsLocationCounts, filtered);
     await kv.set(findingsKey(route), {
       route, findings: filtered,
+      ...(stored === undefined ? {} : { body_coverage: cmsBodyCoverage(stored.document) }),
       ...(route === "*" && globalAssessment !== undefined ? { assessment: globalAssessment } :
         result.assessments?.[route] === undefined ? {} : { assessment: result.assessments[route] }),
     });

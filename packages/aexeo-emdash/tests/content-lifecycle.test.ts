@@ -502,6 +502,42 @@ describe("assessment persistence", () => {
     expect(missing).toContain("No evaluation is available");
     expect(missing).not.toContain("No findings");
   });
+  it("stores body coverage with the evaluated revision and exposes it in both views", async () => {
+    const { ctx, store } = host();
+    const missing = item("a", OLD);
+    await save(ctx, missing, returning());
+    expect(store.get(findingsKey("/a"))).toMatchObject({ body_coverage: "unavailable", findings: [] });
+    expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"))).toContain("Body coverage is unavailable");
+    const data = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator: returning() });
+    expect(data.payload.routes.find((route) => route.route === "/a")?.body_coverage).toBe("unavailable");
+    const empty = item("a", NEW);
+    empty.data.body = [];
+    await save(ctx, empty, returning());
+    expect(store.get(findingsKey("/a"))).toMatchObject({ body_coverage: "complete" });
+    expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"))).not.toContain("Body coverage is unavailable");
+    // A later document write must not change what the stored evaluation covered.
+    const stored = store.get(documentKey("/a")) as { document: { body?: unknown } };
+    delete stored.document.body;
+    const later = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator: returning() });
+    expect(later.payload.routes.find((route) => route.route === "/a")?.body_coverage).toBe("complete");
+    store.set(findingsKey("/legacy"), { route: "/legacy", findings: [finding("/legacy", "CNT006"), { ...finding("/legacy", "CNT006"), aexeo_origin: "content_preset" }] });
+    const legacy = JSON.stringify(await renderDocumentPanel(ctx.kv, "/legacy"));
+    expect(legacy).toContain("Body coverage is unknown");
+    const legacyData = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator: returning() });
+    expect(legacyData.payload.findings.filter((row) => row.route === "/legacy")).toHaveLength(1);
+    expect(legacyData.payload.findings.find((row) => row.route === "/legacy")?.aexeo_origin).toBe("content_preset");
+    const page = JSON.stringify(await renderFindingsPage(ctx.kv, { emptyFindingsText: "empty", emptyScoreText: "empty", refreshFailureVariant: "error", score: async () => null, truthLabel: () => "" }));
+    expect(page).toContain("coverage is unknown for 1 older or failed evaluations");
+  });
+  it("records body coverage during refresh even without a preset", async () => {
+    const empty = item("empty", NEW);
+    empty.data.body = [];
+    const missing = item("missing", NEW);
+    const { ctx, store } = host([empty, missing]);
+    await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator: returning() });
+    expect(store.get(findingsKey("/empty"))).toMatchObject({ body_coverage: "complete" });
+    expect(store.get(findingsKey("/missing"))).toMatchObject({ body_coverage: "unavailable" });
+  });
   it("stores not-checked gate details alongside current findings", async () => {
     const { ctx, store } = host();
     await save(ctx, item("a", NEW), async () => ({ ok: true, findings: [finding("/a", "current")], assessments: { "/a": { status: "evaluated", preset: "article", gates: [{ gate_id: "words", status: "not_checked", blocking: true, scope: "document", required_capability: "text", reason: "text unavailable" }] } } }));
