@@ -576,6 +576,13 @@ aexeo-cli check ./dist --link-graph-output graph.json \
   --link-graph-telemetry
 ```
 
+Place the graph output outside the resolved build directory and separately from
+the explicit URL map, context, baseline and primary config files. Existing graph
+files at a separate path can be updated. Symbolic-link output paths are refused;
+on Unix, existing hard-linked output files are refused too. These checks prevent
+common accidental collisions; they are not protection against concurrent file
+replacement by another process.
+
 The URL map uses the paths relative to the resolved build directory described
 below. `--link-graph-context context.json` optionally supplies inventory and
 identity context. Text output qualifies legacy link findings and includes the

@@ -1120,3 +1120,57 @@ fn static_check_graph_uses_the_audited_site_and_preserves_uncertainty() {
         .unwrap();
     assert!(!missing.status.success());
 }
+
+#[test]
+fn static_check_never_overwrites_the_build_or_direct_inputs_with_the_graph() {
+    let temp = tempfile::tempdir().unwrap();
+    let site = temp.path().join("dist");
+    fs::create_dir(&site).unwrap();
+    let page = site.join("index.html");
+    let html = "<main><p>Original page</p></main>";
+    fs::write(&page, html).unwrap();
+    let map = temp.path().join("map.json");
+    let original_map = r#"{"index.html":"https://example.org/"}"#;
+    fs::write(&map, original_map).unwrap();
+    let invoke = |output: &std::path::Path| {
+        Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "check",
+                site.to_str().unwrap(),
+                "--link-graph-output",
+                output.to_str().unwrap(),
+                "--link-graph-site-origin",
+                "https://example.org",
+                "--link-graph-url-map",
+                map.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap()
+    };
+    for output in [&page, &site.join("new-graph.json"), &map] {
+        let result = invoke(output);
+        assert!(!result.status.success());
+        assert!(!String::from_utf8_lossy(&result.stderr).is_empty());
+    }
+    assert_eq!(fs::read_to_string(&page).unwrap(), html);
+    assert_eq!(fs::read_to_string(&map).unwrap(), original_map);
+    assert!(!site.join("new-graph.json").exists());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        let alias = temp.path().join("alias.json");
+        symlink(&page, &alias).unwrap();
+        assert!(!invoke(&alias).status.success());
+        assert_eq!(fs::read_to_string(&page).unwrap(), html);
+        let hardlink = temp.path().join("hardlink.json");
+        fs::hard_link(&page, &hardlink).unwrap();
+        assert!(!invoke(&hardlink).status.success());
+        assert_eq!(fs::read_to_string(&page).unwrap(), html);
+    }
+    let graph = temp.path().join("graph.json");
+    invoke(&graph);
+    assert!(graph.exists());
+    invoke(&graph);
+    assert!(graph.exists());
+    assert_eq!(fs::read_to_string(&page).unwrap(), html);
+}

@@ -21,6 +21,49 @@ use crate::output::{
     render_fix_command_json, render_path_command_json, render_text_command_json,
 };
 
+// Reject paths that would overwrite the build or inputs before writing anything.
+// Resolving the existing parent also detects symlinks in directory components.
+fn check_graph_output_path(output: &Path, site_root: &Path, protected: &[&Path]) -> Result<()> {
+    let metadata = match fs::symlink_metadata(output) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                user_bail!("link graph output must not be a symlink");
+            }
+            Some(metadata)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    #[cfg(unix)]
+    if let Some(metadata) = &metadata {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.nlink() > 1 {
+            user_bail!("link graph output must not be a hard-linked file");
+        }
+    }
+    let resolved = if metadata.is_some() {
+        output.canonicalize()?
+    } else {
+        let parent = output
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let name = output
+            .file_name()
+            .ok_or_else(|| anyhow::anyhow!("invalid link graph output path"))?;
+        parent.canonicalize()?.join(name)
+    };
+    if resolved.starts_with(site_root.canonicalize()?) {
+        user_bail!("link graph output must be outside the static site directory");
+    }
+    for input in protected {
+        if input.canonicalize().is_ok_and(|path| path == resolved) {
+            user_bail!("link graph output must differ from audit input files");
+        }
+    }
+    Ok(())
+}
+
 pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
     let root = canonicalize_or_keep(required_arg(submatches, "path")?);
     let explicit_config = submatches.get_one::<String>("config").map(PathBuf::from);
@@ -41,6 +84,18 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
     // same parsed site feeds both rule evaluation and the graph snapshot.
     let graph_output = submatches.get_one::<String>("link-graph-output");
     let graph_inputs = if let Some(path) = graph_output {
+        let site_root = resolve_static_site_root(&root, &config)?;
+        let map = required_arg(submatches, "link-graph-url-map")?;
+        let mut protected = vec![Path::new(map)];
+        if let Some(context) = submatches.get_one::<String>("link-graph-context") {
+            protected.push(Path::new(context));
+        }
+        if let Some(baseline) = baseline_path {
+            protected.push(Path::new(baseline));
+        }
+        let default_config = root.join("aexeo.toml");
+        protected.push(explicit_config.as_deref().unwrap_or(&default_config));
+        check_graph_output_path(Path::new(path), &site_root, &protected)?;
         let urls = super::link_graph::read_static_url_map(required_arg(
             submatches,
             "link-graph-url-map",
