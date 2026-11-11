@@ -39,6 +39,10 @@ pub struct LinkEvidence {
     /// Absent in older reports; CSS and scripts can alter actual visibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hidden_attribute: Option<bool>,
+    /// Whether this link or an ancestor has an inline style that may hide it.
+    /// Absent in older reports; this is not a computed CSS visibility result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden_inline_style: Option<bool>,
     /// Whether the link is outside the first summary of a closed details element.
     /// Absent in older reports; scripts may change the element state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -58,6 +62,7 @@ impl LinkEvidence {
     pub fn is_nonconditional(&self) -> bool {
         self.conditional_markup == Some(false)
             && self.hidden_attribute == Some(false)
+            && self.hidden_inline_style == Some(false)
             && self.collapsed_details == Some(false)
     }
 }
@@ -85,6 +90,7 @@ struct Scope {
     /// Source-only markup may not be displayed in the evaluated page.
     conditional_markup: bool,
     hidden_attribute: bool,
+    hidden_inline_style: bool,
     collapsed_details: bool,
 }
 
@@ -279,6 +285,7 @@ pub fn extract_document(
         non_body_landmark: false,
         conditional_markup: false,
         hidden_attribute: false,
+        hidden_inline_style: false,
         collapsed_details: false,
     };
     // Keep the document alive while traversing: RcDom drains descendants when
@@ -290,6 +297,12 @@ pub fn extract_document(
             let tag = name.local.as_ref();
             if attribute(&node, "hidden").is_some() {
                 scope.hidden_attribute = true;
+            }
+            if attribute(&node, "style")
+                .as_deref()
+                .is_some_and(crate::site::style_hides_content)
+            {
+                scope.hidden_inline_style = true;
             }
             if matches!(tag, "template" | "noscript") && !scope.conditional_markup {
                 scope.conditional_markup = true;
@@ -366,6 +379,7 @@ pub fn extract_document(
                     paragraph: scope.paragraph.as_deref().map(str::to_owned),
                     conditional_markup: Some(scope.conditional_markup),
                     hidden_attribute: Some(scope.hidden_attribute),
+                    hidden_inline_style: Some(scope.hidden_inline_style),
                     collapsed_details: Some(scope.collapsed_details),
                     rel: crawl_rel_tokens(attribute(&node, "rel")),
                     line: None,
@@ -589,6 +603,35 @@ mod tests {
         let older: LinkEvidence = serde_json::from_value(older).unwrap();
         assert_eq!(older.hidden_attribute, None);
         assert!(!older.is_nonconditional());
+    }
+
+    #[test]
+    fn inline_hidden_styles_are_inherited_and_legacy_evidence_is_unobserved() {
+        let links = extract_links(
+            "<main><div style='DISPLAY: none !important'><a href='/a'>a</a></div><a style='visibility: collapse' href='/b'>b</a><div style='content-visibility:hidden'><a href='/c'>c</a></div><a style='display:block' href='/d'>d</a></main>",
+            "https://example.org/",
+            "https://example.org",
+            None,
+        );
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| link.hidden_inline_style)
+                .collect::<Vec<_>>(),
+            vec![Some(true), Some(true), Some(true), Some(false)]
+        );
+        assert_eq!(
+            links
+                .iter()
+                .map(LinkEvidence::is_nonconditional)
+                .collect::<Vec<_>>(),
+            vec![false, false, false, true]
+        );
+        let mut old = serde_json::to_value(&links[3]).unwrap();
+        old.as_object_mut().unwrap().remove("hidden_inline_style");
+        let old: LinkEvidence = serde_json::from_value(old).unwrap();
+        assert_eq!(old.hidden_inline_style, None);
+        assert!(!old.is_nonconditional());
     }
 
     #[test]

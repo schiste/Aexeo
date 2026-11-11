@@ -157,9 +157,16 @@ also counted as conditional, including `hidden="until-found"`. Evidence records
 `hidden_attribute`; its absence in older reports means unobserved. Historical
 aggregate counts were calculated before this field existed and are not revised:
 regenerate a report to assess these links. CSS can override `hidden`, and CSS
-and script-driven visibility are not evaluated, so neither the attribute nor
+and script-driven visibility are not fully evaluated, so neither the attribute nor
 its absence proves what a reader saw. Opt-in telemetry includes aggregate
 `hidden_attribute_link_count` and `hidden_attribute_unobserved_link_count`.
+An inline `display:none`, `visibility:hidden` or `collapse`, or
+`content-visibility:hidden` declaration on a link or ancestor also makes its
+visibility conditional. `hidden_inline_style` records this limited observation;
+its absence in older reports means unobserved. Opt-in telemetry includes
+`hidden_inline_style_link_count` and `hidden_inline_style_unobserved_link_count`.
+The CSS cascade, stylesheets, media queries and scripts are not evaluated; a
+declaration does not prove the final rendered state.
 Links outside the first direct `summary` of a closed `details` element are also
 conditional; `collapsed_details` records this observation. Nested closed details
 remain conditional even inside a nested summary. An absent field in an older
