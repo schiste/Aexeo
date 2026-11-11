@@ -27,6 +27,7 @@
 
 import * as React from "react";
 import { useCallback, useEffect, useState } from "react";
+import { cmsBodyCoverageNotice } from "../cms-coverage.js";
 import { describeGate, summarizeGates } from "../assessment-display.js";
 import type { FindingsPayload, RouteSummary } from "../data-route.js";
 
@@ -189,9 +190,10 @@ export function Findings(): React.JSX.Element {
         </section>
       )}
 
-      {payload.routes.filter((route) => route.assessment !== undefined).map((route) => (
+      {payload.routes.filter((route) => route.assessment !== undefined || route.body_coverage !== "complete").map((route) => (
         <section key={route.route} className="rounded border border-kumo-line p-3 text-sm">
           <strong>{route.route}</strong>
+          {route.assessment?.status !== "error" && cmsBodyCoverageNotice(route.body_coverage) && <p>{cmsBodyCoverageNotice(route.body_coverage)}</p>}
           {route.assessment?.status === "error" ? <p>Evaluation failed: {route.assessment.reason}. Findings are unavailable for this revision.</p> :
             route.assessment?.status === "evaluated" ? <details>
               <summary>Content preset: {route.assessment.preset} — {summarizeGates(route.assessment.gates)}</summary>

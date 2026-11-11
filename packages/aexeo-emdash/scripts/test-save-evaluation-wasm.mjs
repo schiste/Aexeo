@@ -216,6 +216,7 @@ kind="link_reachability"
   assert.ok(document, "adapted document was persisted");
   assert.deepEqual(document.body.filter((entry) => ["a", "b", "c"].includes(entry._key)).map((entry) => entry.children[0].text), ["Before", "Between", "After"]);
   assert.deepEqual(document.body_capabilities, []);
+  assert.equal(host.store.get("findings:/mixed")?.body_coverage, "unavailable");
   for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/mixed", rule), false);
 }
 

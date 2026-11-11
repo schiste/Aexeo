@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasCompleteBody, isCmsObservableFinding } from "../src/cms-coverage.js";
+import { cmsBodyCoverage, cmsBodyCoverageNotice, hasCompleteBody, isCmsObservableFinding } from "../src/cms-coverage.js";
 import type { Finding } from "../src/types.js";
 
 const finding = (rule_id: string): Finding => ({ rule_id, message: "", path: "/a", line: 1, column: 1, severity: "warning", suggestion: null, scope: "page" });
@@ -9,6 +9,13 @@ describe("CMS observation boundaries", () => {
     expect(hasCompleteBody({ route: "/a", title: "A" })).toBe(false);
     expect(hasCompleteBody({ route: "/a", title: "A", body: [] })).toBe(true);
     expect(hasCompleteBody({ route: "/a", title: "A", body: [], body_capabilities: ["text"] })).toBe(false);
+    expect(cmsBodyCoverage({ route: "/a", title: "A" })).toBe("unavailable");
+    expect(cmsBodyCoverage({ route: "/a", title: "A", body: [], body_capabilities: [] })).toBe("unavailable");
+    expect(cmsBodyCoverage({ route: "/a", title: "A", body: [], body_capabilities: ["text"] })).toBe("partial");
+    expect(cmsBodyCoverage({ route: "/a", title: "A", body: [] })).toBe("complete");
+    expect(cmsBodyCoverageNotice("complete")).toBeUndefined();
+    expect(cmsBodyCoverageNotice("partial")).toContain("partial");
+    expect(cmsBodyCoverageNotice(undefined)).toContain("unknown");
   });
 
   it("retains body findings only when body coverage is complete", () => {
