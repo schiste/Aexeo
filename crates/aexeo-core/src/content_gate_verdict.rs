@@ -251,17 +251,27 @@ pub fn evaluate_change_with_host<P: ConfinedContentFiles>(
         let plain_index = needs_plain_index
             .then(|| crate::text_index::LineIndex::new(input.text.as_deref().unwrap_or_default()));
         for (definition, gate) in preset.gates.iter().zip(report.gates) {
-            let positions = source_map.as_ref().and_then(|map| {
-                gate_source_positions(
-                    map,
-                    input.source_text.as_deref()?,
-                    &input,
-                    definition,
-                    &gate,
-                    destinations.as_deref(),
-                    observations.as_deref(),
-                )
-            });
+            let positions = source_map
+                .as_ref()
+                .and_then(|map| {
+                    gate_source_positions(
+                        map,
+                        input.source_text.as_deref()?,
+                        &input,
+                        definition,
+                        &gate,
+                        destinations.as_deref(),
+                        observations.as_deref(),
+                    )
+                })
+                .or_else(|| {
+                    crate::plain_text_adapter::gate_source_positions(
+                        plain_index.as_ref()?,
+                        input.text.as_deref()?,
+                        definition,
+                        &gate,
+                    )
+                });
             let check_id = scoped_id("gate", &entry.entity_id, &gate.gate_id);
             omitted = omitted.saturating_add(
                 gate.measurements
@@ -280,16 +290,7 @@ pub fn evaluate_change_with_host<P: ConfinedContentFiles>(
                     .as_ref()
                     .and_then(|values| values.get(index))
                     .copied()
-                    .flatten()
-                    .or_else(|| {
-                        let text = input.text.as_deref()?;
-                        let line_index = plain_index.as_ref()?;
-                        (prose_gate_has_positions(definition)
-                            && line_index
-                                .offset(text, finding.line, finding.column)
-                                .is_some())
-                        .then_some((finding.line, finding.column))
-                    });
+                    .flatten();
                 findings.push(protocol::Finding {
                     rule_id: finding.rule_id,
                     severity,

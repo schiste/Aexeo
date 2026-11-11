@@ -114,3 +114,42 @@ fn wrapped_quote_reports_the_middle_line_and_mapping_telemetry() {
     assert_eq!(telemetry["source_mapping"]["unmapped"], 0);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("interdite"));
 }
+
+#[test]
+fn plain_text_formats_report_exact_unicode_source_positions() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("article.txt");
+    let preset = dir.path().join("preset.toml");
+    fs::write(&file, "Avant\r\n\r\nÉlan interdit ici.\r\n").unwrap();
+    fs::write(&preset, "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['interdit']\n").unwrap();
+    for format in ["text", "paragraph-text"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                file.to_str().unwrap(),
+                "--input-format",
+                format,
+                "--preset",
+                "custom",
+                "--preset-source",
+                &format!("custom={}", preset.display()),
+                "--format",
+                "json",
+                "--telemetry",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(
+            report["source_locations"],
+            serde_json::json!([
+                {"gate_id":"terms", "finding_index":0, "line":3, "column":6}
+            ])
+        );
+        assert_eq!(telemetry["source_mapping"]["mapped"], 1);
+        assert_eq!(telemetry["source_mapping"]["unmapped"], 0);
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("interdit"));
+    }
+}

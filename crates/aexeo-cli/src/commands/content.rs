@@ -348,38 +348,66 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     // Keep the established projected finding coordinates unchanged. Supply
     // separately indexed source coordinates for positional prose and link gates.
     let mut source_locations = Vec::new();
-    if let (Some(map), Some(source), Some(_projected)) = (
-        source_map.as_ref(),
-        input.source_text.as_deref(),
-        input.text.as_deref(),
-    ) {
-        for (gate, result) in preset.gates.iter().zip(&report.gates) {
-            if let Some(positions) = aexeo_core::markdown_adapter::gate_source_positions(
-                map,
-                source,
-                &input,
-                gate,
-                result,
-                destinations.as_deref(),
-                link_observations.as_deref(),
-            ) {
-                positional_findings += positions.len();
-                for (finding_index, position) in positions.into_iter().enumerate() {
-                    if let Some((line, column)) = position {
-                        source_locations.push(SourceLocation {
-                            gate_id: &result.gate_id,
-                            finding_index,
-                            line,
-                            column,
-                        });
-                    }
+    let plain_source = if source_map.is_none() && source_complete {
+        input
+            .source_text
+            .as_deref()
+            .filter(|source| Some(*source) == input.text.as_deref())
+    } else {
+        None
+    };
+    let mapping_available = source_map.is_some() || plain_source.is_some();
+    let plain_index = plain_source
+        .filter(|_| {
+            preset
+                .gates
+                .iter()
+                .zip(&report.gates)
+                .any(|(gate, result)| {
+                    aexeo_core::markdown_adapter::prose_gate_has_positions(gate)
+                        && !result.findings.is_empty()
+                })
+        })
+        .map(aexeo_core::text_index::LineIndex::new);
+    for (gate, result) in preset.gates.iter().zip(&report.gates) {
+        let positions = source_map
+            .as_ref()
+            .and_then(|map| {
+                aexeo_core::markdown_adapter::gate_source_positions(
+                    map,
+                    input.source_text.as_deref()?,
+                    &input,
+                    gate,
+                    result,
+                    destinations.as_deref(),
+                    link_observations.as_deref(),
+                )
+            })
+            .or_else(|| {
+                aexeo_core::plain_text_adapter::gate_source_positions(
+                    plain_index.as_ref()?,
+                    plain_source?,
+                    gate,
+                    result,
+                )
+            });
+        if let Some(positions) = positions {
+            positional_findings += positions.len();
+            for (finding_index, position) in positions.into_iter().enumerate() {
+                if let Some((line, column)) = position {
+                    source_locations.push(SourceLocation {
+                        gate_id: &result.gate_id,
+                        finding_index,
+                        line,
+                        column,
+                    });
                 }
             }
         }
     }
 
     if let Some(started) = mapping_started {
-        let mapping = source_map.as_ref().map(|_| {
+        let mapping = mapping_available.then(|| {
             (
                 source_locations.len(),
                 positional_findings - source_locations.len(),
@@ -411,7 +439,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 "version": 1, "text_sha256": text_sha256, "metadata_sha256": metadata_sha256
             });
         }
-        if source_map.is_some() {
+        if mapping_available {
             output["source_locations"] = serde_json::to_value(&source_locations)?;
         }
         println!("{}", serde_json::to_string_pretty(&output)?);
@@ -432,10 +460,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 let location = source_locations.iter().find(|location| {
                     location.gate_id == gate.gate_id && location.finding_index == finding_index
                 });
-                println!(
-                    "  {}",
-                    finding_line(finding, location, source_map.is_some())
-                );
+                println!("  {}", finding_line(finding, location, mapping_available));
             }
         }
     }
