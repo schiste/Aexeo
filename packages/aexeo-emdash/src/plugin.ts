@@ -391,9 +391,17 @@ function recordAssessmentCoverage(ctx: SandboxCtx, result: EvaluationOutcome, do
   const collidingFindings = result.ok ? result.findings.filter((finding) => finding.aexeo_origin === "content_preset" &&
     (SITE_GRAPH_RULE_IDS.has(finding.rule_id) || !isLegacyCmsObservableFinding(finding))).length : 0;
   try { ctx.log?.info?.("aexeo.preset_coverage", { status: result.ok ? "evaluated" : "error", documents: documents.length, assessed_documents: assessedDocuments, missing_assessments: missingDocuments, assessment_errors: errorDocuments, passed, failed, not_checked: notChecked, colliding_findings: collidingFindings, mapping_reports: mappingReports, mapping_eligible: mappingEligible, mapping_mapped: mappingMapped, mapping_unmapped: mappingUnmapped }); } catch { /* best effort */ }
-  const withheld = result.ok ? result.findings.filter((finding) => finding.aexeo_origin !== "content_preset" &&
-    !isLegacyCmsObservableFinding(finding)).length : 0;
-  try { ctx.log?.info?.("aexeo.cms_finding_coverage", { status: result.ok ? "evaluated" : "error", rendered_findings_withheld: withheld }); } catch { /* best effort */ }
+  // Keep the existing counter's semantics, and separately account for body
+  // findings withheld because the corresponding document was incomplete or
+  // absent from this evaluation. These counters contain no routes or rule IDs.
+  const completeByRoute = new Map(documents.map((document) => [document.route, hasCompleteBody(document)]));
+  let withheld = 0, incompleteBodyWithheld = 0;
+  if (result.ok) for (const finding of result.findings) {
+    if (finding.aexeo_origin === "content_preset") continue;
+    if (!isLegacyCmsObservableFinding(finding)) withheld++;
+    else if (!isLegacyCmsObservableFinding(finding, completeByRoute.get(finding.path) ?? false)) incompleteBodyWithheld++;
+  }
+  try { ctx.log?.info?.("aexeo.cms_finding_coverage", { status: result.ok ? "evaluated" : "error", rendered_findings_withheld: withheld, incomplete_body_findings_withheld: incompleteBodyWithheld }); } catch { /* best effort */ }
 }
 
 // Shape emdash's runtime hands to content:afterSave handlers. The
