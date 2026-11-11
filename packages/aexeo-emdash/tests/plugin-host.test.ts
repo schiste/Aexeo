@@ -221,6 +221,25 @@ describe("EmDash content adaptation", () => {
     expect(invalid.body?.[0]?.children.map((span) => span.text)).toEqual(["Before ", " after"]);
   });
 
+  it("preserves prose and withholds coverage for malformed Portable Text metadata", () => {
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: { content: [
+      { _type: "block", _key: 42, style: "unsupported", listItem: "task", level: -1,
+        markDefs: [{ _key: "bad", _type: "link", href: 12 }, null], children: [
+          { _type: "span", text: "Before ", marks: ["ok", 3] },
+          { _type: "span", text: "after", _key: false, marks: null },
+        ] },
+    ] } };
+    const doc = contentItemToEmdashDocument(item);
+    expect(doc.body?.[0]?.children.map((span) => span.text)).toEqual(["Before ", "after"]);
+    expect(doc.body_capabilities).toEqual([]);
+    expect(doc.body?.[0]).toMatchObject({ markDefs: [], children: [{ _type: "span", text: "Before " }, { _type: "span", text: "after" }] });
+    expect(doc.body?.[0]?.style).toBeUndefined();
+    expect(doc.body?.[0]?.listItem).toBeUndefined();
+    expect(doc.body?.[0]?.level).toBeUndefined();
+    expect(doc.body?.[0]?.children[0]?.marks).toBeUndefined();
+    expect((item.data.content as Array<Record<string, unknown>>)[0]?.style).toBe("unsupported");
+  });
+
   it("retains valid mixed content around malformed items without claiming coverage", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: {
       content: [...body("Before"), null, { _type: "block", children: "broken" }, { prompt: "untyped" }, ...body("After")],

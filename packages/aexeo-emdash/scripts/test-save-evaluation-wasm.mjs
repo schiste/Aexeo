@@ -306,6 +306,22 @@ min=1
   for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/inline-component", rule), false);
 }
 
+// Malformed wire fields cannot discard neighboring prose or pass content gates.
+{
+  const page = item("malformed-spans", { data: { content: [{ _type: "block", style: "custom", markDefs: [{ _key: "bad", _type: "link", href: null }], children: [
+    { _type: "span", text: "Before ", marks: null },
+    { _type: "span", text: "after", marks: [1] },
+  ] }] } });
+  const host = fakeHost([page]);
+  const configured = createPlugin({ contentPreset: { name: "article", collections: ["pages"] } });
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  const document = host.store.get("document:/malformed-spans").document;
+  assert.deepEqual(document.body[0].children.map((span) => span.text), ["Before ", "after"]);
+  assert.deepEqual(document.body_capabilities, []);
+  assert.ok(host.store.get("findings:/malformed-spans").assessment.gates.some((gate) => gate.status === "not_checked"));
+  for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/malformed-spans", rule), false);
+}
+
 // Host-mapped inline content reaches the real evaluator in place.
 {
   const page = item("mapped-inline", { data: { content: [{ _type: "block", children: [
