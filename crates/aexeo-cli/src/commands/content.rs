@@ -471,12 +471,14 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 )
             })
             .or_else(|| {
-                aexeo_core::html_content_adapter::gate_source_positions(
+                aexeo_core::html_content_adapter::gate_source_positions_with_links(
                     html_map.as_ref()?,
                     input.source_text.as_deref()?,
                     &input,
                     gate,
                     result,
+                    destinations.as_deref(),
+                    link_observations.as_deref(),
                 )
             })
             .or_else(|| {

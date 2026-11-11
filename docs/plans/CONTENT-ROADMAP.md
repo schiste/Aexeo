@@ -154,9 +154,9 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] Explicit static HTML content adapter for CLI and content-change verdicts,
   including bounded projections and optional host link observations. Prose findings
   can carry source positions for byte-identical text and a verified, well-nested
-  literal HTML subset in CLI and content-change reports. Entity decoding, hidden
-  content, unsupported or malformed markup and heading/link positions remain
-  unmapped. Browser-rendered visibility remains unverified. CLI JSON and opt-in
+  literal HTML subset in CLI and content-change reports. Heading and link findings
+  in that subset map to opening tags, including ordered reachability observations.
+  Entity decoding, hidden content, unsupported or malformed markup remain unmapped. Browser-rendered visibility remains unverified. CLI JSON and opt-in
   telemetry identify the mapping capability; telemetry also reports projection
   availability and aggregate heading, paragraph and link counts.
 - [ ] Integrate optional host observers with other adapters and continue adding

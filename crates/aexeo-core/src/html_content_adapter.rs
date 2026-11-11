@@ -154,6 +154,8 @@ pub fn html_content(id: impl Into<String>, source: &str) -> Result<HtmlContent, 
 #[derive(Debug)]
 pub struct HtmlSourceMap {
     spans: Vec<(usize, usize, usize)>,
+    heading_starts: Vec<usize>,
+    link_starts: Vec<usize>,
     source_index: crate::text_index::LineIndex,
     projected_index: crate::text_index::LineIndex,
 }
@@ -237,6 +239,8 @@ pub fn html_source_map(source: &str, projected: &str) -> Option<HtmlSourceMap> {
     }
     let mut stack: Vec<String> = Vec::new();
     let mut spans = Vec::new();
+    let mut heading_starts = Vec::new();
+    let mut link_starts = Vec::new();
     let mut output = String::new();
     let mut cursor = 0;
     while cursor < source.len() {
@@ -304,6 +308,12 @@ pub fn html_source_map(source: &str, projected: &str) -> Option<HtmlSourceMap> {
             if !safe_mapping_attributes(rest, tag == "br") || stack.len() >= 256 {
                 return None;
             }
+            if matches!(tag.as_str(), "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
+                heading_starts.push(cursor);
+            }
+            if tag == "a" && crate::site::markup::attr_value(raw, "href").is_some() {
+                link_starts.push(cursor);
+            }
             let block = tag_breaks_text(&tag) && tag != "br";
             if block
                 && stack.iter().any(|parent| {
@@ -345,12 +355,34 @@ pub fn html_source_map(source: &str, projected: &str) -> Option<HtmlSourceMap> {
     }
     Some(HtmlSourceMap {
         spans,
+        heading_starts,
+        link_starts,
         source_index: crate::text_index::LineIndex::new(source),
         projected_index: crate::text_index::LineIndex::new(projected),
     })
 }
 
-/// Map only findings whose coordinates are defined in projected prose.
+impl crate::source_mapping::ContentSourceMap for HtmlSourceMap {
+    fn prose_position(
+        &self,
+        source: &str,
+        projected: &str,
+        line: usize,
+        column: usize,
+    ) -> Option<(usize, usize)> {
+        self.source_position(source, projected, line, column)
+    }
+    fn heading_position(&self, source: &str, index: usize) -> Option<(usize, usize)> {
+        self.source_index
+            .position(source, *self.heading_starts.get(index)?)
+    }
+    fn link_position(&self, source: &str, index: usize) -> Option<(usize, usize)> {
+        self.source_index
+            .position(source, *self.link_starts.get(index)?)
+    }
+}
+
+/// Map findings from the unchanged HTML projection, without link observations.
 pub fn gate_source_positions(
     map: &HtmlSourceMap,
     source: &str,
@@ -358,16 +390,48 @@ pub fn gate_source_positions(
     gate: &crate::content_gate::ContentGate,
     result: &crate::content_gate::ContentGateResult,
 ) -> Option<Vec<Option<(usize, usize)>>> {
-    if !crate::markdown_adapter::prose_gate_has_positions(gate) {
+    gate_source_positions_with_links(map, source, input, gate, result, None, None)
+}
+
+/// Map findings only when the element counts match the evaluated inputs.
+pub fn gate_source_positions_with_links(
+    map: &HtmlSourceMap,
+    source: &str,
+    input: &ContentInput,
+    gate: &crate::content_gate::ContentGate,
+    result: &crate::content_gate::ContentGateResult,
+    destinations: Option<&[String]>,
+    observations: Option<&[crate::content_gate::LinkReachabilityObservation]>,
+) -> Option<Vec<Option<(usize, usize)>>> {
+    use crate::content_gate::{ContentGate, heading_finding_indices};
+    if input
+        .headings
+        .as_ref()
+        .and_then(|headings| heading_finding_indices(gate, headings))
+        .is_some()
+        && input.headings.as_ref()?.len() != map.heading_starts.len()
+    {
         return None;
     }
-    let projected = input.text.as_deref()?;
-    Some(
-        result
-            .findings
-            .iter()
-            .map(|finding| map.source_position(source, projected, finding.line, finding.column))
-            .collect(),
+    if matches!(
+        gate,
+        ContentGate::LinkDestinations { .. } | ContentGate::LinkReachability { .. }
+    ) {
+        if destinations?.len() != map.link_starts.len() {
+            return None;
+        }
+        if observations.is_some_and(|values| values.len() != map.link_starts.len()) {
+            return None;
+        }
+    }
+    crate::source_mapping::map_gate_source_positions(
+        map,
+        source,
+        input,
+        gate,
+        result,
+        destinations,
+        observations,
     )
 }
 
@@ -431,6 +495,72 @@ mod tests {
             );
         }
         assert!(map.source_position(&html, projected, 1, 8_001).is_none());
+    }
+
+    #[test]
+    fn refuses_element_mapping_when_adapter_counts_do_not_match() {
+        use crate::content_gate::{
+            ContentEvaluationContext, ContentPreset, LinkReachabilityObservation,
+        };
+        let html = "<h1>Heading</h1><p><a href='/a'>a</a></p>";
+        let mut adapted = html_content("x", html).unwrap();
+        let map = html_source_map(html, adapted.input.text.as_deref().unwrap()).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='head'\nkind='heading_length'\nmax_chars=1\n[[gates]]\nid='links'\nkind='link_reachability'\n").unwrap();
+        let observations = [LinkReachabilityObservation::NotFound];
+        let capabilities = ContentEvaluationContext {
+            link_reachability: Some(&observations),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_destinations(&adapted.input, &capabilities, Some(&adapted.destinations))
+            .unwrap();
+        adapted
+            .input
+            .headings
+            .as_mut()
+            .unwrap()
+            .push("extra".into());
+        assert!(
+            gate_source_positions_with_links(
+                &map,
+                html,
+                &adapted.input,
+                &preset.gates[0],
+                &report.gates[0],
+                Some(&adapted.destinations),
+                None
+            )
+            .is_none()
+        );
+        let extra = vec!["/a".to_owned(), "/b".to_owned()];
+        assert!(
+            gate_source_positions_with_links(
+                &map,
+                html,
+                &adapted.input,
+                &preset.gates[1],
+                &report.gates[1],
+                Some(&extra),
+                Some(&observations)
+            )
+            .is_none()
+        );
+        let wrong_observations = [
+            LinkReachabilityObservation::NotFound,
+            LinkReachabilityObservation::NotFound,
+        ];
+        assert!(
+            gate_source_positions_with_links(
+                &map,
+                html,
+                &adapted.input,
+                &preset.gates[1],
+                &report.gates[1],
+                Some(&adapted.destinations),
+                Some(&wrong_observations)
+            )
+            .is_none()
+        );
     }
 
     #[test]
