@@ -916,7 +916,7 @@ fn markdown_link_gate_reports_measurements_and_opt_in_telemetry() {
 fn repeated_term_gate_emits_aggregate_telemetry_without_draft_text() {
     let dir = tempfile::tempdir().unwrap();
     let preset = dir.path().join("preset.toml");
-    std::fs::write(&preset, "version=1\nname='repeat'\n[[gates]]\nid='repeat'\nkind='repeated_terms'\nterms=['unique-term']\nmax_occurrences=1\nblocking=false\n").unwrap();
+    std::fs::write(&preset, "version=1\nname='repeat'\n[[gates]]\nid='repeat'\nkind='repeated_terms'\nterms=['unique-term']\nmax_occurrences=1\ncase_insensitive=true\nblocking=false\n").unwrap();
     let source = format!("custom={}", preset.display());
     let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
         .args([
@@ -939,7 +939,7 @@ fn repeated_term_gate_emits_aggregate_telemetry_without_draft_text() {
         .stdin
         .take()
         .unwrap()
-        .write_all(b"unique-term unique-term")
+        .write_all(b"Unique-Term UNIQUE-TERM")
         .unwrap();
     let output = child.wait_with_output().unwrap();
     assert!(output.status.success());
@@ -954,6 +954,7 @@ fn repeated_term_gate_emits_aggregate_telemetry_without_draft_text() {
     assert!(
         !String::from_utf8(output.stderr)
             .unwrap()
+            .to_lowercase()
             .contains("unique-term")
     );
 }

@@ -69,6 +69,9 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
   beyond the finding limit. This does not verify factual support.
 - [x] Configurable exact repeated-term check, with whole-word and substring modes
   ([PR #38](https://github.com/schiste/Aexeo/pull/38)).
+- [x] Repeated terms can opt into per-character Unicode lowercase matching, with
+  duplicate normalized terms rejected and source locations preserved; this is
+  not full Unicode case folding. The default remains case-sensitive.
 - [x] Offline link destination syntax and configurable scheme validation; this does not check reachability or link safety ([PR #46](https://github.com/schiste/Aexeo/pull/46)).
 - [x] Configurable duplicate-heading gate with heading capability and aggregate
   counts ([PR #49](https://github.com/schiste/Aexeo/pull/49)).
