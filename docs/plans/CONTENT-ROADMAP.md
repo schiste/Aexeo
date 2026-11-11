@@ -65,7 +65,9 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   boundaries ([PR #126](https://github.com/schiste/Aexeo/pull/126)), with
   Markdown/EmDash parity and explicit `not_checked` for missing paragraphs.
   It counts Unicode scalar values, not grapheme clusters or words.
-- [x] Sentence word and character limits can opt into paragraph-only input,
+- [x] Sentence word and character limits respect adapter block boundaries even
+  when adjacent blocks have no inserted separator, preserving the first character
+  and its location. They can opt into paragraph-only input,
   excluding headings while preserving adapter locations. Missing paragraph
   capability remains `not_checked`; existing presets keep their prior behavior.
 - [x] Optional sentence character-length gate ([PR #128](https://github.com/schiste/Aexeo/pull/128))
