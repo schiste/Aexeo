@@ -631,6 +631,18 @@ external observations cannot be replayed this way. It does not authenticate the
 previous timestamp, verify collection completeness or revision, or replace the
 host's authority and freshness checks. Aexeo never publishes content.
 
+Rust hosts using a link observer without custom gate extensions can compare a
+previous result with a newly evaluated verdict using `verify_observed_link_verdict`.
+The `aexeo.observed-link-binding.v1` extension hashes the same change, policy,
+limits, options and collection as the offline binding, plus the ordered observer
+requests and responses actually used. The verdict contains only hashes; the host
+must protect them as potentially guessable data. The caller must independently run
+a fresh evaluation with trusted inputs and observer, then compare before applying
+an action. This does not authenticate the observer, verify response freshness,
+prove collection completeness or bind hidden external state. Custom gate
+extensions remain unsupported and do not receive this binding. Older consumers
+that ignore the extension are not protected; the CLI revalidation remains offline-only.
+
 Rust EmDash hosts can use `content::evaluate_collection` to adapt a complete
 slice of documents; document and site gates without their inputs remain
 `not_checked`. JavaScript hosts can use `evaluateContentCollection` from the
