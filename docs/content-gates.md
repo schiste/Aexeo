@@ -603,7 +603,10 @@ For `content-change`, a host can explicitly supply a post-change collection
 with `--collection-snapshot snapshot.json`. Its JSON shape is
 `{"change_id":"example","complete":false,"items":[{"id":"article","metadata":{"slug":"article"}}]}`.
 The change ID must match, item IDs must be unique, proposed item metadata must
-match the change, and deleted or old renamed IDs must be absent. The snapshot
+match the change, and deleted or old renamed IDs must be absent. The v1 verdict
+subject does not bind the snapshot or entry metadata: a runner must retain and
+compare these and other evaluation inputs independently before applying a verdict.
+The snapshot
 must represent one common collection scope. The host asserts completeness and
 revision consistency; Aexeo cannot detect omitted unchanged records. A partial
 snapshot preserves observed duplicates while keeping the check `not_checked`.

@@ -173,6 +173,12 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   records and revision consistency. Collection gates run once per change, including
   delete-only changes; site impact remains separately not checked. CLI telemetry
   reports aggregate collection size and the completeness assertion only.
+- [ ] Bind change verdicts to all decision inputs, including entry metadata,
+  collection snapshots, effective policy, host options and external evidence,
+  with a versioned interoperable verification contract. The current v1 subject
+  binds content digests and base only; runners must independently retain and
+  compare the other inputs or fail closed. Do not claim an optional extension
+  protects legacy runners that ignore it.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
 - [x] Include a fingerprint of the CLI-resolved preset in corpus evaluation
   results and reject a policy change observed during a run. This identifies the
