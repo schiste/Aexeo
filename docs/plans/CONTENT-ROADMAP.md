@@ -131,6 +131,9 @@ scenario, not as a representative benchmark or an assessment of Aeptus overall.
 - [x] Allow explicit acceptance of a conflicting human verdict into a new private
   corpus copy, preserving the former proposed label and review provenance. This
   supports curation; it does not itself establish reviewer independence.
+- [x] Optional corpus strata report aggregate metrics and separately bound-review
+  metrics by declared language or content category, including missing labels.
+  The labels are unverified and results can contain repeated inputs.
 - [ ] Independently reviewed, diverse evaluation corpus and held-out metrics.
   A synthetic, explicitly unreviewed starter and evaluator were delivered in
   [PR #32](https://github.com/schiste/Aexeo/pull/32); they do not establish

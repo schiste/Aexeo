@@ -125,6 +125,14 @@ def validate_corpus(corpus):
         ids.add(identifier)
         if "metadata" in item:
             metadata_hash(item["metadata"])
+        if "strata" in item:
+            strata = item["strata"]
+            def valid_label(value):
+                return (isinstance(value, str) and 1 <= len(value) <= 64
+                        and all(c.isascii() and (c.isalnum() or c in "._:-") for c in value))
+            if (not isinstance(strata, dict) or len(strata) > 8
+                    or any(not valid_label(key) or not valid_label(value) for key, value in strata.items())):
+                raise ValueError("strata must contain at most 8 ASCII category names and values of 1 to 64 characters")
         if split not in {"development", "holdout"} or not isinstance(text, str):
             raise ValueError("invalid example split or text")
         if text in text_splits and text_splits[text] != split:
@@ -269,6 +277,7 @@ def evaluate(binary, corpus, split, review_log=None):
     unique_reviewed_examples = 0
     reviewed_examples = 0
     unbound_reviewed_examples = 0
+    strata_results = {}
     durations = []
     input_format = corpus.get("input_format")
     if input_format not in (None, "text", "markdown"):
@@ -312,11 +321,21 @@ def evaluate(binary, corpus, split, review_log=None):
                 raise ValueError(f"missing or invalid gate for {item['id']}")
             actual, expected = gates[0]["status"], item["expected"]
             record_result(counts, actual, expected)
+            bound_review = item.get("review_status") == "reviewed" and review_is_bound(item)
+            for dimension, label in item.get("strata", {}).items():
+                bucket = strata_results.setdefault(dimension, {}).setdefault(
+                    label, {"counts": empty_counts(), "examples": 0,
+                            "reviewed_counts": empty_counts(), "reviewed_examples": 0})
+                bucket["examples"] += 1
+                record_result(bucket["counts"], actual, expected)
+                if bound_review:
+                    bucket["reviewed_examples"] += 1
+                    record_result(bucket["reviewed_counts"], actual, expected)
             unique = input_groups[input_key(item)][0] == 1
             if unique:
                 record_result(unique_counts, actual, expected)
             if item.get("review_status") == "reviewed":
-                if review_is_bound(item):
+                if bound_review:
                     reviewed_examples += 1
                     record_result(reviewed_counts, actual, expected)
                     if unique:
@@ -342,6 +361,16 @@ def evaluate(binary, corpus, split, review_log=None):
               "unique_input_metrics": classification_metrics(unique_counts, input_coverage["unique_input_examples"]),
               "unique_reviewed_input_metrics": classification_metrics(unique_reviewed_counts, unique_reviewed_examples),
               "fresh_process_p95_ms": durations[math.ceil(len(durations) * .95) - 1]}
+    result["strata"] = {
+        dimension: {
+            "unlabeled_examples": len(examples) - sum(bucket["examples"] for bucket in buckets.values()),
+            "unlabeled_reviewed_examples": reviewed_examples - sum(bucket["reviewed_examples"] for bucket in buckets.values()),
+            "groups": {label: {
+                "metrics": classification_metrics(bucket["counts"], bucket["examples"]),
+                "reviewed_metrics": classification_metrics(bucket["reviewed_counts"], bucket["reviewed_examples"]),
+            } for label, bucket in sorted(buckets.items())},
+        } for dimension, buckets in sorted(strata_results.items())
+    }
     if review_metrics is not None:
         result["historical_review_events"] = review_metrics
     return result

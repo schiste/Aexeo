@@ -307,6 +307,23 @@ checks. Retain those separately when comparing runs. Existing human labels and
 historical review events are not bound to this fingerprint; they remain useful
 for comparison across policies and are not proof of independent review.
 
+### Comparing corpus categories
+
+Examples can optionally declare up to eight `strata` categories, such as
+`"strata": {"language": "fr", "content_type": "article"}`. Names and values
+must be 1–64 ASCII letters, digits, `.`, `_`, `:` or `-`. The evaluator adds
+per-category counts, precision, recall and unchecked rates for all examples and,
+separately, reviews bound to their text, metadata and expected status. Each
+dimension also reports examples and bound reviews without a label. An absent `strata` object is
+valid; these labels do not affect the evaluated content or policy fingerprint.
+
+Labels are supplied by the corpus author, are not independently verified or
+bound to the human review, and appear verbatim in the local JSON output. Use
+coarse categories, not names, IDs or sensitive data. Small groups are not
+representative; these metrics include repeated inputs, so also inspect the
+existing unique-input metrics and source-group coverage. Corpus results are
+local and do not transmit data automatically.
+
 ### Resolving a human review disagreement
 
 A reviewer can explicitly replace an unreviewed proposed corpus label when their
