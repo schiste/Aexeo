@@ -22,6 +22,27 @@ class EvaluateTests(unittest.TestCase):
         self.policy_patch.start()
         self.addCleanup(self.policy_patch.stop)
 
+    def test_blind_log_evaluates_without_false_model_comparison(self):
+        text = "private example"
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": [
+            {"id": "e", "split": "holdout", "text": text, "expected": "passed"}]}
+        base = {"example_id": "e", "reviewer": "r1", "method": "manual", "reviewer_status": "passed",
+                "text_sha256": hashlib.sha256(text.encode()).hexdigest(), "rubric_sha256": "a" * 64}
+        log = {"version": 4, "gate_id": "g", "events": [base, dict(base, reviewer="r2", reviewer_status="failed")]}
+        response = SimpleNamespace(returncode=0, stdout='{"gates":[{"gate_id":"g","status":"passed"}]}')
+        with patch.object(eval_module.subprocess, "run", return_value=response):
+            result = eval_module.evaluate("cli", corpus, "holdout", review_log=log)
+        self.assertEqual(result["historical_review_events"]["disagreed_examples"], 1)
+        self.assertIsNone(result["historical_review_events"]["override_rate"])
+        self.assertNotIn("private", json.dumps(result))
+        log["events"][0]["model_status"] = "passed"
+        with self.assertRaisesRegex(ValueError, "model verdict"):
+            eval_module.aggregate_review_events(corpus, "holdout", log)
+        del log["events"][0]["model_status"]
+        corpus["fixture_kind"] = "synthetic_regression"
+        with self.assertRaisesRegex(ValueError, "synthetic"):
+            eval_module.aggregate_review_events(corpus, "holdout", log)
+
     def test_repeated_inputs_are_reported_and_excluded_from_unique_metrics(self):
         text = "private repeated text"
         reviewed = {"reviewer": "r", "method": "manual", "text_sha256": hashlib.sha256(text.encode()).hexdigest(), "expected": "passed"}

@@ -164,9 +164,64 @@ def validate_corpus(corpus):
                 raise ValueError("invalid review report binding")
 
 
+def aggregate_blind_review_events(corpus, split, review_log):
+    """Validate and summarize blind opinions without claiming a model comparison."""
+    if corpus.get("fixture_kind") == "synthetic_regression":
+        raise ValueError("synthetic regression fixtures cannot be marked reviewed")
+    if review_log.get("gate_id") != corpus["gate_id"] or not isinstance(review_log.get("events"), list) or not review_log["events"]:
+        raise ValueError("blind review log gate or events are invalid")
+    by_id = {item["id"]: item for item in corpus["examples"]}
+    seen, rubric_by_id = set(), {}
+    opinions, counts_by_example = {}, {}
+    uncertain_reviews = 0
+    selected_events = 0
+    for event in review_log["events"]:
+        if not isinstance(event, dict) or "model_status" in event:
+            raise ValueError("blind review event cannot contain a model verdict")
+        identifier = event.get("example_id")
+        item = by_id.get(identifier)
+        reviewer, method, status = event.get("reviewer"), event.get("method"), event.get("reviewer_status")
+        if item is None or any(not isinstance(value, str) or not value.strip() for value in (reviewer, method)):
+            raise ValueError("blind review requires a known example and reviewer provenance")
+        key = (identifier, reviewer.strip())
+        if key in seen:
+            raise ValueError("duplicate blind example or reviewer")
+        seen.add(key)
+        if status not in {"passed", "failed", "uncertain"}:
+            raise ValueError("invalid blind review status")
+        if event.get("text_sha256") != hashlib.sha256(item["text"].encode("utf-8")).hexdigest():
+            raise ValueError("blind review does not match current example text")
+        if "metadata" in item:
+            if event.get("metadata_sha256") != metadata_hash(item["metadata"]):
+                raise ValueError("blind review does not match current metadata")
+        elif "metadata_sha256" in event:
+            raise ValueError("blind review metadata is absent from the example")
+        rubric = event.get("rubric_sha256")
+        if not isinstance(rubric, str) or len(rubric) != 64 or any(c not in "0123456789abcdef" for c in rubric):
+            raise ValueError("invalid blind review rubric fingerprint")
+        if identifier in rubric_by_id and rubric_by_id[identifier] != rubric:
+            raise ValueError("blind reviews for an example use different rubrics")
+        rubric_by_id[identifier] = rubric
+        if item["split"] != split:
+            continue
+        selected_events += 1
+        opinions.setdefault(identifier, set()).add(status)
+        counts_by_example[identifier] = counts_by_example.get(identifier, 0) + 1
+        uncertain_reviews += int(status == "uncertain")
+    return {"events": selected_events, "counts": None, "override_rate": None,
+            "model_comparison_available": False,
+            "reviewed_examples": len(opinions),
+            "multiple_reviewed_examples": sum(count >= 2 for count in counts_by_example.values()),
+            "disagreed_examples": sum({"passed", "failed"} <= statuses for statuses in opinions.values()),
+            "uncertain_reviews": uncertain_reviews,
+            "uncertain_examples": sum("uncertain" in statuses for statuses in opinions.values())}
+
+
 def aggregate_review_events(corpus, split, review_log, current_policy=None):
     """Summarize supplied historical reviews without exposing IDs or text."""
     version = review_log.get("version")
+    if type(version) is int and version == 4:
+        return aggregate_blind_review_events(corpus, split, review_log)
     if type(version) is not int or version not in {1, 2, 3} or review_log.get("gate_id") != corpus["gate_id"]:
         raise ValueError("review log version or gate does not match corpus")
     by_id = {item["id"]: item for item in corpus["examples"]}
