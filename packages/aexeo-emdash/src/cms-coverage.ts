@@ -3,10 +3,15 @@ import type { EmdashDocument, Finding } from "./types.js";
 // A CMS record is not the rendered page. These legacy rules inspect page
 // markup, generated metadata, page size or rendered citation context. The
 // synthetic HTML used by the bridge cannot establish their absence.
-const RENDERED_PAGE_RULE = /^(?:SEO|SOC|A11Y)\d{3}$/;
-const RENDERED_CONTEXT_RULES = new Set(["CNT001", "CNT002", "GEO008", "GEO010"]);
-// CMS records alone cannot establish the rendered site's link inventory.
+// The bridge synthesizes heading sections, link markup and head metadata. GEO
+// rules consume that synthetic page structure, not the host's rendered page.
+const RENDERED_PAGE_RULE = /^(?:SEO|SOC|A11Y|GEO)\d{3}$/;
+// Weak-anchor advice may use observed body text; graph conclusions require a
+// rendered-site inventory, irrespective of the CMS inventory's completeness.
 const UNVERIFIED_SITE_GRAPH_RULES = new Set(["LNK001", "LNK002", "LNK004"]);
+// Duplicate-page findings compare rendered visible text, which CMS records do
+// not provide even when their body fields and inventory are complete.
+const RENDERED_CONTEXT_RULES = new Set(["CNT001", "CNT002", "CNT005"]);
 
 export function isCmsObservableFinding(finding: Finding, bodyComplete = true): boolean {
   return finding.aexeo_origin === "content_preset" || isLegacyCmsObservableFinding(finding, bodyComplete);

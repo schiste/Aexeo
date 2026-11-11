@@ -387,6 +387,9 @@ function recordAssessmentCoverage(ctx: SandboxCtx, result: EvaluationOutcome): v
   const collidingFindings = result.ok ? result.findings.filter((finding) => finding.aexeo_origin === "content_preset" &&
     (SITE_GRAPH_RULE_IDS.has(finding.rule_id) || !isLegacyCmsObservableFinding(finding))).length : 0;
   try { ctx.log?.info?.("aexeo.preset_coverage", { status: result.ok ? "evaluated" : "error", passed, failed, not_checked: notChecked, colliding_findings: collidingFindings, mapping_reports: mappingReports, mapping_eligible: mappingEligible, mapping_mapped: mappingMapped, mapping_unmapped: mappingUnmapped }); } catch { /* best effort */ }
+  const withheld = result.ok ? result.findings.filter((finding) => finding.aexeo_origin !== "content_preset" &&
+    !isLegacyCmsObservableFinding(finding)).length : 0;
+  try { ctx.log?.info?.("aexeo.cms_finding_coverage", { status: result.ok ? "evaluated" : "error", rendered_findings_withheld: withheld }); } catch { /* best effort */ }
 }
 
 // Shape emdash's runtime hands to content:afterSave handlers. The

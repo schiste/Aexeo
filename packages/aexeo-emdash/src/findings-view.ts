@@ -348,7 +348,7 @@ export async function renderFindingsPage(
           ? documentRoutes.length === 0 ? "No CMS document results available — click Refresh to evaluate records." : "No findings reported for the available CMS checks. Inspect assessments for unchecked or failed evaluations."
           : `${findings.length} findings across ${routes.length} routes — ${errors.length} errors, ${warnings.length} warnings.`,
     },
-    { type: "context", text: "Rendered page markup, generated metadata and sitewide link inventory are not checked here. Audit the built site for page-level and link findings." },
+    { type: "context", text: "Rendered page markup, semantic sections, generated metadata, duplicate pages and sitewide links are not checked here. Audit the built site for page-level and link findings." },
     ...(failedAssessments || uncheckedGates ? [{ type: "context", text: `${failedAssessments} document evaluations failed; ${uncheckedGates} preset checks were not checked. Inspect individual documents for details.` }] : []),
     ...(sitewideAssessment?.status === "error" ? [{ type: "context", text: `Sitewide checks unavailable: ${sitewideAssessment.reason}. ${sitewideAssessment.detail}` }] : []),
     { type: "divider" },
@@ -480,7 +480,7 @@ export async function renderDocumentPanel(
                 ? `No findings for ${route} from the available CMS checks.`
                 : `${findings.length} findings — ${errors.length} errors, ${warnings.length} warnings.`,
       },
-      { type: "context", text: "Rendered page markup, generated metadata and sitewide link inventory are not checked here. Audit the built site for page-level and link findings." },
+      { type: "context", text: "Rendered page markup, semantic sections, generated metadata, duplicate pages and sitewide links are not checked here. Audit the built site for page-level and link findings." },
       ...(incomplete ? [{ type: "context", text: "Sitewide and cross-document checks are unavailable; refresh after resolving the CMS input error." }] : []),
       ...(assessment?.status === "error" ? [{ type: "context", text: `Evaluation failed: ${assessment.reason}. Findings are unavailable for this revision.` }] : []),
       ...(assessment?.status === "evaluated" ? [{ type: "context", text: `Content preset: ${assessment.preset}. ${summarizeGates(assessment.gates)}. Results cover only these configured checks.` }, ...assessment.gates.map((gate) => ({ type: "context", text: describeGate(gate) }))] : []),

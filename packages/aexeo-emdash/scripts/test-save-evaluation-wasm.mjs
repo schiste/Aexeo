@@ -544,12 +544,11 @@ fields=["description"]
 
   const expected = [
     ["/subject", "LNK003"],
-    ["/subject", "CNT005"],
   ];
   for (const [route, ruleId] of expected) {
     assert.equal(has(host, route, ruleId), true, `fixture must trigger ${ruleId} on ${route} at Refresh; got ${[...rulesAt(host, route)]}`);
   }
-  for (const ruleId of ["LNK001", "LNK002", "LNK004"]) {
+  for (const ruleId of ["LNK001", "LNK002", "LNK004", "CNT005", "GEO001", "GEO007", "GEO009", "GEO011", "GEO012", "GEO013"]) {
     assert.equal(has(host, "/subject", ruleId), false, `CMS-only Refresh must not assert ${ruleId}`);
   }
 
