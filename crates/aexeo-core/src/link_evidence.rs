@@ -3,6 +3,7 @@ use crate::site::markup::tag_breaks_text;
 use html5ever::{ParseOpts, parse_document, tendril::TendrilSink, tree_builder::TreeBuilderOpts};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use serde::{Deserialize, Serialize};
+use std::rc::Rc;
 use url::Url;
 
 use crate::link_graph::{LinkResolution, resolve_link, same_site_host};
@@ -75,7 +76,8 @@ pub struct HtmlLinkMetadata {
 struct Scope {
     context: LinkContext,
     component: Option<String>,
-    paragraph: Option<String>,
+    // Shared through the traversal; only emitted links need an owned copy.
+    paragraph: Option<Rc<str>>,
     locale: Option<String>,
     explicit: bool,
     /// Inside an `aside` or `header`, which `article` and `main` cannot promote to body.
@@ -343,7 +345,7 @@ pub fn extract_document(
                 });
             }
             if tag == "p" {
-                scope.paragraph = Some(text_content(&node));
+                scope.paragraph = Some(Rc::from(text_content(&node)));
             }
             let href = if tag == "a" {
                 attribute(&node, "href")
@@ -361,7 +363,7 @@ pub fn extract_document(
                     snapshot_date: snapshot_date.map(str::to_string),
                     context: scope.context,
                     component: scope.component.clone(),
-                    paragraph: scope.paragraph.clone(),
+                    paragraph: scope.paragraph.as_deref().map(str::to_owned),
                     conditional_markup: Some(scope.conditional_markup),
                     hidden_attribute: Some(scope.hidden_attribute),
                     collapsed_details: Some(scope.collapsed_details),
@@ -645,6 +647,29 @@ mod tests {
                 .map(|link| link.locale.as_deref())
                 .collect::<Vec<_>>(),
             vec![Some("fr"), None, Some("en"), None, Some("fr")]
+        );
+    }
+
+    #[test]
+    fn preserves_long_paragraph_context_for_each_link() {
+        let spans = "<span>word </span>".repeat(4_000);
+        let html = format!(
+            r#"<main><p>{spans}<a href="/one">first</a> middle <a href="/two">second</a></p></main>"#
+        );
+        let links = extract_links(&html, "https://example.org/", "https://example.org", None);
+        let expected = format!("{}first middle second", "word ".repeat(4_000));
+        assert_eq!(links.len(), 2);
+        assert!(
+            links
+                .iter()
+                .all(|link| link.paragraph.as_deref() == Some(expected.as_str()))
+        );
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| link.anchor.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "second"]
         );
     }
 

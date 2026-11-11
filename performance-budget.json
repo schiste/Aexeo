@@ -41,6 +41,10 @@
     "max_avg_ms": 300,
     "max_p95_ms": 600
   },
+  "link_graph/dense_paragraph_4000_spans": {
+    "max_avg_ms": 20,
+    "max_p95_ms": 40
+  },
   "link_graph/qualify_1000_pages_2000_findings": {
     "max_avg_ms": 300,
     "max_p95_ms": 600
