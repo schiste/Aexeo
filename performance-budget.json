@@ -52,5 +52,13 @@
   "content/emdash_projection_and_evaluation": {
     "max_avg_ms": 10,
     "max_p95_ms": 20
+  },
+  "editorial/single_line_1000_paragraphs": {
+    "max_avg_ms": 15,
+    "max_p95_ms": 30
+  },
+  "editorial/single_line_10000_paragraphs": {
+    "max_avg_ms": 100,
+    "max_p95_ms": 200
   }
 }
