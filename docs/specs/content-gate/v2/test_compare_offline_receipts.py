@@ -67,6 +67,30 @@ class CompareOfflineReceipts(unittest.TestCase):
         with self.assertRaises(comparison.VerificationError):
             comparison.compare_receipts(original, self.encode(changed), self.artifacts)
 
+    def test_opt_in_validates_schema_timestamp_summary_and_status(self):
+        try:
+            import jsonschema  # noqa: F401
+            import rfc3339_validator  # noqa: F401
+        except ImportError:
+            self.skipTest("optional verdict validation dependencies are unavailable")
+        receipt = copy.deepcopy(self.receipt)
+        receipt["verdict"] = json.loads((Path(__file__).parent.parent / "v1" / "examples" / "verdict-fail.json").read_text())
+        fresh = copy.deepcopy(receipt)
+        fresh["verdict"]["evaluated_at"] = "2026-01-02T03:04:05Z"
+        comparison.compare_receipts(self.encode(receipt), self.encode(fresh), self.artifacts, validate=True)
+        mutations = [
+            lambda v: v["subject"].pop("change_id"),
+            lambda v: v.update(evaluated_at="not-a-date"),
+            lambda v: v["summary"].update(checks=999),
+            lambda v: v.update(status="pass"),
+            lambda v: v["checks"][0].update(blocking="yes"),
+        ]
+        for mutate in mutations:
+            bad = copy.deepcopy(receipt)
+            mutate(bad["verdict"])
+            with self.subTest(mutation=mutate), self.assertRaises(comparison.VerificationError):
+                comparison.compare_receipts(self.encode(bad), self.encode(bad), self.artifacts, validate=True)
+
     def test_cli_is_private_and_does_not_authorize_publication(self):
         previous = self.root / "previous.json"
         fresh = self.root / "fresh.json"
@@ -82,6 +106,10 @@ class CompareOfflineReceipts(unittest.TestCase):
         self.assertIn("publication are not established", run.stdout)
         self.assertEqual(json.loads(run.stderr)["status"], "matched")
         self.assertNotIn(str(self.root), run.stderr)
+        unavailable = subprocess.run([sys.executable, "-S", *args[1:], "--validate-verdicts", "--telemetry"], capture_output=True, text=True)
+        self.assertNotEqual(unavailable.returncode, 0)
+        self.assertTrue(json.loads(unavailable.stderr.splitlines()[0])["verdict_validation_requested"])
+        self.assertNotIn(str(self.root), unavailable.stderr)
         fresh.write_text('{"schema":"x","schema":"y"}')
         run = subprocess.run(args + ["--telemetry"], capture_output=True, text=True)
         self.assertNotEqual(run.returncode, 0)

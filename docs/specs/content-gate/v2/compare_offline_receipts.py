@@ -6,6 +6,7 @@ check, not a v2 protocol, full verdict validation or publication authorization.
 import argparse
 import json
 import math
+from pathlib import Path
 import sys
 import time
 
@@ -58,6 +59,40 @@ def parse_receipt(data):
     return value, encoded
 
 
+def validate_verdict(verdict):
+    """Validate the public v1 schema and counts; no trust or freshness implied."""
+    try:
+        from jsonschema import Draft202012Validator, FormatChecker
+        from jsonschema.exceptions import ValidationError
+    except ImportError as error:
+        raise VerificationError("verdict schema validator is unavailable") from error
+    checker = FormatChecker()
+    if "date-time" not in checker.checkers:
+        raise VerificationError("RFC 3339 validation is unavailable")
+    try:
+        schema_path = Path(__file__).resolve().parent.parent / "v1" / "verdict.schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        Draft202012Validator(schema, format_checker=checker).validate(verdict)
+    except (OSError, ValueError, ValidationError, RecursionError) as error:
+        raise VerificationError("invalid verdict schema") from error
+    checks = verdict["checks"]
+    summary = verdict["summary"]
+    expected = {
+        "checks": len(checks),
+        "passed": sum(c["status"] == "passed" for c in checks),
+        "failed": sum(c["status"] == "failed" for c in checks),
+        "not_checked": sum(c["status"] == "not_checked" for c in checks),
+        "blocking_failed": sum(c["blocking"] and c["status"] == "failed" for c in checks),
+        "blocking_not_checked": sum(c["blocking"] and c["status"] == "not_checked" for c in checks),
+    }
+    if any(summary[key] != count for key, count in expected.items()):
+        raise VerificationError("inconsistent verdict summary")
+    expected_status = ("not_checked" if expected["blocking_not_checked"] else
+                       "fail" if expected["blocking_failed"] else "pass")
+    if verdict["status"] != "error" and verdict["status"] != expected_status:
+        raise VerificationError("inconsistent verdict status")
+
+
 def _typed_equal(left, right):
     # Python otherwise considers True == 1 and 1 == 1.0. Preserve JSON value
     # types and arrays; object order is irrelevant and all members are compared.
@@ -70,9 +105,12 @@ def _typed_equal(left, right):
     return left == right
 
 
-def compare_receipts(previous_bytes, fresh_bytes, artifacts):
+def compare_receipts(previous_bytes, fresh_bytes, artifacts, validate=False):
     previous, old_manifest = parse_receipt(previous_bytes)
     fresh, new_manifest = parse_receipt(fresh_bytes)
+    if validate:
+        validate_verdict(previous["verdict"])
+        validate_verdict(fresh["verdict"])
     # Verify both manifests against independently supplied, current artifacts.
     stats = verify_files(old_manifest, artifacts)
     verify_files(new_manifest, artifacts)
@@ -101,6 +139,7 @@ def main(argv=None):
         group = parser.add_mutually_exclusive_group(required=True)
         group.add_argument("--" + role.replace("_", "-"))
         group.add_argument("--" + role.replace("_", "-") + "-absent", action="store_true")
+    parser.add_argument("--validate-verdicts", action="store_true", help="validate v1 schemas and check summary consistency (requires jsonschema and RFC 3339 support)")
     parser.add_argument("--telemetry", action="store_true")
     args = parser.parse_args(argv)
     started = time.perf_counter() if args.telemetry else 0
@@ -108,7 +147,8 @@ def main(argv=None):
         if not args.telemetry:
             return
         event = {"event": "offline_receipt_comparison", "status": status,
-                 "duration_ms": round((time.perf_counter() - started) * 1000, 3)}
+                 "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+                 "verdict_validation_requested": args.validate_verdicts}
         if stats is not None:
             event.update(stats)
         try:
@@ -121,7 +161,7 @@ def main(argv=None):
         with _open_regular(args.fresh) as source:
             fresh = source.read(MAX_RECEIPT_BYTES + 1)
         artifacts = {role: getattr(args, role) for role in REQUIRED + OPTIONAL}
-        stats = compare_receipts(previous, fresh, artifacts)
+        stats = compare_receipts(previous, fresh, artifacts, validate=args.validate_verdicts)
     except (OSError, VerificationError):
         telemetry("error")
         print("Offline receipt comparison failed.", file=sys.stderr)

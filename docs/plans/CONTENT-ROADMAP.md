@@ -251,7 +251,8 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   artifact files against the standalone manifest. An independent Python
   comparator also checks two Aexeo offline receipts against host-supplied
   artifact bytes and compares their verdicts except the evaluation timestamp.
-  It does not fully validate the verdict schema, produce a fresh evaluation,
+  An opt-in comparison mode also checks v1 verdict schema, timestamps, summary
+  counts and status consistency. It does not produce a fresh evaluation,
   establish artifact freshness or authenticity, or authorize publication.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
 - [x] Preserve preset and input-report provenance when binding human feedback; report policy-matched reviewed metrics separately from legacy metrics. Fingerprints do not authenticate people or bind external evidence.

@@ -49,6 +49,14 @@ class ReceiptInterop(unittest.TestCase):
                 comparison_args = [sys.executable, str(COMPARATOR), str(previous), str(fresh)] + args[3:]
                 comparison = subprocess.run(comparison_args, capture_output=True, text=True)
                 self.assertEqual(comparison.returncode, 0, comparison.stderr)
+                try:
+                    import jsonschema  # noqa: F401
+                    import rfc3339_validator  # noqa: F401
+                except ImportError:
+                    pass
+                else:
+                    checked = subprocess.run(comparison_args + ["--validate-verdicts"], capture_output=True, text=True)
+                    self.assertEqual(checked.returncode, 0, checked.stderr)
                 changed_receipt["verdict"]["status"] = "fail"
                 fresh.write_text(json.dumps(changed_receipt), encoding="utf-8")
                 self.assertNotEqual(subprocess.run(comparison_args, capture_output=True).returncode, 0)
