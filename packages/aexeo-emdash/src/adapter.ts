@@ -382,12 +382,7 @@ function isPortableTextArray(value: unknown): value is PortableTextBlock[] {
     value.length > 0 &&
     value.every(
       (item) =>
-        isRecord(item) &&
-        item["_type"] === "block" &&
-        Array.isArray(item["children"]) &&
-        item["children"].every(
-          (child) => isPortableTextSpan(child),
-        ),
+        isPortableTextBlockCandidate(item) && isWireSafeBlock(item),
     )
   );
 }
@@ -398,6 +393,55 @@ function isPortableTextSpan(value: unknown): boolean {
 
 function isPortableTextBlockCandidate(value: unknown): value is Record<string, unknown> {
   return isRecord(value) && value["_type"] === "block" && Array.isArray(value["children"]);
+}
+
+// Mirror the fields consumed by the Rust bridge. An accepted block must not
+// fail deserialization or hide an unreadable link behind complete coverage.
+function isWireSafeSpan(value: unknown): boolean {
+  return isPortableTextSpan(value) && isRecord(value) &&
+    (value["_key"] == null || typeof value["_key"] === "string") &&
+    (value["marks"] === undefined || (Array.isArray(value["marks"]) && value["marks"].every((mark) => typeof mark === "string")));
+}
+
+function isWireSafeMarkDef(value: unknown): boolean {
+  return isRecord(value) && typeof value["_key"] === "string" && typeof value["_type"] === "string" &&
+    (value["_type"] !== "link" || typeof value["href"] === "string");
+}
+
+function isWireSafeBlock(block: Record<string, unknown>): boolean {
+  const level = block["level"];
+  return (block["_key"] == null || typeof block["_key"] === "string") &&
+    (block["style"] === undefined || (typeof block["style"] === "string" && ["normal", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote"].includes(block["style"]))) &&
+    (block["listItem"] == null || block["listItem"] === "bullet" || block["listItem"] === "number") &&
+    (level == null || (typeof level === "number" && Number.isInteger(level) && level >= 0 && level <= 0xffffffff)) &&
+    (block["markDefs"] === undefined || (Array.isArray(block["markDefs"]) && block["markDefs"].every(isWireSafeMarkDef))) &&
+    (block["children"] as unknown[]).every(isWireSafeSpan);
+}
+
+function normalizePortableBlock(block: Record<string, unknown>): { block: Record<string, unknown>; incomplete: boolean } {
+  const normalized = { ...block };
+  let incomplete = false;
+  if (normalized["_key"] != null && typeof normalized["_key"] !== "string") { delete normalized["_key"]; incomplete = true; }
+  if (normalized["style"] !== undefined && (typeof normalized["style"] !== "string" || !["normal", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote"].includes(normalized["style"]))) { delete normalized["style"]; incomplete = true; }
+  if (normalized["listItem"] != null && normalized["listItem"] !== "bullet" && normalized["listItem"] !== "number") { delete normalized["listItem"]; incomplete = true; }
+  const level = normalized["level"];
+  if (level != null && (typeof level !== "number" || !Number.isInteger(level) || level < 0 || level > 0xffffffff)) { delete normalized["level"]; incomplete = true; }
+  if (normalized["markDefs"] !== undefined) {
+    if (!Array.isArray(normalized["markDefs"])) { delete normalized["markDefs"]; incomplete = true; }
+    else {
+      const defs = normalized["markDefs"].filter(isWireSafeMarkDef);
+      if (defs.length !== normalized["markDefs"].length) { normalized["markDefs"] = defs; incomplete = true; }
+    }
+  }
+  normalized["children"] = (block["children"] as unknown[]).map((child) => {
+    if (!isPortableTextSpan(child) || !isRecord(child) || isWireSafeSpan(child)) return child;
+    const span = { ...child };
+    if (span["_key"] != null && typeof span["_key"] !== "string") delete span["_key"];
+    if (span["marks"] !== undefined && (!Array.isArray(span["marks"]) || !span["marks"].every((mark) => typeof mark === "string"))) delete span["marks"];
+    incomplete = true;
+    return span;
+  });
+  return { block: normalized, incomplete };
 }
 
 /** Portable Text can interleave ordinary text blocks with custom components. */
@@ -417,9 +461,10 @@ function mapMixedPortableText(blocks: unknown[], mappings?: CustomBlockMappings,
       continue;
     }
     if (isPortableTextBlockCandidate(block)) {
-      const projected = projectInlineBlock(block, mappings);
+      const normalized = normalizePortableBlock(block);
+      const projected = projectInlineBlock(normalized.block, mappings);
       result.push(projected.block);
-      capabilities = intersectCapabilities(capabilities, projected.capabilities);
+      capabilities = normalized.incomplete ? [] : intersectCapabilities(capabilities, projected.capabilities);
       continue;
     }
     if (!isRecord(block) || typeof block["_type"] !== "string" || block["_type"] === "block") {
