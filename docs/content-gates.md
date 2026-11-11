@@ -615,6 +615,20 @@ site impact of deletion and rename remains separately `not_checked`. Optional
 telemetry reports only item count and the supplied completeness flag. Rust hosts
 can use `evaluate_change_with_collection` and `ChangeCollection`.
 
+To revalidate a previous offline verdict, pass `--verify-verdict previous.json`
+to the same `content-change` invocation, with its current change, preset,
+collection, options, and a **different** `CONTENT_GATE_VERDICT_FILE` output path.
+Aexeo verifies the optional offline input fingerprint, reads and checks the
+current content bytes, reruns the gates, and compares the full result except for
+the evaluation timestamp. A mismatch, missing fingerprint, or unreadable input
+returns exit code 2 and does not write a new verdict. On a match, it writes the
+fresh verdict and returns its usual status code (0, 1, or 2). Always check the
+exit code; an output path may contain an older file from a previous invocation.
+This mode rejects `--extension-results` and `--check-link-reachability` because
+external observations cannot be replayed this way. It does not authenticate the
+previous timestamp, verify collection completeness or revision, or replace the
+host's authority and freshness checks. Aexeo never publishes content.
+
 Rust EmDash hosts can use `content::evaluate_collection` to adapt a complete
 slice of documents; document and site gates without their inputs remain
 `not_checked`. JavaScript hosts can use `evaluateContentCollection` from the

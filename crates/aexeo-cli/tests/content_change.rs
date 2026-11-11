@@ -519,3 +519,126 @@ fn explicit_collection_snapshot_is_bound_and_conservative() {
     assert!(!output.status.success());
     assert!(!dir.path().join("verdict.json").exists());
 }
+
+#[test]
+fn revalidates_previous_verdict_against_current_inputs_and_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
+    assert_eq!(
+        run(dir.path(), &input(), policy, &[]).status.code(),
+        Some(0)
+    );
+    let previous = dir.path().join("previous.json");
+    fs::copy(dir.path().join("verdict.json"), &previous).unwrap();
+    let path = previous.to_str().unwrap();
+    let args = ["--verify-verdict", path];
+    let valid = run(dir.path(), &input(), policy, &args);
+    assert_eq!(
+        valid.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&valid.stderr)
+    );
+
+    let mut changed = input();
+    changed["entries"][0]["metadata"] = serde_json::json!({"slug":"different"});
+    assert_eq!(
+        run(dir.path(), &changed, policy, &args).status.code(),
+        Some(2)
+    );
+    let other_policy = policy.replace("min=1", "min=2");
+    assert_eq!(
+        run(dir.path(), &input(), &other_policy, &args)
+            .status
+            .code(),
+        Some(2)
+    );
+
+    let mut tampered: serde_json::Value =
+        serde_json::from_slice(&fs::read(&previous).unwrap()).unwrap();
+    tampered["checks"][0]["status"] = "failed".into();
+    fs::write(&previous, serde_json::to_vec(&tampered).unwrap()).unwrap();
+    let result = run(dir.path(), &input(), policy, &args);
+    assert_eq!(result.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&result.stderr)
+            .contains("differs from the current offline evaluation")
+    );
+}
+
+#[test]
+fn previous_verdict_verification_rejects_opaque_inputs_and_output_alias() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
+    assert_eq!(
+        run(dir.path(), &input(), policy, &[]).status.code(),
+        Some(0)
+    );
+    let verdict = dir.path().join("verdict.json");
+    let path = verdict.to_str().unwrap();
+    assert_eq!(
+        run(dir.path(), &input(), policy, &["--verify-verdict", path])
+            .status
+            .code(),
+        Some(2)
+    );
+    assert_eq!(
+        run(
+            dir.path(),
+            &input(),
+            policy,
+            &["--verify-verdict", path, "--check-link-reachability"]
+        )
+        .status
+        .code(),
+        Some(2)
+    );
+}
+
+#[test]
+fn revalidation_detects_changed_collection_without_overwriting_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
+    let snapshot = dir.path().join("collection.json");
+    fs::write(
+        &snapshot,
+        r#"{"change_id":"example","complete":true,"items":[{"id":"article","text":null}]}"#,
+    )
+    .unwrap();
+    let snapshot_path = snapshot.to_str().unwrap();
+    assert_eq!(
+        run(
+            dir.path(),
+            &input(),
+            policy,
+            &["--collection-snapshot", snapshot_path]
+        )
+        .status
+        .code(),
+        Some(0)
+    );
+    let previous = dir.path().join("previous.json");
+    fs::copy(dir.path().join("verdict.json"), &previous).unwrap();
+    let old_output = fs::read(dir.path().join("verdict.json")).unwrap();
+    fs::write(
+        &snapshot,
+        r#"{"change_id":"example","complete":false,"items":[{"id":"article","text":null}]}"#,
+    )
+    .unwrap();
+    let output = run(
+        dir.path(),
+        &input(),
+        policy,
+        &[
+            "--collection-snapshot",
+            snapshot_path,
+            "--verify-verdict",
+            previous.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        fs::read(dir.path().join("verdict.json")).unwrap(),
+        old_output
+    );
+}
