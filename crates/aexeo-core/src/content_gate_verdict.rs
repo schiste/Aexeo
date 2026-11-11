@@ -112,6 +112,121 @@ pub struct ChangeCollection<'a> {
     pub complete: bool,
 }
 
+/// Identifier of Aexeo's opt-in offline evaluation-input fingerprint.
+pub const OFFLINE_BINDING_EXTENSION: &str = "aexeo.offline-input-binding.v1";
+
+#[derive(serde::Serialize)]
+struct OfflineBinding<'a> {
+    domain: &'static str,
+    engine_version: &'static str,
+    change: &'a Change,
+    preset: &'a ContentPreset,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    plain_text_paragraphs: bool,
+    collection: Option<OfflineCollection<'a>>,
+}
+
+#[derive(serde::Serialize)]
+struct OfflineCollection<'a> {
+    change_id: &'a str,
+    items: &'a [ContentInput],
+    complete: bool,
+}
+
+fn offline_binding_digest(
+    change: &Change,
+    preset: &ContentPreset,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    plain_text_paragraphs: bool,
+    collection: Option<&ChangeCollection<'_>>,
+) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::{self, Write};
+    struct DigestWriter(Sha256);
+    impl Write for DigestWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.update(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let material = OfflineBinding {
+        domain: OFFLINE_BINDING_EXTENSION,
+        engine_version: env!("CARGO_PKG_VERSION"),
+        change,
+        preset,
+        max_entry_bytes,
+        max_total_bytes,
+        plain_text_paragraphs,
+        collection: collection.map(|c| OfflineCollection {
+            change_id: c.change_id,
+            items: c.items,
+            complete: c.complete,
+        }),
+    };
+    let mut writer = DigestWriter(Sha256::new());
+    serde_json::to_writer(&mut writer, &material)?;
+    Ok(format!("{:x}", writer.0.finalize()))
+}
+
+fn subject_for_change(change: &Change) -> Subject {
+    Subject {
+        change_id: change.change_id.clone(),
+        base: change.base.clone(),
+        entries: change
+            .entries
+            .iter()
+            .map(|entry| SubjectEntry {
+                entity_id: entry.entity_id.clone(),
+                sha256: entry.after.as_ref().map(|state| state.sha256.clone()),
+            })
+            .collect(),
+    }
+}
+
+/// Verify the opt-in offline fingerprint against the inputs the host intends to
+/// apply. This does not validate the verdict's status, authenticity, content
+/// sources, collection completeness, or freshness; callers must do that too.
+/// A verdict without this extension, including one made with an external host
+/// callback, fails verification. Recompute with the same Aexeo engine version.
+pub fn verify_offline_input_binding(
+    verdict: &Verdict,
+    change: &Change,
+    preset: &ContentPreset,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    plain_text_paragraphs: bool,
+    collection: Option<&ChangeCollection<'_>>,
+) -> Result<()> {
+    if verdict.validator.name != "aexeo" || verdict.validator.version != env!("CARGO_PKG_VERSION") {
+        bail!("offline binding requires the same Aexeo engine version");
+    }
+    if verdict.schema != VERDICT_SCHEMA || verdict.subject != subject_for_change(change) {
+        bail!("verdict subject does not match the change");
+    }
+    let expected = offline_binding_digest(
+        change,
+        preset,
+        max_entry_bytes,
+        max_total_bytes,
+        plain_text_paragraphs,
+        collection,
+    )?;
+    let actual = verdict
+        .extensions
+        .as_ref()
+        .and_then(|extensions| extensions.get(OFFLINE_BINDING_EXTENSION))
+        .and_then(serde_json::Value::as_str);
+    if actual != Some(expected.as_str()) {
+        bail!("offline evaluation input binding is missing or does not match");
+    }
+    Ok(())
+}
+
 /// Explicitly supplied host capabilities. No extension is executed by a preset.
 #[derive(Default)]
 pub struct ChangeEvaluationHost<'a, 'b> {
@@ -158,6 +273,18 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
     collection: Option<ChangeCollection<'_>>,
 ) -> Result<Verdict> {
     preset.validate()?;
+    let offline_binding = if host.options.link_observer.is_none() && host.extensions.is_none() {
+        Some(offline_binding_digest(
+            change,
+            preset,
+            max_entry_bytes,
+            max_total_bytes,
+            host.options.plain_text_paragraphs,
+            collection.as_ref(),
+        )?)
+    } else {
+        None
+    };
     if evaluated_at.is_empty() {
         bail!("evaluation timestamp is empty");
     }
@@ -505,18 +632,7 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
     Ok(Verdict {
         schema: VERDICT_SCHEMA.into(),
         status,
-        subject: Subject {
-            change_id: change.change_id.clone(),
-            base: change.base.clone(),
-            entries: change
-                .entries
-                .iter()
-                .map(|entry| SubjectEntry {
-                    entity_id: entry.entity_id.clone(),
-                    sha256: entry.after.as_ref().map(|state| state.sha256.clone()),
-                })
-                .collect(),
-        },
+        subject: subject_for_change(change),
         validator: Validator {
             name: "aexeo".into(),
             version: env!("CARGO_PKG_VERSION").into(),
@@ -529,7 +645,13 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
         checks,
         findings,
         findings_omitted: (omitted > 0).then_some(omitted),
-        extensions: None,
+        extensions: offline_binding.map(|digest| {
+            std::iter::once((
+                OFFLINE_BINDING_EXTENSION.into(),
+                serde_json::Value::String(digest),
+            ))
+            .collect()
+        }),
     })
 }
 
@@ -615,6 +737,127 @@ mod tests {
             1024,
             1024,
         )
+    }
+
+    #[test]
+    fn offline_binding_detects_changed_inputs_and_requires_same_engine() {
+        let input = change();
+        let policy = preset(1);
+        let verdict = evaluate(&input, 1).unwrap();
+        let verify = |v: &Verdict, c: &Change, p: &ContentPreset, limit, paragraphs, collection| {
+            verify_offline_input_binding(v, c, p, limit, 1024, paragraphs, collection)
+        };
+        assert!(verify(&verdict, &input, &policy, 1024, false, None).is_ok());
+        let mut modified = input.clone();
+        modified.entries[0].metadata = Some(std::collections::BTreeMap::from([(
+            "slug".into(),
+            "new".into(),
+        )]));
+        assert!(verify(&verdict, &modified, &policy, 1024, false, None).is_err());
+        modified = input.clone();
+        modified.entries[0].media_type = "text/markdown".into();
+        assert!(verify(&verdict, &modified, &policy, 1024, false, None).is_err());
+        assert!(verify(&verdict, &input, &preset(2), 1024, false, None).is_err());
+        assert!(verify(&verdict, &input, &policy, 1023, false, None).is_err());
+        assert!(verify(&verdict, &input, &policy, 1024, true, None).is_err());
+        let items = vec![ContentInput {
+            id: "article".into(),
+            ..Default::default()
+        }];
+        let collection = ChangeCollection {
+            change_id: "x",
+            items: &items,
+            complete: true,
+        };
+        assert!(verify(&verdict, &input, &policy, 1024, false, Some(&collection)).is_err());
+        let mut missing = verdict.clone();
+        missing.extensions = None;
+        assert!(verify(&missing, &input, &policy, 1024, false, None).is_err());
+        let mut wrong_subject = verdict.clone();
+        wrong_subject.subject.change_id = "other".into();
+        assert!(verify(&wrong_subject, &input, &policy, 1024, false, None).is_err());
+        let mut wrong_version = verdict.clone();
+        wrong_version.validator.version = "different".into();
+        assert!(verify(&wrong_version, &input, &policy, 1024, false, None).is_err());
+    }
+
+    #[test]
+    fn offline_binding_covers_collection_and_rejects_dynamic_observers() {
+        let input = change();
+        let policy = preset(1);
+        let items = vec![ContentInput {
+            id: "article".into(),
+            ..Default::default()
+        }];
+        let collection = ChangeCollection {
+            change_id: "x",
+            items: &items,
+            complete: true,
+        };
+        let verdict = evaluate_change_with_collection(
+            &input,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+            ChangeEvaluationHost::default(),
+            Some(ChangeCollection {
+                change_id: "x",
+                items: &items,
+                complete: true,
+            }),
+        )
+        .unwrap();
+        assert!(
+            verify_offline_input_binding(
+                &verdict,
+                &input,
+                &policy,
+                1024,
+                1024,
+                false,
+                Some(&collection)
+            )
+            .is_ok()
+        );
+        let partial = ChangeCollection {
+            change_id: "x",
+            items: &items,
+            complete: false,
+        };
+        assert!(
+            verify_offline_input_binding(
+                &verdict,
+                &input,
+                &policy,
+                1024,
+                1024,
+                false,
+                Some(&partial)
+            )
+            .is_err()
+        );
+        let mut observer =
+            |_: &str,
+             _: &[String]|
+             -> Result<Vec<crate::content_gate::LinkReachabilityObservation>> {
+                Ok(vec![])
+            };
+        let observed = evaluate_change_with_observer(
+            &input,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+            Some(&mut observer),
+        )
+        .unwrap();
+        assert!(
+            verify_offline_input_binding(&observed, &input, &policy, 1024, 1024, false, None)
+                .is_err()
+        );
     }
 
     #[test]
@@ -950,6 +1193,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(verdict.status, VerdictStatus::Pass);
+        assert!(
+            verify_offline_input_binding(&verdict, &input, &policy, 1024, 1024, false, None)
+                .is_err()
+        );
         assert_eq!(extension.0.get(), 2);
     }
 
