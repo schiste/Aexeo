@@ -141,7 +141,9 @@ An optional `capabilities` array limits the assertion just as for block mappings
 omitting it asserts all body capabilities. Only declare these mappings after
 verifying the host renderer. Unknown components or invalid fields keep surrounding
 spans but leave the body unverified. Mapped spans do not have original CMS source
-locations because they are derived from component fields.
+locations because they are derived from component fields. Unchanged surrounding
+spans can retain their original paths even when component projection changes their
+position; ambiguous aliases and oversized or cyclic records remain unmapped.
 
 The array form asserts that all four capabilities are complete. If a host can
 only establish some capabilities, use the object form instead:

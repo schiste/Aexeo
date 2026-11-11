@@ -340,6 +340,36 @@ min=1
   assert.ok(host.store.get("findings:/mapped-inline").assessment.gates.some((gate) => gate.status === "passed"));
 }
 
+// Original spans keep exact paths when a mapped inline component changes indices.
+{
+  const page = item("inline-locations", { data: { content: [{ _type: "block", children: [
+    { _type: "span", text: "Alpha ", marks: [] },
+    { _type: "inlineBadge", label: "Inserted ", href: "/target", title: "Linked" },
+    { _type: "span", text: " Omega", marks: [] },
+  ] }] } });
+  const preset = `version=1
+name="locations"
+[[gates]]
+id="terms"
+kind="forbidden_terms"
+terms=["Alpha", "Inserted", "Omega"]
+blocking=false
+`;
+  const configured = createPlugin({ contentPreset: { name: "locations", sources: { locations: preset } },
+    blockMappings: { inlineBadge: { inline: [{ kind: "text", field: "label" }, { kind: "link", field: "title", hrefField: "href" }] } } });
+  const host = fakeHost([page]);
+  const events = [];
+  host.ctx.log.info = (name, data) => events.push([name, data]);
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  const findings = host.store.get("findings:/inline-locations").findings.filter((finding) => finding.rule_id === "terms");
+  assert.equal(findings.length, 3);
+  assert.deepEqual(findings[0].aexeo_cms_location, { path: ["data", "content", 0, "children", 0, "text"], utf16_offset: 0 });
+  assert.equal(findings[1].aexeo_cms_location, undefined);
+  assert.deepEqual(findings[2].aexeo_cms_location, { path: ["data", "content", 0, "children", 2, "text"], utf16_offset: 1 });
+  assert.deepEqual(events.find(([name]) => name === "aexeo.cms_location_coverage")?.[1], { eligible: 3, mapped: 2, unmapped: 1 });
+  assert.equal(JSON.stringify(events).includes("Omega"), false);
+}
+
 // A selected but unobserved field cannot certify the remaining body as complete.
 {
   const partial = item("missing-selected-field", { data: { introduction: [block("a", "Before")], conclusion: [block("b", "After")] } });

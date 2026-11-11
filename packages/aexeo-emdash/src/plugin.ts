@@ -521,7 +521,7 @@ export function isSiteGraphFinding(finding: Finding): boolean {
   return finding.aexeo_origin !== "content_preset" && SITE_GRAPH_RULE_IDS.has(finding.rule_id);
 }
 
-/** Bind a projected position only when the adapter preserved its source block. */
+/** Bind projected positions only to unchanged source blocks or spans. */
 function withCmsSourceLocation(finding: Finding, stored: StoredDocument | undefined): Finding {
   if (finding.aexeo_cms_location !== undefined) {
     finding = { ...finding };
@@ -529,12 +529,14 @@ function withCmsSourceLocation(finding: Finding, stored: StoredDocument | undefi
   }
   const location = finding.aexeo_source_location;
   if (finding.aexeo_origin !== "content_preset" || !location || !stored) return finding;
-  const path = stored.meta.bodySourcePaths?.[location.block_index];
+  const blockPath = stored.meta.bodySourcePaths?.[location.block_index];
+  const spanPath = stored.meta.bodySourceSpanPaths?.[location.block_index]?.[location.span_index];
+  const path = blockPath ? [...blockPath, "children", location.span_index, "text"] : spanPath;
   const text = stored.document.body?.[location.block_index]?.children[location.span_index]?.text;
   const offset = location.utf16_offset;
   if (!path || typeof text !== "string" || !Number.isSafeInteger(offset) || offset < 0 || offset > text.length ||
       (offset > 0 && offset < text.length && /[\uD800-\uDBFF]/.test(text[offset - 1]!) && /[\uDC00-\uDFFF]/.test(text[offset]!))) return finding;
-  return { ...finding, aexeo_cms_location: { path: [...path, "children", location.span_index, "text"], utf16_offset: offset } };
+  return { ...finding, aexeo_cms_location: { path, utf16_offset: offset } };
 }
 
 function countCmsLocations(counts: { eligible: number; mapped: number }, findings: readonly Finding[]): void {
