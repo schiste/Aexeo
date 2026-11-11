@@ -28,7 +28,7 @@ Markdown and EmDash adapters report where each heading, paragraph, list item and
 
 Literal matching for `forbidden_terms`, `repeated_terms` and the claim of an evidence gate ignores whitespace differences: `best price` matches `best` and `price` separated by any run of whitespace without a blank line. Finding positions stay in the original text. Quote anchors in evidence sources remain exact.
 
-`forbidden_terms` accepts `whole_words` (default `true`, as in `repeated_terms`; set `false` for substring matches, the behaviour before this option existed) and `case_insensitive` (default `false`). Case-insensitive matching lowercases each character, without full Unicode case folding. Word boundaries use Unicode alphanumeric characters and underscores. Thai, Lao, Myanmar, Khmer, CJK and Hangul characters do not act as word characters, because these scripts do not reliably separate words with spaces; a term in them matches inside surrounding text.
+`forbidden_terms` and `repeated_terms` accept `whole_words` (default `true`; set `false` for substring matches) and `case_insensitive` (default `false`). Case-insensitive matching lowercases each character, without full Unicode case folding. Word boundaries use Unicode alphanumeric characters and underscores. Thai, Lao, Myanmar, Khmer, CJK and Hangul characters do not act as word characters, because these scripts do not reliably separate words with spaces; a term in them matches inside surrounding text.
 
 ### Input limits
 
@@ -506,10 +506,14 @@ kind = "repeated_terms"
 terms = ["very", "really"]
 max_occurrences = 2
 whole_words = true
+case_insensitive = true
 blocking = false
 ```
 
-Matching is case-sensitive and non-overlapping. By default Unicode alphanumeric
+Matching is non-overlapping and case-sensitive by default. The optional
+case-insensitive mode lowercases each character; it does not perform full Unicode
+case folding. Equivalent configured terms after case and whitespace normalization
+are rejected in this mode to avoid duplicate findings. By default Unicode alphanumeric
 characters and underscores define word boundaries; set `whole_words = false`
 for substring matches. It does not infer synonyms, grammar, or editorial intent.
 Each finding points to the first occurrence beyond the configured maximum,

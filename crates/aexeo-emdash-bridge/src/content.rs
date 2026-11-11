@@ -773,6 +773,37 @@ mod tests {
     }
 
     #[test]
+    fn case_insensitive_repetition_matches_markdown_and_maps_emdash() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/t","title":"T","body":[{"children":[{"_type":"span","text":"Café"}]},{"children":[{"_type":"span","text":"😀 CAFÉ"}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='repeat'\nkind='repeated_terms'\nterms=['café']\nmax_occurrences=1\ncase_insensitive=true\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        let (input, context, links) = markdown_input_with_links("t.md", "Café\n\n😀 CAFÉ").unwrap();
+        let markdown = preset
+            .evaluate_with_capabilities(
+                &input,
+                &ContentEvaluationContext {
+                    adapter: Some(&context),
+                    link_count: Some(links),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[0].status, markdown.gates[0].status);
+        assert_eq!(report.gates[0].measurements["matching_occurrences"], 2);
+        let locations = source_locations(&document, &preset, &report);
+        assert_eq!(locations.len(), 1);
+        assert_eq!(
+            (
+                locations[0].block_index,
+                locations[0].span_index,
+                locations[0].utf16_offset
+            ),
+            (1, 0, 3)
+        );
+    }
+
+    #[test]
     fn findings_map_to_their_portable_text_span_and_utf16_offset() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"children":[{"_type":"span","text":"Heading"}]},{"children":[{"_type":"span","text":"😀 "},{"_type":"span","text":"pré target"}]}]}"#).unwrap();
         let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['target']\n").unwrap();

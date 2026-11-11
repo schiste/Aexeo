@@ -193,6 +193,8 @@ pub enum ContentGate {
         max_occurrences: usize,
         #[serde(default = "default_whole_words")]
         whole_words: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        case_insensitive: bool,
     },
     ForbiddenTerms {
         id: String,
@@ -950,10 +952,20 @@ impl ContentPreset {
                         gate.id()
                     )
                 }
-                ContentGate::RepeatedTerms { terms, .. }
-                    if terms.is_empty()
-                        || terms.iter().any(|s| s.trim().is_empty())
-                        || terms.iter().collect::<BTreeSet<_>>().len() != terms.len() =>
+                ContentGate::RepeatedTerms {
+                    terms,
+                    case_insensitive,
+                    ..
+                } if terms.is_empty()
+                    || terms.iter().any(|s| s.trim().is_empty())
+                    || terms.iter().collect::<BTreeSet<_>>().len() != terms.len()
+                    || (*case_insensitive
+                        && terms
+                            .iter()
+                            .map(|term| fold_literal(term, true).0)
+                            .collect::<BTreeSet<_>>()
+                            .len()
+                            != terms.len()) =>
                 {
                     bail!(
                         "repeated terms must be nonempty and unique for {}",
@@ -1707,6 +1719,7 @@ impl ContentPreset {
                     terms,
                     max_occurrences,
                     whole_words,
+                    case_insensitive,
                     ..
                 } => {
                     measurements.insert("configured_terms".into(), terms.len());
@@ -1715,7 +1728,7 @@ impl ContentPreset {
                         Some(text) => {
                             let mut total = 0;
                             let mut exceeded = 0;
-                            let literal = LiteralText::new(text, block_ends, false);
+                            let literal = LiteralText::new(text, block_ends, *case_insensitive);
                             for term in terms {
                                 let mut first_excess = None;
                                 let mut count = 0;
@@ -2576,6 +2589,33 @@ max_occurrences = 1
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn repeated_terms_can_match_case_insensitively_without_changing_defaults() {
+        let source = "version=1\nname='repeat'\n[[gates]]\nid='repeat'\nkind='repeated_terms'\nterms=['café']\nmax_occurrences=1\n";
+        let input = ContentInput {
+            text: Some("Café puis\nCAFÉ".into()),
+            ..Default::default()
+        };
+        let default = ContentPreset::from_toml(source).unwrap();
+        assert_eq!(
+            default.evaluate(&input).unwrap().gates[0].status,
+            GateStatus::Passed
+        );
+        assert!(
+            serde_json::to_string(&default)
+                .unwrap()
+                .find("case_insensitive")
+                .is_none()
+        );
+        let insensitive =
+            ContentPreset::from_toml(&format!("{source}case_insensitive=true\n")).unwrap();
+        let result = &insensitive.evaluate(&input).unwrap().gates[0];
+        assert_eq!(result.status, GateStatus::Failed);
+        assert_eq!(result.measurements["matching_occurrences"], 2);
+        assert_eq!((result.findings[0].line, result.findings[0].column), (2, 1));
+        assert!(ContentPreset::from_toml("version=1\nname='repeat'\n[[gates]]\nid='repeat'\nkind='repeated_terms'\nterms=['Café','CAFÉ']\nmax_occurrences=1\ncase_insensitive=true\n").is_err());
     }
 
     #[test]
