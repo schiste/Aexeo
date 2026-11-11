@@ -34,7 +34,6 @@ import type {
 import {
   isSiteGraphFinding,
   evaluateAndPersistAll,
-  readAllDocuments,
   readAssessment,
   readFindings,
 } from "./plugin.js";
@@ -401,22 +400,10 @@ export function findingsTable(rows: FindingRow[]): unknown {
 }
 
 export async function renderScoreWidget(
-  kv: KvNamespace,
-  tuning: AdminViewTuning,
+  _kv: KvNamespace,
+  _tuning: AdminViewTuning,
   _log?: { error(message: string, data?: unknown): void },
 ): Promise<BlockResponse> {
-  const documents = await readAllDocuments(kv);
-  if (documents.length === 0) {
-    return {
-      blocks: [
-        { type: "header", text: "SEO score" },
-        {
-          type: "context",
-          text: tuning.emptyScoreText,
-        },
-      ],
-    };
-  }
   // CMS records cannot establish the rendered page, generated metadata,
   // or a complete site inventory. Do not compute or present a site score.
   return {

@@ -16,9 +16,11 @@ describe("renderScoreWidget", () => {
     expect(JSON.stringify(response.blocks)).toContain("built site");
     expect(JSON.stringify(response.blocks)).not.toContain("Citation");
   });
-  it("retains the empty state when no documents are indexed", async () => {
-    const emptyKv = { list: async () => [] } as unknown as KvNamespace;
-    const response = await renderScoreWidget(emptyKv, { emptyScoreText: "empty" } as AdminViewTuning);
-    expect(JSON.stringify(response.blocks)).toContain("empty");
+  it("explains the limitation without loading the CMS inventory", async () => {
+    const list = vi.fn(async () => { throw new Error("must not read documents"); });
+    const response = await renderScoreWidget({ list } as unknown as KvNamespace, { emptyScoreText: "empty" } as AdminViewTuning);
+    expect(list).not.toHaveBeenCalled();
+    expect(JSON.stringify(response.blocks)).toContain("SEO score unavailable");
+    expect(JSON.stringify(response.blocks)).toContain("built site");
   });
 });
