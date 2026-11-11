@@ -49,6 +49,32 @@ class EvaluateTests(unittest.TestCase):
         self.assertIsNone(result["unique_input_metrics"]["recall"])
         self.assertIsNone(result["unique_reviewed_input_metrics"]["unchecked_rate"])
 
+    def test_strata_metrics_separate_reviewed_and_unlabeled_examples(self):
+        reviewed = {"reviewer": "r", "method": "manual", "text_sha256": hashlib.sha256(b"private one").hexdigest(), "expected": "failed"}
+        items = [
+            {"id": "a", "split": "holdout", "text": "private one", "expected": "failed", "strata": {"language": "fr", "type": "article"}, "review_status": "reviewed", "review": reviewed},
+            {"id": "b", "split": "holdout", "text": "private two", "expected": "passed", "strata": {"language": "fr"}},
+            {"id": "c", "split": "holdout", "text": "private three", "expected": "failed", "strata": {"language": "en"}},
+            {"id": "d", "split": "holdout", "text": "private four", "expected": "passed"},
+        ]
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": items}
+        results = [SimpleNamespace(returncode=0, stdout=json.dumps({"gates": [{"gate_id": "g", "status": status}]})) for status in ("failed", "failed", "not_checked", "passed")]
+        with patch.object(eval_module.subprocess, "run", side_effect=results):
+            result = eval_module.evaluate("cli", corpus, "holdout")
+        french = result["strata"]["language"]["groups"]["fr"]
+        self.assertEqual(french["metrics"]["precision"], .5)
+        self.assertEqual(french["reviewed_metrics"]["precision"], 1)
+        self.assertEqual(french["reviewed_metrics"]["examples"], 1)
+        self.assertEqual(result["strata"]["language"]["unlabeled_examples"], 1)
+        self.assertEqual(result["strata"]["type"]["unlabeled_examples"], 3)
+        self.assertEqual(result["strata"]["type"]["unlabeled_reviewed_examples"], 0)
+        self.assertEqual(result["strata"]["language"]["groups"]["en"]["metrics"]["unchecked_rate"], 1)
+        self.assertNotIn("private", json.dumps(result))
+        for invalid in [{"language": "private text"}, {"language": ""}, {"language": 2}, {str(i): "x" for i in range(9)}]:
+            items[0]["strata"] = invalid
+            with self.assertRaisesRegex(ValueError, "strata"):
+                eval_module.validate_corpus(corpus)
+
     def test_policy_hash_is_canonical_and_detects_changes(self):
         first = {"name": "Été", "gates": [{"id": "g", "min_words": 5}]}
         reordered = {"gates": [{"min_words": 5, "id": "g"}], "name": "Été"}
