@@ -40,3 +40,21 @@ publication state, evaluator identity, source freshness and completeness,
 artifact authenticity and all other policy requirements. Neither a matching
 manifest nor a hash is an authentication, freshness or truth guarantee. The
 current Aexeo content-change command does not produce or consume this format.
+
+## Experimental Aexeo offline host API
+
+A Rust host can call `evaluate_offline_receipt` and
+`revalidate_offline_receipt` with an `OfflineDecisionContext`. This packages an
+Aexeo v1 verdict with a manifest, and revalidation compares the current
+manifest before re-reading content and comparing a fresh evaluation. The host
+must provide a nonempty identity for a trusted evaluator build. The API does
+not authenticate that identity, implement a v2 verdict or support network and
+custom-extension observations. Those are not evaluated in this offline mode.
+
+The change, resolved policy, options and collection artifacts are Aexeo's own
+compact Serde JSON bytes; they are not a cross-implementation canonical format.
+Consumers must independently protect and establish the current inputs, build
+identity, collection completeness and publication state. Unknown fields in a
+change parsed by v1 may already have been discarded. A matching receipt does
+not prove that an external input was absent, fresh, true or authenticated.
+No CLI or EmDash workflow automatically produces or consumes these receipts.
