@@ -4,6 +4,8 @@ Inputs and fresh evaluation must come from a trusted host. This is a consistency
 check, not a v2 protocol, full verdict validation or publication authorization.
 """
 import argparse
+import hashlib
+import hmac
 import json
 import math
 from pathlib import Path
@@ -11,7 +13,7 @@ import sys
 import time
 
 from verify_decision_inputs import (
-    MAX_MANIFEST_BYTES, OPTIONAL, REQUIRED, VerificationError, _open_regular,
+    MAX_ARTIFACT_BYTES, MAX_MANIFEST_BYTES, OPTIONAL, REQUIRED, VerificationError, _open_regular,
     _reject_constant, _unique_object, verify_files,
 )
 
@@ -105,7 +107,42 @@ def _typed_equal(left, right):
     return left == right
 
 
-def compare_receipts(previous_bytes, fresh_bytes, artifacts, validate=False):
+def verify_subject(change_path, expected_digest, verdict):
+    """Bind the v1 subject to the same change bytes covered by the manifest.
+
+    This validates only the fields needed to derive the subject; it does not
+    validate the change schema, content files, provenance or publication state.
+    """
+    with _open_regular(change_path) as source:
+        data = source.read(MAX_ARTIFACT_BYTES + 1)
+    if len(data) > MAX_ARTIFACT_BYTES:
+        raise VerificationError("change exceeds size limit")
+    if not hmac.compare_digest(hashlib.sha256(data).hexdigest(), expected_digest):
+        raise VerificationError("change bytes do not match manifest")
+    try:
+        change = json.loads(data.decode("utf-8"), object_pairs_hook=_unique_object,
+                            parse_constant=_reject_constant, parse_float=_finite_float)
+        if (not isinstance(change, dict) or change.get("schema") != "content-gate.change/v1"
+                or not isinstance(change.get("change_id"), str)
+                or not isinstance(change.get("base"), dict)
+                or not isinstance(change.get("entries"), list)):
+            raise VerificationError("invalid change subject fields")
+        entries = []
+        for entry in change["entries"]:
+            if not isinstance(entry, dict) or not isinstance(entry.get("entity_id"), str):
+                raise VerificationError("invalid change entry")
+            after = entry.get("after")
+            if after is not None and (not isinstance(after, dict) or not isinstance(after.get("sha256"), str)):
+                raise VerificationError("invalid change entry digest")
+            entries.append({"entity_id": entry["entity_id"], "sha256": None if after is None else after["sha256"]})
+        expected = {"change_id": change["change_id"], "base": change["base"], "entries": entries}
+        if not _typed_equal(expected, verdict["subject"]):
+            raise VerificationError("verdict subject does not match change")
+    except (UnicodeDecodeError, ValueError, RecursionError, KeyError) as error:
+        raise VerificationError("unable to verify verdict subject") from error
+
+
+def compare_receipts(previous_bytes, fresh_bytes, artifacts, validate=False, verify_change_subject=False):
     previous, old_manifest = parse_receipt(previous_bytes)
     fresh, new_manifest = parse_receipt(fresh_bytes)
     if validate:
@@ -114,6 +151,8 @@ def compare_receipts(previous_bytes, fresh_bytes, artifacts, validate=False):
     # Verify both manifests against independently supplied, current artifacts.
     stats = verify_files(old_manifest, artifacts)
     verify_files(new_manifest, artifacts)
+    if verify_change_subject:
+        verify_subject(artifacts["change"], previous["decision_inputs"]["change"]["sha256"], previous["verdict"])
     if previous["decision_inputs"]["external_evidence"] != {"state": "absent"} or fresh["decision_inputs"]["external_evidence"] != {"state": "absent"}:
         raise VerificationError("offline receipts cannot contain external evidence")
     before = dict(previous["verdict"])
@@ -140,6 +179,7 @@ def main(argv=None):
         group.add_argument("--" + role.replace("_", "-"))
         group.add_argument("--" + role.replace("_", "-") + "-absent", action="store_true")
     parser.add_argument("--validate-verdicts", action="store_true", help="validate v1 schemas and check summary consistency (requires jsonschema and RFC 3339 support)")
+    parser.add_argument("--verify-subject", action="store_true", help="compare both v1 subjects to the independently supplied change artifact")
     parser.add_argument("--telemetry", action="store_true")
     args = parser.parse_args(argv)
     started = time.perf_counter() if args.telemetry else 0
@@ -148,7 +188,8 @@ def main(argv=None):
             return
         event = {"event": "offline_receipt_comparison", "status": status,
                  "duration_ms": round((time.perf_counter() - started) * 1000, 3),
-                 "verdict_validation_requested": args.validate_verdicts}
+                 "verdict_validation_requested": args.validate_verdicts,
+                 "subject_verification_requested": args.verify_subject}
         if stats is not None:
             event.update(stats)
         try:
@@ -161,7 +202,8 @@ def main(argv=None):
         with _open_regular(args.fresh) as source:
             fresh = source.read(MAX_RECEIPT_BYTES + 1)
         artifacts = {role: getattr(args, role) for role in REQUIRED + OPTIONAL}
-        stats = compare_receipts(previous, fresh, artifacts, validate=args.validate_verdicts)
+        stats = compare_receipts(previous, fresh, artifacts, validate=args.validate_verdicts,
+                                 verify_change_subject=args.verify_subject)
     except (OSError, VerificationError):
         telemetry("error")
         print("Offline receipt comparison failed.", file=sys.stderr)

@@ -147,6 +147,15 @@ comparator continues to check only the envelope. Schema and consistency checks
 do not verify the subject against the intended change, validator exit code,
 required gates, actual evaluator behavior or content authenticity.
 
+The additional opt-in `--verify-subject` derives the v1 subject (change ID,
+base, and ordered entity IDs and after digests) from the independently supplied
+change artifact and compares it with both receipts. It rereads and hashes that
+artifact against the manifest before deriving the subject, rejecting duplicate
+JSON keys and oversized files. This checks only the fields needed for the
+subject; it is not complete change-schema or content-file validation, does not
+prove input freshness or authenticity, and does not prevent publication races.
+The caller must independently provide and protect the intended change bytes.
+
 The optional local telemetry contains only status, whether verdict validation was
 requested, elapsed time and aggregate artifact counts and sizes. Receipt and artifact files can contain private content.
 Run `python3 docs/specs/content-gate/v2/test_compare_offline_receipts.py` and

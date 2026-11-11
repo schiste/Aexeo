@@ -91,6 +91,36 @@ class CompareOfflineReceipts(unittest.TestCase):
             with self.subTest(mutation=mutate), self.assertRaises(comparison.VerificationError):
                 comparison.compare_receipts(self.encode(bad), self.encode(bad), self.artifacts, validate=True)
 
+    def test_subject_matches_bound_change_and_rejects_substitution(self):
+        change = {"schema": "content-gate.change/v1", "change_id": "change-1",
+                  "base": {"kind": "git", "revision": "abc"},
+                  "entries": [{"entity_id": "a", "after": {"sha256": "hash-a"}},
+                              {"entity_id": "b", "operation": "delete"}]}
+        data = self.encode(change)
+        self.artifacts["change"].write_bytes(data)
+        receipt = copy.deepcopy(self.receipt)
+        receipt["decision_inputs"]["change"]["sha256"] = hashlib.sha256(data).hexdigest()
+        receipt["verdict"]["subject"] = {"change_id": "change-1", "base": change["base"],
+            "entries": [{"entity_id": "a", "sha256": "hash-a"}, {"entity_id": "b", "sha256": None}]}
+        encoded = self.encode(receipt)
+        comparison.compare_receipts(encoded, encoded, self.artifacts, verify_change_subject=True)
+        for mutation in (
+            lambda subject: subject.update(change_id="another"),
+            lambda subject: subject["base"].update(revision="other"),
+            lambda subject: subject["entries"].reverse(),
+            lambda subject: subject["entries"][1].update(sha256="wrong"),
+        ):
+            bad = copy.deepcopy(receipt)
+            mutation(bad["verdict"]["subject"])
+            with self.subTest(mutation=mutation), self.assertRaises(comparison.VerificationError):
+                comparison.compare_receipts(self.encode(bad), self.encode(bad), self.artifacts, verify_change_subject=True)
+        malformed = b'{"schema":"content-gate.change/v1","schema":"other"}'
+        self.artifacts["change"].write_bytes(malformed)
+        bad = copy.deepcopy(receipt)
+        bad["decision_inputs"]["change"]["sha256"] = hashlib.sha256(malformed).hexdigest()
+        with self.assertRaises(comparison.VerificationError):
+            comparison.compare_receipts(self.encode(bad), self.encode(bad), self.artifacts, verify_change_subject=True)
+
     def test_cli_is_private_and_does_not_authorize_publication(self):
         previous = self.root / "previous.json"
         fresh = self.root / "fresh.json"
