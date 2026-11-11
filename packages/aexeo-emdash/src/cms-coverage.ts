@@ -1,26 +1,21 @@
 import type { EmdashDocument, Finding } from "./types.js";
 
-// A CMS record is not the rendered page. These legacy rules inspect page
-// markup, generated metadata, page size or rendered citation context. The
-// synthetic HTML used by the bridge cannot establish their absence.
-// The bridge synthesizes heading sections, link markup and head metadata. GEO
-// rules consume that synthetic page structure, not the host's rendered page.
-const RENDERED_PAGE_RULE = /^(?:SEO|SOC|A11Y|GEO)\d{3}$/;
-// Weak-anchor advice may use observed body text; graph conclusions require a
-// rendered-site inventory, irrespective of the CMS inventory's completeness.
-const UNVERIFIED_SITE_GRAPH_RULES = new Set(["LNK001", "LNK002", "LNK004"]);
-// Duplicate-page findings compare rendered visible text, which CMS records do
-// not provide even when their body fields and inventory are complete.
-const RENDERED_CONTEXT_RULES = new Set(["CNT001", "CNT002", "CNT005"]);
+// CMS records are not rendered pages or site artifacts. Native Aexeo rule IDs
+// are withheld unless their evidence can be obtained from a complete body.
+// Keep this family list in sync with the native rule registry; unknown IDs may
+// belong to host evaluators and cannot safely be classified as native.
+const NATIVE_RULE_ID = /^(?:A11Y|AGT|CNT|CRW|DEP|EDT|FACTS|GEO|IMG|LLM|LNK|MAP|QLT|ROB|SCH|SEO|SOC|SRF)[0-9]{3}$/;
+const OBSERVABLE_BODY_RULES = new Set(["CNT006", "LNK003"]);
 
 export function isCmsObservableFinding(finding: Finding, bodyComplete = true): boolean {
   return finding.aexeo_origin === "content_preset" || isLegacyCmsObservableFinding(finding, bodyComplete);
 }
 
 export function isLegacyCmsObservableFinding(finding: Finding, bodyComplete = true): boolean {
-  return !RENDERED_PAGE_RULE.test(finding.rule_id) && !RENDERED_CONTEXT_RULES.has(finding.rule_id) &&
-    !UNVERIFIED_SITE_GRAPH_RULES.has(finding.rule_id) &&
-    (bodyComplete || !/^(?:CNT|GEO|LNK)\d{3}$/.test(finding.rule_id));
+  // Non-native IDs may come from a host-supplied evaluator, whose author is
+  // responsible for the evidence it reports. Preset findings carry an origin.
+  if (!NATIVE_RULE_ID.test(finding.rule_id)) return true;
+  return bodyComplete && finding.scope === "page" && OBSERVABLE_BODY_RULES.has(finding.rule_id);
 }
 
 export function hasCompleteBody(document: EmdashDocument): boolean {

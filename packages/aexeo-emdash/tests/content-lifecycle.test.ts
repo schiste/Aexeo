@@ -590,6 +590,29 @@ describe("sitewide refresh coverage", () => {
     expect(payload.findings.map((f) => f.rule_id)).toEqual(["OTHER"]);
     expect(payload.sitewideFindings).toEqual([]);
   });
+  it("withholds unobserved native site and page rules in refresh and old records", async () => {
+    const subject = item("a", NEW);
+    subject.data.body = [];
+    const { ctx, store } = host([subject]);
+    const tagged = { ...finding("/a", "SCH001"), message: "preset result", aexeo_origin: "content_preset" as const };
+    const legacy = { ...finding("/a", "SCH001"), message: "unobserved schema" };
+    const evaluator: EvaluatorFn = async () => ({ ok: true, findings: [
+      { ...finding("*", "ROB001"), scope: "sitewide" as const },
+      legacy, tagged,
+    ] });
+    await sweep(ctx, evaluator);
+    expect(rulesAt(store, "*")).toEqual([]);
+    expect(rulesAt(store, "/a")).toEqual(["SCH001"]);
+    expect((store.get(findingsKey("/a")) as { findings: Finding[] }).findings[0]?.aexeo_origin).toBe("content_preset");
+    store.set(findingsKey("*"), { route: "*", findings: [{ ...finding("*", "ROB001"), scope: "sitewide" }] });
+    store.set(findingsKey("/a"), { route: "/a", body_coverage: "complete", findings: [legacy, tagged] });
+    const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator });
+    expect(payload.sitewideFindings).toEqual([]);
+    expect(payload.findings.map((entry) => entry.aexeo_origin)).toEqual(["content_preset"]);
+    const panel = JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"));
+    expect(panel).toContain("preset result");
+    expect(panel).not.toContain("unobserved schema");
+  });
   it("replaces old sitewide findings even when the new result is empty", async () => {
     const { ctx, store } = host();
     store.set(findingsKey("*"), { route: "*", findings: [globalFinding] });

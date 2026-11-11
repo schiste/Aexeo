@@ -8,6 +8,7 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Withhold native page and site rules unless their evidence is observable from the CMS body; preserve explicitly tagged content-preset findings and filter old stored results at read time.
 - Explain when no content-preset assessment was recorded and report aggregate assessment coverage in local telemetry.
 - Show whether each CMS evaluation had complete, partial, unavailable or unknown body coverage in both findings interfaces. Older findings without coverage are treated conservatively; a complete body does not establish rendered-page or overall editorial quality.
 - Preserve available prose while marking body coverage unverified when automatic selection encounters an unrecognized conventional body field. Hosts can still explicitly select the fields constituting the rendered body.
