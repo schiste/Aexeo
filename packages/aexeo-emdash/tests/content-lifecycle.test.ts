@@ -411,6 +411,57 @@ describe("assessment persistence", () => {
     expect(JSON.stringify(store.get(findingsKey("/a")))).not.toContain("private draft text");
     expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"))).toContain("Evaluation failed: evaluator_exception");
   });
+  it("invalidates a saved snapshot when adaptation fails and permits recovery", async () => {
+    const { ctx, store } = host();
+    await save(ctx, item("a", OLD), returning("OLD"));
+    ctx.content.getPublicUrl = async () => { throw new Error("private draft text"); };
+    await save(ctx, item("a", NEW), returning("SHOULD_NOT_RUN"));
+    expect(store.get(findingsKey("/a"))).toMatchObject({ findings: [], assessment: { status: "error", reason: "adaptation_failed" } });
+    expect(store.get(documentKey("/a"))).toMatchObject({ document: { route: "/a" }, meta: { adaptationFailed: true, publicUrl: null, updatedAt: NEW } });
+    expect(JSON.stringify(store.get(findingsKey("/a")))).not.toContain("private draft text");
+    ctx.content.getPublicUrl = async (_collection, id) => `https://example.com/${id}`;
+    await save(ctx, item("a", NEW), returning("CURRENT"));
+    expect(rulesAt(store, "/a")).toEqual(["CURRENT"]);
+  });
+  it("does not invent a public route when the first save cannot be adapted", async () => {
+    const { ctx, store } = host();
+    ctx.content.getPublicUrl = async () => { throw new Error("unavailable"); };
+    await save(ctx, item("a", NEW), returning());
+    expect(store.size).toBe(0);
+  });
+  it("discards an earlier evaluation after a newer save fails adaptation", async () => {
+    const { ctx, store } = host();
+    const slow = gated("STALE");
+    const pending = save(ctx, item("a", OLD), slow.evaluator);
+    await new Promise((resolve) => setTimeout(resolve));
+    ctx.content.getPublicUrl = async () => { throw new Error("unavailable"); };
+    await save(ctx, item("a", NEW), returning());
+    slow.release();
+    await pending;
+    expect(store.get(findingsKey("/a"))).toMatchObject({ findings: [], assessment: { reason: "adaptation_failed" } });
+  });
+  it.each(["newer", "equal", "missing"])("preserves a concurrent save when revisions are %s", async (revisions) => {
+    const { ctx, store } = host();
+    await save(ctx, item("a", OLD), returning("OLD"));
+    let release = (): void => {};
+    let entered = (): void => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    let first = true;
+    ctx.content.getPublicUrl = async (_collection, id) => {
+      if (first) { first = false; entered(); await gate; throw new Error("unavailable"); }
+      return `https://example.com/${id}`;
+    };
+    const failed = item("a", OLD, "failed");
+    const current = item("a", revisions === "newer" ? NEW : OLD, "current");
+    if (revisions === "missing") { delete failed.updatedAt; delete current.updatedAt; }
+    const pending = save(ctx, failed, returning());
+    await started;
+    await save(ctx, current, returning("CURRENT"));
+    release();
+    await pending;
+    expect(rulesAt(store, "/a")).toEqual(["CURRENT"]);
+  });
   it("does not let a thrown older evaluation replace newer findings", async () => {
     const { ctx, store } = host();
     let release = (): void => {};
