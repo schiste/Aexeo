@@ -96,6 +96,18 @@ fn repeated_paragraph_openings_are_advisory_and_located() {
 }
 
 #[test]
+fn duplicate_paragraphs_locate_the_second_markdown_paragraph() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("review.toml");
+    let draft = dir.path().join("draft.md");
+    fs::write(&preset, "version=1\nname='Review'\n[[gates]]\nid='duplicates'\nkind='duplicate_paragraphs'\nmax_occurrences=1\n").unwrap();
+    fs::write(&draft, "A repeated paragraph.\n\nA repeated paragraph.\n").unwrap();
+    let report = evaluate(&draft, &format!("review={}", preset.display()));
+    assert_eq!(status(&report, "duplicates"), "failed");
+    assert_eq!(report["source_locations"][0]["line"], 3);
+}
+
+#[test]
 fn repeated_openings_with_unassessable_paragraphs_preserve_findings() {
     let dir = tempfile::tempdir().unwrap();
     let preset = dir.path().join("review.toml");

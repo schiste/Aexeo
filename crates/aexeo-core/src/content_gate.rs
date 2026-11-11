@@ -59,6 +59,14 @@ pub const MAX_FINDINGS_PER_GATE: usize = 1000;
 // Keep the advisory openings gate bounded for adapters other than the CLI.
 const MAX_DISTINCT_PARAGRAPH_OPENINGS: usize = 10_000;
 const MAX_PARAGRAPH_OPENING_BYTES: usize = 4_096;
+const MAX_DUPLICATE_PARAGRAPHS: usize = 100_000;
+const MAX_DUPLICATE_PARAGRAPH_BYTES: usize = 16 * 1024;
+const MAX_DUPLICATE_PARAGRAPH_KEYS: usize = 10_000;
+const MAX_DUPLICATE_PARAGRAPH_KEY_BYTES: usize = 4 * 1024 * 1024;
+
+fn default_min_paragraph_chars() -> usize {
+    1
+}
 
 /// The measurement that records findings dropped by `MAX_FINDINGS_PER_GATE`.
 pub const FINDINGS_OMITTED: &str = "findings_omitted";
@@ -112,6 +120,19 @@ pub enum ContentGate {
         blocking: bool,
         opening_words: usize,
         max_occurrences: usize,
+    },
+    /// Finds exact repeated paragraphs after whitespace normalization.
+    DuplicateParagraphs {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default)]
+        blocking: bool,
+        max_occurrences: usize,
+        #[serde(default = "default_min_paragraph_chars")]
+        min_chars: usize,
+        #[serde(default)]
+        case_insensitive: bool,
     },
     /// Limits Unicode scalar values in adapter-supplied paragraphs.
     ParagraphCharacterLength {
@@ -365,6 +386,7 @@ impl ContentGate {
             | Self::ParagraphCount { severity, .. }
             | Self::ParagraphLength { severity, .. }
             | Self::RepeatedParagraphOpenings { severity, .. }
+            | Self::DuplicateParagraphs { severity, .. }
             | Self::ParagraphCharacterLength { severity, .. }
             | Self::RepeatedTerms { severity, .. }
             | Self::ForbiddenTerms { severity, .. }
@@ -392,6 +414,7 @@ impl ContentGate {
             | Self::ParagraphCount { blocking, .. }
             | Self::ParagraphLength { blocking, .. }
             | Self::RepeatedParagraphOpenings { blocking, .. }
+            | Self::DuplicateParagraphs { blocking, .. }
             | Self::ParagraphCharacterLength { blocking, .. }
             | Self::RepeatedTerms { blocking, .. }
             | Self::ForbiddenTerms { blocking, .. }
@@ -431,7 +454,8 @@ impl ContentGate {
             Self::ParagraphCount { .. }
             | Self::ParagraphLength { .. }
             | Self::ParagraphCharacterLength { .. }
-            | Self::RepeatedParagraphOpenings { .. } => "paragraphs",
+            | Self::RepeatedParagraphOpenings { .. }
+            | Self::DuplicateParagraphs { .. } => "paragraphs",
             Self::RequiredHeadings { .. }
             | Self::DuplicateHeadings { .. }
             | Self::HeadingLength { .. } => "headings",
@@ -455,6 +479,7 @@ impl ContentGate {
             | Self::ParagraphCount { id, .. }
             | Self::ParagraphLength { id, .. }
             | Self::RepeatedParagraphOpenings { id, .. }
+            | Self::DuplicateParagraphs { id, .. }
             | Self::ParagraphCharacterLength { id, .. }
             | Self::RepeatedTerms { id, .. }
             | Self::ForbiddenTerms { id, .. }
@@ -935,6 +960,16 @@ impl ContentPreset {
                 } if *opening_words == 0 || *opening_words > 16 || *max_occurrences == 0 => {
                     bail!(
                         "paragraph openings need 1 to 16 words and a positive occurrence limit for {}",
+                        gate.id()
+                    )
+                }
+                ContentGate::DuplicateParagraphs {
+                    max_occurrences,
+                    min_chars,
+                    ..
+                } if *max_occurrences == 0 || *min_chars == 0 => {
+                    bail!(
+                        "duplicate paragraphs need positive occurrence and character limits for {}",
                         gate.id()
                     )
                 }
@@ -1517,6 +1552,79 @@ impl ContentPreset {
                             measurements.insert("paragraph_count".into(), paragraphs.len());
                             measurements.insert("paragraphs_exceeding_limit".into(), exceeding);
                             measurements.insert(longest_key.into(), longest);
+                        }
+                        None => {
+                            reason = Some("paragraphs are unavailable from this adapter".into())
+                        }
+                    }
+                }
+                ContentGate::DuplicateParagraphs {
+                    max_occurrences,
+                    min_chars,
+                    case_insensitive,
+                    ..
+                } => {
+                    measurements.insert("max_occurrences".into(), *max_occurrences);
+                    measurements.insert("min_chars".into(), *min_chars);
+                    match context.and_then(|c| c.paragraphs.as_ref()) {
+                        Some(paragraphs) => {
+                            let mut counts = BTreeMap::<String, usize>::new();
+                            let (mut key_bytes, mut evaluated, mut skipped, mut exceeding) =
+                                (0usize, 0usize, 0usize, 0usize);
+                            for paragraph in paragraphs.iter().take(MAX_DUPLICATE_PARAGRAPHS) {
+                                if paragraph.text.len() > MAX_DUPLICATE_PARAGRAPH_BYTES {
+                                    reason = Some(
+                                        "paragraph exceeds the duplicate-check byte limit".into(),
+                                    );
+                                    break;
+                                }
+                                let text = collapse_whitespace(&paragraph.text);
+                                if text.chars().count() < *min_chars {
+                                    skipped += 1;
+                                    continue;
+                                }
+                                let key = if *case_insensitive {
+                                    text.to_lowercase()
+                                } else {
+                                    text
+                                };
+                                if key.len() > MAX_DUPLICATE_PARAGRAPH_BYTES {
+                                    reason = Some("normalized paragraph exceeds the duplicate-check byte limit".into());
+                                    break;
+                                }
+                                if !counts.contains_key(&key) {
+                                    if counts.len() >= MAX_DUPLICATE_PARAGRAPH_KEYS
+                                        || key_bytes + key.len() > MAX_DUPLICATE_PARAGRAPH_KEY_BYTES
+                                    {
+                                        reason = Some(
+                                            "too many distinct paragraphs to assess completely"
+                                                .into(),
+                                        );
+                                        break;
+                                    }
+                                    key_bytes += key.len();
+                                }
+                                evaluated += 1;
+                                let count = counts.entry(key).or_default();
+                                *count += 1;
+                                if *count > *max_occurrences {
+                                    exceeding += 1;
+                                    emit(
+                                        format!(
+                                            "Paragraph occurs {count} times; maximum is {max_occurrences}"
+                                        ),
+                                        paragraph.line,
+                                        paragraph.column,
+                                    );
+                                }
+                            }
+                            if reason.is_none() && paragraphs.len() > MAX_DUPLICATE_PARAGRAPHS {
+                                reason = Some("too many paragraphs to assess completely".into());
+                            }
+                            measurements.insert("paragraph_count".into(), paragraphs.len());
+                            measurements.insert("paragraphs_evaluated".into(), evaluated);
+                            measurements.insert("paragraphs_skipped".into(), skipped);
+                            measurements.insert("paragraphs_exceeding_limit".into(), exceeding);
                         }
                         None => {
                             reason = Some("paragraphs are unavailable from this adapter".into())
@@ -3425,6 +3533,59 @@ terms = ["bad"]
             assert_eq!(observed.gates[0].status, GateStatus::Passed);
             assert_eq!(observed.gates[0].measurements["sentence_count"], 0);
         }
+    }
+
+    #[test]
+    fn duplicate_paragraphs_are_configurable_and_preserve_partial_results() {
+        let toml = "version=1\nname='duplicates'\n[[gates]]\nid='dupe'\nkind='duplicate_paragraphs'\nmax_occurrences=1\nmin_chars=4\ncase_insensitive=true\n";
+        let preset = ContentPreset::from_toml(toml).unwrap();
+        assert!(
+            ContentPreset::from_toml(&toml.replace("max_occurrences=1", "max_occurrences=0"))
+                .is_err()
+        );
+        assert!(ContentPreset::from_toml(&toml.replace("min_chars=4", "min_chars=0")).is_err());
+        let input = ContentInput::default();
+        let run = |paragraphs: Option<Vec<ContentParagraph>>| {
+            preset
+                .evaluate_with_context(
+                    &input,
+                    None,
+                    None,
+                    Some(&ContentContext {
+                        paragraphs,
+                        ..Default::default()
+                    }),
+                )
+                .unwrap()
+                .gates
+                .remove(0)
+        };
+        let paragraph = |text: String, line| ContentParagraph {
+            text,
+            line,
+            column: 1,
+        };
+        let report = run(Some(vec![
+            paragraph("Café  ici".into(), 1),
+            paragraph("CAFÉ\nici".into(), 4),
+            paragraph("x".into(), 7),
+        ]));
+        assert_eq!(report.status, GateStatus::Failed);
+        assert!(!report.blocking);
+        assert_eq!(report.findings.len(), 1);
+        assert_eq!(report.findings[0].line, 4);
+        assert_eq!(report.measurements["paragraphs_evaluated"], 2);
+        assert_eq!(report.measurements["paragraphs_skipped"], 1);
+        assert_eq!(report.measurements["paragraphs_exceeding_limit"], 1);
+        assert_eq!(run(None).status, GateStatus::NotChecked);
+        assert_eq!(run(Some(vec![])).status, GateStatus::Passed);
+        let partial = run(Some(vec![
+            paragraph("same".into(), 1),
+            paragraph("same".into(), 2),
+            paragraph("x".repeat(MAX_DUPLICATE_PARAGRAPH_BYTES + 1), 3),
+        ]));
+        assert_eq!(partial.status, GateStatus::NotChecked);
+        assert_eq!(partial.findings.len(), 1);
     }
 
     #[test]

@@ -874,3 +874,29 @@ snapshot-specific; re-evaluate after changes. Synthesized blocks and ambiguous,
 cyclic or excessively large inputs do not receive a CMS source path. The local
 `aexeo.cms_location_coverage` event reports eligible, mapped and unmapped counts
 without paths, content or identifiers.
+
+
+### Duplicate paragraphs
+
+The opt-in `duplicate_paragraphs` gate reports exact repeated paragraphs after
+normalizing whitespace. It does not detect AI authorship or semantic similarity.
+It is advisory by default and requires an adapter that supplies paragraphs.
+
+```toml
+[[gates]]
+id = "editorial.duplicate_paragraphs"
+kind = "duplicate_paragraphs"
+max_occurrences = 1
+min_chars = 40
+case_insensitive = true
+```
+
+Both limits must be positive. `min_chars` counts Unicode scalar values after
+whitespace normalization; `case_insensitive` uses Unicode lowercase conversion,
+not full Unicode case folding. Findings identify each occurrence beyond the
+configured maximum, without including the paragraph text. Measurements include
+the total, evaluated and skipped paragraphs and occurrences exceeding the limit.
+Missing paragraphs are `not_checked`. The check also reports `not_checked` if
+a paragraph exceeds 16 KiB, there are more than 100,000 paragraphs, or its
+10,000-key / 4 MiB distinct-key budget is exceeded; findings already observed
+remain available. Locations are supplied where the adapter can map them.
