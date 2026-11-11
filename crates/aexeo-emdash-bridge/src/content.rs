@@ -1140,6 +1140,24 @@ field = "slug"
         assert_eq!(emdash.gates[0].status, plain.gates[0].status);
     }
     #[test]
+    fn required_terms_match_across_markdown_and_emdash() {
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='terms'\nkind='required_terms'\nterms=['café', 'absent']\ncase_insensitive=true\n").unwrap();
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"children":[{"_type":"span","text":"CAFÉ"}]}]}"#).unwrap();
+        let markdown = aexeo_core::markdown_adapter::markdown_input("test.md", "CAFÉ").unwrap();
+        let emdash = evaluate_content(&document, &preset).unwrap();
+        let plain = preset.evaluate(&markdown).unwrap();
+        assert_eq!(emdash.gates[0].status, GateStatus::Failed);
+        assert_eq!(emdash.gates[0].measurements, plain.gates[0].measurements);
+        assert!(source_locations(&document, &preset, &emdash).is_empty());
+        assert_eq!(
+            evaluate_content_with_body_availability(&document, &preset, None, false)
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::NotChecked
+        );
+    }
+    #[test]
     fn markdown_and_emdash_share_duplicate_heading_gate() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"style":"h2","children":[{"_type":"span","text":"Summary"}]},{"style":"h3","children":[{"_type":"span","text":"summary"}]}]}"#).unwrap();
         let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='unique'\nkind='duplicate_headings'\ncase_sensitive=false\n").unwrap();

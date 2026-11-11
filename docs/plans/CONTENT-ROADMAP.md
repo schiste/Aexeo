@@ -39,6 +39,11 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 
 ## Delivery tracker
 
+- [x] Optional portable literal required-terms gate with explicit word and case
+  behavior, bounded configuration, aggregate measurements and unavailable-text
+  handling across text, Markdown, EmDash and content-change evaluation. It is not
+  a semantic coverage assessment and has not been independently calibrated.
+
 - [x] Reject content-change verdict paths that alias configuration, snapshot or
   confined content inputs. Filesystem changes concurrent with evaluation still
   require host coordination; this is not an atomic input/output transaction.

@@ -41,6 +41,20 @@ assert.equal(groupedDuplicate.gates[0].status, "failed");
 assert.equal(groupedDuplicate.gates[0].findings[0].path, "/en2");
 console.log("WASM collection smoke test passed");
 
+const requiredPreset = `version=1
+name="terms"
+[[gates]]
+id="terms"
+kind="required_terms"
+terms=["café", "absent"]
+case_insensitive=true
+`;
+const requiredReport = await evaluateContent({ route: "/test", title: "Test", body: [{ children: [{ _type: "span", text: "CAFÉ" }] }] }, "test", { test: requiredPreset });
+assert.equal(requiredReport.gates[0].status, "failed");
+assert.equal(requiredReport.gates[0].measurements.present_terms, 1);
+assert.deepEqual(requiredReport.source_locations, []);
+console.log("WASM required terms smoke test passed");
+
 const positionalPreset = `version=1
 name="positions"
 [[gates]]
