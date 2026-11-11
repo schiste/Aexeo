@@ -320,9 +320,19 @@ function extractPortableText(
     isPortableTextArray(value) || isMixedPortableTextArray(value) || isEmdashBlocksArray(value, field) ||
     ((field === "body" || field === "content") && typeof value === "string" && value.trim().length > 0),
   );
+  // Conventional body fields may contain a host-specific structure that this
+  // adapter cannot recognize. Its absence from candidates does not establish
+  // that it is irrelevant to the rendered body. Explicit field selection is the
+  // host's way to declare which fields constitute the body.
+  const unrecognizedBody = ["body", "content", "blocks"].some((field) => {
+    const value = data[field];
+    if (value == null || (Array.isArray(value) && value.length === 0) ||
+        (typeof value === "string" && value.trim().length === 0)) return false;
+    return !candidates.some(([candidate]) => candidate === field);
+  });
   // Automatically selecting one field does not prove the others are rendered
   // or irrelevant. Never present that projection as the complete document.
-  return candidates.length > 1 ? { blocks: result.blocks, capabilities: [] } : result;
+  return candidates.length > 1 || unrecognizedBody ? { blocks: result.blocks, capabilities: [] } : result;
 }
 
 function extractFirstPortableText(
