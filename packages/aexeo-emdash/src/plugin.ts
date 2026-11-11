@@ -590,23 +590,7 @@ export async function handleAfterSaveConfigured(
     try { ctx.log?.info?.("aexeo.adaptation_coverage", { failed: 1 }); } catch { /* best effort */ }
     ctx.log?.error?.("Aexeo afterSave adaptation failed");
     const previous = prior.length === 1 ? prior[0] : undefined;
-    if (previous === undefined || isOlderRevision(event.content.updatedAt, previous.meta.updatedAt) ||
-        await isSuperseded(ctx.kv, previous)) return;
-    const unavailable: StoredDocument = {
-      document: { route: previous.document.route, title: previous.document.title },
-      meta: {
-        id: event.content.id, collection: event.content.type, slug: event.content.slug,
-        status: event.content.status, title: previous.meta.title, publicUrl: null,
-        adaptationFailed: true,
-        ...(event.content.updatedAt === undefined ? {} : { updatedAt: event.content.updatedAt }),
-      },
-    };
-    if (!(await persistDocument(ctx, unavailable)) || await isSuperseded(ctx.kv, unavailable)) return;
-    recordContentCoverage(ctx, [unavailable.document]);
-    await ctx.kv.set(findingsKey(unavailable.document.route), {
-      route: unavailable.document.route, findings: [],
-      assessment: { status: "error", reason: "adaptation_failed", detail: "The CMS record could not be adapted." },
-    });
+    if (previous !== undefined) await markAdaptationUnavailable(ctx, event.content, previous);
     return;
   }
   const document = adapted.document;
@@ -717,6 +701,29 @@ export type EvaluatorFn = (
   documents: readonly EmdashDocument[],
   context?: { collections: readonly string[] },
 ) => Promise<EvaluationOutcome>;
+
+// Invalidate the evaluated snapshot as well as its findings, so an older
+// in-flight evaluation cannot subsequently restore results for that snapshot.
+async function markAdaptationUnavailable(
+  ctx: SandboxCtx, item: EmdashContentItem, previous: StoredDocument,
+): Promise<void> {
+  if (isOlderRevision(item.updatedAt, previous.meta.updatedAt) || await isSuperseded(ctx.kv, previous)) return;
+  const unavailable: StoredDocument = {
+    document: { route: previous.document.route, title: previous.document.title },
+    meta: {
+      id: item.id, collection: item.type, slug: item.slug,
+      status: item.status, title: previous.meta.title, publicUrl: null,
+      adaptationFailed: true,
+      ...(item.updatedAt === undefined ? {} : { updatedAt: item.updatedAt }),
+    },
+  };
+  if (!(await persistDocument(ctx, unavailable)) || await isSuperseded(ctx.kv, unavailable)) return;
+  recordContentCoverage(ctx, [unavailable.document]);
+  await ctx.kv.set(findingsKey(unavailable.document.route), {
+    route: unavailable.document.route, findings: [],
+    assessment: { status: "error", reason: "adaptation_failed", detail: "The CMS record could not be adapted." },
+  });
+}
 
 // Evaluators are host-provided and may throw, including on a WASM trap.
 // Do not persist exception text: it can contain content or credentials.
@@ -837,12 +844,8 @@ export async function evaluateAndPersistAll(
     }
     for (const { item, collection } of adaptationFailures) {
       for (const stored of storedByCollection.get(collection)?.get(item.id) ?? []) {
-        if (isOlderRevision(item.updatedAt, stored.meta.updatedAt) || documentRoutes.has(stored.document.route) ||
-            await isSuperseded(kv, stored)) continue;
-        await kv.set(findingsKey(stored.document.route), {
-          route: stored.document.route, findings: [],
-          assessment: { status: "error", reason: "adaptation_failed", detail: "The CMS record could not be adapted." },
-        });
+        if (documentRoutes.has(stored.document.route)) continue;
+        await markAdaptationUnavailable(ctx, item, stored);
       }
     }
   }

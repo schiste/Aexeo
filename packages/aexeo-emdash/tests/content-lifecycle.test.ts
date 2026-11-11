@@ -553,6 +553,18 @@ describe("sitewide refresh coverage", () => {
     expect(events).toContainEqual(["aexeo.adaptation_coverage", { failed: 1 }]);
     expect(JSON.stringify({ summary, events, value: store.get(findingsKey("/b")) })).not.toContain("private draft text");
   });
+  it("does not let an older in-flight evaluation restore findings after refresh adaptation fails", async () => {
+    const { ctx, store } = host([item("b", NEW)]);
+    const slow = gated("STALE");
+    const pending = save(ctx, item("b", OLD), slow.evaluator);
+    await new Promise((resolve) => setTimeout(resolve));
+    ctx.content.getPublicUrl = async () => { throw new Error("unavailable"); };
+    await sweep(ctx, returning());
+    slow.release();
+    await pending;
+    expect(store.get(findingsKey("/b"))).toMatchObject({ findings: [], assessment: { reason: "adaptation_failed" } });
+    expect(store.get(documentKey("/b"))).toMatchObject({ meta: { adaptationFailed: true, updatedAt: NEW } });
+  });
   it("does not replace a save that finishes while adaptation is failing", async () => {
     const { ctx, store } = host([item("b", OLD)]);
     await save(ctx, item("b", OLD), returning("OLD"));
