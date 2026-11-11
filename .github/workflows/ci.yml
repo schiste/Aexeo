@@ -235,6 +235,8 @@ jobs:
         run: sh scripts/install-quality-tools.sh --skip-ripgrep
       - name: Run repo quality gate
         run: sh scripts/check-repo.sh
+      - name: Cross-check Rust receipt artifacts with Python verifier
+        run: python3 docs/specs/content-gate/v2/test_receipt_interop.py
       - name: Run release install smoke
         run: sh scripts/pre-push.sh
       # performance-budget.json was dead weight: nothing in CI read it, so

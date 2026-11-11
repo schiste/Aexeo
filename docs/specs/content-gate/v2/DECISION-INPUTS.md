@@ -106,3 +106,9 @@ Run `python3 docs/specs/content-gate/v2/test_verify_decision_inputs.py` to test
 the verifier against the same UTF-8 and empty/absent vector used by Rust, plus
 malformed and changed inputs. The separate JSON Schema test still checks the
 schema with an independent library.
+
+The cross-language regression `python3 docs/specs/content-gate/v2/test_receipt_interop.py`
+produces synthetic offline receipts and artifacts with Rust, then runs the Python
+CLI against those exact bytes, changed artifacts, and absent versus empty
+collections. It exercises the implementation boundary; it does not establish
+a portable artifact serialization, validate a verdict, or authenticate inputs.
