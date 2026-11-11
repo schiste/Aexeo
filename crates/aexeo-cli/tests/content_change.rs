@@ -233,6 +233,96 @@ fn external_gates_bind_each_entry_and_withhold_stale_results() {
 }
 
 #[test]
+fn revalidates_custom_results_alone_and_with_observed_links() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("draft.md");
+    fs::write(&source, "[x](/x)").unwrap();
+    let exported = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            source.to_str().unwrap(),
+            "--input-format",
+            "markdown",
+            "--export-adapter-input",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        exported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&exported.stderr)
+    );
+    let mut projected: serde_json::Value = serde_json::from_slice(&exported.stdout).unwrap();
+    projected["id"] = "article".into();
+    let path = dir.path().join("external.json");
+    let mut records = serde_json::json!([{"extension":"example.rule", "parameters":{}, "input":projected, "diagnostics":[]}]);
+    fs::write(&path, serde_json::to_vec(&records).unwrap()).unwrap();
+    let ext = path.to_str().unwrap();
+    let mut change = input();
+    change["entries"][0]["media_type"] = "text/markdown".into();
+    change["entries"][0]["after"] = serde_json::json!({"inline":"[x](/x)", "sha256":"f0028e4ca25f0bd43662926fcd36d300576e7e7b3d49045cc6f89a409eaf971e"});
+    let preset = "version=1\nname='test'\n[[gates]]\nid='external'\nkind='custom'\nextension='example.rule'\n[[gates]]\nid='links'\nkind='link_reachability'\nblocking=false\n";
+    for with_links in [false, true] {
+        let mut flags = vec!["--extension-results", ext];
+        if with_links {
+            flags.push("--check-link-reachability");
+        }
+        let first = run(dir.path(), &change, preset, &flags);
+        assert_eq!(
+            first.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&first.stderr)
+        );
+        let verdict = dir.path().join("verdict.json");
+        let previous = dir.path().join("previous.json");
+        fs::copy(&verdict, &previous).unwrap();
+        let original = fs::read(&previous).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        let binding = &saved["extensions"]["aexeo.external-observations.v1"];
+        assert!(binding["extensions_sha256"].as_str().is_some());
+        assert_eq!(binding["links_sha256"].is_string(), with_links);
+        assert!(!binding.to_string().contains("example.rule"));
+        flags.extend([
+            "--verify-verdict",
+            previous.to_str().unwrap(),
+            "--telemetry",
+        ]);
+        let matching = run(dir.path(), &change, preset, &flags);
+        assert_eq!(
+            matching.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&matching.stderr)
+        );
+        assert!(String::from_utf8_lossy(&matching.stderr).contains("\"matched\":true"));
+        let current = fs::read(&verdict).unwrap();
+        // Even an unused result is part of the caller-supplied snapshot.
+        let mut unused = records[0].clone();
+        unused["extension"] = "other.rule".into();
+        records.as_array_mut().unwrap().push(unused);
+        fs::write(&path, serde_json::to_vec(&records).unwrap()).unwrap();
+        let rejected = run(dir.path(), &change, preset, &flags);
+        assert_eq!(rejected.status.code(), Some(2));
+        let stderr = String::from_utf8_lossy(&rejected.stderr);
+        assert!(stderr.contains("\"matched\":false"));
+        assert!(!stderr.contains("content_link_reachability"));
+        assert!(!stderr.contains("other.rule"));
+        assert_eq!(fs::read(&verdict).unwrap(), current);
+        records.as_array_mut().unwrap().pop();
+        fs::write(&path, serde_json::to_vec(&records).unwrap()).unwrap();
+        let mut tampered = saved;
+        tampered["extensions"]["aexeo.external-observations.v1"]["extensions_sha256"] =
+            "0".repeat(64).into();
+        fs::write(&previous, serde_json::to_vec(&tampered).unwrap()).unwrap();
+        let rejected = run(dir.path(), &change, preset, &flags);
+        assert_eq!(rejected.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&rejected.stderr).contains("\"matched\":false"));
+        assert_eq!(fs::read(&verdict).unwrap(), current);
+    }
+}
+
+#[test]
 fn external_markdown_result_maps_projected_location_to_original_source() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("draft.md");

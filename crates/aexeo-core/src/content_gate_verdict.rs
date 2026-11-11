@@ -119,6 +119,45 @@ pub const OFFLINE_BINDING_EXTENSION: &str = "aexeo.offline-input-binding.v1";
 /// Only the digest is retained, not the observed URLs or their statuses.
 pub const OBSERVED_LINK_BINDING_EXTENSION: &str = "aexeo.observed-link-binding.v1";
 
+/// Binding of external gate calls, optionally combined with link observations.
+pub const EXTERNAL_BINDING_EXTENSION: &str = "aexeo.external-observations.v1";
+
+struct RecordingExtensions<'a> {
+    inner: &'a dyn crate::content_gate::ContentGateExtensions,
+    digest: std::cell::RefCell<sha2::Sha256>,
+}
+
+impl crate::content_gate::ContentGateExtensions for RecordingExtensions<'_> {
+    fn evaluate(
+        &self,
+        extension: &str,
+        parameters: &std::collections::BTreeMap<String, String>,
+        input: &ContentInput,
+    ) -> Result<Option<Vec<crate::content_gate::ExtensionDiagnostic>>> {
+        use sha2::Digest;
+        use std::io::{self, Write};
+        struct HashWriter<'a>(&'a mut sha2::Sha256);
+        impl Write for HashWriter<'_> {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.update(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let result = self.inner.evaluate(extension, parameters, input)?;
+        let mut digest = self.digest.borrow_mut();
+        // Compact JSON escapes literal NUL, so it delimits individual calls.
+        serde_json::to_writer(
+            HashWriter(&mut digest),
+            &(extension, parameters, input, &result),
+        )?;
+        digest.update([0]);
+        Ok(result)
+    }
+}
+
 #[derive(serde::Serialize)]
 struct OfflineBinding<'a> {
     domain: &'static str,
@@ -362,6 +401,101 @@ fn verify_observed_link_binding_with_digest(
     Ok(())
 }
 
+/// Check change inputs before external work. This does not verify callback
+/// responses, authenticate their producer, or establish freshness.
+pub fn verify_external_input_binding(
+    verdict: &Verdict,
+    change: &Change,
+    preset: &ContentPreset,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    plain_text_paragraphs: bool,
+    collection: Option<&ChangeCollection<'_>>,
+) -> Result<()> {
+    let base = offline_binding_digest(
+        change,
+        preset,
+        max_entry_bytes,
+        max_total_bytes,
+        plain_text_paragraphs,
+        collection,
+    )?;
+    verify_external_binding_with_digest(verdict, change, &base)
+}
+
+fn verify_external_binding_with_digest(
+    verdict: &Verdict,
+    change: &Change,
+    base: &str,
+) -> Result<()> {
+    if verdict.validator.name != "aexeo"
+        || verdict.validator.version != env!("CARGO_PKG_VERSION")
+        || verdict.schema != VERDICT_SCHEMA
+        || verdict.subject != subject_for_change(change)
+    {
+        bail!("external verdict requires the same engine and change");
+    }
+    let binding = verdict
+        .extensions
+        .as_ref()
+        .and_then(|v| v.get(EXTERNAL_BINDING_EXTENSION))
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| anyhow::anyhow!("external observation binding is missing"))?;
+    let valid_hash = |value: &serde_json::Value| {
+        value.as_str().is_some_and(|s| {
+            s.len() == 64
+                && s.bytes()
+                    .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        })
+    };
+    if binding.len() != 3
+        || binding
+            .get("inputs_sha256")
+            .and_then(serde_json::Value::as_str)
+            != Some(base)
+        || !binding.get("extensions_sha256").is_some_and(valid_hash)
+        || !binding
+            .get("links_sha256")
+            .is_some_and(|v| v.is_null() || valid_hash(v))
+    {
+        bail!("external observation binding is invalid or does not match the inputs");
+    }
+    Ok(())
+}
+
+/// Compare all verdict fields, except the timestamp, with a fresh trusted
+/// evaluation of the same inputs and external callbacks. This does not establish
+/// producer identity, source truth or freshness, or collection completeness.
+#[allow(clippy::too_many_arguments)]
+pub fn verify_external_verdict(
+    previous: &Verdict,
+    fresh: &Verdict,
+    change: &Change,
+    preset: &ContentPreset,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    plain_text_paragraphs: bool,
+    collection: Option<&ChangeCollection<'_>>,
+) -> Result<()> {
+    let base = offline_binding_digest(
+        change,
+        preset,
+        max_entry_bytes,
+        max_total_bytes,
+        plain_text_paragraphs,
+        collection,
+    )?;
+    for verdict in [previous, fresh] {
+        verify_external_binding_with_digest(verdict, change, &base)?;
+    }
+    let mut previous = previous.clone();
+    previous.evaluated_at.clone_from(&fresh.evaluated_at);
+    if previous != *fresh {
+        bail!("previous verdict differs from the current external evaluation");
+    }
+    Ok(())
+}
+
 /// Re-evaluate confined content without external callbacks and compare every
 /// result field with a previously issued offline verdict, except its timestamp.
 /// The provider, policy and optional collection must be trusted by the caller.
@@ -468,7 +602,16 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
 ) -> Result<Verdict> {
     use sha2::{Digest, Sha256};
     preset.validate()?;
-    let observed_binding = if host.options.link_observer.is_some() && host.extensions.is_none() {
+    let has_observer = host.options.link_observer.is_some();
+    let external = host.extensions.map(|inner| {
+        let mut digest = Sha256::new();
+        digest.update(EXTERNAL_BINDING_EXTENSION.as_bytes());
+        RecordingExtensions {
+            inner,
+            digest: std::cell::RefCell::new(digest),
+        }
+    });
+    let observed_binding = if has_observer || external.is_some() {
         Some(offline_binding_digest(
             change,
             preset,
@@ -661,7 +804,9 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
         };
         let capabilities = ContentEvaluationContext {
             site: None,
-            extensions: host.extensions,
+            extensions: external
+                .as_ref()
+                .map(|recording| recording as &dyn crate::content_gate::ContentGateExtensions),
             adapter: context.as_ref(),
             link_count,
             link_reachability: observations.as_deref(),
@@ -872,6 +1017,13 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
             })
             .or_else(|| {
                 observed_binding.map(|digest| {
+                    if let Some(external) = external {
+                        return std::iter::once((EXTERNAL_BINDING_EXTENSION.into(), serde_json::json!({
+                            "inputs_sha256": digest,
+                            "extensions_sha256": format!("{:x}", external.digest.into_inner().finalize()),
+                            "links_sha256": has_observer.then(|| format!("{:x}", observed_digest.finalize())),
+                        }))).collect();
+                    }
                     std::iter::once((
                         OBSERVED_LINK_BINDING_EXTENSION.into(),
                         serde_json::json!({
@@ -1545,13 +1697,93 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(with_both.extensions.is_none());
+        assert!(
+            with_both
+                .extensions
+                .as_ref()
+                .unwrap()
+                .contains_key(EXTERNAL_BINDING_EXTENSION)
+        );
         assert!(
             verify_observed_link_verdict(
                 &with_both, &with_both, &input, &policy, 1024, 1024, false, None
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn external_binding_tracks_callback_responses_and_optional_link_observations() {
+        use crate::content_gate::{
+            ContentGateExtensions, ExtensionDiagnostic, LinkReachabilityObservation as Observation,
+        };
+        use sha2::{Digest, Sha256};
+        use std::collections::BTreeMap;
+        struct Host(bool);
+        impl ContentGateExtensions for Host {
+            fn evaluate(
+                &self,
+                _: &str,
+                _: &BTreeMap<String, String>,
+                _: &ContentInput,
+            ) -> Result<Option<Vec<ExtensionDiagnostic>>> {
+                Ok(if self.0 { None } else { Some(vec![]) })
+            }
+        }
+        let mut input = change();
+        input.entries[0].media_type = "text/markdown".into();
+        let source = "[x](/x)";
+        let state = input.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='custom'\nkind='custom'\nextension='example.rule'\n[[gates]]\nid='links'\nkind='link_reachability'\n").unwrap();
+        let run = |missing, observation, timestamp| {
+            let extension = Host(missing);
+            let mut observer =
+                |_: &str, destinations: &[String]| Ok(vec![observation; destinations.len()]);
+            evaluate_change_with_host(
+                &input,
+                &mut NoFiles,
+                &policy,
+                timestamp,
+                1024,
+                1024,
+                ChangeEvaluationHost {
+                    options: ChangeEvaluationOptions {
+                        link_observer: Some(&mut observer),
+                        plain_text_paragraphs: false,
+                    },
+                    extensions: Some(&extension),
+                },
+            )
+            .unwrap()
+        };
+        let first = run(false, Observation::Reachable, "2026-01-01T00:00:00Z");
+        let fresh = run(false, Observation::Reachable, "2026-01-02T00:00:00Z");
+        let verify = |a: &Verdict, b: &Verdict| {
+            verify_external_verdict(a, b, &input, &policy, 1024, 1024, false, None)
+        };
+        assert!(verify(&first, &fresh).is_ok());
+        assert!(
+            verify(
+                &first,
+                &run(true, Observation::Reachable, "2026-01-02T00:00:00Z")
+            )
+            .is_err()
+        );
+        let changed_link = run(false, Observation::NotApplicable, "2026-01-02T00:00:00Z");
+        assert_eq!(first.checks, changed_link.checks);
+        assert!(verify(&first, &changed_link).is_err());
+        let encoded = first.extensions.as_ref().unwrap()[EXTERNAL_BINDING_EXTENSION].to_string();
+        assert!(!encoded.contains("example.rule"));
+        assert!(!encoded.contains("/x"));
+        let mut bad = first.clone();
+        bad.extensions
+            .as_mut()
+            .unwrap()
+            .get_mut(EXTERNAL_BINDING_EXTENSION)
+            .unwrap()["links_sha256"] = "wrong".into();
+        assert!(verify(&bad, &fresh).is_err());
     }
 
     #[test]

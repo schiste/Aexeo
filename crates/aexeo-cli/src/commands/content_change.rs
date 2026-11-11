@@ -194,8 +194,19 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         items: &snapshot.items,
         complete: snapshot.complete,
     });
-    if check_links && let Some(previous) = &previous_verdict {
-        let preflight = aexeo_core::content_gate_verdict::verify_observed_link_input_binding(
+    let external_fingerprint = external
+        .as_ref()
+        .map(|host| host.fingerprint())
+        .transpose()?;
+    if (check_links || external.is_some())
+        && let Some(previous) = &previous_verdict
+    {
+        let verify_inputs = if external.is_some() {
+            aexeo_core::content_gate_verdict::verify_external_input_binding
+        } else {
+            aexeo_core::content_gate_verdict::verify_observed_link_input_binding
+        };
+        let preflight = verify_inputs(
             previous,
             &change,
             &preset,
@@ -205,13 +216,17 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             collection_ref.as_ref(),
         )
         .and_then(|()| {
-            if previous
-                .extensions
-                .as_ref()
-                .and_then(|extensions| extensions.get("aexeo.cli-link-options.v1"))
-                != Some(&link_options)
-            {
+            let extensions = previous.extensions.as_ref();
+            let previous_options =
+                extensions.and_then(|values| values.get("aexeo.cli-link-options.v1"));
+            if previous_options != check_links.then_some(&link_options) {
                 anyhow::bail!("previous verdict link options are missing or have changed");
+            }
+            let previous_snapshot = extensions
+                .and_then(|values| values.get("aexeo.cli-external-snapshot.v1"))
+                .and_then(serde_json::Value::as_str);
+            if previous_snapshot != external_fingerprint.as_deref() {
+                anyhow::bail!("previous verdict external snapshot is missing or has changed");
             }
             Ok(())
         });
@@ -271,14 +286,25 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         }
         Err(error) => return Err(error),
     };
-    if check_links && external.is_none() {
+    if check_links {
         verdict
             .extensions
             .get_or_insert_with(Default::default)
             .insert("aexeo.cli-link-options.v1".into(), link_options);
     }
+    if let Some(fingerprint) = external_fingerprint {
+        verdict
+            .extensions
+            .get_or_insert_with(Default::default)
+            .insert(
+                "aexeo.cli-external-snapshot.v1".into(),
+                serde_json::Value::String(fingerprint),
+            );
+    }
     if let Some(previous) = previous_verdict {
-        let verify = if check_links {
+        let verify = if external.is_some() {
+            aexeo_core::content_gate_verdict::verify_external_verdict
+        } else if check_links {
             aexeo_core::content_gate_verdict::verify_observed_link_verdict
         } else {
             aexeo_core::content_gate_verdict::verify_offline_verdict

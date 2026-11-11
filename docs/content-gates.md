@@ -149,7 +149,7 @@ aexeoPlugin({
 })
 ```
 
-For custom presets, add `sources: { custom: "...TOML..." }` and select `name: "custom"`. `name` is the fallback preset; `byCollection` selects a named preset for a specific collection on both save and refresh. The existing SEO findings remain enabled. A gate the document adapter cannot check causes an explicit incomplete-evaluation error rather than being silently omitted. For the sandboxed plugin, configure equivalent presets on the [sidecar worker](../packages/aexeo-crawl-worker/README.md) using its environment variables.
+For custom presets, add `sources: { custom: "...TOML..." }` and select `name: "custom"`. `name` is the fallback preset; `byCollection` selects a named preset for a specific collection on both save and refresh. The existing SEO findings remain enabled. A gate the document adapter cannot check is recorded as `not_checked` with its reason. For the sandboxed plugin, configure equivalent presets on the [sidecar worker](../packages/aexeo-crawl-worker/README.md) using its environment variables.
 
 ## Host-provided custom gates
 
@@ -632,7 +632,15 @@ making observations. It then observes links again and compares the complete
 result and observation digest. A changed observation, including a newly unavailable one, causes a mismatch;
 a matching result does not establish long-term availability or source reliability.
 The previous verdict must have been created by a CLI version that records these
-link options. `--extension-results` remains incompatible with revalidation.
+link options.
+
+With `--extension-results`, revalidation checks a fingerprint of the entire
+validated result snapshot before observing links, then compares a fresh verdict
+and the external callbacks actually consumed. Both options may be used together.
+The host must provide the current, trusted result snapshot: Aexeo does not rerun
+or authenticate its producer and cannot establish whether its judgment is correct
+or current. Verdicts generated before these bindings were added cannot be
+revalidated in this mode and require a new evaluation.
 Neither mode authenticates the previous timestamp, verifies collection completeness
 or revision, or replaces the host's authority and freshness checks. Aexeo never
 publishes content.
@@ -645,10 +653,14 @@ requests and responses actually used. The verdict contains only hashes; the host
 must protect them as potentially guessable data. The caller must independently run
 a fresh evaluation with trusted inputs and observer, then compare before applying
 an action. This does not authenticate the observer, verify response freshness,
-prove collection completeness or bind hidden external state. Custom gate
-extensions remain unsupported and do not receive this binding. Older consumers
-that ignore the extension are not protected. The CLI supports its own
-link observer but does not verify arbitrary host implementations.
+prove collection completeness or bind hidden external state. A separate
+`aexeo.external-observations.v1` binding records a digest of custom callback
+requests and responses, and optionally the link-observation digest. Rust hosts
+can use `verify_external_input_binding` before external work and
+`verify_external_verdict` against a freshly evaluated verdict. The CLI also
+binds its entire supplied result snapshot. These checks do not authenticate
+producers or prove the freshness or correctness of their results. Older
+consumers that ignore the extension are not protected.
 The observation hash is SHA-256 initialized with the UTF-8 extension identifier;
 each actual callback adds an eight-byte big-endian length followed by compact
 UTF-8 JSON `[entity_id, destinations, observations]`, in callback order. Each

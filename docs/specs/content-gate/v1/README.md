@@ -140,11 +140,12 @@ re-reads confined content, runs a fresh offline evaluation and compares all
 verdict fields except `evaluated_at`. It returns the fresh verdict only on a
 match. `verify_offline_verdict` provides the same comparison when the host
 already has a fresh, trusted evaluation; callers must not supply an untrusted
-or cached verdict as that evaluation. The CLI uses this comparison when `--verify-verdict` is selected without a
-link observer. With its explicitly enabled link observer it instead compares
-a fresh evaluation using the observed-link binding; see `docs/content-gates.md`. These APIs do not authenticate inputs or
-verdicts, establish collection completeness or source freshness, or cover
-external callbacks. A successful match is not a claim of factual truth.
+or cached verdict as that evaluation. The CLI uses this offline comparison when
+`--verify-verdict` is selected without external inputs. With a link observer
+or supplied custom results it uses the corresponding external binding; see
+`docs/content-gates.md`. These APIs do not authenticate inputs or verdicts,
+establish collection completeness or source freshness, or establish the truth
+of external callback results. A successful match is not a claim of factual truth.
 
 This is an Aexeo-specific, versioned mechanism, not a replacement for a
 cross-implementation protocol binding. Existing v1 runners can ignore it, so
@@ -154,7 +155,8 @@ substitution, validate the verdict and content digests, and independently
 establish snapshot completeness, revision, and freshness. A missing extension
 must not be interpreted as a match. Evaluations using an external callback have
 no offline fingerprint because its observations are not covered; verifying
-those inputs requires a separate mechanism. Hashes may themselves disclose
+those inputs requires the separate observed-link or external-observation
+binding, depending on the configured callbacks. Hashes may themselves disclose
 information about low-entropy inputs and should be handled accordingly.
 
 ### 3.3 Findings

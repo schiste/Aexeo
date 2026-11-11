@@ -203,7 +203,12 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   observer, establish freshness, or protect consumers that ignore the extension.
   CLI revalidation also supports its own bounded link observer: it verifies
   inputs and network options before observation and compares fresh results.
-  Custom extensions and other external evidence remain unsupported.
+  Custom extensions and other external evidence remain unsupported by that
+  link-only binding.
+- [x] Hash actual custom gate calls and responses, optionally with link
+  observations, and compare fresh Rust verdicts. The CLI additionally binds the
+  full supplied external-result snapshot and checks it before network work.
+  Callers must provide trusted, current data; hashes do not authenticate it.
 - [ ] Bind change verdicts to all decision inputs, including entry metadata,
   collection snapshots, effective policy, host options and external evidence,
   with a versioned interoperable verification contract. The current v1 subject
