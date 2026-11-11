@@ -614,6 +614,21 @@ records. Other gates that need an individual document still report `not_checked`
 real WASM boundary locally, build the plugin and run `npm run test:wasm` in
 `packages/aexeo-emdash`; the ordinary TypeScript unit test uses a mock.
 
+### Static HTML content
+
+Use `--input-format html` to evaluate an HTML document or fragment with content
+presets. The adapter extracts text, headings, `<p>` paragraphs and `<a href>`
+destinations from the supplied markup. It excludes `<head>`, script, style,
+template, noscript and elements with the HTML `hidden` attribute. Images
+contribute their `alt` text; image URLs are not link destinations. This is a
+static markup projection, not a browser rendering: CSS, JavaScript, closed
+`details`, navigation and generated content can affect what readers see. Scope
+therefore depends on the fragment or page the host supplies. HTML parsing does
+not preserve trustworthy source offsets, so findings refer to the projected
+text and do not claim source locations. Network checks remain explicit opt-in.
+Inputs exceeding 16 MiB or 100,000 traversed DOM nodes are `not_checked`, not empty.
+The content-change protocol supports `text/html` with the same rules.
+
 ### Plain-text source locations
 
 For `text` and `paragraph-text` inputs, JSON reports include `source_locations`
@@ -687,7 +702,7 @@ conservatively, or an adapter lacks destinations, the gate is `not_checked`.
 Markdown reports can provide the source location of an invalid link occurrence,
 including a reference link usage; locations point to the beginning of the link,
 not necessarily its destination definition. Counters report checked and invalid
-destinations without recording addresses in telemetry. Image destinations and raw HTML are outside this gate's scope.
+destinations without recording addresses in telemetry. Image destinations and raw HTML embedded in Markdown are outside this gate's scope; the explicit HTML adapter checks anchor destinations.
 
 ### Duplicate headings
 

@@ -121,6 +121,9 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] Reuse the guarded HTTP client and run-scoped link observations across
   a content-change evaluation, within one global check budget. Aggregate
   telemetry counts only new checks; observations are discarded after the run.
+- [x] Explicit static HTML content adapter for CLI and content-change verdicts,
+  including bounded projections and optional host link observations. HTML source
+  positions and browser-rendered visibility remain unverified.
 - [ ] Integrate optional host observers with other adapters and continue adding
   independently validated editorial gates.
 - [x] Explicit collection metadata uniqueness gate in core, CLI and EmDash/WASM

@@ -245,6 +245,27 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             link_count = Some(links);
             input
         }
+        (Some("html"), Some(text)) => {
+            match aexeo_core::html_content_adapter::html_content(&id, &text) {
+                Ok(adapted) => {
+                    link_count = Some(adapted.destinations.len());
+                    destinations = Some(adapted.destinations);
+                    context = Some(adapted.context);
+                    adapted.input
+                }
+                Err(reason) => {
+                    source_complete = false;
+                    context = Some(ContentContext {
+                        input_limit: Some(reason.into()),
+                        ..Default::default()
+                    });
+                    ContentInput {
+                        id,
+                        ..Default::default()
+                    }
+                }
+            }
+        }
         (Some("paragraph-text"), Some(text)) => {
             match aexeo_core::plain_text_adapter::paragraph_text_context(&text) {
                 Ok(capabilities) => {
@@ -348,7 +369,10 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     // Keep the established projected finding coordinates unchanged. Supply
     // separately indexed source coordinates for positional prose and link gates.
     let mut source_locations = Vec::new();
-    let plain_source = if source_map.is_none() && source_complete {
+    let plain_source = if source_map.is_none()
+        && source_complete
+        && args.get_one::<String>("input-format").map(String::as_str) != Some("html")
+    {
         input
             .source_text
             .as_deref()
@@ -460,7 +484,16 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 let location = source_locations.iter().find(|location| {
                     location.gate_id == gate.gate_id && location.finding_index == finding_index
                 });
-                println!("  {}", finding_line(finding, location, mapping_available));
+                println!(
+                    "  {}",
+                    finding_line(
+                        finding,
+                        location,
+                        mapping_available
+                            || args.get_one::<String>("input-format").map(String::as_str)
+                                == Some("html")
+                    )
+                );
             }
         }
     }

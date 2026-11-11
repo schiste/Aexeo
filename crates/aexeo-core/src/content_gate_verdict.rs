@@ -1,7 +1,7 @@
 //! Evaluate proposed changes and map content results to protocol verdicts.
 //!
 //! File confinement, timestamp generation, URI access, and verdict publication
-//! belong to the host. This evaluates Markdown and plain text items only; it
+//! belong to the host. This evaluates Markdown, plain text and static HTML items; it
 //! does not establish the impact of deleting or renaming an item on a site.
 
 use crate::{
@@ -155,6 +155,33 @@ pub fn evaluate_change_with_host<P: ConfinedContentFiles>(
                     adapted.destinations,
                     Some(adapted.source_map),
                 )
+            }
+            "text/html" => {
+                match crate::html_content_adapter::html_content(&entry.entity_id, &text) {
+                    Ok(adapted) => {
+                        let count = adapted.destinations.len();
+                        (
+                            adapted.input,
+                            Some(adapted.context),
+                            Some(count),
+                            Some(adapted.destinations),
+                            None,
+                        )
+                    }
+                    Err(reason) => (
+                        ContentInput {
+                            id: entry.entity_id.clone(),
+                            ..Default::default()
+                        },
+                        Some(crate::content_gate::ContentContext {
+                            input_limit: Some(reason.into()),
+                            ..Default::default()
+                        }),
+                        None,
+                        None,
+                        None,
+                    ),
+                }
             }
             "text/plain" if host.options.plain_text_paragraphs => {
                 match crate::plain_text_adapter::paragraph_text_context(&text) {
@@ -587,6 +614,69 @@ mod tests {
         .unwrap();
         assert_eq!(verdict.status, VerdictStatus::Pass);
         assert_eq!(extension.0.get(), 2);
+    }
+
+    #[test]
+    fn html_change_runs_gates_and_explicit_observer_without_guessing_locations() {
+        use sha2::{Digest, Sha256};
+        let source = "<p>hello <a href='https://example.org'>world</a></p>";
+        let mut change = change();
+        change.entries[0].media_type = "text/html".into();
+        let state = change.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['world']\n[[gates]]\nid='links'\nkind='link_reachability'\n").unwrap();
+        let mut calls = 0;
+        let mut observe = |_: &str, values: &[String]| {
+            calls += 1;
+            assert_eq!(values, ["https://example.org"]);
+            Ok(vec![
+                crate::content_gate::LinkReachabilityObservation::Reachable,
+            ])
+        };
+        let verdict = evaluate_change_with_observer(
+            &change,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+            Some(&mut observe),
+        )
+        .unwrap();
+        assert_eq!(calls, 1);
+        assert_eq!(verdict.status, VerdictStatus::Fail);
+        assert_eq!(verdict.findings.len(), 1);
+        assert!(verdict.findings[0].location.is_none());
+    }
+
+    #[test]
+    fn html_overflow_leaves_content_and_link_gates_unchecked() {
+        use sha2::{Digest, Sha256};
+        let source = "<br>".repeat(crate::html_content_adapter::MAX_HTML_CONTENT_NODES + 1);
+        let mut input = change();
+        input.entries[0].media_type = "text/html".into();
+        let state = input.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.clone());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='links'\nkind='link_count'\nmin=1\n").unwrap();
+        let verdict = evaluate_change(
+            &input,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            source.len(),
+            source.len(),
+        )
+        .unwrap();
+        assert_eq!(verdict.status, VerdictStatus::NotChecked);
+        assert!(
+            verdict
+                .checks
+                .iter()
+                .all(|check| check.status == CheckStatus::NotChecked)
+        );
+        assert!(verdict.findings.is_empty());
     }
 
     #[test]
