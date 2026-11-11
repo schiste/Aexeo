@@ -60,5 +60,13 @@
   "editorial/single_line_10000_paragraphs": {
     "max_avg_ms": 100,
     "max_p95_ms": 200
+  },
+  "content/html_projection": {
+    "max_avg_ms": 20,
+    "max_p95_ms": 40
+  },
+  "content/html_projection_and_evaluation": {
+    "max_avg_ms": 30,
+    "max_p95_ms": 60
   }
 }

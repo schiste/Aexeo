@@ -45,7 +45,7 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   findings are capped; emit opt-in anonymous aggregate length-check telemetry
   ([PR #137](https://github.com/schiste/Aexeo/pull/137)).
 - [x] CI benchmarks and conservative budgets for evaluation, Markdown adaptation,
-  50-item batches and fresh-process CLI runs, with p50/p95 telemetry. Fresh
+  HTML projection and evaluation, 50-item batches and fresh-process CLI runs, with p50/p95 telemetry. Fresh
   processes do not imply cold operating-system caches.
 - [x] Performance budget validation requires every configured benchmark exactly
   once and rejects missing, invalid or non-finite measurements; independent
