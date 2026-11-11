@@ -87,7 +87,8 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   capabilities ([PR #33](https://github.com/schiste/Aexeo/pull/33)).
 - [x] Configurable link-count gate for Markdown and EmDash ([PR #35](https://github.com/schiste/Aexeo/pull/35)); this does not validate destinations.
 - [x] Literal matching streams occurrences instead of retaining all offsets; claim
-  anchors also respect known block boundaries. Counts still include occurrences
+  anchors also respect known block boundaries. Word-level checks treat adjacent
+  blocks as separate words even without inserted separators. Counts still include occurrences
   beyond the finding limit. Forbidden-term checks avoid constructing discarded
   findings or computing their positions. A synthetic 400 KB, 200,000-match case
   has a separate p50/p95 benchmark and conservative CI budget; it does not

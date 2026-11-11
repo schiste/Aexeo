@@ -674,16 +674,18 @@ impl<'a> LiteralText<'a> {
         while let Some(relative) = text[cursor..].find(&needle) {
             let offset = cursor + relative;
             let end = offset + needle.len();
+            let original_start = self.original_offset(offset);
+            let original_end = self.original_offset(end);
             let boundaries_match = !whole_words
                 || ((!needle.chars().next().is_some_and(word)
                     || text[..offset]
                         .chars()
                         .next_back()
-                        .is_none_or(|ch| !word(ch)))
+                        .is_none_or(|ch| !word(ch))
+                    || self.block_ends.binary_search(&original_start).is_ok())
                     && (!needle.chars().next_back().is_some_and(word)
-                        || text[end..].chars().next().is_none_or(|ch| !word(ch))));
-            let original_start = self.original_offset(offset);
-            let original_end = self.original_offset(end);
+                        || text[end..].chars().next().is_none_or(|ch| !word(ch))
+                        || self.block_ends.binary_search(&original_end).is_ok()));
             if boundaries_match && !self.crosses_block_end(original_start, original_end) {
                 if visit(original_start) {
                     return true;
@@ -2301,6 +2303,43 @@ mod tests {
                 "{text}"
             );
         }
+    }
+
+    #[test]
+    fn whole_word_gates_respect_adjacent_block_boundaries() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='forbidden'\nkind='forbidden_terms'\nterms=['café','chat','caféchat']\ncase_insensitive=true\n[[gates]]\nid='repeat'\nkind='repeated_terms'\nterms=['chat']\nmax_occurrences=1\n").unwrap();
+        let input = literal_input("CAFÉchatchat");
+        let context = ContentContext {
+            block_ends: Some(vec![5, 9]),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        let forbidden = &report.gates[0];
+        assert_eq!(forbidden.measurements["matches"], 3);
+        assert_eq!(
+            forbidden
+                .findings
+                .iter()
+                .map(|f| (f.line, f.column))
+                .collect::<Vec<_>>(),
+            [(1, 1), (1, 5), (1, 9)]
+        );
+        let repeat = &report.gates[1];
+        assert_eq!(repeat.measurements["matching_occurrences"], 2);
+        assert_eq!(repeat.status, GateStatus::Failed);
+        assert_eq!((repeat.findings[0].line, repeat.findings[0].column), (1, 9));
+        let adjacent = LiteralText::new("caféchat", &[5], false);
+        assert!(!adjacent.visit_matches("caféchat", true, |_| true));
+        assert!(!adjacent.visit_matches("caféchat", false, |_| true));
+        assert!(LiteralText::new("caféchat", &[], false).visit_matches("caféchat", true, |_| true));
+        let no_boundaries = preset.evaluate(&input).unwrap();
+        assert_eq!(no_boundaries.gates[0].measurements["matches"], 0);
+        assert_eq!(
+            no_boundaries.gates[1].measurements["matching_occurrences"],
+            0
+        );
     }
 
     #[test]
