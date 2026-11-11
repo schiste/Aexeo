@@ -332,6 +332,21 @@ Arguments:
           [default: .]
 
 Options:
+      --link-graph-output <link-graph-output>
+          Write an observational link graph report for the existing static site
+
+      --link-graph-site-origin <link-graph-site-origin>
+          Public origin of the static site
+
+      --link-graph-url-map <link-graph-url-map>
+          JSON map of build-relative paths to public URLs
+
+      --link-graph-context <link-graph-context>
+          Optional inventory and identity context JSON
+
+      --link-graph-telemetry
+          Emit aggregate link graph timing and counts to stderr
+
       --config <config>
 
 

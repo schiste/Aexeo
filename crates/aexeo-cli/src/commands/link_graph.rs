@@ -49,13 +49,7 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
             .transpose()?;
         let static_urls = matches
             .get_one::<String>("static-url-map")
-            .map(
-                |path| -> Result<std::collections::BTreeMap<String, String>> {
-                    let data = fs::read(path)
-                        .user_context(format!("cannot read static URL map: {path}"))?;
-                    serde_json::from_slice(&data).user_context("invalid static URL map JSON")
-                },
-            )
+            .map(|path| read_static_url_map(path))
             .transpose()?;
         build_link_report_from_audit_with_static_urls(
             &artifact,
@@ -81,6 +75,27 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
 pub(super) fn read_audit_link_context(path: &str) -> Result<AuditLinkContext> {
     let data = fs::read(path).user_context(format!("cannot read audit link context: {path}"))?;
     serde_json::from_slice(&data).user_context("invalid audit link context JSON")
+}
+
+pub(super) fn read_static_url_map(
+    path: &str,
+) -> Result<std::collections::BTreeMap<String, String>> {
+    let data = fs::read(path).user_context(format!("cannot read static URL map: {path}"))?;
+    serde_json::from_slice(&data).user_context("invalid static URL map JSON")
+}
+
+pub(super) fn link_graph_summary(graph: &LinkReport) -> serde_json::Value {
+    serde_json::json!({
+        "version": 1,
+        "crawl_complete": graph.crawl_complete,
+        "page_count": graph.pages.len(),
+        "destination_count": graph.links.destinations.len(),
+        "same_document_count": graph.links.same_document.len(),
+        "indeterminate_count": graph.links.indeterminate.len(),
+        "issues": graph.issues,
+        "legacy_link_findings": aexeo_core::link_findings::count_conclusions(&graph.legacy_findings),
+        "suppressed_legacy_findings": graph.suppressed_legacy_findings,
+    })
 }
 
 pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {

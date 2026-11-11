@@ -493,19 +493,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
                 aexeo_core::reporting::summarize_findings(&full_audit_artifact.findings);
         }
         if submatches.get_flag("link-graph-summary") {
-            graph_summary = Some(serde_json::json!({
-                "version": 1,
-                "crawl_complete": graph.crawl_complete,
-                "page_count": graph.pages.len(),
-                "destination_count": graph.links.destinations.len(),
-                "same_document_count": graph.links.same_document.len(),
-                "indeterminate_count": graph.links.indeterminate.len(),
-                "issues": graph.issues,
-                "legacy_link_findings": aexeo_core::link_findings::count_conclusions(
-                    &graph.legacy_findings
-                ),
-                "suppressed_legacy_findings": graph.suppressed_legacy_findings,
-            }));
+            graph_summary = Some(super::link_graph::link_graph_summary(&graph));
         }
         link_notes = Some(aexeo_core::link_notes::LinkFindingNotes::from_report(
             &graph,

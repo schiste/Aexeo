@@ -6,9 +6,8 @@ use aexeo_core::{
     MachineArtifactBundle, build_audit_artifact, build_machine_artifact_bundle, diff_finding_sets,
     generate_schema_suggestions, load_findings_from_audit, load_site, render_facts_prompt,
     render_llms_full_txt, render_llms_txt, render_markdown_mirror, render_markdown_mirror_pages,
-    render_robots_txt, render_sarif, render_sitemap_xml, render_text_artifact,
-    run_native_static_audit_with_config, suggest_internal_links, write_audit_artifact,
-    write_baseline_file,
+    render_robots_txt, render_sarif, render_sitemap_xml, run_native_static_audit_with_config,
+    suggest_internal_links, write_audit_artifact, write_baseline_file,
 };
 use anyhow::{Result, bail};
 use clap::ArgMatches;
@@ -18,7 +17,7 @@ use std::path::{Path, PathBuf};
 use super::exit_code::{EXIT_FINDINGS, EXIT_SUCCESS, EXIT_UNSUPPORTED};
 use crate::commands::common::{canonicalize_or_keep, required_arg};
 use crate::output::{
-    emit_config_warnings, render_audit_command_json, render_data_command_json,
+    emit_config_warnings, render_audit_command_json_with_graph, render_data_command_json,
     render_fix_command_json, render_path_command_json, render_text_command_json,
 };
 
@@ -38,9 +37,61 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
         user_bail!("--regressions-only requires --baseline");
     }
 
-    let findings = run_native_static_audit_with_config(&root, &config)?;
-    let audit_artifact =
-        build_audit_artifact("check", &findings, AuditStatus::Complete, None, None);
+    // Resolve the optional graph inputs before loading or writing the audit. The
+    // same parsed site feeds both rule evaluation and the graph snapshot.
+    let graph_output = submatches.get_one::<String>("link-graph-output");
+    let graph_inputs = if let Some(path) = graph_output {
+        let urls = super::link_graph::read_static_url_map(required_arg(
+            submatches,
+            "link-graph-url-map",
+        )?)?;
+        let context = submatches
+            .get_one::<String>("link-graph-context")
+            .map(|path| super::link_graph::read_audit_link_context(path))
+            .transpose()?;
+        Some((path, urls, context))
+    } else {
+        None
+    };
+    let mut graph_summary = None;
+    let mut link_notes = None;
+    let (findings, audit_artifact) = if let Some((path, urls, context)) = graph_inputs {
+        let started = std::time::Instant::now();
+        let site = aexeo_core::site::load_site_with_site_url(
+            &resolve_static_site_root(&root, &config)?,
+            config.site_url.as_deref(),
+        )?;
+        let mut findings = aexeo_core::run_checks_for_site(&site, &config);
+        let mut artifact =
+            build_audit_artifact("check", &findings, AuditStatus::Complete, None, None);
+        artifact.site = Some(aexeo_core::audit_site_snapshot(
+            &site,
+            Some(required_arg(submatches, "link-graph-site-origin")?),
+        ));
+        let graph = aexeo_core::link_report::build_link_report_from_audit_with_static_urls(
+            &artifact,
+            context.as_ref(),
+            Some(&urls),
+        )?;
+        aexeo_core::link_findings::remove_suppressed_findings(&mut findings, &graph);
+        aexeo_core::link_findings::remove_suppressed_findings(&mut artifact.findings, &graph);
+        artifact.summary = aexeo_core::reporting::summarize_findings(&artifact.findings);
+        fs::write(path, serde_json::to_vec_pretty(&graph)?)
+            .map_err(|error| anyhow::anyhow!("cannot write link graph report {path}: {error}"))?;
+        if submatches.get_flag("link-graph-telemetry") {
+            super::link_graph::emit_link_graph_telemetry(&graph, started);
+        }
+        graph_summary = Some(super::link_graph::link_graph_summary(&graph));
+        link_notes = Some(aexeo_core::link_notes::LinkFindingNotes::from_report(
+            &graph,
+            Some(path),
+        ));
+        (findings, artifact)
+    } else {
+        let findings = run_native_static_audit_with_config(&root, &config)?;
+        let artifact = build_audit_artifact("check", &findings, AuditStatus::Complete, None, None);
+        (findings, artifact)
+    };
     let audit_path = write_audit_artifact(
         &audit_artifact,
         &root,
@@ -73,7 +124,7 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
     {
         "json" => println!(
             "{}",
-            render_audit_command_json(
+            render_audit_command_json_with_graph(
                 "check",
                 &build_audit_artifact(
                     "check",
@@ -85,6 +136,8 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
                 success,
                 Some(audit_path.display().to_string()),
                 warnings,
+                graph_summary.as_ref(),
+                link_notes.as_ref(),
             )?
         ),
         "sarif" => {
@@ -100,7 +153,7 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
             };
             println!(
                 "{}",
-                render_text_artifact(
+                aexeo_core::render_text_artifact_with_links(
                     &build_audit_artifact(
                         "check",
                         &findings_to_render,
@@ -110,6 +163,7 @@ pub fn command_check(submatches: &ArgMatches) -> Result<i32> {
                     ),
                     success_message,
                     Some(&audit_path),
+                    link_notes.as_ref(),
                 )
             );
         }

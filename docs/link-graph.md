@@ -482,10 +482,8 @@ additive `link_graph` object (`confirmed`, `not_verifiable`) on the problems
 the report qualifies. `report render <audit> --format md --link-graph
 graph.json` (or `--format text`) shows the same for a stored crawl audit and
 its report. Rule IDs, severities, messages and fingerprints are unchanged.
-Without a report, every output is byte for byte what it was. The static
-`audit` command builds no report, so its report shows no qualification: its
-pages have no observed URL, and a report for it would need a
-`--static-url-map` (below) to place any page.
+Without a report, every output is byte for byte what it was. Static `check` can
+also create and attach a graph with an explicit URL map, as described below.
 
 ## Legacy inbound-link findings
 
@@ -558,6 +556,32 @@ response or off the site leaves no analyzed page, so links to it remain
 `LNK001`, as do links to a redirect without a recorded, consistent chain, such
 as one from an older browser artifact or custom runner without hop data. Static exports record no redirects and are
 unchanged. This does not depend on a link report.
+
+## Static checks with a link graph
+
+Run the normal checks and an observational graph together against the same
+already-built directory; this performs no additional build or network requests:
+
+```sh
+aexeo-cli check ./dist --link-graph-output graph.json \
+  --link-graph-site-origin https://example.org --link-graph-url-map urls.json \
+  --link-graph-telemetry
+```
+
+The URL map uses the paths relative to the resolved build directory described
+below. `--link-graph-context context.json` optionally supplies inventory and
+identity context. Text output qualifies legacy link findings and includes the
+graph location; JSON includes an additive `link_graph_summary` and qualified
+priorities. SARIF retains its ordinary findings; use the separate graph report
+for coverage and evidence. Proven false legacy findings are suppressed in all
+outputs, including the stored audit. Incomplete or unmapped observations never
+confirm an orphan. Use `report render <audit> --link-graph graph.json` to
+reproduce qualifications later.
+
+The stored audit now contains the parsed site's HTML when graph output is
+requested, and the graph includes source context and file paths: treat both as
+potentially sensitive. Opt-in telemetry on stderr contains only aggregate
+counts and timings. Without the graph flags, static check behavior is unchanged.
 
 ## Built static sites
 
