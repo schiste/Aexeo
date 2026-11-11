@@ -260,8 +260,9 @@ pub fn extract_document(
                 scope.component = Some(tag.to_string());
                 scope.paragraph = None;
             }
-            if let Some(lang) = attribute(&node, "lang").filter(|lang| !lang.trim().is_empty()) {
-                scope.locale = Some(lang);
+            if let Some(lang) = attribute(&node, "lang") {
+                // An explicitly empty language means unknown, not inherited.
+                scope.locale = (!lang.trim().is_empty()).then_some(lang);
             }
             let explicit = (!scope.conditional_markup)
                 .then(|| attribute(&node, "data-aexeo-link-context"))
@@ -569,6 +570,23 @@ mod tests {
     fn query_variants_collapse_onto_the_route_of_their_path() {
         let html = r#"<a href="?page=2">Next</a><a href="/list?page=3">Last</a>"#;
         assert_eq!(routes(html, "https://example.org/list"), ["list", "list"]);
+    }
+
+    #[test]
+    fn empty_language_resets_inheritance_until_a_nested_override() {
+        let links = extract_links(
+            r#"<html lang="fr"><main><a href="/fr">fr</a><div lang=""><a href="/unknown">unknown</a><span lang="en"><a href="/en">en</a></span><a lang=" " href="/empty">empty</a></div><a href="/fr-again">fr</a></main></html>"#,
+            "https://example.org/",
+            "https://example.org",
+            None,
+        );
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| link.locale.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("fr"), None, Some("en"), None, Some("fr")]
+        );
     }
 
     #[test]
