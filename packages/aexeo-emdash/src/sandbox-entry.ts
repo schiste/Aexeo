@@ -13,7 +13,7 @@ import {
   isTokenStoredInPlaintext,
   readSidecarConfig,
   readSandboxBlockMappings,
-  readSandboxContentFields,
+  readSandboxContentFieldState,
   readSandboxDescriptionFields,
   writeSidecarConfig,
 } from "./plugin.js";
@@ -210,6 +210,7 @@ async function handleRefresh(ctx: DispatchCtx): Promise<BlockResponse> {
       context?.collections,
     );
   };
+  const contentFields = await readSandboxContentFieldState(ctx.ctx);
   return refreshSweep({
     ctx: ctx.ctx,
     // The sandboxed descriptor takes no collection knobs, so the sweep
@@ -218,7 +219,8 @@ async function handleRefresh(ctx: DispatchCtx): Promise<BlockResponse> {
     evaluator: sandboxEvaluator,
     suppressionFilter: sandboxSuppressionFilter,
     blockMappings: await readSandboxBlockMappings(ctx.ctx),
-    contentFieldsByCollection: await readSandboxContentFields(ctx.ctx),
+    contentFieldsByCollection: contentFields.fields,
+    contentFieldsUnavailable: contentFields.unavailable,
     descriptionFieldsByCollection: await readSandboxDescriptionFields(ctx.ctx),
     tuning: adminViewTuning,
   });

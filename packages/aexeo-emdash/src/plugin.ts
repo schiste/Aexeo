@@ -457,28 +457,34 @@ export async function readSandboxBlockMappings(ctx: SandboxCtx): Promise<CustomB
 }
 
 /** Read an optional JSON mapping from collection names to ordered field names. */
-async function readSandboxFields(ctx: SandboxCtx, key: string, warning: string): Promise<Record<string, readonly string[]> | undefined> {
-  if (!ctx.settings) return undefined;
+type SandboxFieldsState = { fields: Record<string, readonly string[]> | undefined; unavailable: boolean };
+
+async function readSandboxFields(ctx: SandboxCtx, key: string, warning: string): Promise<SandboxFieldsState> {
+  if (!ctx.settings) return { fields: undefined, unavailable: false };
   try {
     const raw = await ctx.settings.get<unknown>(key);
-    if (raw === null || raw === "") return undefined;
+    if (raw === null || raw === "") return { fields: undefined, unavailable: false };
     if (typeof raw !== "string" || raw.length > 65536) throw new Error("invalid selection size or type");
     const value: unknown = JSON.parse(raw);
     if (value === null || typeof value !== "object" || Array.isArray(value) ||
       !Object.values(value).every((fields) => Array.isArray(fields) && fields.length > 0 && fields.every((field) => typeof field === "string" && field.length > 0))) throw new Error("invalid selection");
-    return value as Record<string, readonly string[]>;
+    return { fields: value as Record<string, readonly string[]>, unavailable: false };
   } catch {
     ctx.log?.warn?.(warning);
-    return undefined;
+    return { fields: undefined, unavailable: true };
   }
 }
 
-export function readSandboxContentFields(ctx: SandboxCtx): Promise<Record<string, readonly string[]> | undefined> {
-  return readSandboxFields(ctx, SETTINGS_CONTENT_FIELDS_KEY, "Aexeo content field selection unavailable; multiple fields remain unverified");
+export function readSandboxContentFieldState(ctx: SandboxCtx): Promise<SandboxFieldsState> {
+  return readSandboxFields(ctx, SETTINGS_CONTENT_FIELDS_KEY, "Aexeo content field selection unavailable; body coverage remains unverified");
 }
 
-export function readSandboxDescriptionFields(ctx: SandboxCtx): Promise<Record<string, readonly string[]> | undefined> {
-  return readSandboxFields(ctx, SETTINGS_DESCRIPTION_FIELDS_KEY, "Aexeo description field selection unavailable; description remains unverified");
+export async function readSandboxContentFields(ctx: SandboxCtx): Promise<Record<string, readonly string[]> | undefined> {
+  return (await readSandboxContentFieldState(ctx)).fields;
+}
+
+export async function readSandboxDescriptionFields(ctx: SandboxCtx): Promise<Record<string, readonly string[]> | undefined> {
+  return (await readSandboxFields(ctx, SETTINGS_DESCRIPTION_FIELDS_KEY, "Aexeo description field selection unavailable; description remains unverified")).fields;
 }
 
 // EmDash 0.41 keeps the sandbox bridge available for afterSave work.
@@ -495,7 +501,7 @@ export async function handleAfterSave(
     );
     return;
   }
-  const [blockMappings, fields, descriptions] = await Promise.all([readSandboxBlockMappings(ctx), readSandboxContentFields(ctx), readSandboxDescriptionFields(ctx)]);
+  const [blockMappings, fields, descriptions] = await Promise.all([readSandboxBlockMappings(ctx), readSandboxContentFieldState(ctx), readSandboxDescriptionFields(ctx)]);
   await handleAfterSaveConfigured(event, ctx, (documents, context) =>
     evaluateViaSidecar(
       ctx.http,
@@ -505,8 +511,9 @@ export async function handleAfterSave(
     ),
     undefined,
     blockMappings,
-    fields?.[event.content.type],
+    fields.fields?.[event.content.type],
     descriptions?.[event.content.type],
+    fields.unavailable,
   );
 }
 
@@ -586,6 +593,7 @@ export async function handleAfterSaveConfigured(
   blockMappings?: CustomBlockMappings,
   contentFields?: readonly string[],
   descriptionFields?: readonly string[],
+  contentFieldsUnavailable = false,
 ): Promise<void> {
   // Capture the prior identity before host calls: a later save or delete must
   // not be overwritten if adaptation fails while it is in progress.
@@ -611,6 +619,7 @@ export async function handleAfterSaveConfigured(
     return;
   }
   const document = adapted.document;
+  if (contentFieldsUnavailable && document.body !== undefined) document.body_capabilities = [];
   recordContentCoverage(ctx, [document]);
   const { kv, log } = ctx;
 
@@ -774,6 +783,7 @@ export async function evaluateAndPersistAll(
     suppressionFilter?: SuppressionFilter;
     blockMappings?: CustomBlockMappings | undefined;
     contentFieldsByCollection?: Record<string, readonly string[]> | undefined;
+    contentFieldsUnavailable?: boolean | undefined;
     descriptionFieldsByCollection?: Record<string, readonly string[]> | undefined;
   },
 ): Promise<RefreshSummary> {
@@ -819,6 +829,7 @@ export async function evaluateAndPersistAll(
               options.contentFieldsByCollection?.[collection],
               options.descriptionFieldsByCollection?.[collection],
             );
+            if (options.contentFieldsUnavailable && adapted.document.body !== undefined) adapted.document.body_capabilities = [];
             documents.push(adapted.document);
             documentCollections.push(adapted.meta.collection);
             documentRoutes.add(adapted.document.route);
