@@ -350,6 +350,20 @@ describe("assessment persistence", () => {
     const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator });
     expect(payload.findings.map((entry) => entry.rule_id)).toEqual(["SEO004", "LNK003", "CNT005"]);
   });
+  it("persists and displays snapshot locations without inventing missing ones", async () => {
+    const { ctx } = host();
+    const events: Array<[string, unknown]> = [];
+    ctx.log = { info: (name, data) => events.push([name, data]), warn: () => {}, error: () => {} };
+    const located = { ...finding("/a", "words"), aexeo_origin: "content_preset" as const, aexeo_source_location: { block_index: 1, span_index: 2, utf16_offset: 3 } };
+    const unlocated = { ...finding("/a", "missing"), aexeo_origin: "content_preset" as const };
+    await save(ctx, item("a", NEW), async () => ({ ok: true, findings: [located, unlocated], assessments: { "/a": { status: "evaluated", preset: "p", gates: [], source_mapping: { eligible: 2, mapped: 1, unmapped: 1 } } } }));
+    expect(events.find(([name]) => name === "aexeo.preset_coverage")?.[1]).toMatchObject({ mapping_reports: 1, mapping_eligible: 2, mapping_mapped: 1, mapping_unmapped: 1 });
+    const panel = JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"));
+    expect(panel).toContain("Projected body: block 2, span 3, UTF-16 offset 3");
+    expect(panel).toContain("Projected location unavailable");
+    const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator: returning() });
+    expect(payload.findings.find((entry) => entry.rule_id === "words")?.aexeo_source_location).toEqual(located.aexeo_source_location);
+  });
   it("keeps colliding preset findings after an incomplete site refresh and records aggregate telemetry", async () => {
     const { ctx, store } = host([item("a", OLD)]);
     const events: Array<[string, unknown]> = [];
@@ -359,7 +373,7 @@ describe("assessment persistence", () => {
     await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator });
     expect(store.get(findingsKey("/a"))).toMatchObject({ findings: [tagged] });
     expect((await readAllFindings(ctx.kv)).map((entry) => entry.rule_id)).toEqual(["CNT005"]);
-    expect(events.find(([name]) => name === "aexeo.preset_coverage")).toEqual(["aexeo.preset_coverage", { status: "evaluated", passed: 0, failed: 0, not_checked: 0, colliding_findings: 1 }]);
+    expect(events.find(([name]) => name === "aexeo.preset_coverage")).toEqual(["aexeo.preset_coverage", { status: "evaluated", passed: 0, failed: 0, not_checked: 0, colliding_findings: 1, mapping_reports: 0, mapping_eligible: 0, mapping_mapped: 0, mapping_unmapped: 0 }]);
     expect(JSON.stringify(events)).not.toContain("CNT005");
   });
   it("replaces previous findings with an explicit error for a failed newer evaluation", async () => {

@@ -113,10 +113,18 @@ export function withContentPreset(
         assessments[document.route] = {
           status: "evaluated",
           preset: name,
+          ...(report.source_mapping === undefined ? {} : { source_mapping: report.source_mapping }),
           gates: report.gates.map(({ gate_id, status, blocking, scope, required_capability, reason, measurements }) =>
             ({ gate_id, status, blocking, scope, required_capability, reason, ...(measurements === undefined ? {} : { measurements }) })),
         };
-        for (const gate of report.gates) findings.push(...gate.findings.map((finding) => ({ ...finding, aexeo_origin: "content_preset" as const })));
+        const locations = new Map((report.source_locations ?? []).map((location) => [
+          `${location.gate_id}:${location.finding_index}`, location,
+        ]));
+        for (const gate of report.gates) findings.push(...gate.findings.map((finding, index) => {
+          const location = locations.get(`${gate.gate_id}:${index}`);
+          return { ...finding, aexeo_origin: "content_preset" as const,
+            ...(location === undefined ? {} : { aexeo_source_location: { block_index: location.block_index, span_index: location.span_index, utf16_offset: location.utf16_offset } }) };
+        }));
       }
       return { ok: true, findings, assessments };
     } catch (error) {
