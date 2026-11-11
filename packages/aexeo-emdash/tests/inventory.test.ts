@@ -44,6 +44,41 @@ describe("conservative EmDash link inventory", () => {
     expect(list).toHaveBeenCalledTimes(2);
   });
 
+  it("uses host route and locale mappings with explicit collection context", async () => {
+    const list = vi.fn(async (collection: string) => ({ items: [item(collection)], hasMore: false }));
+    const getPublicUrl = vi.fn(async () => "https://wrong.example/");
+    const resolveUrl = vi.fn(async (collection: string, entry: EmdashContentItem) => `https://example.org/${collection}/${entry.id}`);
+    const classify = vi.fn((_entry: EmdashContentItem, _url: string, collection: string) =>
+      collection === "posts" ? { disposition: "published" as const, locale: "en-US" } : { disposition: "locale_fallback" as const, locale: null });
+    const result = await exportLinkInventory({ list, getPublicUrl }, { collections: ["posts", "pages"], identity: null, resolveUrl, classify });
+    expect(getPublicUrl).not.toHaveBeenCalled();
+    expect(classify.mock.calls.map((call) => call[2])).toEqual(["posts", "pages"]);
+    expect(result.inventory.pages).toEqual([
+      { url: "https://example.org/pages/pages", disposition: "locale_fallback", target: null, locale: null },
+      { url: "https://example.org/posts/posts", disposition: "published", target: null, locale: "en-US" },
+    ]);
+    expect(result.inventory.complete).toBe(false);
+  });
+
+  it("keeps URL mapping failures and invalid locale mappings conservative", async () => {
+    const list = vi.fn(async () => ({ items: [item("a"), item("b"), item("c")], hasMore: false }));
+    const resolveUrl = vi.fn(async (_collection: string, entry: EmdashContentItem) => {
+      if (entry.id === "a") throw new Error("private route details");
+      if (entry.id === "b") return null;
+      return "https://example.org/c";
+    });
+    const onTelemetry = vi.fn();
+    const result = await exportLinkInventory({ list, getPublicUrl: vi.fn(async () => null) }, {
+      collections: ["posts"], identity: null, resolveUrl, onTelemetry,
+      classify: () => ({ disposition: "published", locale: 42 as unknown as string }),
+    });
+    expect(result.omitted).toBe(2);
+    expect(result.issues).toEqual(expect.arrayContaining(["url_resolution_failed", "entry_without_public_url", "classification_failed"]));
+    expect(result.inventory.pages).toEqual([{ url: "https://example.org/c", disposition: "unknown", target: null, locale: "fr" }]);
+    expect(onTelemetry.mock.calls[0]?.[0].classification_failures).toBe(1);
+    expect(JSON.stringify(result)).not.toContain("private route details");
+  });
+
   it("records failed collection reads and refuses unspecified scope", async () => {
     const list = vi.fn(async () => { throw new Error("private backend error"); });
     const getPublicUrl = vi.fn(async () => null);

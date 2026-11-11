@@ -577,6 +577,16 @@ include routes outside the chosen collections. No HTTP endpoint is installed by
 this API. It cannot by itself establish that a crawl and CMS view describe the
 same publication, release and point in time.
 
+Hosts whose rendered routes differ from EmDash's resolver can supply an async
+`resolveUrl(collection, item)` returning the actual public URL or `null` when
+no route is known. It replaces `getPublicUrl` for that export. The optional
+`classify(item, url, collection)` callback can use collection-specific rules
+and return `disposition`, `target`, and an explicit `locale` (including `null`
+for unknown); omitting `locale` retains the CMS value. Callback failures leave
+entries omitted or unclassified and are counted without exposing error details.
+These host-supplied values are assertions, not proof of rendered routes,
+publication state, snapshot identity, or inventory completeness.
+
 URL resolution runs at most eight CMS requests concurrently by default. Set
 `urlResolutionConcurrency` to an integer from 1 to 100 to suit the host's
 capacity; use 1 for sequential requests. Pagination remains sequential.

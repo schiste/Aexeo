@@ -51,9 +51,13 @@ export async function exportLinkInventory(
     urlResolutionConcurrency?: number;
     /** Optional aggregate-only local telemetry; no URLs or content are included. */
     onTelemetry?: (event: { event: "link_inventory_export"; elapsed_ms: number; scanned: number; omitted: number; page_count: number; issue_count: number; classification_failures: number }) => void;
-    classify?: (item: EmdashContentItem, url: string) => {
+    /** Override URL resolution when the host renderer uses a different route mapping. */
+    resolveUrl?: (collection: string, item: EmdashContentItem) => Promise<string | null>;
+    /** Classify using host-owned publication rules; locale defaults to the CMS value. */
+    classify?: (item: EmdashContentItem, url: string, collection: string) => {
       disposition: LinkInventoryDisposition;
       target?: string | null;
+      locale?: string | null;
     };
   },
 ): Promise<LinkInventoryExport> {
@@ -95,7 +99,12 @@ export async function exportLinkInventory(
           const index = next++;
           if (index >= batch.items.length) return;
           try {
-            urls[index] = { url: await content.getPublicUrl(collection, batch.items[index]!.id) };
+            const item = batch.items[index]!;
+            const url = options.resolveUrl
+              ? await options.resolveUrl(collection, item)
+              : await content.getPublicUrl(collection, item.id);
+            if (url !== null && typeof url !== "string") throw new Error("invalid public URL");
+            urls[index] = { url };
           } catch {
             urls[index] = { error: true };
           }
@@ -117,15 +126,18 @@ export async function exportLinkInventory(
         }
         let disposition: LinkInventoryDisposition = "unknown";
         let target: string | null = null;
+        let locale = item.locale;
         if (options.classify) {
           try {
-            const classification = options.classify(item, url);
+            const classification = options.classify(item, url, collection);
             if (!classification || !DISPOSITIONS.has(classification.disposition)
-                || (classification.target != null && typeof classification.target !== "string")) {
+                || (classification.target != null && typeof classification.target !== "string")
+                || (classification.locale != null && typeof classification.locale !== "string")) {
               throw new Error("invalid inventory classification");
             }
             disposition = classification.disposition;
             target = classification.target ?? null;
+            locale = classification.locale === undefined ? item.locale : classification.locale;
           } catch {
             // A host failure cannot turn an unclassified page into a known one,
             // nor discard other pages. Never expose host error details.
@@ -133,7 +145,7 @@ export async function exportLinkInventory(
             issues.add("classification_failed");
           }
         }
-        pages.push({ url, disposition, target, locale: item.locale });
+        pages.push({ url, disposition, target, locale });
       }
       if (!batch.hasMore) break;
       if (!batch.cursor || seen.has(batch.cursor)) {
