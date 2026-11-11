@@ -587,6 +587,115 @@ fn revalidates_previous_verdict_against_current_inputs_and_result() {
 }
 
 #[test]
+fn revalidates_observed_links_and_rejects_stale_inputs_before_observing() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut change = input();
+    change["entries"][0]["media_type"] = "text/markdown".into();
+    change["entries"][0]["after"] = serde_json::json!({"inline":"[x](/x)", "sha256":"f0028e4ca25f0bd43662926fcd36d300576e7e7b3d49045cc6f89a409eaf971e"});
+    let policy = "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\n";
+    assert_eq!(
+        run(dir.path(), &change, policy, &["--check-link-reachability"])
+            .status
+            .code(),
+        Some(0)
+    );
+    let verdict = dir.path().join("verdict.json");
+    let previous = dir.path().join("previous.json");
+    fs::copy(&verdict, &previous).unwrap();
+    let path = previous.to_str().unwrap();
+    let first: serde_json::Value = serde_json::from_slice(&fs::read(&previous).unwrap()).unwrap();
+    assert_eq!(
+        first["extensions"]["aexeo.cli-link-options.v1"],
+        serde_json::json!({"max_checks":20,"timeout_seconds":5})
+    );
+    let ok = run(
+        dir.path(),
+        &change,
+        policy,
+        &[
+            "--check-link-reachability",
+            "--verify-verdict",
+            path,
+            "--telemetry",
+        ],
+    );
+    assert_eq!(
+        ok.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&ok.stderr)
+    );
+    let events: Vec<serde_json::Value> = String::from_utf8_lossy(&ok.stderr)
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["event"], "content_link_reachability");
+    assert_eq!(events[0]["network_checks"], 0);
+    assert_eq!(
+        events[1],
+        serde_json::json!({"event":"content_change_revalidation", "version":1, "matched":true})
+    );
+    let current = fs::read(&verdict).unwrap();
+    let rejected = run(
+        dir.path(),
+        &change,
+        policy,
+        &[
+            "--check-link-reachability",
+            "--verify-verdict",
+            path,
+            "--link-max-checks",
+            "1",
+            "--telemetry",
+        ],
+    );
+    assert_eq!(rejected.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert!(!stderr.contains("content_link_reachability"));
+    assert!(stderr.contains("\"matched\":false"));
+    assert_eq!(fs::read(&verdict).unwrap(), current);
+    let mut changed = change.clone();
+    changed["entries"][0]["metadata"] = serde_json::json!({"private":"secret"});
+    let rejected = run(
+        dir.path(),
+        &changed,
+        policy,
+        &[
+            "--check-link-reachability",
+            "--verify-verdict",
+            path,
+            "--telemetry",
+        ],
+    );
+    assert_eq!(rejected.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert!(!stderr.contains("content_link_reachability"));
+    assert!(!stderr.contains("secret"));
+    assert_eq!(fs::read(&verdict).unwrap(), current);
+    let mut altered = first;
+    altered["extensions"]["aexeo.observed-link-binding.v1"]["observations_sha256"] =
+        "0".repeat(64).into();
+    fs::write(&previous, serde_json::to_vec(&altered).unwrap()).unwrap();
+    let rejected = run(
+        dir.path(),
+        &change,
+        policy,
+        &[
+            "--check-link-reachability",
+            "--verify-verdict",
+            path,
+            "--telemetry",
+        ],
+    );
+    assert_eq!(rejected.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert!(stderr.contains("content_link_reachability"));
+    assert!(stderr.contains("\"matched\":false"));
+    assert_eq!(fs::read(&verdict).unwrap(), current);
+}
+
+#[test]
 fn previous_verdict_verification_rejects_opaque_inputs_and_output_alias() {
     let dir = tempfile::tempdir().unwrap();
     let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";

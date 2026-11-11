@@ -176,6 +176,51 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             .user_context("missing link-timeout")?,
     );
     let telemetry = args.get_flag("telemetry");
+    let check_links = args.get_flag("check-link-reachability");
+    let report_revalidation = |matched: bool| {
+        if telemetry {
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "event": "content_change_revalidation", "version": 1, "matched": matched
+                })
+            );
+        }
+    };
+    let link_options =
+        serde_json::json!({"max_checks": max_checks, "timeout_seconds": timeout.as_secs()});
+    let collection_ref = collection.as_ref().map(|snapshot| ChangeCollection {
+        change_id: &snapshot.change_id,
+        items: &snapshot.items,
+        complete: snapshot.complete,
+    });
+    if check_links && let Some(previous) = &previous_verdict {
+        let preflight = aexeo_core::content_gate_verdict::verify_observed_link_input_binding(
+            previous,
+            &change,
+            &preset,
+            MAX_CONTENT_INPUT_BYTES,
+            MAX_TOTAL_CONTENT_BYTES,
+            args.get_flag("plain-text-paragraphs"),
+            collection_ref.as_ref(),
+        )
+        .and_then(|()| {
+            if previous
+                .extensions
+                .as_ref()
+                .and_then(|extensions| extensions.get("aexeo.cli-link-options.v1"))
+                != Some(&link_options)
+            {
+                anyhow::bail!("previous verdict link options are missing or have changed");
+            }
+            Ok(())
+        });
+        if preflight.is_err() {
+            report_revalidation(false);
+        }
+        preflight
+            .user_context("previous verdict does not match the current link evaluation inputs")?;
+    }
     let mut link_session = None;
     let mut observe = |_: &str, values: &[String]| -> Result<_> {
         use aexeo_core::runtime::link_reachability::{LinkReachabilitySession, gate_observations};
@@ -193,12 +238,12 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         }
         Ok(gate_observations(values, &report))
     };
-    let observer = if args.get_flag("check-link-reachability") {
+    let observer = if check_links {
         Some(&mut observe as &mut aexeo_core::content_gate_verdict::LinkObserver<'_>)
     } else {
         None
     };
-    let verdict = match evaluate_change_with_collection(
+    let mut verdict = match evaluate_change_with_collection(
         &change,
         &mut provider,
         &preset,
@@ -226,8 +271,19 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         }
         Err(error) => return Err(error),
     };
+    if check_links && external.is_none() {
+        verdict
+            .extensions
+            .get_or_insert_with(Default::default)
+            .insert("aexeo.cli-link-options.v1".into(), link_options);
+    }
     if let Some(previous) = previous_verdict {
-        let comparison = aexeo_core::content_gate_verdict::verify_offline_verdict(
+        let verify = if check_links {
+            aexeo_core::content_gate_verdict::verify_observed_link_verdict
+        } else {
+            aexeo_core::content_gate_verdict::verify_offline_verdict
+        };
+        let comparison = verify(
             &previous,
             &verdict,
             &change,
@@ -235,28 +291,11 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             MAX_CONTENT_INPUT_BYTES,
             MAX_TOTAL_CONTENT_BYTES,
             args.get_flag("plain-text-paragraphs"),
-            collection
-                .as_ref()
-                .map(|snapshot| ChangeCollection {
-                    change_id: &snapshot.change_id,
-                    items: &snapshot.items,
-                    complete: snapshot.complete,
-                })
-                .as_ref(),
+            collection_ref.as_ref(),
         );
-        // The verdict above was just evaluated locally without external callbacks.
-        let matched = comparison.is_ok();
-        if telemetry {
-            eprintln!(
-                "{}",
-                serde_json::json!({
-                    "event": "content_change_revalidation", "version": 1, "matched": matched
-                })
-            );
-        }
-        comparison.user_context(
-            "previous verdict does not match the current offline inputs or evaluation",
-        )?;
+        report_revalidation(comparison.is_ok());
+        comparison
+            .user_context("previous verdict does not match the current inputs or evaluation")?;
     }
     if telemetry && let Some(snapshot) = &collection {
         eprintln!(

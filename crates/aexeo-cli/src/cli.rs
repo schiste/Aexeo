@@ -62,7 +62,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("extension-results").long("extension-results").num_args(1).help("Load explicitly supplied, input-bound external gate results for change entries"))
                 .arg(Arg::new("plain-text-paragraphs").long("plain-text-paragraphs").action(ArgAction::SetTrue).help("Interpret text/plain entries as blank-line-separated paragraphs"))
                 .arg(Arg::new("collection-snapshot").long("collection-snapshot").help("Host-supplied post-change collection JSON with explicit completeness"))
-                .arg(Arg::new("verify-verdict").long("verify-verdict").conflicts_with_all(["extension-results", "check-link-reachability"]).help("Re-evaluate offline and compare a previous verdict before writing a fresh verdict"))
+                .arg(Arg::new("verify-verdict").long("verify-verdict").conflicts_with("extension-results").help("Re-evaluate and compare a previous verdict before writing a fresh verdict"))
                 .arg(Arg::new("check-link-reachability").long("check-link-reachability").action(ArgAction::SetTrue).help("Explicitly enable bounded external HTTP observations for reachability gates"))
                 .arg(Arg::new("link-max-checks").long("link-max-checks").value_parser(value_parser!(u64).range(1..=100)).default_value("20").help("Maximum external link checks across the entire change"))
                 .arg(Arg::new("link-timeout").long("link-timeout").value_parser(value_parser!(u64).range(1..=30)).default_value("5").help("Maximum seconds per external link including redirects"))

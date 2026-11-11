@@ -626,10 +626,16 @@ fresh verdict and returns its usual status code (0, 1, or 2). Always check the
 exit code; an output path may contain an older file from a previous invocation.
 Opt-in `--telemetry` reports `content_change_revalidation` with a boolean match
 result, without the content, paths, or identifiers.
-This mode rejects `--extension-results` and `--check-link-reachability` because
-external observations cannot be replayed this way. It does not authenticate the
-previous timestamp, verify collection completeness or revision, or replace the
-host's authority and freshness checks. Aexeo never publishes content.
+With `--check-link-reachability`, the CLI first checks the previous input
+fingerprint and the configured `--link-max-checks` and `--link-timeout` before
+making observations. It then observes links again and compares the complete
+result and observation digest. A changed observation, including a newly unavailable one, causes a mismatch;
+a matching result does not establish long-term availability or source reliability.
+The previous verdict must have been created by a CLI version that records these
+link options. `--extension-results` remains incompatible with revalidation.
+Neither mode authenticates the previous timestamp, verifies collection completeness
+or revision, or replaces the host's authority and freshness checks. Aexeo never
+publishes content.
 
 Rust hosts using a link observer without custom gate extensions can compare a
 previous result with a newly evaluated verdict using `verify_observed_link_verdict`.
@@ -641,7 +647,8 @@ a fresh evaluation with trusted inputs and observer, then compare before applyin
 an action. This does not authenticate the observer, verify response freshness,
 prove collection completeness or bind hidden external state. Custom gate
 extensions remain unsupported and do not receive this binding. Older consumers
-that ignore the extension are not protected; the CLI revalidation remains offline-only.
+that ignore the extension are not protected. The CLI supports its own
+link observer but does not verify arbitrary host implementations.
 The observation hash is SHA-256 initialized with the UTF-8 extension identifier;
 each actual callback adds an eight-byte big-endian length followed by compact
 UTF-8 JSON `[entity_id, destinations, observations]`, in callback order. Each

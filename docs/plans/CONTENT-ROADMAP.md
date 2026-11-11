@@ -201,7 +201,9 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   the complete verdict against a fresh trusted evaluation. This detects changed
   observations even if gate checks are unchanged; it does not authenticate the
   observer, establish freshness, or protect consumers that ignore the extension.
-  CLI revalidation remains offline-only.
+  CLI revalidation also supports its own bounded link observer: it verifies
+  inputs and network options before observation and compares fresh results.
+  Custom extensions and other external evidence remain unsupported.
 - [ ] Bind change verdicts to all decision inputs, including entry metadata,
   collection snapshots, effective policy, host options and external evidence,
   with a versioned interoperable verification contract. The current v1 subject

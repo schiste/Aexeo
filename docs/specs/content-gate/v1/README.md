@@ -140,8 +140,9 @@ re-reads confined content, runs a fresh offline evaluation and compares all
 verdict fields except `evaluated_at`. It returns the fresh verdict only on a
 match. `verify_offline_verdict` provides the same comparison when the host
 already has a fresh, trusted evaluation; callers must not supply an untrusted
-or cached verdict as that evaluation. The CLI uses this comparison when
-`--verify-verdict` is selected. These APIs do not authenticate inputs or
+or cached verdict as that evaluation. The CLI uses this comparison when `--verify-verdict` is selected without a
+link observer. With its explicitly enabled link observer it instead compares
+a fresh evaluation using the observed-link binding; see `docs/content-gates.md`. These APIs do not authenticate inputs or
 verdicts, establish collection completeness or source freshness, or cover
 external callbacks. A successful match is not a claim of factual truth.
 
