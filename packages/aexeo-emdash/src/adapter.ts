@@ -137,20 +137,23 @@ export function contentItemToEmdashDocument(
   content: EmdashContentItem,
   blockMappings?: CustomBlockMappings,
 ): EmdashDocument {
-  return adaptContentItem(content, { blockMappings }).document;
+  return adaptContentItemInternal(content, { blockMappings }, false).document;
 }
 
-export function adaptContentItem(
-  content: EmdashContentItem,
-  options: {
-    route?: string;
-    publicUrl?: string | null;
-    defaultLocale?: string;
-    blockMappings?: CustomBlockMappings | undefined;
-    contentFields?: readonly string[];
-    descriptionFields?: readonly string[];
-  } = {},
-): AdaptedContent {
+type AdaptContentOptions = {
+  route?: string;
+  publicUrl?: string | null;
+  defaultLocale?: string;
+  blockMappings?: CustomBlockMappings | undefined;
+  contentFields?: readonly string[];
+  descriptionFields?: readonly string[];
+};
+
+export function adaptContentItem(content: EmdashContentItem, options: AdaptContentOptions = {}): AdaptedContent {
+  return adaptContentItemInternal(content, options, true);
+}
+
+function adaptContentItemInternal(content: EmdashContentItem, options: AdaptContentOptions, includeSourcePaths: boolean): AdaptedContent {
   const route = options.route ?? deriveRoute(content);
   const title = stringOrEmpty(
     content.seo?.title ?? content.data["title"] ?? content.slug ?? content.id,
@@ -194,7 +197,7 @@ export function adaptContentItem(
     if (body.capabilities !== undefined) document.body_capabilities = body.capabilities;
   }
 
-  const bodySourcePaths = body === null ? undefined : portableTextSourcePaths(content.data, body.blocks);
+  const bodySourcePaths = body === null || !includeSourcePaths ? undefined : portableTextSourcePaths(content.data, body.blocks);
   return {
     document,
     meta: {
