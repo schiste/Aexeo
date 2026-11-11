@@ -467,6 +467,122 @@ fn digest_mismatch_and_unapproved_files_cannot_succeed() {
 }
 
 #[test]
+fn rejects_verdict_aliases_of_configuration_inputs() {
+    let dir = tempfile::tempdir().unwrap();
+    let change = dir.path().join("change.json");
+    let preset = dir.path().join("preset.toml");
+    let snapshot = dir.path().join("snapshot.json");
+    let external = dir.path().join("external.json");
+    fs::write(&change, serde_json::to_vec(&input()).unwrap()).unwrap();
+    fs::write(
+        &preset,
+        "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n",
+    )
+    .unwrap();
+    fs::write(&snapshot, "snapshot must not be replaced").unwrap();
+    fs::write(&external, "external input must not be replaced").unwrap();
+    for (target, extra) in [
+        (&preset, None),
+        (&snapshot, Some("--collection-snapshot")),
+        (&external, Some("--extension-results")),
+    ] {
+        let original = fs::read(target).unwrap();
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"));
+        cmd.args([
+            "content-change",
+            "--preset",
+            "test",
+            "--preset-source",
+            &format!("test={}", preset.display()),
+        ]);
+        if let Some(flag) = extra {
+            cmd.arg(flag).arg(target);
+        }
+        let output = cmd
+            .env("CONTENT_GATE_CHANGE_FILE", &change)
+            .env("CONTENT_GATE_VERDICT_FILE", target)
+            .output()
+            .unwrap();
+        assert!(
+            !output.status.success(),
+            "alias should fail: {}",
+            target.display()
+        );
+        assert_eq!(fs::read(target).unwrap(), original);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_symlink_to_preset_without_replacing_it() {
+    use std::os::unix::fs::symlink;
+    let dir = tempfile::tempdir().unwrap();
+    let change = dir.path().join("change.json");
+    let preset = dir.path().join("preset.toml");
+    let output_path = dir.path().join("verdict-link.json");
+    let original = b"version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
+    fs::write(&change, serde_json::to_vec(&input()).unwrap()).unwrap();
+    fs::write(&preset, original).unwrap();
+    symlink(&preset, &output_path).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content-change",
+            "--preset",
+            "test",
+            "--preset-source",
+            &format!("test={}", preset.display()),
+        ])
+        .env("CONTENT_GATE_CHANGE_FILE", &change)
+        .env("CONTENT_GATE_VERDICT_FILE", &output_path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("preset source and verdict paths must be different")
+    );
+    assert!(
+        fs::symlink_metadata(&output_path)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(fs::read(&preset).unwrap(), original);
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn rejects_verdict_aliases_of_confined_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let change_path = dir.path().join("change.json");
+    let article = dir.path().join("article.txt");
+    let alias = dir.path().join("article-alias.txt");
+    fs::write(&article, "abc").unwrap();
+    fs::hard_link(&article, &alias).unwrap();
+    let mut change = input();
+    change["content_root"] = dir.path().to_str().unwrap().into();
+    change["entries"][0]["after"] = serde_json::json!({"file":"article.txt", "sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"});
+    fs::write(&change_path, serde_json::to_vec(&change).unwrap()).unwrap();
+    for output_path in [&article, &alias] {
+        let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content-change",
+                "--preset",
+                "article",
+                "--content-root",
+                dir.path().to_str().unwrap(),
+            ])
+            .env("CONTENT_GATE_CHANGE_FILE", &change_path)
+            .env("CONTENT_GATE_VERDICT_FILE", output_path)
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "content alias should fail");
+        assert_eq!(fs::read(&article).unwrap(), b"abc");
+        assert_eq!(fs::read(&alias).unwrap(), b"abc");
+    }
+}
+
+#[test]
 fn rejects_same_change_and_verdict_path_without_destroying_input() {
     let dir = tempfile::tempdir().unwrap();
     let change = dir.path().join("change.json");

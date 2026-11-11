@@ -39,6 +39,10 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 
 ## Delivery tracker
 
+- [x] Reject content-change verdict paths that alias configuration, snapshot or
+  confined content inputs. Filesystem changes concurrent with evaluation still
+  require host coordination; this is not an atomic input/output transaction.
+
 - [x] Report aggregate body findings withheld due to incomplete CMS projections; guard known native families against drift with a registry test. Unknown custom rules remain host-managed.
 
 - [x] Withhold findings from known native rule families in CMS-only views, including old stored findings, except explicitly tagged content-preset results and two page-level checks supported by a complete body. Unknown host rule IDs remain the host evaluator’s responsibility; the native-family list must track new native rules.
