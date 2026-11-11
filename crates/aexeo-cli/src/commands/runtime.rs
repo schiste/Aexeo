@@ -477,7 +477,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
     let mut link_notes = None;
     if let Some(path) = submatches.get_one::<String>("link-graph-output") {
         let started = std::time::Instant::now();
-        let graph = aexeo_core::link_report::build_link_report_from_audit_with_context(
+        let mut graph = aexeo_core::link_report::build_link_report_from_audit_with_context(
             &full_audit_artifact,
             link_context.as_ref(),
         )?;
@@ -491,6 +491,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
             );
             full_audit_artifact.summary =
                 aexeo_core::reporting::summarize_findings(&full_audit_artifact.findings);
+            graph.bind_audit(&full_audit_artifact)?;
         }
         if submatches.get_flag("link-graph-summary") {
             graph_summary = Some(super::link_graph::link_graph_summary(&graph));

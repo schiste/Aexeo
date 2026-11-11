@@ -1756,6 +1756,20 @@ fn links_through_a_redirect_are_neither_broken_nor_orphaned_once_the_report_prov
             .unwrap();
     assert!(rule_findings(&stored["findings"], "LNK002").is_empty());
     assert_eq!(stored["summary"], payload["artifact"]["summary"]);
+    let rendered = Command::new(bin())
+        .current_dir(temp.path())
+        .args([
+            "report",
+            "render",
+            payload["audit_path"].as_str().unwrap(),
+            "--link-graph",
+            graph.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(rendered.status.success());
+    assert!(!String::from_utf8_lossy(&rendered.stderr).contains("qualifications were not applied"));
+    assert!(String::from_utf8_lossy(&rendered.stdout).contains("1 suppressed as disproven"));
 }
 
 /// A seeded crawl of `site` with the link rules only, writing its own link
@@ -2100,6 +2114,49 @@ fn the_text_report_qualifies_orphan_findings_only_with_a_link_report() {
         markdown.contains("## Link graph\n\n- Crawl complete: yes\n"),
         "{markdown}"
     );
+
+    // Reusing a different audit or an old unbound graph must never certify
+    // an orphan, even if the finding paths happen to be identical.
+    let audit_path = temp.path().join(audit);
+    let mut changed: Value = serde_json::from_slice(&std::fs::read(&audit_path).unwrap()).unwrap();
+    changed["generated_at"] = Value::from(changed["generated_at"].as_u64().unwrap() + 1);
+    let changed_path = temp.path().join("different-audit.json");
+    write(&changed_path, &changed.to_string());
+    let mismatched = Command::new(bin())
+        .current_dir(temp.path())
+        .args([
+            "report",
+            "render",
+            changed_path.to_str().unwrap(),
+            "--link-graph",
+            "graph.json",
+        ])
+        .output()
+        .unwrap();
+    assert!(mismatched.status.success());
+    assert!(!String::from_utf8_lossy(&mismatched.stdout).contains("confirmed orphan"));
+    assert!(
+        String::from_utf8_lossy(&mismatched.stderr).contains("qualifications were not applied")
+    );
+
+    let mut legacy: Value =
+        serde_json::from_slice(&std::fs::read(temp.path().join("graph.json")).unwrap()).unwrap();
+    legacy.as_object_mut().unwrap().remove("audit_sha256");
+    write(&temp.path().join("legacy-graph.json"), &legacy.to_string());
+    let unbound = Command::new(bin())
+        .current_dir(temp.path())
+        .args([
+            "report",
+            "render",
+            audit,
+            "--link-graph",
+            "legacy-graph.json",
+        ])
+        .output()
+        .unwrap();
+    assert!(unbound.status.success());
+    assert!(!String::from_utf8_lossy(&unbound.stdout).contains("confirmed orphan"));
+    assert!(String::from_utf8_lossy(&unbound.stderr).contains("qualifications were not applied"));
 
     let plain = seeded_text_crawl(&site, temp.path(), &inventory, &[]);
     assert!(plain.contains(&format!("{finding}\n")), "{plain}");

@@ -237,6 +237,9 @@ fn near_variant_key(value: &str) -> Option<String> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LinkReport {
     pub version: u32,
+    /// SHA-256 of the canonical serialized audit, when produced from an audit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit_sha256: Option<String>,
     pub identity: Option<SurfaceIdentity>,
     pub snapshot_date: Option<String>,
     pub crawl_complete: bool,
@@ -257,6 +260,31 @@ pub struct LinkReport {
     /// from its findings; omitted when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub suppressed_legacy_findings: Vec<LegacyLinkFinding>,
+}
+
+impl LinkReport {
+    /// Bind this report to the exact serialized audit. This detects accidental
+    /// mismatches but does not authenticate a report or its producer.
+    pub fn bind_audit(&mut self, audit: &aexeo_contracts::AuditArtifact) -> anyhow::Result<()> {
+        self.audit_sha256 = Some(audit_digest(audit)?);
+        Ok(())
+    }
+
+    /// Old reports with no binding and reports for a different audit do not match.
+    pub fn matches_audit(&self, audit: &aexeo_contracts::AuditArtifact) -> anyhow::Result<bool> {
+        match &self.audit_sha256 {
+            Some(expected) => Ok(*expected == audit_digest(audit)?),
+            None => Ok(false),
+        }
+    }
+}
+
+fn audit_digest(audit: &aexeo_contracts::AuditArtifact) -> anyhow::Result<String> {
+    use sha2::{Digest, Sha256};
+    // Going through Value sorts object keys even when a nested map's iteration
+    // order differs between serialization processes.
+    let canonical = serde_json::to_vec(&serde_json::to_value(audit)?)?;
+    Ok(format!("{:x}", Sha256::digest(canonical)))
 }
 
 /// Exact relative-path comparison, not evidence of a deployed route.
@@ -552,6 +580,7 @@ pub fn build_link_report_from_audit_with_static_urls(
         qualify_legacy_link_findings(&artifact.findings, &site.pages, static_urls, &report)
             .into_iter()
             .partition(|finding| finding.conclusion.proves_finding_false());
+    report.bind_audit(artifact)?;
     Ok(report)
 }
 
@@ -1370,6 +1399,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
         .collect();
     Ok(LinkReport {
         version: 1,
+        audit_sha256: None,
         identity: input.identity.clone(),
         snapshot_date: input.snapshot_date.clone(),
         crawl_complete: input.crawl_complete,

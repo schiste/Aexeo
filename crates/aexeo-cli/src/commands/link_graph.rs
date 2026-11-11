@@ -23,7 +23,7 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
                 && matches.get_one::<String>("static-url-map").is_none()),
         "--context and --static-url-map require --audit or --static-site"
     );
-    let report = if audit_mode || static_mode {
+    let mut report = if audit_mode || static_mode {
         let artifact = if static_mode {
             let site = aexeo_core::load_site(std::path::Path::new(path))?;
             let mut artifact = aexeo_core::build_audit_artifact(
@@ -63,6 +63,11 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
             serde_json::from_slice(&data).user_context("invalid link graph input JSON")?;
         build_link_report(&input).user_context("invalid link graph input")?
     };
+    // The static-site adapter uses an internal synthetic audit which is not
+    // persisted and must not be presented as a reusable audit binding.
+    if static_mode {
+        report.audit_sha256 = None;
+    }
     if matches.get_flag("telemetry") {
         emit_link_graph_telemetry(&report, started);
     }
@@ -143,6 +148,7 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
     let mut telemetry = serde_json::json!({
         "event": "link_graph_analysis",
         "version": 1,
+        "audit_bound": report.audit_sha256.is_some(),
         "elapsed_us": started.elapsed().as_micros(),
         "page_count": report.pages.len(),
         "link_count": observed,

@@ -173,14 +173,20 @@ pub fn command_report_render(
 ) -> Result<i32> {
     let artifact = load_audit_artifact(Path::new(audit))?;
     let links = link_graph
-        .map(|path| -> Result<LinkFindingNotes> {
+        .map(|path| -> Result<Option<LinkFindingNotes>> {
             let data =
                 fs::read(path).user_context(format!("cannot read link graph report: {path}"))?;
             let report: LinkReport =
                 serde_json::from_slice(&data).user_context("invalid link graph report JSON")?;
-            Ok(LinkFindingNotes::from_report(&report, Some(path)))
+            if report.matches_audit(&artifact)? {
+                Ok(Some(LinkFindingNotes::from_report(&report, Some(path))))
+            } else {
+                eprintln!("Link graph does not identify this audit; its qualifications were not applied: {path}");
+                Ok(None)
+            }
         })
-        .transpose()?;
+        .transpose()?
+        .flatten();
     match output_format {
         "json" => println!("{}", render_audit_artifact_json(&artifact)?),
         "md" => println!(
