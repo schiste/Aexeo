@@ -164,6 +164,49 @@ class FeedbackTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "multiple splits"):
             module.export_review(self.corpus, note)
 
+    def test_combines_distinct_reviews_preserving_disagreement_and_rejects_duplicates(self):
+        first = module.capture(self.text, self.report, "length", "e1", "passed", "editor-a", "manual")
+        second = module.capture(self.text, self.report, "length", "e1", "failed", "editor-b", "manual")
+        log = module.export_reviews(self.corpus, [first, second])
+        self.assertEqual(log["version"], 2)
+        self.assertEqual([event["reviewer_status"] for event in log["events"]], ["passed", "failed"])
+        evaluator_spec = importlib.util.spec_from_file_location("evaluator", Path(__file__).with_name("evaluate-content-gates.py"))
+        evaluator = importlib.util.module_from_spec(evaluator_spec)
+        evaluator_spec.loader.exec_module(evaluator)
+        summary = evaluator.aggregate_review_events(self.corpus, "development", log)
+        self.assertEqual(summary["events"], 2)
+        self.assertEqual(summary["reviewed_examples"], 1)
+        self.assertEqual(summary["disagreed_examples"], 1)
+        self.assertEqual(evaluator.aggregate_review_events(self.corpus, "holdout", log)["reviewed_examples"], 0)
+        duplicate = dict(second, reviewer="  editor-a  ")
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            module.export_reviews(self.corpus, [first, duplicate])
+        stale = dict(second, text_sha256="stale")
+        with self.assertRaisesRegex(ValueError, "current example"):
+            module.export_reviews(self.corpus, [first, stale])
+        with self.assertRaisesRegex(ValueError, "at least one"):
+            module.export_reviews(self.corpus, [])
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            evaluator.aggregate_review_events(self.corpus, "development", dict(log, version=1))
+
+    def test_cli_combines_reviews_privately_and_does_not_overwrite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "corpus").write_text(json.dumps(self.corpus))
+            for reviewer, status in [("one", "passed"), ("two", "failed")]:
+                note = module.capture(self.text, self.report, "length", "e1", status, reviewer, "manual", reason="private reason")
+                (root / reviewer).write_text(json.dumps(note))
+            command = [sys.executable, str(SCRIPT), "combine-reviews", "--corpus", str(root / "corpus"),
+                       "--note", str(root / "one"), "--note", str(root / "two"), "--output", str(root / "log"), "--telemetry"]
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            metrics = json.loads(result.stderr)
+            self.assertEqual((metrics["review_count"], metrics["example_count"], metrics["disagreement_count"]), (2, 1, 1))
+            self.assertNotIn("private reason", (root / "log").read_text())
+            self.assertNotIn("e1", result.stderr)
+            self.assertEqual((root / "log").stat().st_mode & 0o077, 0)
+            self.assertEqual(subprocess.run(command, capture_output=True).returncode, 2)
+
     def test_cli_preserves_crlf_and_does_not_overwrite(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

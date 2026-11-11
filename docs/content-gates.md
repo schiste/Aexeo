@@ -324,6 +324,36 @@ representative; these metrics include repeated inputs, so also inspect the
 existing unique-input metrics and source-group coverage. Corpus results are
 local and do not transmit data automatically.
 
+### Combining independent reported reviews
+
+When several people review examples, create a separate feedback note for each
+person and combine explicit pass/fail notes against the same corpus:
+
+```sh
+python3 scripts/content-review-note.py combine-reviews --corpus corpus.json \
+  --note review-a.json --note review-b.json --output reviews.json --telemetry
+python3 scripts/evaluate-content-gates.py corpus.json --binary target/release/aexeo-cli \
+  --split development --review-events reviews.json
+```
+
+The output is a version 2 review-event log accepted by the corpus evaluator's
+`--review-events` option. It retains each reported verdict, validates each note
+against the corpus text and metadata, and rejects repeated example/reviewer pairs
+(reviewer identifiers are compared after trimming outer whitespace). It does not
+modify corpus labels, resolve disagreement, authenticate reviewers, or prove their
+independence. Uncertain notes stay in their original private files and are not
+accepted into this pass/fail log. Keep those files for context: exported events
+exclude reasons and other private notes.
+
+For version 2, review metrics add `reviewed_examples` and `disagreed_examples`
+for the selected split. Existing event and override counts are per review, so an
+example with more reviewers has greater weight; disagreement compares reported
+human statuses and does not account for differences in model policy or time.
+The log contains reviewer identifiers and input hashes, and must remain private.
+The command creates a new file with private permissions and refuses overwrite.
+Opt-in local telemetry contains only duration and aggregate counts, with no text,
+identifiers or reasons. It does not transmit data.
+
 ### Resolving a human review disagreement
 
 A reviewer can explicitly replace an unreviewed proposed corpus label when their

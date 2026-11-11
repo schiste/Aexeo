@@ -60,12 +60,7 @@ def capture(text, report, gate_id, example_id, human_status=None, reviewer=None,
     return note
 
 
-def export_review(corpus, note):
-    # Reuse the existing corpus/review validation, including split leakage checks.
-    spec = importlib.util.spec_from_file_location("content_gate_evaluation", Path(__file__).with_name("evaluate-content-gates.py"))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    module.validate_corpus(corpus)
+def _review_event(corpus, note, module):
     if note.get("version") != 1 or note.get("kind") != "reported_human_feedback":
         raise ValueError("unsupported feedback note")
     if note.get("gate_id") != corpus.get("gate_id"):
@@ -85,9 +80,25 @@ def export_review(corpus, note):
         if note["report_binding"] not in {"verified", "unverified"}:
             raise ValueError("invalid report binding")
         event["report_binding"] = note["report_binding"]
-    log = {"version": 1, "gate_id": corpus["gate_id"], "events": [event]}
+    return event
+
+
+def export_reviews(corpus, notes, version=2):
+    """Export validated reported reviews without resolving disagreements."""
+    if not notes:
+        raise ValueError("at least one feedback note is required")
+    spec = importlib.util.spec_from_file_location("content_gate_evaluation", Path(__file__).with_name("evaluate-content-gates.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.validate_corpus(corpus)
+    events = [_review_event(corpus, note, module) for note in notes]
+    log = {"version": version, "gate_id": corpus["gate_id"], "events": events}
     module.aggregate_review_events(corpus, "development", log)
     return log
+
+
+def export_review(corpus, note):
+    return export_reviews(corpus, [note], version=1)
 
 
 def bind_review(corpus, note, accept_human_label=False):
@@ -137,6 +148,11 @@ def main():
     export.add_argument("--note", type=Path, required=True)
     export.add_argument("--output", type=Path, required=True)
     export.add_argument("--telemetry", action="store_true", help="Emit aggregate local timing to stderr")
+    combine = actions.add_parser("combine-reviews", help="Combine distinct reported reviews without resolving disagreements")
+    combine.add_argument("--corpus", type=Path, required=True)
+    combine.add_argument("--note", type=Path, action="append", required=True)
+    combine.add_argument("--output", type=Path, required=True)
+    combine.add_argument("--telemetry", action="store_true", help="Emit aggregate local timing and counts to stderr")
     bind = actions.add_parser("bind-review", help="Create a new corpus copy with one explicit matching human review")
     bind.add_argument("--corpus", type=Path, required=True)
     bind.add_argument("--note", type=Path, required=True)
@@ -158,6 +174,8 @@ def main():
                             metadata)
         elif args.action == "export-review":
             value = export_review(read_json(args.corpus), read_json(args.note))
+        elif args.action == "combine-reviews":
+            value = export_reviews(read_json(args.corpus), [read_json(path) for path in args.note])
         else:
             corpus = read_json(args.corpus)
             note = read_json(args.note)
@@ -170,6 +188,12 @@ def main():
                      "elapsed_ms": (time.perf_counter() - started) * 1000}
             if args.action == "bind-review":
                 event["label_changed"] = label_changed
+            elif args.action == "combine-reviews":
+                opinions = {}
+                for review in value["events"]:
+                    opinions.setdefault(review["example_id"], set()).add(review["reviewer_status"])
+                event.update(review_count=len(value["events"]), example_count=len(opinions),
+                             disagreement_count=sum(len(statuses) > 1 for statuses in opinions.values()))
             print(json.dumps(event), file=sys.stderr)
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
         parser.exit(2, f"feedback operation failed: {error}\n")

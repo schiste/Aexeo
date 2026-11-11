@@ -161,19 +161,27 @@ def validate_corpus(corpus):
 
 def aggregate_review_events(corpus, split, review_log, current_policy=None):
     """Summarize supplied historical reviews without exposing IDs or text."""
-    if review_log.get("version") != 1 or review_log.get("gate_id") != corpus["gate_id"]:
+    version = review_log.get("version")
+    if type(version) is not int or version not in {1, 2} or review_log.get("gate_id") != corpus["gate_id"]:
         raise ValueError("review log version or gate does not match corpus")
     by_id = {item["id"]: item for item in corpus["examples"]}
     seen = set()
+    opinions = {}
     counts = {"agreed": 0, "overrides_to_pass": 0, "overrides_to_fail": 0, "resolved_unchecked": 0}
     binding_counts = {"verified": 0, "unverified": 0}
     policy_counts = {"matching": 0, "different": 0, "unbound": 0}
     policy_decisions = {key: dict.fromkeys(counts, 0) for key in policy_counts}
     for event in review_log["events"]:
         identifier = event["example_id"]
-        if identifier not in by_id or identifier in seen:
+        if identifier not in by_id:
             raise ValueError("review log references an unknown or duplicate example")
-        seen.add(identifier)
+        reviewer_id = event.get("reviewer")
+        if not isinstance(reviewer_id, str) or not reviewer_id.strip():
+            raise ValueError("review event requires reviewer and method provenance")
+        key = identifier if version == 1 else (identifier, reviewer_id.strip())
+        if key in seen:
+            raise ValueError("review log references an unknown or duplicate example or reviewer")
+        seen.add(key)
         item = by_id[identifier]
         digest = hashlib.sha256(item["text"].encode("utf-8")).hexdigest()
         if event.get("text_sha256") != digest:
@@ -196,6 +204,8 @@ def aggregate_review_events(corpus, split, review_log, current_policy=None):
             validate_policy_fingerprint(fingerprint)
         if item["split"] != split:
             continue
+        if version == 2:
+            opinions.setdefault(identifier, set()).add(reviewer)
         policy_group = "unbound" if fingerprint is None else "matching" if fingerprint["sha256"] == current_policy else "different"
         if current_policy is not None:
             policy_counts[policy_group] += 1
@@ -208,6 +218,9 @@ def aggregate_review_events(corpus, split, review_log, current_policy=None):
     decisions = counts["agreed"] + counts["overrides_to_pass"] + counts["overrides_to_fail"]
     result = {"events": sum(counts.values()), "counts": counts, "report_binding_counts": binding_counts,
               "override_rate": (counts["overrides_to_pass"] + counts["overrides_to_fail"]) / decisions if decisions else None}
+    if version == 2:
+        result["reviewed_examples"] = len(opinions)
+        result["disagreed_examples"] = sum(len(statuses) > 1 for statuses in opinions.values())
     if current_policy is not None:
         result["policy_binding_counts"] = policy_counts
         result["policy_decisions"] = policy_decisions
