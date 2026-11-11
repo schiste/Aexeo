@@ -102,7 +102,8 @@ fn external_result_wait_is_not_counted_as_adapter_time() {
         .unwrap();
     let output = child.wait_with_output().unwrap();
     let elapsed = started.elapsed().as_secs_f64() * 1000.0;
-    writer.join().unwrap();
+    // Do not wait on a FIFO writer if a future regression skips reading it.
+    drop(writer);
     assert!(
         output.status.success(),
         "{}",
