@@ -48,9 +48,15 @@ Usage: link-graph [OPTIONS] <input>
 
 Arguments:
   <input>
-          Versioned JSON input file
+          Versioned JSON input file or built static site directory
 
 Options:
+      --static-site
+          Analyze a built static site directory without a crawl
+
+      --site-origin <site-origin>
+          Explicit public site origin for the static export
+
       --audit
           Read an Aexeo audit artifact instead of a link graph input
 
