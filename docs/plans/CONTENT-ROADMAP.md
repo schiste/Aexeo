@@ -39,6 +39,10 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 
 ## Delivery tracker
 
+- [x] Bound content CLI auxiliary files with per-file and shared byte budgets;
+  optional local telemetry records limit events without paths or input data.
+  Exceeding a limit aborts the command instead of returning a partial report.
+
 - [x] Resolve shared preset ancestors once per call and limit inheritance paths to
   64 presets, including when a cached ancestor is reused. No cross-call cache is
   retained, so updated sources are reflected on the next resolution.

@@ -32,6 +32,8 @@ Literal matching for `forbidden_terms`, `required_terms`, `repeated_terms` and t
 
 ### Input limits
 
+The CLI bounds auxiliary files separately: each custom preset, metadata file and evidence source is limited to 16 MiB, with a shared 64 MiB budget across those files and the collection JSON. A collection can consume up to the remaining shared budget. Exceeding an auxiliary limit stops the command with an error; it does not produce a partial report. With `--telemetry`, a local `content_auxiliary_input_limit` event records the input category and effective byte limit without paths or contents.
+
 The CLI reads at most 16 MiB of content. Before parsing Markdown it rejects more than 100 nested block containers on one line, more than 100 unclosed link or image labels, or more than 1000 emphasis delimiter runs in one block. This conservative scan can overestimate nesting. Input beyond any limit is not evaluated: each gate that needs it reports `not_checked` with the limit as its reason, and a blocking gate exits 2. Rust callers of the Markdown adapter receive an error, and can test with `markdown_limit_reason` first.
 
 A document gate keeps its first 1000 findings. It still fails, its source locations cover those findings, and its `findings_omitted` measurement counts the rest. A preset that resolves to no gates, including one whose gates are all disabled, is an error because it would check nothing.
