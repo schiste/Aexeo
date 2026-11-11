@@ -171,7 +171,7 @@ Reusable GEO rules extracted from the Chau7 website guidelines.
 - `GEO007`: semantic block is too thin for retrieval
 - `GEO008`: page does not have enough answer-oriented blocks
 - `GEO009`: core page facts do not align across title, H1, OpenGraph, and schema
-- `GEO010`: numeric claims lack source cues
+- `GEO010`: numeric text lacks recognized source wording in the block
 - `GEO011`: page title is weakly disambiguated
 - `GEO012`: question-like block appears under-explained
 - `GEO013`: page contains overlapping answer chunks

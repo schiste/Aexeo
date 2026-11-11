@@ -1018,7 +1018,7 @@ pub fn builtin_rule_groups() -> &'static [RuleGroupDefinition] {
                 RuleDescriptor {
                     rule_id: "GEO010",
                     sitewide: false,
-                    summary: "numeric claims lack source cues",
+                    summary: "numeric text lacks recognized source wording in the block",
                 },
                 RuleDescriptor {
                     rule_id: "GEO011",

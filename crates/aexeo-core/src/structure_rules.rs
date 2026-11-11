@@ -1,4 +1,4 @@
-use aexeo_contracts::{Finding, FindingScope};
+use aexeo_contracts::{Finding, FindingScope, GEO010_MESSAGE};
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -394,7 +394,7 @@ fn collect_citation_and_title_findings(page: &crate::site::Page) -> Vec<Finding>
     }) {
         findings.push(finding(
             "GEO010",
-            "page contains factual numeric claims without visible source or citation cues",
+            GEO010_MESSAGE,
             &page.path,
             block.line,
             block.column,
@@ -673,6 +673,22 @@ mod tests {
             .filter(|finding| finding.rule_id == "GEO010")
             .count();
         assert_eq!(geo010_count, 1);
+    }
+
+    #[test]
+    fn geo010_describes_textual_heuristic_when_links_and_references_exist() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        write(
+            &root.join("features/test/index.html"),
+            r#"<html><head><title>Test article</title></head><body><article><p>The 2024 study included 240 participants and reported an improvement after twelve months. Read the <a href="https://example.org/study">study</a> for details.</p></article><section><h2>References</h2><a href="https://example.org/study">Study</a></section></body></html>"#,
+        );
+        let findings = run_structure_rules(&load_site(root).unwrap(), &Config::default());
+        let finding = findings
+            .iter()
+            .find(|finding| finding.rule_id == "GEO010")
+            .unwrap();
+        assert_eq!(finding.message, aexeo_contracts::GEO010_MESSAGE);
     }
 
     #[test]

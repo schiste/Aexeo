@@ -727,6 +727,9 @@ fn default_audit_site_snapshot_version() -> u32 {
     1
 }
 
+/// GEO010 is a textual heuristic, not a source or citation verification.
+pub const GEO010_MESSAGE: &str = "text containing a number lacks recognized source wording in this block; review links and references manually";
+
 impl Finding {
     pub fn render(&self) -> String {
         let base = format!(
@@ -769,6 +772,9 @@ impl Finding {
                     .strip_prefix("no inbound links observed in the analyzed pages: ")
                     .map(|route| format!("orphan page: {route}"))
                     .unwrap_or_else(|| self.message.clone())
+            } else if self.rule_id == "GEO010" && self.message == GEO010_MESSAGE {
+                "page contains factual numeric claims without visible source or citation cues"
+                    .into()
             } else {
                 self.message.clone()
             },
@@ -831,7 +837,7 @@ impl RuleMetadata {
 mod tests {
     use super::{
         AuditArtifact, AuditPageSnapshot, AuditSiteSnapshot, AuditStatus, CrawlAttestation,
-        CrawlSeedSource, Finding, FindingScope, SurfaceIdentity,
+        CrawlSeedSource, Finding, FindingScope, GEO010_MESSAGE, SurfaceIdentity,
     };
 
     #[test]
@@ -879,6 +885,28 @@ mod tests {
         };
         let mut current = old.clone();
         current.message = "no inbound links observed in the analyzed pages: /guide".into();
+        assert_eq!(old.legacy_fingerprint(), current.legacy_fingerprint());
+        current.rule_id = "OTHER".into();
+        assert_ne!(old.legacy_fingerprint(), current.legacy_fingerprint());
+    }
+
+    #[test]
+    fn geo010_clarification_keeps_legacy_baseline_fingerprint() {
+        let old = Finding {
+            rule_id: "GEO010".into(),
+            message: "page contains factual numeric claims without visible source or citation cues"
+                .into(),
+            path: "article.html".into(),
+            line: 1,
+            column: 1,
+            severity: "warning".into(),
+            suggestion: None,
+            scope: FindingScope::Page,
+            subject: None,
+        };
+        let mut current = old.clone();
+        current.message = GEO010_MESSAGE.into();
+        assert_eq!(old.fingerprint(), current.fingerprint());
         assert_eq!(old.legacy_fingerprint(), current.legacy_fingerprint());
         current.rule_id = "OTHER".into();
         assert_ne!(old.legacy_fingerprint(), current.legacy_fingerprint());
