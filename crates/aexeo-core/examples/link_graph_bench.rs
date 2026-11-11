@@ -5,6 +5,7 @@
 //! JSON object per tier, which `scripts/check-performance.sh` compares
 //! against `performance-budget.json`.
 use aexeo_contracts::{AuditPageSnapshot, Finding};
+use aexeo_core::link_evidence::extract_links;
 use aexeo_core::link_findings::qualify_legacy_link_findings;
 use aexeo_core::link_inventory::SurfaceIdentity;
 use aexeo_core::link_report::{LinkReportInput, RenderedPage, build_link_report};
@@ -110,6 +111,38 @@ fn run_tier(tier: &Tier, iterations: usize) -> anyhow::Result<serde_json::Value>
     }))
 }
 
+/// Exercise a long paragraph with many inline elements and few links. The
+/// paragraph context must not be copied for every traversed element.
+fn run_dense_paragraph(iterations: usize) -> serde_json::Value {
+    let html = format!(
+        "<main><p>{}<a href='/target'>target</a></p></main>",
+        "<span>word </span>".repeat(4_000)
+    );
+    let extract = || extract_links(&html, "https://example.org/", "https://example.org", None);
+    for _ in 0..WARMUP_ITERATIONS {
+        let links = extract();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].paragraph.as_ref().unwrap().len(), 20_006);
+    }
+    let mut samples = Vec::with_capacity(iterations);
+    for _ in 0..iterations {
+        let started = Instant::now();
+        black_box(extract());
+        samples.push(started.elapsed().as_micros());
+    }
+    samples.sort_unstable();
+    serde_json::json!({
+        "name": "link_graph/dense_paragraph_4000_spans",
+        "warmup_iterations": WARMUP_ITERATIONS,
+        "iterations": samples.len(),
+        "pages": 1,
+        "links": 1,
+        "avg_ms": samples.iter().sum::<u128>() as f64 / samples.len() as f64 / 1000.0,
+        "p50_ms": percentile_ms(&samples, 50),
+        "p95_ms": percentile_ms(&samples, 95),
+    })
+}
+
 /// Measure qualification itself, not graph construction, with two findings
 /// per page. Fixture creation is outside the measured region.
 fn run_qualification(iterations: usize) -> anyhow::Result<serde_json::Value> {
@@ -184,7 +217,8 @@ fn main() -> anyhow::Result<()> {
     let results = TIERS
         .iter()
         .map(|tier| run_tier(tier, iterations))
-        .chain(std::iter::once_with(|| run_qualification(iterations)));
+        .chain(std::iter::once_with(|| run_qualification(iterations)))
+        .chain(std::iter::once_with(|| Ok(run_dense_paragraph(iterations))));
     for result in results {
         let result = result?;
         if json_mode {
