@@ -414,6 +414,71 @@ fn audit_context_reports_origin_mismatch_even_without_pages() {
 }
 
 #[test]
+fn built_static_site_link_graph_uses_explicit_urls_without_claiming_coverage() {
+    let temp = tempfile::tempdir().unwrap();
+    let site = temp.path().join("dist");
+    fs::create_dir_all(site.join("en")).unwrap();
+    fs::create_dir_all(site.join("fr")).unwrap();
+    fs::write(
+        site.join("en/index.html"),
+        "<html lang='en'><main><p><a href='/fr/'>Bonjour</a></p></main></html>",
+    )
+    .unwrap();
+    fs::write(
+        site.join("fr/index.html"),
+        "<html lang='fr'><main>Bonjour</main></html>",
+    )
+    .unwrap();
+    fs::write(site.join("unmapped.html"), "<main>Unmapped</main>").unwrap();
+    let map = temp.path().join("urls.json");
+    fs::write(
+        &map,
+        r#"{"en/index.html":"https://example.org/en/","fr/index.html":"https://example.org/fr/"}"#,
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "link-graph",
+            site.to_str().unwrap(),
+            "--static-site",
+            "--site-origin",
+            "https://example.org",
+            "--static-url-map",
+            map.to_str().unwrap(),
+            "--telemetry",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["crawl_complete"], false);
+    assert_eq!(report["pages"].as_array().unwrap().len(), 2);
+    assert_eq!(report["pages"][1]["distinct_source_pages"], 1);
+    assert!(
+        report["issues"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("static_url_mapping_missing"))
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("link_graph_analysis"));
+    let missing_map = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "link-graph",
+            site.to_str().unwrap(),
+            "--static-site",
+            "--site-origin",
+            "https://example.org",
+        ])
+        .output()
+        .unwrap();
+    assert!(!missing_map.status.success());
+}
+
+#[test]
 fn static_audit_uses_only_explicit_mappings_and_never_claims_coverage() {
     let temp = tempfile::tempdir().unwrap();
     let audit_path = temp.path().join("audit.json");

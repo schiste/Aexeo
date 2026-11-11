@@ -14,9 +14,35 @@ use crate::commands::common::required_arg;
 pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
     let started = Instant::now();
     let path = required_arg(matches, "input")?;
-    let data = fs::read(path).user_context(format!("cannot read link graph input: {path}"))?;
-    let report = if matches.get_flag("audit") {
-        let artifact = serde_json::from_slice(&data).user_context("invalid audit artifact JSON")?;
+    let audit_mode = matches.get_flag("audit");
+    let static_mode = matches.get_flag("static-site");
+    anyhow::ensure!(
+        audit_mode
+            || static_mode
+            || (matches.get_one::<String>("context").is_none()
+                && matches.get_one::<String>("static-url-map").is_none()),
+        "--context and --static-url-map require --audit or --static-site"
+    );
+    let report = if audit_mode || static_mode {
+        let artifact = if static_mode {
+            let site = aexeo_core::load_site(std::path::Path::new(path))?;
+            let mut artifact = aexeo_core::build_audit_artifact(
+                "link-graph",
+                &[],
+                aexeo_contracts::AuditStatus::Complete,
+                None,
+                None,
+            );
+            artifact.site = Some(aexeo_core::audit_site_snapshot(
+                &site,
+                Some(required_arg(matches, "site-origin")?),
+            ));
+            artifact
+        } else {
+            let data =
+                fs::read(path).user_context(format!("cannot read link graph input: {path}"))?;
+            serde_json::from_slice(&data).user_context("invalid audit artifact JSON")?
+        };
         let context = matches
             .get_one::<String>("context")
             .map(|path| read_audit_link_context(path))
@@ -38,6 +64,7 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
         )
         .user_context("invalid audit link graph input")?
     } else {
+        let data = fs::read(path).user_context(format!("cannot read link graph input: {path}"))?;
         let input: LinkReportInput =
             serde_json::from_slice(&data).user_context("invalid link graph input JSON")?;
         build_link_report(&input).user_context("invalid link graph input")?

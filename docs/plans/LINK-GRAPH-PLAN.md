@@ -222,6 +222,11 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
   every finding. CI now benchmarks qualification independently on 1,000 pages
   and 2,000 findings; its fixture and budget are not real-site latency claims.
 
+- `link-graph --static-site` reads an existing built directory directly using
+  an explicit origin and path-to-URL map. It reuses the audit graph path and
+  aggregate opt-in telemetry; it does not build, crawl or attest coverage.
+  A multilingual CLI fixture covers missing mappings and incomplete coverage.
+
 ## EmDash preview integration update
 
 - Configured and sandboxed plugins support ordered, host-declared mappings for

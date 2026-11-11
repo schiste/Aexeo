@@ -17,10 +17,12 @@ pub fn build_cli() -> Command {
         .subcommand(
             Command::new("link-graph")
                 .about("Analyze explicitly identified rendered pages and inventory")
-                .arg(Arg::new("input").required(true).help("Versioned JSON input file"))
+                .arg(Arg::new("input").required(true).help("Versioned JSON input file or built static site directory"))
+                .arg(Arg::new("static-site").long("static-site").action(ArgAction::SetTrue).conflicts_with("audit").requires("static-url-map").requires("site-origin").help("Analyze a built static site directory without a crawl"))
+                .arg(Arg::new("site-origin").long("site-origin").requires("static-site").num_args(1).help("Explicit public site origin for the static export"))
                 .arg(Arg::new("audit").long("audit").action(ArgAction::SetTrue).help("Read an Aexeo audit artifact instead of a link graph input"))
-                .arg(Arg::new("context").long("context").requires("audit").num_args(1).help("JSON audit identity and inventory context"))
-                .arg(Arg::new("static-url-map").long("static-url-map").requires("audit").num_args(1).help("JSON map of static relative paths to public URLs"))
+                .arg(Arg::new("context").long("context").num_args(1).help("JSON audit identity and inventory context"))
+                .arg(Arg::new("static-url-map").long("static-url-map").num_args(1).help("JSON map of static relative paths to public URLs"))
                 .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate timings and counts as JSON on stderr")),
         )
         .subcommand(
