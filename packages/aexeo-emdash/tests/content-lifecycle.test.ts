@@ -393,7 +393,7 @@ describe("assessment persistence", () => {
     await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator });
     expect(store.get(findingsKey("/a"))).toMatchObject({ findings: [tagged] });
     expect((await readAllFindings(ctx.kv)).map((entry) => entry.rule_id)).toEqual(["CNT005"]);
-    expect(events.find(([name]) => name === "aexeo.preset_coverage")).toEqual(["aexeo.preset_coverage", { status: "evaluated", passed: 0, failed: 0, not_checked: 0, colliding_findings: 1, mapping_reports: 0, mapping_eligible: 0, mapping_mapped: 0, mapping_unmapped: 0 }]);
+    expect(events.find(([name]) => name === "aexeo.preset_coverage")).toEqual(["aexeo.preset_coverage", { status: "evaluated", documents: 1, assessed_documents: 0, missing_assessments: 1, assessment_errors: 0, passed: 0, failed: 0, not_checked: 0, colliding_findings: 1, mapping_reports: 0, mapping_eligible: 0, mapping_mapped: 0, mapping_unmapped: 0 }]);
     expect(events.find(([name]) => name === "aexeo.cms_finding_coverage")).toEqual(["aexeo.cms_finding_coverage", { status: "evaluated", rendered_findings_withheld: 1 }]);
     expect(JSON.stringify(events)).not.toContain("CNT005");
     expect(JSON.stringify(events)).not.toContain("/a");
@@ -537,6 +537,37 @@ describe("assessment persistence", () => {
     await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator: returning() });
     expect(store.get(findingsKey("/empty"))).toMatchObject({ body_coverage: "complete" });
     expect(store.get(findingsKey("/missing"))).toMatchObject({ body_coverage: "unavailable" });
+  });
+  it("reports missing preset assessments without inferring why they are absent", async () => {
+    const { ctx, store } = host();
+    const events: Array<[string, unknown]> = [];
+    ctx.log = { info: (name, data) => { events.push([name, data]); }, warn: () => {}, error: () => {} };
+    const empty = item("a", NEW);
+    empty.data.body = [];
+    await save(ctx, empty, returning());
+    const event = events.find(([name]) => name === "aexeo.preset_coverage")?.[1];
+    expect(event).toMatchObject({ status: "evaluated", documents: 1, assessed_documents: 0, missing_assessments: 1, assessment_errors: 0 });
+    expect(JSON.stringify(event)).not.toContain("/a");
+    expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"))).toContain("No content preset assessment was recorded");
+    const page = JSON.stringify(await renderFindingsPage(ctx.kv, { emptyFindingsText: "empty", emptyScoreText: "empty", refreshFailureVariant: "error", score: async () => null, truthLabel: () => "" }));
+    expect(page).toContain("No content preset assessment was recorded for 1 document(s)");
+    store.set(findingsKey("/a"), { route: "/a", findings: [], assessment: { status: "error", reason: "unavailable", detail: "error" } });
+    expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"))).not.toContain("No content preset assessment was recorded");
+  });
+  it("counts per-document preset coverage during refresh, without identifiers", async () => {
+    const { ctx } = host([item("one", OLD), item("two", OLD), item("three", OLD)]);
+    const events: Array<[string, unknown]> = [];
+    ctx.log = { info: (name, data) => { events.push([name, data]); }, warn: () => {}, error: () => {} };
+    const evaluator: EvaluatorFn = async () => ({ ok: true, findings: [], assessments: {
+      "/one": { status: "evaluated", preset: "article", gates: [{ gate_id: "word-count", status: "passed", blocking: true, scope: "document", required_capability: "text" }] },
+      "/two": { status: "error", reason: "unavailable", detail: "error" },
+      "/extra": { status: "evaluated", preset: "article", gates: [] },
+    } });
+    await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator });
+    const event = events.find(([name]) => name === "aexeo.preset_coverage")?.[1];
+    expect(event).toMatchObject({ documents: 3, assessed_documents: 1, missing_assessments: 1, assessment_errors: 1, passed: 1 });
+    expect(JSON.stringify(event)).not.toContain("/one");
+    expect(JSON.stringify(event)).not.toContain("word-count");
   });
   it("stores not-checked gate details alongside current findings", async () => {
     const { ctx, store } = host();

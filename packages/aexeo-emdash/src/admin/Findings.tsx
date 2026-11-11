@@ -132,6 +132,7 @@ export function Findings(): React.JSX.Element {
     return <div className="p-4 text-sm text-kumo-subtle">No data.</div>;
   }
 
+  const missingAssessments = payload.routes.filter((route) => route.assessment === undefined).length;
   const routesByPath = new Map<string, RouteSummary>();
   for (const route of payload.routes) {
     routesByPath.set(route.route, route);
@@ -164,6 +165,8 @@ export function Findings(): React.JSX.Element {
       </header>
 
       <p className="text-sm text-kumo-subtle">Rendered page markup, generated metadata and sitewide link inventory are not checked here. Audit the built site for page-level and link findings.</p>
+
+      {missingAssessments > 0 && <p className="rounded border border-kumo-line p-3 text-sm">No content preset assessment was recorded for {missingAssessments} document(s); absence of findings is not an editorial quality assessment.</p>}
 
       {toast !== null && (
         <div className="rounded border border-kumo-line bg-kumo-tint p-3 text-sm">

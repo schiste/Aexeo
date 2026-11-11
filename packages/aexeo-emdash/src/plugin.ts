@@ -363,7 +363,7 @@ function recordContentCoverage(ctx: SandboxCtx, documents: readonly EmdashDocume
 }
 
 // Aggregate counts only; never log routes, gate identifiers, source text or reasons.
-function recordAssessmentCoverage(ctx: SandboxCtx, result: EvaluationOutcome): void {
+function recordAssessmentCoverage(ctx: SandboxCtx, result: EvaluationOutcome, documents: readonly EmdashDocument[]): void {
   let passed = 0, failed = 0, notChecked = 0, mappingReports = 0, mappingEligible = 0, mappingMapped = 0, mappingUnmapped = 0;
   if (result.ok) for (const assessment of Object.values(result.assessments ?? {})) {
     if (assessment.status !== "evaluated") continue;
@@ -379,9 +379,18 @@ function recordAssessmentCoverage(ctx: SandboxCtx, result: EvaluationOutcome): v
       else notChecked++;
     }
   }
+  // Count only the supplied documents; extra or sitewide assessments are not
+  // evidence that a particular CMS record received a preset assessment.
+  let assessedDocuments = 0, missingDocuments = 0, errorDocuments = 0;
+  if (result.ok) for (const document of documents) {
+    const assessment = result.assessments?.[document.route];
+    if (assessment === undefined) missingDocuments++;
+    else if (assessment.status === "error") errorDocuments++;
+    else assessedDocuments++;
+  }
   const collidingFindings = result.ok ? result.findings.filter((finding) => finding.aexeo_origin === "content_preset" &&
     (SITE_GRAPH_RULE_IDS.has(finding.rule_id) || !isLegacyCmsObservableFinding(finding))).length : 0;
-  try { ctx.log?.info?.("aexeo.preset_coverage", { status: result.ok ? "evaluated" : "error", passed, failed, not_checked: notChecked, colliding_findings: collidingFindings, mapping_reports: mappingReports, mapping_eligible: mappingEligible, mapping_mapped: mappingMapped, mapping_unmapped: mappingUnmapped }); } catch { /* best effort */ }
+  try { ctx.log?.info?.("aexeo.preset_coverage", { status: result.ok ? "evaluated" : "error", documents: documents.length, assessed_documents: assessedDocuments, missing_assessments: missingDocuments, assessment_errors: errorDocuments, passed, failed, not_checked: notChecked, colliding_findings: collidingFindings, mapping_reports: mappingReports, mapping_eligible: mappingEligible, mapping_mapped: mappingMapped, mapping_unmapped: mappingUnmapped }); } catch { /* best effort */ }
   const withheld = result.ok ? result.findings.filter((finding) => finding.aexeo_origin !== "content_preset" &&
     !isLegacyCmsObservableFinding(finding)).length : 0;
   try { ctx.log?.info?.("aexeo.cms_finding_coverage", { status: result.ok ? "evaluated" : "error", rendered_findings_withheld: withheld }); } catch { /* best effort */ }
@@ -606,7 +615,7 @@ export async function handleAfterSaveConfigured(
   }
 
   const result = await evaluateSafely(evaluator, [document], { collections: [adapted.meta.collection] });
-  recordAssessmentCoverage(ctx, result);
+  recordAssessmentCoverage(ctx, result, [document]);
   if (!result.ok) {
     log?.error?.(`afterSave evaluator failure (${result.reason})`, {
       detail: result.detail,
@@ -865,7 +874,7 @@ export async function evaluateAndPersistAll(
   //    route. The evaluator strategy (in-process WASM vs sidecar
   //    fetch) is the only configured-vs-sandboxed difference.
   const result = await evaluateSafely(options.evaluator, documents, { collections: documentCollections });
-  recordAssessmentCoverage(ctx, result);
+  recordAssessmentCoverage(ctx, result, documents);
   if (!result.ok) {
     log?.error?.(`aexeo evaluator failure (${result.reason})`, {
       detail: result.detail,
