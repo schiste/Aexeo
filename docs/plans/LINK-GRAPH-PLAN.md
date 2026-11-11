@@ -33,9 +33,9 @@ not change their counts or assert confirmed orphans.
 ## Progress
 
 - Anchor evidence retains literal `aria-label` or image `alt` when link text is
-  absent, with explicit source provenance and aggregate opt-in telemetry. It
-  does not compute browser accessibility names or establish rendered visibility;
-  old reports retain unknown provenance.
+  absent, with aggregate opt-in counts of empty and nonempty labels. It does not
+  compute browser accessibility names or establish rendered visibility; old
+  reports retain their original labels.
 
 - URL resolution is merged as an internal building block (#59); existing
   graph rules are not wired to it yet.

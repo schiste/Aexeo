@@ -1206,7 +1206,7 @@ fn static_check_rejects_graph_output_at_its_own_audit_path() {
 }
 
 #[test]
-fn graph_exposes_anchor_label_sources_and_aggregate_only_telemetry() {
+fn graph_exposes_anchor_labels_and_aggregate_only_telemetry() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("input.json");
     let input = serde_json::json!({
@@ -1238,28 +1238,18 @@ fn graph_exposes_anchor_label_sources_and_aggregate_only_telemetry() {
     assert_eq!(
         evidence
             .iter()
-            .map(|item| (
-                item["anchor"].as_str().unwrap(),
-                item["anchor_source"].as_str().unwrap()
-            ))
+            .map(|item| item["anchor"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        vec![
-            ("Words", "text"),
-            ("Private label", "aria_label"),
-            ("Picture label", "image_alt"),
-            ("", "unavailable")
-        ]
+        vec!["Words", "Private label", "Picture label", ""]
+    );
+    assert!(
+        evidence
+            .iter()
+            .all(|item| item.get("anchor_source").is_none())
     );
     let event: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
-    for field in [
-        "anchor_text_count",
-        "anchor_aria_label_count",
-        "anchor_image_alt_count",
-        "anchor_unavailable_count",
-    ] {
-        assert_eq!(event[field], 1, "{field}");
-    }
-    assert_eq!(event["anchor_unobserved_count"], 0);
+    assert_eq!(event["anchor_with_label_count"], 3);
+    assert_eq!(event["anchor_empty_count"], 1);
     let telemetry = String::from_utf8(output.stderr).unwrap();
     assert!(!telemetry.contains("Private label"));
     assert!(!telemetry.contains("example.org"));

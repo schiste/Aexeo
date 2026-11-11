@@ -122,13 +122,9 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
         hidden_unobserved: usize,
         collapsed: usize,
         collapsed_unobserved: usize,
-        anchor_text: usize,
-        anchor_aria: usize,
-        anchor_image_alt: usize,
-        anchor_unavailable: usize,
-        anchor_unobserved: usize,
+        anchor_with_label: usize,
+        anchor_empty: usize,
     }
-    use aexeo_core::link_evidence::AnchorSource;
     let counts = report
         .links
         .destinations
@@ -145,12 +141,10 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
             counts.hidden_unobserved += usize::from(link.hidden_attribute.is_none());
             counts.collapsed += usize::from(link.collapsed_details == Some(true));
             counts.collapsed_unobserved += usize::from(link.collapsed_details.is_none());
-            match link.anchor_source {
-                Some(AnchorSource::Text) => counts.anchor_text += 1,
-                Some(AnchorSource::AriaLabel) => counts.anchor_aria += 1,
-                Some(AnchorSource::ImageAlt) => counts.anchor_image_alt += 1,
-                Some(AnchorSource::Unavailable) => counts.anchor_unavailable += 1,
-                None => counts.anchor_unobserved += 1,
+            if link.anchor.is_empty() {
+                counts.anchor_empty += 1;
+            } else {
+                counts.anchor_with_label += 1;
             }
             counts
         });
@@ -167,11 +161,8 @@ pub(super) fn emit_link_graph_telemetry(report: &LinkReport, started: Instant) {
         "hidden_attribute_unobserved_link_count": counts.hidden_unobserved,
         "collapsed_details_link_count": counts.collapsed,
         "collapsed_details_unobserved_link_count": counts.collapsed_unobserved,
-        "anchor_text_count": counts.anchor_text,
-        "anchor_aria_label_count": counts.anchor_aria,
-        "anchor_image_alt_count": counts.anchor_image_alt,
-        "anchor_unavailable_count": counts.anchor_unavailable,
-        "anchor_unobserved_count": counts.anchor_unobserved,
+        "anchor_with_label_count": counts.anchor_with_label,
+        "anchor_empty_count": counts.anchor_empty,
         "indeterminate_count": report.links.indeterminate.len(),
         "issue_count": report.issues.len(),
     });

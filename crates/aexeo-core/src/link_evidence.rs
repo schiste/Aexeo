@@ -20,24 +20,11 @@ pub enum LinkContext {
     Unknown,
 }
 
-/// Origin of the reported anchor label, not a computed accessibility name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AnchorSource {
-    Text,
-    AriaLabel,
-    ImageAlt,
-    Unavailable,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinkEvidence {
     pub source: String,
     pub href: String,
     pub anchor: String,
-    /// Older reports lack provenance; `unavailable` means no supported label was observed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub anchor_source: Option<AnchorSource>,
     pub locale: Option<String>,
     pub snapshot_date: Option<String>,
     pub context: LinkContext,
@@ -130,17 +117,17 @@ pub(crate) fn text_content(root: &Handle) -> String {
     result.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Report a literal label with provenance; this does not implement the browser's
+/// Report a literal label; this does not implement the browser's
 /// accessible-name algorithm or infer rendered visibility.
-fn anchor_label(node: &Handle) -> (String, AnchorSource) {
+fn anchor_label(node: &Handle) -> String {
     let text = text_content(node);
     if !text.is_empty() {
-        return (text, AnchorSource::Text);
+        return text;
     }
     if let Some(label) = attribute(node, "aria-label") {
         let label = label.split_whitespace().collect::<Vec<_>>().join(" ");
         if !label.is_empty() {
-            return (label, AnchorSource::AriaLabel);
+            return label;
         }
     }
     let mut alternatives = Vec::new();
@@ -162,11 +149,7 @@ fn anchor_label(node: &Handle) -> (String, AnchorSource) {
         }
         stack.extend(child.children.borrow().iter().rev().cloned());
     }
-    if alternatives.is_empty() {
-        (String::new(), AnchorSource::Unavailable)
-    } else {
-        (alternatives.join(" "), AnchorSource::ImageAlt)
-    }
+    alternatives.join(" ")
 }
 
 fn explicit_context(value: &str) -> LinkContext {
@@ -369,12 +352,11 @@ pub fn extract_document(
             };
             if let Some(href) = href {
                 let resolution = resolve_link(&href, source_url, site_origin, base.as_deref());
-                let (anchor, anchor_source) = anchor_label(&node);
+                let anchor = anchor_label(&node);
                 links.push(LinkEvidence {
                     source: source_url.to_string(),
                     href,
                     anchor,
-                    anchor_source: Some(anchor_source),
                     locale: scope.locale.clone(),
                     snapshot_date: snapshot_date.map(str::to_string),
                     context: scope.context,
@@ -478,7 +460,7 @@ mod tests {
     }
 
     #[test]
-    fn labels_text_image_and_aria_links_with_explicit_provenance() {
+    fn labels_text_image_and_aria_links_without_changing_report_shape() {
         let html = r#"<main><p>Before <a href='/text' aria-label='Other'>Visible <img alt='Icon'></a>
           <a href='/aria' aria-label='  Read   more  '><img alt='Ignored'></a>
           <a href='/image'><img alt='First'><span><img alt=' Deux '></span></a>
@@ -487,20 +469,17 @@ mod tests {
         assert_eq!(
             links
                 .iter()
-                .map(|link| (link.anchor.as_str(), link.anchor_source))
+                .map(|link| link.anchor.as_str())
                 .collect::<Vec<_>>(),
-            vec![
-                ("Visible", Some(AnchorSource::Text)),
-                ("Read more", Some(AnchorSource::AriaLabel)),
-                ("First Deux", Some(AnchorSource::ImageAlt)),
-                ("", Some(AnchorSource::Unavailable)),
-            ]
+            vec!["Visible", "Read more", "First Deux", ""]
         );
         assert!(links.iter().all(|link| link.context == LinkContext::Body));
-        let mut old = serde_json::to_value(&links[0]).unwrap();
-        old.as_object_mut().unwrap().remove("anchor_source");
-        let decoded: LinkEvidence = serde_json::from_value(old).unwrap();
-        assert_eq!(decoded.anchor_source, None);
+        assert!(
+            serde_json::to_value(&links[0])
+                .unwrap()
+                .get("anchor_source")
+                .is_none()
+        );
     }
 
     #[test]
