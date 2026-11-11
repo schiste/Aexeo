@@ -95,6 +95,57 @@ fn html_plain_fragment_maps_only_identical_projection() {
 }
 
 #[test]
+fn html_literal_fragment_maps_prose_and_reports_capability() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("article.html");
+    let preset = dir.path().join("preset.toml");
+    fs::write(&input, "<p>Élan <a href='/x'>world</a></p>").unwrap();
+    fs::write(
+        &preset,
+        "version=1\nname='test'\n[[gates]]\nid='words'\nkind='forbidden_terms'\nterms=['world']\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            input.to_str().unwrap(),
+            "--input-format",
+            "html",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--format",
+            "json",
+            "--telemetry",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["source_location_capability"]["status"],
+        "literal_html"
+    );
+    assert_eq!(
+        report["source_locations"],
+        serde_json::json!([{ "gate_id":"words", "finding_index":0, "line":1, "column":22 }])
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("world"));
+    let event: serde_json::Value = stderr
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|event| event["event"] == "content_evaluation")
+        .unwrap();
+    assert_eq!(
+        event["html_projection"]["source_location_capability"],
+        "literal_html"
+    );
+    assert_eq!(event["source_mapping"]["mapped"], 1);
+}
+
+#[test]
 fn html_limit_telemetry_reports_unavailable_without_fabricated_counts() {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("large.html");
