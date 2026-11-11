@@ -152,11 +152,12 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   a content-change evaluation, within one global check budget. Aggregate
   telemetry counts only new checks; observations are discarded after the run.
 - [x] Explicit static HTML content adapter for CLI and content-change verdicts,
-  including bounded projections and optional host link observations. HTML source
-  positions for transformed markup and browser-rendered visibility remain unverified.
-  When the projection is byte-for-byte identical to the source, prose findings can
-  carry source positions in CLI and content-change reports. CLI JSON and opt-in
-  telemetry identify this limited capability; telemetry also reports projection
+  including bounded projections and optional host link observations. Prose findings
+  can carry source positions for byte-identical text and a verified, well-nested
+  literal HTML subset in CLI and content-change reports. Entity decoding, hidden
+  content, unsupported or malformed markup and heading/link positions remain
+  unmapped. Browser-rendered visibility remains unverified. CLI JSON and opt-in
+  telemetry identify the mapping capability; telemetry also reports projection
   availability and aggregate heading, paragraph and link counts.
 - [ ] Integrate optional host observers with other adapters and continue adding
   independently validated editorial gates.

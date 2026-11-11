@@ -1021,6 +1021,17 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
         )?;
         let identity_projection = input.text.as_deref().is_some()
             && input.text.as_deref() == input.source_text.as_deref();
+        let html_map = if entry.media_type == "text/html" && !identity_projection {
+            input
+                .source_text
+                .as_deref()
+                .zip(input.text.as_deref())
+                .and_then(|(source, projected)| {
+                    crate::html_content_adapter::html_source_map(source, projected)
+                })
+        } else {
+            None
+        };
         let needs_plain_index = identity_projection
             && item_preset
                 .gates
@@ -1043,6 +1054,15 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
                         &gate,
                         destinations.as_deref(),
                         observations.as_deref(),
+                    )
+                })
+                .or_else(|| {
+                    crate::html_content_adapter::gate_source_positions(
+                        html_map.as_ref()?,
+                        input.source_text.as_deref()?,
+                        &input,
+                        definition,
+                        &gate,
                     )
                 })
                 .or_else(|| {
@@ -2234,7 +2254,13 @@ mod tests {
         assert_eq!(calls, 1);
         assert_eq!(verdict.status, VerdictStatus::Fail);
         assert_eq!(verdict.findings.len(), 1);
-        assert!(verdict.findings[0].location.is_none());
+        assert_eq!(
+            verdict.findings[0]
+                .location
+                .as_ref()
+                .map(|p| (p.line, p.column)),
+            Some((1, 40))
+        );
     }
 
     #[test]
@@ -2330,7 +2356,7 @@ mod tests {
         let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['world']\n").unwrap();
         for (source, expected) in [
             ("hello world", Some((1, 7))),
-            ("<p>hello world</p>", None),
+            ("<p>hello world</p>", Some((1, 10))),
             ("hello &#119;orld", None),
         ] {
             let mut input = change();

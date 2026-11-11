@@ -429,7 +429,21 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     } else {
         None
     };
-    let mapping_available = source_map.is_some() || plain_source.is_some();
+    let html_map = if source_complete
+        && plain_source.is_none()
+        && args.get_one::<String>("input-format").map(String::as_str) == Some("html")
+    {
+        input
+            .source_text
+            .as_deref()
+            .zip(input.text.as_deref())
+            .and_then(|(source, projected)| {
+                aexeo_core::html_content_adapter::html_source_map(source, projected)
+            })
+    } else {
+        None
+    };
+    let mapping_available = source_map.is_some() || plain_source.is_some() || html_map.is_some();
     let plain_index = plain_source
         .filter(|_| {
             preset
@@ -454,6 +468,15 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                     result,
                     destinations.as_deref(),
                     link_observations.as_deref(),
+                )
+            })
+            .or_else(|| {
+                aexeo_core::html_content_adapter::gate_source_positions(
+                    html_map.as_ref()?,
+                    input.source_text.as_deref()?,
+                    &input,
+                    gate,
+                    result,
                 )
             })
             .or_else(|| {
@@ -496,7 +519,9 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 .map(|(input, adapter)| (input, adapter, external_load_ms)),
             mapping,
             Some(&gate_timer.timings_ms),
-            html_projection.as_ref(),
+            html_projection
+                .as_ref()
+                .map(|projection| (projection, html_map.is_some())),
         )?;
     }
     if args.get_one::<String>("format").map(String::as_str) == Some("json") {
@@ -521,7 +546,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         }
         if args.get_one::<String>("input-format").map(String::as_str) == Some("html") {
             output["source_location_capability"] = serde_json::json!({
-                "status": if mapping_available { "identity_projection" } else { "unavailable" },
+                "status": if html_map.is_some() { "literal_html" } else if mapping_available { "identity_projection" } else { "unavailable" },
                 "finding_coordinates": "projected_text"
             });
         }
@@ -765,7 +790,7 @@ fn print_telemetry(
     stages: Option<(f64, f64, Option<f64>)>,
     source_mapping: Option<(usize, usize, f64)>,
     gate_timings_ms: Option<&[f64]>,
-    html_projection: Option<&serde_json::Value>,
+    html_projection: Option<(&serde_json::Value, bool)>,
 ) -> Result<()> {
     let mut event = serde_json::json!({"schema_version": 1, "event": "content_evaluation", "evaluation_ms": evaluation_ms, "summary": report.summary});
     let mut length_checks = 0usize;
@@ -807,10 +832,12 @@ fn print_telemetry(
     if let Some(timings) = gate_timings_ms {
         event["gate_timings_ms"] = serde_json::json!(timings);
     }
-    if let Some(projection) = html_projection {
+    if let Some((projection, html_literal_mapping)) = html_projection {
         event["html_projection"] = projection.clone();
         event["html_projection"]["source_location_capability"] =
-            serde_json::json!(if source_mapping.is_some() {
+            serde_json::json!(if html_literal_mapping {
+                "literal_html"
+            } else if source_mapping.is_some() {
                 "identity_projection"
             } else {
                 "unavailable"
