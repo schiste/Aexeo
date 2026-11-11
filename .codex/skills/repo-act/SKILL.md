@@ -50,7 +50,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   `cargo run -q -p aexeo-cli -- docs generate .` and `cargo run -q -p aexeo-cli -- docs check .`; CI checks generated documentation.
 - Before EmDash `npm run test:wasm`, rebuild the plugin bundle after TypeScript
   changes (`npm run build:bundle`); `build:ts` alone leaves bundled entrypoints
-  stale. Rebuild the WASM bridge too when Rust bridge code changes.
+  stale. Rebuild the WASM bridge too when Rust bridge code changes. When
+  reporting results against real CMS snapshots, rebuild both the bundle and
+  bridge from the identified commit even if neither source changed: ignored
+  artifacts in reused worktrees may come from another revision.
 - For WASM bridge interface changes, synchronize the plugin and crawl-worker
   glue declarations and run `npm run check:dts --prefix packages/aexeo-crawl-worker`.
 - For EmDash source-mapping tests, external diagnostics must be within the
