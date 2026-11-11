@@ -1,6 +1,7 @@
 //! Deterministic editorial policy checks driven by route briefs in `aexeo.toml`.
 
 use aexeo_contracts::{Finding, FindingScope};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::config::{Config, EditorialRouteBrief, EditorialTargetQuestion};
@@ -208,9 +209,10 @@ fn is_void_element(tag: &str) -> bool {
     )
 }
 
-fn parse_elements(raw: &str) -> Vec<HtmlElement> {
+fn parse_elements(raw: &str) -> (Vec<HtmlElement>, Cow<'_, str>) {
     let mut elements = Vec::new();
     let mut open_elements: Vec<OpenElement> = Vec::new();
+    let mut suppressed_ranges = Vec::new();
     let lowercase_raw = raw.to_ascii_lowercase();
     let mut cursor = 0;
     let mut position_offset = 0;
@@ -234,6 +236,7 @@ fn parse_elements(raw: &str) -> Vec<HtmlElement> {
                 .find("-->")
                 .map(|end| start + 4 + end + 3)
                 .unwrap_or(raw.len());
+            suppressed_ranges.push((start, cursor));
             continue;
         }
         let Some(end) = tag_end(raw, start) else {
@@ -248,6 +251,12 @@ fn parse_elements(raw: &str) -> Vec<HtmlElement> {
                 && let Some(open_index) = open_elements.iter().rposition(|open| open.tag == tag)
             {
                 let open = open_elements.remove(open_index);
+                suppressed_ranges.extend(
+                    open_elements[open_index..]
+                        .iter()
+                        .filter(|child| child.attributes.contains_key("hidden"))
+                        .map(|child| (child.start, start)),
+                );
                 open_elements.truncate(open_index);
                 elements.push(HtmlElement {
                     tag: open.tag,
@@ -267,6 +276,7 @@ fn parse_elements(raw: &str) -> Vec<HtmlElement> {
                     .find(&closing_tag)
                     .map(|offset| end + 1 + offset + closing_tag.len())
                     .unwrap_or(raw.len());
+                suppressed_ranges.push((start, cursor));
                 continue;
             }
             let open = OpenElement {
@@ -311,7 +321,45 @@ fn parse_elements(raw: &str) -> Vec<HtmlElement> {
         });
     }
     elements.sort_by_key(|element| (element.start, element.end));
-    elements
+    suppressed_ranges.extend(
+        elements
+            .iter()
+            .filter(|element| element.attributes.contains_key("hidden"))
+            .map(|element| (element.start, element.end)),
+    );
+    if suppressed_ranges.is_empty() {
+        return (elements, Cow::Borrowed(raw));
+    }
+    suppressed_ranges.sort_unstable();
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in suppressed_ranges {
+        if let Some(last) = merged.last_mut().filter(|last| start <= last.1) {
+            last.1 = last.1.max(end);
+        } else {
+            merged.push((start, end));
+        }
+    }
+    elements.retain(|element| {
+        let index = merged.partition_point(|range| range.0 <= element.start);
+        index == 0 || element.start >= merged[index - 1].1
+    });
+    // Preserve byte offsets for the original element locations. Replacing each
+    // suppressed byte with ASCII whitespace also preserves valid UTF-8.
+    let mut filtered = raw.as_bytes().to_vec();
+    for (start, end) in merged {
+        for byte in &mut filtered[start..end] {
+            if *byte != b'\n' {
+                *byte = b' ';
+            }
+        }
+    }
+    (
+        elements,
+        Cow::Owned(
+            String::from_utf8(filtered)
+                .unwrap_or_else(|error| String::from_utf8_lossy(&error.into_bytes()).into_owned()),
+        ),
+    )
 }
 
 fn decode_common_entities(text: &str) -> String {
@@ -409,6 +457,7 @@ fn block_elements(elements: &[HtmlElement]) -> impl Iterator<Item = &HtmlElement
 
 fn answer_summary_findings(
     page: &Page,
+    raw: &str,
     elements: &[HtmlElement],
     brief: &EditorialRouteBrief,
 ) -> Vec<Finding> {
@@ -466,9 +515,7 @@ fn answer_summary_findings(
         return findings;
     };
     let has_intervening_content = summary.start <= h1.end
-        || !strip_tags(&page.raw_text[h1.end..summary.start])
-            .trim()
-            .is_empty()
+        || !strip_tags(&raw[h1.end..summary.start]).trim().is_empty()
         || elements.iter().any(|element| {
             element.start >= h1.end
                 && element.end <= summary.start
@@ -486,7 +533,7 @@ fn answer_summary_findings(
                         | "ul"
                         | "ol"
                         | "pre"
-                ) || !element.visible_text(&page.raw_text).trim().is_empty())
+                ) || !element.visible_text(raw).trim().is_empty())
         });
     if has_intervening_content {
         findings.push(finding(
@@ -498,7 +545,7 @@ fn answer_summary_findings(
             "Move the answer summary block directly below the H1, before other visible page content.",
         ).with_subject("summary-not-first"));
     }
-    let summary_text = summary.visible_text(&page.raw_text);
+    let summary_text = summary.visible_text(raw);
     let sentences = sentence_count(&summary_text);
     if !(2..=3).contains(&sentences) {
         findings.push(finding(
@@ -542,6 +589,7 @@ fn question_answer_text(raw: &str, elements: &[HtmlElement], heading: &HtmlEleme
 
 fn target_question_findings(
     page: &Page,
+    raw: &str,
     elements: &[HtmlElement],
     questions: &[EditorialTargetQuestion],
 ) -> Vec<Finding> {
@@ -583,9 +631,7 @@ fn target_question_findings(
             ).with_subject(format!("{}:heading", question.heading_id)));
             continue;
         };
-        if normalize_text(&heading.visible_text(&page.raw_text))
-            != normalize_text(&question.question)
-        {
+        if normalize_text(&heading.visible_text(raw)) != normalize_text(&question.question) {
             findings.push(finding(
                 "EDT002",
                 page,
@@ -599,7 +645,7 @@ fn target_question_findings(
             ).with_subject(format!("{}:text", question.heading_id)));
             continue;
         }
-        let answer = question_answer_text(&page.raw_text, elements, heading);
+        let answer = question_answer_text(raw, elements, heading);
         if answer.trim().chars().count() < 20 {
             findings.push(
                 finding(
@@ -637,6 +683,7 @@ fn is_usable_evidence_href(href: &str, site: &Site) -> bool {
 fn evidence_findings(
     page: &Page,
     site: &Site,
+    raw: &str,
     elements: &[HtmlElement],
     claim_ids: &[String],
 ) -> Vec<Finding> {
@@ -670,14 +717,14 @@ fn evidence_findings(
             .copied()
             .filter(|_| marked_claims.len() == 1);
         let has_claim_text = claim
-            .map(|element| !element.visible_text(&page.raw_text).trim().is_empty())
+            .map(|element| !element.visible_text(raw).trim().is_empty())
             .unwrap_or(false);
         let has_evidence = evidence_links.iter().any(|link| {
             link.attribute("data-aexeo-evidence-for") == Some(claim_id)
                 && link
                     .attribute("href")
                     .is_some_and(|href| is_usable_evidence_href(href, site))
-                && !link.visible_text(&page.raw_text).trim().is_empty()
+                && !link.visible_text(raw).trim().is_empty()
         });
         if !has_claim_text || !has_evidence {
             let location = claim.or_else(|| marked_claims.first().copied());
@@ -716,16 +763,18 @@ pub fn run_editorial_rules(site: &Site, config: &Config) -> Vec<Finding> {
             }
             continue;
         };
-        let elements = parse_elements(&page.raw_text);
-        findings.extend(answer_summary_findings(page, &elements, brief));
+        let (elements, raw) = parse_elements(&page.raw_text);
+        findings.extend(answer_summary_findings(page, &raw, &elements, brief));
         findings.extend(target_question_findings(
             page,
+            &raw,
             &elements,
             &brief.target_questions,
         ));
         findings.extend(evidence_findings(
             page,
             site,
+            &raw,
             &elements,
             &brief.claims_requiring_evidence,
         ));
@@ -783,7 +832,7 @@ mod tests {
     #[test]
     fn element_positions_preserve_unicode_columns_across_skipped_and_unclosed_markup() {
         let raw = "é<div>\n<!-- ignored\n <fake> -->\n<script>\n fake <tag>\n</script>\n  <h2>é</h2><br>\n  <p>unfinished";
-        let elements = parse_elements(raw);
+        let (elements, _) = parse_elements(raw);
         let positions: Vec<(&str, usize, usize)> = elements
             .iter()
             .map(|element| (element.tag.as_str(), element.line, element.column))
@@ -792,6 +841,40 @@ mod tests {
             positions,
             vec![("div", 1, 2), ("h2", 7, 3), ("br", 7, 13), ("p", 8, 3)]
         );
+    }
+
+    #[test]
+    fn ignores_hidden_elements_and_non_rendered_text_in_editorial_checks() {
+        let site = site_with_html(
+            r#"<html><body><main>
+                <h1>Compare the plans</h1>
+                <p id="answer-summary">One sentence.<span hidden> Hidden second sentence.</span></p>
+                <h2 id="price">How do the plans compare on price?</h2>
+                <p hidden>Hidden answer text that is longer than twenty characters.</p>
+                <script>Hidden script content that is longer than twenty characters.</script>
+                <!-- Hidden comment that is longer than twenty characters. -->
+                <div hidden><p data-aexeo-claim="benchmark">Hidden claim.</p>
+                <a data-aexeo-evidence-for="benchmark" href="https://example.com">Hidden evidence</a></div>
+            </main></body></html>"#,
+        );
+        let findings = run_editorial_rules(&site, &config_with_brief());
+        let ids: BTreeSet<&str> = findings
+            .iter()
+            .map(|finding| finding.rule_id.as_str())
+            .collect();
+        assert_eq!(ids, BTreeSet::from(["EDT001", "EDT002", "EDT003"]));
+    }
+
+    #[test]
+    fn hidden_content_does_not_displace_a_visible_summary_or_supply_a_heading() {
+        let site = site_with_html(
+            r#"<h1>Compare</h1><div hidden>é Secret intervening text</div>
+            <p id="answer-summary">First sentence. Second sentence.</p>
+            <div hidden><h2 id="price">How do the plans compare on price?</h2></div>"#,
+        );
+        let findings = run_editorial_rules(&site, &config_with_brief());
+        assert!(!findings.iter().any(|finding| finding.rule_id == "EDT001"));
+        assert!(findings.iter().any(|finding| finding.rule_id == "EDT002"));
     }
 
     #[test]
