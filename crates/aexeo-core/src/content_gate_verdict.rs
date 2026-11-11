@@ -177,14 +177,8 @@ struct OfflineCollection<'a> {
     complete: bool,
 }
 
-fn offline_binding_digest(
-    change: &Change,
-    preset: &ContentPreset,
-    max_entry_bytes: usize,
-    max_total_bytes: usize,
-    plain_text_paragraphs: bool,
-    collection: Option<&ChangeCollection<'_>>,
-) -> Result<String> {
+/// Hash the exact compact JSON bytes without buffering the serialized artifact.
+fn hash_json<T: serde::Serialize + ?Sized>(value: &T) -> Result<String> {
     use sha2::{Digest, Sha256};
     use std::io::{self, Write};
     struct DigestWriter(Sha256);
@@ -197,6 +191,19 @@ fn offline_binding_digest(
             Ok(())
         }
     }
+    let mut writer = DigestWriter(Sha256::new());
+    serde_json::to_writer(&mut writer, value)?;
+    Ok(format!("{:x}", writer.0.finalize()))
+}
+
+fn offline_binding_digest(
+    change: &Change,
+    preset: &ContentPreset,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    plain_text_paragraphs: bool,
+    collection: Option<&ChangeCollection<'_>>,
+) -> Result<String> {
     let material = OfflineBinding {
         domain: OFFLINE_BINDING_EXTENSION,
         engine_version: env!("CARGO_PKG_VERSION"),
@@ -211,9 +218,7 @@ fn offline_binding_digest(
             complete: c.complete,
         }),
     };
-    let mut writer = DigestWriter(Sha256::new());
-    serde_json::to_writer(&mut writer, &material)?;
-    Ok(format!("{:x}", writer.0.finalize()))
+    hash_json(&material)
 }
 
 fn subject_for_change(change: &Change) -> Subject {
@@ -582,38 +587,40 @@ pub struct OfflineDecisionContext<'a> {
 
 impl OfflineDecisionContext<'_> {
     fn manifest(&self) -> Result<aexeo_contracts::content_gate_decision_inputs::DecisionInputs> {
-        use aexeo_contracts::content_gate_decision_inputs::{DecisionInputBytes, DecisionInputs};
+        use aexeo_contracts::content_gate_decision_inputs::{
+            Component, DECISION_INPUTS_SCHEMA, DecisionInputs,
+        };
+        use sha2::{Digest, Sha256};
         if self.evaluator_identity.is_empty() {
             bail!("trusted evaluator identity is required");
         }
-        let change = serde_json::to_vec(self.change)?;
-        let policy = serde_json::to_vec(self.preset)?;
-        let options = serde_json::to_vec(&serde_json::json!({
+        let present_json = |sha256| Component::Present { sha256 };
+        let options = serde_json::json!({
             "engine_version": env!("CARGO_PKG_VERSION"),
             "max_entry_bytes": self.max_entry_bytes,
             "max_total_bytes": self.max_total_bytes,
             "plain_text_paragraphs": self.plain_text_paragraphs,
             "mode": "offline"
-        }))?;
-        let collection = self
-            .collection
-            .as_ref()
-            .map(|c| {
-                serde_json::to_vec(&OfflineCollection {
-                    change_id: c.change_id,
-                    items: c.items,
-                    complete: c.complete,
-                })
-            })
-            .transpose()?;
-        Ok(DecisionInputs::from_bytes(&DecisionInputBytes {
-            change: &change,
-            resolved_policy: &policy,
-            host_options: &options,
-            evaluator: self.evaluator_identity,
-            collection: collection.as_deref(),
-            external_evidence: None,
-        }))
+        });
+        let collection = match &self.collection {
+            Some(c) => present_json(hash_json(&OfflineCollection {
+                change_id: c.change_id,
+                items: c.items,
+                complete: c.complete,
+            })?),
+            None => Component::Absent {},
+        };
+        Ok(DecisionInputs {
+            schema: DECISION_INPUTS_SCHEMA.into(),
+            change: present_json(hash_json(self.change)?),
+            resolved_policy: present_json(hash_json(self.preset)?),
+            host_options: present_json(hash_json(&options)?),
+            evaluator: Component::Present {
+                sha256: format!("{:x}", Sha256::digest(self.evaluator_identity)),
+            },
+            collection,
+            external_evidence: Component::Absent {},
+        })
     }
 }
 
@@ -1257,6 +1264,32 @@ mod tests {
             1024,
             1024,
         )
+    }
+
+    #[test]
+    fn streamed_json_digest_matches_compact_json_bytes() {
+        use sha2::{Digest, Sha256};
+        let input = change();
+        let bytes = serde_json::to_vec(&input).unwrap();
+        assert_eq!(
+            hash_json(&input).unwrap(),
+            format!("{:x}", Sha256::digest(&bytes))
+        );
+        let items = vec![ContentInput {
+            id: "café".into(),
+            text: Some("content".repeat(10000)),
+            ..Default::default()
+        }];
+        let collection = OfflineCollection {
+            change_id: "x",
+            items: &items,
+            complete: true,
+        };
+        let bytes = serde_json::to_vec(&collection).unwrap();
+        assert_eq!(
+            hash_json(&collection).unwrap(),
+            format!("{:x}", Sha256::digest(&bytes))
+        );
     }
 
     #[test]
