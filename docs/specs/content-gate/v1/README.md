@@ -107,15 +107,21 @@ a pass.
 
 ### 3.2 Subject binding
 
-`subject` repeats exactly what was evaluated, so that a runner can tell
-whether a verdict still applies:
+`subject` identifies the change and content bytes evaluated:
 
 - `change_id` and `base`, copied from the change document;
 - `entries`: one item per change-document entry, with `entity_id` and
   `sha256` (that is, `after.sha256`; for `delete` the value is `null`).
 
 A verdict applies only to the exact content it names. When any entry's content
-or the base changes, the verdict is stale.
+or the base changes, the verdict is stale. These fields do **not** bind entry
+metadata, operations, media types, collection snapshots, preset contents, host
+options or external observations. A reused `change_id` does not prove these
+inputs stayed unchanged. Metadata and collection gates can produce different
+results for the same subject. A runner must independently retain and compare
+all inputs and configuration that affected its decision; if it cannot establish
+they are unchanged, it must treat the verdict as stale. The v1 verdict alone
+cannot provide this assurance.
 
 ### 3.3 Findings
 
@@ -167,7 +173,11 @@ of the following hold:
 4. `subject.change_id` and `subject.base` equal those of the change document
    the runner supplied, and every entry's `entity_id` and `sha256` match it
    exactly, with none missing and none extra;
-5. the content about to be published still has those digests.
+5. the content about to be published still has those digests;
+6. every other evaluated input and the effective policy and host options are
+   unchanged, including entry metadata and any supplied collection snapshot or
+   external gate results. The runner must establish this independently: the v1
+   subject does not carry their fingerprints.
 
 If any of these fails, the gate is not passed. A missing file, a parse error,
 a timeout, a disagreement between the exit code and `status`, or an unknown
