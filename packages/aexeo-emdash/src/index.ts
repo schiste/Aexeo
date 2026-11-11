@@ -64,7 +64,7 @@ export interface AexeoPluginOptions {
   contentFieldsByCollection?: Record<string, readonly string[]>;
   descriptionFieldsByCollection?: Record<string, readonly string[]>;
   /** Add a portable content preset to configured-mode evaluation. */
-  contentPreset?: { name: string; sources?: Record<string, string>; byCollection?: Record<string, string>; collections?: readonly string[] };
+  contentPreset?: { name: string; sources?: Record<string, string>; evidenceSources?: Record<string, string>; byCollection?: Record<string, string>; collections?: readonly string[] };
   /**
    * emdash collections the plugin sweeps when an admin clicks
    * Refresh on the findings page. Order doesn't matter; the sweep
@@ -192,6 +192,9 @@ export function aexeoPlugin(
               ...(options.contentPreset.sources === undefined
                 ? {}
                 : { sources: { ...options.contentPreset.sources } }),
+              ...(options.contentPreset.evidenceSources === undefined
+                ? {}
+                : { evidenceSources: { ...options.contentPreset.evidenceSources } }),
               ...(options.contentPreset.byCollection === undefined
                 ? {}
                 : { byCollection: { ...options.contentPreset.byCollection } }),

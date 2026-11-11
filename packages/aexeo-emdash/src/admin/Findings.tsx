@@ -27,7 +27,7 @@
 
 import * as React from "react";
 import { useCallback, useEffect, useState } from "react";
-import { describeGate } from "../assessment-display.js";
+import { describeGate, summarizeGates } from "../assessment-display.js";
 import type { FindingsPayload, RouteSummary } from "../data-route.js";
 
 const PLUGIN_ID = "aexeo-emdash";
@@ -143,7 +143,7 @@ export function Findings(): React.JSX.Element {
           <h1 className="text-xl font-semibold">SEO findings</h1>
           <p className="mt-1 text-sm text-kumo-subtle">
             {payload.totals.findings === 0 ? (
-              <>No findings yet — click Refresh to evaluate CMS records.</>
+              <>{payload.totals.documentsIndexed === 0 ? "No CMS records indexed yet." : "No findings from the available CMS checks."}</>
             ) : (
               <>
                 {payload.totals.findings} findings across {payload.totals.routes} routes —{" "}
@@ -194,7 +194,7 @@ export function Findings(): React.JSX.Element {
           <strong>{route.route}</strong>
           {route.assessment?.status === "error" ? <p>Evaluation failed: {route.assessment.reason}. Findings are unavailable for this revision.</p> :
             route.assessment?.status === "evaluated" ? <details>
-              <summary>Content preset: {route.assessment.preset} ({route.assessment.gates.length} checks)</summary>
+              <summary>Content preset: {route.assessment.preset} — {summarizeGates(route.assessment.gates)}</summary>
               <p>Results cover only these configured checks.</p>
               <ul>{route.assessment.gates.map((gate) => <li key={gate.gate_id}>{describeGate(gate)}</li>)}</ul>
             </details> : null}

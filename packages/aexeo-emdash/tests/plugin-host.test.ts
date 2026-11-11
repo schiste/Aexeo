@@ -37,6 +37,15 @@ function body(text: string): Array<Record<string, unknown>> {
   ];
 }
 
+describe("plugin configuration", () => {
+  it("exposes and copies evidence sources through the public plugin descriptor", () => {
+    const evidenceSources = { study: "source snapshot" };
+    const plugin = aexeoPlugin({ contentPreset: { name: "article", evidenceSources } });
+    evidenceSources.study = "changed";
+    expect(JSON.parse(JSON.stringify(plugin.options)).contentPreset.evidenceSources).toEqual({ study: "source snapshot" });
+  });
+});
+
 describe("EmDash content adaptation", () => {
   it("distinguishes an absent body from an explicitly empty one without hiding another rich text field", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: {} };
