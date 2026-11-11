@@ -57,6 +57,14 @@ custom-extension observations. Those are not evaluated in this offline mode.
 
 The change, resolved policy, options and collection artifacts are Aexeo's own
 compact Serde JSON bytes; they are not a cross-implementation canonical format.
+Rust hosts can explicitly call `OfflineDecisionContext::artifacts()` to obtain
+the exact Aexeo-specific bytes used for the receipt manifest. `as_inputs()`
+exposes them to the manifest comparison API; a host may also provide the bytes
+to the independent Python verifier. The method allocates and may expose sensitive
+content, so protect any exported files and acquire the checking inputs
+independently. The normal receipt path continues to hash JSON without buffering
+all artifacts. Matching exported bytes does not verify the receipt or its verdict.
+
 Consumers must independently protect and establish the current inputs, build
 identity, collection completeness and publication state. Unknown fields in a
 change parsed by v1 may already have been discarded. A matching receipt does

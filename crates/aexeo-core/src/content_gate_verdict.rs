@@ -585,7 +585,70 @@ pub struct OfflineDecisionContext<'a> {
     pub evaluator_identity: &'a [u8],
 }
 
+/// Exact Aexeo-specific bytes used by an offline receipt. These may contain
+/// sensitive content and are not a portable serialization or trusted evidence.
+pub struct OfflineDecisionArtifacts {
+    pub change: Vec<u8>,
+    pub resolved_policy: Vec<u8>,
+    pub host_options: Vec<u8>,
+    pub evaluator: Vec<u8>,
+    pub collection: Option<Vec<u8>>,
+}
+
+impl OfflineDecisionArtifacts {
+    /// Borrow the artifacts for the independent decision-input manifest API.
+    pub fn as_inputs(
+        &self,
+    ) -> aexeo_contracts::content_gate_decision_inputs::DecisionInputBytes<'_> {
+        aexeo_contracts::content_gate_decision_inputs::DecisionInputBytes {
+            change: &self.change,
+            resolved_policy: &self.resolved_policy,
+            host_options: &self.host_options,
+            evaluator: &self.evaluator,
+            collection: self.collection.as_deref(),
+            external_evidence: None,
+        }
+    }
+}
+
 impl OfflineDecisionContext<'_> {
+    fn options(&self) -> serde_json::Value {
+        serde_json::json!({
+            "engine_version": env!("CARGO_PKG_VERSION"),
+            "max_entry_bytes": self.max_entry_bytes,
+            "max_total_bytes": self.max_total_bytes,
+            "plain_text_paragraphs": self.plain_text_paragraphs,
+            "mode": "offline"
+        })
+    }
+
+    fn offline_collection(&self) -> Option<OfflineCollection<'_>> {
+        self.collection.as_ref().map(|c| OfflineCollection {
+            change_id: c.change_id,
+            items: c.items,
+            complete: c.complete,
+        })
+    }
+
+    /// Materialize the exact receipt inputs for an independently obtained
+    /// comparison. Call only when needed: this allocates and exposes input data.
+    /// The caller must protect the bytes and establish their provenance and freshness.
+    pub fn artifacts(&self) -> Result<OfflineDecisionArtifacts> {
+        if self.evaluator_identity.is_empty() {
+            bail!("trusted evaluator identity is required");
+        }
+        Ok(OfflineDecisionArtifacts {
+            change: serde_json::to_vec(self.change)?,
+            resolved_policy: serde_json::to_vec(self.preset)?,
+            host_options: serde_json::to_vec(&self.options())?,
+            evaluator: self.evaluator_identity.to_vec(),
+            collection: self
+                .offline_collection()
+                .map(|c| serde_json::to_vec(&c))
+                .transpose()?,
+        })
+    }
+
     fn manifest(&self) -> Result<aexeo_contracts::content_gate_decision_inputs::DecisionInputs> {
         use aexeo_contracts::content_gate_decision_inputs::{
             Component, DECISION_INPUTS_SCHEMA, DecisionInputs,
@@ -595,19 +658,9 @@ impl OfflineDecisionContext<'_> {
             bail!("trusted evaluator identity is required");
         }
         let present_json = |sha256| Component::Present { sha256 };
-        let options = serde_json::json!({
-            "engine_version": env!("CARGO_PKG_VERSION"),
-            "max_entry_bytes": self.max_entry_bytes,
-            "max_total_bytes": self.max_total_bytes,
-            "plain_text_paragraphs": self.plain_text_paragraphs,
-            "mode": "offline"
-        });
-        let collection = match &self.collection {
-            Some(c) => present_json(hash_json(&OfflineCollection {
-                change_id: c.change_id,
-                items: c.items,
-                complete: c.complete,
-            })?),
+        let options = self.options();
+        let collection = match self.offline_collection() {
+            Some(c) => present_json(hash_json(&c)?),
             None => Component::Absent {},
         };
         Ok(DecisionInputs {
@@ -1290,6 +1343,64 @@ mod tests {
             hash_json(&collection).unwrap(),
             format!("{:x}", Sha256::digest(&bytes))
         );
+    }
+
+    #[test]
+    fn offline_receipt_artifacts_match_manifest_and_detect_mutations() {
+        let input = change();
+        let policy = preset(1);
+        let items = vec![ContentInput {
+            id: "article".into(),
+            ..Default::default()
+        }];
+        for present in [false, true] {
+            let context = OfflineDecisionContext {
+                change: &input,
+                preset: &policy,
+                max_entry_bytes: 1024,
+                max_total_bytes: 2048,
+                plain_text_paragraphs: true,
+                collection: present.then_some(ChangeCollection {
+                    change_id: "x",
+                    items: &items,
+                    complete: false,
+                }),
+                evaluator_identity: b"trusted-build-1",
+            };
+            let manifest = context.manifest().unwrap();
+            let artifacts = context.artifacts().unwrap();
+            assert_eq!(artifacts.collection.is_some(), present);
+            assert!(manifest.verify(&artifacts.as_inputs()).is_ok());
+            for index in 0..4 {
+                let mut altered = context.artifacts().unwrap();
+                let field = match index {
+                    0 => &mut altered.change,
+                    1 => &mut altered.resolved_policy,
+                    2 => &mut altered.host_options,
+                    _ => &mut altered.evaluator,
+                };
+                field.push(b' ');
+                assert!(manifest.verify(&altered.as_inputs()).is_err());
+            }
+            let mut artifacts = context.artifacts().unwrap();
+            if let Some(collection) = &mut artifacts.collection {
+                collection.push(b' ');
+                assert!(manifest.verify(&artifacts.as_inputs()).is_err());
+            } else {
+                artifacts.collection = Some(Vec::new());
+                assert!(manifest.verify(&artifacts.as_inputs()).is_err());
+            }
+        }
+        let context = OfflineDecisionContext {
+            change: &input,
+            preset: &policy,
+            max_entry_bytes: 1,
+            max_total_bytes: 1,
+            plain_text_paragraphs: false,
+            collection: None,
+            evaluator_identity: b"",
+        };
+        assert!(context.artifacts().is_err());
     }
 
     #[test]
