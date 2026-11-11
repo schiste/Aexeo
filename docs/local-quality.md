@@ -112,7 +112,7 @@ It enforces release-mode benchmark budgets through:
 sh scripts/check-performance.sh
 ```
 
-This compares the static audit, runtime audit, content and link graph benchmark fixtures, plus a fresh-process CLI run, against `performance-budget.json` and writes `.aexeo-reports/benchmarks-latest.json`. The link graph budget and its calibration are described in [the link graph benchmark](link-graph.md#benchmark).
+This compares the static audit, runtime audit, content, editorial HTML and link graph benchmark fixtures, plus a fresh-process CLI run, against `performance-budget.json` and writes `.aexeo-reports/benchmarks-latest.json`. The link graph budget and its calibration are described in [the link graph benchmark](link-graph.md#benchmark).
 
 Runtime audit artifacts can also be compared directly:
 
@@ -198,3 +198,9 @@ For large runtime audits, the latest crawl artifact is now refreshed during chec
 ## CI Alignment
 
 GitHub Actions should reuse the same shell entrypoints rather than duplicating raw Cargo commands. The goal is one quality model with different execution environments, not separate local and remote rule sets.
+
+The editorial HTML benchmark measures warmed, in-process rule evaluation on
+synthetic single-line pages with 1,000 and 10,000 paragraphs. Fixture creation,
+site loading and CLI startup are excluded. It reports average, p50 and p95
+locally and stores aggregate timings only; the budget is a regression guard,
+not an end-to-end latency guarantee.
