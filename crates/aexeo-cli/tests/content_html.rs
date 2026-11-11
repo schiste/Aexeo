@@ -33,6 +33,14 @@ fn html_content_uses_composable_gates_and_does_not_guess_source_positions() {
     assert_eq!(report["gates"][1]["status"], "failed");
     assert_eq!(report["gates"][2]["status"], "not_checked");
     assert!(report.get("source_locations").is_none());
+    assert_eq!(
+        report["source_location_capability"]["status"],
+        "unavailable"
+    );
+    assert_eq!(
+        report["source_location_capability"]["finding_coordinates"],
+        "projected_text"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!stderr.contains("example.org"));
     assert!(!stderr.contains("secret"));
@@ -43,12 +51,12 @@ fn html_content_uses_composable_gates_and_does_not_guess_source_positions() {
         .unwrap();
     assert_eq!(
         event["html_projection"],
-        serde_json::json!({"status":"complete", "headings":1, "paragraphs":1, "links":1})
+        serde_json::json!({"status":"complete", "headings":1, "paragraphs":1, "links":1, "source_location_capability":"unavailable"})
     );
 }
 
 #[test]
-fn html_plain_fragment_does_not_claim_source_offsets_even_when_text_is_identical() {
+fn html_plain_fragment_maps_only_identical_projection() {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("article.html");
     let preset = dir.path().join("preset.toml");
@@ -75,7 +83,14 @@ fn html_plain_fragment_does_not_claim_source_offsets_even_when_text_is_identical
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert!(report.get("source_locations").is_none());
+    assert_eq!(
+        report["source_location_capability"]["status"],
+        "identity_projection"
+    );
+    assert_eq!(
+        report["source_locations"],
+        serde_json::json!([{ "gate_id":"words", "finding_index":0, "line":1, "column":1 }])
+    );
     assert!(output.stderr.is_empty(), "telemetry must be opt-in");
 }
 
@@ -108,7 +123,7 @@ fn html_limit_telemetry_reports_unavailable_without_fabricated_counts() {
         .unwrap();
     assert_eq!(
         event["html_projection"],
-        serde_json::json!({"status":"unavailable"})
+        serde_json::json!({"status":"unavailable", "source_location_capability":"unavailable"})
     );
     assert!(!stderr.contains("large.html"));
 }

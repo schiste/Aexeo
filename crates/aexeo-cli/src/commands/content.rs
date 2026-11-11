@@ -381,10 +381,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     // Keep the established projected finding coordinates unchanged. Supply
     // separately indexed source coordinates for positional prose and link gates.
     let mut source_locations = Vec::new();
-    let plain_source = if source_map.is_none()
-        && source_complete
-        && args.get_one::<String>("input-format").map(String::as_str) != Some("html")
-    {
+    let plain_source = if source_map.is_none() && source_complete {
         input
             .source_text
             .as_deref()
@@ -478,6 +475,12 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         }
         if mapping_available {
             output["source_locations"] = serde_json::to_value(&source_locations)?;
+        }
+        if args.get_one::<String>("input-format").map(String::as_str) == Some("html") {
+            output["source_location_capability"] = serde_json::json!({
+                "status": if mapping_available { "identity_projection" } else { "unavailable" },
+                "finding_coordinates": "projected_text"
+            });
         }
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
@@ -749,6 +752,12 @@ fn print_telemetry(
     }
     if let Some(projection) = html_projection {
         event["html_projection"] = projection.clone();
+        event["html_projection"]["source_location_capability"] =
+            serde_json::json!(if source_mapping.is_some() {
+                "identity_projection"
+            } else {
+                "unavailable"
+            });
     }
     eprintln!("{}", serde_json::to_string(&event)?);
     Ok(())
