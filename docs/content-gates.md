@@ -820,6 +820,13 @@ CMS record: custom mappings and merged fields can change the structure. The
 admin displays unavailable locations explicitly; older stored findings must be
 re-evaluated to obtain them.
 
+The local `aexeo.preset_coverage` event reports the number of input documents,
+those with evaluated preset reports, those with an error report, and those with
+no report. Missing reports do not say why an assessment is absent: it may be
+not configured, unsupported by the evaluator, or from an older stored result.
+On evaluator error the per-document counts are zero and the event status is
+`error`. Counters contain no document names, routes, gate IDs or content.
+
 The `aexeo.preset_coverage` event also aggregates the number of reports with
 mapping data and their eligible, mapped and unmapped finding counts. Older
 bridges omit coverage; `mapping_reports` distinguishes that from zero findings.

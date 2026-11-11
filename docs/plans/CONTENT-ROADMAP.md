@@ -153,6 +153,10 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] Markdown invalid-link source locations and aggregate mapping telemetry
   ([PR #48](https://github.com/schiste/Aexeo/pull/48)); locations identify link
   occurrences, including reference uses.
+- [x] Both EmDash findings interfaces flag records without a content-preset
+  assessment, without assuming whether it was unconfigured or unavailable.
+  Local aggregate telemetry distinguishes evaluated, missing and error reports;
+  no report or findings-free result implies broad editorial quality.
 - [x] Persist body capability coverage with each CMS evaluation and surface
   incomplete, unavailable or older unknown coverage in both dashboard paths,
   including evaluations without a content preset. Complete body coverage does

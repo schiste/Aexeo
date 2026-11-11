@@ -277,6 +277,7 @@ interface FindingsSnapshot {
   uncheckedGates: number;
   incompleteBodies: number;
   unknownBodies: number;
+  missingAssessments: number;
 }
 
 async function readFindingsSnapshot(kv: KvNamespace): Promise<FindingsSnapshot> {
@@ -291,6 +292,7 @@ async function readFindingsSnapshot(kv: KvNamespace): Promise<FindingsSnapshot> 
   let uncheckedGates = 0;
   let incompleteBodies = 0;
   let unknownBodies = 0;
+  let missingAssessments = 0;
   for (const entry of entries) {
     if (entry.value === null) continue;
     const route = entry.key.replace(/^findings:/, "");
@@ -299,6 +301,7 @@ async function readFindingsSnapshot(kv: KvNamespace): Promise<FindingsSnapshot> 
       if (entry.value.body_coverage === undefined) unknownBodies++;
       else if (entry.value.body_coverage !== "complete") incompleteBodies++;
       const assessment = entry.value.assessment;
+      if (assessment === undefined) missingAssessments++;
       if (assessment?.status === "error") failedAssessments++;
       if (assessment?.status === "evaluated") {
         uncheckedGates += assessment.gates.filter((gate) => gate.status === "not_checked").length;
@@ -310,7 +313,7 @@ async function readFindingsSnapshot(kv: KvNamespace): Promise<FindingsSnapshot> 
       if (route === "*") routes.add(route);
     }
   }
-  return { findings, documentRoutes: [...routes].sort(), sitewideAssessment, failedAssessments, uncheckedGates, incompleteBodies, unknownBodies };
+  return { findings, documentRoutes: [...routes].sort(), sitewideAssessment, failedAssessments, uncheckedGates, incompleteBodies, unknownBodies, missingAssessments };
 }
 
 export async function readAllFindings(kv: KvNamespace): Promise<FindingRow[]> {
@@ -338,7 +341,7 @@ export async function renderFindingsPage(
   kv: KvNamespace,
   tuning: AdminViewTuning,
 ): Promise<BlockResponse> {
-  const { findings, documentRoutes, sitewideAssessment, failedAssessments, uncheckedGates, incompleteBodies, unknownBodies } = await readFindingsSnapshot(kv);
+  const { findings, documentRoutes, sitewideAssessment, failedAssessments, uncheckedGates, incompleteBodies, unknownBodies, missingAssessments } = await readFindingsSnapshot(kv);
   const errors = findings.filter((finding) => finding.severity === "error");
   const warnings = findings.filter(
     (finding) => finding.severity === "warning",
@@ -356,6 +359,7 @@ export async function renderFindingsPage(
     },
     { type: "context", text: "Rendered page markup, semantic sections, generated metadata, duplicate pages and sitewide links are not checked here. Audit the built site for page-level and link findings." },
     ...(incompleteBodies || unknownBodies ? [{ type: "context", text: `${incompleteBodies} document bodies were incomplete or unavailable; coverage is unknown for ${unknownBodies} older or failed evaluations. Inspect individual documents.` }] : []),
+    ...(missingAssessments ? [{ type: "context", text: `No content preset assessment was recorded for ${missingAssessments} document(s); absence of findings is not an editorial quality assessment.` }] : []),
     ...(failedAssessments || uncheckedGates ? [{ type: "context", text: `${failedAssessments} document evaluations failed; ${uncheckedGates} preset checks were not checked. Inspect individual documents for details.` }] : []),
     ...(sitewideAssessment?.status === "error" ? [{ type: "context", text: `Sitewide checks unavailable: ${sitewideAssessment.reason}. ${sitewideAssessment.detail}` }] : []),
     { type: "divider" },
@@ -491,6 +495,7 @@ export async function renderDocumentPanel(
       { type: "context", text: "Rendered page markup, semantic sections, generated metadata, duplicate pages and sitewide links are not checked here. Audit the built site for page-level and link findings." },
       ...(bodyNotice ? [{ type: "context", text: bodyNotice }] : []),
       ...(incomplete ? [{ type: "context", text: "Sitewide and cross-document checks are unavailable; refresh after resolving the CMS input error." }] : []),
+      ...(record && assessment === undefined ? [{ type: "context", text: "No content preset assessment was recorded for this document; absence of findings is not an editorial quality assessment." }] : []),
       ...(assessment?.status === "error" ? [{ type: "context", text: `Evaluation failed: ${assessment.reason}. Findings are unavailable for this revision.` }] : []),
       ...(assessment?.status === "evaluated" ? [{ type: "context", text: `Content preset: ${assessment.preset}. ${summarizeGates(assessment.gates)}. Results cover only these configured checks.` }, ...assessment.gates.map((gate) => ({ type: "context", text: describeGate(gate) }))] : []),
       ...(findings.length === 0
