@@ -8,6 +8,7 @@ import subprocess
 import struct
 import tempfile
 import time
+import unicodedata
 from pathlib import Path
 
 
@@ -292,8 +293,26 @@ def input_multiplicity(examples):
                     "conflicting_label_groups": sum(len(labels) > 1 for _, labels in duplicates)}
 
 
-def evaluate(binary, corpus, split, review_log=None):
+def normalized_split_overlap(examples):
+    """Count cross-split text matches after Unicode, case and whitespace normalization."""
+    groups = {}
+    for item in examples:
+        normalized = " ".join(unicodedata.normalize("NFKC", item["text"]).casefold().split())
+        digest = hashlib.sha256(normalized.encode("utf-8")).digest()
+        counts = groups.setdefault(digest, {"development": 0, "holdout": 0})
+        counts[item["split"]] += 1
+    overlaps = [counts for counts in groups.values() if all(counts.values())]
+    return {"normalization": "nfkc-casefold-whitespace-v1",
+            "cross_split_groups": len(overlaps),
+            "development_examples": sum(group["development"] for group in overlaps),
+            "holdout_examples": sum(group["holdout"] for group in overlaps)}
+
+
+def evaluate(binary, corpus, split, review_log=None, reject_normalized_overlap=False):
     validate_corpus(corpus)
+    overlap = normalized_split_overlap(corpus["examples"])
+    if reject_normalized_overlap and overlap["cross_split_groups"]:
+        raise ValueError("normalized example text appears in multiple splits")
     for item in corpus["examples"]:
         if item.get("review_status") == "reviewed":
             review_is_bound(item)
@@ -418,6 +437,7 @@ def evaluate(binary, corpus, split, review_log=None):
               "review_policy_binding_counts": policy_review_bindings,
               "policy_bound_reviewed_metrics": classification_metrics(policy_reviewed_counts, policy_review_bindings["matching"]),
               "input_multiplicity": input_coverage,
+              "normalized_split_overlap": overlap,
               "unique_input_metrics": classification_metrics(unique_counts, input_coverage["unique_input_examples"]),
               "unique_reviewed_input_metrics": classification_metrics(unique_reviewed_counts, unique_reviewed_examples),
               "fresh_process_p95_ms": durations[math.ceil(len(durations) * .95) - 1]}
@@ -443,11 +463,13 @@ def main():
     parser.add_argument("--split", choices=["development", "holdout"], default="holdout")
     parser.add_argument("--review-events", type=Path, help="Optional local historical review log")
     parser.add_argument("--assert-regression", action="store_true", help="Exit nonzero on mismatches or unchecked examples")
+    parser.add_argument("--reject-normalized-overlap", action="store_true",
+                        help="Reject cross-split text matches after Unicode, case and whitespace normalization")
     args = parser.parse_args()
     try:
         corpus = json.loads(args.corpus.read_text(encoding="utf-8"))
         review_log = json.loads(args.review_events.read_text(encoding="utf-8")) if args.review_events else None
-        result = evaluate(args.binary, corpus, args.split, review_log)
+        result = evaluate(args.binary, corpus, args.split, review_log, args.reject_normalized_overlap)
         print(json.dumps(result, indent=2))
         if args.assert_regression and any(result["counts"][key] for key in ("false_positive", "false_negative", "not_checked", "missed_not_checked")):
             parser.exit(1, "regression check failed: mismatches or unchecked examples\n")

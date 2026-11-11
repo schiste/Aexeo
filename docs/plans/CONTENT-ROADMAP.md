@@ -266,6 +266,7 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   per-example disagreement counts. This does not authenticate reviewers or
   establish independence. Version 3 logs also preserve uncertain opinions,
   separate them from override metrics and report aggregate uncertainty.
+- [x] Report normalized cross-split text overlap and optionally reject it before evaluation; this does not detect paraphrases or establish independence.
 - [ ] Independently reviewed, diverse evaluation corpus and held-out metrics.
   A synthetic, explicitly unreviewed starter and evaluator were delivered in
   [PR #32](https://github.com/schiste/Aexeo/pull/32); they do not establish
