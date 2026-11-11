@@ -177,14 +177,8 @@ struct OfflineCollection<'a> {
     complete: bool,
 }
 
-fn offline_binding_digest(
-    change: &Change,
-    preset: &ContentPreset,
-    max_entry_bytes: usize,
-    max_total_bytes: usize,
-    plain_text_paragraphs: bool,
-    collection: Option<&ChangeCollection<'_>>,
-) -> Result<String> {
+/// Hash the exact compact JSON bytes without buffering the serialized artifact.
+fn hash_json<T: serde::Serialize + ?Sized>(value: &T) -> Result<String> {
     use sha2::{Digest, Sha256};
     use std::io::{self, Write};
     struct DigestWriter(Sha256);
@@ -197,6 +191,19 @@ fn offline_binding_digest(
             Ok(())
         }
     }
+    let mut writer = DigestWriter(Sha256::new());
+    serde_json::to_writer(&mut writer, value)?;
+    Ok(format!("{:x}", writer.0.finalize()))
+}
+
+fn offline_binding_digest(
+    change: &Change,
+    preset: &ContentPreset,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    plain_text_paragraphs: bool,
+    collection: Option<&ChangeCollection<'_>>,
+) -> Result<String> {
     let material = OfflineBinding {
         domain: OFFLINE_BINDING_EXTENSION,
         engine_version: env!("CARGO_PKG_VERSION"),
@@ -211,9 +218,7 @@ fn offline_binding_digest(
             complete: c.complete,
         }),
     };
-    let mut writer = DigestWriter(Sha256::new());
-    serde_json::to_writer(&mut writer, &material)?;
-    Ok(format!("{:x}", writer.0.finalize()))
+    hash_json(&material)
 }
 
 fn subject_for_change(change: &Change) -> Subject {
@@ -553,6 +558,146 @@ pub fn revalidate_offline_verdict<P: ConfinedContentFiles>(
         collection.as_ref(),
     )?;
     Ok(fresh)
+}
+
+/// Experimental Aexeo offline receipt. This is not a v2 verdict and must not be
+/// treated as one by a v1 runner. A trusted host must establish artifact origin,
+/// evaluator identity, collection completeness and publication freshness.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OfflineDecisionReceipt {
+    pub schema: String,
+    pub decision_inputs: aexeo_contracts::content_gate_decision_inputs::DecisionInputs,
+    pub verdict: Verdict,
+}
+
+const OFFLINE_RECEIPT_SCHEMA: &str = "aexeo.offline-decision-receipt/v1";
+
+/// Inputs selected by the host for an offline evaluation. `evaluator_identity`
+/// must identify a trusted build; an engine version string is not sufficient.
+pub struct OfflineDecisionContext<'a> {
+    pub change: &'a Change,
+    pub preset: &'a ContentPreset,
+    pub max_entry_bytes: usize,
+    pub max_total_bytes: usize,
+    pub plain_text_paragraphs: bool,
+    pub collection: Option<ChangeCollection<'a>>,
+    pub evaluator_identity: &'a [u8],
+}
+
+impl OfflineDecisionContext<'_> {
+    fn manifest(&self) -> Result<aexeo_contracts::content_gate_decision_inputs::DecisionInputs> {
+        use aexeo_contracts::content_gate_decision_inputs::{
+            Component, DECISION_INPUTS_SCHEMA, DecisionInputs,
+        };
+        use sha2::{Digest, Sha256};
+        if self.evaluator_identity.is_empty() {
+            bail!("trusted evaluator identity is required");
+        }
+        let present_json = |sha256| Component::Present { sha256 };
+        let options = serde_json::json!({
+            "engine_version": env!("CARGO_PKG_VERSION"),
+            "max_entry_bytes": self.max_entry_bytes,
+            "max_total_bytes": self.max_total_bytes,
+            "plain_text_paragraphs": self.plain_text_paragraphs,
+            "mode": "offline"
+        });
+        let collection = match &self.collection {
+            Some(c) => present_json(hash_json(&OfflineCollection {
+                change_id: c.change_id,
+                items: c.items,
+                complete: c.complete,
+            })?),
+            None => Component::Absent {},
+        };
+        Ok(DecisionInputs {
+            schema: DECISION_INPUTS_SCHEMA.into(),
+            change: present_json(hash_json(self.change)?),
+            resolved_policy: present_json(hash_json(self.preset)?),
+            host_options: present_json(hash_json(&options)?),
+            evaluator: Component::Present {
+                sha256: format!("{:x}", Sha256::digest(self.evaluator_identity)),
+            },
+            collection,
+            external_evidence: Component::Absent {},
+        })
+    }
+}
+
+/// Evaluate without callbacks and bind the receipt to the actual offline inputs.
+/// Only a host-controlled evaluator identity is recorded; it is not authenticated.
+pub fn evaluate_offline_receipt<P: ConfinedContentFiles>(
+    context: &OfflineDecisionContext<'_>,
+    provider: &mut P,
+    evaluated_at: &str,
+) -> Result<OfflineDecisionReceipt> {
+    let manifest = context.manifest()?;
+    let verdict = evaluate_change_with_collection(
+        context.change,
+        provider,
+        context.preset,
+        evaluated_at,
+        context.max_entry_bytes,
+        context.max_total_bytes,
+        ChangeEvaluationHost {
+            options: ChangeEvaluationOptions {
+                link_observer: None,
+                plain_text_paragraphs: context.plain_text_paragraphs,
+            },
+            extensions: None,
+        },
+        context.collection.as_ref().map(|c| ChangeCollection {
+            change_id: c.change_id,
+            items: c.items,
+            complete: c.complete,
+        }),
+    )?;
+    Ok(OfflineDecisionReceipt {
+        schema: OFFLINE_RECEIPT_SCHEMA.into(),
+        decision_inputs: manifest,
+        verdict,
+    })
+}
+
+/// Re-read and re-evaluate content after comparing the manifest to independently
+/// trusted current inputs. A matching result does not validate publication races,
+/// evaluator identity, the collection assertion or input authenticity.
+pub fn revalidate_offline_receipt<P: ConfinedContentFiles>(
+    previous: &OfflineDecisionReceipt,
+    context: &OfflineDecisionContext<'_>,
+    provider: &mut P,
+    evaluated_at: &str,
+) -> Result<OfflineDecisionReceipt> {
+    if previous.schema != OFFLINE_RECEIPT_SCHEMA {
+        bail!("unsupported offline receipt schema");
+    }
+    previous
+        .decision_inputs
+        .validate()
+        .map_err(anyhow::Error::msg)?;
+    if previous.decision_inputs != context.manifest()? {
+        bail!("offline receipt decision inputs differ");
+    }
+    let verdict = revalidate_offline_verdict(
+        &previous.verdict,
+        context.change,
+        provider,
+        context.preset,
+        evaluated_at,
+        context.max_entry_bytes,
+        context.max_total_bytes,
+        context.plain_text_paragraphs,
+        context.collection.as_ref().map(|c| ChangeCollection {
+            change_id: c.change_id,
+            items: c.items,
+            complete: c.complete,
+        }),
+    )?;
+    Ok(OfflineDecisionReceipt {
+        schema: OFFLINE_RECEIPT_SCHEMA.into(),
+        decision_inputs: previous.decision_inputs.clone(),
+        verdict,
+    })
 }
 
 /// Explicitly supplied host capabilities. No extension is executed by a preset.
@@ -1119,6 +1264,167 @@ mod tests {
             1024,
             1024,
         )
+    }
+
+    #[test]
+    fn streamed_json_digest_matches_compact_json_bytes() {
+        use sha2::{Digest, Sha256};
+        let input = change();
+        let bytes = serde_json::to_vec(&input).unwrap();
+        assert_eq!(
+            hash_json(&input).unwrap(),
+            format!("{:x}", Sha256::digest(&bytes))
+        );
+        let items = vec![ContentInput {
+            id: "café".into(),
+            text: Some("content".repeat(10000)),
+            ..Default::default()
+        }];
+        let collection = OfflineCollection {
+            change_id: "x",
+            items: &items,
+            complete: true,
+        };
+        let bytes = serde_json::to_vec(&collection).unwrap();
+        assert_eq!(
+            hash_json(&collection).unwrap(),
+            format!("{:x}", Sha256::digest(&bytes))
+        );
+    }
+
+    #[test]
+    fn offline_receipt_binds_inputs_and_rechecks_results() {
+        let input = change();
+        let policy = preset(1);
+        let make_context = || OfflineDecisionContext {
+            change: &input,
+            preset: &policy,
+            max_entry_bytes: 1024,
+            max_total_bytes: 1024,
+            plain_text_paragraphs: false,
+            collection: None,
+            evaluator_identity: b"trusted-build-1",
+        };
+        let original =
+            evaluate_offline_receipt(&make_context(), &mut NoFiles, "2026-01-01T00:00:00Z")
+                .unwrap();
+        assert!(
+            revalidate_offline_receipt(
+                &original,
+                &make_context(),
+                &mut NoFiles,
+                "2026-02-01T00:00:00Z"
+            )
+            .is_ok()
+        );
+        let changed_policy = preset(2);
+        assert!(
+            revalidate_offline_receipt(
+                &original,
+                &OfflineDecisionContext {
+                    preset: &changed_policy,
+                    ..make_context()
+                },
+                &mut NoFiles,
+                "2026-02-01T00:00:00Z"
+            )
+            .is_err()
+        );
+        assert!(
+            revalidate_offline_receipt(
+                &original,
+                &OfflineDecisionContext {
+                    evaluator_identity: b"other",
+                    ..make_context()
+                },
+                &mut NoFiles,
+                "2026-02-01T00:00:00Z"
+            )
+            .is_err()
+        );
+        assert!(
+            evaluate_offline_receipt(
+                &OfflineDecisionContext {
+                    evaluator_identity: b"",
+                    ..make_context()
+                },
+                &mut NoFiles,
+                "2026-01-01T00:00:00Z"
+            )
+            .is_err()
+        );
+        let mut changed = input.clone();
+        changed.entries[0].metadata = Some(std::collections::BTreeMap::from([(
+            "title".into(),
+            "changed".into(),
+        )]));
+        assert!(
+            revalidate_offline_receipt(
+                &original,
+                &OfflineDecisionContext {
+                    change: &changed,
+                    ..make_context()
+                },
+                &mut NoFiles,
+                "2026-02-01T00:00:00Z"
+            )
+            .is_err()
+        );
+        assert!(
+            revalidate_offline_receipt(
+                &original,
+                &OfflineDecisionContext {
+                    plain_text_paragraphs: true,
+                    ..make_context()
+                },
+                &mut NoFiles,
+                "2026-02-01T00:00:00Z"
+            )
+            .is_err()
+        );
+        let items = vec![ContentInput {
+            id: "article".into(),
+            ..Default::default()
+        }];
+        let collection = ChangeCollection {
+            change_id: "x",
+            items: &items,
+            complete: true,
+        };
+        assert!(
+            revalidate_offline_receipt(
+                &original,
+                &OfflineDecisionContext {
+                    collection: Some(collection),
+                    ..make_context()
+                },
+                &mut NoFiles,
+                "2026-02-01T00:00:00Z"
+            )
+            .is_err()
+        );
+        let mut forged = original.clone();
+        forged.verdict.status = VerdictStatus::Fail;
+        assert!(
+            revalidate_offline_receipt(
+                &forged,
+                &make_context(),
+                &mut NoFiles,
+                "2026-02-01T00:00:00Z"
+            )
+            .is_err()
+        );
+        let mut forged = original.clone();
+        forged.schema = "aexeo.offline-decision-receipt/v2".into();
+        assert!(
+            revalidate_offline_receipt(
+                &forged,
+                &make_context(),
+                &mut NoFiles,
+                "2026-02-01T00:00:00Z"
+            )
+            .is_err()
+        );
     }
 
     #[test]

@@ -25,6 +25,7 @@ dependencies = [
  "iri-string",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

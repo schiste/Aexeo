@@ -22,6 +22,18 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  decision-input-schema:
+    name: decision input schema (independent validator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate manifest schema and examples
+        run: |
+          python3 -m venv "$RUNNER_TEMP/aexeo-schema-venv"
+          "$RUNNER_TEMP/aexeo-schema-venv/bin/python" -m pip install -r docs/specs/content-gate/v2/requirements-test.txt
+          "$RUNNER_TEMP/aexeo-schema-venv/bin/python" docs/specs/content-gate/v2/test_manifest_schema.py
+
   emdash-plugin:
     name: emdash-plugin (typecheck, test, audit)
     runs-on: ubuntu-latest

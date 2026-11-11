@@ -994,3 +994,111 @@ fn revalidation_detects_changed_collection_without_overwriting_output() {
         old_output
     );
 }
+
+#[test]
+fn offline_receipt_is_explicit_bound_and_revalidated() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
+    let identity = [
+        "--offline-receipt",
+        "--evaluator-identity",
+        "trusted-build-1",
+    ];
+    let first = run(dir.path(), &input(), policy, &identity);
+    assert_eq!(
+        first.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let path = dir.path().join("verdict.json");
+    let receipt: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(receipt["schema"], "aexeo.offline-decision-receipt/v1");
+    assert_eq!(receipt["verdict"]["status"], "pass");
+    assert!(
+        serde_json::from_value::<aexeo_contracts::content_gate_protocol::Verdict>(receipt).is_err()
+    );
+    let previous = dir.path().join("previous.json");
+    fs::copy(&path, &previous).unwrap();
+    let previous = previous.to_str().unwrap();
+    let verify = [
+        "--offline-receipt",
+        "--evaluator-identity",
+        "trusted-build-1",
+        "--verify-offline-receipt",
+        previous,
+        "--telemetry",
+    ];
+    let result = run(dir.path(), &input(), policy, &verify);
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let telemetry: serde_json::Value = serde_json::from_slice(&result.stderr).unwrap();
+    assert_eq!(
+        telemetry,
+        serde_json::json!({"event":"content_change_receipt_revalidation","version":1,"matched":true})
+    );
+    let before = fs::read(&path).unwrap();
+    let changed = [
+        "--offline-receipt",
+        "--evaluator-identity",
+        "other-build",
+        "--verify-offline-receipt",
+        previous,
+        "--telemetry",
+    ];
+    let result = run(dir.path(), &input(), policy, &changed);
+    assert_ne!(result.status.code(), Some(0));
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert!(String::from_utf8_lossy(&result.stderr).contains("\"matched\":false"));
+    let mut modified = input();
+    modified["entries"][0]["metadata"] = serde_json::json!({"title":"changed"});
+    assert_ne!(
+        run(dir.path(), &modified, policy, &verify).status.code(),
+        Some(0)
+    );
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert_ne!(
+        run(dir.path(), &input(), policy, &["--offline-receipt"])
+            .status
+            .code(),
+        Some(0)
+    );
+    assert_ne!(
+        run(
+            dir.path(),
+            &input(),
+            policy,
+            &[
+                "--offline-receipt",
+                "--evaluator-identity",
+                "trusted-build-1",
+                "--check-link-reachability"
+            ]
+        )
+        .status
+        .code(),
+        Some(0)
+    );
+    assert_ne!(
+        run(
+            dir.path(),
+            &input(),
+            policy,
+            &[
+                "--offline-receipt",
+                "--evaluator-identity",
+                "trusted-build-1",
+                "--verify-offline-receipt",
+                path.to_str().unwrap()
+            ]
+        )
+        .status
+        .code(),
+        Some(0)
+    );
+    assert_eq!(fs::read(&path).unwrap(), before);
+}
