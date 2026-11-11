@@ -394,7 +394,9 @@ describe("assessment persistence", () => {
     expect(store.get(findingsKey("/a"))).toMatchObject({ findings: [tagged] });
     expect((await readAllFindings(ctx.kv)).map((entry) => entry.rule_id)).toEqual(["CNT005"]);
     expect(events.find(([name]) => name === "aexeo.preset_coverage")).toEqual(["aexeo.preset_coverage", { status: "evaluated", passed: 0, failed: 0, not_checked: 0, colliding_findings: 1, mapping_reports: 0, mapping_eligible: 0, mapping_mapped: 0, mapping_unmapped: 0 }]);
+    expect(events.find(([name]) => name === "aexeo.cms_finding_coverage")).toEqual(["aexeo.cms_finding_coverage", { status: "evaluated", rendered_findings_withheld: 1 }]);
     expect(JSON.stringify(events)).not.toContain("CNT005");
+    expect(JSON.stringify(events)).not.toContain("/a");
   });
   it("replaces previous findings with an explicit error for a failed newer evaluation", async () => {
     const { ctx, store } = host();
@@ -668,7 +670,7 @@ describe("sitewide refresh coverage", () => {
       expect(store.get(findingsKey("*"))).toMatchObject({ assessment: { reason: "inventory_incomplete" } });
     }
   });
-  it("suppresses cross-document conclusions when any body is unavailable and restores them on complete input", async () => {
+  it("withholds rendered duplicate-page findings even when CMS bodies are complete", async () => {
     const partial = item("a", OLD);
     const { ctx, store } = host([partial]);
     const evaluator: EvaluatorFn = async () => ({ ok: true, findings: [globalFinding, finding("/a", "CNT005"), finding("/a", "OTHER")] });
@@ -677,7 +679,7 @@ describe("sitewide refresh coverage", () => {
     expect(store.get(findingsKey("*"))).toMatchObject({ findings: [], assessment: { reason: "body_incomplete" } });
     partial.data.content = [];
     await sweep(ctx, evaluator);
-    expect(rulesAt(store, "/a")).toEqual(["CNT005", "OTHER"]);
+    expect(rulesAt(store, "/a")).toEqual(["OTHER"]);
     expect(rulesAt(store, "*")).toEqual(["GLOBAL"]);
     expect((store.get(findingsKey("*")) as { assessment?: unknown }).assessment).toBeUndefined();
   });

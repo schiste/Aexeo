@@ -14,15 +14,20 @@ describe("CMS observation boundaries", () => {
   it("retains body findings only when body coverage is complete", () => {
     expect(isCmsObservableFinding(finding("CNT005"), false)).toBe(false);
     expect(isCmsObservableFinding(finding("GEO009"), false)).toBe(false);
-    expect(isCmsObservableFinding(finding("CNT005"), true)).toBe(true);
+    expect(isCmsObservableFinding(finding("CNT005"), true)).toBe(false);
     expect(isCmsObservableFinding(finding("SEO004"), true)).toBe(false);
     expect(isCmsObservableFinding({ ...finding("SEO004"), aexeo_origin: "content_preset" }, false)).toBe(true);
     expect(isCmsObservableFinding(finding("GEO008"), true)).toBe(false);
     expect(isCmsObservableFinding(finding("editorial.custom"), false)).toBe(true);
-    for (const rule of ["LNK001", "LNK002", "LNK004"]) {
+    for (const rule of ["LNK001", "LNK002", "LNK004", "GEO001", "GEO007", "GEO009", "GEO011", "GEO012", "GEO013"]) {
       expect(isCmsObservableFinding(finding(rule), true)).toBe(false);
     }
     expect(isCmsObservableFinding(finding("LNK003"), true)).toBe(true);
     expect(isCmsObservableFinding(finding("LNK003"), false)).toBe(false);
+    expect(isCmsObservableFinding(finding("CNT006"), true)).toBe(true);
+    expect(isCmsObservableFinding(finding("CNT006"), false)).toBe(false);
+    for (const rule of ["GEO007", "GEO009", "CNT005", "LNK003"]) {
+      expect(isCmsObservableFinding({ ...finding(rule), aexeo_origin: "content_preset" }, false)).toBe(true);
+    }
   });
 });
