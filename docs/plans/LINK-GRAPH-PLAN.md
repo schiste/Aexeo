@@ -226,6 +226,8 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
   an explicit origin and path-to-URL map. It reuses the audit graph path and
   aggregate opt-in telemetry; it does not build, crawl or attest coverage.
   A multilingual CLI fixture covers missing mappings and incomplete coverage.
+  Static reports expose both missing file mappings and mapping keys with no
+  observed file; optional telemetry includes only their aggregate counts.
 
 ## EmDash preview integration update
 

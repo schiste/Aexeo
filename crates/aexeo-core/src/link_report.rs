@@ -242,6 +242,9 @@ pub struct LinkReport {
     pub crawl_complete: bool,
     pub issues: Vec<String>,
     pub reconciliation: Option<InventoryReconciliation>,
+    /// Mapping-to-snapshot comparison, present only when a static URL map was supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub static_url_mapping: Option<StaticUrlMapping>,
     pub pages: Vec<ObservedPageLinks>,
     pub links: LinkCounts,
     /// The audit's legacy `LNK002` and `LNK004` findings, qualified by this
@@ -254,6 +257,14 @@ pub struct LinkReport {
     /// from its findings; omitted when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub suppressed_legacy_findings: Vec<LegacyLinkFinding>,
+}
+
+/// Exact relative-path comparison, not evidence of a deployed route.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StaticUrlMapping {
+    pub matched_count: usize,
+    pub missing_paths: Vec<String>,
+    pub unused_paths: Vec<String>,
 }
 
 /// Caller-supplied identity and inventory for comparison with an audit.
@@ -355,6 +366,31 @@ pub fn build_link_report_from_audit_with_static_urls(
         {
             issues.insert("audit_origin_mismatch");
         }
+    }
+    let mapping = static_urls.map(|urls| {
+        let observed: std::collections::BTreeSet<&str> = site
+            .pages
+            .iter()
+            .map(|page| page.relative_path.as_str())
+            .collect();
+        let supplied: std::collections::BTreeSet<&str> = urls.keys().map(String::as_str).collect();
+        StaticUrlMapping {
+            matched_count: observed.intersection(&supplied).count(),
+            missing_paths: observed
+                .difference(&supplied)
+                .map(|path| (*path).to_owned())
+                .collect(),
+            unused_paths: supplied
+                .difference(&observed)
+                .map(|path| (*path).to_owned())
+                .collect(),
+        }
+    });
+    if mapping
+        .as_ref()
+        .is_some_and(|mapping| !mapping.unused_paths.is_empty())
+    {
+        issues.insert("static_url_mapping_unused");
     }
     let mut pages: Vec<_> = site
         .pages
@@ -493,6 +529,7 @@ pub fn build_link_report_from_audit_with_static_urls(
         inventory: context.and_then(|value| value.inventory.clone()),
     };
     let mut report = build_link_report(&input)?;
+    report.static_url_mapping = mapping;
     // An unconfirmed release, like a coverage gap, keeps every page ineligible.
     if let Some(result) = report
         .reconciliation
@@ -1338,6 +1375,7 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
         crawl_complete: input.crawl_complete,
         issues,
         reconciliation,
+        static_url_mapping: None,
         pages,
         links,
         legacy_findings: Vec::new(),

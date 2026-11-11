@@ -573,7 +573,11 @@ aexeo-cli link-graph ./dist --static-site --site-origin https://example.org \
 For example, `urls.json` can contain
 `{"en/index.html":"https://example.org/en/","fr/index.html":"https://example.org/fr/"}`.
 The same optional `--context` input as `--audit` can be supplied. Only mapped
-pages are included; missing mappings remain visible in `issues`. The supplied
+pages are included. The report's `static_url_mapping` records the matched
+count, sorted `missing_paths` (files without a mapping) and `unused_paths`
+(mapping keys without a file); `issues` also names each kind of discrepancy.
+These paths are included in the report and may reveal local file names. When
+telemetry is enabled, it contains only aggregate mapping counts. The supplied
 URLs and HTML are observations of a local artifact, not HTTP responses. The
 report does not attest deployment, redirects, status, headers, release identity
 or completeness and cannot confirm an orphan. Telemetry is opt-in, aggregate,
@@ -584,7 +588,8 @@ and written to stderr. This command does not perform the other `check` rules.
 For a `static_export` audit artifact, `--audit --static-url-map urls.json`
 accepts a JSON object mapping exact audit `relative_path` values to absolute
 public URLs, for example `{"en/index.html":"https://example.org/en/"}`.
-Only mapped pages are analyzed. Mappings are supplied by the caller, not HTTP
+Only mapped pages are analyzed. The same `static_url_mapping` comparison is
+reported for this input. Mappings are supplied by the caller, not HTTP
 observations; missing mappings, response status and headers are reported, and
 coverage remains incomplete. The map is rejected for other deployment models.
 It does not establish routing, redirects, indexing or publication equivalence.
