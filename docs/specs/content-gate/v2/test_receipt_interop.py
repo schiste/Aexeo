@@ -49,6 +49,8 @@ class ReceiptInterop(unittest.TestCase):
                 comparison_args = [sys.executable, str(COMPARATOR), str(previous), str(fresh)] + args[3:]
                 comparison = subprocess.run(comparison_args, capture_output=True, text=True)
                 self.assertEqual(comparison.returncode, 0, comparison.stderr)
+                checked_subject = subprocess.run(comparison_args + ["--verify-subject"], capture_output=True, text=True)
+                self.assertEqual(checked_subject.returncode, 0, checked_subject.stderr)
                 try:
                     import jsonschema  # noqa: F401
                     import rfc3339_validator  # noqa: F401
