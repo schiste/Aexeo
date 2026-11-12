@@ -59,6 +59,13 @@ class ReceiptInterop(unittest.TestCase):
                 else:
                     checked = subprocess.run(comparison_args + ["--validate-verdicts"], capture_output=True, text=True)
                     self.assertEqual(checked.returncode, 0, checked.stderr)
+                    try:
+                        import rfc3986_validator  # noqa: F401
+                    except ImportError:
+                        pass
+                    else:
+                        checked_change = subprocess.run(comparison_args + ["--validate-change"], capture_output=True, text=True)
+                        self.assertEqual(checked_change.returncode, 0, checked_change.stderr)
                 changed_receipt["verdict"]["status"] = "fail"
                 fresh.write_text(json.dumps(changed_receipt), encoding="utf-8")
                 self.assertNotEqual(subprocess.run(comparison_args, capture_output=True).returncode, 0)

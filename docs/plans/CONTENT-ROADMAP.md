@@ -252,6 +252,11 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   An opt-in CLI mode can write and revalidate Aexeo-specific offline receipts;
   its output is not a v1 verdict or a portable v2 verdict.
   CLI receipt mode rejects duplicate keys in changes, collections and previous receipts, and fields discarded by typed parsing in changes and receipts. Direct Rust hosts must independently ensure their typed inputs preserve all semantics.
+  The independent offline-receipt comparator can also opt into validating the
+  bound change against the v1 change schema, including date and URI formats;
+  that mode verifies the subject as well and fails closed without the required
+  schema dependencies. It does not verify content bytes or establish freshness,
+  provenance, completeness or a portable v2 verdict.
   An independent Python reference verifier compares bounded, explicitly supplied
   artifact files against the standalone manifest. An independent Python
   comparator also checks two Aexeo offline receipts against host-supplied

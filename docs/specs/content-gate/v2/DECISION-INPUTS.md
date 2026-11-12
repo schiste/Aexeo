@@ -156,8 +156,18 @@ subject; it is not complete change-schema or content-file validation, does not
 prove input freshness or authenticity, and does not prevent publication races.
 The caller must independently provide and protect the intended change bytes.
 
-The optional local telemetry contains only status, whether verdict validation was
-requested, elapsed time and aggregate artifact counts and sizes. Receipt and artifact files can contain private content.
+The independent comparator also accepts `--validate-change`. It validates the
+independently supplied, manifest-bound change bytes against the public v1 change
+schema, with RFC 3339 and URI format checking, and also verifies the verdict
+subject. Missing schema-validation or format-checking dependencies fail closed.
+This is opt-in and does not change `--verify-subject` alone. The v1 schema allows
+extension fields and schema validation does not check whether referenced content
+bytes match their hashes, establish completeness or freshness, authenticate the
+input, or prevent a publication race. This remains an offline v1 receipt, not a
+portable v2 verdict or an authorization to publish.
+
+The optional local telemetry contains only status, whether verdict, subject or
+change validation was requested, elapsed time and aggregate artifact counts and sizes. Receipt and artifact files can contain private content.
 Run `python3 docs/specs/content-gate/v2/test_compare_offline_receipts.py` and
 `python3 docs/specs/content-gate/v2/test_receipt_interop.py` for the standalone
 and Rust-to-Python checks.

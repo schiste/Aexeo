@@ -121,6 +121,68 @@ class CompareOfflineReceipts(unittest.TestCase):
         with self.assertRaises(comparison.VerificationError):
             comparison.compare_receipts(self.encode(bad), self.encode(bad), self.artifacts, verify_change_subject=True)
 
+    def test_opt_in_validates_bound_change_schema_and_subject(self):
+        try:
+            import jsonschema  # noqa: F401
+            import rfc3339_validator  # noqa: F401
+            import rfc3986_validator  # noqa: F401
+        except ImportError:
+            self.skipTest("optional change validation dependencies are unavailable")
+        change = json.loads((Path(__file__).parent.parent / "v1" / "examples" / "markdown-change.json").read_text())
+        receipt = copy.deepcopy(self.receipt)
+        receipt["verdict"]["subject"] = {
+            "change_id": change["change_id"], "base": change["base"],
+            "entries": [{"entity_id": entry["entity_id"], "sha256": entry.get("after", {}).get("sha256")}
+                        for entry in change["entries"]],
+        }
+        def bound(candidate):
+            data = self.encode(candidate)
+            self.artifacts["change"].write_bytes(data)
+            value = copy.deepcopy(receipt)
+            value["decision_inputs"]["change"]["sha256"] = hashlib.sha256(data).hexdigest()
+            return self.encode(value)
+        valid = bound(change)
+        comparison.compare_receipts(valid, valid, self.artifacts, validate_change=True)
+        previous = self.root / "valid-previous.json"
+        fresh = self.root / "valid-fresh.json"
+        previous.write_bytes(valid)
+        fresh.write_bytes(valid)
+        args = [sys.executable, str(SCRIPT), str(previous), str(fresh)]
+        for role in comparison.REQUIRED:
+            args.extend(["--" + role.replace("_", "-"), str(self.artifacts[role])])
+        for role in comparison.OPTIONAL:
+            args.append("--" + role.replace("_", "-") + "-absent")
+        run = subprocess.run(args + ["--validate-change", "--telemetry"], capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        event = json.loads(run.stderr)
+        self.assertTrue(event["change_validation_requested"])
+        self.assertTrue(event["subject_verification_requested"])
+        self.assertNotIn(str(self.root), run.stderr)
+        no_dependencies = subprocess.run([sys.executable, "-S", *args[1:], "--validate-change", "--telemetry"], capture_output=True, text=True)
+        self.assertNotEqual(no_dependencies.returncode, 0)
+        self.assertEqual(json.loads(no_dependencies.stderr.splitlines()[0])["status"], "error")
+        self.assertNotIn(str(self.root), no_dependencies.stderr)
+        for mutate in (
+            lambda c: c.pop("created_at"),
+            lambda c: c.update(created_at="not-a-date"),
+            lambda c: c["origin"].update(kind="invented"),
+            lambda c: c["site"].update(base_url="not a URI"),
+            lambda c: c["entries"][0].pop("media_type"),
+            lambda c: c["entries"][0].update(operation="invented"),
+        ):
+            bad = copy.deepcopy(change)
+            mutate(bad)
+            encoded = bound(bad)
+            # Matching hashes and subjects alone cannot validate the change.
+            comparison.compare_receipts(encoded, encoded, self.artifacts, verify_change_subject=True)
+            with self.subTest(mutation=mutate), self.assertRaises(comparison.VerificationError):
+                comparison.compare_receipts(encoded, encoded, self.artifacts, validate_change=True)
+        encoded = bound(change)
+        altered = json.loads(encoded)
+        altered["verdict"]["subject"]["change_id"] = "different"
+        with self.assertRaises(comparison.VerificationError):
+            comparison.compare_receipts(self.encode(altered), self.encode(altered), self.artifacts, validate_change=True)
+
     def test_cli_is_private_and_does_not_authorize_publication(self):
         previous = self.root / "previous.json"
         fresh = self.root / "fresh.json"
@@ -140,6 +202,10 @@ class CompareOfflineReceipts(unittest.TestCase):
         self.assertNotEqual(unavailable.returncode, 0)
         self.assertTrue(json.loads(unavailable.stderr.splitlines()[0])["verdict_validation_requested"])
         self.assertNotIn(str(self.root), unavailable.stderr)
+        unavailable_change = subprocess.run([sys.executable, "-S", *args[1:], "--validate-change", "--telemetry"], capture_output=True, text=True)
+        self.assertNotEqual(unavailable_change.returncode, 0)
+        self.assertTrue(json.loads(unavailable_change.stderr.splitlines()[0])["change_validation_requested"])
+        self.assertNotIn(str(self.root), unavailable_change.stderr)
         fresh.write_text('{"schema":"x","schema":"y"}')
         run = subprocess.run(args + ["--telemetry"], capture_output=True, text=True)
         self.assertNotEqual(run.returncode, 0)
