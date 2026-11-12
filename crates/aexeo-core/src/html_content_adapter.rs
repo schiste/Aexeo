@@ -405,6 +405,12 @@ pub fn html_source_map(source: &str, projected: &str) -> Option<HtmlSourceMap> {
 }
 
 impl crate::source_mapping::ContentSourceMap for HtmlSourceMap {
+    fn heading_count(&self) -> usize {
+        self.heading_starts.len()
+    }
+    fn link_count(&self) -> usize {
+        self.link_starts.len()
+    }
     fn prose_position(
         &self,
         source: &str,
@@ -436,6 +442,8 @@ pub fn gate_source_positions(
 }
 
 /// Map findings only when the element counts match the evaluated inputs.
+/// Matching counts do not establish identity: callers must pass the same source,
+/// input, destinations and observations used to evaluate the report.
 pub fn gate_source_positions_with_links(
     map: &HtmlSourceMap,
     source: &str,
@@ -445,27 +453,6 @@ pub fn gate_source_positions_with_links(
     destinations: Option<&[String]>,
     observations: Option<&[crate::content_gate::LinkReachabilityObservation]>,
 ) -> Option<Vec<Option<(usize, usize)>>> {
-    use crate::content_gate::{ContentGate, heading_finding_indices};
-    if input
-        .headings
-        .as_ref()
-        .and_then(|headings| heading_finding_indices(gate, headings))
-        .is_some()
-        && input.headings.as_ref()?.len() != map.heading_starts.len()
-    {
-        return None;
-    }
-    if matches!(
-        gate,
-        ContentGate::LinkDestinations { .. } | ContentGate::LinkReachability { .. }
-    ) {
-        if destinations?.len() != map.link_starts.len() {
-            return None;
-        }
-        if observations.is_some_and(|values| values.len() != map.link_starts.len()) {
-            return None;
-        }
-    }
     crate::source_mapping::map_gate_source_positions(
         map,
         source,
@@ -622,6 +609,20 @@ mod tests {
                 Some(&observations)
             )
             .is_none()
+        );
+        let no_finding = [LinkReachabilityObservation::Reachable];
+        assert_eq!(
+            gate_source_positions_with_links(
+                &map,
+                html,
+                &adapted.input,
+                &preset.gates[1],
+                &report.gates[1],
+                Some(&adapted.destinations),
+                Some(&no_finding)
+            )
+            .unwrap(),
+            vec![None]
         );
         let wrong_observations = [
             LinkReachabilityObservation::NotFound,

@@ -873,13 +873,14 @@ pub struct ContentGateResult {
 
 impl ContentGateResult {
     /// All findings of this gate, including any omitted from `findings`.
+    /// Saturates for malformed or externally supplied counts that exceed `usize`.
     pub fn total_findings(&self) -> usize {
-        self.findings.len()
-            + self
-                .measurements
+        self.findings.len().saturating_add(
+            self.measurements
                 .get(FINDINGS_OMITTED)
                 .copied()
-                .unwrap_or(0)
+                .unwrap_or(0),
+        )
     }
 }
 
@@ -2760,6 +2761,15 @@ mod tests {
             assert_eq!(report.gates[0].status, GateStatus::NotChecked, "{kind}");
             assert!(!report.gates[0].measurements.contains_key(key), "{kind}");
         }
+    }
+
+    #[test]
+    fn externally_supplied_finding_counts_do_not_overflow() {
+        let mut result = forbidden("terms=['x']", "x");
+        result
+            .measurements
+            .insert(FINDINGS_OMITTED.into(), usize::MAX);
+        assert_eq!(result.total_findings(), usize::MAX);
     }
 
     #[test]
