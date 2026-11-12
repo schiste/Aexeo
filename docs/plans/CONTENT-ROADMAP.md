@@ -257,6 +257,9 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   that mode verifies the subject as well and fails closed without the required
   schema dependencies. It does not verify content bytes or establish freshness,
   provenance, completeness or a portable v2 verdict.
+  Its opt-in inline-content mode additionally compares the UTF-8 bytes of every
+  before/after inline state with its declared digest and rejects file and URI
+  references. It cannot verify freshness, source authenticity or publication races.
   An independent Python reference verifier compares bounded, explicitly supplied
   artifact files against the standalone manifest. An independent Python
   comparator also checks two Aexeo offline receipts against host-supplied

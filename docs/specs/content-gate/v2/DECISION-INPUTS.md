@@ -166,8 +166,17 @@ bytes match their hashes, establish completeness or freshness, authenticate the
 input, or prevent a publication race. This remains an offline v1 receipt, not a
 portable v2 verdict or an authorization to publish.
 
-The optional local telemetry contains only status, whether verdict, subject or
-change validation was requested, elapsed time and aggregate artifact counts and sizes. Receipt and artifact files can contain private content.
+The additional opt-in `--verify-inline-content` implies `--validate-change` and
+subject verification. It hashes the exact UTF-8 encoding of every supplied
+`before` and `after` inline value and checks its declared SHA-256. A state using
+`file` or `uri` is rejected, not fetched or silently skipped; invalid UTF-8
+encodings are rejected. The existing change artifact size limit bounds the input.
+This does not verify that the host supplied the intended change or that its
+inputs are complete, current, authentic, or safe to publish. It is not a
+portable v2 verdict. A change with no content states has no content bytes to check.
+
+The optional local telemetry contains only status, whether verdict, subject,
+change or inline-content validation was requested, elapsed time and aggregate artifact counts and sizes. Receipt and artifact files can contain private content.
 Run `python3 docs/specs/content-gate/v2/test_compare_offline_receipts.py` and
 `python3 docs/specs/content-gate/v2/test_receipt_interop.py` for the standalone
 and Rust-to-Python checks.
