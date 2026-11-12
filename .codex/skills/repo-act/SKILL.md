@@ -87,6 +87,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For public Rust structs, check downstream struct-literal compatibility as well
   as serialized compatibility: adding a field can break callers even when
   Serde still accepts older JSON.
+- For Python JSON Schema format checks, verify each required format checker is
+  registered: optional dependencies can otherwise make validation silently skip
+  it. Test malformed format values and fail closed when a checker is missing.
 - For JSON contracts, test omitted fields and explicit `null` separately when
   the schema distinguishes them: Serde `Option` normally collapses both.
 - Test unknown fields inside every tagged enum variant, including unit variants:
