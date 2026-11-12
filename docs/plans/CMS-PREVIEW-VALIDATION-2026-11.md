@@ -38,6 +38,34 @@ test assumption, not a verified description of Aeptus's renderer. Deploying it
 requires the host to establish that those components contribute no relevant
 editorial body content.
 
+## Packaged candidate retest, 12 November 2026
+
+The 0.9.1 npm candidate archive, built from Aexeo commit
+`03d9008c29732473225df669e18ad28f191af688` and installed in a temporary
+project with EmDash 1.4.0, was tested with a fresh read-only CMS copy of the
+same evidence-room record. Its SHA-256 is
+`84a326d040e10f5a8eb48c84ffa9a63c7d6bb08c0c6de20d0b544f9f9aca1ca7`.
+The configured save hook, real bundled WASM, in-memory KV and mocked host APIs
+were used; no CMS save or publication occurred.
+
+The persisted adapted document preserved all 18 Portable Text blocks in order.
+With the two `askYourAi` components unmapped, the stored body coverage was
+`unavailable` and the one-word article gate was `not_checked`; the findings
+record was persisted without errors. With an explicit empty component mapping,
+body coverage was `complete` and that gate passed. This mapping is only a test
+assumption, not verification of the component's rendered content. Neither run
+emitted findings. This checks the packaged candidate, not a deployed npm version,
+hosted admin UI, rendered page, or the other four CMS records.
+
+The website's locally available `origin/main` at `4aac9b632422` renders
+`askYourAi` as interface controls with provider links. A third run mapped that
+component with empty fields and only `text`, `headings`, and `paragraphs`
+capabilities. Its word-count gate passed, the link-count gate was `not_checked`,
+and body coverage was `partial`. This illustrates how a host can scope a text
+projection without claiming link coverage; its choice of what counts as editorial
+text remains a host assertion, and the inspected source is not proof of the
+Preview deployment or its rendered output.
+
 ## Limits and remaining work
 
 The mocked host did not test the hosted admin UI, translations, cross-page
