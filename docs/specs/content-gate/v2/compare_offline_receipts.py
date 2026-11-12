@@ -61,22 +61,28 @@ def parse_receipt(data):
     return value, encoded
 
 
-def validate_verdict(verdict):
-    """Validate the public v1 schema and counts; no trust or freshness implied."""
+def _validate_schema(value, filename):
+    """Validate a public v1 schema without establishing authenticity or freshness."""
     try:
         from jsonschema import Draft202012Validator, FormatChecker
         from jsonschema.exceptions import ValidationError
     except ImportError as error:
-        raise VerificationError("verdict schema validator is unavailable") from error
+        raise VerificationError("schema validator is unavailable") from error
     checker = FormatChecker()
-    if "date-time" not in checker.checkers:
-        raise VerificationError("RFC 3339 validation is unavailable")
+    formats = {"date-time", "uri"} if filename == "change.schema.json" else {"date-time"}
+    if not formats.issubset(checker.checkers):
+        raise VerificationError("required format validation is unavailable")
     try:
-        schema_path = Path(__file__).resolve().parent.parent / "v1" / "verdict.schema.json"
+        schema_path = Path(__file__).resolve().parent.parent / "v1" / filename
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        Draft202012Validator(schema, format_checker=checker).validate(verdict)
+        Draft202012Validator(schema, format_checker=checker).validate(value)
     except (OSError, ValueError, ValidationError, RecursionError) as error:
-        raise VerificationError("invalid verdict schema") from error
+        raise VerificationError("invalid document schema") from error
+
+
+def validate_verdict(verdict):
+    """Validate the public v1 verdict schema and counts."""
+    _validate_schema(verdict, "verdict.schema.json")
     checks = verdict["checks"]
     summary = verdict["summary"]
     expected = {
@@ -107,11 +113,11 @@ def _typed_equal(left, right):
     return left == right
 
 
-def verify_subject(change_path, expected_digest, verdict):
+def verify_subject(change_path, expected_digest, verdict, validate_change=False):
     """Bind the v1 subject to the same change bytes covered by the manifest.
 
-    This validates only the fields needed to derive the subject; it does not
-    validate the change schema, content files, provenance or publication state.
+    The optional schema check covers the public v1 change format; it does not
+    verify content files, provenance, completeness or publication state.
     """
     with _open_regular(change_path) as source:
         data = source.read(MAX_ARTIFACT_BYTES + 1)
@@ -127,6 +133,8 @@ def verify_subject(change_path, expected_digest, verdict):
                 or not isinstance(change.get("base"), dict)
                 or not isinstance(change.get("entries"), list)):
             raise VerificationError("invalid change subject fields")
+        if validate_change:
+            _validate_schema(change, "change.schema.json")
         entries = []
         for entry in change["entries"]:
             if not isinstance(entry, dict) or not isinstance(entry.get("entity_id"), str):
@@ -142,7 +150,7 @@ def verify_subject(change_path, expected_digest, verdict):
         raise VerificationError("unable to verify verdict subject") from error
 
 
-def compare_receipts(previous_bytes, fresh_bytes, artifacts, validate=False, verify_change_subject=False):
+def compare_receipts(previous_bytes, fresh_bytes, artifacts, validate=False, verify_change_subject=False, validate_change=False):
     previous, old_manifest = parse_receipt(previous_bytes)
     fresh, new_manifest = parse_receipt(fresh_bytes)
     if validate:
@@ -151,8 +159,8 @@ def compare_receipts(previous_bytes, fresh_bytes, artifacts, validate=False, ver
     # Verify both manifests against independently supplied, current artifacts.
     stats = verify_files(old_manifest, artifacts)
     verify_files(new_manifest, artifacts)
-    if verify_change_subject:
-        verify_subject(artifacts["change"], previous["decision_inputs"]["change"]["sha256"], previous["verdict"])
+    if verify_change_subject or validate_change:
+        verify_subject(artifacts["change"], previous["decision_inputs"]["change"]["sha256"], previous["verdict"], validate_change=validate_change)
     if previous["decision_inputs"]["external_evidence"] != {"state": "absent"} or fresh["decision_inputs"]["external_evidence"] != {"state": "absent"}:
         raise VerificationError("offline receipts cannot contain external evidence")
     before = dict(previous["verdict"])
@@ -180,6 +188,7 @@ def main(argv=None):
         group.add_argument("--" + role.replace("_", "-") + "-absent", action="store_true")
     parser.add_argument("--validate-verdicts", action="store_true", help="validate v1 schemas and check summary consistency (requires jsonschema and RFC 3339 support)")
     parser.add_argument("--verify-subject", action="store_true", help="compare both v1 subjects to the independently supplied change artifact")
+    parser.add_argument("--validate-change", action="store_true", help="validate the bound change against its v1 schema and verify its verdict subject")
     parser.add_argument("--telemetry", action="store_true")
     args = parser.parse_args(argv)
     started = time.perf_counter() if args.telemetry else 0
@@ -189,7 +198,8 @@ def main(argv=None):
         event = {"event": "offline_receipt_comparison", "status": status,
                  "duration_ms": round((time.perf_counter() - started) * 1000, 3),
                  "verdict_validation_requested": args.validate_verdicts,
-                 "subject_verification_requested": args.verify_subject}
+                 "subject_verification_requested": args.verify_subject or args.validate_change,
+                 "change_validation_requested": args.validate_change}
         if stats is not None:
             event.update(stats)
         try:
@@ -203,7 +213,7 @@ def main(argv=None):
             fresh = source.read(MAX_RECEIPT_BYTES + 1)
         artifacts = {role: getattr(args, role) for role in REQUIRED + OPTIONAL}
         stats = compare_receipts(previous, fresh, artifacts, validate=args.validate_verdicts,
-                                 verify_change_subject=args.verify_subject)
+                                 verify_change_subject=args.verify_subject, validate_change=args.validate_change)
     except (OSError, VerificationError):
         telemetry("error")
         print("Offline receipt comparison failed.", file=sys.stderr)
