@@ -188,6 +188,35 @@ pub fn source_mapping_coverage(
     }
 }
 
+// Sparse UTF-16 offsets avoid rescanning a long span for every finding. The
+// projection and this index must refer to the same unchanged text.
+struct Utf16Index {
+    checkpoints: Vec<(usize, usize)>,
+}
+
+impl Utf16Index {
+    fn new(text: &str) -> Self {
+        let mut checkpoints = Vec::new();
+        let mut utf16 = 0;
+        for (index, (offset, character)) in text.char_indices().enumerate() {
+            if index % 128 == 0 {
+                checkpoints.push((offset, utf16));
+            }
+            utf16 += character.len_utf16();
+        }
+        Self { checkpoints }
+    }
+
+    fn position(&self, text: &str, offset: usize) -> Option<usize> {
+        let checkpoint = self
+            .checkpoints
+            .partition_point(|&(start, _)| start <= offset)
+            .checked_sub(1)?;
+        let (start, units) = self.checkpoints[checkpoint];
+        Some(units + text.get(start..offset)?.encode_utf16().count())
+    }
+}
+
 /// Map prose, heading and invalid link findings to spans. Synthetic block
 /// separators have no location. Heading locations identify the first non-empty
 /// span of the block; link locations identify the first span of the occurrence.
@@ -256,6 +285,17 @@ pub fn source_locations_with_reachability(
         }
     }
     let line_index = aexeo_core::text_index::LineIndex::new(&projection);
+    // Build sparse indices lazily only for long spans with many findings.
+    let many_prose_findings = preset
+        .gates
+        .iter()
+        .zip(&report.gates)
+        .filter(|(gate, _)| positional_gate(gate))
+        .flat_map(|(_, result)| result.findings.iter())
+        .take(8)
+        .count()
+        == 8;
+    let mut utf16_indices: BTreeMap<usize, Option<Utf16Index>> = BTreeMap::new();
     let heading_blocks: Vec<_> = document
         .body
         .iter()
@@ -384,15 +424,31 @@ pub fn source_locations_with_reachability(
             if offset >= end {
                 continue;
             }
-            let Some(prefix) = text.get(..offset - start) else {
-                continue;
+            let relative = offset - start;
+            let utf16_offset = if many_prose_findings && text.len() >= 8192 {
+                let index = utf16_indices
+                    .entry(index)
+                    .or_insert_with(|| (!text.is_ascii()).then(|| Utf16Index::new(text)));
+                if let Some(index) = index {
+                    let Some(units) = index.position(text, relative) else {
+                        continue;
+                    };
+                    units
+                } else {
+                    relative
+                }
+            } else {
+                let Some(prefix) = text.get(..relative) else {
+                    continue;
+                };
+                prefix.encode_utf16().count()
             };
             result.push(EmdashSourceLocation {
                 gate_id: evaluated.gate_id.clone(),
                 finding_index,
                 block_index,
                 span_index,
-                utf16_offset: prefix.encode_utf16().count(),
+                utf16_offset,
             });
         }
     }
@@ -878,6 +934,68 @@ mod tests {
                 unmapped: 1
             }
         );
+    }
+
+    #[test]
+    fn utf16_index_matches_reference_across_checkpoints() {
+        let text = format!("{}\n{}", "é😀ab".repeat(200), "漢😀z".repeat(200));
+        let index = Utf16Index::new(&text);
+        for (offset, _) in text.char_indices() {
+            assert_eq!(
+                index.position(&text, offset),
+                Some(text[..offset].encode_utf16().count())
+            );
+        }
+        assert_eq!(
+            index.position(&text, text.len()),
+            Some(text.encode_utf16().count())
+        );
+        assert_eq!(index.position(&text, 1), None);
+        assert_eq!(index.position(&text, text.len() + 1), None);
+    }
+
+    #[test]
+    fn source_mapping_handles_long_unicode_spans_and_extreme_coordinates() {
+        let prefix = "😀éabc".repeat(500);
+        let document: EmdashDocument = serde_json::from_value(serde_json::json!({
+            "route": "/test", "title": "Test", "body": [
+                {"children": [{"_type": "span", "text": "Earlier 😀"}]},
+                {"children": [{"_type": "span", "text": format!("{prefix} target")}]}
+            ]
+        }))
+        .unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['target']\n").unwrap();
+        let mut report = evaluate_content(&document, &preset).unwrap();
+        let locations = source_locations(&document, &preset, &report);
+        assert_eq!(locations[0].block_index, 1);
+        assert_eq!(locations[0].utf16_offset, prefix.encode_utf16().count() + 1);
+        report.gates[0].findings[0].column = usize::MAX;
+        assert!(source_locations(&document, &preset, &report).is_empty());
+    }
+
+    #[test]
+    fn source_mapping_indexes_many_unicode_findings_across_spans() {
+        let body = format!("{} {}", "é😀".repeat(2000), "😀 target é ".repeat(25));
+        let document: EmdashDocument = serde_json::from_value(serde_json::json!({
+            "route": "/test", "title": "Test", "body": [
+                {"children": [{"_type": "span", "text": "前置 😀"}]},
+                {"children": [{"_type": "span", "text": &body}, {"_type": "span", "text": &body}]}
+            ]
+        }))
+        .unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['target']\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        let locations = source_locations(&document, &preset, &report);
+        let expected: Vec<_> = body
+            .match_indices("target")
+            .map(|(offset, _)| body[..offset].encode_utf16().count())
+            .collect();
+        assert_eq!(locations.len(), expected.len() * 2);
+        for (index, location) in locations.iter().enumerate() {
+            assert_eq!(location.block_index, 1);
+            assert_eq!(location.span_index, index / expected.len());
+            assert_eq!(location.utf16_offset, expected[index % expected.len()]);
+        }
     }
 
     #[test]
