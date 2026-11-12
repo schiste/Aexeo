@@ -55,7 +55,7 @@ record was persisted without errors. With an explicit empty component mapping,
 body coverage was `complete` and that gate passed. This mapping is only a test
 assumption, not verification of the component's rendered content. Neither run
 emitted findings. This checks the packaged candidate, not a deployed npm version,
-hosted admin UI, rendered page, or the other four CMS records.
+hosted admin UI or rendered page.
 
 The website's locally available `origin/main` at `4aac9b632422` renders
 `askYourAi` as interface controls with provider links. A third run mapped that
@@ -65,6 +65,16 @@ and body coverage was `partial`. This illustrates how a host can scope a text
 projection without claiming link coverage; its choice of what counts as editorial
 text remains a host assertion, and the inspected source is not proof of the
 Preview deployment or its rendered output.
+
+The same archive was then run against fresh copies of all five reported
+records, both without a content preset and with the built-in `article` preset.
+All Portable Text blocks were preserved in order: 12/12, 14/14, 18/18,
+27/27 and 18/18. Both configurations persisted results without logged errors
+or findings. The four ordinary records had complete body coverage and their
+one-word article gate passed; the mixed record remained unavailable for body
+capabilities and its gate was `not_checked`. The URL and translations APIs were
+mocked. This is a packaged save-hook regression, not evidence of the deployed
+site, source support, overall quality, or a complete rendered-page audit.
 
 ## Limits and remaining work
 
