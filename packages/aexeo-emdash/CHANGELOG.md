@@ -6,6 +6,13 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-12
+
+### Added
+
+- Support host-provided component, inventory route and locale mappings, and preserve precise CMS source positions when available.
+- Report content assessment coverage and measurements, with opt-in external gate and link observation providers.
+
 ### Fixed
 
 - Count body findings withheld due to incomplete CMS projections in aggregate telemetry, and test native family coverage against the rule registry.
@@ -13,11 +20,6 @@ and the project follows [Semantic Versioning](https://semver.org/).
 - Explain when no content-preset assessment was recorded and report aggregate assessment coverage in local telemetry.
 - Show whether each CMS evaluation had complete, partial, unavailable or unknown body coverage in both findings interfaces. Older findings without coverage are treated conservatively; a complete body does not establish rendered-page or overall editorial quality.
 - Preserve available prose while marking body coverage unverified when automatic selection encounters an unrecognized conventional body field. Hosts can still explicitly select the fields constituting the rendered body.
-
-## [0.9.1] - 2026-11-10
-
-### Fixed
-
 - Preserve ordered Portable Text when it is mixed with custom components. Unmapped components leave coverage unverified; explicitly mapped components can be included or deliberately excluded from editorial body evaluation.
 
 ## [0.9.0] - 2026-11-10
