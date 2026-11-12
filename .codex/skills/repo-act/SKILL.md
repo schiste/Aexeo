@@ -22,7 +22,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   an `npx` invocation that could install an unpinned missing executable.
 - When reusing a squash-merged session branch, inspect ancestry and broker
   session-owned commits: old commits can still be replay candidates after a
-  sync. Preserve a backup ref and reconcile the branch onto the current base
+  sync. `git cherry` may report individual commits as missing when several were
+  squash-merged together. Run `aethyme broker advanced representation scan
+  --session <id>` and inspect its landing evidence before concluding they are
+  unrepresented; record only the reviewed scan digest. Preserve a backup ref
+  and reconcile the branch onto the current base
   with only the new commits before submitting; verify the resulting diff.
   Check the old remote branch before pushing: the new session may not own the
   previous session’s recorded push. If the broker refuses replacement, publish
