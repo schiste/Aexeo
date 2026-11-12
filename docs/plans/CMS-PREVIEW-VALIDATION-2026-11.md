@@ -57,6 +57,15 @@ assumption, not verification of the component's rendered content. Neither run
 emitted findings. This checks the packaged candidate, not a deployed npm version,
 hosted admin UI, rendered page, or the other four CMS records.
 
+The website's locally available `origin/main` at `4aac9b632422` renders
+`askYourAi` as interface controls with provider links. A third run mapped that
+component with empty fields and only `text`, `headings`, and `paragraphs`
+capabilities. Its word-count gate passed, the link-count gate was `not_checked`,
+and body coverage was `partial`. This illustrates how a host can scope a text
+projection without claiming link coverage; its choice of what counts as editorial
+text remains a host assertion, and the inspected source is not proof of the
+Preview deployment or its rendered output.
+
 ## Limits and remaining work
 
 The mocked host did not test the hosted admin UI, translations, cross-page
