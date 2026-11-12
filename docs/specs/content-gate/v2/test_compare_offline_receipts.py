@@ -183,6 +183,71 @@ class CompareOfflineReceipts(unittest.TestCase):
         with self.assertRaises(comparison.VerificationError):
             comparison.compare_receipts(self.encode(altered), self.encode(altered), self.artifacts, validate_change=True)
 
+    def test_inline_content_checks_every_present_state_and_rejects_references(self):
+        try:
+            import jsonschema  # noqa: F401
+            import rfc3339_validator  # noqa: F401
+            import rfc3986_validator  # noqa: F401
+        except ImportError:
+            self.skipTest("optional change validation dependencies are unavailable")
+        change = json.loads((Path(__file__).parent.parent / "v1" / "examples" / "markdown-change.json").read_text())
+        for index, entry in enumerate(change["entries"]):
+            for field in ("before", "after"):
+                if field in entry:
+                    content = f"Contenu café {index} {field}\n"
+                    entry[field].pop("file", None)
+                    entry[field]["inline"] = content
+                    entry[field]["sha256"] = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        def bound(candidate):
+            data = self.encode(candidate)
+            self.artifacts["change"].write_bytes(data)
+            receipt = copy.deepcopy(self.receipt)
+            receipt["decision_inputs"]["change"]["sha256"] = hashlib.sha256(data).hexdigest()
+            receipt["verdict"]["subject"] = {
+                "change_id": candidate["change_id"], "base": candidate["base"],
+                "entries": [{"entity_id": entry["entity_id"], "sha256": entry.get("after", {}).get("sha256")}
+                            for entry in candidate["entries"]],
+            }
+            return self.encode(receipt)
+        good = bound(change)
+        comparison.compare_receipts(good, good, self.artifacts, verify_inline_content=True)
+        previous = self.root / "previous-inline"
+        previous.write_bytes(good)
+        args = [sys.executable, str(SCRIPT), str(previous), str(previous)]
+        for role in comparison.REQUIRED:
+            args.extend(["--" + role.replace("_", "-"), str(self.artifacts[role])])
+        for role in comparison.OPTIONAL:
+            args.append("--" + role.replace("_", "-") + "-absent")
+        run = subprocess.run(args + ["--verify-inline-content", "--telemetry"], capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        event = json.loads(run.stderr)
+        self.assertTrue(event["inline_content_verification_requested"])
+        self.assertNotIn(str(self.root), run.stderr)
+        for field in ("before", "after"):
+            bad = copy.deepcopy(change)
+            bad["entries"][0][field]["inline"] += " changed"
+            encoded = bound(bad)
+            comparison.compare_receipts(encoded, encoded, self.artifacts, validate_change=True)
+            with self.subTest(field=field), self.assertRaises(comparison.VerificationError):
+                comparison.compare_receipts(encoded, encoded, self.artifacts, verify_inline_content=True)
+        for reference in ("file", "uri"):
+            bad = copy.deepcopy(change)
+            state = bad["entries"][0]["before"]
+            del state["inline"]
+            state[reference] = "local.md" if reference == "file" else "https://example.org/content"
+            encoded = bound(bad)
+            with self.subTest(reference=reference), self.assertRaises(comparison.VerificationError):
+                comparison.compare_receipts(encoded, encoded, self.artifacts, verify_inline_content=True)
+        bad = copy.deepcopy(change)
+        bad["entries"][0]["before"]["inline"] = "\ud800"
+        encoded = bound(bad)
+        with self.assertRaises(comparison.VerificationError):
+            comparison.compare_receipts(encoded, encoded, self.artifacts, verify_inline_content=True)
+        bound(change)
+        missing = subprocess.run([sys.executable, "-S", *args[1:], "--verify-inline-content", "--telemetry"], capture_output=True, text=True)
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertEqual(json.loads(missing.stderr.splitlines()[0])["status"], "error")
+
     def test_cli_is_private_and_does_not_authorize_publication(self):
         previous = self.root / "previous.json"
         fresh = self.root / "fresh.json"
