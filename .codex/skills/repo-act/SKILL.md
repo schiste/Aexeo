@@ -63,6 +63,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   reporting results against real CMS snapshots, rebuild both the bundle and
   bridge from the identified commit even if neither source changed: ignored
   artifacts in reused worktrees may come from another revision.
+- When smoke-testing a packed EmDash plugin in a clean project, install the
+  host-compatible EmDash peer and its dependencies as well as the archive.
+  Exercise the configured hook and real WASM; a missing peer import tests the
+  fixture setup rather than package behavior. Do not confuse a CMS snapshot
+  and mocked host with an end-to-end rendered-site validation.
 - For WASM bridge interface changes, synchronize the plugin and crawl-worker
   glue declarations and run `npm run check:dts --prefix packages/aexeo-crawl-worker`.
 - For EmDash adapter configuration changes, test absent, valid, malformed and
