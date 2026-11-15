@@ -2157,18 +2157,16 @@ impl ContentPreset {
                     measurements.insert("required_headings".into(), headings.len());
                     match &input.headings {
                         Some(actual) => {
-                            measurements.insert(
-                                "present_headings".into(),
-                                headings
-                                    .iter()
-                                    .filter(|heading| actual.contains(*heading))
-                                    .count(),
-                            );
+                            let mut missing = 0;
                             for heading in headings {
-                                if !actual.iter().any(|item| item == heading) {
+                                if !actual.contains(heading) {
+                                    missing += 1;
                                     emit(format!("Required heading is missing: {heading}"), 1, 1);
                                 }
                             }
+                            measurements
+                                .insert("present_headings".into(), headings.len() - missing);
+                            measurements.insert("missing_headings".into(), missing);
                         }
                         None => reason = Some("headings are unavailable from this adapter".into()),
                     }
@@ -2390,30 +2388,21 @@ impl ContentPreset {
                             let unavailable = context
                                 .map(|ctx| ctx.unavailable_metadata_fields.as_slice())
                                 .unwrap_or_default();
-                            let unknown = fields
-                                .iter()
-                                .filter(|field| unavailable.contains(field))
-                                .count();
-                            measurements.insert("unavailable_fields".into(), unknown);
-                            measurements.insert(
-                                "present_fields".into(),
-                                fields
-                                    .iter()
-                                    .filter(|field| {
-                                        !unavailable.contains(field)
-                                            && metadata
-                                                .get(*field)
-                                                .is_some_and(|v| !v.trim().is_empty())
-                                    })
-                                    .count(),
-                            );
+                            let (mut unknown, mut present, mut missing) = (0, 0, 0);
                             for field in fields {
-                                if !unavailable.contains(field)
-                                    && metadata.get(field).is_none_or(|v| v.trim().is_empty())
+                                if unavailable.contains(field) {
+                                    unknown += 1;
+                                } else if metadata.get(field).is_some_and(|v| !v.trim().is_empty())
                                 {
+                                    present += 1;
+                                } else {
+                                    missing += 1;
                                     emit(format!("Required metadata is missing: {field}"), 1, 1);
                                 }
                             }
+                            measurements.insert("unavailable_fields".into(), unknown);
+                            measurements.insert("present_fields".into(), present);
+                            measurements.insert("missing_fields".into(), missing);
                             if unknown > 0 {
                                 reason = Some("some required metadata fields are unavailable from this adapter".into());
                             }
@@ -2494,6 +2483,60 @@ impl ContentPreset {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn required_content_measurements_keep_missing_and_unavailable_distinct() {
+        let preset = ContentPreset::from_toml("version=1\nname='counts'\n[[gates]]\nid='metadata'\nkind='required_metadata'\nfields=['title','description','author']\n[[gates]]\nid='headings'\nkind='required_headings'\nheadings=['Intro','Summary']\n").unwrap();
+        let input = ContentInput {
+            id: "example".into(),
+            metadata: Some(BTreeMap::from([
+                ("title".into(), "Title".into()),
+                ("description".into(), " ".into()),
+            ])),
+            headings: Some(vec!["Intro".into()]),
+            ..Default::default()
+        };
+        let adapter = ContentContext {
+            unavailable_metadata_fields: vec!["author".into()],
+            ..Default::default()
+        };
+        let context = ContentEvaluationContext {
+            adapter: Some(&adapter),
+            ..Default::default()
+        };
+        let report = preset.evaluate_with_capabilities(&input, &context).unwrap();
+        let metadata = &report.gates[0];
+        assert_eq!(metadata.status, GateStatus::NotChecked);
+        assert_eq!(metadata.measurements["present_fields"], 1);
+        assert_eq!(metadata.measurements["missing_fields"], 1);
+        assert_eq!(metadata.measurements["unavailable_fields"], 1);
+        assert_eq!(metadata.findings.len(), 1);
+        assert!(metadata.findings[0].message.contains("description"));
+        let headings = &report.gates[1];
+        assert_eq!(headings.status, GateStatus::Failed);
+        assert_eq!(headings.measurements["present_headings"], 1);
+        assert_eq!(headings.measurements["missing_headings"], 1);
+        assert_eq!(headings.findings.len(), 1);
+
+        let unavailable = preset
+            .evaluate(&ContentInput {
+                id: "none".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(unavailable.gates[0].status, GateStatus::NotChecked);
+        assert!(
+            !unavailable.gates[0]
+                .measurements
+                .contains_key("missing_fields")
+        );
+        assert_eq!(unavailable.gates[1].status, GateStatus::NotChecked);
+        assert!(
+            !unavailable.gates[1]
+                .measurements
+                .contains_key("missing_headings")
+        );
+    }
+
     #[test]
     fn editorial_findings_carry_advisory_suggestions_without_changing_coverage() {
         let preset = ContentPreset::from_toml(

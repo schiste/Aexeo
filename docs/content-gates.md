@@ -131,6 +131,13 @@ kind = "required_metadata"
 fields = ["title", "description"]
 ```
 
+Required-heading measurements separate configured, present and missing headings
+when headings are available. Required-metadata measurements separate configured,
+present, missing and unavailable fields when metadata is supplied. A missing
+count describes only observed fields; fields the adapter cannot observe count as
+unavailable and make the gate `not_checked`. When the entire input is unavailable,
+observed counts are omitted rather than reported as zero.
+
 Save this as `product.toml`, then run:
 
 ```sh

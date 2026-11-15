@@ -345,8 +345,9 @@ is safe or that a heuristic establishes quality. Unavailable inputs remain
 1. **Explain the result.** Show configured-gate coverage, missing capabilities,
    blocking status, measured values and thresholds even when checks pass.
    Preserve machine contracts and distinguish unavailable measurements from zero.
-   Done for aggregate coverage, word counts and metadata counts; expand to
-   other gate types and more actionable remedies.
+   Done for aggregate coverage, word counts and metadata counts; required
+   headings and metadata now report observed missing counts separately from
+   unavailable fields. Expand to other gate types and more actionable remedies.
 2. **Make basic editorial gates useful.** Add configurable checks for sentence
    and paragraph length, repeated terms, headings, links and prohibited wording;
    support different languages where measurement depends on language. Test

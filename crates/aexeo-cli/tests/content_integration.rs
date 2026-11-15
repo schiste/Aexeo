@@ -482,6 +482,8 @@ fn telemetry_is_opt_in_and_reports_metadata_presence() {
     assert!(output.stderr.is_empty());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["gates"][2]["measurements"]["present_fields"], 2);
+    assert_eq!(report["gates"][2]["measurements"]["missing_fields"], 0);
+    assert_eq!(report["gates"][2]["measurements"]["unavailable_fields"], 0);
 }
 
 #[test]
@@ -517,6 +519,7 @@ fn heading_and_term_measurements_distinguish_absent_inputs() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["gates"][0]["measurements"]["required_headings"], 2);
     assert_eq!(report["gates"][0]["measurements"]["present_headings"], 1);
+    assert_eq!(report["gates"][0]["measurements"]["missing_headings"], 1);
     assert_eq!(report["gates"][1]["measurements"]["configured_terms"], 2);
     assert_eq!(report["gates"][1]["measurements"]["matches"], 2);
 
@@ -538,6 +541,11 @@ fn heading_and_term_measurements_distinguish_absent_inputs() {
     assert!(
         report["gates"][0]["measurements"]
             .get("present_headings")
+            .is_none()
+    );
+    assert!(
+        report["gates"][0]["measurements"]
+            .get("missing_headings")
             .is_none()
     );
     assert!(report["gates"][1]["measurements"].get("matches").is_none());
