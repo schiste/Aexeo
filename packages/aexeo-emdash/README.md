@@ -98,6 +98,15 @@ Pointing any of these at a slug that doesn't exist is non-fatal:
 the bridge's `content.list` returns empty and the missing collection
 shows up in the Refresh summary's `errors` field.
 
+If multiple records resolve to one route, Aexeo withholds that route’s findings
+and records `route_collision`; it also marks sitewide results incomplete. A
+single save or deletion cannot establish that the ambiguity is resolved. Run a
+complete Refresh including every known affected collection after fixing the
+routes. Configure all relevant collections: an unobserved collection cannot
+be checked for collisions. Collision telemetry contains aggregate counts,
+not routes or content. The host KV API does not provide atomic snapshots or
+compare-and-set, so concurrent changes can still race the refresh.
+
 ## Suppressing findings
 
 When a finding is intentional (legal pages with non-standard SEO,

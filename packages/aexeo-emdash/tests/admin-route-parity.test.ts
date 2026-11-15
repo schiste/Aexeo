@@ -152,8 +152,8 @@ function fakeCtx(kv: KvNamespace, settings?: Map<string, unknown>): SandboxCtx {
       },
     },
     content: {
-      async list() {
-        return { items: [helloDoc] as never, hasMore: false };
+      async list(collection: string) {
+        return { items: (collection === "posts" ? [helloDoc] : []) as never, hasMore: false };
       },
       async getPublicUrl() {
         return "https://www.aexeo.test/journal/hello/";

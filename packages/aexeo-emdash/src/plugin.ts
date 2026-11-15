@@ -435,7 +435,9 @@ export async function handleAfterDelete(
       stored.meta.collection === event.collection
     ) {
       await ctx.kv.delete(entry.key);
-      await ctx.kv.delete(findingsKey(stored.document.route));
+      if (!(await routeHasCollision(ctx.kv, stored.document.route))) {
+        await ctx.kv.delete(findingsKey(stored.document.route));
+      }
     }
   }
 }
@@ -626,7 +628,19 @@ export async function handleAfterSaveConfigured(
   // Persist the WASM-shaped document and metadata, including the exact
   // public URL resolved by EmDash, so the admin needs no second lookup.
   const stored: StoredDocument = { document, meta: adapted.meta };
-  if (!(await persistDocument(ctx, stored))) {
+  if (await routeHasCollision(kv, document.route)) {
+    // A single save cannot establish that the other owner disappeared.
+    await markRouteCollision(ctx, document.route, await readStoredDocument(kv, document.route), [adapted.meta.collection]);
+    recordRouteCollisions(ctx, 1, "save");
+    return;
+  }
+  const persisted = await persistDocument(ctx, stored);
+  if (persisted.status === "collision") {
+    await markRouteCollision(ctx, document.route, persisted.existing, [persisted.existing.meta.collection, adapted.meta.collection]);
+    recordRouteCollisions(ctx, 1, "save");
+    return;
+  }
+  if (persisted.status === "older") {
     log?.info?.(`Aexeo afterSave skipped: ${document.route} has a newer save`);
     return;
   }
@@ -744,7 +758,7 @@ async function markAdaptationUnavailable(
       ...(item.updatedAt === undefined ? {} : { updatedAt: item.updatedAt }),
     },
   };
-  if (!(await persistDocument(ctx, unavailable)) || await isSuperseded(ctx.kv, unavailable)) return;
+  if ((await persistDocument(ctx, unavailable)).status !== "saved" || await isSuperseded(ctx.kv, unavailable)) return;
   recordContentCoverage(ctx, [unavailable.document]);
   await ctx.kv.set(findingsKey(unavailable.document.route), {
     route: unavailable.document.route, findings: [],
@@ -809,6 +823,7 @@ export async function evaluateAndPersistAll(
   const documentCollections: string[] = [];
   const adaptedByRoute = new Map<string, StoredDocument>();
   const documentRoutes = new Set<string>();
+  const duplicateRoutes = new Set<string>();
   const adaptationFailures: Array<{ item: EmdashContentItem; collection: string }> = [];
   for (const collection of collections) {
     let cursor: string | undefined;
@@ -832,6 +847,7 @@ export async function evaluateAndPersistAll(
             if (options.contentFieldsUnavailable && adapted.document.body !== undefined) adapted.document.body_capabilities = [];
             documents.push(adapted.document);
             documentCollections.push(adapted.meta.collection);
+            if (documentRoutes.has(adapted.document.route)) duplicateRoutes.add(adapted.document.route);
             documentRoutes.add(adapted.document.route);
             adaptedByRoute.set(adapted.document.route, {
               document: adapted.document,
@@ -858,9 +874,68 @@ export async function evaluateAndPersistAll(
       }
     } while (cursor !== undefined);
   }
-  const inventoryComplete = summary.errors.length === 0;
   summary.documentsScanned = documents.length;
   recordContentCoverage(ctx, documents);
+  // A partial sweep cannot displace an owner from an unscanned collection.
+  const scannedCollections = new Set(collections);
+  for (const prior of storedAtStart) {
+    const candidate = adaptedByRoute.get(prior.document.route);
+    if (candidate && (prior.meta.id !== candidate.meta.id || prior.meta.collection !== candidate.meta.collection) &&
+        !scannedCollections.has(prior.meta.collection)) {
+      duplicateRoutes.add(prior.document.route);
+    }
+  }
+  if (duplicateRoutes.size > 0) {
+    summary.errors.push("Multiple CMS records resolve to the same route; affected evaluations are unavailable.");
+    recordRouteCollisions(ctx, duplicateRoutes.size, "refresh");
+  }
+  const withheldRoutes = new Set(duplicateRoutes);
+  const selectedCollections = new Set(collections);
+  const routesToCheck = [...documentRoutes];
+  for (let offset = 0; offset < routesToCheck.length; offset += 16) {
+    const batch = routesToCheck.slice(offset, offset + 16);
+    const collisions = await Promise.all(batch.map((route) => readRouteCollision(kv, route)));
+    for (const [index, collision] of collisions.entries()) {
+      if (collision !== null && (summary.errors.length > 0 || collision.collections === null ||
+          collision.collections.some((collection) => !selectedCollections.has(collection)))) {
+        withheldRoutes.add(batch[index]!);
+      }
+    }
+  }
+  if (withheldRoutes.size > 0 && summary.errors.length === 0) {
+    summary.errors.push("A previous route collision requires a complete refresh of all affected collections.");
+  }
+  if (withheldRoutes.size > 0) {
+    // A route-keyed report cannot safely associate findings with either record.
+    const documentsForCollision = new Map<string, string[]>();
+    for (let index = 0; index < documents.length; index++) {
+      const route = documents[index]!.route;
+      if (duplicateRoutes.has(route)) {
+        const owners = documentsForCollision.get(route) ?? [];
+        owners.push(documentCollections[index]!);
+        documentsForCollision.set(route, owners);
+      }
+    }
+    let kept = 0;
+    for (let index = 0; index < documents.length; index++) {
+      if (withheldRoutes.has(documents[index]!.route)) continue;
+      documents[kept] = documents[index]!;
+      documentCollections[kept] = documentCollections[index]!;
+      kept++;
+    }
+    documents.length = kept;
+    documentCollections.length = kept;
+    const initial = new Map(storedAtStart.map((entry) => [entry.document.route, entry]));
+    for (const route of withheldRoutes) {
+      adaptedByRoute.delete(route);
+      documentRoutes.delete(route);
+      const prior = initial.get(route) ?? null;
+      const owners = documentsForCollision.get(route) ?? [];
+      if (prior) owners.push(prior.meta.collection);
+      await markRouteCollision(ctx, route, prior, owners);
+    }
+  }
+  const inventoryComplete = summary.errors.length === 0;
   if (adaptationFailures.length > 0) {
     try { ctx.log?.info?.("aexeo.adaptation_coverage", { failed: adaptationFailures.length }); } catch { /* best effort */ }
     const storedByCollection = new Map<string, Map<string, StoredDocument[]>>();
@@ -939,6 +1014,7 @@ export async function evaluateAndPersistAll(
     summary.errors.push("Sitewide checks unavailable: one or more document bodies are incomplete.");
   }
   for (const finding of result.findings) {
+    if (finding.scope === "page" && withheldRoutes.has(finding.path)) continue;
     if (!globalCoverageComplete && (finding.scope !== "page" || isSiteGraphFinding(finding))) continue;
     const complete = finding.scope === "page" ? completeByRoute.get(finding.path) ?? false : allBodiesComplete;
     if (!isCmsObservableFinding(finding, complete)) continue;
@@ -1057,13 +1133,16 @@ async function isSuperseded(kv: KvNamespace, evaluated: StoredDocument): Promise
   return !sameStoredDocument(evaluated, await readStoredDocument(kv, evaluated.document.route));
 }
 
-// Returns false, writing nothing, when a newer revision of this entry is
-// already stored.
+// Refuse older revisions and route ownership conflicts before moving any keys.
 async function persistDocument(
   ctx: SandboxCtx,
   stored: StoredDocument,
-): Promise<boolean> {
+): Promise<{ status: "saved" | "older" } | { status: "collision"; existing: StoredDocument }> {
   const route = stored.document.route;
+  const existing = await readStoredDocument(ctx.kv, route);
+  if (existing !== null && (existing.meta.id !== stored.meta.id || existing.meta.collection !== stored.meta.collection)) {
+    return { status: "collision", existing };
+  }
   const sameEntry = (await ctx.kv.list<unknown>("document:")).flatMap((entry) => {
     const previous = toStoredDocument(entry.value);
     return previous !== null &&
@@ -1077,15 +1156,47 @@ async function persistDocument(
       isOlderRevision(stored.meta.updatedAt, previous.meta.updatedAt),
     )
   ) {
-    return false;
+    return { status: "older" };
   }
   for (const { key, previous } of sameEntry) {
     if (previous.document.route === route) continue;
     await ctx.kv.delete(key);
-    await ctx.kv.delete(findingsKey(previous.document.route));
+    if (!(await routeHasCollision(ctx.kv, previous.document.route))) {
+      await ctx.kv.delete(findingsKey(previous.document.route));
+    }
   }
   await ctx.kv.set(documentKey(route), stored);
-  return true;
+  return { status: "saved" };
+}
+
+async function readRouteCollision(kv: KvNamespace, route: string): Promise<{ collections: string[] | null } | null> {
+  const record = await kv.get<{ assessment?: { status?: string; reason?: string }; collision_collections?: unknown }>(findingsKey(route));
+  if (record?.assessment?.status !== "error" || record.assessment.reason !== "route_collision") return null;
+  const owners = record.collision_collections;
+  return { collections: Array.isArray(owners) && owners.length > 0 && owners.every((value) => typeof value === "string" && value.length > 0)
+    ? owners : null };
+}
+
+async function routeHasCollision(kv: KvNamespace, route: string): Promise<boolean> {
+  return (await readRouteCollision(kv, route)) !== null;
+}
+
+function recordRouteCollisions(ctx: SandboxCtx, routes: number, operation: "save" | "refresh"): void {
+  try { ctx.log?.info?.("aexeo.route_collision", { routes, operation }); } catch { /* best effort */ }
+}
+
+async function markRouteCollision(ctx: SandboxCtx, route: string, expected: StoredDocument | null, owners: readonly string[]): Promise<void> {
+  const current = await readStoredDocument(ctx.kv, route);
+  // A concurrent save or deletion owns the new state. KV has no compare-and-set.
+  if (expected === null ? current !== null : !sameStoredDocument(expected, current)) return;
+  const previous = await readRouteCollision(ctx.kv, route);
+  const collections = previous?.collections === null ? null : [...new Set([...(previous?.collections ?? []), ...owners])];
+  await ctx.kv.set(findingsKey(route), {
+    route, findings: [], ...(collections === null ? {} : { collision_collections: collections }), assessment: {
+      status: "error", reason: "route_collision",
+      detail: "Multiple CMS records resolve to this route; findings cannot be attributed safely.",
+    },
+  });
 }
 
 // Removes entries the sweep no longer saw. An absence only proves staleness

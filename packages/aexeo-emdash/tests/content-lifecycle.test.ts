@@ -194,6 +194,95 @@ describe("concurrent saves", () => {
   });
 });
 
+describe("CMS route collisions", () => {
+  it("withholds ambiguous route findings while evaluating unrelated records", async () => {
+    const { ctx, store } = host([item("a", OLD), item("b", OLD), item("other", OLD)]);
+    ctx.content.getPublicUrl = async (_collection, id) => `https://example.com/${id === "other" ? "other" : "shared"}`;
+    const events: Array<[string, unknown]> = [];
+    ctx.log = { info: (name, data) => events.push([name, data]), warn: () => {}, error: () => {} };
+    const seen: string[] = [];
+    const evaluator: EvaluatorFn = async (documents) => {
+      seen.push(...documents.map((document) => document.route));
+      return { ok: true, findings: documents.map((document) => finding(document.route, "EDITORIAL")) };
+    };
+    store.set(findingsKey("/shared"), { route: "/shared", findings: [finding("/shared", "STALE")] });
+    const summary = await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator });
+    expect(summary.documentsScanned).toBe(3);
+    expect(summary.errors.join(" ")).toContain("same route");
+    expect(seen).toEqual(["/other"]);
+    expect(store.has(documentKey("/shared"))).toBe(false);
+    expect(store.get(findingsKey("/shared"))).toMatchObject({ findings: [], assessment: { status: "error", reason: "route_collision" } });
+    expect(rulesAt(store, "/other")).toEqual(["EDITORIAL"]);
+    expect(store.get(findingsKey("*"))).toMatchObject({ assessment: { status: "error", reason: "inventory_incomplete" } });
+    expect(events.find(([name]) => name === "aexeo.route_collision")).toEqual(["aexeo.route_collision", { routes: 1, operation: "refresh" }]);
+    expect(JSON.stringify(events)).not.toContain("/shared");
+  });
+
+  it("retains a collision after an incomplete listing and after deleting one owner", async () => {
+    const { ctx, store } = host();
+    ctx.content.getPublicUrl = async () => "https://example.com/shared";
+    await save(ctx, item("a", OLD), returning("FIRST"));
+    await save(ctx, item("b", NEW), returning("WRONG"));
+    ctx.content.list = async () => ({ items: [item("a", OLD)], hasMore: true });
+    const evaluate = vi.fn(returning("WRONG"));
+    await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator: evaluate });
+    expect(evaluate.mock.calls[0]?.[0]).toEqual([]);
+    expect(store.get(findingsKey("/shared"))).toMatchObject({ findings: [], assessment: { reason: "route_collision" } });
+    await handleAfterDelete({ id: "a", collection: "pages", permanent: true }, ctx);
+    expect(store.has(documentKey("/shared"))).toBe(false);
+    expect(store.get(findingsKey("/shared"))).toMatchObject({ findings: [], assessment: { reason: "route_collision" } });
+    await save(ctx, item("b", NEW), evaluate);
+    expect(evaluate).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires every known collection to resolve a cross-collection collision", async () => {
+    const { ctx, store } = host();
+    ctx.content.getPublicUrl = async () => "https://example.com/shared";
+    await save(ctx, item("a", OLD), returning("FIRST"));
+    await save(ctx, { ...item("b", NEW), type: "posts" }, returning("WRONG"));
+    expect(store.get(findingsKey("/shared"))).toMatchObject({ collision_collections: ["pages", "posts"] });
+    ctx.content.list = async (collection) => ({ items: collection === "pages" ? [item("a", OLD)] : [], hasMore: false });
+    const evaluator = vi.fn(returning("RECOVERED"));
+    const partial = await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator });
+    expect(partial.errors.join(" ")).toContain("all affected collections");
+    expect(evaluator.mock.calls[0]?.[0]).toEqual([]);
+    expect(store.get(findingsKey("/shared"))).toMatchObject({ findings: [], assessment: { reason: "route_collision" } });
+    await evaluateAndPersistAll(ctx, { collections: ["pages", "posts"], evaluator });
+    expect(rulesAt(store, "/shared")).toEqual(["RECOVERED"]);
+  });
+
+  it("does not displace an owner from a collection excluded from refresh", async () => {
+    const { ctx, store } = host();
+    ctx.content.getPublicUrl = async () => "https://example.com/shared";
+    await save(ctx, { ...item("a", OLD, "first"), type: "posts" }, returning("FIRST"));
+    ctx.content.list = async () => ({ items: [item("b", NEW, "second")], hasMore: false });
+    const result = await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator: returning("WRONG") });
+    expect(result.errors.join(" ")).toContain("same route");
+    expect(titleAt(store, "/shared")).toBe("first");
+    expect(store.get(findingsKey("/shared"))).toMatchObject({ findings: [], collision_collections: ["pages", "posts"], assessment: { reason: "route_collision" } });
+  });
+
+  it("does not overwrite another record on save to the same route", async () => {
+    const { ctx, store } = host();
+    ctx.content.getPublicUrl = async () => "https://example.com/shared";
+    await save(ctx, item("a", OLD, "first"), returning("FIRST"));
+    const evaluate = vi.fn(returning("WRONG"));
+    await save(ctx, item("b", NEW, "second"), evaluate);
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(titleAt(store, "/shared")).toBe("first");
+    expect(store.get(findingsKey("/shared"))).toMatchObject({ findings: [], assessment: { status: "error", reason: "route_collision" } });
+    await save(ctx, item("a", NEW, "first revised"), evaluate);
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(titleAt(store, "/shared")).toBe("first");
+    // A complete refresh can establish that the collision is gone.
+    ctx.content.list = async () => ({ items: [item("a", NEW, "first revised")], hasMore: false });
+    await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator: returning("RECOVERED") });
+    expect(rulesAt(store, "/shared")).toEqual(["RECOVERED"]);
+    await save(ctx, item("a", NEW, "first revised"), returning("SAVED"));
+    expect(rulesAt(store, "/shared")).toEqual(["SAVED"]);
+  });
+});
+
 describe("Refresh racing a save", () => {
   const sweep = (ctx: SandboxCtx, evaluator: EvaluatorFn) =>
     evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator });
