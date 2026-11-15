@@ -253,11 +253,25 @@ impl LinkReachabilitySession {
 }
 
 /// Convert host observations to portable gate capabilities in input order.
+/// A malformed occurrence sequence is entirely unchecked: this verifies the
+/// report shape, not that the report came from these destination values.
+/// An invalid report for zero destinations returns a mismatched sentinel so the
+/// gate cannot mistake the malformed report for a successful empty check.
 pub fn gate_observations(
     destinations: &[String],
     report: &ReachabilityReport,
 ) -> Vec<crate::content_gate::LinkReachabilityObservation> {
     use crate::content_gate::{LinkReachabilityObservation as Observation, valid_link_destination};
+    if report.version != 1
+        || report.observations.len() != destinations.len()
+        || report
+            .observations
+            .iter()
+            .enumerate()
+            .any(|(offset, item)| item.index != offset + 1)
+    {
+        return vec![Observation::NotChecked; destinations.len().max(1)];
+    }
     report
         .observations
         .iter()
@@ -367,6 +381,64 @@ mod tests {
             location: location.map(str::to_owned),
         }
     }
+    #[test]
+    fn malformed_observation_order_or_count_never_misattributes_a_finding() {
+        use crate::content_gate::LinkReachabilityObservation as Observation;
+        let urls = vec![
+            "https://example.org/first".into(),
+            "https://example.org/second".into(),
+        ];
+        let mut report = ReachabilityReport {
+            version: 1,
+            observations: vec![
+                LinkObservation {
+                    index: 2,
+                    status: ReachabilityStatus::NotFound,
+                    reason: "http_not_found",
+                    http_status: Some(404),
+                },
+                LinkObservation {
+                    index: 1,
+                    status: ReachabilityStatus::Reachable,
+                    reason: "http_success",
+                    http_status: Some(200),
+                },
+            ],
+            network_checks: 2,
+            elapsed_ms: 0,
+        };
+        assert_eq!(
+            gate_observations(&urls, &report),
+            vec![Observation::NotChecked; 2]
+        );
+        report.observations.pop();
+        report.observations[0].index = 1;
+        assert_eq!(
+            gate_observations(&urls, &report),
+            vec![Observation::NotChecked; 2]
+        );
+        report.observations.push(LinkObservation {
+            index: 1,
+            status: ReachabilityStatus::Reachable,
+            reason: "http_success",
+            http_status: Some(200),
+        });
+        assert_eq!(
+            gate_observations(&urls, &report),
+            vec![Observation::NotChecked; 2]
+        );
+        assert_eq!(
+            gate_observations(&[], &report),
+            vec![Observation::NotChecked]
+        );
+        report.observations[1].index = 2;
+        report.version = 2;
+        assert_eq!(
+            gate_observations(&urls, &report),
+            vec![Observation::NotChecked; 2]
+        );
+    }
+
     #[test]
     fn exhausted_budget_never_requests_and_preserves_relative_links() {
         let fake = Fake {
