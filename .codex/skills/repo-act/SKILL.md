@@ -43,6 +43,7 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 ## Validation Checklist
 
 - Run the fastest relevant test command first.
+- For report performance changes, compare release builds on the same reproducible synthetic input before and after, verify the full output stays equivalent, and report workload and timing variability rather than generalizing one measurement.
 - Python test scripts with hyphens in their filenames are not discovered by
   `unittest discover`; run the relevant files directly, or use the repository
   check script that invokes them explicitly. Confirm the reported test count.
