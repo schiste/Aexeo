@@ -59,6 +59,15 @@ describe("portable content API", () => {
     expect(JSON.stringify(event)).not.toContain("Private");
     expect(JSON.stringify(event)).not.toContain("/private");
   });
+  it("preserves the report when the telemetry observer throws", async () => {
+    const document = { route: "/private", title: "Private", body: [] };
+    const expected = await evaluateContent(document, "custom");
+    const observer = vi.fn(() => { throw new Error("telemetry failure"); });
+    const actual = await evaluateContent(document, "custom", {}, undefined, observer);
+    expect(observer).toHaveBeenCalledOnce();
+    expect(actual).toEqual(expected);
+  });
+
   it("omits destination telemetry when the gate was not measured", async () => {
     vi.mocked(evaluateWasm).mockResolvedValueOnce(JSON.stringify({ preset: "custom", input_id: "/private", gates: [{ status: "not_checked", measurements: {} }] }));
     const onTelemetry = vi.fn();

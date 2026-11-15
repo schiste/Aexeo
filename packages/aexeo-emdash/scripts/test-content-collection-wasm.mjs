@@ -2,6 +2,17 @@
 import assert from "node:assert/strict";
 import { evaluateContent, evaluateContentCollection, projectContentInput, projectLinkDestinations } from "../dist/content.js";
 
+const telemetryDocument = { route: "/telemetry", title: "Example", body: [] };
+const expectedTelemetryReport = await evaluateContent(telemetryDocument, "article");
+let telemetryCalls = 0;
+const actualTelemetryReport = await evaluateContent(telemetryDocument, "article", {}, undefined, () => {
+  telemetryCalls += 1;
+  throw new Error("telemetry failed");
+});
+assert.equal(telemetryCalls, 1);
+assert.deepEqual(actualTelemetryReport, expectedTelemetryReport);
+console.log("WASM content report survives a telemetry callback failure");
+
 const preset = `version=1
 name="collection"
 [[gates]]
