@@ -97,9 +97,33 @@ def validate_policy_fingerprint(value):
     return value
 
 
-def review_is_bound(item):
+HTML_MAIN_PROJECTION = {"format": "html", "scope": "main"}
+
+
+def corpus_projection(corpus):
+    """Validate the declared adapter and return its explicit projection, if any."""
+    input_format = corpus.get("input_format")
+    if input_format not in (None, "text", "markdown", "html"):
+        raise ValueError("unsupported input format")
+    if input_format == "html":
+        if corpus.get("content_projection") != HTML_MAIN_PROJECTION:
+            raise ValueError("HTML corpus requires the main content projection")
+        return HTML_MAIN_PROJECTION
+    if "content_projection" in corpus:
+        raise ValueError("content projection requires HTML input")
+    return None
+
+
+def check_projection(container, expected):
+    """Reject mismatched or absent scope where scoped data is required."""
+    if ("content_projection" in container) != (expected is not None) or (expected is not None and container["content_projection"] != expected):
+        raise ValueError("content projection does not match the corpus")
+
+
+def review_is_bound(item, projection=None):
     """Only count reviews bound to the current text, metadata and label."""
     review = item["review"]
+    check_projection(review, projection)
     expected_hashes = {"text_sha256": hashlib.sha256(item["text"].encode("utf-8")).hexdigest(),
                        "expected": item["expected"]}
     if "metadata" in item:
@@ -115,6 +139,7 @@ def review_is_bound(item):
 def validate_corpus(corpus):
     if corpus.get("version") != 1:
         raise ValueError("unsupported corpus version")
+    projection = corpus_projection(corpus)
     synthetic = corpus.get("fixture_kind") == "synthetic_regression"
     ids = set()
     text_splits = {}
@@ -158,6 +183,7 @@ def validate_corpus(corpus):
             review = item.get("review")
             if not isinstance(review, dict) or any(not isinstance(review.get(key), str) or not review[key].strip() for key in ("reviewer", "method")):
                 raise ValueError("reviewed examples require reviewer and method provenance")
+            check_projection(review, projection)
             if "resolved_policy_fingerprint" in review:
                 validate_policy_fingerprint(review["resolved_policy_fingerprint"])
             if "report_binding" in review and (not isinstance(review["report_binding"], str) or review["report_binding"] not in {"verified", "unverified"}):
@@ -170,6 +196,7 @@ def aggregate_blind_review_events(corpus, split, review_log):
         raise ValueError("synthetic regression fixtures cannot be marked reviewed")
     if review_log.get("gate_id") != corpus["gate_id"] or not isinstance(review_log.get("events"), list) or not review_log["events"]:
         raise ValueError("blind review log gate or events are invalid")
+    projection = corpus_projection(corpus)
     by_id = {item["id"]: item for item in corpus["examples"]}
     seen, rubric_by_id = set(), {}
     opinions, counts_by_example = {}, {}
@@ -189,6 +216,7 @@ def aggregate_blind_review_events(corpus, split, review_log):
         seen.add(key)
         if status not in {"passed", "failed", "uncertain"}:
             raise ValueError("invalid blind review status")
+        check_projection(event, projection)
         if event.get("text_sha256") != hashlib.sha256(item["text"].encode("utf-8")).hexdigest():
             raise ValueError("blind review does not match current example text")
         if "metadata" in item:
@@ -224,6 +252,7 @@ def aggregate_review_events(corpus, split, review_log, current_policy=None):
         return aggregate_blind_review_events(corpus, split, review_log)
     if type(version) is not int or version not in {1, 2, 3} or review_log.get("gate_id") != corpus["gate_id"]:
         raise ValueError("review log version or gate does not match corpus")
+    projection = corpus_projection(corpus)
     by_id = {item["id"]: item for item in corpus["examples"]}
     seen = set()
     opinions = {}
@@ -248,6 +277,7 @@ def aggregate_review_events(corpus, split, review_log, current_policy=None):
             raise ValueError("review log references an unknown or duplicate example or reviewer")
         seen.add(key)
         item = by_id[identifier]
+        check_projection(event, projection)
         digest = hashlib.sha256(item["text"].encode("utf-8")).hexdigest()
         if event.get("text_sha256") != digest:
             raise ValueError("review event does not match the current example text")
@@ -374,12 +404,13 @@ def normalized_split_overlap(examples, include_examples=False):
 
 def evaluate(binary, corpus, split, review_log=None, reject_normalized_overlap=False):
     validate_corpus(corpus)
+    projection = corpus_projection(corpus)
     overlap = normalized_split_overlap(corpus["examples"])
     if reject_normalized_overlap and overlap["cross_split_groups"]:
         raise ValueError("normalized example text appears in multiple splits")
     for item in corpus["examples"]:
         if item.get("review_status") == "reviewed":
-            review_is_bound(item)
+            review_is_bound(item, projection)
     examples = [item for item in corpus["examples"] if item["split"] == split]
     if not examples:
         raise ValueError("split must contain examples")
@@ -396,12 +427,12 @@ def evaluate(binary, corpus, split, review_log=None, reject_normalized_overlap=F
     strata_results = {}
     durations = []
     input_format = corpus.get("input_format")
-    if input_format not in (None, "text", "markdown"):
-        raise ValueError("unsupported input format")
     with tempfile.TemporaryDirectory(prefix="aexeo-corpus-") as directory:
         arguments = [binary, "content", "-", "--preset", corpus["preset"], "--format", "json"]
         if input_format:
             arguments.extend(["--input-format", input_format])
+        if projection is not None:
+            arguments.extend(["--html-scope", "main"])
         preset_source = None
         if "preset_toml" in corpus:
             preset_path = Path(directory) / "preset.toml"
@@ -428,6 +459,7 @@ def evaluate(binary, corpus, split, review_log=None, reject_normalized_overlap=F
             if result.returncode not in (0, 1, 2):
                 raise ValueError(f"CLI failed for {item['id']}: exit {result.returncode}")
             report = json.loads(result.stdout)
+            check_projection(report, projection)
             report_has_policy = "resolved_policy_fingerprint" in report
             if report_has_policy:
                 fingerprint = validate_policy_fingerprint(report["resolved_policy_fingerprint"])
@@ -448,7 +480,7 @@ def evaluate(binary, corpus, split, review_log=None, reject_normalized_overlap=F
                 raise ValueError(f"missing or invalid gate for {item['id']}")
             actual, expected = gates[0]["status"], item["expected"]
             record_result(counts, actual, expected)
-            bound_review = item.get("review_status") == "reviewed" and review_is_bound(item)
+            bound_review = item.get("review_status") == "reviewed" and review_is_bound(item, projection)
             for dimension, label in item.get("strata", {}).items():
                 bucket = strata_results.setdefault(dimension, {}).setdefault(
                     label, {"counts": empty_counts(), "examples": 0,
@@ -487,6 +519,7 @@ def evaluate(binary, corpus, split, review_log=None, reject_normalized_overlap=F
         if policy_hash(resolve_policy(binary, corpus["preset"], preset_source)) != resolved_policy_hash:
             raise ValueError("resolved evaluation policy changed during the run")
     durations.sort()
+    # A scope is part of the evaluation context, not the content fingerprint.
     result = {"version": 1, "resolved_policy_sha256": resolved_policy_hash,
               "resolved_policy_hash_format": "canonical-json-utf8-v1",
               "resolved_policy_fingerprint": {"version": 1, "sha256": resolved_typed_hash}, "metric_scope": "checked_examples_only", "split": split,
@@ -517,6 +550,8 @@ def evaluate(binary, corpus, split, review_log=None, reject_normalized_overlap=F
     }
     if review_metrics is not None:
         result["historical_review_events"] = review_metrics
+    if projection is not None:
+        result["content_projection"] = projection.copy()
     return result
 
 

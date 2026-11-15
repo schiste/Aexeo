@@ -399,6 +399,26 @@ fn scoped_projection_is_retained_but_not_exported_as_raw_text() {
     assert!(!export.status.success());
     assert!(!output.exists());
     assert!(String::from_utf8_lossy(&export.stderr).contains("projection"));
+    fs::write(&corpus, r#"{"version":1,"gate_id":"g","input_format":"html","content_projection":{"format":"html","scope":"main"},"examples":[{"id":"e","split":"development","text":"article","expected":"passed"}]}"#).unwrap();
+    let export = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(["feedback-export", "--corpus"])
+        .arg(&corpus)
+        .arg("--note")
+        .arg(&note)
+        .arg("--output")
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(
+        export.status.success(),
+        "{}",
+        String::from_utf8_lossy(&export.stderr)
+    );
+    let log: serde_json::Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert_eq!(
+        log["events"][0]["content_projection"],
+        serde_json::json!({"format":"html","scope":"main"})
+    );
     for projection in [
         serde_json::json!(null),
         serde_json::json!({"format":"html","scope":"other"}),

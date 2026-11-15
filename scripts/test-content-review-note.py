@@ -31,6 +31,36 @@ class FeedbackTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "projection"):
                 module.capture(self.text, self.report, "length", "e1")
 
+    def test_scoped_feedback_and_blind_reviews_require_matching_projection(self):
+        projection = {"format":"html", "scope":"main"}
+        self.corpus["input_format"] = "html"
+        self.corpus["content_projection"] = projection
+        self.report["content_projection"] = projection
+        note = module.capture(self.text, self.report, "length", "e1", "passed", "person", "manual")
+        event = module.export_review(self.corpus, note)["events"][0]
+        self.assertEqual(event["content_projection"], projection)
+        bound = module.bind_review(self.corpus, note)
+        self.assertEqual(bound["examples"][0]["review"]["content_projection"], projection)
+        packet = module.blind_packet(self.corpus, "development", "Review only the main element.")
+        self.assertEqual(packet["content_projection"], projection)
+        packet["examples"][0]["human_status"] = "passed"
+        blind, _, _ = module.bind_blind_reviews(self.corpus, packet, "person", "manual")
+        self.assertEqual(blind["examples"][0]["review"]["content_projection"], projection)
+        log = module.combine_blind_reviews(self.corpus, [(packet, "person", "manual")])
+        self.assertEqual(log["events"][0]["content_projection"], projection)
+        del log["events"][0]["content_projection"]
+        with self.assertRaisesRegex(ValueError, "projection"):
+            module._corpus_module().aggregate_review_events(self.corpus, "development", log)
+        del bound["examples"][0]["review"]["content_projection"]
+        with self.assertRaisesRegex(ValueError, "projection"):
+            module._corpus_module().validate_corpus(bound)
+        del packet["content_projection"]
+        with self.assertRaisesRegex(ValueError, "projection"):
+            module.bind_blind_reviews(self.corpus, packet, "person", "manual")
+        del note["content_projection"]
+        with self.assertRaisesRegex(ValueError, "projection"):
+            module.export_review(self.corpus, note)
+
     def test_combines_blind_opinions_without_fabricating_model_verdicts(self):
         self.corpus["examples"][0]["metadata"] = {"lang": "fr"}
         first = module.blind_packet(self.corpus, "development", "Assess length.")

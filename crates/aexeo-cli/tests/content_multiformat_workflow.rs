@@ -125,3 +125,35 @@ fn localized_revision_and_feedback_are_bound_across_text_markdown_and_html() {
         );
     }
 }
+
+#[test]
+fn scoped_html_corpus_replays_against_the_real_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let corpus = dir.path().join("corpus.json");
+    fs::write(&corpus, serde_json::to_vec(&serde_json::json!({
+        "version": 1, "preset": "custom", "gate_id": "words", "input_format": "html",
+        "content_projection": {"format": "html", "scope": "main"},
+        "preset_toml": "version=1\nname='custom'\n[[gates]]\nid='words'\nkind='forbidden_terms'\nterms=['navigation']\n",
+        "examples": [{"id":"a", "split":"holdout", "text":"<nav>navigation</nav><main><p>Article</p></main>", "expected":"passed"}]
+    })).unwrap()).unwrap();
+    let script =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/evaluate-content-gates.py");
+    let output = Command::new("python3")
+        .arg(script)
+        .arg(corpus)
+        .args([
+            "--binary",
+            env!("CARGO_BIN_EXE_aexeo-cli"),
+            "--assert-regression",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["counts"]["true_negative"], 1);
+    assert_eq!(report["content_projection"]["scope"], "main");
+}

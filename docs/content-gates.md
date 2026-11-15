@@ -862,9 +862,12 @@ the supplied file, not only the selected element. Scope does not prove CSS or
 ARIA visibility, page identity, render completeness, or correctness of CMS
 metadata. The input fingerprint binds the supplied bytes and metadata, not the
 projection scope. Feedback capture retains this explicit projection in the
-private note. Corpus export rejects notes carrying a projection because the
-current corpus evaluator cannot reproduce this HTML scope; retaining the report
-and scope does not authenticate the input or the reviewer.
+private note. To replay it in a corpus, set `"input_format": "html"` and
+`"content_projection": {"format": "html", "scope": "main"}` at corpus level.
+Evaluation, feedback export, bound reviews and blind review packets require the
+same projection; mismatches are rejected. Reviewers must assess the selected
+main element, even though packets contain the supplied HTML. Retaining the
+report and scope does not authenticate the input, reviewer or review conditions.
 This option applies to the single-content CLI; it does not alter the
 content-change protocol.
 The content-change protocol supports `text/html` with the same rules. For the single-content CLI, opt-in telemetry includes `html_projection`: a complete projection reports aggregate heading, paragraph and link counts; an unavailable projection reports its status without counts. The JSON report and telemetry distinguish unavailable source locations, byte-identical text (`identity_projection`), and a verified, well-nested literal HTML subset (`literal_html`). Prose locations in the latter are mapped only when a bounded lexical reconstruction matches the parser projection exactly. In the supported subset, heading and link-destination findings also map to their opening tags; link reachability findings require matching ordered observations. Semicolon-terminated named entities from the HTML parser that decode to non-control characters, and non-control numeric entities map their decoded characters to the opening `&` (including entities that decode to two Unicode scalars); the remaining text retains its original position. Unsupported entities, hidden elements, unsupported or malformed markup, excessive nesting and other transformations leave locations unavailable. Finding coordinates remain relative to projected text; separate mapped positions point into the supplied source. These observations do not establish browser visibility or page completeness, and telemetry contains no content, paths or URLs.
