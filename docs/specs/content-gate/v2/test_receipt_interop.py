@@ -2,7 +2,9 @@
 
 This tests artifact-byte interoperability, not verdict verification or trust.
 """
+import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -16,6 +18,51 @@ ROLES = ("change", "resolved_policy", "host_options", "evaluator", "collection",
 
 
 class ReceiptInterop(unittest.TestCase):
+    def test_cli_bundle_artifacts_against_independent_python_verifier(self):
+        with tempfile.TemporaryDirectory(prefix="aexeo bundle interop ") as temp:
+            directory = Path(temp)
+            change = {"schema": "content-gate.change/v1", "change_id": "example",
+                      "created_at": "2026-01-01T00:00:00Z", "origin": {"kind": "manual"},
+                      "base": {"kind": "opaque", "revision": "r1"},
+                      "entries": [{"entity_id": "article", "operation": "create", "media_type": "text/plain",
+                                   "after": {"inline": "café", "sha256": hashlib.sha256("café".encode()).hexdigest()}}]}
+            change_file = directory / "change.json"
+            change_file.write_text(json.dumps(change, ensure_ascii=False), encoding="utf-8")
+            policy = directory / "policy.toml"
+            policy.write_text("version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n", encoding="utf-8")
+            output = directory / "bundle.json"
+            env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(change_file), CONTENT_GATE_VERDICT_FILE=str(output))
+            command = ["cargo", "run", "--quiet", "-p", "aexeo-cli", "--", "content-change", "--preset", "test",
+                       "--preset-source", "test=" + str(policy), "--offline-receipt", "--offline-receipt-bundle",
+                       "--evaluator-identity", "build-café"]
+            run = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            bundle = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(bundle["schema"], "aexeo.offline-receipt-bundle/v1")
+            manifest = directory / "manifest.json"
+            manifest.write_text(json.dumps(bundle["receipt"]["decision_inputs"]), encoding="utf-8")
+            args = [sys.executable, str(VERIFIER), str(manifest)]
+            paths = {}
+            for role in ROLES:
+                value = bundle["artifacts"][role]
+                flag = "--" + role.replace("_", "-")
+                if value is None:
+                    args.append(flag + "-absent")
+                else:
+                    paths[role] = directory / (role + ".bin")
+                    paths[role].write_bytes(value.encode("utf-8"))
+                    args.extend([flag, str(paths[role])])
+            valid = subprocess.run(args, capture_output=True, text=True)
+            self.assertEqual(valid.returncode, 0, valid.stderr)
+            previous = directory / "previous.json"
+            previous.write_text(json.dumps(bundle["receipt"]), encoding="utf-8")
+            fresh = directory / "fresh.json"
+            fresh.write_text(json.dumps(bundle["receipt"]), encoding="utf-8")
+            comparison = subprocess.run([sys.executable, str(COMPARATOR), str(previous), str(fresh), *args[3:], "--verify-subject"], capture_output=True, text=True)
+            self.assertEqual(comparison.returncode, 0, comparison.stderr)
+            paths["change"].write_bytes(paths["change"].read_bytes() + b" ")
+            self.assertNotEqual(subprocess.run(args, capture_output=True).returncode, 0)
+
     def test_rust_receipt_inputs_against_python_cli(self):
         result = subprocess.run(
             ["cargo", "run", "--quiet", "-p", "aexeo-core", "--example", "decision_inputs_fixture"],

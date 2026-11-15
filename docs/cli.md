@@ -201,6 +201,9 @@ Options:
       --offline-receipt
           Write an experimental offline receipt instead of a v1 verdict
 
+      --offline-receipt-bundle
+          Include private decision input bytes in the experimental receipt output
+
       --evaluator-identity <evaluator-identity>
           Host-asserted trusted evaluator build identity (not authenticated by Aexeo)
 

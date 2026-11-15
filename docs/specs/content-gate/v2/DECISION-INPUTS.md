@@ -79,6 +79,35 @@ not prove that an external input was absent, fresh, true or authenticated.
 The CLI supports an explicit offline receipt mode; it does not use the v2
 verdict protocol. EmDash does not produce or consume these receipts.
 
+### Optional CLI transport bundle
+
+`content-change --offline-receipt --offline-receipt-bundle --evaluator-identity
+BUILD_ID` writes a single JSON document to `CONTENT_GATE_VERDICT_FILE`. Its
+`schema` is `aexeo.offline-receipt-bundle/v1`, `receipt` is the ordinary
+experimental offline receipt, and `artifacts` has exactly six members:
+`change`, `resolved_policy`, `host_options`, `evaluator`, `collection` and
+`external_evidence`. A present member is a JSON string whose UTF-8 encoding is
+the exact artifact bytes; an absent optional member is `null`, distinct from an
+empty string. Offline mode always emits `external_evidence: null`. The current
+artifact serializations remain Aexeo-specific, not canonical cross-language JSON.
+The output, including its trailing newline, is limited to 64 MiB.
+
+The bundle can expose private article text, metadata, and evaluator identity.
+It is opt-in and should be stored and transferred as sensitive data. The CLI
+writes it atomically with a private temporary file. Optional `--telemetry`
+emits only bundle byte size and artifact count, with no paths or content.
+
+`--verify-offline-receipt` accepts a previous bundle as well as a normal receipt.
+It rejects unknown or duplicate fields, unsupported schema, changed embedded
+artifacts and external evidence, then re-evaluates against independently
+supplied current CLI inputs. A successful check still does not authenticate the
+bundle or its producer, establish complete and fresh inputs, or prevent a
+publication race. The bundled artifacts only make exact-byte transport possible:
+checking a bundle against its own hashes is not independent validation. The
+Python verifier and comparator below can consume separately extracted UTF-8
+artifact files and the nested `receipt`; a trusted host must independently
+obtain and protect the current files used for a decision.
+
 Run `python -m pip install -r docs/specs/content-gate/v2/requirements-test.txt`
 in an isolated environment, then run
 `python docs/specs/content-gate/v2/test_manifest_schema.py` to check the schema
