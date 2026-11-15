@@ -82,6 +82,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   and mocked host with an end-to-end rendered-site validation.
 - For WASM bridge interface changes, synchronize the plugin and crawl-worker
   glue declarations and run `npm run check:dts --prefix packages/aexeo-crawl-worker`.
+- When EmDash produces data consumed by Rust, use a shared synthetic fixture:
+  assert it matches the actual TypeScript exporter and pass those same bytes to
+  the Rust or CLI consumer. Cover incomplete and unknown inputs separately;
+  a fixture or CMS listing alone does not establish a matching rendered site.
 - For partially observed metadata in core tests, put
   `unavailable_metadata_fields` in a `ContentContext` and pass it through
   `ContentEvaluationContext.adapter`; assert unknown fields stay distinct
