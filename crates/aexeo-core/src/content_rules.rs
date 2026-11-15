@@ -5,6 +5,7 @@ use std::path::Path;
 
 use crate::config::Config;
 use crate::site::{Page, PageKind, Site, collapse_whitespace, normalize_internal_href, strip_tags};
+use crate::text::prefix_at_char_boundary;
 
 fn finding(
     rule_id: &str,
@@ -234,11 +235,8 @@ fn collect_generic_beneficiary_findings(page: &Page) -> Vec<Finding> {
             // Sample the next ~80 chars after the trigger; that's
             // typically one phrase or list item. Longer windows
             // catch too much body text and dilute the heuristic.
-            // `after` is lowercased page text, so byte 80 can land inside a
-            // multi-byte character. `get(..sample_end)` yields the prefix up
-            // to the nearest boundary rather than panicking.
-            let sample_end = after.len().min(80);
-            let sample = after.get(..sample_end).unwrap_or(after);
+            // Keep the byte window bounded even when its end splits UTF-8.
+            let sample = prefix_at_char_boundary(after, 80);
             if phrase_is_generic_beneficiary(sample) {
                 findings.push(finding(
                     "CNT006",
@@ -484,6 +482,18 @@ mod tests {
         // itself depends on the heuristic and is not the subject here.
         let findings = run_content_rules(&load_site(root).unwrap(), &Config::default());
         assert!(findings.iter().all(|f| !f.rule_id.is_empty()));
+    }
+
+    #[test]
+    fn cnt006_does_not_consider_distant_anchors_when_utf8_splits_window() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        let sample = format!("speed {}é research", "a".repeat(73));
+        assert!(!sample.is_char_boundary(80));
+        let body = format!("<p>Everyone needs {sample}</p>");
+        write(&root.join("about/index.html"), &make_page("about", &body));
+        let findings = run_content_rules(&load_site(root).unwrap(), &Config::default());
+        assert!(findings.iter().any(|finding| finding.rule_id == "CNT006"));
     }
 
     #[test]
