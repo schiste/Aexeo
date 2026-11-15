@@ -77,6 +77,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   and mocked host with an end-to-end rendered-site validation.
 - For WASM bridge interface changes, synchronize the plugin and crawl-worker
   glue declarations and run `npm run check:dts --prefix packages/aexeo-crawl-worker`.
+- For partially observed metadata in core tests, put
+  `unavailable_metadata_fields` in a `ContentContext` and pass it through
+  `ContentEvaluationContext.adapter`; assert unknown fields stay distinct
+  from observed missing fields and retain `not_checked`.
 - For EmDash adapter configuration changes, test absent, valid, malformed and
   unreadable settings through both save and refresh. A failed settings read must
   not certify body capabilities via an automatic fallback; verify coverage
