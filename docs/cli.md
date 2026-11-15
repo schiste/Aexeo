@@ -186,6 +186,12 @@ Options:
       --plain-text-paragraphs
           Interpret text/plain entries as blank-line-separated paragraphs
 
+      --html-scope <html-scope>
+          Project each HTML entry as a whole document or its unique main element
+
+          [default: document]
+          [possible values: document, main]
+
       --collection-snapshot <collection-snapshot>
           Host-supplied post-change collection JSON with explicit completeness
 

@@ -380,7 +380,17 @@ pub fn verify_scoped_change_verdict(
     let mut previous = previous.clone();
     previous.evaluated_at.clone_from(&fresh.evaluated_at);
     if previous != *fresh {
-        bail!("previous verdict differs from the current scoped evaluation");
+        match kind {
+            ScopedBindingKind::Offline => {
+                bail!("previous verdict differs from the current offline evaluation")
+            }
+            ScopedBindingKind::ObservedLinks => {
+                bail!("previous verdict differs from the current observed link evaluation")
+            }
+            ScopedBindingKind::External => {
+                bail!("previous verdict differs from the current external evaluation")
+            }
+        }
     }
     Ok(())
 }
@@ -722,14 +732,18 @@ impl OfflineDecisionArtifacts {
 }
 
 impl OfflineDecisionContext<'_> {
-    fn options(&self) -> serde_json::Value {
-        serde_json::json!({
+    fn options_with_html_scope(&self, html_scope: HtmlContentScope) -> serde_json::Value {
+        let mut options = serde_json::json!({
             "engine_version": env!("CARGO_PKG_VERSION"),
             "max_entry_bytes": self.max_entry_bytes,
             "max_total_bytes": self.max_total_bytes,
             "plain_text_paragraphs": self.plain_text_paragraphs,
             "mode": "offline"
-        })
+        });
+        if html_scope == HtmlContentScope::Main {
+            options["html_scope"] = serde_json::json!("main");
+        }
+        options
     }
 
     fn offline_collection(&self) -> Option<OfflineCollection<'_>> {
@@ -744,13 +758,22 @@ impl OfflineDecisionContext<'_> {
     /// comparison. Call only when needed: this allocates and exposes input data.
     /// The caller must protect the bytes and establish their provenance and freshness.
     pub fn artifacts(&self) -> Result<OfflineDecisionArtifacts> {
+        self.artifacts_with_html_scope(HtmlContentScope::Document)
+    }
+
+    /// Materialize the exact artifacts for the explicitly selected HTML scope.
+    /// The caller must protect and independently obtain these potentially private bytes.
+    pub fn artifacts_with_html_scope(
+        &self,
+        html_scope: HtmlContentScope,
+    ) -> Result<OfflineDecisionArtifacts> {
         if self.evaluator_identity.is_empty() {
             bail!("trusted evaluator identity is required");
         }
         Ok(OfflineDecisionArtifacts {
             change: serde_json::to_vec(self.change)?,
             resolved_policy: serde_json::to_vec(self.preset)?,
-            host_options: serde_json::to_vec(&self.options())?,
+            host_options: serde_json::to_vec(&self.options_with_html_scope(html_scope))?,
             evaluator: self.evaluator_identity.to_vec(),
             collection: self
                 .offline_collection()
@@ -759,7 +782,15 @@ impl OfflineDecisionContext<'_> {
         })
     }
 
+    #[cfg(test)]
     fn manifest(&self) -> Result<aexeo_contracts::content_gate_decision_inputs::DecisionInputs> {
+        self.manifest_with_html_scope(HtmlContentScope::Document)
+    }
+
+    fn manifest_with_html_scope(
+        &self,
+        html_scope: HtmlContentScope,
+    ) -> Result<aexeo_contracts::content_gate_decision_inputs::DecisionInputs> {
         use aexeo_contracts::content_gate_decision_inputs::{
             Component, DECISION_INPUTS_SCHEMA, DecisionInputs,
         };
@@ -768,7 +799,7 @@ impl OfflineDecisionContext<'_> {
             bail!("trusted evaluator identity is required");
         }
         let present_json = |sha256| Component::Present { sha256 };
-        let options = self.options();
+        let options = self.options_with_html_scope(html_scope);
         let collection = match self.offline_collection() {
             Some(c) => present_json(hash_json(&c)?),
             None => Component::Absent {},
@@ -794,8 +825,37 @@ pub fn evaluate_offline_receipt<P: ConfinedContentFiles>(
     provider: &mut P,
     evaluated_at: &str,
 ) -> Result<OfflineDecisionReceipt> {
-    let manifest = context.manifest()?;
-    let verdict = evaluate_change_with_collection(
+    evaluate_offline_receipt_with_html_scope(
+        context,
+        provider,
+        evaluated_at,
+        HtmlContentScope::Document,
+    )
+}
+
+/// Evaluate an offline receipt with an explicit HTML scope bound to host options.
+pub fn evaluate_offline_receipt_with_html_scope<P: ConfinedContentFiles>(
+    context: &OfflineDecisionContext<'_>,
+    provider: &mut P,
+    evaluated_at: &str,
+    html_scope: HtmlContentScope,
+) -> Result<OfflineDecisionReceipt> {
+    let manifest = context.manifest_with_html_scope(html_scope)?;
+    let verdict = evaluate_offline_context(context, provider, evaluated_at, html_scope)?;
+    Ok(OfflineDecisionReceipt {
+        schema: OFFLINE_RECEIPT_SCHEMA.into(),
+        decision_inputs: manifest,
+        verdict,
+    })
+}
+
+fn evaluate_offline_context<P: ConfinedContentFiles>(
+    context: &OfflineDecisionContext<'_>,
+    provider: &mut P,
+    evaluated_at: &str,
+    html_scope: HtmlContentScope,
+) -> Result<Verdict> {
+    evaluate_change_with_collection_and_html_scope(
         context.change,
         provider,
         context.preset,
@@ -814,12 +874,8 @@ pub fn evaluate_offline_receipt<P: ConfinedContentFiles>(
             items: c.items,
             complete: c.complete,
         }),
-    )?;
-    Ok(OfflineDecisionReceipt {
-        schema: OFFLINE_RECEIPT_SCHEMA.into(),
-        decision_inputs: manifest,
-        verdict,
-    })
+        html_scope,
+    )
 }
 
 /// Re-read and re-evaluate content after comparing the manifest to independently
@@ -831,6 +887,24 @@ pub fn revalidate_offline_receipt<P: ConfinedContentFiles>(
     provider: &mut P,
     evaluated_at: &str,
 ) -> Result<OfflineDecisionReceipt> {
+    revalidate_offline_receipt_with_html_scope(
+        previous,
+        context,
+        provider,
+        evaluated_at,
+        HtmlContentScope::Document,
+    )
+}
+
+/// Re-read and re-evaluate an offline receipt with the same explicit HTML scope.
+/// Input identity, freshness, collection completeness and publication safety remain host obligations.
+pub fn revalidate_offline_receipt_with_html_scope<P: ConfinedContentFiles>(
+    previous: &OfflineDecisionReceipt,
+    context: &OfflineDecisionContext<'_>,
+    provider: &mut P,
+    evaluated_at: &str,
+    html_scope: HtmlContentScope,
+) -> Result<OfflineDecisionReceipt> {
     if previous.schema != OFFLINE_RECEIPT_SCHEMA {
         bail!("unsupported offline receipt schema");
     }
@@ -838,23 +912,32 @@ pub fn revalidate_offline_receipt<P: ConfinedContentFiles>(
         .decision_inputs
         .validate()
         .map_err(anyhow::Error::msg)?;
-    if previous.decision_inputs != context.manifest()? {
+    if previous.decision_inputs != context.manifest_with_html_scope(html_scope)? {
         bail!("offline receipt decision inputs differ");
     }
-    let verdict = revalidate_offline_verdict(
+    verify_scoped_change_input_binding(
         &previous.verdict,
         context.change,
-        provider,
         context.preset,
-        evaluated_at,
         context.max_entry_bytes,
         context.max_total_bytes,
         context.plain_text_paragraphs,
-        context.collection.as_ref().map(|c| ChangeCollection {
-            change_id: c.change_id,
-            items: c.items,
-            complete: c.complete,
-        }),
+        context.collection.as_ref(),
+        html_scope,
+        ScopedBindingKind::Offline,
+    )?;
+    let verdict = evaluate_offline_context(context, provider, evaluated_at, html_scope)?;
+    verify_scoped_change_verdict(
+        &previous.verdict,
+        &verdict,
+        context.change,
+        context.preset,
+        context.max_entry_bytes,
+        context.max_total_bytes,
+        context.plain_text_paragraphs,
+        context.collection.as_ref(),
+        html_scope,
+        ScopedBindingKind::Offline,
     )?;
     Ok(OfflineDecisionReceipt {
         schema: OFFLINE_RECEIPT_SCHEMA.into(),
@@ -1523,6 +1606,44 @@ mod tests {
         assert_eq!(
             hash_json(&collection).unwrap(),
             format!("{:x}", Sha256::digest(&bytes))
+        );
+    }
+
+    #[test]
+    fn offline_receipt_scoped_artifacts_match_manifest_and_preserve_document_scope() {
+        let input = change();
+        let policy = preset(1);
+        let context = OfflineDecisionContext {
+            change: &input,
+            preset: &policy,
+            max_entry_bytes: 1024,
+            max_total_bytes: 1024,
+            plain_text_paragraphs: false,
+            collection: None,
+            evaluator_identity: b"trusted-build",
+        };
+        let document = context.artifacts().unwrap();
+        let explicit_document = context
+            .artifacts_with_html_scope(HtmlContentScope::Document)
+            .unwrap();
+        assert_eq!(document.host_options, explicit_document.host_options);
+        let main = context
+            .artifacts_with_html_scope(HtmlContentScope::Main)
+            .unwrap();
+        let manifest = context
+            .manifest_with_html_scope(HtmlContentScope::Main)
+            .unwrap();
+        assert!(manifest.verify(&main.as_inputs()).is_ok());
+        assert!(manifest.verify(&document.as_inputs()).is_err());
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&main.host_options).unwrap()["html_scope"],
+            "main"
+        );
+        assert!(
+            serde_json::from_slice::<serde_json::Value>(&document.host_options)
+                .unwrap()
+                .get("html_scope")
+                .is_none()
         );
     }
 

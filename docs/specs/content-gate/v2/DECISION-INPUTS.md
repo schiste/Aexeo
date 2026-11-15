@@ -55,6 +55,14 @@ must provide a nonempty identity for a trusted evaluator build. The API does
 not authenticate that identity, implement a v2 verdict or support network and
 custom-extension observations. Those are not evaluated in this offline mode.
 
+When an offline host explicitly selects `HtmlContentScope::Main`,
+`evaluate_offline_receipt_with_html_scope` and its revalidation counterpart bind
+that choice in the host-options artifact and verdict. The CLI supports the same
+choice via `content-change --html-scope main`. `artifacts_with_html_scope`
+exports the matching bytes; the default document scope keeps the prior artifact
+format. A host must supply the same independently obtained scope on revalidation.
+Neither scope establishes browser visibility or rendered-page completeness.
+
 The change, resolved policy, options and collection artifacts are Aexeo's own
 compact Serde JSON bytes; they are not a cross-implementation canonical format.
 Rust hosts can explicitly call `OfflineDecisionContext::artifacts()` to obtain

@@ -176,7 +176,10 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] Map selected HTML findings to source positions only for a verified,
   well-nested subset, excluding repeated menu and footer occurrences
   ([PR #385](https://github.com/schiste/Aexeo/pull/385)). Unsupported markup
-  remains unmapped. Selection is currently limited to the single-content CLI.
+  remains unmapped. The content-change Rust API also supports main scope
+  ([PR #387](https://github.com/schiste/Aexeo/pull/387)), and the CLI and
+  experimental offline receipts bind and revalidate the selected scope. Static
+  markup does not prove browser visibility or source freshness.
 - [ ] Integrate optional host observers with other adapters and continue adding
   independently validated editorial gates.
 - [x] Explicit collection metadata uniqueness gate in core, CLI and EmDash/WASM
