@@ -194,6 +194,12 @@ fn build_note(
         }
     };
     note["report_binding"] = json!(binding);
+    if let Some(projection) = report.get("content_projection") {
+        if projection != &json!({"format": "html", "scope": "main"}) {
+            bail!("unsupported content projection in report");
+        }
+        note["content_projection"] = projection.clone();
+    }
     if let Some(fingerprint) = report.get("resolved_policy_fingerprint") {
         note["resolved_policy_fingerprint"] = policy_fingerprint(fingerprint)?.clone();
     }
@@ -324,6 +330,9 @@ fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
         || note.get("kind").and_then(Value::as_str) != Some("reported_human_feedback")
     {
         bail!("unsupported feedback note");
+    }
+    if note.get("content_projection").is_some() {
+        bail!("feedback with a content projection cannot be exported to this corpus format");
     }
     if note.get("gate_id") != Some(gate) {
         bail!("feedback gate does not match corpus");

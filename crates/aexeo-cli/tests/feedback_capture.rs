@@ -344,3 +344,77 @@ fn capture_checks_report_against_original_markdown_and_metadata() {
         Some(2)
     );
 }
+
+#[test]
+fn scoped_projection_is_retained_but_not_exported_as_raw_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let text = dir.path().join("text");
+    let report = dir.path().join("report");
+    let note = dir.path().join("note");
+    let corpus = dir.path().join("corpus");
+    fs::write(&text, "article").unwrap();
+    fs::write(&report, r#"{"gates":[{"gate_id":"g","status":"passed"}],"content_projection":{"format":"html","scope":"main"}}"#).unwrap();
+    fs::write(&corpus, r#"{"version":1,"gate_id":"g","examples":[{"id":"e","split":"development","text":"article","expected":"passed"}]}"#).unwrap();
+    let capture = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(["feedback-capture", "--text"])
+        .arg(&text)
+        .arg("--report")
+        .arg(&report)
+        .args([
+            "--gate",
+            "g",
+            "--example",
+            "e",
+            "--human-status",
+            "passed",
+            "--reviewer",
+            "person",
+            "--method",
+            "manual",
+            "--output",
+        ])
+        .arg(&note)
+        .output()
+        .unwrap();
+    assert!(
+        capture.status.success(),
+        "{}",
+        String::from_utf8_lossy(&capture.stderr)
+    );
+    let captured: serde_json::Value = serde_json::from_slice(&fs::read(&note).unwrap()).unwrap();
+    assert_eq!(
+        captured["content_projection"],
+        serde_json::json!({"format":"html","scope":"main"})
+    );
+    let output = dir.path().join("output");
+    let export = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(["feedback-export", "--corpus"])
+        .arg(&corpus)
+        .arg("--note")
+        .arg(&note)
+        .arg("--output")
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(!export.status.success());
+    assert!(!output.exists());
+    assert!(String::from_utf8_lossy(&export.stderr).contains("projection"));
+    for projection in [
+        serde_json::json!(null),
+        serde_json::json!({"format":"html","scope":"other"}),
+        serde_json::json!({"format":"html","scope":"main","extra":1}),
+    ] {
+        fs::write(&report, serde_json::to_vec(&serde_json::json!({"gates":[{"gate_id":"g","status":"passed"}],"content_projection":projection})).unwrap()).unwrap();
+        let invalid = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args(["feedback-capture", "--text"])
+            .arg(&text)
+            .arg("--report")
+            .arg(&report)
+            .args(["--gate", "g", "--example", "e", "--output"])
+            .arg(dir.path().join("invalid-note"))
+            .output()
+            .unwrap();
+        assert!(!invalid.status.success());
+        assert!(!dir.path().join("invalid-note").exists());
+    }
+}
