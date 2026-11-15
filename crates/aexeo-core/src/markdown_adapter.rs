@@ -382,6 +382,10 @@ fn map_text_spans(
         }
         return;
     }
+    if let Some(mapped) = map_transformed_text(raw, value, source_start, projected_start) {
+        spans.extend(mapped);
+        return;
+    }
     // A soft-wrapped node may retain newlines while Markdown container
     // prefixes (`>` and indentation) are removed at the start of each line.
     // Only map this case when every line matches exactly after such a prefix;
@@ -460,6 +464,80 @@ fn map_text_spans(
             source_start + raw.len() - suffix,
         ));
     }
+}
+
+/// Map transformations only when reconstruction exactly matches the parser.
+/// The cap bounds allocation for entity-heavy text.
+fn map_transformed_text(
+    raw: &str,
+    value: &str,
+    source_start: usize,
+    projected_start: usize,
+) -> Option<Vec<(usize, usize, usize)>> {
+    const MAX_TRANSFORMED_SPANS: usize = 10_000;
+    if raw.contains(['\n', '\r', '\0']) {
+        return None;
+    }
+    let mut result = String::with_capacity(value.len());
+    let mut spans = Vec::new();
+    let mut cursor = 0;
+    while cursor < raw.len() {
+        if spans.len() >= MAX_TRANSFORMED_SPANS {
+            return None;
+        }
+        let rest = &raw[cursor..];
+        let start = result.len();
+        let source_offset = cursor;
+        if rest.starts_with('&') {
+            let semicolon = rest.bytes().take(33).position(|byte| byte == b';')?;
+            let (first, second) =
+                crate::html_content_adapter::mapping_entity(&rest[1..=semicolon])?;
+            result.push(first);
+            spans.push((
+                projected_start + start,
+                projected_start + result.len(),
+                source_start + source_offset,
+            ));
+            if let Some(second) = second {
+                if spans.len() >= MAX_TRANSFORMED_SPANS {
+                    return None;
+                }
+                let start = result.len();
+                result.push(second);
+                spans.push((
+                    projected_start + start,
+                    projected_start + result.len(),
+                    source_start + source_offset,
+                ));
+            }
+            cursor += semicolon + 1;
+        } else if rest.starts_with('\\') {
+            let escaped = rest.as_bytes().get(1).copied()?;
+            if !escaped.is_ascii_punctuation() {
+                return None;
+            }
+            result.push(escaped as char);
+            spans.push((
+                projected_start + start,
+                projected_start + result.len(),
+                source_start + source_offset + 1,
+            ));
+            cursor += 2;
+        } else {
+            let length = rest.find(['&', '\\']).unwrap_or(rest.len());
+            result.push_str(&rest[..length]);
+            spans.push((
+                projected_start + start,
+                projected_start + result.len(),
+                source_start + source_offset,
+            ));
+            cursor += length;
+        }
+        if value.get(start..result.len()) != Some(&result[start..]) {
+            return None;
+        }
+    }
+    (result == value).then_some(spans)
 }
 
 #[derive(Default)]
@@ -790,7 +868,7 @@ mod tests {
         assert_eq!(map.source_position(source, &text, 1, 1), Some((4, 3)));
         assert_eq!(map.source_position(source, &text, 1, 7), Some((4, 10)));
         assert_eq!(map.source_position(source, &text, 2, 3), Some((6, 4)));
-        assert_eq!(map.source_position(source, &text, 3, 9), None);
+        assert_eq!(map.source_position(source, &text, 3, 9), Some((8, 10)));
         assert_eq!(map.source_position(source, &text, 0, 1), None);
     }
 
@@ -801,12 +879,45 @@ mod tests {
         let text = input.text.unwrap();
         assert_eq!(text, "Avant & après élan.\nDébut *fin*.\nAvant ; après.\n");
         assert_eq!(map.source_position(source, &text, 1, 1), Some((1, 1)));
-        assert_eq!(map.source_position(source, &text, 1, 7), None);
+        assert_eq!(map.source_position(source, &text, 1, 7), Some((1, 7)));
         assert_eq!(map.source_position(source, &text, 1, 9), Some((1, 13)));
         assert_eq!(map.source_position(source, &text, 2, 1), Some((3, 1)));
-        assert_eq!(map.source_position(source, &text, 2, 7), None);
-        assert_eq!(map.source_position(source, &text, 3, 7), None);
+        assert_eq!(map.source_position(source, &text, 2, 7), Some((3, 8)));
+        assert_eq!(map.source_position(source, &text, 3, 7), Some((5, 7)));
         assert_eq!(map.source_position(source, &text, 3, 9), Some((5, 13)));
+    }
+
+    #[test]
+    fn maps_text_between_multiple_markdown_entities_and_escapes() {
+        let source = "Début &amp; milieu \\*fort\\* fin &#59; après.\n";
+        let (input, _, _, map) = markdown_input_with_source_map("t.md", source).unwrap();
+        let text = input.text.unwrap();
+        assert_eq!(text, "Début & milieu *fort* fin ; après.\n");
+        assert_eq!(map.source_position(source, &text, 1, 7), Some((1, 7)));
+        assert_eq!(map.source_position(source, &text, 1, 9), Some((1, 13)));
+        assert_eq!(map.source_position(source, &text, 1, 16), Some((1, 21)));
+        assert_eq!(map.source_position(source, &text, 1, 27), Some((1, 33)));
+    }
+
+    #[test]
+    fn maps_both_scalars_of_a_two_scalar_entity_to_its_start() {
+        let source = "A &NotEqualTilde; Z\n";
+        let (input, _, _, map) = markdown_input_with_source_map("t.md", source).unwrap();
+        let text = input.text.unwrap();
+        assert_eq!(text, "A ≂̸ Z\n");
+        assert_eq!(map.source_position(source, &text, 1, 3), Some((1, 3)));
+        assert_eq!(map.source_position(source, &text, 1, 4), Some((1, 3)));
+        assert_eq!(map.source_position(source, &text, 1, 6), Some((1, 19)));
+    }
+
+    #[test]
+    fn transformed_mapping_fails_closed_on_mismatch_or_excessive_work() {
+        assert!(map_transformed_text("&amp;", "different", 0, 0).is_none());
+        assert!(map_transformed_text("&unknown;", "&unknown;", 0, 0).is_none());
+        assert!(map_transformed_text("\\x", "x", 0, 0).is_none());
+        let raw = "&amp;".repeat(10_001);
+        let value = "&".repeat(10_001);
+        assert!(map_transformed_text(&raw, &value, 0, 0).is_none());
     }
 
     #[test]

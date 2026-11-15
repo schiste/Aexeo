@@ -2546,7 +2546,13 @@ mod tests {
         );
         assert_eq!(
             location(":terms"),
-            vec![Some(protocol::Location { line: 3, column: 9 }), None]
+            vec![
+                Some(protocol::Location { line: 3, column: 9 }),
+                Some(protocol::Location {
+                    line: 3,
+                    column: 21
+                })
+            ]
         );
         assert_eq!(
             location(":links"),
