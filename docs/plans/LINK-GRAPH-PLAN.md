@@ -285,8 +285,11 @@ missing and unspecified languages are not treated as an observed mismatch.
   sources, multiple locales, incomplete crawls, redirects and cross-origin URLs.
   A local HTTP fixture now exercises a seeded English/French crawl end to end:
   matching observed languages permit reconciliation, while a French inventory
-  entry served in English is `not_eligible` for a confirmed orphan. This does
-  not establish locale-region equivalence or substitute for a matching real site.
+  entry served in English is `not_eligible` for a confirmed orphan. A seeded
+  crawl with a foreign inventory URL and a fetched, unlinked local page also
+  checks that reconciliation has no eligible pages and the local orphan finding
+  remains `not_eligible`. These local fixtures do not establish locale-region
+  equivalence or substitute for a matching real site.
   On 2026-11-10 the Preview CMS schema was accessible, but a direct article
   request redirected to Cloudflare Access login; the HTML remained unobserved.
 - [x] Benchmark graph parsing independently and retain opt-in, aggregate-only
