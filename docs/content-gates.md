@@ -728,7 +728,13 @@ the result `not_checked`; observed duplicates with known groups remain visible.
 `items_missing_group` counts affected entries without logging group values. The
 host must supply the group metadata consistently; Aexeo does not infer locale
 fallbacks or normalize language tags. Omitting `group_by` retains collection-wide
-matching. The host is responsible for collection completeness.
+matching. The host is responsible for collection completeness. To bound work
+across adapters, the gate examines at most 100,000 items, 10,000 distinct
+(group, value) pairs and 4 MiB of distinct key bytes; each group or value is
+limited to 16 KiB. If a limit is reached, the result is `not_checked` and
+retains findings from the examined prefix. `collection_items` counts all
+supplied items, while `items_evaluated`, missing-field counts and duplicate
+counts describe only that prefix.
 For `content-change`, a host can explicitly supply a post-change collection
 with `--collection-snapshot snapshot.json`. Its JSON shape is
 `{"change_id":"example","complete":false,"items":[{"id":"article","metadata":{"slug":"article"}}]}`.

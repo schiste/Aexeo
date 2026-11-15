@@ -168,7 +168,9 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   independently validated editorial gates.
 - [x] Explicit collection metadata uniqueness gate in core, CLI and EmDash/WASM
   ([PR #40](https://github.com/schiste/Aexeo/pull/40)); callers must supply the
-  complete collection and missing metadata remains `not_checked`.
+  complete collection and missing metadata remains `not_checked`. Resource
+  limits retain observed duplicates and report `not_checked`; measurements
+  distinguish supplied items from the evaluated prefix.
 - [x] Exact Markdown source locations and aggregate local mapping telemetry
   ([PR #42](https://github.com/schiste/Aexeo/pull/42)); transformed spans can
   remain unmapped, and projected finding coordinates are preserved.
