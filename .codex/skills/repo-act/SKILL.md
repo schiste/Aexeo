@@ -20,6 +20,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   preparation is not configured: cleanup can remove ignored `node_modules`.
   Restore them with the package lockfile (`npm ci`) before Node tests; avoid
   an `npx` invocation that could install an unpinned missing executable.
+- Before publishing even a new session, inspect its actual branch and any
+  same-named remote branch; a different `--short-name` need not change the
+  generated branch name. A stale remote can belong to an earlier session.
 - When reusing a squash-merged session branch, inspect ancestry and broker
   session-owned commits: old commits can still be replay candidates after a
   sync. `git cherry` may report individual commits as missing when several were
