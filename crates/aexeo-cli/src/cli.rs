@@ -61,6 +61,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("content-root").long("content-root").help("Authorize this absolute content root for local file references (Linux and supported macOS kernels)"))
                 .arg(Arg::new("extension-results").long("extension-results").num_args(1).help("Load explicitly supplied, input-bound external gate results for change entries"))
                 .arg(Arg::new("plain-text-paragraphs").long("plain-text-paragraphs").action(ArgAction::SetTrue).help("Interpret text/plain entries as blank-line-separated paragraphs"))
+                .arg(Arg::new("html-scope").long("html-scope").value_parser(["document", "main"]).default_value("document").help("Project each HTML entry as a whole document or its unique main element"))
                 .arg(Arg::new("collection-snapshot").long("collection-snapshot").help("Host-supplied post-change collection JSON with explicit completeness"))
                 .arg(Arg::new("verify-verdict").long("verify-verdict").help("Re-evaluate and compare a previous verdict before writing a fresh verdict"))
                 .arg(Arg::new("offline-receipt").long("offline-receipt").action(ArgAction::SetTrue).requires("evaluator-identity").conflicts_with_all(["verify-verdict", "check-link-reachability", "extension-results"]).help("Write an experimental offline receipt instead of a v1 verdict"))

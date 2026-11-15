@@ -5,17 +5,19 @@ use aexeo_contracts::{
         parse_lossless_json, parse_strict_validated_change, parse_unique_json_value,
         parse_validated_change,
     },
-    content_gate_protocol::{Verdict, VerdictStatus},
+    content_gate_protocol::{Operation, Verdict, VerdictStatus},
 };
 use aexeo_core::{
     content_gate::MAX_CONTENT_INPUT_BYTES,
     content_gate_sources::{ConfinedContentFiles, SourceError},
     content_gate_verdict::{
-        ChangeCollection, ChangeEvaluationHost, ChangeEvaluationOptions,
-        evaluate_change_with_collection,
+        ChangeCollection, ChangeEvaluationHost, ChangeEvaluationOptions, ScopedBindingKind,
+        evaluate_change_with_collection_and_html_scope, verify_scoped_change_input_binding,
+        verify_scoped_change_verdict,
     },
     content_presets::{builtin_content_presets, resolve_content_preset},
     error::UserContext,
+    html_content_adapter::HtmlContentScope,
     intelligence::presence::iso_now,
     user_bail,
 };
@@ -137,6 +139,10 @@ fn protect_input(input: &Path, output: &Path, label: &str) -> Result<()> {
 }
 
 pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
+    let html_scope = match args.get_one::<String>("html-scope").map(String::as_str) {
+        Some("main") => HtmlContentScope::Main,
+        _ => HtmlContentScope::Document,
+    };
     let change_path = std::env::var_os("CONTENT_GATE_CHANGE_FILE")
         .user_context("CONTENT_GATE_CHANGE_FILE is required")?;
     let verdict_path = std::env::var_os("CONTENT_GATE_VERDICT_FILE")
@@ -239,6 +245,9 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         Path::new(&verdict_path),
     )?;
     if args.get_flag("offline-receipt") {
+        if args.get_flag("telemetry") {
+            report_html_scope(&change, html_scope);
+        }
         return command_offline_receipt(
             args,
             &change,
@@ -246,6 +255,7 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             &collection,
             &mut provider,
             Path::new(&verdict_path),
+            html_scope,
         );
     }
     let max_checks = *args
@@ -282,12 +292,12 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
     if (check_links || external.is_some())
         && let Some(previous) = &previous_verdict
     {
-        let verify_inputs = if external.is_some() {
-            aexeo_core::content_gate_verdict::verify_external_input_binding
+        let kind = if external.is_some() {
+            ScopedBindingKind::External
         } else {
-            aexeo_core::content_gate_verdict::verify_observed_link_input_binding
+            ScopedBindingKind::ObservedLinks
         };
-        let preflight = verify_inputs(
+        let preflight = verify_scoped_change_input_binding(
             previous,
             &change,
             &preset,
@@ -295,6 +305,8 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             MAX_TOTAL_CONTENT_BYTES,
             args.get_flag("plain-text-paragraphs"),
             collection_ref.as_ref(),
+            html_scope,
+            kind,
         )
         .and_then(|()| {
             let extensions = previous.extensions.as_ref();
@@ -339,7 +351,7 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
     } else {
         None
     };
-    let mut verdict = match evaluate_change_with_collection(
+    let mut verdict = match evaluate_change_with_collection_and_html_scope(
         &change,
         &mut provider,
         &preset,
@@ -360,6 +372,7 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             items: &snapshot.items,
             complete: snapshot.complete,
         }),
+        html_scope,
     ) {
         Ok(verdict) => verdict,
         Err(error) if error.downcast_ref::<SourceError>().is_some() => {
@@ -383,14 +396,14 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             );
     }
     if let Some(previous) = previous_verdict {
-        let verify = if external.is_some() {
-            aexeo_core::content_gate_verdict::verify_external_verdict
+        let kind = if external.is_some() {
+            ScopedBindingKind::External
         } else if check_links {
-            aexeo_core::content_gate_verdict::verify_observed_link_verdict
+            ScopedBindingKind::ObservedLinks
         } else {
-            aexeo_core::content_gate_verdict::verify_offline_verdict
+            ScopedBindingKind::Offline
         };
-        let comparison = verify(
+        let comparison = verify_scoped_change_verdict(
             &previous,
             &verdict,
             &change,
@@ -399,10 +412,15 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             MAX_TOTAL_CONTENT_BYTES,
             args.get_flag("plain-text-paragraphs"),
             collection_ref.as_ref(),
+            html_scope,
+            kind,
         );
         report_revalidation(comparison.is_ok());
         comparison
             .user_context("previous verdict does not match the current inputs or evaluation")?;
+    }
+    if telemetry {
+        report_html_scope(&change, html_scope);
     }
     if telemetry && let Some(snapshot) = &collection {
         eprintln!(
@@ -449,6 +467,27 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
     Ok(code)
 }
 
+fn report_html_scope(
+    change: &aexeo_contracts::content_gate_protocol::Change,
+    scope: HtmlContentScope,
+) {
+    if scope == HtmlContentScope::Main {
+        let entries = change
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.media_type == "text/html"
+                    && entry.after.is_some()
+                    && !matches!(entry.operation, Operation::Delete | Operation::Rename)
+            })
+            .count();
+        eprintln!(
+            "{}",
+            serde_json::json!({"event":"content_change_html_projection", "version":1, "scope":"main", "eligible_entries":entries})
+        );
+    }
+}
+
 fn command_offline_receipt(
     args: &ArgMatches,
     change: &aexeo_contracts::content_gate_protocol::Change,
@@ -456,10 +495,11 @@ fn command_offline_receipt(
     collection: &Option<CollectionSnapshot>,
     provider: &mut HostFiles,
     output: &Path,
+    html_scope: HtmlContentScope,
 ) -> Result<i32> {
     use aexeo_core::content_gate_verdict::{
-        OfflineDecisionContext, OfflineDecisionReceipt, evaluate_offline_receipt,
-        revalidate_offline_receipt,
+        OfflineDecisionContext, OfflineDecisionReceipt, evaluate_offline_receipt_with_html_scope,
+        revalidate_offline_receipt_with_html_scope,
     };
     let identity = args
         .get_one::<String>("evaluator-identity")
@@ -493,7 +533,13 @@ fn command_offline_receipt(
         }
         let previous: OfflineDecisionReceipt =
             parse_lossless_json(&data).user_context("invalid previous receipt")?;
-        let result = revalidate_offline_receipt(&previous, &context, provider, &iso_now());
+        let result = revalidate_offline_receipt_with_html_scope(
+            &previous,
+            &context,
+            provider,
+            &iso_now(),
+            html_scope,
+        );
         if args.get_flag("telemetry") {
             eprintln!(
                 "{}",
@@ -502,7 +548,7 @@ fn command_offline_receipt(
         }
         result.user_context("previous receipt does not match current inputs or evaluation")?
     } else {
-        evaluate_offline_receipt(&context, provider, &iso_now())
+        evaluate_offline_receipt_with_html_scope(&context, provider, &iso_now(), html_scope)
             .user_context("offline receipt evaluation failed")?
     };
     let code = match receipt.verdict.status {

@@ -36,6 +36,266 @@ fn run(
         .unwrap()
 }
 
+fn html_change(source: &str, digest: &str) -> serde_json::Value {
+    let mut change = input();
+    change["entries"][0]["media_type"] = "text/html".into();
+    change["entries"][0]["after"] = serde_json::json!({"inline": source, "sha256": digest});
+    change
+}
+
+#[test]
+fn html_main_scope_excludes_navigation_and_revalidates_only_the_same_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let change = html_change(
+        "<nav>word</nav><main><p>safe</p></main><footer>word</footer>",
+        "1a092dfafca8e00d06f070ace94d81061c2749235da07c5aca309f5dc0d106b2",
+    );
+    let policy =
+        "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['word']\n";
+    let document = run(dir.path(), &change, policy, &[]);
+    assert_eq!(
+        document.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&document.stderr)
+    );
+    let path = dir.path().join("verdict.json");
+    let doc_copy = dir.path().join("document.json");
+    fs::copy(&path, &doc_copy).unwrap();
+    let main = run(
+        dir.path(),
+        &change,
+        policy,
+        &["--html-scope", "main", "--telemetry"],
+    );
+    assert_eq!(
+        main.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&main.stderr)
+    );
+    let verdict: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(verdict["extensions"]["aexeo.html-content-scope.v1"], "main");
+    assert!(verdict["findings"].as_array().unwrap().is_empty());
+    let event: serde_json::Value = serde_json::from_slice(&main.stderr).unwrap();
+    assert_eq!(
+        event,
+        serde_json::json!({"event":"content_change_html_projection", "version":1, "scope":"main", "eligible_entries":1})
+    );
+    let main_copy = dir.path().join("main.json");
+    fs::copy(&path, &main_copy).unwrap();
+    let main_path = main_copy.to_str().unwrap();
+    let doc_path = doc_copy.to_str().unwrap();
+    assert_eq!(
+        run(
+            dir.path(),
+            &change,
+            policy,
+            &["--html-scope", "main", "--verify-verdict", main_path]
+        )
+        .status
+        .code(),
+        Some(0)
+    );
+    assert_ne!(
+        run(
+            dir.path(),
+            &change,
+            policy,
+            &["--html-scope", "main", "--verify-verdict", doc_path]
+        )
+        .status
+        .code(),
+        Some(0)
+    );
+    assert_ne!(
+        run(
+            dir.path(),
+            &change,
+            policy,
+            &["--verify-verdict", main_path]
+        )
+        .status
+        .code(),
+        Some(0)
+    );
+}
+
+#[test]
+fn html_main_scope_incomplete_is_not_checked() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy =
+        "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['word']\n";
+    for (source, digest) in [
+        (
+            "<p>safe</p>",
+            "adc3b3e94ea3095bd354fb8397e7927993eb5d246add0eee4887780a0455ee19",
+        ),
+        (
+            "<main>safe</main><main>safe</main>",
+            "7cd94121c9a7db06b8caafb89dad731e41f0f681e9fa927de212b545935ff8a8",
+        ),
+    ] {
+        let result = run(
+            dir.path(),
+            &html_change(source, digest),
+            policy,
+            &["--html-scope", "main"],
+        );
+        assert_eq!(result.status.code(), Some(2));
+        let verdict: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+        assert_eq!(verdict["status"], "not_checked");
+        assert!(verdict["findings"].as_array().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn html_main_scope_link_revalidation_checks_scope_before_observation() {
+    let dir = tempfile::tempdir().unwrap();
+    let change = html_change(
+        "<nav><a href='/nav'>nav</a></nav><main><a href='/body'>body</a></main>",
+        "e0e2dde15c5da6b57d63ee84eba388e19d3eb1c0411f0a74f485b45142fbc4a6",
+    );
+    let policy = "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\n";
+    let options = [
+        "--html-scope",
+        "main",
+        "--check-link-reachability",
+        "--telemetry",
+    ];
+    let first = run(dir.path(), &change, policy, &options);
+    assert_eq!(
+        first.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let events: Vec<serde_json::Value> = String::from_utf8(first.stderr)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(
+        events
+            .iter()
+            .any(|e| e["event"] == "content_link_reachability" && e["destinations"] == 1)
+    );
+    let previous = dir.path().join("main-links.json");
+    fs::copy(dir.path().join("verdict.json"), &previous).unwrap();
+    let path = previous.to_str().unwrap();
+    let same = [
+        "--html-scope",
+        "main",
+        "--check-link-reachability",
+        "--verify-verdict",
+        path,
+    ];
+    assert_eq!(
+        run(dir.path(), &change, policy, &same).status.code(),
+        Some(0)
+    );
+    let different = [
+        "--check-link-reachability",
+        "--verify-verdict",
+        path,
+        "--telemetry",
+    ];
+    let result = run(dir.path(), &change, policy, &different);
+    assert_ne!(result.status.code(), Some(0));
+    assert!(!String::from_utf8_lossy(&result.stderr).contains("content_link_reachability"));
+}
+
+#[test]
+fn html_main_scope_receipts_bind_scope_and_revalidate() {
+    let dir = tempfile::tempdir().unwrap();
+    let change = html_change(
+        "<nav>word</nav><main><p>safe</p></main><footer>word</footer>",
+        "1a092dfafca8e00d06f070ace94d81061c2749235da07c5aca309f5dc0d106b2",
+    );
+    let policy =
+        "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['word']\n";
+    let common = [
+        "--offline-receipt",
+        "--evaluator-identity",
+        "trusted-build",
+        "--html-scope",
+        "main",
+        "--telemetry",
+    ];
+    let first = run(dir.path(), &change, policy, &common);
+    assert_eq!(
+        first.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let event: serde_json::Value = serde_json::from_slice(&first.stderr).unwrap();
+    assert_eq!(event["event"], "content_change_html_projection");
+    assert_eq!(event["eligible_entries"], 1);
+    let path = dir.path().join("verdict.json");
+    let receipt: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(
+        receipt["verdict"]["extensions"]["aexeo.html-content-scope.v1"],
+        "main"
+    );
+    let main_options = receipt["decision_inputs"]["host_options"]["sha256"].clone();
+    let saved = dir.path().join("main-receipt.json");
+    fs::copy(&path, &saved).unwrap();
+    let saved_path = saved.to_str().unwrap();
+    let verify = [
+        "--offline-receipt",
+        "--evaluator-identity",
+        "trusted-build",
+        "--html-scope",
+        "main",
+        "--verify-offline-receipt",
+        saved_path,
+    ];
+    assert_eq!(
+        run(dir.path(), &change, policy, &verify).status.code(),
+        Some(0)
+    );
+    let mismatched = [
+        "--offline-receipt",
+        "--evaluator-identity",
+        "trusted-build",
+        "--verify-offline-receipt",
+        saved_path,
+    ];
+    assert_ne!(
+        run(dir.path(), &change, policy, &mismatched).status.code(),
+        Some(0)
+    );
+    let document = ["--offline-receipt", "--evaluator-identity", "trusted-build"];
+    assert_eq!(
+        run(dir.path(), &change, policy, &document).status.code(),
+        Some(1)
+    );
+    let doc: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_ne!(
+        doc["decision_inputs"]["host_options"]["sha256"],
+        main_options
+    );
+    let doc_copy = dir.path().join("document-receipt.json");
+    fs::copy(&path, &doc_copy).unwrap();
+    let verify_document_as_main = [
+        "--offline-receipt",
+        "--evaluator-identity",
+        "trusted-build",
+        "--html-scope",
+        "main",
+        "--verify-offline-receipt",
+        doc_copy.to_str().unwrap(),
+    ];
+    assert_ne!(
+        run(dir.path(), &change, policy, &verify_document_as_main)
+            .status
+            .code(),
+        Some(0)
+    );
+}
+
 #[test]
 fn emits_bound_pass_fail_and_not_checked_verdicts() {
     let dir = tempfile::tempdir().unwrap();
