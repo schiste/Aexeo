@@ -1,0 +1,10 @@
+version = 1
+name = "Duplicate paragraph review starter"
+
+[[gates]]
+id = "editorial.duplicate_paragraphs"
+kind = "duplicate_paragraphs"
+max_occurrences = 1
+min_chars = 40
+case_insensitive = true
+blocking = false
