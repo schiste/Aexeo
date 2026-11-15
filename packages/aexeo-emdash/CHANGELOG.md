@@ -18,7 +18,7 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- Preserve content evaluation results when an optional synchronous telemetry callback throws.
+- Keep optional telemetry failures, including rejected asynchronous callbacks, from disrupting content evaluation and inventory exports. Telemetry is not awaited.
 - Bound collection metadata uniqueness evaluation; when a limit interrupts the scan, retain observed duplicate findings and report the check as `not_checked`.
 - Require explicit custom-block mappings; inherited properties no longer certify body coverage.
 - Treat non-boolean `optional` values in custom block mappings as unverified, preserving known prose without claiming complete body coverage.
