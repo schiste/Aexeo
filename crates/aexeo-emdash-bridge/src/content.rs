@@ -136,20 +136,7 @@ pub struct EmdashSourceLocation {
     pub utf16_offset: usize,
 }
 
-fn positional_gate(gate: &ContentGate) -> bool {
-    matches!(
-        gate,
-        ContentGate::Custom { .. }
-            | ContentGate::ForbiddenTerms { .. }
-            | ContentGate::RepeatedTerms { .. }
-            | ContentGate::SentenceLength { .. }
-            | ContentGate::SentenceCharacterLength { .. }
-            | ContentGate::ParagraphLength { .. }
-            | ContentGate::RepeatedParagraphOpenings { .. }
-            | ContentGate::DuplicateParagraphs { .. }
-            | ContentGate::ParagraphCharacterLength { .. }
-    )
-}
+use aexeo_core::source_mapping::prose_gate_has_positions as positional_gate;
 
 /// Coverage of emitted findings that can have a source position.
 /// Findings omitted by the report limit are not included.
@@ -165,22 +152,7 @@ pub fn source_mapping_coverage(
     report: &ContentReport,
     locations: &[EmdashSourceLocation],
 ) -> SourceMappingCoverage {
-    let eligible = preset
-        .gates
-        .iter()
-        .zip(&report.gates)
-        .filter(|(gate, _)| {
-            positional_gate(gate)
-                || matches!(
-                    gate,
-                    ContentGate::HeadingLength { .. }
-                        | ContentGate::DuplicateHeadings { .. }
-                        | ContentGate::LinkDestinations { .. }
-                        | ContentGate::LinkReachability { .. }
-                )
-        })
-        .map(|(_, result)| result.findings.len())
-        .sum::<usize>();
+    let eligible = aexeo_core::source_mapping::eligible_findings(preset, report);
     SourceMappingCoverage {
         eligible,
         mapped: locations.len(),
