@@ -30,6 +30,30 @@ Literal matching for `forbidden_terms`, `required_terms`, `repeated_terms` and t
 
 `forbidden_terms`, `required_terms` and `repeated_terms` accept `whole_words` (default `true`; set `false` for substring matches) and `case_insensitive` (default `false`). Case-insensitive matching lowercases each character, without full Unicode case folding. Word boundaries use Unicode alphanumeric characters and underscores. Adapter block boundaries also separate words even when no separator is inserted; a term never matches across a known block boundary. Thai, Lao, Myanmar, Khmer, CJK and Hangul characters do not act as word characters, because these scripts do not reliably separate words with spaces; a term in them matches inside surrounding text.
 
+### Character count for multilingual content
+
+`character_count` bounds Unicode scalar values in the adapter-projected text,
+including whitespace by default. Set `ignore_whitespace = true` to omit Unicode
+whitespace. This can be useful for writing systems without space-separated
+words; it does not count grapheme clusters, visual width or linguistic words.
+Combining marks and emoji sequences can count as multiple scalars. Adapters may
+insert or omit separators, so choose limits for the actual input format. Missing
+text is `not_checked`, while observed empty text has count zero.
+
+```toml
+[[gates]]
+id = "article.characters"
+kind = "character_count"
+min = 100
+max = 2000
+ignore_whitespace = true
+blocking = false
+```
+
+At least one bound is required and `min` must not exceed `max`. The report
+includes configured `min_characters` / `max_characters` and, when text was
+observed, `character_count`. Existing word-count presets remain unchanged.
+
 ### Input limits
 
 The CLI bounds auxiliary files separately: each custom preset, metadata file and evidence source is limited to 16 MiB, with a shared 64 MiB budget across those files and the collection JSON. A collection can consume up to the remaining shared budget. Exceeding an auxiliary limit stops the command with an error; it does not produce a partial report. With `--telemetry`, a local `content_auxiliary_input_limit` event records the input category and effective byte limit without paths or contents.

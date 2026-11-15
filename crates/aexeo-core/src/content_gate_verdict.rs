@@ -1584,6 +1584,36 @@ mod tests {
     }
 
     #[test]
+    fn change_verdict_enforces_character_count() {
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='characters'\n[[gates]]\nid='chars'\nkind='character_count'\nmax=2\n",
+        )
+        .unwrap();
+        let verdict = evaluate_change(
+            &change(),
+            &mut NoFiles,
+            &preset,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+        )
+        .unwrap();
+        assert_eq!(verdict.status, VerdictStatus::Fail);
+        assert!(
+            verdict
+                .checks
+                .iter()
+                .any(|check| check.id.ends_with(":chars") && check.status == CheckStatus::Failed)
+        );
+        assert!(
+            verdict
+                .findings
+                .iter()
+                .any(|finding| finding.message.contains("Character count 3"))
+        );
+    }
+
+    #[test]
     fn streamed_json_digest_matches_compact_json_bytes() {
         use sha2::{Digest, Sha256};
         let input = change();

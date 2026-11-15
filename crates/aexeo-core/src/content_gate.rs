@@ -100,6 +100,18 @@ pub enum ContentGate {
         min: Option<usize>,
         max: Option<usize>,
     },
+    /// Bounds Unicode scalar values in the adapter's projected text.
+    CharacterCount {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+        min: Option<usize>,
+        max: Option<usize>,
+        #[serde(default)]
+        ignore_whitespace: bool,
+    },
     /// Bounds the number of adapter-supplied paragraphs.
     ParagraphCount {
         id: String,
@@ -399,6 +411,7 @@ impl ContentGate {
     pub fn severity(&self) -> Severity {
         match self {
             Self::WordCount { severity, .. }
+            | Self::CharacterCount { severity, .. }
             | Self::LinkCount { severity, .. }
             | Self::LinkDestinations { severity, .. }
             | Self::LinkReachability { severity, .. }
@@ -428,6 +441,7 @@ impl ContentGate {
     pub fn blocking(&self) -> bool {
         match self {
             Self::WordCount { blocking, .. }
+            | Self::CharacterCount { blocking, .. }
             | Self::LinkCount { blocking, .. }
             | Self::LinkDestinations { blocking, .. }
             | Self::LinkReachability { blocking, .. }
@@ -466,6 +480,7 @@ impl ContentGate {
                 ..
             } => "paragraphs",
             Self::WordCount { .. }
+            | Self::CharacterCount { .. }
             | Self::SentenceLength { .. }
             | Self::SentenceCharacterLength { .. }
             | Self::RepeatedTerms { .. }
@@ -495,6 +510,7 @@ impl ContentGate {
     pub fn id(&self) -> &str {
         match self {
             Self::WordCount { id, .. }
+            | Self::CharacterCount { id, .. }
             | Self::LinkCount { id, .. }
             | Self::LinkDestinations { id, .. }
             | Self::LinkReachability { id, .. }
@@ -527,7 +543,9 @@ impl ContentGate {
 // Guidance is advisory: thresholds and literal matches do not establish editorial quality.
 fn editorial_suggestion(gate: &ContentGate) -> Option<&'static str> {
     match gate {
-        ContentGate::WordCount { .. } | ContentGate::ParagraphCount { .. } => Some(
+        ContentGate::WordCount { .. }
+        | ContentGate::CharacterCount { .. }
+        | ContentGate::ParagraphCount { .. } => Some(
             "Review the content length against the configured limits; adjust the content or the policy where appropriate.",
         ),
         ContentGate::ParagraphLength { .. } | ContentGate::ParagraphCharacterLength { .. } => Some(
@@ -1003,6 +1021,12 @@ impl ContentPreset {
                 {
                     bail!("invalid word count bounds for {}", gate.id())
                 }
+                ContentGate::CharacterCount { min, max, .. }
+                    if min.is_none() && max.is_none()
+                        || matches!((min, max), (Some(a), Some(b)) if a > b) =>
+                {
+                    bail!("invalid character count bounds for {}", gate.id())
+                }
                 ContentGate::ParagraphCount { min, max, .. }
                     if min.is_none() && max.is_none()
                         || matches!((min, max), (Some(a), Some(b)) if a > b) =>
@@ -1336,6 +1360,7 @@ impl ContentPreset {
         self.validate()?;
         let mut results = Vec::with_capacity(self.gates.len());
         let mut word_count = None;
+        let mut character_counts = [None, None];
         let block_ends = context
             .and_then(|context| context.block_ends.as_deref())
             .unwrap_or_default();
@@ -1396,6 +1421,49 @@ impl ContentPreset {
                                     format!(
                                         "Word count {count} exceeds the maximum of {}",
                                         maximum
+                                    ),
+                                    1,
+                                    1,
+                                );
+                            }
+                        }
+                        None => reason = Some("text is unavailable from this adapter".into()),
+                    }
+                }
+                ContentGate::CharacterCount {
+                    min,
+                    max,
+                    ignore_whitespace,
+                    ..
+                } => {
+                    if let Some(min) = min {
+                        measurements.insert("min_characters".into(), *min);
+                    }
+                    if let Some(max) = max {
+                        measurements.insert("max_characters".into(), *max);
+                    }
+                    match &input.text {
+                        Some(text) => {
+                            let count = *character_counts[usize::from(*ignore_whitespace)]
+                                .get_or_insert_with(|| {
+                                    text.chars()
+                                        .filter(|c| !ignore_whitespace || !c.is_whitespace())
+                                        .count()
+                                });
+                            measurements.insert("character_count".into(), count);
+                            if let Some(minimum) = min.filter(|n| count < *n) {
+                                emit(
+                                    format!(
+                                        "Character count {count} is below the minimum of {minimum}"
+                                    ),
+                                    1,
+                                    1,
+                                );
+                            }
+                            if let Some(maximum) = max.filter(|n| count > *n) {
+                                emit(
+                                    format!(
+                                        "Character count {count} exceeds the maximum of {maximum}"
                                     ),
                                     1,
                                     1,
@@ -3134,6 +3202,52 @@ term="draft"
             preset.evaluate(&input).unwrap().gates[0].measurements["word_count"],
             2
         );
+    }
+
+    #[test]
+    fn character_counts_are_configurable_unicode_scalars_and_distinguish_missing() {
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='chars'\n[[gates]]\nid='all'\nkind='character_count'\nmin=5\nmax=5\n[[gates]]\nid='compact'\nkind='character_count'\nmin=4\nmax=4\nignore_whitespace=true\n"
+        ).unwrap();
+        let input = literal_input("你好 é\u{301}");
+        let report = preset.evaluate(&input).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Passed);
+        assert_eq!(report.gates[0].measurements["character_count"], 5);
+        assert_eq!(report.gates[1].status, GateStatus::Passed);
+        assert_eq!(report.gates[1].measurements["character_count"], 4);
+        let long = preset.evaluate(&literal_input("你好 é\u{301}!")).unwrap();
+        assert_eq!(long.gates[0].status, GateStatus::Failed);
+        assert!(long.gates[0].findings[0].message.contains("exceeds"));
+        assert_eq!(long.gates[1].status, GateStatus::Failed);
+        let empty = preset.evaluate(&literal_input("")).unwrap();
+        assert_eq!(empty.gates[0].status, GateStatus::Failed);
+        assert_eq!(empty.gates[0].measurements["character_count"], 0);
+        let missing = preset
+            .evaluate(&ContentInput {
+                text: None,
+                ..input
+            })
+            .unwrap();
+        assert!(
+            missing
+                .gates
+                .iter()
+                .all(|gate| gate.status == GateStatus::NotChecked)
+        );
+        assert!(
+            missing
+                .gates
+                .iter()
+                .all(|gate| !gate.measurements.contains_key("character_count"))
+        );
+        for bounds in ["", "min=5\nmax=4\n"] {
+            assert!(
+                ContentPreset::from_toml(&format!(
+                    "version=1\nname='x'\n[[gates]]\nid='x'\nkind='character_count'\n{bounds}"
+                ))
+                .is_err()
+            );
+        }
     }
 
     #[test]
