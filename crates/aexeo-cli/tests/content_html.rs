@@ -10,7 +10,7 @@ fn html_content_uses_composable_gates_and_does_not_guess_source_positions() {
         "<h1>Title</h1><p>Intro <a href='http://example.org'>word</a></p><p hidden>secret</p>",
     )
     .unwrap();
-    fs::write(&preset, "version=1\nname='test'\n[[gates]]\nid='words'\nkind='forbidden_terms'\nterms=['word','secret']\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\n[[gates]]\nid='online'\nkind='link_reachability'\n").unwrap();
+    fs::write(&preset, "version=1\nname='test'\n[[gates]]\nid='words'\nkind='forbidden_terms'\nterms=['word','secret']\n[[gates]]\nid='links'\nkind='link_destinations'\nallowed_schemes=['https']\n[[gates]]\nid='online'\nkind='link_reachability'\n[[gates]]\nid='wordcount'\nkind='word_count'\nmin=100\n").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
         .args([
             "content",
@@ -32,7 +32,12 @@ fn html_content_uses_composable_gates_and_does_not_guess_source_positions() {
     assert_eq!(report["gates"][0]["findings"].as_array().unwrap().len(), 1);
     assert_eq!(report["gates"][1]["status"], "failed");
     assert_eq!(report["gates"][2]["status"], "not_checked");
+    assert_eq!(report["gates"][3]["status"], "failed");
     assert!(report.get("source_locations").is_none());
+    assert_eq!(
+        report["source_mapping"],
+        serde_json::json!({"eligible": 2, "mapped": 0, "unmapped": 2})
+    );
     assert_eq!(
         report["source_location_capability"]["status"],
         "unavailable"
@@ -49,6 +54,9 @@ fn html_content_uses_composable_gates_and_does_not_guess_source_positions() {
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
         .find(|event| event["event"] == "content_evaluation")
         .unwrap();
+    assert_eq!(event["source_mapping"]["eligible"], 2);
+    assert_eq!(event["source_mapping"]["mapped"], 0);
+    assert_eq!(event["source_mapping"]["unmapped"], 2);
     assert_eq!(
         event["html_projection"],
         serde_json::json!({"status":"complete", "headings":1, "paragraphs":1, "links":1, "source_location_capability":"unavailable"})

@@ -30,6 +30,11 @@ fn markdown_report_maps_exact_and_reconstructed_source_positions() {
     assert_eq!(output.status.code(), Some(1));
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(
+        report["source_mapping"],
+        serde_json::json!({"eligible": 2, "mapped": 2, "unmapped": 0})
+    );
+    assert_eq!(telemetry["source_mapping"]["eligible"], 2);
     assert_eq!(telemetry["source_mapping"]["mapped"], 2);
     assert_eq!(telemetry["source_mapping"]["unmapped"], 0);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("world"));
@@ -180,6 +185,9 @@ fn text_report_keeps_sparse_source_locations_across_gates() {
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
     let text = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        text.contains("Locations mapped: 2 of 4 emitted positional findings mapped; 2 unmapped")
+    );
     assert_eq!(text.matches(":4:10: Forbidden term: world").count(), 2);
     assert_eq!(
         text.matches("Forbidden term: star (projected text ")

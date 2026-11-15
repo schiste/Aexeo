@@ -450,6 +450,14 @@ eight-byte item count. Object keys are UTF-8 length-framed in Unicode code-point
 order. The fingerprint is unsigned and does not identify the executable, input
 adapter, evidence, or other context; it does not establish reviewer independence.
 
+### Source mapping coverage across adapters
+
+Single-item CLI JSON reports include `source_mapping` counts for emitted
+findings eligible for source positions, including when no trustworthy mapping is
+available. Text reports summarize coverage when positional findings exist. The same aggregate counts appear in opt-in CLI telemetry; they omit
+truncated findings and carry no source content. EmDash uses the same gate
+eligibility definition. A mapped position identifies only the evaluated snapshot.
+
 ### EmDash source mapping coverage
 
 Single-item EmDash reports include counts of emitted findings eligible for source

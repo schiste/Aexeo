@@ -429,7 +429,6 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     let evaluation_ms = started.elapsed().as_secs_f64() * 1000.0;
     report.applied_fixes = applied_fixes;
     let mapping_started = measuring.then(std::time::Instant::now);
-    let mut positional_findings = 0;
     // Keep the established projected finding coordinates unchanged. Supply
     // separately indexed source coordinates for positional prose and link gates.
     let mut source_locations = Vec::new();
@@ -512,7 +511,6 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 )
             });
         if let Some(positions) = positions {
-            positional_findings += positions.len();
             for (finding_index, position) in positions.into_iter().enumerate() {
                 if let Some((line, column)) = position {
                     source_locations.push(SourceLocation {
@@ -526,14 +524,16 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         }
     }
 
+    let eligible_findings = aexeo_core::source_mapping::eligible_findings(&preset, &report);
+    let mapped_findings = source_locations.len();
+    let unmapped_findings = eligible_findings.saturating_sub(mapped_findings);
     if let Some(started) = mapping_started {
-        let mapping = mapping_available.then(|| {
-            (
-                source_locations.len(),
-                positional_findings - source_locations.len(),
-                started.elapsed().as_secs_f64() * 1000.0,
-            )
-        });
+        let mapping = Some((
+            eligible_findings,
+            mapped_findings,
+            unmapped_findings,
+            started.elapsed().as_secs_f64() * 1000.0,
+        ));
         print_telemetry(
             &report,
             &preset,
@@ -545,7 +545,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             Some(&gate_timer.timings_ms),
             html_projection
                 .as_ref()
-                .map(|projection| (projection, html_map.is_some())),
+                .map(|projection| (projection, html_map.is_some(), mapping_available)),
         )?;
     }
     if args.get_one::<String>("format").map(String::as_str) == Some("json") {
@@ -565,6 +565,9 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 "version": 1, "text_sha256": text_sha256, "metadata_sha256": metadata_sha256
             });
         }
+        output["source_mapping"] = serde_json::json!({
+            "eligible": eligible_findings, "mapped": mapped_findings, "unmapped": unmapped_findings
+        });
         if mapping_available {
             output["source_locations"] = serde_json::to_value(&source_locations)?;
         }
@@ -583,6 +586,11 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             println!("HTML content scope: main");
         }
         print_summary(&report);
+        if eligible_findings > 0 {
+            println!(
+                "Locations mapped: {mapped_findings} of {eligible_findings} emitted positional findings mapped; {unmapped_findings} unmapped"
+            );
+        }
         for fix in &report.applied_fixes {
             println!("Applied fix: {fix}");
         }
@@ -827,9 +835,9 @@ fn print_telemetry(
     preset: &aexeo_core::content_gate::ContentPreset,
     evaluation_ms: f64,
     stages: Option<(f64, f64, Option<f64>)>,
-    source_mapping: Option<(usize, usize, f64)>,
+    source_mapping: Option<(usize, usize, usize, f64)>,
     gate_timings_ms: Option<&[f64]>,
-    html_projection: Option<(&serde_json::Value, bool)>,
+    html_projection: Option<(&serde_json::Value, bool, bool)>,
 ) -> Result<()> {
     let mut event = serde_json::json!({"schema_version": 1, "event": "content_evaluation", "evaluation_ms": evaluation_ms, "summary": report.summary});
     let mut length_checks = 0usize;
@@ -864,19 +872,18 @@ fn print_telemetry(
             event["stages"]["external_results_load_ms"] = serde_json::json!(duration);
         }
     }
-    if let Some((mapped, unmapped, duration_ms)) = source_mapping {
-        event["source_mapping"] =
-            serde_json::json!({"mapped": mapped, "unmapped": unmapped, "duration_ms": duration_ms});
+    if let Some((eligible, mapped, unmapped, duration_ms)) = source_mapping {
+        event["source_mapping"] = serde_json::json!({"eligible": eligible, "mapped": mapped, "unmapped": unmapped, "duration_ms": duration_ms});
     }
     if let Some(timings) = gate_timings_ms {
         event["gate_timings_ms"] = serde_json::json!(timings);
     }
-    if let Some((projection, html_literal_mapping)) = html_projection {
+    if let Some((projection, html_literal_mapping, mapping_available)) = html_projection {
         event["html_projection"] = projection.clone();
         event["html_projection"]["source_location_capability"] =
             serde_json::json!(if html_literal_mapping {
                 "literal_html"
-            } else if source_mapping.is_some() {
+            } else if mapping_available {
                 "identity_projection"
             } else {
                 "unavailable"

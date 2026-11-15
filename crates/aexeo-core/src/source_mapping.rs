@@ -18,6 +18,32 @@ pub fn prose_gate_has_positions(gate: &crate::content_gate::ContentGate) -> bool
     )
 }
 
+/// Count emitted findings for gates that can have a source position. Findings
+/// omitted by a report limit are excluded. An adapter may still be unable to
+/// locate any particular finding. The report must be from this preset, in gate order.
+pub fn eligible_findings(
+    preset: &crate::content_gate::ContentPreset,
+    report: &crate::content_gate::ContentReport,
+) -> usize {
+    use crate::content_gate::ContentGate;
+    preset
+        .gates
+        .iter()
+        .zip(&report.gates)
+        .filter(|(gate, _)| {
+            prose_gate_has_positions(gate)
+                || matches!(
+                    gate,
+                    ContentGate::HeadingLength { .. }
+                        | ContentGate::DuplicateHeadings { .. }
+                        | ContentGate::LinkDestinations { .. }
+                        | ContentGate::LinkReachability { .. }
+                )
+        })
+        .map(|(_, result)| result.findings.len())
+        .sum()
+}
+
 /// Adapter-specific exact positions used by the shared gate mapper.
 pub(crate) trait ContentSourceMap {
     fn heading_count(&self) -> usize;
