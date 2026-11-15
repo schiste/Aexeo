@@ -61,7 +61,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   outside the host. Test paths containing spaces as well as CI paths.
 - Before EmDash `npm run test:wasm`, rebuild the plugin bundle after TypeScript
   changes (`npm run build:bundle`); `build:ts` alone leaves bundled entrypoints
-  stale. Rebuild the WASM bridge too when Rust bridge code changes. When
+  stale. In a fresh or cleaned worktree, check that the ignored WASM bridge
+  artifacts exist and run `npm run build:wasm` before bundling if they are
+  missing. Rebuild the WASM bridge too when Rust bridge code changes. When
   reporting results against real CMS snapshots, rebuild both the bundle and
   bridge from the identified commit even if neither source changed: ignored
   artifacts in reused worktrees may come from another revision.
