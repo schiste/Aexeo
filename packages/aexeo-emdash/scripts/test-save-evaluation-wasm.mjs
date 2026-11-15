@@ -89,6 +89,41 @@ const rulesAt = (host, route) => {
 };
 const has = (host, route, ruleId) => rulesAt(host, route).has(ruleId);
 
+// Multilingual character bounds run through the configured host and real WASM.
+{
+  const preset = `version=1
+name="characters"
+[[gates]]
+id="characters"
+kind="character_count"
+min=4
+max=4
+ignore_whitespace=true
+`;
+  const configured = createPlugin({ contentPreset: { name: "characters", sources: { characters: preset } } });
+  const page = item("character-count", { data: { body: [block("p", "你好 世界")] } });
+  const host = fakeHost([page]);
+  const evaluate = () => configured.hooks["content:afterSave"].handler(
+    { content: page, collection: "pages", isNew: false }, host.ctx,
+  );
+  await evaluate();
+  let gate = host.store.get("findings:/character-count").assessment.gates.find((item) => item.gate_id === "characters");
+  assert.equal(gate.status, "passed");
+  assert.equal(gate.measurements.character_count, 4);
+  page.data.body[0] = block("p", "你好");
+  await evaluate();
+  gate = host.store.get("findings:/character-count").assessment.gates.find((item) => item.gate_id === "characters");
+  assert.equal(gate.status, "failed");
+  assert.equal(gate.measurements.character_count, 2);
+  page.data.body.push({ _type: "unknownComponent", _key: "unknown" });
+  await evaluate();
+  gate = host.store.get("findings:/character-count").assessment.gates.find((item) => item.gate_id === "characters");
+  assert.equal(gate.status, "not_checked");
+  assert.equal(gate.measurements?.character_count, undefined);
+  assert.deepEqual(host.logged, []);
+  console.log("WASM character count handles observed and incomplete content");
+}
+
 // The shipped preset must work through configured save and real WASM, with
 // a source location an editor can use and a clean recheck after revision.
 {
