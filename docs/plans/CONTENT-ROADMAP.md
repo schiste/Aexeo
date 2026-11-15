@@ -186,6 +186,8 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] Map single-line Markdown entities and escaped punctuation, including text
   between multiple transformations, only when bounded reconstruction agrees
   exactly with the parser. Unsupported or ambiguous cases remain unmapped.
+- [x] Extend bounded reconstruction to soft-wrapped Markdown containers when
+  every line can be matched exactly; all lines share a single span budget.
 - [x] Markdown invalid-link source locations and aggregate mapping telemetry
   ([PR #48](https://github.com/schiste/Aexeo/pull/48)); locations identify link
   occurrences, including reference uses.

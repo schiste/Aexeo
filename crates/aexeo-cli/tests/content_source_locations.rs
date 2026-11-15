@@ -79,11 +79,11 @@ fn unchanged_text_after_an_entity_has_an_actionable_source_position() {
 }
 
 #[test]
-fn wrapped_quote_reports_the_middle_line_and_mapping_telemetry() {
+fn wrapped_quote_with_entity_reports_the_middle_line_and_mapping_telemetry() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("article.md");
     let preset = dir.path().join("preset.toml");
-    fs::write(&file, "> Avant\n> phrase interdite\n> Après\n").unwrap();
+    fs::write(&file, "> Avant\n> phrase &amp; interdite\n> Après\n").unwrap();
     fs::write(&preset, "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['interdite']\n").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
         .args([
@@ -107,7 +107,7 @@ fn wrapped_quote_reports_the_middle_line_and_mapping_telemetry() {
     assert_eq!(
         report["source_locations"],
         serde_json::json!([
-            { "gate_id":"terms", "finding_index":0, "line":2, "column":10 }
+            { "gate_id":"terms", "finding_index":0, "line":2, "column":16 }
         ])
     );
     assert_eq!(telemetry["source_mapping"]["mapped"], 1);
