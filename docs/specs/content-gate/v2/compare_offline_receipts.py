@@ -14,12 +14,14 @@ import time
 
 from verify_decision_inputs import (
     MAX_ARTIFACT_BYTES, MAX_MANIFEST_BYTES, OPTIONAL, REQUIRED, VerificationError, _open_regular,
-    _reject_constant, _unique_object, verify_files,
+    _reject_constant, _unique_object, _digest_file, verify_files,
 )
 
 MAX_RECEIPT_BYTES = 16 * 1024 * 1024
 RECEIPT_SCHEMA = "aexeo.offline-decision-receipt/v1"
 VERDICT_SCHEMA = "content-gate.verdict/v1"
+MAX_CONTENT_MAP_BYTES = 1024 * 1024
+MAX_CONTENT_STATES = 1024
 
 
 def _finite_float(value):
@@ -113,7 +115,71 @@ def _typed_equal(left, right):
     return left == right
 
 
-def verify_subject(change_path, expected_digest, verdict, validate_change=False, verify_inline_content=False):
+def read_content_map(path):
+    """Read trusted host-supplied paths, indexed by change entry and state."""
+    with _open_regular(path) as source:
+        data = source.read(MAX_CONTENT_MAP_BYTES + 1)
+    if len(data) > MAX_CONTENT_MAP_BYTES:
+        raise VerificationError("content map exceeds size limit")
+    try:
+        entries = json.loads(data.decode("utf-8"), object_pairs_hook=_unique_object,
+                             parse_constant=_reject_constant)
+    except (UnicodeDecodeError, ValueError, RecursionError) as error:
+        raise VerificationError("invalid content map") from error
+    if not isinstance(entries, list) or len(entries) > MAX_CONTENT_STATES:
+        raise VerificationError("invalid content map")
+    result = {}
+    for item in entries:
+        if (not isinstance(item, dict) or set(item) != {"entry", "state", "path"}
+                or type(item["entry"]) is not int or item["entry"] < 0
+                or item["state"] not in ("before", "after")
+                or not isinstance(item["path"], str) or not item["path"] or "\0" in item["path"]):
+            raise VerificationError("invalid content map entry")
+        key = (item["entry"], item["state"])
+        if key in result:
+            raise VerificationError("duplicate content map entry")
+        result[key] = item["path"]
+    return result
+
+
+def verify_content_states(change, content_files):
+    """Verify inline and explicitly supplied external bytes within one budget."""
+    unused = set(content_files)
+    remaining = MAX_ARTIFACT_BYTES
+    count = 0
+    for index, entry in enumerate(change["entries"]):
+        for field in ("before", "after"):
+            state = entry.get(field)
+            if state is None:
+                continue
+            count += 1
+            if count > MAX_CONTENT_STATES:
+                raise VerificationError("too many content states")
+            key = (index, field)
+            if "inline" in state:
+                if key in content_files:
+                    raise VerificationError("content map includes inline state")
+                try:
+                    content = state["inline"].encode("utf-8")
+                except UnicodeEncodeError as error:
+                    raise VerificationError("content is not valid UTF-8") from error
+                size = len(content)
+                digest = hashlib.sha256(content).hexdigest()
+            else:
+                if key not in content_files:
+                    raise VerificationError("missing content file")
+                digest, size = _digest_file(content_files[key], remaining)
+                unused.remove(key)
+            if size > remaining:
+                raise VerificationError("content exceeds size limit")
+            remaining -= size
+            if not hmac.compare_digest(digest, state["sha256"]):
+                raise VerificationError("content digest mismatch")
+    if unused:
+        raise VerificationError("unused content map entry")
+
+
+def verify_subject(change_path, expected_digest, verdict, validate_change=False, verify_inline_content=False, content_files=None):
     """Bind the v1 subject to the same change bytes covered by the manifest.
 
     The optional schema check covers the public v1 change format; it does not
@@ -133,22 +199,10 @@ def verify_subject(change_path, expected_digest, verdict, validate_change=False,
                 or not isinstance(change.get("base"), dict)
                 or not isinstance(change.get("entries"), list)):
             raise VerificationError("invalid change subject fields")
-        if validate_change or verify_inline_content:
+        if validate_change or verify_inline_content or content_files is not None:
             _validate_schema(change, "change.schema.json")
-        if verify_inline_content:
-            for entry in change["entries"]:
-                for field in ("before", "after"):
-                    state = entry.get(field)
-                    if state is None:
-                        continue
-                    if "inline" not in state:
-                        raise VerificationError("content is not inline")
-                    try:
-                        content = state["inline"].encode("utf-8")
-                    except UnicodeEncodeError as error:
-                        raise VerificationError("content is not valid UTF-8") from error
-                    if not hmac.compare_digest(hashlib.sha256(content).hexdigest(), state["sha256"]):
-                        raise VerificationError("inline content digest mismatch")
+        if verify_inline_content or content_files is not None:
+            verify_content_states(change, {} if content_files is None else content_files)
         entries = []
         for entry in change["entries"]:
             if not isinstance(entry, dict) or not isinstance(entry.get("entity_id"), str):
@@ -164,7 +218,9 @@ def verify_subject(change_path, expected_digest, verdict, validate_change=False,
         raise VerificationError("unable to verify verdict subject") from error
 
 
-def compare_receipts(previous_bytes, fresh_bytes, artifacts, validate=False, verify_change_subject=False, validate_change=False, verify_inline_content=False):
+def compare_receipts(previous_bytes, fresh_bytes, artifacts, validate=False, verify_change_subject=False, validate_change=False, verify_inline_content=False, content_files=None):
+    if verify_inline_content and content_files is not None:
+        raise VerificationError("content verification modes are mutually exclusive")
     previous, old_manifest = parse_receipt(previous_bytes)
     fresh, new_manifest = parse_receipt(fresh_bytes)
     if validate:
@@ -173,8 +229,8 @@ def compare_receipts(previous_bytes, fresh_bytes, artifacts, validate=False, ver
     # Verify both manifests against independently supplied, current artifacts.
     stats = verify_files(old_manifest, artifacts)
     verify_files(new_manifest, artifacts)
-    if verify_change_subject or validate_change or verify_inline_content:
-        verify_subject(artifacts["change"], previous["decision_inputs"]["change"]["sha256"], previous["verdict"], validate_change=validate_change, verify_inline_content=verify_inline_content)
+    if verify_change_subject or validate_change or verify_inline_content or content_files is not None:
+        verify_subject(artifacts["change"], previous["decision_inputs"]["change"]["sha256"], previous["verdict"], validate_change=validate_change, verify_inline_content=verify_inline_content, content_files=content_files)
     if previous["decision_inputs"]["external_evidence"] != {"state": "absent"} or fresh["decision_inputs"]["external_evidence"] != {"state": "absent"}:
         raise VerificationError("offline receipts cannot contain external evidence")
     before = dict(previous["verdict"])
@@ -203,7 +259,9 @@ def main(argv=None):
     parser.add_argument("--validate-verdicts", action="store_true", help="validate v1 schemas and check summary consistency (requires jsonschema and RFC 3339 support)")
     parser.add_argument("--verify-subject", action="store_true", help="compare both v1 subjects to the independently supplied change artifact")
     parser.add_argument("--validate-change", action="store_true", help="validate the bound change against its v1 schema and verify its verdict subject")
-    parser.add_argument("--verify-inline-content", action="store_true", help="validate the change and all before/after inline content digests; reject file and URI references")
+    content_mode = parser.add_mutually_exclusive_group()
+    content_mode.add_argument("--verify-inline-content", action="store_true", help="validate the change and all before/after inline content digests; reject file and URI references")
+    content_mode.add_argument("--content-files", help="trusted JSON mapping of entry indexes and states to local content files; verifies all content")
     parser.add_argument("--telemetry", action="store_true")
     args = parser.parse_args(argv)
     started = time.perf_counter() if args.telemetry else 0
@@ -213,9 +271,10 @@ def main(argv=None):
         event = {"event": "offline_receipt_comparison", "status": status,
                  "duration_ms": round((time.perf_counter() - started) * 1000, 3),
                  "verdict_validation_requested": args.validate_verdicts,
-                 "subject_verification_requested": args.verify_subject or args.validate_change or args.verify_inline_content,
-                 "change_validation_requested": args.validate_change or args.verify_inline_content,
-                 "inline_content_verification_requested": args.verify_inline_content}
+                 "subject_verification_requested": args.verify_subject or args.validate_change or args.verify_inline_content or args.content_files is not None,
+                 "change_validation_requested": args.validate_change or args.verify_inline_content or args.content_files is not None,
+                 "inline_content_verification_requested": args.verify_inline_content,
+                 "external_content_verification_requested": args.content_files is not None}
         if stats is not None:
             event.update(stats)
         try:
@@ -230,7 +289,8 @@ def main(argv=None):
         artifacts = {role: getattr(args, role) for role in REQUIRED + OPTIONAL}
         stats = compare_receipts(previous, fresh, artifacts, validate=args.validate_verdicts,
                                  verify_change_subject=args.verify_subject, validate_change=args.validate_change,
-                                 verify_inline_content=args.verify_inline_content)
+                                 verify_inline_content=args.verify_inline_content,
+                                 content_files=read_content_map(args.content_files) if args.content_files is not None else None)
     except (OSError, VerificationError):
         telemetry("error")
         print("Offline receipt comparison failed.", file=sys.stderr)
