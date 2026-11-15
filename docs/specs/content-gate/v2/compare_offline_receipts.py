@@ -222,13 +222,15 @@ def compare_receipts(previous_bytes, fresh_bytes, artifacts, validate=False, ver
     if verify_inline_content and content_files is not None:
         raise VerificationError("content verification modes are mutually exclusive")
     previous, old_manifest = parse_receipt(previous_bytes)
-    fresh, new_manifest = parse_receipt(fresh_bytes)
+    fresh, _ = parse_receipt(fresh_bytes)
     if validate:
         validate_verdict(previous["verdict"])
         validate_verdict(fresh["verdict"])
-    # Verify both manifests against independently supplied, current artifacts.
+    # Equal decisions must refer to the same input snapshot. Comparing the
+    # manifests first also lets us read each supplied artifact just once.
+    if previous["decision_inputs"] != fresh["decision_inputs"]:
+        raise VerificationError("receipt decision inputs differ")
     stats = verify_files(old_manifest, artifacts)
-    verify_files(new_manifest, artifacts)
     if verify_change_subject or validate_change or verify_inline_content or content_files is not None:
         verify_subject(artifacts["change"], previous["decision_inputs"]["change"]["sha256"], previous["verdict"], validate_change=validate_change, verify_inline_content=verify_inline_content, content_files=content_files)
     if previous["decision_inputs"]["external_evidence"] != {"state": "absent"} or fresh["decision_inputs"]["external_evidence"] != {"state": "absent"}:
