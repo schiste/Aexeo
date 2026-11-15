@@ -16,23 +16,29 @@ pub(crate) fn truncate_at_char_boundary(value: &str, max_bytes: usize, suffix: &
     if value.len() <= max_bytes {
         return value.to_string();
     }
-    // Walk down to the nearest char boundary at or below the budget.
-    let mut end = max_bytes;
+    format!("{}{suffix}", prefix_at_char_boundary(value, max_bytes))
+}
+
+/// Borrow a UTF-8 prefix no longer than the byte budget.
+pub(crate) fn prefix_at_char_boundary(value: &str, max_bytes: usize) -> &str {
+    let mut end = value.len().min(max_bytes);
     while end > 0 && !value.is_char_boundary(end) {
         end -= 1;
     }
-    match value.get(..end) {
-        Some(head) => format!("{head}{suffix}"),
-        // Unreachable while `end` is a validated boundary, but never slice
-        // blindly: a wrong index here would reintroduce the panic this
-        // helper exists to prevent.
-        None => String::new(),
-    }
+    value.get(..end).unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::truncate_at_char_boundary;
+    use super::{prefix_at_char_boundary, truncate_at_char_boundary};
+
+    #[test]
+    fn prefix_is_bounded_and_never_splits_unicode() {
+        assert_eq!(prefix_at_char_boundary("abé日z", 3), "ab");
+        assert_eq!(prefix_at_char_boundary("abé日z", 6), "abé");
+        assert_eq!(prefix_at_char_boundary("abé日z", 100), "abé日z");
+        assert_eq!(prefix_at_char_boundary("é", 0), "");
+    }
 
     #[test]
     fn returns_input_unchanged_when_shorter_than_budget() {
