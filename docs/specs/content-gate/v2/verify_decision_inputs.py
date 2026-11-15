@@ -17,6 +17,8 @@ import time
 SCHEMA = "content-gate.decision-inputs/v1"
 MAX_MANIFEST_BYTES = 8192
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
+MAX_BUNDLE_BYTES = 64 * 1024 * 1024
+BUNDLE_SCHEMA = "aexeo.offline-receipt-bundle/v1"
 REQUIRED = ("change", "resolved_policy", "host_options", "evaluator")
 OPTIONAL = ("collection", "external_evidence")
 
@@ -115,9 +117,49 @@ def verify_files(manifest_bytes, artifacts, max_bytes=MAX_ARTIFACT_BYTES):
     return {"files": files, "bytes": total_bytes}
 
 
+def verify_bundle(data, artifacts, max_bytes=MAX_ARTIFACT_BYTES):
+    """Verify embedded bytes and independently supplied current artifact files."""
+    if len(data) > MAX_BUNDLE_BYTES:
+        raise VerificationError("bundle exceeds size limit")
+    try:
+        bundle = json.loads(data.decode("utf-8"), object_pairs_hook=_unique_object,
+                            parse_constant=_reject_constant)
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
+        raise VerificationError("invalid bundle JSON") from error
+    if (not isinstance(bundle, dict) or set(bundle) != {"schema", "receipt", "artifacts"}
+            or bundle["schema"] != BUNDLE_SCHEMA or not isinstance(bundle["receipt"], dict)
+            or not isinstance(bundle["artifacts"], dict)
+            or set(bundle["artifacts"]) != set(REQUIRED + OPTIONAL)):
+        raise VerificationError("invalid bundle fields")
+    if bundle["artifacts"]["external_evidence"] is not None:
+        raise VerificationError("unsupported bundle external evidence")
+    try:
+        manifest_data = json.dumps(bundle["receipt"]["decision_inputs"], separators=(",", ":")).encode("utf-8")
+    except (KeyError, UnicodeEncodeError, ValueError, RecursionError) as error:
+        raise VerificationError("invalid bundle manifest") from error
+    manifest = parse_manifest(manifest_data)
+    for role in REQUIRED + OPTIONAL:
+        value = bundle["artifacts"][role]
+        component = manifest[role]
+        if value is None:
+            if role in REQUIRED or component["state"] != "absent":
+                raise VerificationError("bundle artifacts differ")
+        elif isinstance(value, str) and component["state"] == "present":
+            try:
+                digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+            except UnicodeEncodeError as error:
+                raise VerificationError("invalid bundle artifact encoding") from error
+            if not hmac.compare_digest(component["sha256"], digest):
+                raise VerificationError("bundle artifacts differ")
+        else:
+            raise VerificationError("bundle artifacts differ")
+    return verify_files(manifest_data, artifacts, max_bytes)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("manifest", help="manifest JSON file")
+    parser.add_argument("manifest", help="manifest JSON file, or bundle with --bundle")
+    parser.add_argument("--bundle", action="store_true", help="verify an offline bundle and independently supplied files")
     for role in REQUIRED:
         parser.add_argument("--" + role.replace("_", "-"), required=True)
     for role in OPTIONAL:
@@ -139,9 +181,9 @@ def main(argv=None):
                 pass  # Optional telemetry cannot change verification.
     try:
         with _open_regular(args.manifest) as source:
-            data = source.read(MAX_MANIFEST_BYTES + 1)
+            data = source.read((MAX_BUNDLE_BYTES if args.bundle else MAX_MANIFEST_BYTES) + 1)
         artifacts = {role: getattr(args, role) for role in REQUIRED + OPTIONAL}
-        stats = verify_files(data, artifacts)
+        stats = verify_bundle(data, artifacts) if args.bundle else verify_files(data, artifacts)
     except OSError:
         telemetry("error")
         print("Decision input verification failed: cannot read manifest", file=sys.stderr)

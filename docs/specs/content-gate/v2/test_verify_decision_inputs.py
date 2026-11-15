@@ -81,6 +81,35 @@ class DecisionInputTests(unittest.TestCase):
         with self.assertRaises(verifier.VerificationError):
             verifier.verify_files(EXAMPLE, self.artifacts, max_bytes=1)
 
+    def test_bundle_rejects_missing_duplicate_unsupported_and_invalid_inputs(self):
+        manifest = json.loads(EXAMPLE)
+        manifest["external_evidence"] = {"state": "absent"}
+        self.artifacts["external_evidence"] = None
+        values = {role: (None if path is None else path.read_text(encoding="utf-8"))
+                  for role, path in self.artifacts.items()}
+        bundle = {"schema": verifier.BUNDLE_SCHEMA,
+                  "receipt": {"decision_inputs": manifest}, "artifacts": values}
+        valid = json.dumps(bundle, ensure_ascii=False).encode()
+        self.assertEqual(verifier.verify_bundle(valid, self.artifacts)["files"], 4)
+        cases = []
+        for mutation in ("missing", "extra", "absent", "evidence", "version", "surrogate"):
+            bad = copy.deepcopy(bundle)
+            if mutation == "missing": del bad["artifacts"]["collection"]
+            elif mutation == "extra": bad["artifacts"]["extra"] = "x"
+            elif mutation == "absent": bad["artifacts"]["collection"] = ""
+            elif mutation == "evidence": bad["artifacts"]["external_evidence"] = "x"
+            elif mutation == "version": bad["schema"] = "v2"
+            else: bad["artifacts"]["change"] = "\ud800"
+            cases.append(json.dumps(bad).encode())
+        cases.extend([valid.replace(b'"schema":', b'"schema":"x", "schema":', 1),
+                      b"\xff", b" " * (verifier.MAX_BUNDLE_BYTES + 1)])
+        for data in cases:
+            with self.subTest(data=data[:80]), self.assertRaises(verifier.VerificationError):
+                verifier.verify_bundle(data, self.artifacts)
+        self.artifacts["change"].write_bytes(b"different")
+        with self.assertRaises(verifier.VerificationError):
+            verifier.verify_bundle(valid, self.artifacts)
+
     @unittest.skipUnless(hasattr(os, "mkfifo"), "requires a FIFO")
     def test_rejects_non_regular_inputs_without_blocking(self):
         fifo = self.root / "fifo"
