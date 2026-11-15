@@ -175,8 +175,27 @@ This does not verify that the host supplied the intended change or that its
 inputs are complete, current, authentic, or safe to publish. It is not a
 portable v2 verdict. A change with no content states has no content bytes to check.
 
+For changes containing `file` or `uri` states, `--content-files PATH` instead
+accepts a trusted local JSON array, for example:
+
+```json
+[{"entry": 0, "state": "after", "path": "/trusted/snapshot/article.md"}]
+```
+
+`entry` is the zero-based change-entry index and `state` is `before` or `after`.
+The host must provide exactly one file for each referenced state, including URI
+states; inline states are checked directly. The verifier never fetches a URI or
+resolves the change's path itself. Extra, duplicate and missing mappings fail;
+inline and file bytes share a 64 MiB budget and at most 1,024 states are accepted.
+Map paths are opened as supplied (relative paths use the process working
+directory, and symlinks are followed). Only provide a map from a trusted host:
+it controls which local files are read. Files must remain stable across the
+comparison and any subsequent use. The digest check does not establish their
+provenance, freshness, completeness, confinement or publication safety.
+
 The optional local telemetry contains only status, whether verdict, subject,
-change or inline-content validation was requested, elapsed time and aggregate artifact counts and sizes. Receipt and artifact files can contain private content.
+change, inline-content or externally supplied content validation was requested,
+elapsed time and aggregate artifact counts and sizes. Receipt and artifact files can contain private content.
 Run `python3 docs/specs/content-gate/v2/test_compare_offline_receipts.py` and
 `python3 docs/specs/content-gate/v2/test_receipt_interop.py` for the standalone
 and Rust-to-Python checks.
