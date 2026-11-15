@@ -437,6 +437,27 @@ blocking=false
   for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/missing-selected-field", rule), false);
 }
 
+// Malformed optional mapping values cannot certify partial body content.
+{
+  const page = item("invalid-optional", { data: { blocks: [
+    block("a", "Known prose"), { _type: "hero", _key: "h", _version: 1, title: "Visible title" },
+  ] } });
+  const host = fakeHost([page]);
+  const configured = createPlugin({ contentPreset: { name: "article", collections: ["pages"] },
+    blockMappings: { hero: [{ kind: "paragraph", field: "missing", optional: "false" }] } });
+  const check = () => {
+    const document = host.store.get("document:/invalid-optional").document;
+    assert.equal(document.body[0].children[0].text, "Known prose");
+    assert.deepEqual(document.body_capabilities, []);
+    assert.ok(host.store.get("findings:/invalid-optional").assessment.gates.some((gate) => gate.status === "not_checked"));
+    for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/invalid-optional", rule), false);
+  };
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  check();
+  await configured.routes.refresh.handler(host.ctx);
+  check();
+}
+
 // Nested mixed rich text retains ordered blocks; unknown components stay unchecked.
 {
   const nested = item("nested", { data: { blocks: [{ _type: "section", _key: "s", body: [

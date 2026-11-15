@@ -11,6 +11,7 @@ import {
   SETTINGS_DESCRIPTION_FIELDS_KEY,
   SETTINGS_TOKEN_KEY,
   handleAfterSave,
+  readSandboxBlockMappings,
   documentKey,
   evaluateAndPersistAll,
   type EvaluatorFn,
@@ -351,6 +352,43 @@ describe("custom block mappings", () => {
       expect(JSON.stringify(store.get(documentKey(`/broken-${failure}`)))).toContain('"body_capabilities":[]');
       expect(JSON.stringify(events)).not.toContain("Observed prose");
     }
+  });
+
+  it("does not certify malformed sandbox mappings on save or refresh", async () => {
+    const content = item("malformed-mapping", NEW);
+    content.data.blocks = [
+      { _type: "block", _key: "p", children: [{ _type: "span", text: "Known prose", marks: [] }] },
+      { _type: "hero", _key: "one", _version: 1, title: "Observed title" },
+    ];
+    const { ctx } = host([content]);
+    await ctx.kv.set(CONFIG_URL_KEY, "https://example.org");
+    ctx.settings = {
+      get: async <T>(key: string) => (key === SETTINGS_TOKEN_KEY ? "token" : key === SETTINGS_BLOCK_MAPPINGS_KEY ? JSON.stringify({ hero: [{ kind: "paragraph", field: "missing", optional: "false" }] }) : null) as T | null,
+      set: async () => {},
+    };
+    const seen: unknown[] = [];
+    const coverage: unknown[] = [];
+    ctx.log = { info: (message, data) => { if (message === "aexeo.content_coverage") coverage.push(data); }, warn: () => {}, error: () => {} };
+    ctx.http = { fetch: async (_url, init) => {
+      seen.push(JSON.parse(init?.body ?? "{}").documents[0]);
+      return { status: 200, ok: true, text: async () => "[]" };
+    } };
+    await handleAfterSave({ content, collection: "pages", isNew: false }, ctx);
+    const evaluator: EvaluatorFn = async (documents) => {
+      seen.push(documents[0]);
+      return { ok: true, findings: [] };
+    };
+    await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator, blockMappings: await readSandboxBlockMappings(ctx) });
+    expect(seen).toHaveLength(2);
+    for (const document of seen) {
+      expect(document).toMatchObject({ body_capabilities: [] });
+      expect((document as { body: Array<{ children: Array<{ text: string }> }> }).body[0]?.children[0]?.text).toBe("Known prose");
+    }
+    expect(coverage).toEqual([
+      { documents: 1, complete: 0, partial: 0, unavailable: 1 },
+      { documents: 1, complete: 0, partial: 0, unavailable: 1 },
+    ]);
+    expect(JSON.stringify(coverage)).not.toContain("Known prose");
   });
 
   it("uses the same mapping for afterSave and refresh", async () => {
