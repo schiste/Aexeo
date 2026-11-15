@@ -39,6 +39,9 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 
 ## Delivery tracker
 
+The `@aeptus/aexeo-emdash` 0.9.2 package is prepared but must be published
+and independently checked against the registry before it is considered delivered.
+
 - [x] Optional, composable total character-count gate for text, Markdown, HTML,
   EmDash and change evaluation, with optional Unicode whitespace exclusion and
   explicit unavailable-text handling. Counts Unicode scalar values, not visual
