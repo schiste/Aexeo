@@ -1246,6 +1246,168 @@ fn revalidation_detects_changed_collection_without_overwriting_output() {
 }
 
 #[test]
+fn offline_receipt_bundle_exports_exact_inputs_and_rejects_tampering() {
+    use aexeo_contracts::content_gate_decision_inputs::{DecisionInputBytes, DecisionInputs};
+    let dir = tempfile::tempdir().unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
+    let opts = [
+        "--offline-receipt",
+        "--offline-receipt-bundle",
+        "--evaluator-identity",
+        "trusted-bât",
+        "--telemetry",
+    ];
+    let created = run(dir.path(), &input(), policy, &opts);
+    assert_eq!(
+        created.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    let telemetry: serde_json::Value = serde_json::from_slice(&created.stderr).unwrap();
+    assert_eq!(telemetry["event"], "content_change_offline_bundle");
+    assert_eq!(telemetry["artifact_count"], 4);
+    assert!(!String::from_utf8_lossy(&created.stderr).contains("trusted-bât"));
+    let output = dir.path().join("verdict.json");
+    assert_eq!(
+        telemetry["bundle_bytes"],
+        fs::metadata(&output).unwrap().len()
+    );
+    let mut bundle: serde_json::Value =
+        serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert_eq!(bundle["schema"], "aexeo.offline-receipt-bundle/v1");
+    assert!(bundle["artifacts"]["collection"].is_null());
+    assert!(bundle["artifacts"]["external_evidence"].is_null());
+    let manifest: DecisionInputs =
+        serde_json::from_value(bundle["receipt"]["decision_inputs"].clone()).unwrap();
+    let artifact = |name: &str| bundle["artifacts"][name].as_str().unwrap().as_bytes();
+    assert!(
+        manifest
+            .verify(&DecisionInputBytes {
+                change: artifact("change"),
+                resolved_policy: artifact("resolved_policy"),
+                host_options: artifact("host_options"),
+                evaluator: artifact("evaluator"),
+                collection: None,
+                external_evidence: None,
+            })
+            .is_ok()
+    );
+    let previous = dir.path().join("previous.json");
+    fs::copy(&output, &previous).unwrap();
+    let verify = [
+        "--offline-receipt",
+        "--evaluator-identity",
+        "trusted-bât",
+        "--verify-offline-receipt",
+        previous.to_str().unwrap(),
+    ];
+    let verified = run(dir.path(), &input(), policy, &verify);
+    assert_eq!(
+        verified.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&verified.stderr)
+    );
+    let original_output = fs::read(&output).unwrap();
+    bundle["artifacts"]["change"] = "modified".into();
+    fs::write(&previous, serde_json::to_vec(&bundle).unwrap()).unwrap();
+    let rejected = run(dir.path(), &input(), policy, &verify);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr)
+            .contains("invalid previous receipt bundle artifacts")
+    );
+    assert_eq!(fs::read(&output).unwrap(), original_output);
+    // Each malformed form is tested against the original, independently of
+    // the modified change. None may overwrite the existing output.
+    // Recover the exact original artifact from the still-trusted local inputs
+    // by creating another bundle, then retain its bytes for the cases below.
+    let recreated = run(dir.path(), &input(), policy, &opts);
+    assert_eq!(recreated.status.code(), Some(0));
+    let valid: serde_json::Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    let safe_output = fs::read(&output).unwrap();
+    let mut cases = Vec::new();
+    let mut absent_to_empty = valid.clone();
+    absent_to_empty["artifacts"]["collection"] = "".into();
+    cases.push(absent_to_empty);
+    let mut evidence = valid.clone();
+    evidence["artifacts"]["external_evidence"] = "unexpected".into();
+    cases.push(evidence);
+    let mut unknown = valid.clone();
+    unknown["artifacts"]["extra"] = "x".into();
+    cases.push(unknown);
+    let mut missing = valid.clone();
+    missing["artifacts"]
+        .as_object_mut()
+        .unwrap()
+        .remove("collection");
+    cases.push(missing);
+    let mut version = valid;
+    version["schema"] = "aexeo.offline-receipt-bundle/v2".into();
+    cases.push(version);
+    for case in cases {
+        fs::write(&previous, serde_json::to_vec(&case).unwrap()).unwrap();
+        assert_eq!(
+            run(dir.path(), &input(), policy, &verify).status.code(),
+            Some(2)
+        );
+        assert_eq!(fs::read(&output).unwrap(), safe_output);
+    }
+}
+
+#[test]
+fn offline_receipt_bundle_binds_collection_completeness() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
+    let collection = dir.path().join("collection.json");
+    fs::write(
+        &collection,
+        br#"{"change_id":"example","complete":true,"items":[{"id":"article","text":null}]}"#,
+    )
+    .unwrap();
+    let path = collection.to_str().unwrap();
+    let opts = [
+        "--offline-receipt",
+        "--offline-receipt-bundle",
+        "--evaluator-identity",
+        "build",
+        "--collection-snapshot",
+        path,
+    ];
+    assert_eq!(
+        run(dir.path(), &input(), policy, &opts).status.code(),
+        Some(0)
+    );
+    let output = dir.path().join("verdict.json");
+    let bundle: serde_json::Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    let artifact: serde_json::Value =
+        serde_json::from_str(bundle["artifacts"]["collection"].as_str().unwrap()).unwrap();
+    assert_eq!(artifact["complete"], true);
+    let previous = dir.path().join("previous.json");
+    fs::copy(&output, &previous).unwrap();
+    let old_output = fs::read(&output).unwrap();
+    fs::write(
+        &collection,
+        br#"{"change_id":"example","complete":false,"items":[{"id":"article","text":null}]}"#,
+    )
+    .unwrap();
+    let verify = [
+        "--offline-receipt",
+        "--evaluator-identity",
+        "build",
+        "--collection-snapshot",
+        path,
+        "--verify-offline-receipt",
+        previous.to_str().unwrap(),
+    ];
+    let rejected = run(dir.path(), &input(), policy, &verify);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("previous receipt does not match"));
+    assert_eq!(fs::read(&output).unwrap(), old_output);
+}
+
+#[test]
 fn offline_receipt_is_explicit_bound_and_revalidated() {
     let dir = tempfile::tempdir().unwrap();
     let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";

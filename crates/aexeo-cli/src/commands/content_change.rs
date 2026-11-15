@@ -488,6 +488,93 @@ fn report_html_scope(
     }
 }
 
+const OFFLINE_BUNDLE_SCHEMA: &str = "aexeo.offline-receipt-bundle/v1";
+
+/// Exact UTF-8 artifact bytes are included for transport, not as trusted inputs.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OfflineReceiptArtifacts {
+    change: String,
+    resolved_policy: String,
+    host_options: String,
+    evaluator: String,
+    collection: Option<String>,
+    external_evidence: Option<String>,
+}
+
+impl OfflineReceiptArtifacts {
+    fn from_context(
+        context: &aexeo_core::content_gate_verdict::OfflineDecisionContext<'_>,
+        html_scope: HtmlContentScope,
+    ) -> Result<Self> {
+        let data = context.artifacts_with_html_scope(html_scope)?;
+        Ok(Self {
+            change: String::from_utf8(data.change)?,
+            resolved_policy: String::from_utf8(data.resolved_policy)?,
+            host_options: String::from_utf8(data.host_options)?,
+            evaluator: String::from_utf8(data.evaluator)?,
+            collection: data.collection.map(String::from_utf8).transpose()?,
+            external_evidence: None,
+        })
+    }
+
+    fn verify(
+        &self,
+        receipt: &aexeo_core::content_gate_verdict::OfflineDecisionReceipt,
+    ) -> Result<()> {
+        if self.external_evidence.is_some() {
+            user_bail!("offline bundles cannot contain external evidence");
+        }
+        let inputs = aexeo_contracts::content_gate_decision_inputs::DecisionInputBytes {
+            change: self.change.as_bytes(),
+            resolved_policy: self.resolved_policy.as_bytes(),
+            host_options: self.host_options.as_bytes(),
+            evaluator: self.evaluator.as_bytes(),
+            collection: self.collection.as_deref().map(str::as_bytes),
+            external_evidence: None,
+        };
+        receipt
+            .decision_inputs
+            .verify(&inputs)
+            .map_err(anyhow::Error::msg)
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OfflineReceiptBundle {
+    schema: String,
+    receipt: aexeo_core::content_gate_verdict::OfflineDecisionReceipt,
+    artifacts: OfflineReceiptArtifacts,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+enum PreviousOfflineReceipt {
+    Bundle(OfflineReceiptBundle),
+    Receipt(aexeo_core::content_gate_verdict::OfflineDecisionReceipt),
+}
+
+fn parse_previous_offline_receipt(
+    data: &[u8],
+) -> Result<aexeo_core::content_gate_verdict::OfflineDecisionReceipt> {
+    // Reject duplicate keys and dropped fields in both formats. The bundle's
+    // artifacts are checked for consistency but never used as current inputs.
+    match parse_lossless_json(data).user_context("invalid previous receipt")? {
+        PreviousOfflineReceipt::Bundle(bundle) => {
+            if bundle.schema != OFFLINE_BUNDLE_SCHEMA {
+                user_bail!("unsupported previous receipt bundle schema");
+            }
+            bundle
+                .artifacts
+                .verify(&bundle.receipt)
+                .user_context("invalid previous receipt bundle artifacts")?;
+            Ok(bundle.receipt)
+        }
+        PreviousOfflineReceipt::Receipt(receipt) => Ok(receipt),
+    }
+}
+
 fn command_offline_receipt(
     args: &ArgMatches,
     change: &aexeo_contracts::content_gate_protocol::Change,
@@ -531,8 +618,7 @@ fn command_offline_receipt(
         if data.len() as u64 > MAX_CHANGE_BYTES {
             user_bail!("previous receipt exceeds the size limit");
         }
-        let previous: OfflineDecisionReceipt =
-            parse_lossless_json(&data).user_context("invalid previous receipt")?;
+        let previous: OfflineDecisionReceipt = parse_previous_offline_receipt(&data)?;
         let result = revalidate_offline_receipt_with_html_scope(
             &previous,
             &context,
@@ -557,8 +643,36 @@ fn command_offline_receipt(
         VerdictStatus::NotChecked => EXIT_UNSUPPORTED,
         VerdictStatus::Error => EXIT_INTERNAL_ERROR,
     };
-    write_atomic(output, &serde_json::to_vec_pretty(&receipt)?)
-        .user_context("writing offline receipt")?;
+    let bytes = if args.get_flag("offline-receipt-bundle") {
+        let artifacts = OfflineReceiptArtifacts::from_context(&context, html_scope)
+            .user_context("preparing offline receipt artifacts")?;
+        artifacts
+            .verify(&receipt)
+            .user_context("offline receipt artifacts differ")?;
+        let bundle = OfflineReceiptBundle {
+            schema: OFFLINE_BUNDLE_SCHEMA.into(),
+            receipt,
+            artifacts,
+        };
+        let bytes = serde_json::to_vec_pretty(&bundle)?;
+        // write_atomic adds one newline, which must also fit the read limit.
+        if bytes.len() as u64 >= MAX_CHANGE_BYTES {
+            user_bail!("offline receipt bundle exceeds the size limit");
+        }
+        bytes
+    } else {
+        serde_json::to_vec_pretty(&receipt)?
+    };
+    write_atomic(output, &bytes).user_context("writing offline receipt")?;
+    if args.get_flag("offline-receipt-bundle") && args.get_flag("telemetry") {
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "event":"content_change_offline_bundle", "version":1,
+                "artifact_count":4 + usize::from(collection.is_some()), "bundle_bytes":bytes.len() + 1
+            })
+        );
+    }
     Ok(code)
 }
 
