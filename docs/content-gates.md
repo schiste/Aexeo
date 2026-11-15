@@ -848,11 +848,12 @@ Opt-in source-mapping telemetry reports aggregate mapped and unmapped counts onl
 
 For Markdown CLI reports, finding `line` and `column` retain their existing
 coordinates in extracted prose. The additive `source_locations` array supplies
-original-file coordinates for exact, untransformed text spans, indexed by
-`gate_id` and zero-based `finding_index`. An absent entry means no reliable
-source position was found; escaped or transformed Markdown may be unmappable.
-Unchanged text at the edges of a transformed text node can still be mapped;
-the mapping does not claim positions inside encoded entities or escapes.
+original-file coordinates, indexed by `gate_id` and zero-based `finding_index`.
+For single-line text nodes, semicolon-terminated entities and escaped ASCII
+punctuation map when a bounded reconstruction matches the parser output exactly.
+Decoded characters point to the entity's opening `&`; escaped punctuation points
+to the punctuation after the backslash. Unsupported transformations and ambiguous
+or multiline nodes can remain unmapped; unchanged edges can still be mapped.
 These locations apply to positional prose gates and to `link_destinations`,
 `heading_length` and `duplicate_headings` findings, not metadata, site or
 collection findings. Soft-wrapped text maps directly only where the wrapped

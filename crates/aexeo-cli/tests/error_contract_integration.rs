@@ -320,7 +320,7 @@ fn content_text_prints_source_coordinates_in_file_position_form() {
     let preset = temp.path().join("preset.toml");
     write(
         &file,
-        "---\ntitle: hidden\n---\n# Héllo *world*\n\nEscaped \\*star\\*.\n",
+        "---\ntitle: hidden\n---\n# Héllo *world*\n\nEscaped \\*star\\* &unknown;.\n",
     );
     write(
         &preset,

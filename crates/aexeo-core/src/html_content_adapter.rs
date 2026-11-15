@@ -233,7 +233,7 @@ fn safe_mapping_attributes(mut rest: &str, void: bool) -> bool {
 
 // Only semicolon-terminated entities are accepted. Reconstruct with the same
 // named-entity table as html5ever, then compare the entire projection below.
-fn mapping_entity(entity: &str) -> Option<(char, Option<char>)> {
+pub(crate) fn mapping_entity(entity: &str) -> Option<(char, Option<char>)> {
     let spelling = entity.strip_suffix(';')?;
     let (first, second) = if let Some(digits) = spelling.strip_prefix('#') {
         let (digits, radix) = digits

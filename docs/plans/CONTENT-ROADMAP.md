@@ -183,6 +183,9 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] Plain-text and paragraph-text CLI reports include validated source
   coordinates for positional prose findings, using the same mapping rules as
   content-change verdicts and opt-in aggregate mapping telemetry.
+- [x] Map single-line Markdown entities and escaped punctuation, including text
+  between multiple transformations, only when bounded reconstruction agrees
+  exactly with the parser. Unsupported or ambiguous cases remain unmapped.
 - [x] Markdown invalid-link source locations and aggregate mapping telemetry
   ([PR #48](https://github.com/schiste/Aexeo/pull/48)); locations identify link
   occurrences, including reference uses.

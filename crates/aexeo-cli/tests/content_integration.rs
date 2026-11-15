@@ -1099,3 +1099,42 @@ fn a_preset_that_checks_nothing_is_an_error() {
     assert_ne!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stderr).contains("no gates"));
 }
+
+#[test]
+fn markdown_reports_source_positions_between_entities_and_escapes() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    std::fs::write(&preset, "version=1\nname='Terms'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['milieu']\n").unwrap();
+    let source = format!("custom={}", preset.display());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "-",
+            "--input-format",
+            "markdown",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &source,
+            "--format",
+            "json",
+            "--telemetry",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all("Début &amp; milieu \\*fort\\*.\n".as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["source_locations"][0]["line"], 1);
+    assert_eq!(report["source_locations"][0]["column"], 13);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("milieu"));
+}

@@ -1,7 +1,7 @@
 use std::{fs, process::Command};
 
 #[test]
-fn markdown_report_adds_only_exact_source_positions() {
+fn markdown_report_maps_exact_and_reconstructed_source_positions() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("article.md");
     let preset = dir.path().join("preset.toml");
@@ -30,13 +30,13 @@ fn markdown_report_adds_only_exact_source_positions() {
     assert_eq!(output.status.code(), Some(1));
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
-    assert_eq!(telemetry["source_mapping"]["mapped"], 1);
-    assert_eq!(telemetry["source_mapping"]["unmapped"], 1);
+    assert_eq!(telemetry["source_mapping"]["mapped"], 2);
+    assert_eq!(telemetry["source_mapping"]["unmapped"], 0);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("world"));
     assert_eq!(report["gates"][0]["findings"][0]["line"], 1);
     assert_eq!(
         report["source_locations"],
-        serde_json::json!([{ "gate_id":"terms", "finding_index":0, "line":4, "column":10 }])
+        serde_json::json!([{ "gate_id":"terms", "finding_index":0, "line":4, "column":10 }, { "gate_id":"terms", "finding_index":1, "line":6, "column":11 }])
     );
 }
 
@@ -161,7 +161,7 @@ fn text_report_keeps_sparse_source_locations_across_gates() {
     let preset = dir.path().join("preset.toml");
     fs::write(
         &file,
-        "---\ntitle: hidden\n---\n# Héllo *world*\n\nEscaped \\*star\\*.\n",
+        "---\ntitle: hidden\n---\n# Héllo *world*\n\nEscaped \\*star\\* &unknown;.\n",
     )
     .unwrap();
     fs::write(&preset, "version=1\nname='test'\n[[gates]]\nid='one'\nkind='forbidden_terms'\nterms=['star','world']\n[[gates]]\nid='two'\nkind='forbidden_terms'\nterms=['world','star']\n").unwrap();
