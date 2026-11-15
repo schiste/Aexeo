@@ -9,6 +9,7 @@ import {
   adaptContentItemWithContext,
   contentItemToEmdashDocument,
   type ContentUrlApi,
+  type CustomBlockMappings,
   type EmdashContentItem,
 } from "../src/adapter.js";
 import { buildAllowedHosts, buildCapabilities } from "../src/plugin.js";
@@ -383,6 +384,29 @@ describe("EmDash content adaptation", () => {
     const rich = { ...item, data: { blocks: [{ _type: "hero", _key: "h", _version: 1, body: body("Nested") }] } };
     expect(contentItemToEmdashDocument(rich, { hero: [{ kind: "richText", field: "body" }] }).body?.[0]?.children[0]?.text).toBe("Nested");
     expect(JSON.parse(JSON.stringify(aexeoPlugin({ blockMappings: mappings }).options)).blockMappings).toEqual(mappings);
+  });
+
+  it("does not certify malformed optional declarations in custom block fields", () => {
+    const item: EmdashContentItem = { id: "a", type: "pages", slug: "a", status: "draft", locale: "en", data: { blocks: [
+      ...body("Known prose"),
+      { _type: "hero", _key: "h", _version: 1, title: "Visible title", rows: [{ title: "Nested title" }] },
+    ] } };
+    for (const optional of ["false", "true", 0, 1, null, []]) {
+      for (const field of [
+        { kind: "paragraph", field: "missing", optional },
+        { kind: "paragraph", field: "title", optional },
+        { kind: "repeat", field: "rows", fields: [{ kind: "paragraph", field: "missing", optional }] },
+      ]) {
+        const mapping = { hero: [field] } as unknown as CustomBlockMappings;
+        const document = contentItemToEmdashDocument(item, mapping);
+        expect(document.body_capabilities, JSON.stringify(field)).toEqual([]);
+        expect(document.body?.[0]?.children[0]?.text).toBe("Known prose");
+      }
+    }
+    const optional = { hero: [{ kind: "paragraph" as const, field: "missing", optional: true }] };
+    expect(contentItemToEmdashDocument(item, optional).body_capabilities).toBeUndefined();
+    const required = { hero: [{ kind: "paragraph" as const, field: "missing", optional: false }] };
+    expect(contentItemToEmdashDocument(item, required).body_capabilities).toEqual([]);
   });
 
   it("keeps typed block text and resolves exact URLs and translation alternates", async () => {

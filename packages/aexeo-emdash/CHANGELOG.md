@@ -6,6 +6,10 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Treat non-boolean `optional` values in custom block mappings as unverified, preserving known prose without claiming complete body coverage.
+
 ## [0.9.1] - 2026-11-12
 
 ### Added

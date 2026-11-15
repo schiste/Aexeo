@@ -625,12 +625,13 @@ function mapCustomBlocks(
     if (depth > 8 || fields.length === 0) return false;
     for (const entry of fields) {
       if (!entry || typeof entry.field !== "string" || !entry.field ||
-        !["heading", "paragraph", "richText", "link", "repeat"].includes(entry.kind)) return false;
+        !["heading", "paragraph", "richText", "link", "repeat"].includes(entry.kind) ||
+        (entry.optional !== undefined && typeof entry.optional !== "boolean")) return false;
       if (entry.kind === "heading" && entry.level !== undefined && ![1, 2, 3, 4, 5, 6].includes(entry.level)) return false;
       if (entry.kind === "link" && (typeof entry.hrefField !== "string" || !entry.hrefField)) return false;
       if (entry.kind === "repeat" && (!Array.isArray(entry.fields) || entry.fields.length === 0)) return false;
       const value = record[entry.field];
-      if ((value === undefined || value === null || value === "") && entry.optional) {
+      if ((value === undefined || value === null || value === "") && entry.optional === true) {
         // Optional links must not silently discard a destination without its label.
         if (entry.kind === "link" && record[entry.hrefField] != null && record[entry.hrefField] !== "") return false;
         continue;
