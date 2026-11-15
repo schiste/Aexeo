@@ -66,6 +66,10 @@ class ReceiptInterop(unittest.TestCase):
                     else:
                         checked_change = subprocess.run(comparison_args + ["--validate-change"], capture_output=True, text=True)
                         self.assertEqual(checked_change.returncode, 0, checked_change.stderr)
+                        content_map = directory / "content-map.json"
+                        content_map.write_text("[]", encoding="utf-8")
+                        checked_content = subprocess.run(comparison_args + ["--content-files", str(content_map)], capture_output=True, text=True)
+                        self.assertEqual(checked_content.returncode, 0, checked_content.stderr)
                 changed_receipt["verdict"]["status"] = "fail"
                 fresh.write_text(json.dumps(changed_receipt), encoding="utf-8")
                 self.assertNotEqual(subprocess.run(comparison_args, capture_output=True).returncode, 0)

@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import compare_offline_receipts as comparison
 
@@ -247,6 +248,78 @@ class CompareOfflineReceipts(unittest.TestCase):
         missing = subprocess.run([sys.executable, "-S", *args[1:], "--verify-inline-content", "--telemetry"], capture_output=True, text=True)
         self.assertNotEqual(missing.returncode, 0)
         self.assertEqual(json.loads(missing.stderr.splitlines()[0])["status"], "error")
+
+    def test_host_content_files_cover_each_reference_and_reject_mismatches(self):
+        try:
+            import jsonschema  # noqa: F401
+            import rfc3339_validator  # noqa: F401
+            import rfc3986_validator  # noqa: F401
+        except ImportError:
+            self.skipTest("optional change validation dependencies are unavailable")
+        change = json.loads((Path(__file__).parent.parent / "v1" / "examples" / "markdown-change.json").read_text())
+        # Inline and reference inputs may coexist; the host supplies bytes for every reference.
+        content_files = {}
+        mapping = []
+        for index, entry in enumerate(change["entries"]):
+            for field in ("before", "after"):
+                state = entry.get(field)
+                if state and "file" in state:
+                    path = self.root / f"content-{index}-{field}"
+                    payload = f"trusted bytes {index} {field} é".encode()
+                    path.write_bytes(payload)
+                    state["sha256"] = hashlib.sha256(payload).hexdigest()
+                    content_files[(index, field)] = path
+                    mapping.append({"entry": index, "state": field, "path": str(path)})
+        data = self.encode(change)
+        self.artifacts["change"].write_bytes(data)
+        receipt = copy.deepcopy(self.receipt)
+        receipt["decision_inputs"]["change"]["sha256"] = hashlib.sha256(data).hexdigest()
+        receipt["verdict"]["subject"] = {"change_id": change["change_id"], "base": change["base"],
+            "entries": [{"entity_id": entry["entity_id"], "sha256": entry.get("after", {}).get("sha256")}
+                        for entry in change["entries"]]}
+        encoded = self.encode(receipt)
+        map_path = self.root / "mapping.json"
+        map_path.write_bytes(self.encode(mapping))
+        self.assertEqual(comparison.read_content_map(map_path), {key: str(path) for key, path in content_files.items()})
+        comparison.compare_receipts(encoded, encoded, self.artifacts, content_files=content_files)
+        with self.assertRaises(comparison.VerificationError):
+            comparison.compare_receipts(encoded, encoded, self.artifacts, content_files=content_files, verify_inline_content=True)
+        with mock.patch.object(comparison, "MAX_ARTIFACT_BYTES", 1), self.assertRaises(comparison.VerificationError):
+            comparison.verify_content_states(change, content_files)
+        uri_change = copy.deepcopy(change)
+        state = uri_change["entries"][0]["after"]
+        state.pop("file")
+        state["uri"] = "https://example.org/content"
+        comparison.verify_content_states(uri_change, content_files)
+        missing = dict(content_files)
+        missing.pop(next(iter(missing)))
+        with self.assertRaises(comparison.VerificationError):
+            comparison.compare_receipts(encoded, encoded, self.artifacts, content_files=missing)
+        for extra in ((99, "after"), (0, "before")):
+            with self.subTest(extra=extra), self.assertRaises(comparison.VerificationError):
+                comparison.compare_receipts(encoded, encoded, self.artifacts, content_files={**content_files, extra: self.root / "unused"})
+        previous = self.root / "receipt"
+        previous.write_bytes(encoded)
+        args = [sys.executable, str(SCRIPT), str(previous), str(previous)]
+        for role in comparison.REQUIRED:
+            args.extend(["--" + role.replace("_", "-"), str(self.artifacts[role])])
+        for role in comparison.OPTIONAL:
+            args.append("--" + role.replace("_", "-") + "-absent")
+        run = subprocess.run(args + ["--content-files", str(map_path), "--telemetry"], capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertTrue(json.loads(run.stderr)["external_content_verification_requested"])
+        self.assertNotIn(str(self.root), run.stderr)
+        next(iter(content_files.values())).write_bytes(b"substituted")
+        with self.assertRaises(comparison.VerificationError):
+            comparison.compare_receipts(encoded, encoded, self.artifacts, content_files=content_files)
+        for bad in ([mapping[0], mapping[0]], [{**mapping[0], "entry": True}],
+                    [{**mapping[0], "path": "bad\0path"}], [{**mapping[0], "unknown": 1}]):
+            map_path.write_bytes(self.encode(bad))
+            with self.subTest(bad=bad), self.assertRaises(comparison.VerificationError):
+                comparison.read_content_map(map_path)
+        map_path.write_text('[{"entry":0,"entry":1,"state":"before","path":"x"}]')
+        with self.assertRaises(comparison.VerificationError):
+            comparison.read_content_map(map_path)
 
     def test_cli_is_private_and_does_not_authorize_publication(self):
         previous = self.root / "previous.json"
