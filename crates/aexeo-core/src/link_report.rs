@@ -315,12 +315,39 @@ impl AuditLinkContext {
             snapshot_date: Option<String>,
         }
         let inventory = InventorySnapshot::from_json_document(data)?;
-        let declared: Declared = serde_json::from_slice(data)?;
+        let value: serde_json::Value = serde_json::from_slice(data)?;
+        let declared: Declared = serde_json::from_value(value.clone())?;
+        // An explicit null is an assertion that the crawl identity is unknown;
+        // only an omitted identity may inherit the inventory's claimed identity.
+        let identity = if value.get("identity").is_some() {
+            declared.identity
+        } else {
+            inventory.identity.clone()
+        };
         Ok(Self {
-            identity: declared.identity.or_else(|| inventory.identity.clone()),
+            identity,
             snapshot_date: declared.snapshot_date,
             inventory: Some(inventory),
         })
+    }
+
+    /// Read an audit context, bare inventory, or EmDash inventory export.
+    /// An omitted identity in an export adopts its inventory's claimed identity;
+    /// explicit `null` stays unknown. These are caller assertions, not proof.
+    pub fn from_context_document(data: &[u8]) -> anyhow::Result<Self> {
+        let value: serde_json::Value = serde_json::from_slice(data)?;
+        if value.get("inventory").is_none()
+            && value.get("complete").is_some()
+            && value.get("pages").is_some()
+        {
+            return Self::from_inventory_document(data);
+        }
+        let identity_missing = value.get("identity").is_none();
+        let mut context: Self = serde_json::from_value(value)?;
+        if identity_missing {
+            context.identity = context.inventory.as_ref().and_then(|i| i.identity.clone());
+        }
+        Ok(context)
     }
 }
 
@@ -1630,6 +1657,47 @@ mod tests {
         assert_eq!(serde_json::json!(context.identity), declared);
         assert_eq!(context.snapshot_date.as_deref(), Some("2026-01-01"));
         assert!(context.inventory.is_some());
+    }
+
+    #[test]
+    fn context_documents_preserve_explicit_unknown_identity_and_support_inventory_exports() {
+        let inventory =
+            serde_json::json!({"identity":attested_identity(), "complete":false, "pages":[]});
+        let parse = |value: serde_json::Value| {
+            AuditLinkContext::from_context_document(value.to_string().as_bytes()).unwrap()
+        };
+        for document in [
+            inventory.clone(),
+            serde_json::json!({"inventory": inventory, "issues":["transactional_snapshot_unavailable"], "scanned":0, "omitted":0}),
+        ] {
+            let context = parse(document);
+            assert_eq!(serde_json::json!(context.identity), attested_identity());
+            assert!(!context.inventory.unwrap().complete);
+        }
+        let explicit_unknown = serde_json::json!({"identity":null, "inventory":inventory});
+        let context = parse(explicit_unknown.clone());
+        assert!(context.identity.is_none());
+        assert!(
+            AuditLinkContext::from_inventory_document(explicit_unknown.to_string().as_bytes())
+                .unwrap()
+                .identity
+                .is_none()
+        );
+        let empty = parse(serde_json::json!({}));
+        assert!(empty.identity.is_none());
+        assert!(empty.inventory.is_none());
+        assert!(
+            AuditLinkContext::from_context_document(
+                br#"{"inventory":{"complete":false,"pages":[]}}"#
+            )
+            .is_ok()
+        );
+        assert!(
+            AuditLinkContext::from_context_document(
+                br#"{"inventory":{"complete":"false","pages":[]}}"#
+            )
+            .is_err()
+        );
     }
 
     /// A complete HTTP crawl seeded from the context inventory; `/orphan` was

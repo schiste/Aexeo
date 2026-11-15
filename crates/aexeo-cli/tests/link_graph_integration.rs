@@ -384,6 +384,61 @@ fn audit_context_compares_inventory_without_claiming_crawl_completeness() {
 }
 
 #[test]
+fn emdash_export_as_audit_context_keeps_inventory_identity_and_unknown_coverage() {
+    let temp = tempfile::tempdir().unwrap();
+    let audit_path = temp.path().join("audit.json");
+    let context_path = temp.path().join("export.json");
+    let audit = serde_json::json!({"command":"crawl", "site":{"site_url":"https://example.org", "root":"crawl", "deployment_model":"runtime_snapshot", "pages":[]}});
+    // EmDash's tests verify this fixture against the actual exporter.
+    let export: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../packages/aexeo-emdash/tests/fixtures/link-inventory-export.json"
+    ))
+    .unwrap();
+    let inventory = export["inventory"].clone();
+    fs::write(&audit_path, serde_json::to_vec(&audit).unwrap()).unwrap();
+    for (context, mismatch) in [
+        (inventory.clone(), true),
+        (export, true),
+        (
+            serde_json::json!({"identity":null, "inventory":inventory}),
+            false,
+        ),
+    ] {
+        fs::write(&context_path, serde_json::to_vec(&context).unwrap()).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .arg("link-graph")
+            .arg(&audit_path)
+            .arg("--audit")
+            .arg("--context")
+            .arg(&context_path)
+            .arg("--telemetry")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(telemetry["event"], "link_graph_analysis");
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("other.example"));
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            has_issue(&report["issues"], "audit_origin_mismatch"),
+            mismatch
+        );
+        assert_eq!(report["crawl_complete"], false);
+        assert_eq!(report["reconciliation"]["comparable"], false);
+        assert!(
+            report["reconciliation"]["eligible_pages"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+    }
+}
+
+#[test]
 fn audit_context_reports_origin_mismatch_even_without_pages() {
     let temp = tempfile::tempdir().unwrap();
     let audit_path = temp.path().join("audit.json");

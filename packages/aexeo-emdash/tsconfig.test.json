@@ -26,6 +26,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
+    "resolveJsonModule": true,
     "declaration": false,
     "declarationMap": false,
     "sourceMap": false,
