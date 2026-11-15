@@ -516,6 +516,59 @@ impl ContentGate {
     }
 }
 
+// Guidance is advisory: thresholds and literal matches do not establish editorial quality.
+fn editorial_suggestion(gate: &ContentGate) -> Option<&'static str> {
+    match gate {
+        ContentGate::WordCount { .. } | ContentGate::ParagraphCount { .. } => Some(
+            "Review the content length against the configured limits; adjust the content or the policy where appropriate.",
+        ),
+        ContentGate::ParagraphLength { .. } | ContentGate::ParagraphCharacterLength { .. } => Some(
+            "Review the paragraph for opportunities to split or shorten it without losing context.",
+        ),
+        ContentGate::SentenceLength { .. } | ContentGate::SentenceCharacterLength { .. } => Some(
+            "Review the sentence boundary and consider shortening the sentence while preserving its meaning.",
+        ),
+        ContentGate::RepeatedParagraphOpenings { .. } => {
+            Some("Review the repeated openings and vary them where repetition is unintended.")
+        }
+        ContentGate::DuplicateParagraphs { .. } => Some(
+            "Review the repeated paragraphs and remove or revise duplication where it is unintended.",
+        ),
+        ContentGate::RepeatedTerms { .. } => Some(
+            "Review the repeated term in context; keep necessary technical or factual repetition.",
+        ),
+        ContentGate::RequiredTerms { .. } => Some(
+            "Check whether the required term belongs in this content or the configured policy needs adjustment.",
+        ),
+        ContentGate::ForbiddenTerms { .. } => Some(
+            "Review the matched term in context and replace it if the configured policy applies.",
+        ),
+        ContentGate::RequiredHeadings { .. } => Some(
+            "Check whether the missing heading belongs in this content or the configured policy needs adjustment.",
+        ),
+        ContentGate::DuplicateHeadings { .. } => Some(
+            "Review the repeated heading and distinguish it where the repetition is unintended.",
+        ),
+        ContentGate::HeadingLength { .. } => {
+            Some("Review the heading and consider shortening it without losing meaning.")
+        }
+        ContentGate::LinkCount { .. } => Some(
+            "Review whether relevant links should be added or the configured minimum adjusted.",
+        ),
+        ContentGate::LinkDestinations { .. } => {
+            Some("Review the destination against the configured URL and scheme rules.")
+        }
+        ContentGate::LinkReachability { .. } => Some(
+            "Recheck the destination and update or remove the link if it is no longer appropriate.",
+        ),
+        ContentGate::RequiredMetadata { .. } => {
+            Some("Provide the required metadata if applicable, or update the configured policy.")
+        }
+        ContentGate::FinalNewline { .. } => Some("Add a final newline to the source text."),
+        _ => None,
+    }
+}
+
 /// Return offending heading indices for heading gates, in finding order.
 /// Other gate types return `None`.
 pub fn heading_finding_indices(gate: &ContentGate, headings: &[String]) -> Option<Vec<usize>> {
@@ -1302,7 +1355,7 @@ impl ContentPreset {
                         Severity::Warning => "warning",
                     }
                     .into(),
-                    suggestion: None,
+                    suggestion: editorial_suggestion(gate).map(str::to_owned),
                     scope: aexeo_contracts::FindingScope::Page,
                     subject: None,
                 })
@@ -2390,6 +2443,39 @@ impl ContentPreset {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn editorial_findings_carry_advisory_suggestions_without_changing_coverage() {
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='advice'\n[[gates]]\nid='length'\nkind='word_count'\nmin=10\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['bad']\n[[gates]]\nid='heading'\nkind='required_headings'\nheadings=['Intro']\n",
+        ).unwrap();
+        let report = preset.evaluate(&literal_input("A bad sentence.")).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[1].status, GateStatus::Failed);
+        assert_eq!(report.gates[2].status, GateStatus::NotChecked);
+        assert!(report.gates[2].findings.is_empty());
+        assert!(
+            report.gates[0].findings[0]
+                .suggestion
+                .as_deref()
+                .unwrap()
+                .contains("configured limits")
+        );
+        assert!(
+            report.gates[1].findings[0]
+                .suggestion
+                .as_deref()
+                .unwrap()
+                .contains("in context")
+        );
+        let value = serde_json::to_value(&report).unwrap();
+        assert!(
+            value["gates"][1]["findings"][0]["suggestion"]
+                .as_str()
+                .unwrap()
+                .contains("configured policy")
+        );
+    }
+
     fn literal_input(text: &str) -> ContentInput {
         ContentInput {
             id: "t".into(),

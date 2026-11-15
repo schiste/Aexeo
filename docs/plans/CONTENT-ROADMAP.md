@@ -323,6 +323,12 @@ editorial validation remain open.
 
 ## Priorities and acceptance criteria
 
+Editorial findings from the shared content engine include advisory suggestions
+for common length, repetition, heading, link and metadata checks. Suggestions
+prompt review or policy adjustment; they do not assert that an automatic rewrite
+is safe or that a heuristic establishes quality. Unavailable inputs remain
+`not_checked` rather than generating advice for unobserved content.
+
 1. **Explain the result.** Show configured-gate coverage, missing capabilities,
    blocking status, measured values and thresholds even when checks pass.
    Preserve machine contracts and distinguish unavailable measurements from zero.

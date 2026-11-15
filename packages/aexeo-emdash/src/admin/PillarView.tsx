@@ -192,7 +192,7 @@ export function PillarView({
               <li key={i} className="flex items-start gap-2">
                 <SeverityBadge severity={finding.severity} />
                 <code className="font-mono text-xs">{finding.rule_id}</code>
-                <span className="flex-1">{finding.message}</span>
+                <span className="flex-1">{finding.message}{finding.suggestion && <span className="block text-xs text-kumo-subtle">Suggestion: {finding.suggestion}</span>}</span>
                 {finding.layers?.secondaries?.length ? (
                   <SecondariesChips layers={finding.layers.secondaries} />
                 ) : null}
@@ -236,7 +236,7 @@ export function PillarView({
                     <td className="px-3 py-2 align-top">
                       <SeverityBadge severity={finding.severity} />
                     </td>
-                    <td className="px-3 py-2 align-top">{finding.message}</td>
+                    <td className="px-3 py-2 align-top">{finding.message}{finding.suggestion && <div className="text-xs text-kumo-subtle">Suggestion: {finding.suggestion}</div>}</td>
                     <td className="px-3 py-2 align-top">
                       {finding.layers?.secondaries?.length ? (
                         <SecondariesChips layers={finding.layers.secondaries} />
