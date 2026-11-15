@@ -9,6 +9,7 @@ use crate::{
         ContentEvaluationContext, ContentInput, ContentPreset, FINDINGS_OMITTED, GateStatus,
     },
     content_gate_sources::{ConfinedContentFiles, resolve_proposed_content},
+    html_content_adapter::HtmlContentScope,
     markdown_adapter::{
         gate_source_positions, markdown_input_with_source_map_and_destinations,
         prose_gate_has_positions,
@@ -221,6 +222,15 @@ fn offline_binding_digest(
     hash_json(&material)
 }
 
+// Preserve the original document-scope digest for existing consumers. A main
+// projection is a distinct evaluation input, not an attribute of the source.
+fn scoped_binding_digest(base: String, scope: HtmlContentScope) -> Result<String> {
+    match scope {
+        HtmlContentScope::Document => Ok(base),
+        HtmlContentScope::Main => hash_json(&("aexeo.html-scope-binding/v1", base, "main")),
+    }
+}
+
 fn subject_for_change(change: &Change) -> Subject {
     Subject {
         change_id: change.change_id.clone(),
@@ -250,12 +260,6 @@ pub fn verify_offline_input_binding(
     plain_text_paragraphs: bool,
     collection: Option<&ChangeCollection<'_>>,
 ) -> Result<()> {
-    if verdict.validator.name != "aexeo" || verdict.validator.version != env!("CARGO_PKG_VERSION") {
-        bail!("offline binding requires the same Aexeo engine version");
-    }
-    if verdict.schema != VERDICT_SCHEMA || verdict.subject != subject_for_change(change) {
-        bail!("verdict subject does not match the change");
-    }
     let expected = offline_binding_digest(
         change,
         preset,
@@ -264,13 +268,119 @@ pub fn verify_offline_input_binding(
         plain_text_paragraphs,
         collection,
     )?;
+    verify_offline_binding_with_digest(verdict, change, &expected)
+}
+
+fn verify_offline_binding_with_digest(
+    verdict: &Verdict,
+    change: &Change,
+    expected: &str,
+) -> Result<()> {
+    if verdict.validator.name != "aexeo" || verdict.validator.version != env!("CARGO_PKG_VERSION") {
+        bail!("offline binding requires the same Aexeo engine version");
+    }
+    if verdict.schema != VERDICT_SCHEMA || verdict.subject != subject_for_change(change) {
+        bail!("verdict subject does not match the change");
+    }
     let actual = verdict
         .extensions
         .as_ref()
         .and_then(|extensions| extensions.get(OFFLINE_BINDING_EXTENSION))
         .and_then(serde_json::Value::as_str);
-    if actual != Some(expected.as_str()) {
+    if actual != Some(expected) {
         bail!("offline evaluation input binding is missing or does not match");
+    }
+    Ok(())
+}
+
+/// Type of external observations used when computing a scoped verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScopedBindingKind {
+    Offline,
+    ObservedLinks,
+    External,
+}
+
+/// Verify scoped input binding before performing host callbacks. This does not
+/// establish evaluator authenticity, observation freshness, or verdict status.
+#[allow(clippy::too_many_arguments)]
+pub fn verify_scoped_change_input_binding(
+    verdict: &Verdict,
+    change: &Change,
+    preset: &ContentPreset,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    plain_text_paragraphs: bool,
+    collection: Option<&ChangeCollection<'_>>,
+    html_scope: HtmlContentScope,
+    kind: ScopedBindingKind,
+) -> Result<()> {
+    let declared_scope = verdict
+        .extensions
+        .as_ref()
+        .and_then(|extensions| extensions.get("aexeo.html-content-scope.v1"));
+    match html_scope {
+        HtmlContentScope::Main if declared_scope != Some(&serde_json::json!("main")) => {
+            bail!("main HTML scope declaration is missing or invalid")
+        }
+        HtmlContentScope::Document if declared_scope.is_some() => {
+            bail!("unexpected HTML scope declaration")
+        }
+        _ => {}
+    }
+    let base = scoped_binding_digest(
+        offline_binding_digest(
+            change,
+            preset,
+            max_entry_bytes,
+            max_total_bytes,
+            plain_text_paragraphs,
+            collection,
+        )?,
+        html_scope,
+    )?;
+    match kind {
+        ScopedBindingKind::Offline => verify_offline_binding_with_digest(verdict, change, &base),
+        ScopedBindingKind::ObservedLinks => {
+            verify_observed_link_binding_with_digest(verdict, change, &base)
+        }
+        ScopedBindingKind::External => verify_external_binding_with_digest(verdict, change, &base),
+    }
+}
+
+/// Compare a previous verdict with a freshly evaluated verdict under the same
+/// explicit scope and trusted inputs. Does not authenticate the evaluator or
+/// independently validate freshness, publication state, or source truth.
+#[allow(clippy::too_many_arguments)]
+pub fn verify_scoped_change_verdict(
+    previous: &Verdict,
+    fresh: &Verdict,
+    change: &Change,
+    preset: &ContentPreset,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
+    plain_text_paragraphs: bool,
+    collection: Option<&ChangeCollection<'_>>,
+    html_scope: HtmlContentScope,
+    kind: ScopedBindingKind,
+) -> Result<()> {
+    for verdict in [previous, fresh] {
+        verify_scoped_change_input_binding(
+            verdict,
+            change,
+            preset,
+            max_entry_bytes,
+            max_total_bytes,
+            plain_text_paragraphs,
+            collection,
+            html_scope,
+            kind,
+        )?;
+    }
+    let mut previous = previous.clone();
+    previous.evaluated_at.clone_from(&fresh.evaluated_at);
+    if previous != *fresh {
+        bail!("previous verdict differs from the current scoped evaluation");
     }
     Ok(())
 }
@@ -795,8 +905,38 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
     evaluated_at: &str,
     max_entry_bytes: usize,
     max_total_bytes: usize,
+    host: ChangeEvaluationHost<'_, '_>,
+    collection: Option<ChangeCollection<'_>>,
+) -> Result<Verdict> {
+    evaluate_change_with_collection_and_html_scope(
+        change,
+        provider,
+        preset,
+        evaluated_at,
+        max_entry_bytes,
+        max_total_bytes,
+        host,
+        collection,
+        HtmlContentScope::Document,
+    )
+}
+
+/// Evaluate with an explicit static HTML projection for every HTML entry.
+/// Main scope requires one observable main element; errors remain not checked.
+/// The scope is bound to the verdict inputs. Existing document-scope verification
+/// deliberately rejects a main-scope verdict. Static markup does not establish
+/// browser visibility or the completeness of a rendered page.
+#[allow(clippy::too_many_arguments)]
+pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
+    change: &Change,
+    provider: &mut P,
+    preset: &ContentPreset,
+    evaluated_at: &str,
+    max_entry_bytes: usize,
+    max_total_bytes: usize,
     mut host: ChangeEvaluationHost<'_, '_>,
     collection: Option<ChangeCollection<'_>>,
+    html_scope: HtmlContentScope,
 ) -> Result<Verdict> {
     use sha2::{Digest, Sha256};
     preset.validate()?;
@@ -810,13 +950,16 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
         }
     });
     let observed_binding = if has_observer || external.is_some() {
-        Some(offline_binding_digest(
-            change,
-            preset,
-            max_entry_bytes,
-            max_total_bytes,
-            host.options.plain_text_paragraphs,
-            collection.as_ref(),
+        Some(scoped_binding_digest(
+            offline_binding_digest(
+                change,
+                preset,
+                max_entry_bytes,
+                max_total_bytes,
+                host.options.plain_text_paragraphs,
+                collection.as_ref(),
+            )?,
+            html_scope,
         )?)
     } else {
         None
@@ -824,13 +967,16 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
     let mut observed_digest = Sha256::new();
     observed_digest.update(OBSERVED_LINK_BINDING_EXTENSION.as_bytes());
     let offline_binding = if host.options.link_observer.is_none() && host.extensions.is_none() {
-        Some(offline_binding_digest(
-            change,
-            preset,
-            max_entry_bytes,
-            max_total_bytes,
-            host.options.plain_text_paragraphs,
-            collection.as_ref(),
+        Some(scoped_binding_digest(
+            offline_binding_digest(
+                change,
+                preset,
+                max_entry_bytes,
+                max_total_bytes,
+                host.options.plain_text_paragraphs,
+                collection.as_ref(),
+            )?,
+            html_scope,
         )?)
     } else {
         None
@@ -892,7 +1038,11 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
                 )
             }
             "text/html" => {
-                match crate::html_content_adapter::html_content(&entry.entity_id, &text) {
+                match crate::html_content_adapter::html_content_with_scope(
+                    &entry.entity_id,
+                    &text,
+                    html_scope,
+                ) {
                     Ok(adapted) => {
                         let count = adapted.destinations.len();
                         (
@@ -1027,7 +1177,9 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
                 .as_deref()
                 .zip(input.text.as_deref())
                 .and_then(|(source, projected)| {
-                    crate::html_content_adapter::html_source_map(source, projected)
+                    crate::html_content_adapter::html_source_map_with_scope(
+                        source, projected, html_scope,
+                    )
                 })
         } else {
             None
@@ -1211,7 +1363,7 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
     } else {
         (VerdictStatus::Pass, None)
     };
-    Ok(Verdict {
+    let mut verdict = Verdict {
         schema: VERDICT_SCHEMA.into(),
         status,
         subject: subject_for_change(change),
@@ -1254,7 +1406,14 @@ pub fn evaluate_change_with_collection<P: ConfinedContentFiles>(
                     .collect()
                 })
             }),
-    })
+    };
+    if html_scope == HtmlContentScope::Main {
+        verdict.extensions.get_or_insert_default().insert(
+            "aexeo.html-content-scope.v1".into(),
+            serde_json::json!("main"),
+        );
+    }
+    Ok(verdict)
 }
 
 fn validate_collection(change: &Change, collection: &ChangeCollection<'_>) -> Result<()> {
@@ -2223,6 +2382,261 @@ mod tests {
             .get_mut(EXTERNAL_BINDING_EXTENSION)
             .unwrap()["links_sha256"] = "wrong".into();
         assert!(verify(&bad, &fresh).is_err());
+    }
+
+    #[test]
+    fn scoped_html_change_binds_scope_and_maps_only_selected_occurrences() {
+        use sha2::{Digest, Sha256};
+        let source = "<nav><p>word</p></nav><main><p>word</p></main><footer><p>word</p></footer>";
+        let mut change = change();
+        change.entries[0].media_type = "text/html".into();
+        let state = change.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['word']\n").unwrap();
+        let run = |scope| {
+            evaluate_change_with_collection_and_html_scope(
+                &change,
+                &mut NoFiles,
+                &policy,
+                "2026-01-01T00:00:00Z",
+                1024,
+                1024,
+                ChangeEvaluationHost {
+                    options: ChangeEvaluationOptions {
+                        link_observer: None,
+                        plain_text_paragraphs: false,
+                    },
+                    extensions: None,
+                },
+                None,
+                scope,
+            )
+            .unwrap()
+        };
+        let main = run(HtmlContentScope::Main);
+        let document = run(HtmlContentScope::Document);
+        assert_eq!(main.findings.len(), 1);
+        assert_eq!(document.findings.len(), 3);
+        assert_eq!(
+            main.findings[0]
+                .location
+                .as_ref()
+                .map(|p| (p.line, p.column)),
+            Some((
+                1,
+                u64::try_from(source.find("<main><p>word").unwrap() + "<main><p>".len() + 1)
+                    .unwrap()
+            ))
+        );
+        assert!(
+            verify_scoped_change_verdict(
+                &main,
+                &run(HtmlContentScope::Main),
+                &change,
+                &policy,
+                1024,
+                1024,
+                false,
+                None,
+                HtmlContentScope::Main,
+                ScopedBindingKind::Offline
+            )
+            .is_ok()
+        );
+        assert!(
+            verify_offline_input_binding(&main, &change, &policy, 1024, 1024, false, None).is_err()
+        );
+        assert!(
+            verify_scoped_change_input_binding(
+                &document,
+                &change,
+                &policy,
+                1024,
+                1024,
+                false,
+                None,
+                HtmlContentScope::Main,
+                ScopedBindingKind::Offline
+            )
+            .is_err()
+        );
+        assert!(
+            verify_scoped_change_verdict(
+                &main,
+                &document,
+                &change,
+                &policy,
+                1024,
+                1024,
+                false,
+                None,
+                HtmlContentScope::Main,
+                ScopedBindingKind::Offline
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn scoped_external_binding_rejects_scope_tampering() {
+        use std::collections::BTreeMap;
+        struct Host;
+        impl crate::content_gate::ContentGateExtensions for Host {
+            fn evaluate(
+                &self,
+                _: &str,
+                _: &BTreeMap<String, String>,
+                _: &ContentInput,
+            ) -> Result<Option<Vec<crate::content_gate::ExtensionDiagnostic>>> {
+                Ok(Some(vec![]))
+            }
+        }
+        let change = change();
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='custom'\nkind='custom'\nextension='test.rule'\n").unwrap();
+        let host = Host;
+        let verdict = evaluate_change_with_collection_and_html_scope(
+            &change,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+            ChangeEvaluationHost {
+                options: ChangeEvaluationOptions::default(),
+                extensions: Some(&host),
+            },
+            None,
+            HtmlContentScope::Main,
+        )
+        .unwrap();
+        let verify = |v: &Verdict, scope| {
+            verify_scoped_change_input_binding(
+                v,
+                &change,
+                &policy,
+                1024,
+                1024,
+                false,
+                None,
+                scope,
+                ScopedBindingKind::External,
+            )
+        };
+        assert!(verify(&verdict, HtmlContentScope::Main).is_ok());
+        assert!(verify(&verdict, HtmlContentScope::Document).is_err());
+        let mut altered = verdict.clone();
+        altered
+            .extensions
+            .as_mut()
+            .unwrap()
+            .remove("aexeo.html-content-scope.v1");
+        assert!(verify(&altered, HtmlContentScope::Main).is_err());
+        assert!(
+            verify_external_input_binding(&verdict, &change, &policy, 1024, 1024, false, None)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn scoped_html_change_reports_missing_or_ambiguous_main_as_not_checked() {
+        use sha2::{Digest, Sha256};
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['word']\n").unwrap();
+        for source in ["<p>word</p>", "<main>word</main><main>word</main>"] {
+            let mut change = change();
+            change.entries[0].media_type = "text/html".into();
+            let state = change.entries[0].after.as_mut().unwrap();
+            state.inline = Some(source.into());
+            state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+            let verdict = evaluate_change_with_collection_and_html_scope(
+                &change,
+                &mut NoFiles,
+                &policy,
+                "2026-01-01T00:00:00Z",
+                1024,
+                1024,
+                ChangeEvaluationHost {
+                    options: ChangeEvaluationOptions {
+                        link_observer: None,
+                        plain_text_paragraphs: false,
+                    },
+                    extensions: None,
+                },
+                None,
+                HtmlContentScope::Main,
+            )
+            .unwrap();
+            assert_eq!(verdict.status, VerdictStatus::NotChecked);
+            assert!(verdict.findings.is_empty());
+        }
+    }
+
+    #[test]
+    fn scoped_html_observer_receives_only_main_links_and_binds_scope() {
+        use sha2::{Digest, Sha256};
+        let source = "<nav><a href='/nav'>nav</a></nav><main><a href='/body'>body</a></main>";
+        let mut change = change();
+        change.entries[0].media_type = "text/html".into();
+        let state = change.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let policy = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\n",
+        )
+        .unwrap();
+        let mut observer = |_: &str, urls: &[String]| {
+            assert_eq!(urls, ["/body"]);
+            Ok(vec![
+                crate::content_gate::LinkReachabilityObservation::NotFound,
+            ])
+        };
+        let verdict = evaluate_change_with_collection_and_html_scope(
+            &change,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+            ChangeEvaluationHost {
+                options: ChangeEvaluationOptions {
+                    link_observer: Some(&mut observer),
+                    plain_text_paragraphs: false,
+                },
+                extensions: None,
+            },
+            None,
+            HtmlContentScope::Main,
+        )
+        .unwrap();
+        assert_eq!(verdict.findings.len(), 1);
+        assert_eq!(
+            verdict.findings[0]
+                .location
+                .as_ref()
+                .map(|p| (p.line, p.column)),
+            Some((
+                1,
+                u64::try_from(source.find("<a href='/body'>").unwrap() + 1).unwrap()
+            ))
+        );
+        assert!(
+            verify_scoped_change_input_binding(
+                &verdict,
+                &change,
+                &policy,
+                1024,
+                1024,
+                false,
+                None,
+                HtmlContentScope::Main,
+                ScopedBindingKind::ObservedLinks
+            )
+            .is_ok()
+        );
+        assert!(
+            verify_observed_link_input_binding(&verdict, &change, &policy, 1024, 1024, false, None)
+                .is_err()
+        );
     }
 
     #[test]
