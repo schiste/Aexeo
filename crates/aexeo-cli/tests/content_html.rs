@@ -269,3 +269,69 @@ fn html_limit_telemetry_reports_unavailable_without_fabricated_counts() {
     );
     assert!(!stderr.contains("large.html"));
 }
+
+#[test]
+fn html_main_scope_excludes_navigation_and_reports_incomplete_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("article.html");
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='test'\n[[gates]]\nid='words'\nkind='forbidden_terms'\nterms=['navigation']\n").unwrap();
+    let run = |source: &str| {
+        fs::write(&input, source).unwrap();
+        Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                input.to_str().unwrap(),
+                "--input-format",
+                "html",
+                "--html-scope",
+                "main",
+                "--preset",
+                "custom",
+                "--preset-source",
+                &format!("custom={}", preset.display()),
+                "--format",
+                "json",
+                "--telemetry",
+            ])
+            .output()
+            .unwrap()
+    };
+    let output = run("<nav>navigation</nav><main><p>Article</p></main><footer>navigation</footer>");
+    assert_eq!(output.status.code(), Some(0));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "passed");
+    assert_eq!(report["content_projection"]["scope"], "main");
+    assert_eq!(
+        report["source_location_capability"]["status"],
+        "unavailable"
+    );
+    let telemetry = String::from_utf8_lossy(&output.stderr);
+    assert!(!telemetry.contains("navigation"));
+    let event: serde_json::Value = telemetry
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|event| event["event"] == "content_evaluation")
+        .unwrap();
+    assert_eq!(event["html_projection"]["scope"], "main");
+    for source in ["<p>Article</p>", "<main>One</main><main>Two</main>"] {
+        let output = run(source);
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["gates"][0]["status"], "not_checked");
+        assert!(
+            report["gates"][0]["findings"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn html_scope_requires_html_input() {
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(["content", "--html-scope", "main", "--input-format", "text"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+}

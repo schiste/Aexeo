@@ -83,6 +83,11 @@ struct SourceLocation<'a> {
 }
 
 pub fn command_content(args: &ArgMatches) -> Result<i32> {
+    if args.value_source("html-scope") == Some(clap::parser::ValueSource::CommandLine)
+        && args.get_one::<String>("input-format").map(String::as_str) != Some("html")
+    {
+        user_bail!("--html-scope requires --input-format html");
+    }
     if args.get_flag("list-site-groups") {
         let groups = aexeo_core::static_check::native_site_rule_groups();
         if args.get_one::<String>("format").map(String::as_str) == Some("json") {
@@ -256,6 +261,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     let mut html_projection = (measuring
         && args.get_one::<String>("input-format").map(String::as_str) == Some("html"))
     .then(|| serde_json::json!({"status": "unavailable"}));
+    let main_scope = args.get_one::<String>("html-scope").map(String::as_str) == Some("main");
     let mut input = match (
         args.get_one::<String>("input-format").map(String::as_str),
         text,
@@ -287,7 +293,13 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             input
         }
         (Some("html"), Some(text)) => {
-            match aexeo_core::html_content_adapter::html_content(&id, &text) {
+            let scope = if args.get_one::<String>("html-scope").map(String::as_str) == Some("main")
+            {
+                aexeo_core::html_content_adapter::HtmlContentScope::Main
+            } else {
+                aexeo_core::html_content_adapter::HtmlContentScope::Document
+            };
+            match aexeo_core::html_content_adapter::html_content_with_scope(&id, &text, scope) {
                 Ok(adapted) => {
                     if html_projection.is_some() {
                         html_projection = Some(serde_json::json!({
@@ -430,6 +442,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         None
     };
     let html_map = if source_complete
+        && !main_scope
         && plain_source.is_none()
         && args.get_one::<String>("input-format").map(String::as_str) == Some("html")
     {
@@ -443,6 +456,9 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     } else {
         None
     };
+    if main_scope && let Some(projection) = html_projection.as_mut() {
+        projection["scope"] = serde_json::json!("main");
+    }
     let mapping_available = source_map.is_some() || plain_source.is_some() || html_map.is_some();
     let plain_index = plain_source
         .filter(|_| {
@@ -552,8 +568,14 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 "finding_coordinates": "projected_text"
             });
         }
+        if args.get_one::<String>("html-scope").map(String::as_str) == Some("main") {
+            output["content_projection"] = serde_json::json!({"format": "html", "scope": "main"});
+        }
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
+        if main_scope {
+            println!("HTML content scope: main");
+        }
         print_summary(&report);
         for fix in &report.applied_fixes {
             println!("Applied fix: {fix}");
