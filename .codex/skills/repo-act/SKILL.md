@@ -100,6 +100,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   unreadable settings through both save and refresh. A failed settings read must
   not certify body capabilities via an automatic fallback; verify coverage
   telemetry and that recognized prose remains available.
+- For route-keyed EmDash findings, test duplicate routes on save and refresh,
+  including collisions across collections and incomplete or partial inventories.
+  Check that an unscanned owner is not overwritten and that a single save or
+  deletion cannot clear ambiguity; the host KV API has no compare-and-set.
 - For EmDash source-mapping tests, external diagnostics must be within the
   projected text. Use the valid position immediately after the last character
   to exercise an unmapped boundary; an out-of-range line is rejected earlier.
