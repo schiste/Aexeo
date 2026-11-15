@@ -670,7 +670,8 @@ function mapCustomBlocks(
     return true;
   };
   for (const block of blocks) {
-    const mapping: unknown = mappings?.[String(block["_type"])];
+    const type = String(block["_type"]);
+    const mapping: unknown = mappings && Object.hasOwn(mappings, type) ? mappings[type] : undefined;
     let fields: readonly CustomBlockField[];
     if (Array.isArray(mapping)) {
       fields = mapping as CustomBlockField[];

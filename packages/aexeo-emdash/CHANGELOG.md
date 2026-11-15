@@ -6,6 +6,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- Require explicit custom-block mappings; inherited properties no longer certify body coverage.
+
 ### Fixed
 
 - Treat non-boolean `optional` values in custom block mappings as unverified, preserving known prose without claiming complete body coverage.
