@@ -51,6 +51,7 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   `unittest discover`; run the relevant files directly, or use the repository
   check script that invokes them explicitly. Confirm the reported test count.
 - For finding fields shown to editors, verify CLI JSON and text output and both EmDash Block Kit and React views; a field can survive serialization while being omitted from the interface.
+- For partial HTML projections, validate source positions against the selected subtree and the corresponding ordered elements; matching extracted text alone does not prove that surrounding links or headings map to the same source nodes. Withhold locations when that correspondence cannot be established.
 - Check likely entrypoints and impacted callers before finishing. For source-mapping changes, run adapter and single-content CLI tests, `content_source_locations` and `error_contract_integration`, and the entire affected content-change verdict test module, not only the new scenario: older cases can encode separate expectations about supported and unmapped transformations.
 - After focused validation, run `sh scripts/clippy-strict.sh` for Rust changes.
   The CI applies extra lint rules beyond ordinary `cargo clippy -- -D warnings`;
