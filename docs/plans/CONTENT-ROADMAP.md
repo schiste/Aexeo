@@ -39,6 +39,11 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 
 ## Delivery tracker
 
+- [x] Optional, composable total character-count gate for text, Markdown, HTML,
+  EmDash and change evaluation, with optional Unicode whitespace exclusion and
+  explicit unavailable-text handling. Counts Unicode scalar values, not visual
+  graphemes or linguistic words; thresholds remain host-defined.
+
 - [x] Bound content CLI auxiliary files with per-file and shared byte budgets;
   optional local telemetry records limit events without paths or input data.
   Exceeding a limit aborts the command instead of returning a partial report.

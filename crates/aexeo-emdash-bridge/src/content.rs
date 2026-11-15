@@ -1056,6 +1056,23 @@ mod tests {
     }
 
     #[test]
+    fn character_count_respects_emdash_body_availability() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"children":[{"_type":"span","text":"你好 世界"}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='chars'\nkind='character_count'\nmin=4\nmax=4\nignore_whitespace=true\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Passed);
+        assert_eq!(report.gates[0].measurements["character_count"], 4);
+        let missing =
+            evaluate_content_with_body_availability(&document, &preset, None, false).unwrap();
+        assert_eq!(missing.gates[0].status, GateStatus::NotChecked);
+        assert!(
+            !missing.gates[0]
+                .measurements
+                .contains_key("character_count")
+        );
+    }
+
+    #[test]
     fn unavailable_body_is_not_an_empty_body() {
         let document: EmdashDocument =
             serde_json::from_str(r#"{"route":"/test","title":"Test"}"#).unwrap();

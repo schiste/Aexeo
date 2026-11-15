@@ -4,6 +4,80 @@ use std::{
 };
 
 #[test]
+fn character_count_works_across_cli_adapters_and_missing_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("chars.toml");
+    std::fs::write(&preset, "version=1\nname='chars'\n[[gates]]\nid='characters'\nkind='character_count'\nmin=4\nmax=4\nignore_whitespace=true\n").unwrap();
+    let source = format!("custom={}", preset.display());
+    for (format, content) in [
+        ("text", "你好 世界"),
+        ("paragraph-text", "你好 世界"),
+        ("markdown", "你好 **世界**"),
+        ("html", "<p>你好 世界</p>"),
+    ] {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                "-",
+                "--preset",
+                "custom",
+                "--preset-source",
+                &source,
+                "--input-format",
+                format,
+                "--format",
+                "json",
+                "--telemetry",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(content.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{format}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["gates"][0]["status"], "passed", "{format}");
+        assert_eq!(
+            report["gates"][0]["measurements"]["character_count"], 4,
+            "{format}"
+        );
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("你好"));
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "--no-text",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &source,
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "not_checked");
+    assert!(
+        report["gates"][0]["measurements"]
+            .get("character_count")
+            .is_none()
+    );
+}
+
+#[test]
 fn stdin_content_returns_structured_findings() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
         .args(["content", "-", "--preset", "glossary", "--format", "json"])
