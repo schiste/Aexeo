@@ -40,6 +40,10 @@ Existing source and factuality work is outside this plan.
   This is a coverage observation, not evidence of accuracy, recall, or editorial
   quality; the sample has no validated labels. A single human's reviews can
   support local calibration, but are not independent multi-reviewer validation.
+- The opt-in duplicate-paragraph starter was run on those 19 development
+  excerpts: 259 paragraphs met its 40-character threshold, 20 were excluded,
+  and none was flagged. This is coverage only; no held-out examples or
+  independently validated labels were used.
 - A configured EmDash plugin and real WASM were exercised across refresh and
   save with an explicitly injected provider. A workerd test exercises the
   sidecar's service binding, actual WASM, and rejection of stale results.

@@ -108,6 +108,84 @@ fn duplicate_paragraphs_locate_the_second_markdown_paragraph() {
 }
 
 #[test]
+fn builtin_duplicate_review_composes_overrides_and_guides_revision() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("review.toml");
+    let draft = dir.path().join("draft.md");
+    fs::write(
+        &preset,
+        "version=1\nname='Review'\nextends=['article-editorial','duplicate-paragraph-review']\n",
+    )
+    .unwrap();
+    let source = format!("review={}", preset.display());
+    let paragraph = "The team checks backups before every planned deployment.";
+    fs::write(
+        &draft,
+        format!(
+            "{paragraph}\n\n{}\n\nShort.\n\nShort.\n",
+            paragraph.to_uppercase()
+        ),
+    )
+    .unwrap();
+    let report = evaluate(&draft, &source);
+    assert_eq!(status(&report, "editorial.duplicate_paragraphs"), "failed");
+    assert!(report["source_locations"].as_array().unwrap().iter().any(
+        |location| location["gate_id"] == "editorial.duplicate_paragraphs" && location["line"] == 3
+    ));
+    let gate = report["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|gate| gate["gate_id"] == "editorial.duplicate_paragraphs")
+        .unwrap();
+    assert_eq!(gate["blocking"], false);
+    assert_eq!(gate["measurements"]["paragraphs_skipped"], 2);
+    fs::write(
+        &draft,
+        format!("{paragraph}\n\nA different paragraph explains who owns recovery.\n"),
+    )
+    .unwrap();
+    assert_eq!(
+        status(&evaluate(&draft, &source), "editorial.duplicate_paragraphs"),
+        "passed"
+    );
+    fs::write(&draft, format!("{paragraph}\n\n{paragraph}\n")).unwrap();
+    fs::write(&preset, "version=1\nname='Review'\nextends=['duplicate-paragraph-review']\n[[gates]]\nid='editorial.duplicate_paragraphs'\nkind='duplicate_paragraphs'\nmax_occurrences=2\nmin_chars=40\ncase_insensitive=true\nblocking=false\n").unwrap();
+    assert_eq!(
+        status(&evaluate(&draft, &source), "editorial.duplicate_paragraphs"),
+        "passed"
+    );
+    let list = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(["content", "--list-presets"])
+        .output()
+        .unwrap();
+    assert!(list.status.success());
+    assert!(
+        String::from_utf8(list.stdout)
+            .unwrap()
+            .contains("duplicate-paragraph-review")
+    );
+    let telemetry = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            draft.to_str().unwrap(),
+            "--input-format",
+            "markdown",
+            "--preset",
+            "duplicate-paragraph-review",
+            "--format",
+            "json",
+            "--telemetry",
+        ])
+        .output()
+        .unwrap();
+    assert!(telemetry.status.success());
+    let event: serde_json::Value = serde_json::from_slice(&telemetry.stderr).unwrap();
+    assert_eq!(event["summary"]["failed"], 1);
+    assert!(!String::from_utf8_lossy(&telemetry.stderr).contains(paragraph));
+}
+
+#[test]
 fn repeated_openings_with_unassessable_paragraphs_preserve_findings() {
     let dir = tempfile::tempdir().unwrap();
     let preset = dir.path().join("review.toml");

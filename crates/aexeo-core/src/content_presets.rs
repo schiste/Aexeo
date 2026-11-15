@@ -128,6 +128,10 @@ fn merge_gate(gates: &mut Vec<ContentGate>, gate: ContentGate) {
 pub fn builtin_content_presets() -> BTreeMap<String, String> {
     BTreeMap::from([
         (
+            "duplicate-paragraph-review".into(),
+            include_str!("../presets/duplicate-paragraph-review.toml").into(),
+        ),
+        (
             "writing-patterns".into(),
             include_str!("../presets/writing-patterns.toml").into(),
         ),

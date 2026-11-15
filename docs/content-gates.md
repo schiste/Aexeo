@@ -1017,9 +1017,17 @@ without paths, content or identifiers.
 
 ### Duplicate paragraphs
 
-The opt-in `duplicate_paragraphs` gate reports exact repeated paragraphs after
-normalizing whitespace. It does not detect AI authorship or semantic similarity.
-It is advisory by default and requires an adapter that supplies paragraphs.
+The opt-in `duplicate-paragraph-review` preset reports repeated paragraphs of
+at least 40 Unicode scalar values after normalizing whitespace; comparison also
+uses lowercase. The threshold is a configurable starting point, not a quality score.
+Compose or override its `editorial.duplicate_paragraphs` gate for the content
+being reviewed. It is advisory and requires an adapter that supplies paragraphs.
+Neither the preset nor the underlying `duplicate_paragraphs` gate detects AI
+authorship or semantic similarity; repeated passages can be intentional.
+
+```sh
+aexeo-cli content draft.md --input-format markdown --preset duplicate-paragraph-review --telemetry
+```
 
 ```toml
 [[gates]]

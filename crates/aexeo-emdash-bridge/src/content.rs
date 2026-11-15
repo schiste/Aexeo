@@ -830,6 +830,30 @@ mod tests {
     }
 
     #[test]
+    fn builtin_duplicate_review_maps_and_withholds_unavailable_body() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/t","title":"T","body":[{"children":[{"_type":"span","text":"The team checks backups before every planned deployment."}]},{"children":[{"_type":"span","text":"THE TEAM CHECKS BACKUPS BEFORE EVERY PLANNED DEPLOYMENT."}]}]}"#).unwrap();
+        let preset =
+            resolve_content_preset("duplicate-paragraph-review", &builtin_content_presets())
+                .unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert!(!report.gates[0].blocking);
+        let locations = source_locations(&document, &preset, &report);
+        assert_eq!(locations.len(), 1);
+        assert_eq!(
+            (
+                locations[0].block_index,
+                locations[0].span_index,
+                locations[0].utf16_offset
+            ),
+            (1, 0, 0)
+        );
+        let unavailable =
+            evaluate_content_with_body_availability(&document, &preset, None, false).unwrap();
+        assert_eq!(unavailable.gates[0].status, GateStatus::NotChecked);
+    }
+
+    #[test]
     fn duplicate_paragraph_maps_to_emdash_block() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/t","title":"T","body":[{"children":[{"_type":"span","text":"Repeated prose."}]},{"children":[{"_type":"span","text":"Repeated prose."}]}]}"#).unwrap();
         let preset = ContentPreset::from_toml("version=1\nname='review'\n[[gates]]\nid='dupe'\nkind='duplicate_paragraphs'\nmax_occurrences=1\n").unwrap();

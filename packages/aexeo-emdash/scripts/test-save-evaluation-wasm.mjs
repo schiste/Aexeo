@@ -89,6 +89,32 @@ const rulesAt = (host, route) => {
 };
 const has = (host, route, ruleId) => rulesAt(host, route).has(ruleId);
 
+// The shipped preset must work through configured save and real WASM, with
+// a source location an editor can use and a clean recheck after revision.
+{
+  const configured = createPlugin({ contentPreset: { name: "duplicate-paragraph-review" } });
+  const paragraph = "The team checks backups before every planned deployment.";
+  const page = item("duplicate-review", {
+    data: { body: [block("one", paragraph), block("two", paragraph.toUpperCase())] },
+  });
+  const host = fakeHost([page]);
+  const evaluate = () => configured.hooks["content:afterSave"].handler(
+    { content: page, collection: "pages", isNew: false }, host.ctx,
+  );
+  await evaluate();
+  const finding = host.store.get("findings:/duplicate-review").findings.find(
+    (result) => result.rule_id === "editorial.duplicate_paragraphs",
+  );
+  assert.ok(finding);
+  assert.deepEqual(finding.aexeo_cms_location,
+    { path: ["data", "body", 1, "children", 0, "text"], utf16_offset: 0 });
+  page.data.body[1] = block("two", "A different paragraph explains who owns recovery.");
+  await evaluate();
+  assert.equal(has(host, "/duplicate-review", "editorial.duplicate_paragraphs"), false);
+  assert.deepEqual(host.logged, []);
+  console.log("WASM duplicate paragraph preset reports and clears a CMS finding");
+}
+
 // Exercise the injected runtime provider through the actual configured hooks
 // and WASM, including a later fix and re-evaluation.
 {
