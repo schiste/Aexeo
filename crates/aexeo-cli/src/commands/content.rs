@@ -558,6 +558,9 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         for fix in &report.applied_fixes {
             println!("Applied fix: {fix}");
         }
+        // Locations are collected in report gate and finding order above. Walking
+        // them once avoids rescanning all previous locations for every finding.
+        let mut locations = source_locations.iter().peekable();
         for gate in &report.gates {
             println!("{}: {:?}", gate.gate_id, gate.status);
             for (name, value) in &gate.measurements {
@@ -567,7 +570,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 println!("  {reason}");
             }
             for (finding_index, finding) in gate.findings.iter().enumerate() {
-                let location = source_locations.iter().find(|location| {
+                let location = locations.next_if(|location| {
                     location.gate_id == gate.gate_id && location.finding_index == finding_index
                 });
                 println!(

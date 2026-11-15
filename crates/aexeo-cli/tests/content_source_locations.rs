@@ -153,3 +153,37 @@ fn plain_text_formats_report_exact_unicode_source_positions() {
         assert!(!String::from_utf8_lossy(&output.stderr).contains("interdit"));
     }
 }
+
+#[test]
+fn text_report_keeps_sparse_source_locations_across_gates() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("article.md");
+    let preset = dir.path().join("preset.toml");
+    fs::write(
+        &file,
+        "---\ntitle: hidden\n---\n# Héllo *world*\n\nEscaped \\*star\\*.\n",
+    )
+    .unwrap();
+    fs::write(&preset, "version=1\nname='test'\n[[gates]]\nid='one'\nkind='forbidden_terms'\nterms=['star','world']\n[[gates]]\nid='two'\nkind='forbidden_terms'\nterms=['world','star']\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            file.to_str().unwrap(),
+            "--input-format",
+            "markdown",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(text.matches(":4:10: Forbidden term: world").count(), 2);
+    assert_eq!(
+        text.matches("Forbidden term: star (projected text ")
+            .count(),
+        2
+    );
+}
