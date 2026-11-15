@@ -10,6 +10,7 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Show source-location coverage and its limits in both EmDash editorial views, including an unavailable state for older reports.
 - Support an optional `character_count` content gate with minimum and maximum Unicode scalar-value bounds and optional whitespace exclusion. Unavailable body text remains `not_checked`; limits do not measure grapheme clusters or linguistic words.
 - Distinguish observed missing headings and metadata from unavailable inputs in content gate measurements.
 - Offer the optional `duplicate-paragraph-review` content preset for advisory review of repeated paragraphs; its parameters can be composed and overridden. Repetition does not establish AI authorship.

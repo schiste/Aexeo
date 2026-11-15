@@ -28,8 +28,9 @@
 import * as React from "react";
 import { useCallback, useEffect, useState } from "react";
 import { cmsBodyCoverageNotice } from "../cms-coverage.js";
-import { describeGate, summarizeGates } from "../assessment-display.js";
+import { describeGate, describeSourceMapping, summarizeGates } from "../assessment-display.js";
 import type { FindingsPayload, RouteSummary } from "../data-route.js";
+import type { DocumentAssessment } from "../plugin.js";
 
 const PLUGIN_ID = "aexeo-emdash";
 const API_BASE = "/_emdash/api";
@@ -38,6 +39,16 @@ interface FetchState {
   loading: boolean;
   error: string | null;
   payload: FindingsPayload | null;
+}
+
+/** Shared presentation of one persisted assessment, including older records. */
+export function ContentAssessmentDetails({ assessment }: { assessment: Extract<DocumentAssessment, { status: "evaluated" }> }): React.JSX.Element {
+  return <details>
+    <summary>Content preset: {assessment.preset} — {summarizeGates(assessment.gates)}</summary>
+    <p>Results cover only these configured checks.</p>
+    <p>{describeSourceMapping(assessment.source_mapping)}</p>
+    <ul>{assessment.gates.map((gate) => <li key={gate.gate_id}>{describeGate(gate)}</li>)}</ul>
+  </details>;
 }
 
 export function Findings(): React.JSX.Element {
@@ -198,11 +209,7 @@ export function Findings(): React.JSX.Element {
           <strong>{route.route}</strong>
           {route.assessment?.status !== "error" && cmsBodyCoverageNotice(route.body_coverage) && <p>{cmsBodyCoverageNotice(route.body_coverage)}</p>}
           {route.assessment?.status === "error" ? <p>Evaluation failed: {route.assessment.reason}. Findings are unavailable for this revision.</p> :
-            route.assessment?.status === "evaluated" ? <details>
-              <summary>Content preset: {route.assessment.preset} — {summarizeGates(route.assessment.gates)}</summary>
-              <p>Results cover only these configured checks.</p>
-              <ul>{route.assessment.gates.map((gate) => <li key={gate.gate_id}>{describeGate(gate)}</li>)}</ul>
-            </details> : null}
+            route.assessment?.status === "evaluated" ? <ContentAssessmentDetails assessment={route.assessment} /> : null}
         </section>
       ))}
 

@@ -462,9 +462,11 @@ eligibility definition. A mapped position identifies only the evaluated snapshot
 
 Single-item EmDash reports include counts of emitted findings eligible for source
 location, mapped findings, and unmapped findings. Aggregate opt-in telemetry includes
-the same eligible and unmapped counts, without content or identifiers. Counts omit
-findings truncated by the report limit; a location identifies the evaluated snapshot,
-not a later edited document. Older WASM bridges do not provide the extra counts.
+the same eligible and unmapped counts, without content or identifiers. Both the
+Block Kit document panel and React assessment show these counts, or explicitly
+say they are unavailable for older reports. Counts precede suppressions and omit findings truncated by
+the report limit; a location identifies the evaluated snapshot, not a later
+edited document. Older WASM bridges do not provide the extra counts.
 
 ### Collection finding limits and identities
 
