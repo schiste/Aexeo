@@ -77,6 +77,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For EmDash source-mapping tests, external diagnostics must be within the
   projected text. Use the valid position immediately after the last character
   to exercise an unmapped boundary; an out-of-range line is rejected earlier.
+- Keep real-content review packets awaiting people in a durable private directory,
+  outside Git and temporary cleanup locations; verify restrictive permissions,
+  preserve the corpus and rubric, and never treat placeholder labels as reviews.
 - For protected site comparisons, verify the HTTP method and final response URL:
   a successful login page after a redirect is not an observed site page, and
   CMS access alone does not establish a matching rendered snapshot.
