@@ -20,6 +20,17 @@ class FeedbackTests(unittest.TestCase):
         self.corpus = {"version": 1, "gate_id": "length", "examples": [
             {"id": "e1", "split": "development", "text": self.text, "expected": "passed"}]}
 
+    def test_projection_is_preserved_and_cannot_be_exported_as_raw_text(self):
+        self.report["content_projection"] = {"format": "html", "scope": "main"}
+        note = module.capture(self.text, self.report, "length", "e1", "passed", "person", "manual")
+        self.assertEqual(note["content_projection"], self.report["content_projection"])
+        with self.assertRaisesRegex(ValueError, "projection"):
+            module.export_review(self.corpus, note)
+        for projection in (None, {"format": "html", "scope": "other"}, {"format": "html", "scope": "main", "extra": 1}):
+            self.report["content_projection"] = projection
+            with self.assertRaisesRegex(ValueError, "projection"):
+                module.capture(self.text, self.report, "length", "e1")
+
     def test_combines_blind_opinions_without_fabricating_model_verdicts(self):
         self.corpus["examples"][0]["metadata"] = {"lang": "fr"}
         first = module.blind_packet(self.corpus, "development", "Assess length.")

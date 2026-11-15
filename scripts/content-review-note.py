@@ -52,6 +52,11 @@ def capture(text, report, gate_id, example_id, human_status=None, reviewer=None,
         raise ValueError("report input fingerprint does not match the text and metadata")
     else:
         note["report_binding"] = "verified"
+    if "content_projection" in report:
+        projection = report["content_projection"]
+        if projection != {"format": "html", "scope": "main"}:
+            raise ValueError("unsupported content projection in report")
+        note["content_projection"] = copy.deepcopy(projection)
     if "resolved_policy_fingerprint" in report:
         spec = importlib.util.spec_from_file_location("content_gate_evaluation", Path(__file__).with_name("evaluate-content-gates.py"))
         module = importlib.util.module_from_spec(spec)
@@ -63,6 +68,8 @@ def capture(text, report, gate_id, example_id, human_status=None, reviewer=None,
 def _review_event(corpus, note, module, version):
     if note.get("version") != 1 or note.get("kind") != "reported_human_feedback":
         raise ValueError("unsupported feedback note")
+    if "content_projection" in note:
+        raise ValueError("feedback with a content projection cannot be exported to this corpus format")
     if note.get("gate_id") != corpus.get("gate_id"):
         raise ValueError("feedback gate does not match corpus")
     statuses = {"passed", "failed", "uncertain"} if version == 3 else {"passed", "failed"}
