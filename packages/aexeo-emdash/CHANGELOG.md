@@ -6,11 +6,18 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-- Require explicit custom-block mappings; inherited properties no longer certify body coverage.
+## [0.9.2] - 2026-11-15
+
+### Added
+
+- Offer the optional `duplicate-paragraph-review` content preset for advisory review of repeated paragraphs; its parameters can be composed and overridden. Repetition does not establish AI authorship.
+- Show actionable editorial suggestions when supported by a finding.
 
 ### Fixed
 
+- Require explicit custom-block mappings; inherited properties no longer certify body coverage.
 - Treat non-boolean `optional` values in custom block mappings as unverified, preserving known prose without claiming complete body coverage.
+- Bound repeated paragraph opening checks and report incomplete assessments when evaluation limits are reached.
 
 ## [0.9.1] - 2026-11-12
 
