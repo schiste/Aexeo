@@ -99,6 +99,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   Lexical checks and per-component no-follow opens alone do not prevent a
   concurrent directory rename from escaping the root; use an atomic platform
   primitive or fail closed, and run the tests on each supported platform.
+- For CLI revalidation failures, assert the specific error exit and diagnostic,
+  and that any previous output remains unchanged. A nonzero exit alone can be
+  an ordinary failed editorial gate rather than a rejected revalidation.
 - For receipt or manifest comparisons, test a supplied artifact changing
   between verification passes, and ensure different input snapshots are rejected.
   A matching digest does not establish provenance or protect later publication.
