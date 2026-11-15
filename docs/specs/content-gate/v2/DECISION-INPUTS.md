@@ -155,6 +155,17 @@ comparator continues to check only the envelope. Schema and consistency checks
 do not verify the subject against the intended change, validator exit code,
 required gates, actual evaluator behavior or content authenticity.
 
+The repeatable `--require-check ID` option implies verdict validation and requires
+both verdicts to pass, with each exact host-supplied check ID present once,
+blocking and passed. Duplicate check IDs and duplicate or blank requested IDs
+are rejected. IDs are scoped to the evaluated entities: the host must obtain the
+expected IDs independently and supply the complete set it requires. This check
+does not establish that the evaluator actually ran, authenticate the receipts,
+validate the exit code, bind the subject or verify content; combine the relevant
+options and trusted inputs for those checks. Telemetry records only the number
+of required checks, never their IDs. A passing comparison is not authorization
+to publish.
+
 The additional opt-in `--verify-subject` derives the v1 subject (change ID,
 base, and ordered entity IDs and after digests) from the independently supplied
 change artifact and compares it with both receipts. It rereads and hashes that

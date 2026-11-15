@@ -103,6 +103,25 @@ def validate_verdict(verdict):
         raise VerificationError("inconsistent verdict status")
 
 
+def require_passed_checks(verdict, required_checks):
+    """Require the host's exact check IDs in a validated passing verdict."""
+    if (not required_checks or any(not isinstance(item, str) or not item.strip() for item in required_checks)
+            or len(set(required_checks)) != len(required_checks)):
+        raise VerificationError("invalid required check IDs")
+    if verdict["status"] != "pass":
+        raise VerificationError("verdict does not pass")
+    checks_by_id = {}
+    for check in verdict["checks"]:
+        check_id = check["id"]
+        if check_id in checks_by_id:
+            raise VerificationError("duplicate check ID")
+        checks_by_id[check_id] = check
+    for check_id in required_checks:
+        check = checks_by_id.get(check_id)
+        if check is None or not check["blocking"] or check["status"] != "passed":
+            raise VerificationError("required check did not pass as blocking")
+
+
 def _typed_equal(left, right):
     # Python otherwise considers True == 1 and 1 == 1.0. Preserve JSON value
     # types and arrays; object order is irrelevant and all members are compared.
@@ -218,14 +237,17 @@ def verify_subject(change_path, expected_digest, verdict, validate_change=False,
         raise VerificationError("unable to verify verdict subject") from error
 
 
-def compare_receipts(previous_bytes, fresh_bytes, artifacts, validate=False, verify_change_subject=False, validate_change=False, verify_inline_content=False, content_files=None):
+def compare_receipts(previous_bytes, fresh_bytes, artifacts, validate=False, verify_change_subject=False, validate_change=False, verify_inline_content=False, content_files=None, required_checks=None):
     if verify_inline_content and content_files is not None:
         raise VerificationError("content verification modes are mutually exclusive")
     previous, old_manifest = parse_receipt(previous_bytes)
     fresh, _ = parse_receipt(fresh_bytes)
-    if validate:
+    if validate or required_checks is not None:
         validate_verdict(previous["verdict"])
         validate_verdict(fresh["verdict"])
+    if required_checks is not None:
+        require_passed_checks(previous["verdict"], required_checks)
+        require_passed_checks(fresh["verdict"], required_checks)
     # Equal decisions must refer to the same input snapshot. Comparing the
     # manifests first also lets us read each supplied artifact just once.
     if previous["decision_inputs"] != fresh["decision_inputs"]:
@@ -259,6 +281,7 @@ def main(argv=None):
         group.add_argument("--" + role.replace("_", "-"))
         group.add_argument("--" + role.replace("_", "-") + "-absent", action="store_true")
     parser.add_argument("--validate-verdicts", action="store_true", help="validate v1 schemas and check summary consistency (requires jsonschema and RFC 3339 support)")
+    parser.add_argument("--require-check", action="append", help="require this exact check ID to be blocking and passed; implies verdict validation; repeatable")
     parser.add_argument("--verify-subject", action="store_true", help="compare both v1 subjects to the independently supplied change artifact")
     parser.add_argument("--validate-change", action="store_true", help="validate the bound change against its v1 schema and verify its verdict subject")
     content_mode = parser.add_mutually_exclusive_group()
@@ -272,7 +295,8 @@ def main(argv=None):
             return
         event = {"event": "offline_receipt_comparison", "status": status,
                  "duration_ms": round((time.perf_counter() - started) * 1000, 3),
-                 "verdict_validation_requested": args.validate_verdicts,
+                 "verdict_validation_requested": args.validate_verdicts or args.require_check is not None,
+                 "required_check_count": len(args.require_check or []),
                  "subject_verification_requested": args.verify_subject or args.validate_change or args.verify_inline_content or args.content_files is not None,
                  "change_validation_requested": args.validate_change or args.verify_inline_content or args.content_files is not None,
                  "inline_content_verification_requested": args.verify_inline_content,
@@ -292,7 +316,8 @@ def main(argv=None):
         stats = compare_receipts(previous, fresh, artifacts, validate=args.validate_verdicts,
                                  verify_change_subject=args.verify_subject, validate_change=args.validate_change,
                                  verify_inline_content=args.verify_inline_content,
-                                 content_files=read_content_map(args.content_files) if args.content_files is not None else None)
+                                 content_files=read_content_map(args.content_files) if args.content_files is not None else None,
+                                 required_checks=args.require_check)
     except (OSError, VerificationError):
         telemetry("error")
         print("Offline receipt comparison failed.", file=sys.stderr)
