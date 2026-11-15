@@ -564,9 +564,10 @@ describe("assessment persistence", () => {
   });
   it("shows passed checks and measurements in the document panel", async () => {
     const { ctx } = host();
-    await save(ctx, item("a", NEW), async () => ({ ok: true, findings: [], assessments: { "/a": { status: "evaluated", preset: "article", gates: [{ gate_id: "words", status: "passed", blocking: false, scope: "document", required_capability: "text", reason: null, measurements: { word_count: 50, min_words: 20 } }] } } }));
+    await save(ctx, item("a", NEW), async () => ({ ok: true, findings: [], assessments: { "/a": { status: "evaluated", preset: "article", source_mapping: { eligible: 2, mapped: 1, unmapped: 1 }, gates: [{ gate_id: "words", status: "passed", blocking: false, scope: "document", required_capability: "text", reason: null, measurements: { word_count: 50, min_words: 20 } }] } } }));
     const panel = JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"));
     expect(panel).toContain("Content preset: article");
+    expect(panel).toContain("Source locations: 1 of 2 emitted findings mapped; 1 unmapped.");
     expect(panel).toContain("words passed (advisory) — word count: 50, min words: 20");
     const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator: returning() });
     expect(payload.routes.find((route) => route.route === "/a")?.assessment).toMatchObject({ gates: [{ measurements: { word_count: 50, min_words: 20 } }] });

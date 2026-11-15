@@ -16,3 +16,9 @@ export function summarizeGates(gates: readonly Gate[]): string {
   for (const gate of gates) counts[gate.status]++;
   return `${gates.length} configured checks: ${counts.passed} passed, ${counts.failed} failed, ${counts.not_checked} not checked`;
 }
+
+/** Coverage applies to emitted findings from the evaluated snapshot only. */
+export function describeSourceMapping(mapping: Extract<DocumentAssessment, { status: "evaluated" }>["source_mapping"]): string {
+  if (mapping === undefined) return "Source location coverage is unavailable for this assessment.";
+  return `Source locations: ${mapping.mapped} of ${mapping.eligible} emitted findings mapped; ${mapping.unmapped} unmapped. Counts cover the assessment before suppressions; report limits may omit findings. Positions refer to the evaluated snapshot.`;
+}

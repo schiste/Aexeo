@@ -1,4 +1,4 @@
-import { describeGate, summarizeGates } from "./assessment-display.js";
+import { describeGate, describeSourceMapping, summarizeGates } from "./assessment-display.js";
 import { cmsBodyCoverageNotice, isCmsObservableFinding, type CmsBodyCoverage } from "./cms-coverage.js";
 import type { CustomBlockMappings } from "./adapter.js";
 // Shared Block Kit view layer for both plugin entrypoints.
@@ -501,7 +501,7 @@ export async function renderDocumentPanel(
       ...(incomplete ? [{ type: "context", text: "Sitewide and cross-document checks are unavailable; refresh after resolving the CMS input error." }] : []),
       ...(record && assessment === undefined ? [{ type: "context", text: "No content preset assessment was recorded for this document; absence of findings is not an editorial quality assessment." }] : []),
       ...(assessment?.status === "error" ? [{ type: "context", text: `Evaluation failed: ${assessment.reason}. Findings are unavailable for this revision.` }] : []),
-      ...(assessment?.status === "evaluated" ? [{ type: "context", text: `Content preset: ${assessment.preset}. ${summarizeGates(assessment.gates)}. Results cover only these configured checks.` }, ...assessment.gates.map((gate) => ({ type: "context", text: describeGate(gate) }))] : []),
+      ...(assessment?.status === "evaluated" ? [{ type: "context", text: `Content preset: ${assessment.preset}. ${summarizeGates(assessment.gates)}. Results cover only these configured checks.` }, { type: "context", text: describeSourceMapping(assessment.source_mapping) }, ...assessment.gates.map((gate) => ({ type: "context", text: describeGate(gate) }))] : []),
       ...(findings.length === 0
         ? []
         : [{ type: "divider" }, documentFindingsTable(sorted)]),
