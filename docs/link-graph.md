@@ -281,8 +281,13 @@ orphans. `--telemetry` retains the same opt-in, aggregate-only behavior.
 To compare an audit with an explicitly captured inventory, pass
 `--audit --context context.json`. The context has the shape
 `{"identity": {"origin":"https://example.org", "release":"r", "surface":"public", "snapshot":"s"}, "snapshot_date":"2026-01-01T00:00:00Z", "inventory": { ... }}`;
-the inventory object uses the same schema as above. Identity and date are
-caller-supplied, not independently established by the audit. A context never
+the inventory object uses the same schema as above. An EmDash export or bare
+inventory can also be supplied directly. If the top-level identity is omitted,
+the context uses the inventory's claimed identity; an explicit `"identity": null`
+remains unknown. This applies to audit, static and crawl link-graph contexts,
+as well as the context derived from `--seed-file`. Export issues and omitted
+counts still need to be inspected separately; the export remains incomplete.
+Identity and date are caller-supplied, not independently established by the audit. A context never
 makes the crawl complete on its own: matching identities still leave
 `crawl_complete` `false` unless the audit carries a crawl attestation that
 meets every condition below.
@@ -432,8 +437,8 @@ output file can include URLs and page text.
 
 With `--seed-file`, that report uses the seed file as its context, exactly as
 `link-graph --audit --context` would: the top-level `identity` and
-`snapshot_date` the file declares, as a `--context` file does, else the
-inventory's own identity and no date, so an EmDash export or a bare inventory
+`snapshot_date` the file declares, as a `--context` file does; an omitted
+identity uses the inventory's own identity, while explicit `null` remains unknown, so an EmDash export or a bare inventory
 works as is. The report therefore reconciles the inventory, an attested
 release, if any, replaces the declared one, and `snapshot_date` falls back to the date
 of the crawl's `snapshot.started_at`. Since the seed and the context are the

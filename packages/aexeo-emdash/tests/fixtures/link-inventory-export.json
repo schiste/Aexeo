@@ -1,0 +1,30 @@
+{
+  "inventory": {
+    "identity": {
+      "origin": "https://other.example",
+      "release": "r1",
+      "surface": "public",
+      "snapshot": "s1"
+    },
+    "complete": false,
+    "pages": [
+      {
+        "url": "https://other.example/en/a",
+        "disposition": "published",
+        "target": null,
+        "locale": "en"
+      },
+      {
+        "url": "https://other.example/fr/b",
+        "disposition": "draft",
+        "target": null,
+        "locale": "fr"
+      }
+    ]
+  },
+  "issues": [
+    "transactional_snapshot_unavailable"
+  ],
+  "scanned": 2,
+  "omitted": 0
+}

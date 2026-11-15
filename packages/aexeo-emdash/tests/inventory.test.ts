@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { exportLinkInventory } from "../src/inventory.js";
+import crossStackExport from "./fixtures/link-inventory-export.json";
 import type { EmdashContentItem } from "../src/adapter.js";
 
 function item(id: string, status = "published"): EmdashContentItem {
@@ -7,6 +8,20 @@ function item(id: string, status = "published"): EmdashContentItem {
 }
 
 describe("conservative EmDash link inventory", () => {
+  it("produces the multilingual inventory fixture consumed by the Rust CLI", async () => {
+    const list = vi.fn(async () => ({ items: [
+      { ...item("a"), locale: "en" },
+      { ...item("b", "draft"), locale: "fr" },
+    ], hasMore: false }));
+    const getPublicUrl = vi.fn(async (_collection: string, id: string) =>
+      id === "a" ? "https://other.example/en/a" : "https://other.example/fr/b");
+    const result = await exportLinkInventory({ list, getPublicUrl }, {
+      collections: ["posts"], identity: crossStackExport.inventory.identity,
+      classify: (entry) => ({ disposition: entry.status === "published" ? "published" : "draft" }),
+    });
+    expect(result).toEqual(crossStackExport);
+  });
+
   it("uses explicit collections and resolved URLs while withholding completeness", async () => {
     const list = vi.fn(async (_collection: string, options?: { cursor?: string }) =>
       options?.cursor

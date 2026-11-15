@@ -79,7 +79,7 @@ pub fn command_link_graph(matches: &ArgMatches) -> Result<i32> {
 /// `crawl --link-graph-context`.
 pub(super) fn read_audit_link_context(path: &str) -> Result<AuditLinkContext> {
     let data = fs::read(path).user_context(format!("cannot read audit link context: {path}"))?;
-    serde_json::from_slice(&data).user_context("invalid audit link context JSON")
+    AuditLinkContext::from_context_document(&data).user_context("invalid audit link context JSON")
 }
 
 pub(super) fn read_static_url_map(
