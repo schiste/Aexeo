@@ -50,6 +50,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 ## Validation Checklist
 
 - Run the fastest relevant test command first.
+- For rules with overlapping triggers, isolate the trigger under test in the
+  regression fixture and confirm the test fails before the fix; another
+  matching trigger can otherwise hide the defect.
 - If a shared Cargo target makes tests resolve `CARGO_MANIFEST_DIR` to another
   worktree or a removed merge simulation, rerun with a fresh `CARGO_TARGET_DIR`
   for this worktree before treating the missing fixture as a product failure.
