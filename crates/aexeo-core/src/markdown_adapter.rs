@@ -17,6 +17,7 @@ pub const MAX_LABEL_NESTING: usize = 100;
 pub const MAX_EMPHASIS_RUNS: usize = 1000;
 /// Bound extra mappings for a single transformed multiline text node.
 const MAX_MAPPED_CONTAINER_LINES: usize = 10_000;
+const MAX_TRANSFORMED_SPANS: usize = 10_000;
 
 /// A conservative mapping from extracted text back to exact Markdown text spans.
 /// Transformed or synthetic text has no mapping.
@@ -388,9 +389,9 @@ fn map_text_spans(
     }
     // A soft-wrapped node may retain newlines while Markdown container
     // prefixes (`>` and indentation) are removed at the start of each line.
-    // Only map this case when every line matches exactly after such a prefix;
-    // transformed entities and escapes remain on the conservative path.
-    if !raw.contains(['&', '\\']) && raw.contains('\n') {
+    // Only map this case when every line reconstructs exactly after such a
+    // prefix. Keep one shared span budget across the entire node.
+    if raw.contains('\n') {
         let raw_lines = raw.split('\n');
         let value_lines = value.split('\n');
         let line_count = raw_lines.clone().count();
@@ -400,18 +401,34 @@ fn map_text_spans(
             let mut value_offset = 0;
             let mut exact = true;
             for (raw_line, value_line) in raw_lines.zip(value_lines) {
-                if let Some(container) = raw_line.strip_suffix(value_line)
-                    && container
-                        .bytes()
-                        .all(|byte| matches!(byte, b' ' | b'\t' | b'>'))
-                {
-                    if !value_line.is_empty() {
-                        mapped.push((
-                            projected_start + value_offset,
-                            projected_start + value_offset + value_line.len(),
-                            source_start + raw_offset + container.len(),
-                        ));
+                let candidate = match raw_line.strip_suffix(value_line) {
+                    Some(prefix)
+                        if prefix
+                            .bytes()
+                            .all(|byte| matches!(byte, b' ' | b'\t' | b'>')) =>
+                    {
+                        value_line
                     }
+                    _ => raw_line.trim_start_matches([' ', '\t', '>']),
+                };
+                let source_offset = source_start + raw_offset + raw_line.len() - candidate.len();
+                let projected_offset = projected_start + value_offset;
+                if candidate == value_line {
+                    if !value_line.is_empty() && mapped.len() < MAX_TRANSFORMED_SPANS {
+                        mapped.push((
+                            projected_offset,
+                            projected_offset + value_line.len(),
+                            source_offset,
+                        ));
+                    } else if !value_line.is_empty() {
+                        exact = false;
+                        break;
+                    }
+                } else if let Some(line_spans) =
+                    map_transformed_text(candidate, value_line, source_offset, projected_offset)
+                    && mapped.len() + line_spans.len() <= MAX_TRANSFORMED_SPANS
+                {
+                    mapped.extend(line_spans);
                 } else {
                     exact = false;
                     break;
@@ -474,7 +491,6 @@ fn map_transformed_text(
     source_start: usize,
     projected_start: usize,
 ) -> Option<Vec<(usize, usize, usize)>> {
-    const MAX_TRANSFORMED_SPANS: usize = 10_000;
     if raw.contains(['\n', '\r', '\0']) {
         return None;
     }
@@ -807,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    fn maps_exact_wrapped_quote_lines_without_guessing_transformed_text() {
+    fn maps_exact_and_transformed_wrapped_quote_lines() {
         let source = "> Premier élan\n> second terme\n> troisième terme\n";
         let (input, _, _, map) = markdown_input_with_source_map("t.md", source).unwrap();
         let text = input.text.unwrap();
@@ -816,10 +832,44 @@ mod tests {
         assert_eq!(map.source_position(source, &text, 2, 1), Some((2, 3)));
         assert_eq!(map.source_position(source, &text, 3, 1), Some((3, 3)));
 
-        let escaped = "> first\n> second &amp; transformed\n> last\n";
+        let escaped = "> first\n> second &amp; \\*transformed\\*\n> last\n";
         let (input, _, _, map) = markdown_input_with_source_map("t.md", escaped).unwrap();
         let text = input.text.unwrap();
-        assert_eq!(map.source_position(escaped, &text, 2, 8), None);
+        assert_eq!(map.source_position(escaped, &text, 2, 8), Some((2, 10)));
+        assert_eq!(map.source_position(escaped, &text, 2, 10), Some((2, 17)));
+        assert_eq!(map.source_position(escaped, &text, 2, 11), Some((2, 18)));
+    }
+
+    #[test]
+    fn wrapped_transformation_span_budget_is_shared_across_lines() {
+        let raw = (0..101)
+            .map(|_| format!("> {}", "&amp;".repeat(100)))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let value = (0..101)
+            .map(|_| "&".repeat(100))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut spans = Vec::new();
+        map_text_spans(&raw, &value, 0, 0, &mut spans);
+        assert!(spans.len() <= 2);
+    }
+
+    #[test]
+    fn wrapped_transformations_do_not_map_when_reconstruction_differs() {
+        let mut spans = Vec::new();
+        map_text_spans(
+            "> first\n> left &amp; altered\n> last",
+            "first\nleft & expected\nlast",
+            0,
+            0,
+            &mut spans,
+        );
+        assert!(
+            spans
+                .iter()
+                .all(|&(start, end, _)| !(start <= 8 && 8 < end))
+        );
     }
 
     #[test]
