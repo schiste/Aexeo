@@ -855,9 +855,11 @@ navigation and footers outside it. If none or more than one is found, dependent
 gates are `not_checked`; an explicitly empty `<main>` remains an observed empty
 body. The default `document` scope preserves the original full-document
 behavior. The JSON report records `content_projection`, and opt-in telemetry
-records the scope without content. Source locations are unavailable for this
-selection because the document-level mapping also includes surrounding markup.
-Source-level checks and fixes still apply to
+records the scope without content. Source locations are supplied for this
+selection only when the entire document has a supported, well-nested lexical
+structure and the selected reconstruction matches the parsed projection;
+otherwise they remain unavailable. Navigation and footer occurrences are not
+mapped as part of the selected main element. Source-level checks and fixes apply to
 the supplied file, not only the selected element. Scope does not prove CSS or
 ARIA visibility, page identity, render completeness, or correctness of CMS
 metadata. The input fingerprint binds the supplied bytes and metadata, not the

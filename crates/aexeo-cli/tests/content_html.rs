@@ -304,7 +304,7 @@ fn html_main_scope_excludes_navigation_and_reports_incomplete_scope() {
     assert_eq!(report["content_projection"]["scope"], "main");
     assert_eq!(
         report["source_location_capability"]["status"],
-        "unavailable"
+        "literal_html"
     );
     let telemetry = String::from_utf8_lossy(&output.stderr);
     assert!(!telemetry.contains("navigation"));
@@ -334,4 +334,47 @@ fn html_scope_requires_html_input() {
         .output()
         .unwrap();
     assert!(!output.status.success());
+}
+
+#[test]
+fn main_scope_maps_the_selected_occurrence_not_navigation_or_footer() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("article.html");
+    let preset = dir.path().join("preset.toml");
+    fs::write(
+        &input,
+        "<nav><p>word</p></nav>\n<main>\n<p>word</p>\n</main>\n<footer><p>word</p></footer>",
+    )
+    .unwrap();
+    fs::write(
+        &preset,
+        "version=1\nname='test'\n[[gates]]\nid='words'\nkind='forbidden_terms'\nterms=['word']\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            input.to_str().unwrap(),
+            "--input-format",
+            "html",
+            "--html-scope",
+            "main",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["source_location_capability"]["status"],
+        "literal_html"
+    );
+    assert_eq!(
+        report["source_locations"],
+        serde_json::json!([{"gate_id":"words", "finding_index":0, "line":3, "column":4}])
+    );
 }

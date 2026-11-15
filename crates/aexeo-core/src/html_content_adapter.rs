@@ -311,11 +311,22 @@ pub(crate) fn mapping_entity(entity: &str) -> Option<(char, Option<char>)> {
 /// matches the parser's projection. Unsupported entities, raw-text or hidden
 /// elements, malformed HTML, and browser-generated content remain unmapped.
 pub fn html_source_map(source: &str, projected: &str) -> Option<HtmlSourceMap> {
+    html_source_map_with_scope(source, projected, HtmlContentScope::Document)
+}
+
+/// Map a selected scope only when the entire lexical structure and projection agree.
+pub fn html_source_map_with_scope(
+    source: &str,
+    projected: &str,
+    scope: HtmlContentScope,
+) -> Option<HtmlSourceMap> {
     use crate::site::markup::{open_tag_end, tag_breaks_text};
     if source.len() > MAX_CONTENT_INPUT_BYTES || source.contains(['\r', '\0', '\x0b']) {
         return None;
     }
     let mut stack: Vec<String> = Vec::new();
+    let mut selected_depth = None;
+    let mut main_seen = false;
     let mut spans = Vec::new();
     let mut heading_starts = Vec::new();
     let mut link_starts = Vec::new();
@@ -327,6 +338,10 @@ pub fn html_source_map(source: &str, projected: &str) -> Option<HtmlSourceMap> {
                 .find('<')
                 .map_or(source.len(), |n| cursor + n);
             let literal = &source[cursor..end];
+            if scope == HtmlContentScope::Main && selected_depth.is_none() {
+                cursor = end;
+                continue;
+            }
             let mut within = 0;
             while within < literal.len() {
                 let rest = &literal[within..];
@@ -368,6 +383,9 @@ pub fn html_source_map(source: &str, projected: &str) -> Option<HtmlSourceMap> {
             "html"
                 | "body"
                 | "main"
+                | "header"
+                | "nav"
+                | "footer"
                 | "article"
                 | "section"
                 | "div"
@@ -393,19 +411,35 @@ pub fn html_source_map(source: &str, projected: &str) -> Option<HtmlSourceMap> {
             if !rest.trim().is_empty() || stack.pop().as_deref() != Some(&tag) {
                 return None;
             }
-            if tag_breaks_text(&tag) {
+            if tag_breaks_text(&tag)
+                && (scope == HtmlContentScope::Document || selected_depth.is_some())
+            {
                 output.push('\n');
             }
+            if tag == "main" && scope == HtmlContentScope::Main {
+                if selected_depth != Some(stack.len()) {
+                    return None;
+                }
+                selected_depth = None;
+            }
         } else {
+            if tag == "main" && scope == HtmlContentScope::Main {
+                if main_seen || selected_depth.is_some() {
+                    return None;
+                }
+                main_seen = true;
+                selected_depth = Some(stack.len());
+            }
+            let selected = scope == HtmlContentScope::Document || selected_depth.is_some();
             // Restrict attributes to a form that cannot affect projection or
             // hide a subtree. Other valid HTML is still evaluated without a map.
             if !safe_mapping_attributes(rest, tag == "br") || stack.len() >= 256 {
                 return None;
             }
-            if matches!(tag.as_str(), "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
+            if selected && matches!(tag.as_str(), "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
                 heading_starts.push(cursor);
             }
-            if tag == "a" && crate::site::markup::attr_value(raw, "href").is_some() {
+            if selected && tag == "a" && crate::site::markup::attr_value(raw, "href").is_some() {
                 link_starts.push(cursor);
             }
             let block = tag_breaks_text(&tag) && tag != "br";
@@ -434,9 +468,11 @@ pub fn html_source_map(source: &str, projected: &str) -> Option<HtmlSourceMap> {
                 return None;
             }
             if tag == "br" {
-                output.push('\n');
+                if selected {
+                    output.push('\n');
+                }
             } else {
-                if block && !output.is_empty() && !output.ends_with('\n') {
+                if selected && block && !output.is_empty() && !output.ends_with('\n') {
                     output.push('\n');
                 }
                 stack.push(tag);
@@ -444,7 +480,7 @@ pub fn html_source_map(source: &str, projected: &str) -> Option<HtmlSourceMap> {
         }
         cursor = end + 1;
     }
-    if !stack.is_empty() || output != projected {
+    if !stack.is_empty() || output != projected || (scope == HtmlContentScope::Main && !main_seen) {
         return None;
     }
     Some(HtmlSourceMap {
@@ -537,6 +573,27 @@ mod tests {
                 .unwrap()
                 .contains("Navigation")
         );
+    }
+
+    #[test]
+    fn maps_main_scope_only_for_verified_structure() {
+        use crate::source_mapping::ContentSourceMap;
+        let source = "<nav><a href='/same'>word</a></nav>\n<main><p><a href='/same'>word</a></p></main>\n<footer>word</footer>";
+        let adapted = html_content_with_scope("x", source, HtmlContentScope::Main).unwrap();
+        let text = adapted.input.text.as_deref().unwrap();
+        let map = html_source_map_with_scope(source, text, HtmlContentScope::Main).unwrap();
+        assert_eq!(map.source_position(source, text, 1, 1), Some((2, 26)));
+        assert_eq!(map.link_position(source, 0), Some((2, 10)));
+        for source in [
+            "<script>fake</script><main><p>word</p></main>",
+            "<nav hidden>word</nav><main><p>word</p></main>",
+            "<main><p>word</p></main><main><p>word</p></main>",
+            "<main><p>word</main></p>",
+        ] {
+            assert!(
+                html_source_map_with_scope(source, "word\n\n", HtmlContentScope::Main).is_none()
+            );
+        }
     }
 
     #[test]

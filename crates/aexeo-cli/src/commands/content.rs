@@ -442,7 +442,6 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         None
     };
     let html_map = if source_complete
-        && !main_scope
         && plain_source.is_none()
         && args.get_one::<String>("input-format").map(String::as_str) == Some("html")
     {
@@ -451,7 +450,14 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             .as_deref()
             .zip(input.text.as_deref())
             .and_then(|(source, projected)| {
-                aexeo_core::html_content_adapter::html_source_map(source, projected)
+                let scope = if main_scope {
+                    aexeo_core::html_content_adapter::HtmlContentScope::Main
+                } else {
+                    aexeo_core::html_content_adapter::HtmlContentScope::Document
+                };
+                aexeo_core::html_content_adapter::html_source_map_with_scope(
+                    source, projected, scope,
+                )
             })
     } else {
         None
