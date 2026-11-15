@@ -182,8 +182,8 @@ def verify_content_states(change, content_files):
 def verify_subject(change_path, expected_digest, verdict, validate_change=False, verify_inline_content=False, content_files=None):
     """Bind the v1 subject to the same change bytes covered by the manifest.
 
-    The optional schema check covers the public v1 change format; it does not
-    verify content files, provenance, completeness or publication state.
+    Optional checks cover the public v1 change schema and content digests.
+    They do not establish provenance, completeness or publication state.
     """
     with _open_regular(change_path) as source:
         data = source.read(MAX_ARTIFACT_BYTES + 1)
