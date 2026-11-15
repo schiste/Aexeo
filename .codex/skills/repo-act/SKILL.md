@@ -94,6 +94,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   Lexical checks and per-component no-follow opens alone do not prevent a
   concurrent directory rename from escaping the root; use an atomic platform
   primitive or fail closed, and run the tests on each supported platform.
+- For receipt or manifest comparisons, test a supplied artifact changing
+  between verification passes, and ensure different input snapshots are rejected.
+  A matching digest does not establish provenance or protect later publication.
 - For public Rust structs, check downstream struct-literal compatibility as well
   as serialized compatibility: adding a field can break callers even when
   Serde still accepts older JSON.
