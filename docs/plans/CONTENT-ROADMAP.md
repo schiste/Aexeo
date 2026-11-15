@@ -39,6 +39,9 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 
 ## Delivery tracker
 
+- [x] Keep EmDash content reports available when an optional synchronous
+  telemetry callback throws; telemetry does not change the gate result.
+
 The `@aeptus/aexeo-emdash` 0.9.2 package is prepared but must be published
 and independently checked against the registry before it is considered delivered.
 

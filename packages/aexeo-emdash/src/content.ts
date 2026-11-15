@@ -129,7 +129,11 @@ export async function evaluateContent(
         event.link_destinations.invalid += invalid;
       }
     }
-    onTelemetry(event);
+    try {
+      onTelemetry(event);
+    } catch {
+      // Optional instrumentation must not change the content report.
+    }
   }
   return report;
 }
