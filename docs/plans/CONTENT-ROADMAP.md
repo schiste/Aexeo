@@ -68,6 +68,10 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] CI benchmarks and conservative budgets for evaluation, Markdown adaptation,
   HTML projection and evaluation, 50-item batches and fresh-process CLI runs, with p50/p95 telemetry. Fresh
   processes do not imply cold operating-system caches.
+- [x] The text renderer walks ordered source locations once instead of rescanning
+  them per finding. `python3 scripts/benchmark-content-report.py target/release/aexeo-cli`
+  measures a synthetic 30,000-finding end-to-end report and emits local aggregate
+  samples; it is an opt-in diagnostic, not a CI budget or a typical workload.
 - [x] Performance budget validation requires every configured benchmark exactly
   once and rejects missing, invalid or non-finite measurements; independent
   content and EmDash example targets have distinct binary names.
