@@ -176,6 +176,23 @@ describe("EmDash content adaptation", () => {
     expect(mapped.body?.map((block) => block.children[0]?.text)).toEqual(["Before", "Question", "After"]);
   });
 
+  it("requires custom block mappings to be own properties", () => {
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: {
+      content: [...body("Before"), { _type: "card", _key: "c", text: "Visible" }, ...body("After")],
+    } };
+    const inherited = Object.create({ card: [] }) as CustomBlockMappings;
+    const unknown = contentItemToEmdashDocument(item, inherited);
+    expect(unknown.body_capabilities).toEqual([]);
+    expect(unknown.body?.map((block) => block.children[0]?.text)).toEqual(["Before", "Visible", "After"]);
+    const own = Object.assign(inherited, { card: [] });
+    expect(contentItemToEmdashDocument(item, own).body_capabilities).toBeUndefined();
+    expect(contentItemToEmdashDocument(item, own).body?.map((block) => block.children[0]?.text)).toEqual(["Before", "After"]);
+    const special = { ...item, data: { content: [...body("Before"), { _type: "__proto__", _key: "p", text: "Visible" }] } };
+    const jsonMapping = JSON.parse('{"__proto__":[]}') as CustomBlockMappings;
+    expect(contentItemToEmdashDocument(special, jsonMapping).body_capabilities).toBeUndefined();
+    expect(contentItemToEmdashDocument(special, jsonMapping).body?.map((block) => block.children[0]?.text)).toEqual(["Before"]);
+  });
+
   it("intersects declared component capabilities across mixed and nested content", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: {
       content: [...body("Before"), { _type: "card", _key: "c", text: "Card" }, { _type: "badge", _key: "b", text: "Badge" }, ...body("After")],
