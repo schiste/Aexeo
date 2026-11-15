@@ -56,6 +56,12 @@ pub const MAX_CONTENT_INPUT_BYTES: usize = 16 * 1024 * 1024;
 /// counts any others, so a truncated gate still reports its full total.
 pub const MAX_FINDINGS_PER_GATE: usize = 1000;
 
+// Bound collection work for adapters that do not impose CLI input limits.
+const MAX_COLLECTION_ITEMS: usize = 100_000;
+const MAX_COLLECTION_KEYS: usize = 10_000;
+const MAX_COLLECTION_KEY_BYTES: usize = 4 * 1024 * 1024;
+const MAX_COLLECTION_VALUE_BYTES: usize = 16 * 1024;
+
 // Keep the advisory openings gate bounded for adapters other than the CLI.
 const MAX_PARAGRAPH_OPENINGS: usize = 100_000;
 const MAX_DISTINCT_PARAGRAPH_OPENINGS: usize = 10_000;
@@ -1408,18 +1414,26 @@ impl ContentPreset {
                         let mut missing = 0;
                         let mut missing_group = 0;
                         let mut duplicates = 0;
-                        for item in items {
-                            let value = item
-                                .metadata
-                                .as_ref()
-                                .and_then(|m| m.get(field))
-                                .filter(|v| !v.trim().is_empty());
+                        let mut evaluated = 0;
+                        let mut key_bytes = 0;
+                        let mut limit_reason = None;
+                        for item in items.iter().take(MAX_COLLECTION_ITEMS) {
+                            let value = item.metadata.as_ref().and_then(|m| m.get(field));
                             let group = group_by.as_ref().and_then(|field| {
                                 item.metadata
                                     .as_ref()
                                     .and_then(|metadata| metadata.get(field))
-                                    .filter(|value| !value.trim().is_empty())
                             });
+                            if value.is_some_and(|value| value.len() > MAX_COLLECTION_VALUE_BYTES)
+                                || group
+                                    .is_some_and(|group| group.len() > MAX_COLLECTION_VALUE_BYTES)
+                            {
+                                limit_reason =
+                                    Some("collection metadata exceeds the byte limit".to_owned());
+                                break;
+                            }
+                            let value = value.filter(|v| !v.trim().is_empty());
+                            let group = group.filter(|v| !v.trim().is_empty());
                             if value.is_none() {
                                 missing += 1;
                             }
@@ -1434,6 +1448,7 @@ impl ContentPreset {
                                     duplicates += 1;
                                     if findings.len() >= MAX_FINDINGS_PER_GATE {
                                         omitted += 1;
+                                        evaluated += 1;
                                         continue;
                                     }
                                     findings.push(aexeo_contracts::Finding {
@@ -1448,17 +1463,39 @@ impl ContentPreset {
                                                 subject: None,
                                             });
                                 } else {
+                                    let added_bytes =
+                                        value.len() + group.map_or(0, |value| value.len());
+                                    if first_by_value.len() >= MAX_COLLECTION_KEYS
+                                        || key_bytes + added_bytes > MAX_COLLECTION_KEY_BYTES
+                                    {
+                                        limit_reason = Some("too many distinct collection metadata values to assess completely".to_owned());
+                                        break;
+                                    }
+                                    key_bytes += added_bytes;
                                     first_by_value.insert(key, &item.id);
                                 }
                             }
+                            evaluated += 1;
                         }
+                        if limit_reason.is_none() && items.len() > MAX_COLLECTION_ITEMS {
+                            limit_reason =
+                                Some("too many collection items to assess completely".to_owned());
+                        }
+                        measurements.insert("items_evaluated".into(), evaluated);
                         measurements.insert("items_missing_field".into(), missing);
                         if group_by.is_some() {
                             measurements.insert("items_missing_group".into(), missing_group);
                         }
                         measurements.insert("duplicate_items".into(), duplicates);
-                        if missing > 0 || missing_group > 0 || !collection_complete {
+                        if missing > 0
+                            || missing_group > 0
+                            || !collection_complete
+                            || limit_reason.is_some()
+                        {
                             let mut causes = Vec::new();
+                            if let Some(cause) = limit_reason {
+                                causes.push(cause);
+                            }
                             if !collection_complete {
                                 causes.push("collection is incomplete".to_owned());
                             }
@@ -3618,6 +3655,94 @@ field = "slug"
                 assert!(gate.reason.as_ref().unwrap().contains("unavailable for 1"));
             }
         }
+    }
+
+    #[test]
+    fn collection_uniqueness_limits_preserve_findings_and_report_incomplete() {
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\ngroup_by='lang'\n").unwrap();
+        let root = ContentInput {
+            id: "collection".into(),
+            ..Default::default()
+        };
+        let item = |id: String, slug: String, lang: String| ContentInput {
+            id,
+            metadata: Some(BTreeMap::from([
+                ("slug".into(), slug),
+                ("lang".into(), lang),
+            ])),
+            ..Default::default()
+        };
+        let evaluate = |items: &[ContentInput]| {
+            preset
+                .evaluate_with_capabilities(
+                    &root,
+                    &ContentEvaluationContext {
+                        collection: Some(items),
+                        ..Default::default()
+                    },
+                )
+                .unwrap()
+                .gates
+                .remove(0)
+        };
+        let mut items = vec![
+            item("first".into(), "same".into(), "en".into()),
+            item("duplicate".into(), "same".into(), "en".into()),
+        ];
+        items.push(item(
+            "oversized".into(),
+            "other".into(),
+            "x".repeat(MAX_COLLECTION_VALUE_BYTES + 1),
+        ));
+        let result = evaluate(&items);
+        assert_eq!(result.status, GateStatus::NotChecked);
+        assert_eq!(result.findings[0].path, "duplicate");
+        assert_eq!(result.measurements["items_evaluated"], 2);
+        assert!(result.reason.unwrap().contains("byte limit"));
+
+        items.pop();
+        items.extend(
+            (1..=MAX_COLLECTION_KEYS).map(|i| item(i.to_string(), i.to_string(), "en".into())),
+        );
+        let at_limit = evaluate(&items[..MAX_COLLECTION_KEYS + 1]);
+        assert_eq!(at_limit.status, GateStatus::Failed);
+        assert_eq!(
+            at_limit.measurements["items_evaluated"],
+            MAX_COLLECTION_KEYS + 1
+        );
+        let result = evaluate(&items);
+        assert_eq!(result.status, GateStatus::NotChecked);
+        assert_eq!(result.findings[0].path, "duplicate");
+        assert_eq!(
+            result.measurements["items_evaluated"],
+            MAX_COLLECTION_KEYS + 1
+        );
+        assert!(result.reason.unwrap().contains("distinct"));
+
+        let long_values: Vec<_> = (0..260)
+            .map(|i| {
+                item(
+                    i.to_string(),
+                    format!("{i:04}{}", "x".repeat(MAX_COLLECTION_VALUE_BYTES - 4)),
+                    "en".into(),
+                )
+            })
+            .collect();
+        let result = evaluate(&long_values);
+        assert_eq!(result.status, GateStatus::NotChecked);
+        assert!(result.measurements["items_evaluated"] < long_values.len());
+        assert!(result.reason.unwrap().contains("distinct"));
+
+        let repeated =
+            vec![item("same".into(), "same".into(), "en".into()); MAX_COLLECTION_ITEMS + 1];
+        let result = evaluate(&repeated);
+        assert_eq!(result.status, GateStatus::NotChecked);
+        assert_eq!(result.measurements["items_evaluated"], MAX_COLLECTION_ITEMS);
+        assert_eq!(
+            result.measurements["duplicate_items"],
+            MAX_COLLECTION_ITEMS - 1
+        );
+        assert!(result.reason.unwrap().contains("too many collection items"));
     }
 
     #[test]
