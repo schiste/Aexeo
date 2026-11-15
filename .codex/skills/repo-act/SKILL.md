@@ -46,6 +46,7 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - Python test scripts with hyphens in their filenames are not discovered by
   `unittest discover`; run the relevant files directly, or use the repository
   check script that invokes them explicitly. Confirm the reported test count.
+- For finding fields shown to editors, verify CLI JSON and text output and both EmDash Block Kit and React views; a field can survive serialization while being omitted from the interface.
 - Check likely entrypoints and impacted callers before finishing. For source-mapping changes, run adapter, single-content CLI and content-change verdict tests: each can encode separate expectations about supported and unmapped transformations.
 - After focused validation, run `sh scripts/clippy-strict.sh` for Rust changes.
   The CI applies extra lint rules beyond ordinary `cargo clippy -- -D warnings`;
