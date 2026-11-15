@@ -1,3 +1,4 @@
+import { emitTelemetry } from "./telemetry.js";
 import { evaluateContent as evaluateContentWasm, evaluateContentCollection as evaluateCollectionWasm, projectContentInput as projectContentInputWasm, projectLinkDestinations as projectLinkDestinationsWasm } from "./wasm-init.js";
 import type { EmdashDocument, Finding } from "./types.js";
 
@@ -129,11 +130,7 @@ export async function evaluateContent(
         event.link_destinations.invalid += invalid;
       }
     }
-    try {
-      onTelemetry(event);
-    } catch {
-      // Optional instrumentation must not change the content report.
-    }
+    emitTelemetry(onTelemetry, event);
   }
   return report;
 }

@@ -1,3 +1,4 @@
+import { emitTelemetry } from "./telemetry.js";
 import type { ContentReport, ContentEvaluationTelemetry, ExtensionInput, ExternalGateResult, LinkDestinationProjection, BoundLinkObservations } from "./content.js";
 import type { EvaluatorFn } from "./plugin.js";
 import type { EmdashDocument } from "./types.js";
@@ -85,7 +86,7 @@ export function withContentPreset(
             externalFailure = true;
           } finally {
             if (onProviderTelemetry) {
-              try { onProviderTelemetry({ duration_ms: performance.now() - started, status }); } catch { /* telemetry is best effort */ }
+              emitTelemetry(onProviderTelemetry, { duration_ms: performance.now() - started, status });
             }
           }
         }
@@ -111,7 +112,7 @@ export function withContentPreset(
             // The report already represents the missing capability as not checked.
           } finally {
             if (onLinkProviderTelemetry) {
-              try { onLinkProviderTelemetry({ duration_ms: performance.now() - started, status }); } catch { /* best effort */ }
+              emitTelemetry(onLinkProviderTelemetry, { duration_ms: performance.now() - started, status });
             }
           }
         }

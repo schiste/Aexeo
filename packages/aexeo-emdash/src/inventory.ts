@@ -1,3 +1,4 @@
+import { emitTelemetry } from "./telemetry.js";
 import type { EmdashContentItem } from "./adapter.js";
 import type { SandboxContentApi } from "./plugin.js";
 
@@ -178,11 +179,7 @@ export async function exportLinkInventory(
   pages.sort((left, right) => left.url < right.url ? -1 : left.url > right.url ? 1 : 0);
   const result: LinkInventoryExport = { inventory: { identity: options.identity, complete: false, pages }, issues: [...issues].sort(), scanned, omitted };
   if (options.onTelemetry) {
-    try {
-      options.onTelemetry({ event: "link_inventory_export", elapsed_ms: Math.max(0, Date.now() - started), scanned, omitted, page_count: pages.length, issue_count: issues.size, classification_failures: classificationFailures, malformed_entries: malformedEntries });
-    } catch {
-      // Optional instrumentation must not change the inventory result.
-    }
+    emitTelemetry(options.onTelemetry, { event: "link_inventory_export", elapsed_ms: Math.max(0, Date.now() - started), scanned, omitted, page_count: pages.length, issue_count: issues.size, classification_failures: classificationFailures, malformed_entries: malformedEntries });
   }
   return result;
 }

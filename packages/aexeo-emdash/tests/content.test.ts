@@ -68,6 +68,20 @@ describe("portable content API", () => {
     expect(actual).toEqual(expected);
   });
 
+  it("does not await or leak a rejection from asynchronous telemetry", async () => {
+    const document = { route: "/private", title: "Private", body: [] };
+    const expected = await evaluateContent(document, "custom");
+    let rejectObserver!: (reason: Error) => void;
+    const pending = new Promise<void>((_resolve, reject) => { rejectObserver = reject; });
+    const observer = vi.fn(async () => pending);
+    const actual = await evaluateContent(document, "custom", {}, undefined, observer);
+    expect(actual).toEqual(expected);
+    expect(observer).toHaveBeenCalledOnce();
+    rejectObserver(new Error("asynchronous telemetry failure"));
+    // Vitest fails the test run on an unhandled rejection.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  });
+
   it("omits destination telemetry when the gate was not measured", async () => {
     vi.mocked(evaluateWasm).mockResolvedValueOnce(JSON.stringify({ preset: "custom", input_id: "/private", gates: [{ status: "not_checked", measurements: {} }] }));
     const onTelemetry = vi.fn();
