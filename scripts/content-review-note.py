@@ -68,8 +68,7 @@ def capture(text, report, gate_id, example_id, human_status=None, reviewer=None,
 def _review_event(corpus, note, module, version):
     if note.get("version") != 1 or note.get("kind") != "reported_human_feedback":
         raise ValueError("unsupported feedback note")
-    if "content_projection" in note:
-        raise ValueError("feedback with a content projection cannot be exported to this corpus format")
+    module.check_projection(note, module.corpus_projection(corpus))
     if note.get("gate_id") != corpus.get("gate_id"):
         raise ValueError("feedback gate does not match corpus")
     statuses = {"passed", "failed", "uncertain"} if version == 3 else {"passed", "failed"}
@@ -83,6 +82,8 @@ def _review_event(corpus, note, module, version):
              "reviewer": note["reviewer"], "method": note["method"]}
     if "metadata_sha256" in note:
         event["metadata_sha256"] = note["metadata_sha256"]
+    if "content_projection" in note:
+        event["content_projection"] = copy.deepcopy(note["content_projection"])
     if "resolved_policy_fingerprint" in note:
         event["resolved_policy_fingerprint"] = module.validate_policy_fingerprint(note["resolved_policy_fingerprint"])
     if "report_binding" in note:
@@ -132,7 +133,7 @@ def bind_review(corpus, note, accept_human_label=False):
                       "text_sha256": event["text_sha256"], "expected": item["expected"]}
     if "metadata_sha256" in event:
         item["review"]["metadata_sha256"] = event["metadata_sha256"]
-    for key in ("resolved_policy_fingerprint", "report_binding"):
+    for key in ("resolved_policy_fingerprint", "report_binding", "content_projection"):
         if key in event:
             item["review"][key] = copy.deepcopy(event[key])
     if label_changed:
@@ -165,8 +166,11 @@ def blind_packet(corpus, split, rubric):
         examples.append(entry)
     if not examples:
         raise ValueError("no unreviewed examples in the selected split")
-    return {"version": 1, "kind": "blind_content_review", "gate_id": corpus["gate_id"],
-            "rubric": rubric, "examples": examples}
+    packet = {"version": 1, "kind": "blind_content_review", "gate_id": corpus["gate_id"],
+              "rubric": rubric, "examples": examples}
+    if "content_projection" in corpus:
+        packet["content_projection"] = copy.deepcopy(corpus["content_projection"])
+    return packet
 
 
 def _blind_entries(corpus, packet, module):
@@ -175,6 +179,7 @@ def _blind_entries(corpus, packet, module):
             or not isinstance(packet.get("rubric"), str) or not packet["rubric"].strip()
             or not isinstance(packet.get("examples"), list)):
         raise ValueError("invalid blind review packet")
+    module.check_projection(packet, module.corpus_projection(corpus))
     by_id = {item["id"]: item for item in corpus["examples"]}
     seen = set()
     for entry in packet["examples"]:
@@ -228,6 +233,8 @@ def bind_blind_reviews(corpus, packet, reviewer, method, accept_human_label=Fals
                   "rubric_sha256": hashlib.sha256(packet["rubric"].encode("utf-8")).hexdigest()}
         if "metadata" in item:
             review["metadata_sha256"] = module.metadata_hash(item["metadata"])
+        if "content_projection" in result:
+            review["content_projection"] = copy.deepcopy(result["content_projection"])
         if old != status:
             review["previous_expected"] = old
         item["review"] = review
@@ -256,6 +263,8 @@ def combine_blind_reviews(corpus, reviews):
                      "rubric_sha256": hashlib.sha256(packet["rubric"].encode("utf-8")).hexdigest()}
             if "metadata" in item:
                 event["metadata_sha256"] = module.metadata_hash(item["metadata"])
+            if "content_projection" in corpus:
+                event["content_projection"] = copy.deepcopy(corpus["content_projection"])
             events.append(event)
     if not events:
         raise ValueError("no explicit blind opinions to combine")

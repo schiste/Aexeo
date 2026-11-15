@@ -388,6 +388,30 @@ class EvaluateTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "metadata is absent"):
                 eval_module.evaluate("cli", corpus, "holdout")
 
+    def test_html_main_corpus_replays_and_requires_matching_report_scope(self):
+        projection = {"format": "html", "scope": "main"}
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "input_format": "html", "content_projection": projection,
+                  "examples": [{"id": "a", "split": "holdout", "text": "<main>article</main>", "expected": "passed"}]}
+        def run(arguments, **kwargs):
+            self.assertEqual(arguments[arguments.index("--input-format") + 1], "html")
+            self.assertEqual(arguments[arguments.index("--html-scope") + 1], "main")
+            return SimpleNamespace(returncode=0, stdout=json.dumps({"gates": [{"gate_id":"g", "status":"passed"}], "content_projection": projection}))
+        with patch.object(eval_module.subprocess, "run", side_effect=run):
+            result = eval_module.evaluate("cli", corpus, "holdout")
+        self.assertEqual(result["content_projection"], projection)
+        self.assertEqual(result["counts"]["true_negative"], 1)
+        with patch.object(eval_module.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout='{"gates":[{"gate_id":"g","status":"passed"}]}')):
+            with self.assertRaisesRegex(ValueError, "projection"):
+                eval_module.evaluate("cli", corpus, "holdout")
+        for invalid in (None, {"format":"html", "scope":"document"}, {"format":"html", "scope":"main", "extra": 1}):
+            corpus["content_projection"] = invalid
+            with self.assertRaisesRegex(ValueError, "projection"):
+                eval_module.validate_corpus(corpus)
+        corpus["input_format"] = "text"
+        corpus["content_projection"] = projection
+        with self.assertRaisesRegex(ValueError, "projection"):
+            eval_module.validate_corpus(corpus)
+
     def test_markdown_and_embedded_preset_reach_cli(self):
         corpus = {"version": 1, "preset": "custom", "preset_toml": "name='example'", "input_format": "markdown", "gate_id": "g", "examples": [
             {"id": "a", "split": "holdout", "text": "# heading", "expected": "passed"},

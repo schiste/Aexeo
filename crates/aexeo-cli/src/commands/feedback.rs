@@ -240,6 +240,25 @@ fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
         .get("examples")
         .and_then(Value::as_array)
         .context("missing examples")?;
+    let projection = corpus.get("content_projection");
+    match corpus.get("input_format") {
+        Some(Value::String(format)) if format == "html" => {
+            if projection != Some(&json!({"format":"html", "scope":"main"})) {
+                bail!("HTML corpus requires the main content projection");
+            }
+        }
+        None | Some(Value::Null) => {
+            if projection.is_some() {
+                bail!("content projection requires HTML input");
+            }
+        }
+        Some(Value::String(format)) if format == "text" || format == "markdown" => {
+            if projection.is_some() {
+                bail!("content projection requires HTML input");
+            }
+        }
+        _ => bail!("unsupported input format"),
+    }
     let mut ids = HashSet::new();
     let mut splits = HashMap::new();
     let mut source_splits = HashMap::new();
@@ -312,6 +331,9 @@ fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
         }
         if review_status == "reviewed" {
             let review = item.get("review").context("missing review provenance")?;
+            if review.get("content_projection") != projection {
+                bail!("review content projection does not match the corpus");
+            }
             for key in ["reviewer", "method"] {
                 if !review
                     .get(key)
@@ -331,8 +353,8 @@ fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
     {
         bail!("unsupported feedback note");
     }
-    if note.get("content_projection").is_some() {
-        bail!("feedback with a content projection cannot be exported to this corpus format");
+    if note.get("content_projection") != projection {
+        bail!("content projection does not match the corpus");
     }
     if note.get("gate_id") != Some(gate) {
         bail!("feedback gate does not match corpus");
@@ -377,6 +399,9 @@ fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
         bail!("invalid model status");
     }
     let mut event = json!({"example_id":note["example_id"],"text_sha256":hash,"model_status":model,"reviewer_status":status,"reviewer":note["reviewer"],"method":note["method"]});
+    if let Some(projection) = projection {
+        event["content_projection"] = projection.clone();
+    }
     if let Some(fingerprint) = note.get("resolved_policy_fingerprint") {
         event["resolved_policy_fingerprint"] = policy_fingerprint(fingerprint)?.clone();
     }
