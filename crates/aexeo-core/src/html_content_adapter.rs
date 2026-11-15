@@ -231,28 +231,28 @@ fn safe_mapping_attributes(mut rest: &str, void: bool) -> bool {
     }
 }
 
-// Deliberately limited to single-scalar, semicolon-terminated entities. The
-// full reconstructed projection must still match html5ever before mapping.
-fn mapping_entity(entity: &str) -> Option<char> {
-    match entity {
-        "amp" => Some('&'),
-        "lt" => Some('<'),
-        "gt" => Some('>'),
-        "quot" => Some('"'),
-        "apos" => Some('\''),
-        "nbsp" => Some('\u{a0}'),
-        numeric => {
-            let digits = numeric.strip_prefix('#')?;
-            let (digits, radix) = digits
-                .strip_prefix(['x', 'X'])
-                .map_or((digits, 10), |hex| (hex, 16));
-            if digits.is_empty() || digits.len() > 8 {
-                return None;
-            }
-            let ch = char::from_u32(u32::from_str_radix(digits, radix).ok()?)?;
-            (!ch.is_control()).then_some(ch)
+// Only semicolon-terminated entities are accepted. Reconstruct with the same
+// named-entity table as html5ever, then compare the entire projection below.
+fn mapping_entity(entity: &str) -> Option<(char, Option<char>)> {
+    let spelling = entity.strip_suffix(';')?;
+    let (first, second) = if let Some(digits) = spelling.strip_prefix('#') {
+        let (digits, radix) = digits
+            .strip_prefix(['x', 'X'])
+            .map_or((digits, 10), |hex| (hex, 16));
+        if digits.is_empty() || digits.len() > 8 {
+            return None;
         }
-    }
+        (u32::from_str_radix(digits, radix).ok()?, 0)
+    } else {
+        *html5ever::data::NAMED_ENTITIES.get(entity)?
+    };
+    let first = char::from_u32(first).filter(|ch| !ch.is_control())?;
+    let second = if second == 0 {
+        None
+    } else {
+        Some(char::from_u32(second).filter(|ch| !ch.is_control())?)
+    };
+    Some((first, second))
 }
 
 /// Build a mapping only when a conservative lexical reconstruction exactly
@@ -279,14 +279,14 @@ pub fn html_source_map(source: &str, projected: &str) -> Option<HtmlSourceMap> {
             while within < literal.len() {
                 let rest = &literal[within..];
                 if rest.starts_with('&') {
-                    let semicolon = rest.find(';')?;
-                    // Bound both parsing work and accepted source spelling.
-                    if semicolon > 16 {
-                        return None;
-                    }
-                    let ch = mapping_entity(&rest[1..semicolon])?;
+                    // HTML's longest named entity is 33 bytes including & and ;.
+                    let semicolon = rest.bytes().take(33).position(|byte| byte == b';')?;
+                    let (first, second) = mapping_entity(&rest[1..=semicolon])?;
                     let start = output.len();
-                    output.push(ch);
+                    output.push(first);
+                    if let Some(second) = second {
+                        output.push(second);
+                    }
                     spans.push((start, output.len(), cursor + within, true));
                     within += semicolon + 1;
                 } else {
@@ -495,7 +495,6 @@ mod tests {
         assert_eq!(map.source_position(source, projected, 2, 6), Some((2, 27)));
         assert_eq!(map.source_position(source, projected, 3, 1), Some((2, 45)));
         for html in [
-            "<p>hello &copy; world</p>",
             "<p hidden>hidden</p><p>world</p>",
             "<p><div>world</div></p>",
             "<p>world",
@@ -531,7 +530,6 @@ mod tests {
             );
         }
         for html in [
-            "<p>&copy;</p>",
             "<p>&amp</p>",
             "<p>&#0;</p>",
             "<p>&#x80;</p>",
@@ -544,6 +542,31 @@ mod tests {
             );
         }
         assert!(html_source_map(html, "wrong").is_none());
+    }
+
+    #[test]
+    fn maps_named_html_entities_with_one_or_two_scalars() {
+        let html = "<p>A &copy; &NotEqualTilde; &CounterClockwiseContourIntegral; Z</p>";
+        let adapted = html_content("x", html).unwrap();
+        let projected = adapted.input.text.as_deref().unwrap();
+        let map = html_source_map(html, projected).unwrap();
+        let source_index = crate::text_index::LineIndex::new(html);
+        let projected_index = crate::text_index::LineIndex::new(projected);
+        for (character, needle) in [
+            ('©', "&copy;"),
+            ('≂', "&NotEqualTilde;"),
+            ('\u{338}', "&NotEqualTilde;"),
+            ('∳', "&CounterClockwiseContourIntegral;"),
+            ('Z', "Z"),
+        ] {
+            let (line, column) = projected_index
+                .position(projected, projected.find(character).unwrap())
+                .unwrap();
+            assert_eq!(
+                map.source_position(html, projected, line, column),
+                source_index.position(html, html.find(needle).unwrap())
+            );
+        }
     }
 
     #[test]

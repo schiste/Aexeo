@@ -150,7 +150,7 @@ fn html_entities_map_findings_to_their_source_spelling() {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("article.html");
     let preset = dir.path().join("preset.toml");
-    fs::write(&input, "<p>É &#x62;ad &amp; bad</p>").unwrap();
+    fs::write(&input, "<p>É &#x62;ad &amp; &copy; bad</p>").unwrap();
     fs::write(
         &preset,
         "version=1\nname='test'\n[[gates]]\nid='words'\nkind='forbidden_terms'\nterms=['bad']\n",
@@ -168,6 +168,7 @@ fn html_entities_map_findings_to_their_source_spelling() {
             &format!("custom={}", preset.display()),
             "--format",
             "json",
+            "--telemetry",
         ])
         .output()
         .unwrap();
@@ -177,9 +178,16 @@ fn html_entities_map_findings_to_their_source_spelling() {
         report["source_locations"],
         serde_json::json!([
             {"gate_id":"words", "finding_index":0, "line":1, "column":6},
-            {"gate_id":"words", "finding_index":1, "line":1, "column":21}
+            {"gate_id":"words", "finding_index":1, "line":1, "column":28}
         ])
     );
+    let event = String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|event| event["event"] == "content_evaluation")
+        .unwrap();
+    assert_eq!(event["source_mapping"]["mapped"], 2);
+    assert_eq!(event["source_mapping"]["unmapped"], 0);
 }
 
 #[test]

@@ -2269,7 +2269,8 @@ mod tests {
     fn html_change_maps_link_observations_to_their_source_occurrences() {
         use crate::content_gate::LinkReachabilityObservation as Observation;
         use sha2::{Digest, Sha256};
-        let source = "<p><a href='/a'>one</a> <a href='/b'>two</a> <a href='/a'>three</a></p>";
+        let source =
+            "<p>&copy; <a href='/a'>one</a> <a href='/b'>two</a> <a href='/a'>three</a></p>";
         let mut change = change();
         change.entries[0].media_type = "text/html".into();
         let state = change.entries[0].after.as_mut().unwrap();
