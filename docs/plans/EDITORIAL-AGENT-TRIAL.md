@@ -95,3 +95,18 @@ done
 
 The open-ended eight-gate evaluation uses `article.toml` instead of `bounded.toml`
 and `--metadata eval/workflow-trials/open-article-metadata.json`.
+
+## Repeatable multi-format workflow regression
+
+The CLI integration test `content_multiformat_workflow` exercises a synthetic,
+predefined localized edit in paragraph text, Markdown and HTML. Each case checks
+an advisory phrase finding and its source coordinates, captures a note without
+inventing a human verdict, rejects reuse of the old report after the draft changes,
+and reruns the same preset. A deliberately absent metadata input remains
+`not_checked` before and after revision. Opt-in telemetry is checked for mapping
+coverage and does not contain the example phrase.
+
+Run it with `cargo test -p aexeo-cli --test content_multiformat_workflow`.
+A local debug run of all three cases took 0.78 seconds in the test runner, after
+compilation, with uncontrolled cache and load. It is not a benchmark, an autonomous
+agent-writing trial, a review by a human, or a measure of editorial quality.

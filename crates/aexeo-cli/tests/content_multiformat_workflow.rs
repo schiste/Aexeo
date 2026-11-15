@@ -1,0 +1,127 @@
+//! Cross-format agent workflow. Synthetic cases exercise mechanics, not quality.
+use serde_json::Value;
+use std::{fs, path::Path, process::Command};
+
+fn evaluate(draft: &Path, preset: &Path, format: &str) -> (Value, Value) {
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            draft.to_str().unwrap(),
+            "--input-format",
+            format,
+            "--preset",
+            "workflow",
+            "--preset-source",
+            &format!("workflow={}", preset.display()),
+            "--format",
+            "json",
+            "--telemetry",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report = serde_json::from_slice(&output.stdout).unwrap();
+    let event = String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|event| event["event"] == "content_evaluation")
+        .unwrap();
+    (report, event)
+}
+
+fn capture(draft: &Path, report: &Path, note: &Path) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "feedback-capture",
+            "--text",
+            draft.to_str().unwrap(),
+            "--report",
+            report.to_str().unwrap(),
+            "--gate",
+            "style.phrase",
+            "--example",
+            "synthetic",
+            "--output",
+            note.to_str().unwrap(),
+            "--telemetry",
+        ])
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn localized_revision_and_feedback_are_bound_across_text_markdown_and_html() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("workflow.toml");
+    fs::write(&preset, "version=1\nname='workflow'\n[[gates]]\nid='style.phrase'\nkind='forbidden_terms'\nterms=['generic phrase']\nblocking=false\n[[gates]]\nid='metadata.required'\nkind='required_metadata'\nfields=['title']\nblocking=false\n").unwrap();
+    for (format, original) in [
+        (
+            "paragraph-text",
+            "Élan.\n\nThis generic phrase needs review.\n",
+        ),
+        (
+            "markdown",
+            "# Élan\n\nThis **generic phrase** needs review.\n",
+        ),
+        (
+            "html",
+            "<h1>Élan</h1>\n<p>&copy; This generic phrase needs review.</p>",
+        ),
+    ] {
+        let draft = dir.path().join(format!("{format}.txt"));
+        let report_path = dir.path().join(format!("{format}.json"));
+        let note = dir.path().join(format!("{format}-note.json"));
+        fs::write(&draft, original).unwrap();
+        let (before, telemetry) = evaluate(&draft, &preset, format);
+        assert_eq!(before["gates"][0]["status"], "failed", "{format}");
+        assert_eq!(before["gates"][1]["status"], "not_checked", "{format}");
+        assert!(!telemetry.to_string().contains("generic phrase"));
+        assert_eq!(telemetry["source_mapping"]["mapped"], 1, "{format}");
+        let location = &before["source_locations"][0];
+        let line = location["line"].as_u64().unwrap() as usize;
+        let column = location["column"].as_u64().unwrap() as usize;
+        let byte = original
+            .lines()
+            .take(line - 1)
+            .map(|line| line.len() + 1)
+            .sum::<usize>()
+            + original
+                .lines()
+                .nth(line - 1)
+                .unwrap()
+                .char_indices()
+                .nth(column - 1)
+                .unwrap()
+                .0;
+        assert!(original[byte..].starts_with("generic phrase"), "{format}");
+        fs::write(&report_path, serde_json::to_vec(&before).unwrap()).unwrap();
+        assert!(capture(&draft, &report_path, &note).status.success());
+        let captured: Value = serde_json::from_slice(&fs::read(&note).unwrap()).unwrap();
+        assert_eq!(captured["report_binding"], "verified");
+        assert!(captured["human_status"].is_null());
+        assert!(captured["reviewer"].is_null());
+        let mut revised = original.to_owned();
+        revised.replace_range(byte..byte + "generic phrase".len(), "specific note");
+        fs::write(&draft, &revised).unwrap();
+        let stale = capture(
+            &draft,
+            &report_path,
+            &dir.path().join(format!("{format}-stale.json")),
+        );
+        assert!(
+            !stale.status.success(),
+            "stale report was accepted for {format}"
+        );
+        let (after, _) = evaluate(&draft, &preset, format);
+        assert_eq!(after["gates"][0]["status"], "passed", "{format}");
+        assert_eq!(after["gates"][1]["status"], "not_checked", "{format}");
+        assert_eq!(
+            revised.replacen("specific note", "generic phrase", 1),
+            original
+        );
+    }
+}
