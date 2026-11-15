@@ -26,14 +26,70 @@ enum Event {
     },
 }
 
+/// Which part of the supplied static HTML to project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HtmlContentScope {
+    Document,
+    Main,
+}
+
+fn excluded_element(node: &Handle) -> bool {
+    if let NodeData::Element { name, attrs, .. } = &node.data {
+        matches!(
+            name.local.as_ref(),
+            "head" | "script" | "style" | "template" | "noscript"
+        ) || attrs
+            .borrow()
+            .iter()
+            .any(|attr| attr.name.local.as_ref() == "hidden")
+    } else {
+        false
+    }
+}
+
 /// Project a complete supplied HTML document or fragment, without fetching links.
 /// Errors describe limits, never source contents. No source positions are guessed.
 pub fn html_content(id: impl Into<String>, source: &str) -> Result<HtmlContent, &'static str> {
+    html_content_with_scope(id, source, HtmlContentScope::Document)
+}
+
+/// Project the explicitly selected scope. `Main` requires exactly one observable
+/// main element; static markup does not establish CSS visibility or page identity.
+pub fn html_content_with_scope(
+    id: impl Into<String>,
+    source: &str,
+    scope: HtmlContentScope,
+) -> Result<HtmlContent, &'static str> {
     if source.len() > MAX_CONTENT_INPUT_BYTES {
         return Err("HTML exceeds the content input byte limit");
     }
     let dom = parse_document(RcDom::default(), Default::default()).one(source);
-    let mut stack = vec![Event::Enter(dom.document.clone())];
+    let root = if scope == HtmlContentScope::Main {
+        let mut pending = vec![dom.document.clone()];
+        let mut selected = None;
+        let mut visited = 0usize;
+        while let Some(node) = pending.pop() {
+            visited += 1;
+            if visited > MAX_HTML_CONTENT_NODES {
+                return Err("HTML exceeds the node limit");
+            }
+            if excluded_element(&node) {
+                continue;
+            }
+            if matches!(&node.data, NodeData::Element { name, .. } if name.local.as_ref() == "main")
+            {
+                if selected.is_some() {
+                    return Err("HTML main scope is ambiguous: multiple main elements");
+                }
+                selected = Some(node.clone());
+            }
+            pending.extend(node.children.borrow().iter().cloned());
+        }
+        selected.ok_or("HTML main scope is unavailable: no main element")?
+    } else {
+        dom.document.clone()
+    };
+    let mut stack = vec![Event::Enter(root)];
     let mut text = String::new();
     let mut headings = Vec::new();
     let mut ranges = Vec::new();
@@ -61,18 +117,14 @@ pub fn html_content(id: impl Into<String>, source: &str) -> Result<HtmlContent, 
                 if visited > MAX_HTML_CONTENT_NODES {
                     return Err("HTML exceeds the node limit");
                 }
+                if excluded_element(&node) {
+                    continue;
+                }
                 match &node.data {
                     NodeData::Text { contents } => text.push_str(&contents.borrow()),
                     NodeData::Element { name, attrs, .. } => {
                         let tag = name.local.as_ref();
                         let attrs = attrs.borrow();
-                        if matches!(tag, "head" | "script" | "style" | "template" | "noscript")
-                            || attrs
-                                .iter()
-                                .any(|attr| attr.name.local.as_ref() == "hidden")
-                        {
-                            continue;
-                        }
                         if tag == "a"
                             && let Some(href) =
                                 attrs.iter().find(|attr| attr.name.local.as_ref() == "href")
@@ -467,6 +519,55 @@ pub fn gate_source_positions_with_links(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn main_scope_excludes_surrounding_content_and_preserves_links() {
+        let source = "<nav><p>Navigation</p><a href='/nav'>nav</a></nav><main><h1>Article</h1><p>Inside <a href='/inside'>link</a></p></main><footer>Footer</footer>";
+        let result = html_content_with_scope("x", source, HtmlContentScope::Main).unwrap();
+        let text = result.input.text.unwrap();
+        assert!(text.contains("Article") && text.contains("Inside"));
+        assert!(!text.contains("Navigation") && !text.contains("Footer"));
+        assert_eq!(result.destinations, ["/inside"]);
+        assert_eq!(result.input.headings.unwrap(), ["Article"]);
+        assert!(
+            html_content("x", source)
+                .unwrap()
+                .input
+                .text
+                .unwrap()
+                .contains("Navigation")
+        );
+    }
+
+    #[test]
+    fn main_scope_distinguishes_empty_missing_and_ambiguous() {
+        assert!(html_content_with_scope("x", "<main></main>", HtmlContentScope::Main).is_ok());
+        for source in ["<p>None</p>", "<div hidden><main>Hidden</main></div>"] {
+            assert!(
+                html_content_with_scope("x", source, HtmlContentScope::Main)
+                    .err()
+                    .unwrap()
+                    .contains("unavailable")
+            );
+        }
+        assert!(
+            html_content_with_scope(
+                "x",
+                "<main>One</main><main>Two</main>",
+                HtmlContentScope::Main
+            )
+            .err()
+            .unwrap()
+            .contains("ambiguous")
+        );
+        let selected = html_content_with_scope(
+            "x",
+            "<main hidden>Hidden</main><main>Visible</main>",
+            HtmlContentScope::Main,
+        )
+        .unwrap();
+        assert!(selected.input.text.unwrap().contains("Visible"));
+    }
 
     #[test]
     fn projects_fragments_without_hidden_or_inert_content() {

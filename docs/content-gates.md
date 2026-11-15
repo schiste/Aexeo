@@ -847,6 +847,23 @@ not itself preserve source offsets, so findings refer to projected text. Exact
 source locations are supplied only when the conservative reconstruction below
 can establish them. Network checks remain explicit opt-in.
 Inputs exceeding 16 MiB or 100,000 traversed DOM nodes are `not_checked`, not empty.
+
+For a full HTML page, `aexeo content article.html --input-format html
+--html-scope main --preset article --format json` explicitly restricts the
+content projection to the single non-hidden `<main>` element. This excludes
+navigation and footers outside it. If none or more than one is found, dependent
+gates are `not_checked`; an explicitly empty `<main>` remains an observed empty
+body. The default `document` scope preserves the original full-document
+behavior. The JSON report records `content_projection`, and opt-in telemetry
+records the scope without content. Source locations are unavailable for this
+selection because the document-level mapping also includes surrounding markup.
+Source-level checks and fixes still apply to
+the supplied file, not only the selected element. Scope does not prove CSS or
+ARIA visibility, page identity, render completeness, or correctness of CMS
+metadata. The input fingerprint binds the supplied bytes and metadata, not the
+projection scope: retain the report and its scope when interpreting feedback.
+This option applies to the single-content CLI; it does not alter the
+content-change protocol.
 The content-change protocol supports `text/html` with the same rules. For the single-content CLI, opt-in telemetry includes `html_projection`: a complete projection reports aggregate heading, paragraph and link counts; an unavailable projection reports its status without counts. The JSON report and telemetry distinguish unavailable source locations, byte-identical text (`identity_projection`), and a verified, well-nested literal HTML subset (`literal_html`). Prose locations in the latter are mapped only when a bounded lexical reconstruction matches the parser projection exactly. In the supported subset, heading and link-destination findings also map to their opening tags; link reachability findings require matching ordered observations. Semicolon-terminated named entities from the HTML parser that decode to non-control characters, and non-control numeric entities map their decoded characters to the opening `&` (including entities that decode to two Unicode scalars); the remaining text retains its original position. Unsupported entities, hidden elements, unsupported or malformed markup, excessive nesting and other transformations leave locations unavailable. Finding coordinates remain relative to projected text; separate mapped positions point into the supplied source. These observations do not establish browser visibility or page completeness, and telemetry contains no content, paths or URLs.
 
 ### Plain-text source locations

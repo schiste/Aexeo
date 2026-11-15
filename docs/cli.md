@@ -301,6 +301,12 @@ Options:
           [default: text]
           [possible values: text, paragraph-text, markdown, html]
 
+      --html-scope <html-scope>
+          Project the whole static HTML document or its unique main element
+
+          [default: document]
+          [possible values: document, main]
+
       --telemetry
           Write local evaluation timing and aggregate counts as JSON to stderr
 
