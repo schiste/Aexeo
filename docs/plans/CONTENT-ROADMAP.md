@@ -289,6 +289,10 @@ and independently checked against the registry before it is considered delivered
   observations, artifact formats, freshness and trusted build identity remain open.
   An opt-in CLI mode can write and revalidate Aexeo-specific offline receipts;
   its output is not a v1 verdict or a portable v2 verdict.
+  PR #401 added an opt-in bundle transporting exact UTF-8 decision artifacts
+  and a receipt for independent hash verification; revalidation still requires
+  independently supplied current inputs. Bundles may contain private content
+  and do not establish provenance, freshness or a portable v2 contract.
   CLI receipt mode rejects duplicate keys in changes, collections and previous receipts, and fields discarded by typed parsing in changes and receipts. Direct Rust hosts must independently ensure their typed inputs preserve all semantics.
   The independent offline-receipt comparator can also opt into validating the
   bound change against the v1 change schema, including date and URI formats;
