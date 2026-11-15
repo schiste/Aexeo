@@ -20,6 +20,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   preparation is not configured: cleanup can remove ignored `node_modules`.
   Restore them with the package lockfile (`npm ci`) before Node tests; avoid
   an `npx` invocation that could install an unpinned missing executable.
+- Before a guarded PR merge, fetch the full live `headRefOid` directly from
+  `gh pr view --json headRefOid` and pass that exact value to
+  `--match-head-commit`; never reconstruct a full SHA from an abbreviated log.
+  Recheck the head and its checks if it changes before the merge.
 - Before publishing even a new session, inspect its actual branch and any
   same-named remote branch; a different `--short-name` need not change the
   generated branch name. A stale remote can belong to an earlier session.
