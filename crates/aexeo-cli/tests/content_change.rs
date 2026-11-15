@@ -97,28 +97,18 @@ fn html_main_scope_excludes_navigation_and_revalidates_only_the_same_scope() {
         .code(),
         Some(0)
     );
-    assert_ne!(
-        run(
-            dir.path(),
-            &change,
-            policy,
-            &["--html-scope", "main", "--verify-verdict", doc_path]
-        )
-        .status
-        .code(),
-        Some(0)
-    );
-    assert_ne!(
-        run(
-            dir.path(),
-            &change,
-            policy,
-            &["--verify-verdict", main_path]
-        )
-        .status
-        .code(),
-        Some(0)
-    );
+    let before = fs::read(&path).unwrap();
+    for options in [
+        vec!["--html-scope", "main", "--verify-verdict", doc_path],
+        vec!["--verify-verdict", main_path],
+    ] {
+        let result = run(dir.path(), &change, policy, &options);
+        assert_eq!(result.status.code(), Some(2));
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains("previous verdict does not match")
+        );
+        assert_eq!(fs::read(&path).unwrap(), before);
+    }
 }
 
 #[test]
@@ -263,10 +253,11 @@ fn html_main_scope_receipts_bind_scope_and_revalidate() {
         "--verify-offline-receipt",
         saved_path,
     ];
-    assert_ne!(
-        run(dir.path(), &change, policy, &mismatched).status.code(),
-        Some(0)
-    );
+    let before = fs::read(&path).unwrap();
+    let rejected = run(dir.path(), &change, policy, &mismatched);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("previous receipt does not match"));
+    assert_eq!(fs::read(&path).unwrap(), before);
     let document = ["--offline-receipt", "--evaluator-identity", "trusted-build"];
     assert_eq!(
         run(dir.path(), &change, policy, &document).status.code(),
@@ -288,12 +279,11 @@ fn html_main_scope_receipts_bind_scope_and_revalidate() {
         "--verify-offline-receipt",
         doc_copy.to_str().unwrap(),
     ];
-    assert_ne!(
-        run(dir.path(), &change, policy, &verify_document_as_main)
-            .status
-            .code(),
-        Some(0)
-    );
+    let before = fs::read(&path).unwrap();
+    let rejected = run(dir.path(), &change, policy, &verify_document_as_main);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("previous receipt does not match"));
+    assert_eq!(fs::read(&path).unwrap(), before);
 }
 
 #[test]
