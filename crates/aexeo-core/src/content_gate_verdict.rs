@@ -2405,7 +2405,8 @@ mod tests {
             ("hello world", Some((1, 7))),
             ("<p>hello world</p>", Some((1, 10))),
             ("hello &#119;orld", Some((1, 7))),
-            ("hello &copy; world", None),
+            ("hello &copy; world", Some((1, 14))),
+            ("hello &notanentity; world", None),
         ] {
             let mut input = change();
             input.entries[0].media_type = "text/html".into();
