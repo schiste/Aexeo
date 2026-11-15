@@ -580,7 +580,12 @@ fields=["description"]
     const host = fakeHost([page]);
     await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
     const result = host.store.get(`findings:/${slug}`);
-    assert.equal(result.assessment.gates.find((gate) => gate.gate_id === "description").status, status);
+    const gate = result.assessment.gates.find((gate) => gate.gate_id === "description");
+    assert.equal(gate.status, status);
+    assert.equal(gate.measurements.required_fields, 1);
+    assert.equal(gate.measurements.present_fields, status === "passed" ? 1 : 0);
+    assert.equal(gate.measurements.missing_fields, status === "failed" ? 1 : 0);
+    assert.equal(gate.measurements.unavailable_fields, status === "not_checked" ? 1 : 0);
     assert.equal(result.findings.some((finding) => finding.rule_id === "description"), status === "failed");
   }
 }
