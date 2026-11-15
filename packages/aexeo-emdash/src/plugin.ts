@@ -814,6 +814,7 @@ export async function evaluateAndPersistAll(
   // Taken before listing content, so anything stored after this point is
   // recognizably newer than the sweep. See removeStaleDocuments.
   const storedAtStart = await readAllStoredDocuments(kv);
+  const findingsAtStart = await kv.list<unknown>("findings:");
 
   // 1. Pull every document from each collection. The bridge
   //    enforces a per-call limit of 100; iterate by cursor so the full
@@ -891,6 +892,16 @@ export async function evaluateAndPersistAll(
   }
   const withheldRoutes = new Set(duplicateRoutes);
   const selectedCollections = new Set(collections);
+  for (const entry of findingsAtStart) {
+    const route = entry.key.slice("findings:".length);
+    if (documentRoutes.has(route)) continue;
+    const collision = parseRouteCollision(entry.value);
+    if (collision !== null && (collision.collections === null ||
+        collision.collections.some((collection) => !selectedCollections.has(collection)))) {
+      summary.errors.push("A previous route collision requires a complete refresh of all affected collections.");
+      break;
+    }
+  }
   const routesToCheck = [...documentRoutes];
   for (let offset = 0; offset < routesToCheck.length; offset += 16) {
     const batch = routesToCheck.slice(offset, offset + 16);
@@ -1076,6 +1087,17 @@ export async function evaluateAndPersistAll(
   summary.totalFindings = totalAfterSuppression;
   if (inventoryComplete && !changed) {
     await removeStaleDocuments(ctx, collections, documentRoutes, storedAtStart);
+    // Clear orphaned collision markers only when the same marker existed at
+    // the start and every known owner collection was fully scanned.
+    for (const entry of findingsAtStart) {
+      const route = entry.key.slice("findings:".length);
+      if (route === "*" || documentRoutes.has(route)) continue;
+      const previous = parseRouteCollision(entry.value);
+      if (previous?.collections == null || previous.collections.some((collection) => !selectedCollections.has(collection))) continue;
+      if (await readStoredDocument(kv, route) !== null) continue;
+      const current = await kv.get<unknown>(entry.key);
+      if (JSON.stringify(current) === JSON.stringify(entry.value)) await kv.delete(entry.key);
+    }
   }
   return summary;
 }
@@ -1169,12 +1191,17 @@ async function persistDocument(
   return { status: "saved" };
 }
 
-async function readRouteCollision(kv: KvNamespace, route: string): Promise<{ collections: string[] | null } | null> {
-  const record = await kv.get<{ assessment?: { status?: string; reason?: string }; collision_collections?: unknown }>(findingsKey(route));
-  if (record?.assessment?.status !== "error" || record.assessment.reason !== "route_collision") return null;
+function parseRouteCollision(value: unknown): { collections: string[] | null } | null {
+  if (value === null || typeof value !== "object") return null;
+  const record = value as { assessment?: { status?: string; reason?: string }; collision_collections?: unknown };
+  if (record.assessment?.status !== "error" || record.assessment.reason !== "route_collision") return null;
   const owners = record.collision_collections;
   return { collections: Array.isArray(owners) && owners.length > 0 && owners.every((value) => typeof value === "string" && value.length > 0)
     ? owners : null };
+}
+
+async function readRouteCollision(kv: KvNamespace, route: string): Promise<{ collections: string[] | null } | null> {
+  return parseRouteCollision(await kv.get<unknown>(findingsKey(route)));
 }
 
 async function routeHasCollision(kv: KvNamespace, route: string): Promise<boolean> {
@@ -1230,6 +1257,9 @@ async function removeStaleDocuments(
     ) {
       continue;
     }
+    const collision = await readRouteCollision(ctx.kv, stored.document.route);
+    if (collision !== null && (collision.collections === null ||
+        collision.collections.some((collection) => !scannedCollections.has(collection)))) continue;
     await ctx.kv.delete(entry.key);
     await ctx.kv.delete(findingsKey(stored.document.route));
   }

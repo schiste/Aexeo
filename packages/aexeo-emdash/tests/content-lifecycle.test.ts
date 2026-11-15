@@ -251,6 +251,35 @@ describe("CMS route collisions", () => {
     expect(rulesAt(store, "/shared")).toEqual(["RECOVERED"]);
   });
 
+  it("clears an orphaned collision marker only after all known collections are scanned", async () => {
+    const { ctx, store } = host();
+    ctx.content.getPublicUrl = async () => "https://example.com/shared";
+    await save(ctx, item("a", OLD), returning("FIRST"));
+    await save(ctx, { ...item("b", NEW), type: "posts" }, returning("WRONG"));
+    await handleAfterDelete({ id: "a", collection: "pages", permanent: true }, ctx);
+    ctx.content.list = async () => ({ items: [], hasMore: false });
+    const partial = await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator: returning() });
+    expect(partial.errors.join(" ")).toContain("all affected collections");
+    expect(store.get(findingsKey("*"))).toMatchObject({ assessment: { reason: "inventory_incomplete" } });
+    expect(store.get(findingsKey("/shared"))).toMatchObject({ assessment: { reason: "route_collision" } });
+    await evaluateAndPersistAll(ctx, { collections: ["pages", "posts"], evaluator: returning() });
+    expect(store.has(findingsKey("/shared"))).toBe(false);
+  });
+
+  it("retains a stale collision when a refresh omits a known owner collection", async () => {
+    const { ctx, store } = host();
+    ctx.content.getPublicUrl = async () => "https://example.com/shared";
+    await save(ctx, item("a", OLD), returning("FIRST"));
+    await save(ctx, { ...item("b", NEW), type: "posts" }, returning("WRONG"));
+    ctx.content.list = async () => ({ items: [], hasMore: false });
+    await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator: returning() });
+    expect(store.get(findingsKey("/shared"))).toMatchObject({ assessment: { reason: "route_collision" } });
+    await save(ctx, item("a", NEW), returning("WRONG"));
+    expect(store.get(findingsKey("/shared"))).toMatchObject({ assessment: { reason: "route_collision" } });
+    await evaluateAndPersistAll(ctx, { collections: ["pages", "posts"], evaluator: returning() });
+    expect(store.has(findingsKey("/shared"))).toBe(false);
+  });
+
   it("does not displace an owner from a collection excluded from refresh", async () => {
     const { ctx, store } = host();
     ctx.content.getPublicUrl = async () => "https://example.com/shared";
