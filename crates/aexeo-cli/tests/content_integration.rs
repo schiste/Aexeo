@@ -73,7 +73,42 @@ fn advisory_failures_do_not_block_the_command() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["gates"][0]["status"], "failed");
     assert_eq!(report["gates"][0]["findings"][0]["severity"], "warning");
+    assert!(
+        report["gates"][0]["findings"][0]["suggestion"]
+            .as_str()
+            .unwrap()
+            .contains("in context")
+    );
     assert_eq!(report["gates"][0]["required_capability"], "text");
+}
+
+#[test]
+fn text_report_displays_advisory_suggestions() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    std::fs::write(&preset, "version=1\nname='Advisory'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['hype']\nblocking=false\n").unwrap();
+    let source = format!("custom={}", preset.display());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "-",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &source,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(b"hype").unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("Suggestion: Review the matched term in context")
+    );
 }
 
 #[test]

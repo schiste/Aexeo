@@ -246,6 +246,16 @@ function emptyStateCopy(response: BlockResponse): string | undefined {
  * paths have been observed to send.
  */
 describe("admin route parity across entrypoints", () => {
+  it("shows advisory suggestions in document and findings tables", async () => {
+    const { documentFindingsTable, findingsTable } = await import("../src/findings-view.js");
+    const finding = { ...engineFindings[0], suggestion: "Review the wording in context." } as Finding;
+    const document = documentFindingsTable([finding]) as { rows: Array<{ suggestion: string }> };
+    const all = findingsTable([{ ...finding, document_route: "/journal/hello/" }]) as { rows: Array<{ suggestion: string }> };
+    expect(document.rows[0]?.suggestion).toBe(finding.suggestion);
+    expect(all.rows[0]?.suggestion).toBe(finding.suggestion);
+    const legacy = documentFindingsTable([{ ...finding, suggestion: null }]) as { rows: Array<{ suggestion: string }> };
+    expect(legacy.rows[0]?.suggestion).toBe("—");
+  });
   // [label, raw ctx.input, expected header text]. The block_action row
   // is the documented `notFound("")` case — a missing action_id is
   // coerced to "" and falls through to the not-found view rather than

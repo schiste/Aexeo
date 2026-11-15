@@ -186,7 +186,7 @@ export function Findings(): React.JSX.Element {
               <li key={i} className="flex items-start gap-2">
                 <SeverityBadge severity={finding.severity} />
                 <code className="font-mono text-xs">{finding.rule_id}</code>
-                <span className="flex-1">{finding.message}</span>
+                <span className="flex-1">{finding.message}{finding.suggestion && <span className="block text-xs text-kumo-subtle">Suggestion: {finding.suggestion}</span>}</span>
               </li>
             ))}
           </ul>
@@ -239,7 +239,7 @@ export function Findings(): React.JSX.Element {
                     <td className="px-3 py-2 align-top">
                       <SeverityBadge severity={finding.severity} />
                     </td>
-                    <td className="px-3 py-2 align-top">{finding.message}{finding.aexeo_cms_location ? <div className="text-xs text-kumo-subtle">CMS path {JSON.stringify(finding.aexeo_cms_location.path)}, UTF-16 offset {finding.aexeo_cms_location.utf16_offset}</div> : finding.aexeo_source_location ? <div className="text-xs text-kumo-subtle">Projected body: block {finding.aexeo_source_location.block_index + 1}, span {finding.aexeo_source_location.span_index + 1}, UTF-16 offset {finding.aexeo_source_location.utf16_offset}</div> : finding.aexeo_origin === "content_preset" ? <div className="text-xs text-kumo-subtle">Projected location unavailable</div> : null}</td>
+                    <td className="px-3 py-2 align-top">{finding.message}{finding.suggestion && <div className="text-xs text-kumo-subtle">Suggestion: {finding.suggestion}</div>}{finding.aexeo_cms_location ? <div className="text-xs text-kumo-subtle">CMS path {JSON.stringify(finding.aexeo_cms_location.path)}, UTF-16 offset {finding.aexeo_cms_location.utf16_offset}</div> : finding.aexeo_source_location ? <div className="text-xs text-kumo-subtle">Projected body: block {finding.aexeo_source_location.block_index + 1}, span {finding.aexeo_source_location.span_index + 1}, UTF-16 offset {finding.aexeo_source_location.utf16_offset}</div> : finding.aexeo_origin === "content_preset" ? <div className="text-xs text-kumo-subtle">Projected location unavailable</div> : null}</td>
                   </tr>
                 );
               })}

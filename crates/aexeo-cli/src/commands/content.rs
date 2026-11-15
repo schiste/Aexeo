@@ -580,6 +580,9 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                                 == Some("html")
                     )
                 );
+                if let Some(suggestion) = &finding.suggestion {
+                    println!("    Suggestion: {suggestion}");
+                }
             }
         }
     }
@@ -749,6 +752,9 @@ fn evaluate_crawl(
                     "  {}:{}:{}: {}",
                     finding.path, finding.line, finding.column, finding.message
                 );
+                if let Some(suggestion) = &finding.suggestion {
+                    println!("    Suggestion: {suggestion}");
+                }
             }
         }
     }

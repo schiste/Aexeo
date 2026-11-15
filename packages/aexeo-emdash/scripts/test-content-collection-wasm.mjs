@@ -63,6 +63,7 @@ kind="forbidden_terms"
 terms=["target"]
 `;
 const positionalReport = await evaluateContent({ route: "/test", title: "Test", body: [{ children: [{ _type: "span", text: "😀 target" }] }] }, "test", { test: positionalPreset });
+assert.match(positionalReport.gates[0].findings[0].suggestion, /in context/);
 assert.deepEqual(positionalReport.source_locations, [{ gate_id: "terms", finding_index: 0, block_index: 0, span_index: 0, utf16_offset: 3 }]);
 assert.deepEqual(positionalReport.source_mapping, { eligible: 1, mapped: 1, unmapped: 0 });
 console.log("WASM source location smoke test passed");

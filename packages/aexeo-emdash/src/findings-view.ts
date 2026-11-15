@@ -422,12 +422,14 @@ export function findingsTable(rows: FindingRow[]): unknown {
       { key: "rule", label: "Rule", format: "code" },
       { key: "severity", label: "Severity", format: "badge" },
       { key: "message", label: "Message" },
+      { key: "suggestion", label: "Suggestion" },
     ],
     rows: rows.map((row) => ({
       route: row.document_route,
       rule: row.rule_id,
       severity: row.severity,
       message: row.message,
+      suggestion: row.suggestion ?? "—",
     })),
   };
 }
@@ -514,12 +516,14 @@ export function documentFindingsTable(findings: Finding[]): unknown {
       { key: "rule", label: "Rule", format: "code" },
       { key: "severity", label: "Severity", format: "badge" },
       { key: "message", label: "Message" },
+      { key: "suggestion", label: "Suggestion" },
       { key: "block", label: "Location", format: "code" },
     ],
     rows: findings.map((finding) => ({
       rule: finding.rule_id,
       severity: finding.severity,
       message: finding.message,
+      suggestion: finding.suggestion ?? "—",
       block: finding.aexeo_cms_location
         ? `CMS path ${JSON.stringify(finding.aexeo_cms_location.path)}, UTF-16 offset ${finding.aexeo_cms_location.utf16_offset}`
         : finding.aexeo_source_location
