@@ -295,6 +295,9 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   artifact bytes and compares their verdicts except the evaluation timestamp.
   It rejects different decision manifests before reading artifacts and hashes
   each supplied artifact once; the host still must ensure stable, trusted inputs.
+  The independent comparator can additionally require a host-supplied list of
+  exact blocking check IDs to have passed; this does not establish evaluator
+  authenticity, complete required coverage or publication authorization.
   An opt-in comparison mode also checks v1 verdict schema, timestamps, summary
   counts and status consistency. It does not produce a fresh evaluation,
   establish artifact freshness or authenticity, or authorize publication.

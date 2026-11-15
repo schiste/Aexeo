@@ -115,6 +115,29 @@ class CompareOfflineReceipts(unittest.TestCase):
             with self.subTest(mutation=mutate), self.assertRaises(comparison.VerificationError):
                 comparison.compare_receipts(self.encode(bad), self.encode(bad), self.artifacts, validate=True)
 
+    def test_required_checks_need_a_valid_passing_verdict_and_exact_unique_ids(self):
+        receipt = copy.deepcopy(self.receipt)
+        verdict = json.loads((Path(__file__).parent.parent / "v1" / "examples" / "verdict-fail.json").read_text())
+        verdict["checks"][1]["status"] = "passed"
+        verdict["status"] = "pass"
+        verdict["summary"].update(passed=3, failed=0, blocking_failed=0)
+        receipt["verdict"] = verdict
+        encoded = self.encode(receipt)
+        comparison.compare_receipts(encoded, encoded, self.artifacts, required_checks=["structure.title", "links.internal"])
+        for required in (["missing"], ["length.words"], [""], ["structure.title", "structure.title"]):
+            with self.subTest(required=required), self.assertRaises(comparison.VerificationError):
+                comparison.compare_receipts(encoded, encoded, self.artifacts, required_checks=required)
+        for mutate in (
+            lambda v: v["checks"].append(copy.deepcopy(v["checks"][0])),
+            lambda v: v.update(status="fail"),
+            lambda v: v["checks"][0].update(status="not_checked"),
+            lambda v: v["checks"][0].update(blocking=False),
+        ):
+            bad = copy.deepcopy(receipt)
+            mutate(bad["verdict"])
+            with self.subTest(mutation=mutate), self.assertRaises(comparison.VerificationError):
+                comparison.compare_receipts(self.encode(bad), self.encode(bad), self.artifacts, required_checks=["structure.title"])
+
     def test_subject_matches_bound_change_and_rejects_substitution(self):
         change = {"schema": "content-gate.change/v1", "change_id": "change-1",
                   "base": {"kind": "git", "revision": "abc"},
@@ -344,6 +367,30 @@ class CompareOfflineReceipts(unittest.TestCase):
         with self.assertRaises(comparison.VerificationError):
             comparison.read_content_map(map_path)
 
+    def test_cli_requires_exact_passed_checks(self):
+        receipt = copy.deepcopy(self.receipt)
+        verdict = json.loads((Path(__file__).parent.parent / "v1" / "examples" / "verdict-fail.json").read_text())
+        verdict["checks"][1]["status"] = "passed"
+        verdict["status"] = "pass"
+        verdict["summary"].update(passed=3, failed=0, blocking_failed=0)
+        receipt["verdict"] = verdict
+        previous = self.root / "previous.json"
+        previous.write_bytes(self.encode(receipt))
+        args = [sys.executable, str(SCRIPT), str(previous), str(previous)]
+        for role in comparison.REQUIRED:
+            args.extend(["--" + role.replace("_", "-"), str(self.artifacts[role])])
+        for role in comparison.OPTIONAL:
+            args.append("--" + role.replace("_", "-") + "-absent")
+        run = subprocess.run(args + ["--require-check", "structure.title", "--telemetry"], capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        event = json.loads(run.stderr)
+        self.assertTrue(event["verdict_validation_requested"])
+        self.assertEqual(event["required_check_count"], 1)
+        self.assertNotIn("structure.title", run.stderr)
+        missing = subprocess.run(args + ["--require-check", "missing", "--telemetry"], capture_output=True, text=True)
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertEqual(json.loads(missing.stderr.splitlines()[0])["status"], "error")
+
     def test_cli_is_private_and_does_not_authorize_publication(self):
         previous = self.root / "previous.json"
         fresh = self.root / "fresh.json"
@@ -363,6 +410,10 @@ class CompareOfflineReceipts(unittest.TestCase):
         self.assertNotEqual(unavailable.returncode, 0)
         self.assertTrue(json.loads(unavailable.stderr.splitlines()[0])["verdict_validation_requested"])
         self.assertNotIn(str(self.root), unavailable.stderr)
+        required_unavailable = subprocess.run([sys.executable, "-S", *args[1:], "--require-check", "structure.title", "--telemetry"], capture_output=True, text=True)
+        self.assertNotEqual(required_unavailable.returncode, 0)
+        self.assertEqual(json.loads(required_unavailable.stderr.splitlines()[0])["required_check_count"], 1)
+        self.assertNotIn("structure.title", required_unavailable.stderr)
         unavailable_change = subprocess.run([sys.executable, "-S", *args[1:], "--validate-change", "--telemetry"], capture_output=True, text=True)
         self.assertNotEqual(unavailable_change.returncode, 0)
         self.assertTrue(json.loads(unavailable_change.stderr.splitlines()[0])["change_validation_requested"])
