@@ -68,6 +68,29 @@ class CompareOfflineReceipts(unittest.TestCase):
         with self.assertRaises(comparison.VerificationError):
             comparison.compare_receipts(original, self.encode(changed), self.artifacts)
 
+    def test_different_input_snapshots_are_rejected_before_artifact_reads(self):
+        fresh = copy.deepcopy(self.receipt)
+        fresh["decision_inputs"]["change"]["sha256"] = hashlib.sha256(b"new change").hexdigest()
+        # Previously, swapping the file between the two verification calls
+        # made these different manifests appear to match the same artifacts.
+        verify = comparison.verify_files
+        def swap_after_first_read(*args, **kwargs):
+            result = verify(*args, **kwargs)
+            self.artifacts["change"].write_bytes(b"new change")
+            return result
+        with mock.patch.object(comparison, "verify_files", side_effect=swap_after_first_read) as read:
+            with self.assertRaises(comparison.VerificationError):
+                comparison.compare_receipts(self.encode(self.receipt), self.encode(fresh), self.artifacts)
+            read.assert_not_called()
+
+    def test_matching_manifests_read_artifacts_once(self):
+        previous = self.encode(self.receipt)
+        fresh = copy.deepcopy(self.receipt)
+        fresh["decision_inputs"] = dict(reversed(list(fresh["decision_inputs"].items())))
+        with mock.patch.object(comparison, "verify_files", wraps=comparison.verify_files) as read:
+            comparison.compare_receipts(previous, self.encode(fresh), self.artifacts)
+            self.assertEqual(read.call_count, 1)
+
     def test_opt_in_validates_schema_timestamp_summary_and_status(self):
         try:
             import jsonschema  # noqa: F401

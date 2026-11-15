@@ -275,6 +275,8 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   artifact files against the standalone manifest. An independent Python
   comparator also checks two Aexeo offline receipts against host-supplied
   artifact bytes and compares their verdicts except the evaluation timestamp.
+  It rejects different decision manifests before reading artifacts and hashes
+  each supplied artifact once; the host still must ensure stable, trusted inputs.
   An opt-in comparison mode also checks v1 verdict schema, timestamps, summary
   counts and status consistency. It does not produce a fresh evaluation,
   establish artifact freshness or authenticity, or authorize publication.
