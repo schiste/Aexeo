@@ -95,8 +95,10 @@ findings from assessed paragraphs. This conservative result also applies to shor
 paragraphs that may be intentional; the check does not detect language or perform
 linguistic segmentation. An explicitly empty paragraph collection still passes.
 To bound resource use, an opening over 4,096 bytes or
-more than 10,000 distinct openings stops the check as `not_checked`, retaining
-findings from the portion already assessed.
+more than 10,000 distinct openings, more than 4 MiB of normalized distinct
+opening keys, or more than 100,000 paragraphs stops the check as `not_checked`,
+retaining findings from the portion already assessed. Measurements report the
+total paragraph count and the number actually evaluated, including partial runs.
 
 ## Custom presets
 

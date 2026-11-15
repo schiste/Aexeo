@@ -57,7 +57,9 @@ pub const MAX_CONTENT_INPUT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_FINDINGS_PER_GATE: usize = 1000;
 
 // Keep the advisory openings gate bounded for adapters other than the CLI.
+const MAX_PARAGRAPH_OPENINGS: usize = 100_000;
 const MAX_DISTINCT_PARAGRAPH_OPENINGS: usize = 10_000;
+const MAX_PARAGRAPH_OPENING_KEY_BYTES: usize = 4 * 1024 * 1024;
 const MAX_PARAGRAPH_OPENING_BYTES: usize = 4_096;
 const MAX_DUPLICATE_PARAGRAPHS: usize = 100_000;
 const MAX_DUPLICATE_PARAGRAPH_BYTES: usize = 16 * 1024;
@@ -1731,10 +1733,11 @@ impl ContentPreset {
                     match context.and_then(|c| c.paragraphs.as_ref()) {
                         Some(paragraphs) => {
                             let mut openings = BTreeMap::<Vec<String>, usize>::new();
+                            let mut key_bytes = 0usize;
                             let mut exceeding = 0;
                             let mut evaluated = 0;
                             let mut skipped = 0;
-                            for paragraph in paragraphs {
+                            for paragraph in paragraphs.iter().take(MAX_PARAGRAPH_OPENINGS) {
                                 let mut words = Vec::with_capacity(*opening_words);
                                 let mut bytes = 0usize;
                                 for word in paragraph.text.split_whitespace().take(*opening_words) {
@@ -1759,14 +1762,22 @@ impl ContentPreset {
                                     skipped += 1;
                                     continue;
                                 }
-                                if openings.len() >= MAX_DISTINCT_PARAGRAPH_OPENINGS
-                                    && !openings.contains_key(&words)
-                                {
-                                    reason = Some(
-                                        "too many distinct paragraph openings to assess completely"
-                                            .into(),
-                                    );
-                                    break;
+                                if !openings.contains_key(&words) {
+                                    if openings.len() >= MAX_DISTINCT_PARAGRAPH_OPENINGS {
+                                        reason = Some(
+                                            "too many distinct paragraph openings to assess completely"
+                                                .into(),
+                                        );
+                                        break;
+                                    }
+                                    let new_key_bytes: usize = words.iter().map(String::len).sum();
+                                    if key_bytes + new_key_bytes > MAX_PARAGRAPH_OPENING_KEY_BYTES {
+                                        reason = Some(
+                                            "paragraph opening keys exceed the supported byte limit".into(),
+                                        );
+                                        break;
+                                    }
+                                    key_bytes += new_key_bytes;
                                 }
                                 evaluated += 1;
                                 let count = openings.entry(words).or_default();
@@ -1781,6 +1792,9 @@ impl ContentPreset {
                                         paragraph.column,
                                     );
                                 }
+                            }
+                            if reason.is_none() && paragraphs.len() > MAX_PARAGRAPH_OPENINGS {
+                                reason = Some("too many paragraphs to assess completely".into());
                             }
                             measurements.insert("paragraph_count".into(), paragraphs.len());
                             measurements.insert("openings_evaluated".into(), evaluated);
@@ -3932,6 +3946,52 @@ terms = ["bad"]
             MAX_DISTINCT_PARAGRAPH_OPENINGS
         );
     }
+    #[test]
+    fn paragraph_openings_bound_repeated_work_and_total_key_bytes() {
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='openings'\n[[gates]]\nid='opening'\nkind='repeated_paragraph_openings'\nopening_words=2\nmax_occurrences=1\n",
+        ).unwrap();
+        let run = |paragraphs: Vec<ContentParagraph>| {
+            preset
+                .evaluate_with_context(
+                    &ContentInput::default(),
+                    None,
+                    None,
+                    Some(&ContentContext {
+                        paragraphs: Some(paragraphs),
+                        ..Default::default()
+                    }),
+                )
+                .unwrap()
+                .gates
+                .remove(0)
+        };
+        let paragraph = |text: String| ContentParagraph {
+            text,
+            line: 1,
+            column: 1,
+        };
+        let repeated = run(vec![paragraph("same opening".into()); 100_001]);
+        assert_eq!(repeated.status, GateStatus::NotChecked);
+        assert_eq!(repeated.measurements["openings_evaluated"], 100_000);
+        assert!(!repeated.findings.is_empty());
+        assert!(
+            repeated
+                .reason
+                .as_deref()
+                .unwrap()
+                .contains("too many paragraphs")
+        );
+
+        let unique = (0..1_100)
+            .map(|i| paragraph(format!("prefix{i} {}", "x".repeat(4_000))))
+            .collect();
+        let bounded = run(unique);
+        assert_eq!(bounded.status, GateStatus::NotChecked);
+        assert!(bounded.measurements["openings_evaluated"] < 1_100);
+        assert!(bounded.reason.as_deref().unwrap().contains("opening keys"));
+    }
+
     #[test]
     fn reachability_gate_preserves_partial_findings_without_network() {
         use LinkReachabilityObservation::{NotApplicable, NotChecked, NotFound, Reachable};
