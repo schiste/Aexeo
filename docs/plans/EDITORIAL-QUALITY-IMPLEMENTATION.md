@@ -34,6 +34,12 @@ Existing source and factuality work is outside this plan.
   independent human evaluation or an autonomous agent-writing trial.
 - The phrase lists and repeated-opening signal are review prompts. They do not
   establish authorship, detector outcomes or semantic quality.
+- The bundled writing-pattern preset was run on 19 unreviewed development
+  excerpts from a private Aeptus corpus: all 279 paragraph openings were
+  assessed and all 19 documents passed. The held-out examples were not used.
+  This is a coverage observation, not evidence of accuracy, recall, or editorial
+  quality; the sample has no validated labels. A single human's reviews can
+  support local calibration, but are not independent multi-reviewer validation.
 - A configured EmDash plugin and real WASM were exercised across refresh and
   save with an explicitly injected provider. A workerd test exercises the
   sidecar's service binding, actual WASM, and rejection of stale results.
