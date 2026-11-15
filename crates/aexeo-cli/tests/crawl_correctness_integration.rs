@@ -1225,7 +1225,7 @@ fn a_seed_entry_outside_the_crawl_origin_is_reported_and_never_requested() {
         &["/", "/a"],
         &["http://other.example/orphan?token=secret"],
     );
-    let (payload, _) = seeded_crawl(&site, temp.path(), &context, &[]);
+    let (payload, audit) = seeded_crawl(&site, temp.path(), &context, &[]);
     assert!(!site.requested("/orphan"), "{payload:#}");
     let attestation = &payload["artifact"]["crawl_attestation"];
     assert_eq!(
@@ -1234,6 +1234,54 @@ fn a_seed_entry_outside_the_crawl_origin_is_reported_and_never_requested() {
     );
     assert_eq!(attestation["seeded_from"]["url_count"], 2);
     assert_eq!(attestation["unfetched_urls"], serde_json::json!([]));
+
+    // The valid local seed is fully fetched, but the foreign inventory entry
+    // still makes this an invalid comparison. A consumer must not turn a
+    // zero incoming-link count into a confirmed orphan.
+    let report = audit_link_report(temp.path(), &audit);
+    assert_eq!(report["reconciliation"]["comparable"], false, "{report:#}");
+    assert_eq!(
+        report["reconciliation"]["eligible_pages"],
+        serde_json::json!([]),
+        "{report:#}"
+    );
+    assert!(
+        report["reconciliation"]["issues"]
+            .to_string()
+            .contains("invalid_or_duplicate_inventory_url"),
+        "{report:#}"
+    );
+}
+
+#[test]
+fn a_foreign_inventory_entry_never_confirms_a_local_orphan() {
+    let site = orphan_site();
+    site.serve_header("X-Release", "r1");
+    let temp = tempfile::tempdir().unwrap();
+    let context = inventory_context(
+        &site,
+        &["/", "/a", "/orphan"],
+        &["http://other.example/foreign"],
+    );
+    let (_, report) = seeded_crawl_with_report(
+        &site,
+        temp.path(),
+        &context["inventory"],
+        &["--release-header", "x-release"],
+    );
+    assert!(site.requested("/orphan"));
+    assert_eq!(report["reconciliation"]["comparable"], false, "{report:#}");
+    assert_eq!(
+        report["reconciliation"]["eligible_pages"],
+        serde_json::json!([]),
+        "{report:#}"
+    );
+    let orphan = format!("{}/orphan", site.base_url);
+    assert_eq!(
+        legacy_finding(&report, "LNK002", &orphan)["conclusion"],
+        "not_eligible",
+        "{report:#}"
+    );
 }
 
 #[test]
