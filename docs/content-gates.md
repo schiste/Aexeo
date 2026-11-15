@@ -870,9 +870,14 @@ Evaluation, feedback export, bound reviews and blind review packets require the
 same projection; mismatches are rejected. Reviewers must assess the selected
 main element, even though packets contain the supplied HTML. Retaining the
 report and scope does not authenticate the input, reviewer or review conditions.
-This option applies to the single-content CLI; it does not alter the
-content-change protocol.
-Rust hosts may also call `evaluate_change_with_collection_and_html_scope` with `HtmlContentScope::Main` to evaluate only the unique observable `<main>` in each HTML change entry. Missing or ambiguous main elements remain `not_checked`; non-HTML entries retain their normal adapters. The verdict declares the scope in `aexeo.html-content-scope.v1` and binds it into its Aexeo-specific input fingerprint. `verify_scoped_change_input_binding` checks the intended scope before host callbacks; `verify_scoped_change_verdict` compares a fresh trusted result. Existing document-scope verification rejects main-scope bindings, and the existing API remains document-scoped. These helpers do not authenticate the evaluator or establish source freshness or publication safety. This option is currently a Rust host API, not a `content-change` CLI option or offline receipt mode. Static markup does not establish browser visibility.
+For changes, `content-change --html-scope main` selects the same projection for
+all `text/html` entries. The default remains `document`. Missing or ambiguous
+main elements are `not_checked`. The option also applies to experimental offline
+receipts; revalidation requires the same scope. `--telemetry` emits the selected
+scope and eligible entry count without content, paths or URLs. This does not
+change the content-gate v1 protocol.
+
+Rust hosts may also call `evaluate_change_with_collection_and_html_scope` with `HtmlContentScope::Main` to evaluate only the unique observable `<main>` in each HTML change entry. Missing or ambiguous main elements remain `not_checked`; non-HTML entries retain their normal adapters. The verdict declares the scope in `aexeo.html-content-scope.v1` and binds it into its Aexeo-specific input fingerprint. `verify_scoped_change_input_binding` checks the intended scope before host callbacks; `verify_scoped_change_verdict` compares a fresh trusted result. Existing document-scope verification rejects main-scope bindings, and the existing API remains document-scoped. These helpers do not authenticate the evaluator or establish source freshness or publication safety. Static markup does not establish browser visibility.
 
 The content-change protocol supports `text/html` with the same rules. For the single-content CLI, opt-in telemetry includes `html_projection`: a complete projection reports aggregate heading, paragraph and link counts; an unavailable projection reports its status without counts. The JSON report and telemetry distinguish unavailable source locations, byte-identical text (`identity_projection`), and a verified, well-nested literal HTML subset (`literal_html`). Prose locations in the latter are mapped only when a bounded lexical reconstruction matches the parser projection exactly. In the supported subset, heading and link-destination findings also map to their opening tags; link reachability findings require matching ordered observations. Semicolon-terminated named entities from the HTML parser that decode to non-control characters, and non-control numeric entities map their decoded characters to the opening `&` (including entities that decode to two Unicode scalars); the remaining text retains its original position. Unsupported entities, hidden elements, unsupported or malformed markup, excessive nesting and other transformations leave locations unavailable. Finding coordinates remain relative to projected text; separate mapped positions point into the supplied source. These observations do not establish browser visibility or page completeness, and telemetry contains no content, paths or URLs.
 
@@ -1104,4 +1109,4 @@ failure. This mode rejects `--verify-verdict`, `--extension-results` and
 `--check-link-reachability`; external observations are not evaluated. It does
 not prove collection completeness, input authenticity, build identity or
 freshness at publication. Coordinate concurrent changes at the host boundary.
-`--telemetry` reports only an aggregate receipt-revalidation match boolean.
+`--telemetry` reports an aggregate receipt-revalidation match boolean; with main scope it also reports the scope and eligible HTML entry count.

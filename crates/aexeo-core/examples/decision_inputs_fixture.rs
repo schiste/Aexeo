@@ -3,8 +3,9 @@ use aexeo_contracts::content_gate_protocol::Change;
 use aexeo_core::content_gate::{ContentInput, ContentPreset};
 use aexeo_core::content_gate_sources::ConfinedContentFiles;
 use aexeo_core::content_gate_verdict::{
-    ChangeCollection, OfflineDecisionContext, evaluate_offline_receipt,
+    ChangeCollection, OfflineDecisionContext, evaluate_offline_receipt_with_html_scope,
 };
+use aexeo_core::html_content_adapter::HtmlContentScope;
 use std::{
     io::{self, Cursor},
     path::Path,
@@ -34,7 +35,24 @@ fn main() -> anyhow::Result<()> {
         ..Default::default()
     }];
     let mut fixtures = Vec::new();
-    for present in [false, true] {
+    for (present, scope) in [
+        (false, HtmlContentScope::Document),
+        (true, HtmlContentScope::Document),
+        (false, HtmlContentScope::Main),
+        (true, HtmlContentScope::Main),
+    ] {
+        let mut change = change.clone();
+        if scope == HtmlContentScope::Main {
+            change.entries[0].media_type = "text/html".into();
+            let state = change.entries[0]
+                .after
+                .as_mut()
+                .expect("fixture has content");
+            state.inline =
+                Some("<nav>word</nav><main><p>safe</p></main><footer>word</footer>".into());
+            state.sha256 =
+                "1a092dfafca8e00d06f070ace94d81061c2749235da07c5aca309f5dc0d106b2".into();
+        }
         let context = OfflineDecisionContext {
             change: &change,
             preset: &preset,
@@ -48,8 +66,13 @@ fn main() -> anyhow::Result<()> {
             }),
             evaluator_identity: b"test-build",
         };
-        let receipt = evaluate_offline_receipt(&context, &mut NoFiles, "2026-01-01T00:00:00Z")?;
-        let artifacts = context.artifacts()?;
+        let receipt = evaluate_offline_receipt_with_html_scope(
+            &context,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            scope,
+        )?;
+        let artifacts = context.artifacts_with_html_scope(scope)?;
         fixtures.push(serde_json::json!({
             "manifest": receipt.decision_inputs,
             "receipt": receipt,

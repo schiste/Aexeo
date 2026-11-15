@@ -23,7 +23,8 @@ class ReceiptInterop(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         fixtures = json.loads(result.stdout)
-        self.assertEqual(len(fixtures), 2)
+        self.assertEqual(len(fixtures), 4)
+        self.assertEqual([json.loads(bytes(f["artifacts"]["host_options"])).get("html_scope") for f in fixtures], [None, None, "main", "main"])
         with tempfile.TemporaryDirectory(prefix="aexeo interop ") as temp:
             directory = Path(temp)
             for fixture in fixtures:
@@ -75,6 +76,12 @@ class ReceiptInterop(unittest.TestCase):
                 self.assertNotEqual(subprocess.run(comparison_args, capture_output=True).returncode, 0)
                 valid = subprocess.run(args, capture_output=True, text=True)
                 self.assertEqual(valid.returncode, 0, valid.stderr)
+                options = paths["host_options"]
+                if json.loads(options.read_bytes()).get("html_scope") == "main":
+                    original = options.read_bytes()
+                    options.write_bytes(bytes(fixtures[0]["artifacts"]["host_options"]))
+                    self.assertNotEqual(subprocess.run(args, capture_output=True).returncode, 0)
+                    options.write_bytes(original)
                 for role, path in paths.items():
                     original = path.read_bytes()
                     path.write_bytes(original + b" ")
