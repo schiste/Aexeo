@@ -135,6 +135,22 @@ not produce those artifacts, compare receipts or validate a verdict, authenticat
 producer, ensure file immutability during reading, or prevent publication races.
 The experimental Aexeo receipt's Rust-specific serialization remains outside an
 interoperable artifact format. A successful comparison is not authorization.
+To verify a CLI bundle, supply its path in place of the manifest and add
+`--bundle`. The verifier checks the embedded artifacts against the embedded
+manifest, then checks the independently supplied files against that same
+manifest. For example:
+
+```sh
+python3 docs/specs/content-gate/v2/verify_decision_inputs.py bundle.json --bundle \
+  --change change.bin --resolved-policy policy.bin --host-options options.bin \
+  --evaluator evaluator.bin --collection-absent --external-evidence-absent
+```
+
+Bundles are bounded to 64 MiB and may contain private content. This checks
+byte consistency only: the host must supply and protect the intended current
+files. It does not authenticate the bundle, re-evaluate the verdict, establish
+freshness or authorize publication. External evidence in bundles is unsupported.
+
 The optional `--telemetry` flag emits local aggregate duration, status and, on
 success, file and byte counts to stderr; it contains no paths or artifact data.
 

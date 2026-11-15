@@ -54,6 +54,19 @@ class ReceiptInterop(unittest.TestCase):
                     args.extend([flag, str(paths[role])])
             valid = subprocess.run(args, capture_output=True, text=True)
             self.assertEqual(valid.returncode, 0, valid.stderr)
+            bundle_args = [sys.executable, str(VERIFIER), str(output), "--bundle", *args[3:]]
+            direct = subprocess.run(bundle_args + ["--telemetry"], capture_output=True, text=True)
+            self.assertEqual(direct.returncode, 0, direct.stderr)
+            event = json.loads(direct.stderr)
+            self.assertEqual(event["status"], "matched")
+            self.assertEqual(event["files"], 4)
+            self.assertNotIn("café", direct.stderr)
+            self.assertNotIn(str(directory), direct.stderr)
+            altered_bundle = json.loads(output.read_text(encoding="utf-8"))
+            altered_bundle["artifacts"]["change"] += " "
+            output.write_text(json.dumps(altered_bundle), encoding="utf-8")
+            self.assertNotEqual(subprocess.run(bundle_args, capture_output=True).returncode, 0)
+            output.write_text(json.dumps(bundle), encoding="utf-8")
             previous = directory / "previous.json"
             previous.write_text(json.dumps(bundle["receipt"]), encoding="utf-8")
             fresh = directory / "fresh.json"
@@ -62,6 +75,7 @@ class ReceiptInterop(unittest.TestCase):
             self.assertEqual(comparison.returncode, 0, comparison.stderr)
             paths["change"].write_bytes(paths["change"].read_bytes() + b" ")
             self.assertNotEqual(subprocess.run(args, capture_output=True).returncode, 0)
+            self.assertNotEqual(subprocess.run(bundle_args, capture_output=True).returncode, 0)
 
     def test_rust_receipt_inputs_against_python_cli(self):
         result = subprocess.run(
