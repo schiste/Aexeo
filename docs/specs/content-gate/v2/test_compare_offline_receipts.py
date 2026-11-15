@@ -1,5 +1,6 @@
 import copy
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import subprocess
@@ -115,6 +116,8 @@ class CompareOfflineReceipts(unittest.TestCase):
             with self.subTest(mutation=mutate), self.assertRaises(comparison.VerificationError):
                 comparison.compare_receipts(self.encode(bad), self.encode(bad), self.artifacts, validate=True)
 
+    @unittest.skipUnless(importlib.util.find_spec("jsonschema") and importlib.util.find_spec("rfc3339_validator"),
+                         "optional verdict validation dependencies are unavailable")
     def test_required_checks_need_a_valid_passing_verdict_and_exact_unique_ids(self):
         receipt = copy.deepcopy(self.receipt)
         verdict = json.loads((Path(__file__).parent.parent / "v1" / "examples" / "verdict-fail.json").read_text())
@@ -367,6 +370,8 @@ class CompareOfflineReceipts(unittest.TestCase):
         with self.assertRaises(comparison.VerificationError):
             comparison.read_content_map(map_path)
 
+    @unittest.skipUnless(importlib.util.find_spec("jsonschema") and importlib.util.find_spec("rfc3339_validator"),
+                         "optional verdict validation dependencies are unavailable")
     def test_cli_requires_exact_passed_checks(self):
         receipt = copy.deepcopy(self.receipt)
         verdict = json.loads((Path(__file__).parent.parent / "v1" / "examples" / "verdict-fail.json").read_text())
