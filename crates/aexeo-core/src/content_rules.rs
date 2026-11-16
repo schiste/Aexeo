@@ -422,6 +422,11 @@ mod tests {
             .unwrap()
             .set_len(5_000_001)
             .unwrap();
+        fs::create_dir_all(root.join(".evil.test/articles/images")).unwrap();
+        fs::File::create(root.join(".evil.test/articles/images/large.webp"))
+            .unwrap()
+            .set_len(5_000_001)
+            .unwrap();
         write(
             &root.join("articles/index.html"),
             &make_page(
@@ -437,7 +442,11 @@ mod tests {
             "#,
             ),
         );
-        let findings = run_content_rules(&load_site(root).unwrap(), &Config::default());
+        let config = Config {
+            site_url: Some("https://example.com".to_string()),
+            ..Config::default()
+        };
+        let findings = run_content_rules(&load_site(root).unwrap(), &config);
         let images: Vec<_> = findings
             .iter()
             .filter(|finding| finding.rule_id == "CNT004")
@@ -452,7 +461,7 @@ mod tests {
             .indexed_paths
             .remove("articles/images/large.webp");
         assert!(
-            !run_content_rules(&partial_site, &Config::default())
+            !run_content_rules(&partial_site, &config)
                 .iter()
                 .any(|finding| finding.rule_id == "CNT004")
         );
