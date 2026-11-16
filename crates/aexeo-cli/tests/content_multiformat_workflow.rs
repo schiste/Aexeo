@@ -157,3 +157,46 @@ fn scoped_html_corpus_replays_against_the_real_cli() {
     assert_eq!(report["counts"]["true_negative"], 1);
     assert_eq!(report["content_projection"]["scope"], "main");
 }
+
+#[test]
+fn scoped_html_reports_body_coordinates_after_head_script_comparison() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("draft.html");
+    let preset = dir.path().join("preset.toml");
+    let html = "<!doctype html>\n<html><head><script>if (x < 3) x++;</script></head>\n<body><nav>generic phrase</nav>\n<main><p>generic phrase</p></main></body></html>";
+    fs::write(&draft, html).unwrap();
+    fs::write(&preset, "version=1\nname='workflow'\n[[gates]]\nid='style.phrase'\nkind='forbidden_terms'\nterms=['generic phrase']\nblocking=false\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            draft.to_str().unwrap(),
+            "--input-format",
+            "html",
+            "--html-scope",
+            "main",
+            "--preset",
+            "workflow",
+            "--preset-source",
+            &format!("workflow={}", preset.display()),
+            "--format",
+            "json",
+            "--telemetry",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["source_locations"][0]["line"], 4, "{report:#}");
+    assert_eq!(report["source_locations"][0]["column"], 10, "{report:#}");
+    let telemetry = String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|event| event["event"] == "content_evaluation")
+        .unwrap();
+    assert_eq!(telemetry["source_mapping"]["mapped"], 1);
+    assert!(!telemetry.to_string().contains("generic phrase"));
+}

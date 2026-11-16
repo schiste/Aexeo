@@ -525,8 +525,9 @@ pub fn html_source_map_with_scope(
             return None;
         }
         if matches!(tag.as_str(), "script" | "style") {
-            // Treat raw text as opaque only when it contains no '<', so the
-            // first following tag is unambiguously its exact closing tag.
+            // Skip raw text only when every '<' is plainly literal or starts
+            // the exact closing tag. Escapes and other end tags remain outside
+            // this subset because HTML's script tokenizer has additional states.
             // Scripts inside main are deliberately outside this mapping subset.
             if closing
                 || selected_depth.is_some()
@@ -536,20 +537,31 @@ pub fn html_source_map_with_scope(
             {
                 return None;
             }
-            let close_start = end + 1 + source[end + 1..].find('<')?;
             let close = if tag == "script" {
                 "</script>"
             } else {
                 "</style>"
             };
-            let close_end = close_start.checked_add(close.len())?;
-            if !source
-                .get(close_start..close_end)?
-                .eq_ignore_ascii_case(close)
-            {
-                return None;
+            let mut search = end + 1;
+            loop {
+                let candidate = search + source[search..].find('<')?;
+                let close_end = candidate.checked_add(close.len())?;
+                if source
+                    .get(candidate..close_end)
+                    .is_some_and(|value| value.eq_ignore_ascii_case(close))
+                {
+                    cursor = close_end;
+                    break;
+                }
+                if source
+                    .as_bytes()
+                    .get(candidate + 1)
+                    .is_none_or(|byte| matches!(byte, b'/' | b'!' | b'?'))
+                {
+                    return None;
+                }
+                search = candidate + 1;
             }
-            cursor = close_end;
             continue;
         }
         if closing {
@@ -757,7 +769,6 @@ mod tests {
             "stray<html><head><title>word</title></head><body><main><p>word</p></main></body></html>",
             "<html><div>stray</div><head><title>word</title></head><body><main><p>word</p></main></body></html>",
             "<html><head><title>word</title></head>stray<body><main><p>word</p></main></body></html>",
-            "<!doctype html><html><head><script>let x = 1 < 2;</script></head><body><main><p>word</p></main></body></html>",
             "<!doctype html><html><head><main><p>word</p></main></head><body></body></html>",
             "<!doctype html><html><head><title>word</title></head><head><title>word</title></head><body><main><p>word</p></main></body></html>",
         ] {
@@ -786,7 +797,6 @@ mod tests {
             Some((4, body_line.rfind("shared").unwrap() + 1))
         );
         for unsafe_html in [
-            "<html><head><script>let x = 1 < 2;</script></head><body><main><p>word</p></main></body></html>",
             "<html><head></head><body><main><script>word</script><p>word</p></main></body></html>",
             "<html><head><!-- bad -- comment --></head><body><main><p>word</p></main></body></html>",
             "<html><head><script-widget>ignored</script-widget></head><body><main><p>word</p></main></body></html>",
@@ -797,6 +807,33 @@ mod tests {
             assert!(
                 html_source_map_with_scope(
                     unsafe_html,
+                    adapted.input.text.as_deref().unwrap(),
+                    HtmlContentScope::Main
+                )
+                .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn maps_scoped_main_after_literal_less_than_in_head_raw_text() {
+        let source = "<!doctype html>\n<html><head><script>if (x < 3) { x = '<tag'; }</script><style>p { content: '<marker'; }</style></head>\n<body><nav>generic phrase</nav>\n<main><p>generic phrase</p></main></body></html>";
+        let adapted = html_content_with_scope("x", source, HtmlContentScope::Main).unwrap();
+        let text = adapted.input.text.as_deref().unwrap();
+        let map = html_source_map_with_scope(source, text, HtmlContentScope::Main).unwrap();
+        assert_eq!(map.source_position(source, text, 1, 1), Some((4, 10)));
+        for raw in [
+            "<!-- <script> </script> -->",
+            "</not-script>",
+            "<![CDATA[x]]>",
+        ] {
+            let source = format!(
+                "<html><head><script>{raw}</script></head><body><main><p>word</p></main></body></html>"
+            );
+            let adapted = html_content_with_scope("x", &source, HtmlContentScope::Main).unwrap();
+            assert!(
+                html_source_map_with_scope(
+                    &source,
                     adapted.input.text.as_deref().unwrap(),
                     HtmlContentScope::Main
                 )
