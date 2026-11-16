@@ -320,6 +320,7 @@ The latest published version observed on 2026-11-16 was 0.9.1.
   and a receipt for independent hash verification; revalidation still requires
   independently supplied current inputs. Bundles may contain private content
   and do not establish provenance, freshness or a portable v2 contract.
+  CLI verdict revalidation rejects duplicate keys at every depth in the previous verdict before comparing or replacing output; this does not authenticate that verdict.
   CLI receipt mode rejects duplicate keys in changes, collections and previous receipts, and fields discarded by typed parsing in changes and receipts. Direct Rust hosts must independently ensure their typed inputs preserve all semantics.
   The independent offline-receipt comparator can also opt into validating the
   bound change against the v1 change schema, including date and URI formats;

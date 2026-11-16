@@ -1057,6 +1057,35 @@ fn explicit_collection_snapshot_is_bound_and_conservative() {
 }
 
 #[test]
+fn revalidation_rejects_duplicate_nested_verdict_keys_without_replacing_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
+    assert_eq!(
+        run(dir.path(), &input(), policy, &[]).status.code(),
+        Some(0)
+    );
+    let output = dir.path().join("verdict.json");
+    let original = fs::read(&output).unwrap();
+    let parsed: serde_json::Value = serde_json::from_slice(&original).unwrap();
+    let key = "aexeo.offline-input-binding.v1";
+    let pair = format!("\"{}\": {}", key, parsed["extensions"][key]);
+    let raw = String::from_utf8(original.clone()).unwrap();
+    let ambiguous = raw.replacen(&pair, &format!("{pair}, {pair}"), 1);
+    assert_ne!(ambiguous, raw);
+    let previous = dir.path().join("previous.json");
+    fs::write(&previous, ambiguous).unwrap();
+    let result = run(
+        dir.path(),
+        &input(),
+        policy,
+        &["--verify-verdict", previous.to_str().unwrap()],
+    );
+    assert_eq!(result.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&result.stderr).contains("invalid previous verdict"));
+    assert_eq!(fs::read(&output).unwrap(), original);
+}
+
+#[test]
 fn revalidates_previous_verdict_against_current_inputs_and_result() {
     let dir = tempfile::tempdir().unwrap();
     let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
