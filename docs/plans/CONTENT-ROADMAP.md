@@ -39,6 +39,10 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 
 ## Delivery tracker
 
+- [x] Preserve the declared input format in new CLI feedback and reject known
+  corpus format mismatches. Legacy artifacts without a format remain unverified;
+  neither the format nor the fingerprint authenticates the evaluator.
+
 - [x] Allow `paragraph-text` editorial corpora to replay through the same adapter
   and accept feedback export; input fingerprints do not bind adapter format, so
   hosts must verify it separately.

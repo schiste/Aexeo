@@ -424,6 +424,14 @@ class EvaluateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "projection"):
             eval_module.validate_corpus(corpus)
 
+    def test_rejects_report_with_different_input_format(self):
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "input_format": "paragraph-text",
+                  "examples": [{"id": "a", "split": "development", "text": "First.\n\nSecond.", "expected": "passed"}]}
+        report = {"input_format": "text", "gates": [{"gate_id": "g", "status": "passed"}]}
+        with patch.object(eval_module.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout=json.dumps(report))):
+            with self.assertRaisesRegex(ValueError, "input format"):
+                eval_module.evaluate("cli", corpus, "development")
+
     def test_markdown_and_embedded_preset_reach_cli(self):
         corpus = {"version": 1, "preset": "custom", "preset_toml": "name='example'", "input_format": "markdown", "gate_id": "g", "examples": [
             {"id": "a", "split": "holdout", "text": "# heading", "expected": "passed"},

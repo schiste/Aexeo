@@ -20,6 +20,25 @@ class FeedbackTests(unittest.TestCase):
         self.corpus = {"version": 1, "gate_id": "length", "examples": [
             {"id": "e1", "split": "development", "text": self.text, "expected": "passed"}]}
 
+    def test_report_format_is_preserved_and_rejects_corpus_mismatch(self):
+        self.report["input_format"] = "paragraph-text"
+        self.corpus["input_format"] = "paragraph-text"
+        note = module.capture(self.text, self.report, "length", "e1", "passed", "person", "manual")
+        event = module.export_review(self.corpus, note)["events"][0]
+        self.assertEqual(event["input_format"], "paragraph-text")
+        bound = module.bind_review(self.corpus, note)
+        self.assertEqual(bound["examples"][0]["review"]["input_format"], "paragraph-text")
+        self.corpus["input_format"] = "markdown"
+        with self.assertRaisesRegex(ValueError, "input format"):
+            module.export_review(self.corpus, note)
+        self.corpus["input_format"] = "paragraph-text"
+        event["input_format"] = "text"
+        with self.assertRaisesRegex(ValueError, "input format"):
+            module._corpus_module().aggregate_review_events(self.corpus, "development", {"version": 1, "gate_id": "length", "events": [event]})
+        self.report["input_format"] = None
+        with self.assertRaisesRegex(ValueError, "input format"):
+            module.capture(self.text, self.report, "length", "e1")
+
     def test_projection_is_preserved_and_cannot_be_exported_as_raw_text(self):
         self.report["content_projection"] = {"format": "html", "scope": "main"}
         note = module.capture(self.text, self.report, "length", "e1", "passed", "person", "manual")

@@ -194,6 +194,13 @@ fn build_note(
         }
     };
     note["report_binding"] = json!(binding);
+    if let Some(format) = report.get("input_format") {
+        if !["text", "paragraph-text", "markdown", "html"].contains(&format.as_str().unwrap_or(""))
+        {
+            bail!("invalid report input format");
+        }
+        note["input_format"] = format.clone();
+    }
     if let Some(projection) = report.get("content_projection") {
         if projection != &json!({"format": "html", "scope": "main"}) {
             bail!("unsupported content projection in report");
@@ -333,6 +340,15 @@ fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
         }
         if review_status == "reviewed" {
             let review = item.get("review").context("missing review provenance")?;
+            if let Some(format) = review.get("input_format") {
+                let expected = corpus
+                    .get("input_format")
+                    .and_then(Value::as_str)
+                    .unwrap_or("text");
+                if format.as_str() != Some(expected) {
+                    bail!("review input format does not match the corpus");
+                }
+            }
             if review.get("content_projection") != projection {
                 bail!("review content projection does not match the corpus");
             }
@@ -354,6 +370,15 @@ fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
         || note.get("kind").and_then(Value::as_str) != Some("reported_human_feedback")
     {
         bail!("unsupported feedback note");
+    }
+    if let Some(format) = note.get("input_format") {
+        let expected = corpus
+            .get("input_format")
+            .and_then(Value::as_str)
+            .unwrap_or("text");
+        if format.as_str() != Some(expected) {
+            bail!("feedback input format does not match the corpus");
+        }
     }
     if note.get("content_projection") != projection {
         bail!("content projection does not match the corpus");
@@ -403,6 +428,9 @@ fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
     let mut event = json!({"example_id":note["example_id"],"text_sha256":hash,"model_status":model,"reviewer_status":status,"reviewer":note["reviewer"],"method":note["method"]});
     if let Some(projection) = projection {
         event["content_projection"] = projection.clone();
+    }
+    if let Some(format) = note.get("input_format") {
+        event["input_format"] = format.clone();
     }
     if let Some(fingerprint) = note.get("resolved_policy_fingerprint") {
         event["resolved_policy_fingerprint"] = policy_fingerprint(fingerprint)?.clone();

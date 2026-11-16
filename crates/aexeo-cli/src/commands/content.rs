@@ -561,6 +561,11 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 .as_ref()
                 .map(|metadata| super::feedback::metadata_hash(&serde_json::to_value(metadata)?))
                 .transpose()?;
+            output["input_format"] = serde_json::json!(
+                args.get_one::<String>("input-format")
+                    .map(String::as_str)
+                    .unwrap_or("text")
+            );
             output["input_fingerprint"] = serde_json::json!({
                 "version": 1, "text_sha256": text_sha256, "metadata_sha256": metadata_sha256
             });
