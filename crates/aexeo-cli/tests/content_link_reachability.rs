@@ -263,3 +263,54 @@ fn host_snapshot_does_not_connect_to_destinations() {
     assert!(listener.accept().is_err());
     assert!(!String::from_utf8_lossy(&output.stderr).contains("secret"));
 }
+
+#[test]
+fn markdown_snapshot_can_be_reused_with_a_preset_without_link_gates() {
+    let dir = tempfile::tempdir().unwrap();
+    let article = dir.path().join("article.md");
+    let snapshot = dir.path().join("observations.json");
+    fs::write(&article, "A useful [link](https://example.org/page).\n").unwrap();
+    let exported = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            article.to_str().unwrap(),
+            "--input-format",
+            "markdown",
+            "--export-link-observations",
+        ])
+        .output()
+        .unwrap();
+    assert!(exported.status.success());
+    fs::write(&snapshot, &exported.stdout).unwrap();
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                article.to_str().unwrap(),
+                "--input-format",
+                "markdown",
+                "--preset",
+                "article",
+                "--format",
+                "json",
+                "--link-observations",
+                snapshot.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap()
+    };
+    let valid = run();
+    assert!(
+        valid.status.success(),
+        "{}",
+        String::from_utf8_lossy(&valid.stdout)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&valid.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "passed");
+    fs::write(&article, "A changed [link](https://example.org/page).\n").unwrap();
+    let stale = run();
+    assert_eq!(stale.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&stale.stdout).contains("link observation snapshot does not match")
+    );
+}
