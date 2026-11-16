@@ -211,4 +211,8 @@ The optional content API can evaluate explicitly supplied link reachability
 observations without network access in WASM. See [content gate documentation](https://github.com/schiste/Aexeo/blob/main/docs/content-gates.md#emdash-host-observations) for snapshot binding,
 privacy and incomplete-coverage behavior. Configured save and refresh hooks invoke
 a host observer only when it is explicitly installed and the selected preset requests
-the gate. The host owns its network policy and request limits.
+the gate. The observer receives the document route and locale, selected preset,
+collection and projected destinations so it can select document-specific policy.
+A failed observation or unavailable projection remains unchecked with a distinct,
+content-free reason; provider errors are not exposed. The host owns its network
+policy and request limits.

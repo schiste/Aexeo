@@ -42,6 +42,9 @@ export interface EvidenceSourceTelemetry {
 /** Trusted host observer; it controls its own network policy and timeouts. */
 export type LinkObservationProvider = (request: {
   destinations: readonly string[];
+  /** Document route and locale let the host select the correct observation context. */
+  route: string;
+  locale: string | undefined;
   preset: string;
   collection: string | undefined;
 }) => Promise<BoundLinkObservations["observations"]>;
@@ -140,6 +143,7 @@ export function withContentPreset(
         }
         // Do not invoke the host observer unless the resolved preset actually
         // contains a reachability gate. Provider errors retain the initial report.
+        let linkUnavailableReason: string | undefined;
         if (linkProvider && report.gates.some((gate) => gate.required_capability === "link_reachability")) {
           const started = onLinkProviderTelemetry ? performance.now() : 0;
           let status: LinkProviderTelemetry["status"] = "error";
@@ -147,8 +151,9 @@ export function withContentPreset(
             const projection = projectLinks ? await projectLinks(document) : null;
             if (projection === null) {
               status = "unavailable";
+              linkUnavailableReason = "link projection unavailable from adapter";
             } else {
-              const observations = await linkProvider({ destinations: [...projection.destinations], preset: name, collection });
+              const observations = await linkProvider({ destinations: [...projection.destinations], route: document.route, locale: document.lang, preset: name, collection });
               const valid = new Set(["reachable", "not_found", "not_checked", "not_applicable"]);
               if (!Array.isArray(observations) || observations.length !== projection.destinations.length ||
                   observations.some((value) => !valid.has(value))) throw new Error("invalid link observations");
@@ -157,12 +162,18 @@ export function withContentPreset(
               status = "success";
             }
           } catch {
-            // The report already represents the missing capability as not checked.
+            // Do not expose host error details or discard local findings.
+            linkUnavailableReason = "link observation failed";
           } finally {
             if (onLinkProviderTelemetry) {
               emitTelemetry(onLinkProviderTelemetry, { duration_ms: performance.now() - started, status });
             }
           }
+        }
+        if (linkUnavailableReason) {
+          const reason = linkUnavailableReason;
+          report = { ...report, gates: report.gates.map((gate) => gate.required_capability === "link_reachability" && gate.status === "not_checked"
+            ? { ...gate, reason } : gate) };
         }
         if (evidenceFailure) {
           report = { ...report, gates: report.gates.map((gate) => gate.required_capability === "text_and_evidence" && gate.status === "not_checked"

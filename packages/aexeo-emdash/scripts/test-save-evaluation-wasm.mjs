@@ -279,8 +279,8 @@ kind="link_reachability"
   const calls = [];
   const telemetry = [];
   const configured = createPlugin({ contentPreset: { name: "custom", sources: { custom: preset } } }, {
-    linkObservations: async ({ destinations, preset: selected, collection }) => {
-      calls.push({ destinations, selected, collection });
+    linkObservations: async ({ destinations, route, locale, preset: selected, collection }) => {
+      calls.push({ destinations, route, locale, selected, collection });
       if (fail) throw new Error("observer unavailable");
       return destinations.map(() => "not_found");
     },
@@ -294,6 +294,12 @@ kind="link_reachability"
   fail = true;
   await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
   assert.equal(host.store.get("findings:/observed").assessment.gates[0].status, "not_checked");
+  assert.equal(host.store.get("findings:/observed").assessment.gates[0].reason, "link observation failed");
+  assert.equal(calls[0].route, "/observed");
+  assert.equal(calls[1].route, "/observed");
+  assert.equal(calls[0].locale, "en");
+  assert.equal(calls[1].locale, "en");
+  assert.ok(!JSON.stringify(host.store.get("findings:/observed")).includes("observer unavailable"));
   assert.equal(has(host, "/observed", "external-links"), false);
   assert.equal(calls.length, 2);
   assert.deepEqual(telemetry.map((event) => event.status), ["success", "error"]);

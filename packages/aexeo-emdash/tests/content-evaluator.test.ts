@@ -167,7 +167,7 @@ it("runs a link provider only for selected presets with a reachability gate", as
     expect(assessment?.status).toBe("evaluated");
     if (assessment?.status === "evaluated") expect(assessment.gates[0]?.status).toBe("passed");
   }
-  expect(provider).toHaveBeenCalledWith({ destinations: ["https://example.org"], preset: "glossary", collection: "glossary" });
+  expect(provider).toHaveBeenCalledWith({ destinations: ["https://example.org"], route: "/test", locale: undefined, preset: "glossary", collection: "glossary" });
   expect(evaluate).toHaveBeenCalledTimes(2);
   expect(evaluate.mock.calls[1]?.[6]).toEqual({ document: doc, destinations: ["https://example.org"], observations: ["reachable"] });
   expect(telemetry.mock.calls[0]?.[0]).toEqual({ status: "success", duration_ms: expect.any(Number) });
@@ -176,6 +176,23 @@ it("runs a link provider only for selected presets with a reachability gate", as
     undefined, undefined, undefined, provider, project, telemetry);
   await noGate([doc]);
   expect(provider).toHaveBeenCalledTimes(1);
+});
+
+it("supplies document-specific context without mixing link outcomes", async () => {
+  const gate = { gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const,
+    required_capability: "link_reachability" as const, findings: [], reason: "unavailable" };
+  const evaluate = async (...args: Parameters<Parameters<typeof withContentPreset>[2]>): Promise<ContentReport> => ({
+    ...report, gates: [args[6] ? { ...gate, status: args[6].observations[0] === "reachable" ? "passed" : "failed", reason: null } : gate],
+  });
+  const provider = vi.fn(async ({ route }: { route: string }) => [route === "/en" ? "reachable" as const : "not_found" as const]);
+  const evaluator = withContentPreset(base, { name: "article" }, evaluate, undefined, undefined, undefined,
+    provider, async (document) => ({ document, destinations: ["https://example.org/shared"] }));
+  const result = await evaluator([{ ...doc, route: "/en", lang: "en" }, { ...doc, route: "/fr", lang: "fr" }], { collections: ["posts", "posts"] });
+  expect(provider).toHaveBeenNthCalledWith(1, expect.objectContaining({ route: "/en", locale: "en" }));
+  expect(provider).toHaveBeenNthCalledWith(2, expect.objectContaining({ route: "/fr", locale: "fr" }));
+  if (!result.ok) throw new Error("evaluation failed");
+  expect(result.assessments?.["/en"]).toMatchObject({ gates: [{ status: "passed" }] });
+  expect(result.assessments?.["/fr"]).toMatchObject({ gates: [{ status: "failed" }] });
 });
 
 it("retains an external failure after successful link observation", async () => {
@@ -205,13 +222,14 @@ it("preserves not-checked findings if the link provider fails or the adapter lac
     async () => { throw new Error("network down"); }, async () => ({ document: doc, destinations: ["https://example.org"] }), emit);
   const unavailable = withContentPreset(base, { name: "article" }, evaluate, undefined, undefined, undefined,
     async () => ["reachable"], async () => null, emit);
-  for (const evaluator of [failing, unavailable]) {
+  for (const [evaluator, reason] of [[failing, "link observation failed"], [unavailable, "link projection unavailable from adapter"]] as const) {
     const result = await evaluator([doc]);
     expect(result.ok).toBe(true);
     if (result.ok) {
       const assessment = result.assessments?.["/test"];
       expect(assessment?.status).toBe("evaluated");
-      if (assessment?.status === "evaluated") expect(assessment.gates[0]?.status).toBe("not_checked");
+      if (assessment?.status === "evaluated") expect(assessment.gates[0]).toMatchObject({ status: "not_checked", reason });
+      expect(JSON.stringify(result)).not.toContain("network down");
     }
   }
   expect(events).toEqual(["error", "unavailable"]);
