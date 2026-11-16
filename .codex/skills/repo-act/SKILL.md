@@ -60,6 +60,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 ## Validation Checklist
 
 - Run the fastest relevant test command first.
+- For filtered tests, verify the intended test names and nonzero executed test
+  count. Rust `--exact` requires the full module-qualified test name; a zero-test
+  run can exit successfully without exercising the change.
 - Before combining fixture setup with package tests, resolve paths relative to
   the command working directory and stop on setup failure (for example, use
   `&&`). A succeeding test command alone does not prove setup ran.
