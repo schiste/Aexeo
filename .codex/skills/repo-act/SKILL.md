@@ -21,6 +21,8 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   Cleanup can leave a partial `node_modules` directory, so its presence alone
   does not establish readiness. Restore dependencies with the package lockfile
   (`npm ci`) before Node tests; avoid `npx` installing an unpinned executable.
+  Run package-specific tests from that package directory with its local runner
+  or npm script, so its lockfile, configuration and mocks are used.
 - If Aethyme reports that access to its host-scoped coordination state is
   denied, check the active filesystem sandbox and retry the authorized action
   with access to that state. Do not switch to a private coordination directory
