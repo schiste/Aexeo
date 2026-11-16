@@ -110,3 +110,33 @@ Run it with `cargo test -p aexeo-cli --test content_multiformat_workflow`.
 A local debug run of all three cases took 0.78 seconds in the test runner, after
 compilation, with uncontrolled cache and load. It is not a benchmark, an autonomous
 agent-writing trial, a review by a human, or a measure of editorial quality.
+
+## Open-ended paragraph text and HTML drafts
+
+Two additional synthetic handover drafts were authored without a seeded defect:
+`eval/workflow-trials/open-handover.txt` and `open-handover.html`, with shared
+`open-handover-metadata.json`. The same agent authored and assessed them; no
+independent human review is claimed. On the composed `article.toml` profile,
+paragraph text measured 196 words and passed seven gates, while duplicate-heading
+checking was `not_checked` because that adapter has no headings. Scoped HTML
+measured 173 words and passed all eight gates. No revision was suggested by
+these checks. Neither outcome establishes factual correctness, usefulness,
+authorship, or behavior of an AI detector.
+
+The ordinary HTML document uncovered an unavailable source map despite a valid
+main projection. The adapter now maps a conservative subset of complete HTML
+with a doctype and simple head when the selected main can be related to the
+source without ambiguity. A regression test places identical text in the head,
+navigation and body and verifies that a finding points to the body; unsupported
+or ambiguous markup remains unmapped. Telemetry reports aggregate mapping
+coverage without the content. This is a single local exercise, not a benchmark.
+
+Reproduce the evaluations with the same arguments except for the format and
+HTML scope, for example:
+
+```sh
+target/debug/aexeo-cli content eval/workflow-trials/open-handover.html \
+  --input-format html --html-scope main --preset trial \
+  --preset-source trial=eval/workflow-trials/article.toml \
+  --metadata eval/workflow-trials/open-handover-metadata.json --format json --telemetry
+```

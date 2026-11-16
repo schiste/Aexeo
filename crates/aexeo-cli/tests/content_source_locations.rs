@@ -195,3 +195,44 @@ fn text_report_keeps_sparse_source_locations_across_gates() {
         2
     );
 }
+
+#[test]
+fn html_main_maps_to_article_body_in_a_complete_document() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("article.html");
+    let preset = dir.path().join("preset.toml");
+    fs::write(&file, "<!doctype html>\n<html lang=\"en\"><head><title>shared</title><meta charset=\"utf-8\"></head>\n<body><nav><a href=\"/same\">shared</a></nav>\n<main><h1>Heading</h1><p><a href=\"/same\">shared</a></p></main>\n</body></html>").unwrap();
+    fs::write(
+        &preset,
+        "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['shared']\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            file.to_str().unwrap(),
+            "--input-format",
+            "html",
+            "--html-scope",
+            "main",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--format",
+            "json",
+            "--telemetry",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(
+        report["source_locations"],
+        serde_json::json!([{ "gate_id":"terms", "finding_index":0, "line":4, "column":42 }])
+    );
+    assert_eq!(telemetry["source_mapping"]["mapped"], 1);
+    assert_eq!(telemetry["source_mapping"]["unmapped"], 0);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("shared"));
+}

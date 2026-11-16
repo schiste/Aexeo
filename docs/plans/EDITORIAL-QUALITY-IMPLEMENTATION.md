@@ -50,5 +50,8 @@ Existing source and factuality work is outside this plan.
 - [Three synthetic editorial revision trials](EDITORIAL-AGENT-TRIAL.md) cover
   article, glossary and product profiles. Open-ended agent work, retry-exhaustion
   across formats and independent human evaluation remain outstanding. A single
-  open-ended Markdown authoring exercise and a deliberately strict three-retry
-  failure case are recorded in the same trial report; neither is independent.
+  open-ended Markdown authoring exercise, two additional open-ended paragraph
+  text and HTML drafts, and a deliberately strict Markdown three-retry failure
+  case are recorded in the same trial report; none is independent. The project
+  currently has only the user and agent available, so independent multi-reviewer
+  results remain unavailable rather than being inferred from these examples.
