@@ -958,8 +958,8 @@ impl<'a> LiteralText<'a> {
     }
 
     /// Visit non-overlapping occurrences as original byte offsets, stopping when
-    /// the visitor returns true. Word boundaries use Unicode alphanumeric
-    /// characters and underscore, outside scripts written without spaces.
+    /// the visitor returns true. Word boundaries use Unicode alphanumeric and identifier-continuation
+    /// characters, outside scripts written without spaces.
     fn visit_matches(
         &self,
         term: &str,
@@ -967,7 +967,7 @@ impl<'a> LiteralText<'a> {
         mut visit: impl FnMut(usize) -> bool,
     ) -> bool {
         fn word(ch: char) -> bool {
-            (ch.is_alphanumeric() || ch == '_') && !unsegmented_script(ch)
+            (ch.is_alphanumeric() || unicode_ident::is_xid_continue(ch)) && !unsegmented_script(ch)
         }
         let (needle, _) = fold_literal(term, self.case_insensitive);
         let text = self.folded.as_str();
@@ -3325,6 +3325,27 @@ mod tests {
             no_boundaries.gates[1].measurements["matching_occurrences"],
             0
         );
+    }
+
+    #[test]
+    fn whole_word_gates_do_not_split_combining_marks() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='forbidden'\nkind='forbidden_terms'\nterms=['cafe']\n[[gates]]\nid='required'\nkind='required_terms'\nterms=['cafe']\n[[gates]]\nid='repeated'\nkind='repeated_terms'\nterms=['cafe']\nmax_occurrences=1\n").unwrap();
+        let report = preset
+            .evaluate(&literal_input("cafe\u{301} cafe\u{301}"))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Passed);
+        assert_eq!(report.gates[1].status, GateStatus::Failed);
+        assert_eq!(report.gates[2].status, GateStatus::Passed);
+        let literal = LiteralText::new("cafe\u{301} cafe", &[], false);
+        let mut positions = Vec::new();
+        literal.visit_matches("cafe", true, |offset| {
+            positions.push(offset);
+            false
+        });
+        assert_eq!(positions, ["cafe\u{301} ".len()]);
+        assert!(literal.visit_matches("cafe\u{301}", true, |_| true));
+        assert!(literal.visit_matches("cafe", false, |_| true));
+        assert!(!LiteralText::new("İ", &[], true).visit_matches("i", true, |_| true));
     }
 
     #[test]

@@ -89,6 +89,26 @@ const rulesAt = (host, route) => {
 };
 const has = (host, route, ruleId) => rulesAt(host, route).has(ruleId);
 
+// Combining marks stay attached to their word in the configured CMS adapter.
+{
+  const preset = `version=1
+name="terms"
+[[gates]]
+id="forbidden"
+kind="forbidden_terms"
+terms=["cafe"]
+case_insensitive=true
+`;
+  const configured = createPlugin({ contentPreset: { name: "terms", sources: { terms: preset } } });
+  const page = item("combining-marks", { data: { body: [block("p", "CAFE\u0301")] } });
+  const host = fakeHost([page]);
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  const gate = host.store.get("findings:/combining-marks").assessment.gates.find((item) => item.gate_id === "forbidden");
+  assert.equal(gate.status, "passed");
+  assert.equal(gate.measurements.matches, 0);
+  assert.deepEqual(host.logged, []);
+}
+
 // Multilingual character bounds run through the configured host and real WASM.
 {
   const preset = `version=1
