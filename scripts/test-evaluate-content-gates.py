@@ -412,6 +412,18 @@ class EvaluateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "projection"):
             eval_module.validate_corpus(corpus)
 
+    def test_paragraph_text_corpus_replays_with_paragraph_adapter(self):
+        corpus = {"version": 1, "preset": "x", "gate_id": "g", "input_format": "paragraph-text",
+                  "examples": [{"id": "a", "split": "development", "text": "First.\n\nSecond.", "expected": "passed"}]}
+        def run(arguments, **kwargs):
+            self.assertEqual(arguments[arguments.index("--input-format") + 1], "paragraph-text")
+            return SimpleNamespace(returncode=0, stdout='{"gates":[{"gate_id":"g","status":"passed"}]}')
+        with patch.object(eval_module.subprocess, "run", side_effect=run):
+            self.assertEqual(eval_module.evaluate("cli", corpus, "development")["counts"]["true_negative"], 1)
+        corpus["content_projection"] = {"format": "html", "scope": "main"}
+        with self.assertRaisesRegex(ValueError, "projection"):
+            eval_module.validate_corpus(corpus)
+
     def test_markdown_and_embedded_preset_reach_cli(self):
         corpus = {"version": 1, "preset": "custom", "preset_toml": "name='example'", "input_format": "markdown", "gate_id": "g", "examples": [
             {"id": "a", "split": "holdout", "text": "# heading", "expected": "passed"},

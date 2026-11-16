@@ -125,6 +125,11 @@ fn export_matches_existing_python_validator_on_representative_inputs() {
     let corpus = json!({"version":1,"gate_id":"g","examples":[{"id":"e","split":"development","text":"abc\r\n","expected":"passed"}]});
     let note = json!({"version":1,"kind":"reported_human_feedback","gate_id":"g","example_id":"e","text_sha256":"552bab6864c7a7b69a502ed1854b9245c0e1a30f008aaa0b281da62585fdb025","model_status":"failed","human_status":"passed","reviewer":"human","method":"manual","reason":"private reason"});
     let mut cases: Vec<(Value, Value)> = vec![(corpus.clone(), note.clone())];
+    let mut paragraph_corpus = corpus.clone();
+    paragraph_corpus["input_format"] = json!("paragraph-text");
+    cases.push((paragraph_corpus.clone(), note.clone()));
+    paragraph_corpus["content_projection"] = json!({"format":"html", "scope":"main"});
+    cases.push((paragraph_corpus, note.clone()));
     let mut policy_note = note.clone();
     policy_note["resolved_policy_fingerprint"] = json!({"version": 1, "sha256": "a".repeat(64)});
     cases.push((corpus.clone(), policy_note.clone()));

@@ -39,6 +39,10 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 
 ## Delivery tracker
 
+- [x] Allow `paragraph-text` editorial corpora to replay through the same adapter
+  and accept feedback export; input fingerprints do not bind adapter format, so
+  hosts must verify it separately.
+
 - [x] Keep EmDash content reports available when an optional synchronous
   telemetry callback throws; telemetry does not change the gate result.
 

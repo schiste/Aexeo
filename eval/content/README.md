@@ -216,3 +216,8 @@ is created with private permissions. `--telemetry` emits only operation and
 elapsed time. This action records supplied provenance, not proof that review
 was independent or blind; follow the holdout policy before using its metrics.
 The standalone native CLI currently supports capture and event export only.
+
+Corpora may set `input_format` to `paragraph-text` to evaluate blank-line-separated
+plain text with paragraph capabilities. As with text and Markdown corpora, the
+feedback fingerprint does not bind the adapter format; retain and verify the
+format used for the original report before importing feedback.
