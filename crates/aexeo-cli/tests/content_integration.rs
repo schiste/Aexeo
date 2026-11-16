@@ -1320,7 +1320,7 @@ fn fix_does_not_modify_content_when_external_gate_evaluation_fails() {
         ])
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(70));
+    assert_eq!(output.status.code(), Some(2));
     assert!(
         String::from_utf8_lossy(&output.stderr)
             .contains("external diagnostic line is outside projected text")

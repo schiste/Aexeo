@@ -5,10 +5,13 @@
 //! the correctness of its judgment. The caller must trust the producer.
 use std::collections::BTreeMap;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::content_gate::{ContentGateExtensions, ContentInput, ExtensionDiagnostic};
+use crate::{
+    content_gate::{ContentGateExtensions, ContentInput, ExtensionDiagnostic},
+    user_bail,
+};
 
 const MAX_EXTERNAL_RESULTS: usize = 100;
 const MAX_DIAGNOSTICS: usize = 1000;
@@ -69,7 +72,7 @@ impl ExternalGateResults {
 
     fn validate(results: Vec<ExternalGateResult>, by_entity: bool) -> Result<Self> {
         if results.len() > MAX_EXTERNAL_RESULTS {
-            bail!("too many external gate results");
+            user_bail!("too many external gate results");
         }
         for (index, result) in results.iter().enumerate() {
             if result.extension.trim().is_empty()
@@ -79,7 +82,9 @@ impl ExternalGateResults {
                         && (!by_entity || other.input.id == result.input.id)
                 })
             {
-                bail!("external gate identifiers and parameter sets must be nonempty and unique");
+                user_bail!(
+                    "external gate identifiers and parameter sets must be nonempty and unique"
+                );
             }
             if result.diagnostics.len() > MAX_DIAGNOSTICS
                 || result.diagnostics.iter().any(|d| {
@@ -89,7 +94,7 @@ impl ExternalGateResults {
                         || d.column == 0
                 })
             {
-                bail!("external gate diagnostics are invalid or exceed limits");
+                user_bail!("external gate diagnostics are invalid or exceed limits");
             }
         }
         Ok(Self(results))
@@ -128,7 +133,7 @@ impl ContentGateExtensions for ExternalGateResults {
             {
                 if let Some(column) = required.remove(&(index + 1)) {
                     if column > line.chars().count() + 1 {
-                        bail!("external diagnostic column is outside projected text");
+                        user_bail!("external diagnostic column is outside projected text");
                     }
                     if required.is_empty() {
                         break;
@@ -136,14 +141,14 @@ impl ContentGateExtensions for ExternalGateResults {
                 }
             }
             if !required.is_empty() {
-                bail!("external diagnostic line is outside projected text");
+                user_bail!("external diagnostic line is outside projected text");
             }
         } else if result
             .diagnostics
             .iter()
             .any(|d| d.line != 1 || d.column != 1)
         {
-            bail!("external diagnostics without text must use position 1:1");
+            user_bail!("external diagnostics without text must use position 1:1");
         }
         Ok(Some(
             result
