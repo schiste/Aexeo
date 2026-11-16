@@ -46,6 +46,59 @@ fn markdown_report_maps_exact_and_reconstructed_source_positions() {
 }
 
 #[test]
+fn image_alt_findings_map_in_json_and_text_reports() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("article.md");
+    let preset = dir.path().join("preset.toml");
+    fs::write(&file, "![bad](x)\n").unwrap();
+    fs::write(
+        &preset,
+        "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['bad']\n",
+    )
+    .unwrap();
+    let args = [
+        "content",
+        file.to_str().unwrap(),
+        "--input-format",
+        "markdown",
+        "--preset",
+        "custom",
+    ];
+    let preset_arg = format!("custom={}", preset.display());
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(args)
+        .args([
+            "--preset-source",
+            &preset_arg,
+            "--format",
+            "json",
+            "--telemetry",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(
+        report["source_locations"],
+        serde_json::json!([{ "gate_id":"terms", "finding_index":0, "line":1, "column":3 }])
+    );
+    assert_eq!(telemetry["source_mapping"]["mapped"], 1);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("bad"));
+    let text = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(args)
+        .args(["--preset-source", &preset_arg])
+        .output()
+        .unwrap();
+    assert_eq!(text.status.code(), Some(1));
+    assert!(
+        String::from_utf8(text.stdout)
+            .unwrap()
+            .contains(":1:3: Forbidden term: bad")
+    );
+}
+
+#[test]
 fn unchanged_text_after_an_entity_has_an_actionable_source_position() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("article.md");
