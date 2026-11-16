@@ -435,11 +435,35 @@ pub(crate) struct CrawlLink {
 /// the route of its path, so query variants, including query pagination, are
 /// never requested separately. This keeps faceted URLs from becoming a crawl
 /// trap, at the cost of not reaching pages linked only through a query variant.
+#[cfg(test)]
 pub(crate) fn crawl_links(html: &str, page_url: &str) -> Vec<CrawlLink> {
+    crawl_links_and_metadata(html, page_url).0
+}
+
+/// Whether root-relative references resolve onto the observed crawl origin.
+/// An invalid base is unknown and must not be treated as a local link.
+pub(crate) fn root_relative_links_local(page_url: &str, base: Option<&str>) -> bool {
     let Ok(page) = Url::parse(page_url) else {
-        return Vec::new();
+        return false;
     };
-    extract_links(html, page_url, &page.origin().ascii_serialization(), None)
+    let origin = page.origin().ascii_serialization();
+    match resolve_link("/", page_url, &origin, base) {
+        LinkResolution::Internal { .. } | LinkResolution::SameDocument { .. } => true,
+        LinkResolution::External { url } => same_crawl_origin(page_url, &url),
+        _ => false,
+    }
+}
+
+pub(crate) fn crawl_links_and_metadata(
+    html: &str,
+    page_url: &str,
+) -> (Vec<CrawlLink>, HtmlLinkMetadata) {
+    let Ok(page) = Url::parse(page_url) else {
+        return (Vec::new(), HtmlLinkMetadata::default());
+    };
+    let (links, metadata) =
+        extract_document(html, page_url, &page.origin().ascii_serialization(), None);
+    let links = links
         .into_iter()
         .filter_map(|link| {
             let url = match &link.resolution {
@@ -454,7 +478,8 @@ pub(crate) fn crawl_links(html: &str, page_url: &str) -> Vec<CrawlLink> {
                 route,
             })
         })
-        .collect()
+        .collect();
+    (links, metadata)
 }
 
 #[cfg(test)]

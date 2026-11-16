@@ -32,6 +32,10 @@ not change their counts or assert confirmed orphans.
 
 ## Progress
 
+- For crawled pages, legacy root-relative discovery and broken-link checks
+  respect an external or invalid `base` rather than assuming the crawl origin.
+  Static files without an observed page URL retain the prior behavior.
+
 - Crawl discovery no longer rewrites absolute links to the same host on a
   different scheme or port into local paths. Bare and `www.` aliases still
   require matching scheme and effective port, consistent with crawl egress.
