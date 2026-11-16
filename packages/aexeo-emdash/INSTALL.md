@@ -638,7 +638,10 @@ this API. It cannot by itself establish that a crawl and CMS view describe the
 same publication, release and point in time.
 The export also reports invalid or duplicate normalized public URLs, URLs outside
 an explicitly valid inventory origin, and redirect/canonical/locale aliases
-without a target. Original entries remain available for investigation; these
+without a target, as well as alias targets that are invalid or resolve outside
+the declared origin. Relative alias targets are resolved against the alias URL
+for this diagnostic; their original values are retained. If the alias URL is
+invalid, its target cannot be checked. Original entries remain available for investigation; these
 issues do not establish orphan status or verify the supplied origin or target.
 
 Hosts whose rendered routes differ from EmDash's resolver can supply an async

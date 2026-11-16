@@ -65,6 +65,26 @@ describe("conservative EmDash link inventory", () => {
     expect(JSON.stringify(onTelemetry.mock.calls)).not.toContain("example.org");
   });
 
+  it("reports invalid and cross-origin alias targets while retaining relative targets and evidence", async () => {
+    const targets: Record<string, string> = {
+      relative: "../target#section", absolute: "https://example.org/target",
+      foreign: "https://other.example/target", unsafe: "javascript:alert(1)",
+      credentials: "https://user:password@example.org/target",
+    };
+    const list = vi.fn(async () => ({ items: Object.keys(targets).map(id => item(id)), hasMore: false }));
+    const getPublicUrl = vi.fn(async (_collection: string, id: string) => `https://example.org/articles/${id}`);
+    const onTelemetry = vi.fn();
+    const result = await exportLinkInventory({ list, getPublicUrl }, {
+      collections: ["posts"], identity: { origin: "https://example.org", release: "r", surface: "public", snapshot: "s" },
+      classify: entry => ({ disposition: "redirect", target: targets[entry.id]! }), onTelemetry,
+    });
+    expect(result.issues).toEqual(expect.arrayContaining(["invalid_alias_target", "cross_origin_alias_target"]));
+    expect(result.inventory.pages.map(page => page.target).sort()).toEqual(Object.values(targets).sort());
+    expect(result.inventory.complete).toBe(false);
+    expect(onTelemetry.mock.calls[0]?.[0]).toMatchObject({ invalid_alias_targets: 2, cross_origin_alias_targets: 1 });
+    expect(JSON.stringify(onTelemetry.mock.calls)).not.toContain("example.org");
+  });
+
   it.each(["https://user:password@example.org/a", "https://example.org/a#", "/relative", "not a URL"]) (
     "marks the invalid public URL %s while preserving it for inspection", async (url) => {
       const list = vi.fn(async () => ({ items: [item("a")], hasMore: false }));

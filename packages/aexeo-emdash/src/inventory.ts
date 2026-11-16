@@ -66,7 +66,7 @@ export async function exportLinkInventory(
     /** Maximum simultaneous public URL resolutions, from 1 to 100 (default 8). */
     urlResolutionConcurrency?: number;
     /** Optional aggregate-only local telemetry; no URLs or content are included. */
-    onTelemetry?: (event: { event: "link_inventory_export"; elapsed_ms: number; scanned: number; omitted: number; page_count: number; issue_count: number; classification_failures: number; batch_entries_omitted: number; malformed_entries: number; invalid_urls: number; duplicate_urls: number; cross_origin_urls: number; aliases_missing_target: number }) => void;
+    onTelemetry?: (event: { event: "link_inventory_export"; elapsed_ms: number; scanned: number; omitted: number; page_count: number; issue_count: number; classification_failures: number; batch_entries_omitted: number; malformed_entries: number; invalid_urls: number; duplicate_urls: number; cross_origin_urls: number; aliases_missing_target: number; invalid_alias_targets: number; cross_origin_alias_targets: number }) => void;
     /** Override URL resolution when the host renderer uses a different route mapping. */
     resolveUrl?: (collection: string, item: EmdashContentItem) => Promise<string | null>;
     /** Classify using host-owned publication rules; locale defaults to the CMS value. */
@@ -104,6 +104,8 @@ export async function exportLinkInventory(
   let duplicateUrls = 0;
   let crossOriginUrls = 0;
   let aliasesMissingTarget = 0;
+  let invalidAliasTargets = 0;
+  let crossOriginAliasTargets = 0;
   for (const collection of collections) {
     let cursor: string | undefined;
     const seen = new Set<string>();
@@ -213,9 +215,27 @@ export async function exportLinkInventory(
             issues.add("cross_origin_public_url");
           }
         }
-        if ((disposition === "redirect" || disposition === "canonical_alias" || disposition === "locale_fallback") && !target?.trim()) {
-          aliasesMissingTarget += 1;
-          issues.add("alias_target_missing");
+        if (disposition === "redirect" || disposition === "canonical_alias" || disposition === "locale_fallback") {
+          if (!target?.trim()) {
+            aliasesMissingTarget += 1;
+            issues.add("alias_target_missing");
+          } else if (parsed !== null) {
+            // The graph resolves relative alias targets against the alias URL.
+            // Keep the host's original value, including any fragment, as evidence.
+            try {
+              const resolved = new URL(target, parsed);
+              if ((resolved.protocol !== "http:" && resolved.protocol !== "https:") || resolved.username || resolved.password) {
+                throw new Error("invalid alias target");
+              }
+              if (origin !== null && resolved.origin !== origin.origin) {
+                crossOriginAliasTargets += 1;
+                issues.add("cross_origin_alias_target");
+              }
+            } catch {
+              invalidAliasTargets += 1;
+              issues.add("invalid_alias_target");
+            }
+          }
         }
         pages.push({ url, disposition, target, locale });
       }
@@ -232,7 +252,7 @@ export async function exportLinkInventory(
   pages.sort((left, right) => left.url < right.url ? -1 : left.url > right.url ? 1 : 0);
   const result: LinkInventoryExport = { inventory: { identity: options.identity, complete: false, pages }, issues: [...issues].sort(), scanned, omitted };
   if (options.onTelemetry) {
-    emitTelemetry(options.onTelemetry, { event: "link_inventory_export", elapsed_ms: Math.max(0, Date.now() - started), scanned, omitted, page_count: pages.length, issue_count: issues.size, classification_failures: classificationFailures, batch_entries_omitted: batchEntriesOmitted, malformed_entries: malformedEntries, invalid_urls: invalidUrls, duplicate_urls: duplicateUrls, cross_origin_urls: crossOriginUrls, aliases_missing_target: aliasesMissingTarget });
+    emitTelemetry(options.onTelemetry, { event: "link_inventory_export", elapsed_ms: Math.max(0, Date.now() - started), scanned, omitted, page_count: pages.length, issue_count: issues.size, classification_failures: classificationFailures, batch_entries_omitted: batchEntriesOmitted, malformed_entries: malformedEntries, invalid_urls: invalidUrls, duplicate_urls: duplicateUrls, cross_origin_urls: crossOriginUrls, aliases_missing_target: aliasesMissingTarget, invalid_alias_targets: invalidAliasTargets, cross_origin_alias_targets: crossOriginAliasTargets });
   }
   return result;
 }
