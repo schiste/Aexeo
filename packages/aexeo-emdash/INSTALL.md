@@ -605,6 +605,10 @@ incomplete because pagination alone cannot establish a transactional snapshot or
 include routes outside the chosen collections. No HTTP endpoint is installed by
 this API. It cannot by itself establish that a crawl and CMS view describe the
 same publication, release and point in time.
+The export also reports invalid or duplicate normalized public URLs, URLs outside
+an explicitly valid inventory origin, and redirect/canonical/locale aliases
+without a target. Original entries remain available for investigation; these
+issues do not establish orphan status or verify the supplied origin or target.
 
 Hosts whose rendered routes differ from EmDash's resolver can supply an async
 `resolveUrl(collection, item)` returning the actual public URL or `null` when

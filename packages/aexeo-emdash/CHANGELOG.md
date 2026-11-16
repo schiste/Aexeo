@@ -6,6 +6,10 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Report invalid, duplicate and cross-origin inventory URLs and missing alias targets with aggregate-only telemetry.
+
 ### Fixed
 
 - Keep CMS listing exception details out of refresh reports, treat malformed listings as incomplete, and emit aggregate listing coverage telemetry.
