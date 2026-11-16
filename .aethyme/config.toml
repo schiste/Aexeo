@@ -10,3 +10,17 @@ mode = "verify-only"
 # Agents may push their own session branch and open a draft PR
 # (`aethyme broker push --session <id> [--pr]`). Nothing else.
 push_session_branches = true
+
+[cleanup]
+# Only ignored output with an in-repository producer is disposable. Root reports,
+# Wrangler state, and tracked declaration files stay protected.
+regenerable = [
+    "crates/aexeo-cli/tests/fixtures/chau7-mini-site/.aexeo-reports",
+    "packages/aexeo-emdash/wasm/aexeo_emdash_bridge.js",
+    "packages/aexeo-emdash/wasm/aexeo_emdash_bridge_bg.js",
+    "packages/aexeo-emdash/wasm/aexeo_emdash_bridge_bg.wasm",
+    "packages/aexeo-emdash/wasm/aexeo_emdash_bridge_bg.wasm.d.ts",
+    "packages/aexeo-crawl-worker/src/wasm/aexeo_emdash_bridge.js",
+    "packages/aexeo-crawl-worker/src/wasm/aexeo_emdash_bridge_bg.js",
+    "packages/aexeo-crawl-worker/src/wasm/aexeo_emdash_bridge_bg.wasm",
+]
