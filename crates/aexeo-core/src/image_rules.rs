@@ -180,7 +180,11 @@ fn collect_filename_findings(page: &Page, config: &Config, report_style: bool) -
     findings
 }
 
-fn local_asset_relative_path(page: &Page, src: &str, site_url: Option<&str>) -> Option<PathBuf> {
+pub(crate) fn local_asset_relative_path(
+    page: &Page,
+    src: &str,
+    site_url: Option<&str>,
+) -> Option<PathBuf> {
     let path = local_image_url_path(page, src, site_url)?;
     let path = decode_url_path(&path)?;
     let candidate = if path.starts_with('/') {
