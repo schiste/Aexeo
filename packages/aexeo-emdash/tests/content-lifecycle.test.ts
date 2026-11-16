@@ -957,6 +957,37 @@ describe("sitewide refresh coverage", () => {
     expect(store.has(documentKey("/old"))).toBe(false);
     expect(store.get(findingsKey("*"))).toEqual({ route: "*", findings: [] });
   });
+  it("does not expose a collection listing exception and continues other collections", async () => {
+    const { ctx, store } = host();
+    const secret = "private-token-and-content";
+    const events: Array<[string, unknown]> = [];
+    ctx.log = { info: (name, data) => events.push([name, data]), warn: () => {}, error: () => {} };
+    ctx.content.list = async (collection) => {
+      if (collection === "posts") throw new Error(secret);
+      return { items: [item("safe", OLD)], hasMore: false };
+    };
+    const result = await evaluateAndPersistAll(ctx, { collections: ["posts", "pages"], evaluator: returning("LOCAL") });
+    expect(result.errors).toContain("posts: content listing failed");
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(JSON.stringify([...store.values()])).not.toContain(secret);
+    expect(events.find(([name]) => name === "aexeo.cms_listing")).toEqual(["aexeo.cms_listing", {
+      collections: 2, read_failures: 1, invalid_responses: 0, invalid_items: 0, pagination_failures: 0,
+    }]);
+    expect(JSON.stringify(events)).not.toContain(secret);
+    expect(rulesAt(store, "/safe")).toEqual(["LOCAL"]);
+    expect(store.get(findingsKey("*"))).toMatchObject({ assessment: { reason: "inventory_incomplete" } });
+  });
+  it("treats malformed listing responses and records as incomplete", async () => {
+    for (const response of [{ items: [], hasMore: undefined }, { items: [null], hasMore: false }]) {
+      const { ctx, store } = host();
+      await save(ctx, item("old", OLD), returning("OLD"));
+      ctx.content.list = async () => response as never;
+      const result = await sweep(ctx, returning());
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(store.has(documentKey("/old"))).toBe(true);
+      expect(store.get(findingsKey("*"))).toMatchObject({ assessment: { reason: "inventory_incomplete" } });
+    }
+  });
   it("marks missing or repeated pagination cursors incomplete", async () => {
     for (const cursor of [undefined, "repeat"]) {
       const { ctx, store } = host();

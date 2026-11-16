@@ -6,6 +6,10 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep CMS listing exception details out of refresh reports, treat malformed listings as incomplete, and emit aggregate listing coverage telemetry.
+
 ## [0.9.2] - 2026-11-15
 
 ### Added
