@@ -328,23 +328,73 @@ fn has_hidden_inline_style(snippet: &str) -> bool {
 }
 
 pub(crate) fn style_hides_content(style: &str) -> bool {
-    style.split(';').any(|declaration| {
+    // This recognizes only a small literal subset of CSS. Track the last
+    // recognized declaration for each property, respecting !important; an
+    // unknown value cannot safely cancel an earlier hiding declaration.
+    let mut display = None;
+    let mut visibility = None;
+    let mut content_visibility = None;
+    for declaration in style.split(';') {
         let Some((property, value)) = declaration.split_once(':') else {
-            return false;
+            continue;
         };
-        let value = value
-            .split_once('!')
-            .map_or(value, |(value, _)| value)
-            .trim();
-        match property.trim().to_ascii_lowercase().as_str() {
-            "display" => value.eq_ignore_ascii_case("none"),
-            "visibility" => {
-                value.eq_ignore_ascii_case("hidden") || value.eq_ignore_ascii_case("collapse")
+        let (value, important) = match value.split_once('!') {
+            Some((value, priority)) if priority.trim().eq_ignore_ascii_case("important") => {
+                (value.trim(), true)
             }
-            "content-visibility" => value.eq_ignore_ascii_case("hidden"),
-            _ => false,
+            Some(_) => continue,
+            None => (value.trim(), false),
+        };
+        let property = property.trim();
+        let (slot, hidden) = if property.eq_ignore_ascii_case("display") {
+            if value.eq_ignore_ascii_case("none") {
+                (&mut display, true)
+            } else if [
+                "block",
+                "inline",
+                "inline-block",
+                "flex",
+                "inline-flex",
+                "grid",
+                "inline-grid",
+                "flow-root",
+                "contents",
+                "table",
+                "list-item",
+            ]
+            .iter()
+            .any(|candidate| value.eq_ignore_ascii_case(candidate))
+            {
+                (&mut display, false)
+            } else {
+                continue;
+            }
+        } else if property.eq_ignore_ascii_case("visibility") {
+            if value.eq_ignore_ascii_case("hidden") || value.eq_ignore_ascii_case("collapse") {
+                (&mut visibility, true)
+            } else if value.eq_ignore_ascii_case("visible") {
+                (&mut visibility, false)
+            } else {
+                continue;
+            }
+        } else if property.eq_ignore_ascii_case("content-visibility") {
+            if value.eq_ignore_ascii_case("hidden") {
+                (&mut content_visibility, true)
+            } else if value.eq_ignore_ascii_case("visible") || value.eq_ignore_ascii_case("auto") {
+                (&mut content_visibility, false)
+            } else {
+                continue;
+            }
+        } else {
+            continue;
+        };
+        if !matches!(*slot, Some((_, true))) || important {
+            *slot = Some((hidden, important));
         }
-    })
+    }
+    [display, visibility, content_visibility]
+        .into_iter()
+        .any(|state| matches!(state, Some((true, _))))
 }
 
 /// Text of a fragment without the elements marked hidden. A hidden element with

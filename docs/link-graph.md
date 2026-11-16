@@ -168,8 +168,12 @@ An inline `display:none`, `visibility:hidden` or `collapse`, or
 visibility conditional. `hidden_inline_style` records this limited observation;
 its absence in older reports means unobserved. Opt-in telemetry includes
 `hidden_inline_style_link_count` and `hidden_inline_style_unobserved_link_count`.
-The CSS cascade, stylesheets, media queries and scripts are not evaluated; a
-declaration does not prove the final rendered state.
+Within a single inline style, the last recognized literal declaration for each
+property takes precedence, with `!important` taking priority. Unknown values do
+not cancel a recognized hiding declaration. This is a limited heuristic, not a
+CSS parser: stylesheets, media queries, inherited overrides, custom properties
+and scripts are not evaluated, so it does not prove the final rendered state.
+Regenerate older reports to apply the updated inline declaration handling.
 Links outside the first direct `summary` of a closed `details` element are also
 conditional; `collapsed_details` records this observation. Nested closed details
 remain conditional even inside a nested summary. An absent field in an older
