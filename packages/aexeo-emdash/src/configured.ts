@@ -43,8 +43,8 @@ import { PACKAGE_VERSION } from "./version.js";
 import { evaluateDocuments, scoreIntelligence } from "./wasm-init.js";
 import { evaluateContent, projectContentInput, projectLinkDestinations } from "./content.js";
 import { withContentPreset } from "./content-evaluator.js";
-import type { ContentPresetOptions, ExternalGateProvider, ExternalGateTelemetry, LinkObservationProvider, LinkProviderTelemetry } from "./content-evaluator.js";
-export type { ExternalGateProvider, ExternalGateTelemetry, LinkObservationProvider, LinkProviderTelemetry } from "./content-evaluator.js";
+import type { ContentPresetOptions, ExternalGateProvider, ExternalGateTelemetry, LinkObservationProvider, LinkProviderTelemetry, EvidenceSourceProvider, EvidenceSourceTelemetry } from "./content-evaluator.js";
+export type { ExternalGateProvider, ExternalGateTelemetry, LinkObservationProvider, LinkProviderTelemetry, EvidenceSourceProvider, EvidenceSourceTelemetry } from "./content-evaluator.js";
 import type { CustomBlockMappings, EmdashContentItem } from "./adapter.js";
 import type { Finding, SiteIntelligenceScore } from "./types.js";
 
@@ -199,6 +199,8 @@ export interface ConfiguredPluginOptions {
 
 /** Runtime-only dependencies must be installed by trusted host code, not JSON options. */
 export interface ConfiguredPluginRuntime {
+  evidenceSources?: EvidenceSourceProvider;
+  onEvidenceSourceTelemetry?: (event: EvidenceSourceTelemetry) => void;
   externalGates?: ExternalGateProvider;
   onExternalGateTelemetry?: (event: ExternalGateTelemetry) => void;
   linkObservations?: LinkObservationProvider;
@@ -231,7 +233,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
   // throws on empty rules ({} with neither routePattern nor ruleIds);
   // that error surfaces clearly in the host's startup logs.
   const suppressionFilter = compileSuppressions(options.suppressions);
-  const evaluator = withContentPreset(inProcessEvaluator, options.contentPreset, evaluateContent, runtime.externalGates, projectContentInput, runtime.onExternalGateTelemetry, runtime.linkObservations, projectLinkDestinations, runtime.onLinkProviderTelemetry);
+  const evaluator = withContentPreset(inProcessEvaluator, options.contentPreset, evaluateContent, runtime.externalGates, projectContentInput, runtime.onExternalGateTelemetry, runtime.linkObservations, projectLinkDestinations, runtime.onLinkProviderTelemetry, runtime.evidenceSources, runtime.onEvidenceSourceTelemetry);
 
   // Capability enforcement for configured plugins is informational;
   // emdash's host plugins (formsPlugin, etc.) declare what they need

@@ -191,6 +191,20 @@ for the sandboxed setup runbook.
 
 MIT — see [LICENSE](./LICENSE).
 
+### Document-specific evidence snapshots
+
+A trusted runtime host can provide snapshots for each document with
+`createPlugin(options, { evidenceSources, onEvidenceSourceTelemetry })`.
+The async `evidenceSources({ route, preset, collection })` callback returns a
+map of source names to UTF-8 text. It is called only when the resolved preset
+contains a gate requiring text and evidence. The callback replaces the preset's
+static `evidenceSources` map for that document; it does not merge with it.
+A failure or malformed response leaves those gates `not_checked` and keeps
+local findings. The optional telemetry callback receives only duration and
+success/error, not routes, sources or error details. The host controls access,
+timeouts, freshness and source reliability. These snapshots do not establish
+that a source supports a claim or that the claim is true.
+
 ### Host-supplied link observations
 
 The optional content API can evaluate explicitly supplied link reachability

@@ -382,6 +382,7 @@ The latest published version observed on 2026-11-16 was 0.9.1.
 - [x] Shared article/glossary readability preset delivered in
   [PR #34](https://github.com/schiste/Aexeo/pull/34).
 - [ ] Source and factuality evaluation after the basic gates are validated.
+  EmDash trusted hosts can opt into per-document evidence snapshots; failures remain unchecked and never fall back to a shared snapshot. This supplies inputs only and is not factuality validation.
 
 An open PR is not yet delivered. Update this tracker when each change lands and
 when its acceptance criteria are met, rather than inferring completion from a

@@ -19,6 +19,18 @@ export type ExternalGateProvider = (request: {
   collection: string | undefined;
 }) => Promise<ExternalGateResult[]>;
 
+/** Optional trusted host source snapshots for one document. */
+export type EvidenceSourceProvider = (request: {
+  route: string;
+  preset: string;
+  collection: string | undefined;
+}) => Promise<Record<string, string>>;
+
+export interface EvidenceSourceTelemetry {
+  duration_ms: number;
+  status: "success" | "error";
+}
+
 /** Trusted host observer; it controls its own network policy and timeouts. */
 export type LinkObservationProvider = (request: {
   destinations: readonly string[];
@@ -47,6 +59,8 @@ export function withContentPreset(
   linkProvider?: LinkObservationProvider,
   projectLinks?: (document: EmdashDocument) => Promise<LinkDestinationProjection | null>,
   onLinkProviderTelemetry?: (event: LinkProviderTelemetry) => void,
+  evidenceProvider?: EvidenceSourceProvider,
+  onEvidenceSourceTelemetry?: (event: EvidenceSourceTelemetry) => void,
 ): EvaluatorFn {
   if (!preset) return base;
   return async (documents, context) => {
@@ -66,9 +80,32 @@ export function withContentPreset(
         const name = selected ?? preset.name;
         if (!name) throw new Error(`empty preset name for collection ${collection}`);
         // Inspect the resolved gates before sending private content to a host.
-        let report = preset.evidenceSources === undefined
+        // A configured provider replaces static snapshots. Never fall back to
+        // another document's evidence when the provider is unavailable.
+        let evidenceSources = evidenceProvider ? undefined : preset.evidenceSources;
+        let report = evidenceSources === undefined
           ? await evaluate(document, name, preset.sources)
-          : await evaluate(document, name, preset.sources, preset.evidenceSources);
+          : await evaluate(document, name, preset.sources, evidenceSources);
+        let evidenceFailure = false;
+        if (evidenceProvider && report.gates.some((gate) => gate.required_capability === "text_and_evidence")) {
+          const started = onEvidenceSourceTelemetry ? performance.now() : 0;
+          let status: EvidenceSourceTelemetry["status"] = "error";
+          try {
+            const sources = await evidenceProvider({ route: document.route, preset: name, collection });
+            if (!sources || typeof sources !== "object" || Array.isArray(sources) ||
+                Object.entries(sources).some(([key, value]) => !key || typeof value !== "string")) {
+              throw new Error("invalid evidence sources");
+            }
+            evidenceSources = { ...sources };
+            report = await evaluate(document, name, preset.sources, evidenceSources);
+            status = "success";
+          } catch {
+            evidenceSources = undefined;
+            evidenceFailure = true;
+          } finally {
+            if (onEvidenceSourceTelemetry) emitTelemetry(onEvidenceSourceTelemetry, { duration_ms: performance.now() - started, status });
+          }
+        }
         let externalResults: ExternalGateResult[] | undefined;
         let externalFailure = false;
         if (provider !== undefined && report.gates.some((gate) => gate.required_capability === "extension")) {
@@ -76,9 +113,9 @@ export function withContentPreset(
           let status: ExternalGateTelemetry["status"] = "error";
           try {
             if (!project) throw new Error("content gate projection is unavailable");
-            externalResults = await provider({ input: await project(document, preset.evidenceSources), preset: name, collection });
+            externalResults = await provider({ input: await project(document, evidenceSources), preset: name, collection });
             if (!Array.isArray(externalResults)) throw new Error("external gate provider must return an array");
-            report = await evaluate(document, name, preset.sources, preset.evidenceSources, undefined, externalResults);
+            report = await evaluate(document, name, preset.sources, evidenceSources, undefined, externalResults);
             status = "success";
           } catch {
             // Preserve local findings; external gates remain explicitly unchecked.
@@ -104,7 +141,7 @@ export function withContentPreset(
               const valid = new Set(["reachable", "not_found", "not_checked", "not_applicable"]);
               if (!Array.isArray(observations) || observations.length !== projection.destinations.length ||
                   observations.some((value) => !valid.has(value))) throw new Error("invalid link observations");
-              report = await evaluate(document, name, preset.sources, preset.evidenceSources, undefined,
+              report = await evaluate(document, name, preset.sources, evidenceSources, undefined,
                 externalResults, { ...projection, observations });
               status = "success";
             }
@@ -115,6 +152,10 @@ export function withContentPreset(
               emitTelemetry(onLinkProviderTelemetry, { duration_ms: performance.now() - started, status });
             }
           }
+        }
+        if (evidenceFailure) {
+          report = { ...report, gates: report.gates.map((gate) => gate.required_capability === "text_and_evidence" && gate.status === "not_checked"
+            ? { ...gate, reason: "evidence source provider failed" } : gate) };
         }
         if (externalFailure) {
           report = { ...report, gates: report.gates.map((gate) => gate.required_capability === "extension" && gate.status === "not_checked"
