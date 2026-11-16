@@ -290,7 +290,7 @@ fn sentence_openings_builtin_supports_revision_and_private_telemetry() {
     assert!(!String::from_utf8_lossy(&output.stderr).contains("The team"));
     fs::write(
         &draft,
-        "The team plans. Yes. The team acts. Then everyone checks.\n",
+        "The team plans. Été. The team acts. Then everyone checks.\n",
     )
     .unwrap();
     let output = run();

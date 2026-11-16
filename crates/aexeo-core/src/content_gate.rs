@@ -74,6 +74,19 @@ const MAX_DUPLICATE_PARAGRAPH_KEY_BYTES: usize = 4 * 1024 * 1024;
 
 // Visit exactly the same heuristic sentence boundaries for every sentence gate.
 // Positions refer to the projected adapter text, not necessarily the source file.
+// Restrict short-sentence certainty to scripts with whitespace word boundaries
+// that we explicitly recognize. Other scripts stay not_checked.
+fn is_simple_latin_sentence(text: &str) -> bool {
+    text.chars().all(|ch| {
+        ch.is_ascii()
+            || ch.is_whitespace()
+            || matches!(ch, '«' | '»' | '“' | '”' | '‘' | '’' | '–' | '—')
+            || (ch.is_alphabetic()
+                && matches!(ch, '\u{00c0}'..='\u{024f}' | '\u{1e00}'..='\u{1eff}'))
+            || matches!(ch, '\u{0300}'..='\u{036f}')
+    })
+}
+
 fn for_each_sentence(
     text: &str,
     mut line: usize,
@@ -2099,13 +2112,13 @@ impl ContentPreset {
                                                 .to_lowercase(),
                                         );
                                     }
-                                    // A short ASCII sentence has no complete opening of the
-                                    // configured size. Non-ASCII text may use a script without
-                                    // whitespace word boundaries, so keep that case uncertain.
+                                    // A short sentence in the supported Latin subset cannot
+                                    // contain a complete opening. Other scripts may not use
+                                    // whitespace word boundaries and remain uncertain.
                                     if bytes <= MAX_PARAGRAPH_OPENING_BYTES
                                         && words.len() < *opening_words
                                         && !words.is_empty()
-                                        && segment.is_ascii()
+                                        && is_simple_latin_sentence(segment)
                                         && words.iter().all(|word| !word.is_empty())
                                     {
                                         too_short += 1;
@@ -4337,6 +4350,13 @@ terms = ["bad"]
             .evaluate_with_context(&input, None, None, Some(&context("これは文です。")))
             .unwrap();
         assert_eq!(uncertain.gates[0].status, GateStatus::NotChecked);
+        for short in ["Été.", "e\u{301}te\u{301}.", "«Oui»."] {
+            let result = preset
+                .evaluate_with_context(&input, None, None, Some(&context(short)))
+                .unwrap();
+            assert_eq!(result.gates[0].status, GateStatus::Passed, "{short}");
+            assert_eq!(result.gates[0].measurements["sentences_too_short"], 1);
+        }
         let unicode_fold = preset
             .evaluate_with_context(&input, None, None, Some(&context("K.")))
             .unwrap();
