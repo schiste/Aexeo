@@ -687,6 +687,9 @@ pub struct CrawlSeedSource {
     /// Missing on older artifacts, which cannot attest the exact inventory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inventory_sha256_v1: Option<String>,
+    /// Every resumed segment retained the same checkpointed seed fingerprint.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub resume_inventory_verified: bool,
     /// Number of distinct same-origin URLs seeded.
     pub url_count: usize,
 }
@@ -959,6 +962,7 @@ mod tests {
                         snapshot: "s1".into(),
                     }),
                     inventory_sha256_v1: None,
+                    resume_inventory_verified: false,
                     url_count: 2,
                 },
                 engine: "http".into(),

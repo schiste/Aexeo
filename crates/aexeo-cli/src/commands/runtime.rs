@@ -356,6 +356,7 @@ fn runtime_options_from_cli<'a>(
         progress_artifact,
         partial_audit_artifact: partial_artifact,
         release_marker: None,
+        inventory_sha256_v1: None,
     }
 }
 
@@ -449,6 +450,7 @@ pub fn command_crawl(submatches: &ArgMatches) -> Result<i32> {
         Some(path) => Some(super::link_graph::read_audit_link_context(path)?),
         None => seed_context,
     };
+    options.inventory_sha256_v1 = seed.as_ref().and_then(|s| s.inventory_sha256_v1.as_deref());
     if let Some(seed) = &seed {
         add_inventory_seeds(&mut config, seed);
     }

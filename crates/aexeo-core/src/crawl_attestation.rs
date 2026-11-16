@@ -23,6 +23,8 @@ pub struct CrawlRun {
     pub started_at: Option<i64>,
     pub finished_at: i64,
     pub resumed: bool,
+    /// Original inventory fingerprint retained from a checkpoint, when known.
+    pub resume_inventory_sha256_v1: Option<String>,
     /// Markers of the pages a resumed checkpoint already held.
     pub earlier_release_values: BTreeSet<String>,
     /// Markers of the pages fetched by this segment.
@@ -68,6 +70,13 @@ pub fn attest_runtime_crawl(
         |seed| attest_crawl(seed, artifact),
     );
     attestation.release = release.map(|spec| attest_release(spec, artifact, run.spans_releases()));
+    attestation.seeded_from.resume_inventory_verified = run.resumed
+        && run
+            .resume_inventory_sha256_v1
+            .as_deref()
+            .is_some_and(|original| {
+                seed.and_then(|value| value.inventory_sha256_v1.as_deref()) == Some(original)
+            });
     attestation.snapshot = Some(run.snapshot_window());
     Some(attestation)
 }
@@ -167,6 +176,7 @@ pub fn attest_crawl(seed: &InventorySeed, artifact: &AuditArtifact) -> CrawlAtte
         seeded_from: CrawlSeedSource {
             inventory_identity: seed.inventory_identity.clone(),
             inventory_sha256_v1: seed.inventory_sha256_v1.clone(),
+            resume_inventory_verified: false,
             url_count: seed.urls.len(),
         },
         engine: crawl_engine(artifact),
@@ -207,6 +217,7 @@ mod tests {
             started_at: Some(0),
             finished_at: 61,
             resumed: !earlier.is_empty(),
+            resume_inventory_sha256_v1: None,
             earlier_release_values: earlier.iter().map(|value| value.to_string()).collect(),
             segment_release_values: segment.iter().map(|value| value.to_string()).collect(),
         }
@@ -219,6 +230,40 @@ mod tests {
         assert!(!run(&["r1", "r2"], &["r2"]).spans_releases());
         assert!(!run(&["r1"], &[]).spans_releases());
         assert!(run(&["r1"], &["r1", "r2"]).spans_releases());
+    }
+
+    #[test]
+    fn resumed_attestation_requires_the_same_checkpoint_and_supplied_seed() {
+        let first = inventory_seed(
+            &inventory(&["https://example.org/a"]),
+            "https://example.org",
+        );
+        let second = inventory_seed(
+            &inventory(&["https://example.org/b"]),
+            "https://example.org",
+        );
+        let artifact = AuditArtifact::default();
+        let mut resumed = run(&["r1"], &[]);
+        resumed.resume_inventory_sha256_v1 = first.inventory_sha256_v1.clone();
+        assert!(
+            attest_runtime_crawl(Some(&first), None, &resumed, &artifact)
+                .unwrap()
+                .seeded_from
+                .resume_inventory_verified
+        );
+        assert!(
+            !attest_runtime_crawl(Some(&second), None, &resumed, &artifact)
+                .unwrap()
+                .seeded_from
+                .resume_inventory_verified
+        );
+        resumed.resumed = false;
+        assert!(
+            !attest_runtime_crawl(Some(&first), None, &resumed, &artifact)
+                .unwrap()
+                .seeded_from
+                .resume_inventory_verified
+        );
     }
 
     #[test]

@@ -742,8 +742,10 @@ fn crawl_audit_completeness_issues(
     match attestation.filter(|value| value.seeded_from.url_count > 0) {
         None => issues.push("audit_not_inventory_seeded"),
         Some(attestation) => {
-            // Checkpoints do not yet bind the original seed inventory.
-            if attestation.snapshot.as_ref().is_some_and(|s| s.resumed) {
+            // Old checkpoints do not attest the original seed inventory.
+            if attestation.snapshot.as_ref().is_some_and(|s| s.resumed)
+                && !attestation.seeded_from.resume_inventory_verified
+            {
                 issues.push("audit_seed_inventory_resume_unverified");
             }
             if !attestation.unfetched_urls.is_empty() {

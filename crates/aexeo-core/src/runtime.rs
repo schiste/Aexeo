@@ -81,6 +81,9 @@ pub struct RuntimeCheckpoint {
     /// The release marker the crawl records; a resume must ask for the same.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) release_marker: Option<ReleaseMarkerSpec>,
+    /// Seed inventory captured at the first segment, if available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) inventory_sha256_v1: Option<String>,
 }
 
 /// What identifies the crawl a checkpoint belongs to, beyond its progress.
@@ -89,6 +92,7 @@ struct CheckpointScope<'a> {
     engine: &'a str,
     started_at: Option<i64>,
     release_marker: Option<&'a ReleaseMarkerSpec>,
+    inventory_sha256_v1: Option<&'a str>,
 }
 
 fn unix_now() -> i64 {
@@ -135,6 +139,8 @@ pub struct RuntimeAuditOptions<'a> {
     pub partial_audit_artifact: RuntimeArtifactMode<'a>,
     /// Record each HTML page's release marker in its response provenance.
     pub release_marker: Option<&'a ReleaseMarkerSpec>,
+    /// Fingerprint of the inventory whose URLs were supplied as seeds.
+    pub inventory_sha256_v1: Option<&'a str>,
 }
 
 #[derive(Default)]
@@ -167,6 +173,7 @@ impl<'a> Default for RuntimeAuditOptions<'a> {
             progress_artifact: RuntimeArtifactMode::Off,
             partial_audit_artifact: RuntimeArtifactMode::Off,
             release_marker: None,
+            inventory_sha256_v1: None,
         }
     }
 }
@@ -1729,6 +1736,7 @@ fn checkpoint_state(
         crawl_stats: crawl_stats.clone(),
         started_at: scope.started_at,
         release_marker: scope.release_marker.cloned(),
+        inventory_sha256_v1: scope.inventory_sha256_v1.map(str::to_owned),
     };
     write_atomically(checkpoint_path, &serde_json::to_vec_pretty(&checkpoint)?)
 }
@@ -1842,6 +1850,12 @@ fn validate_checkpoint(checkpoint: &RuntimeCheckpoint, scope: &CheckpointScope<'
         checkpoint.release_marker.as_ref() == scope.release_marker,
         "checkpoint records a different release marker than this crawl; pass the same --release-header and --release-meta or start a new crawl"
     );
+    if let Some(original) = checkpoint.inventory_sha256_v1.as_deref() {
+        anyhow::ensure!(
+            Some(original) == scope.inventory_sha256_v1,
+            "checkpoint records a different seed inventory; pass the same --seed-file or start a new crawl"
+        );
+    }
     Ok(())
 }
 
@@ -1860,6 +1874,7 @@ fn materialize_runtime_site(
         ..config.runtime()
     };
     let release_marker = options.release_marker;
+    let mut checkpoint_inventory = options.inventory_sha256_v1.map(str::to_owned);
     let mut crawl_run = CrawlRun {
         started_at: Some(unix_now()),
         ..CrawlRun::default()
@@ -1871,11 +1886,15 @@ fn materialize_runtime_site(
                 engine,
                 started_at: None,
                 release_marker,
+                inventory_sha256_v1: options.inventory_sha256_v1,
             };
             let checkpoint = load_checkpoint(resume_from, &scope, max_pages)?;
             let resumed_elapsed_us = checkpoint.crawl_stats.elapsed_us;
             crawl_run.started_at = checkpoint.started_at;
             crawl_run.resumed = true;
+            // Never upgrade a legacy, unbound checkpoint into a bound one.
+            checkpoint_inventory = checkpoint.inventory_sha256_v1.clone();
+            crawl_run.resume_inventory_sha256_v1 = checkpoint_inventory.clone();
             crawl_run.earlier_release_values = checkpoint.snapshot.release_markers();
             (
                 CrawlPlanner::from_checkpoint(checkpoint.planner, base_url, max_pages),
@@ -2169,6 +2188,7 @@ fn materialize_runtime_site(
                     engine,
                     started_at: crawl_run.started_at,
                     release_marker,
+                    inventory_sha256_v1: checkpoint_inventory.as_deref(),
                 },
                 &planner,
                 &snapshot,

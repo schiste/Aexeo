@@ -1340,11 +1340,35 @@ fn inventory_seeds_survive_a_checkpoint_and_resume() {
         2
     );
 
+    let second = temp.path().join("second-checkpoint.json");
+    let (middle, _) = seeded_crawl(
+        &site,
+        temp.path(),
+        &context,
+        &[
+            "--max-pages",
+            "2",
+            "--resume",
+            checkpoint.to_str().unwrap(),
+            "--checkpoint",
+            second.to_str().unwrap(),
+            "--checkpoint-every",
+            "1",
+        ],
+    );
+    assert_eq!(middle["artifact"]["status"], "partial");
+    let original_checkpoint: Value =
+        serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
+    let next_checkpoint: Value = serde_json::from_slice(&std::fs::read(&second).unwrap()).unwrap();
+    assert_eq!(
+        original_checkpoint["inventory_sha256_v1"],
+        next_checkpoint["inventory_sha256_v1"]
+    );
     let (payload, audit) = seeded_crawl(
         &site,
         temp.path(),
         &context,
-        &["--resume", checkpoint.to_str().unwrap()],
+        &["--resume", second.to_str().unwrap()],
     );
     assert!(
         site.requested("/orphan"),
@@ -1354,6 +1378,107 @@ fn inventory_seeds_survive_a_checkpoint_and_resume() {
     assert_eq!(
         payload["artifact"]["crawl_attestation"]["unfetched_urls"],
         serde_json::json!([])
+    );
+    assert_eq!(
+        payload["artifact"]["crawl_attestation"]["seeded_from"]["resume_inventory_verified"],
+        true
+    );
+    let report = audit_link_report(temp.path(), &audit);
+    assert_eq!(report["crawl_complete"], true, "{report:#}");
+}
+
+#[test]
+fn resume_rejects_changed_inventory_before_any_request() {
+    let site = orphan_site();
+    let temp = tempfile::tempdir().unwrap();
+    let checkpoint = temp.path().join("checkpoint.json");
+    let context = inventory_context(&site, &["/", "/a", "/orphan"], &[]);
+    let (payload, _) = seeded_crawl(
+        &site,
+        temp.path(),
+        &context,
+        &[
+            "--max-pages",
+            "1",
+            "--checkpoint",
+            checkpoint.to_str().unwrap(),
+            "--checkpoint-every",
+            "1",
+        ],
+    );
+    assert_eq!(payload["artifact"]["status"], "partial");
+    let checkpoint_json: Value =
+        serde_json::from_slice(&std::fs::read(&checkpoint).unwrap()).unwrap();
+    assert_eq!(
+        checkpoint_json["inventory_sha256_v1"],
+        payload["artifact"]["crawl_attestation"]["seeded_from"]["inventory_sha256_v1"]
+    );
+    let before = site.requests.lock().unwrap().len();
+    let mut changed = context.clone();
+    changed["inventory"]["pages"][2]["locale"] = "fr".into();
+    let path = temp.path().join("changed.json");
+    write(&path, &changed.to_string());
+    for args in [vec![], vec!["--seed-file", path.to_str().unwrap()]] {
+        let output = resume_with(&site.base_url, &checkpoint, &args);
+        let text = String::from_utf8_lossy(&output.stdout).to_string()
+            + &String::from_utf8_lossy(&output.stderr);
+        assert_ne!(output.status.code(), Some(0), "{text}");
+        assert!(text.contains("different seed inventory"), "{text}");
+        assert_eq!(site.requests.lock().unwrap().len(), before);
+    }
+}
+
+#[test]
+fn old_checkpoints_remain_unverified_across_multiple_resumes() {
+    let site = orphan_site();
+    let temp = tempfile::tempdir().unwrap();
+    let first = temp.path().join("old.json");
+    let second = temp.path().join("next.json");
+    let context = inventory_context(&site, &["/", "/a", "/orphan"], &[]);
+    seeded_crawl(
+        &site,
+        temp.path(),
+        &context,
+        &[
+            "--max-pages",
+            "1",
+            "--checkpoint",
+            first.to_str().unwrap(),
+            "--checkpoint-every",
+            "1",
+        ],
+    );
+    let mut old: Value = serde_json::from_slice(&std::fs::read(&first).unwrap()).unwrap();
+    old.as_object_mut().unwrap().remove("inventory_sha256_v1");
+    write(&first, &old.to_string());
+    let (partial, _) = seeded_crawl(
+        &site,
+        temp.path(),
+        &context,
+        &[
+            "--max-pages",
+            "2",
+            "--resume",
+            first.to_str().unwrap(),
+            "--checkpoint",
+            second.to_str().unwrap(),
+            "--checkpoint-every",
+            "1",
+        ],
+    );
+    assert_eq!(partial["artifact"]["status"], "partial");
+    let saved: Value = serde_json::from_slice(&std::fs::read(&second).unwrap()).unwrap();
+    assert!(saved.get("inventory_sha256_v1").is_none(), "{saved:#}");
+    let (complete, audit) = seeded_crawl(
+        &site,
+        temp.path(),
+        &context,
+        &["--resume", second.to_str().unwrap()],
+    );
+    assert_eq!(complete["artifact"]["status"], "complete");
+    assert_ne!(
+        complete["artifact"]["crawl_attestation"]["seeded_from"]["resume_inventory_verified"],
+        true
     );
     let report = audit_link_report(temp.path(), &audit);
     assert_eq!(report["crawl_complete"], false);
