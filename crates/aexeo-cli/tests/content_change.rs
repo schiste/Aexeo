@@ -482,6 +482,41 @@ fn external_results_with_duplicate_nested_keys_do_not_replace_verdict() {
 }
 
 #[test]
+fn invalid_external_results_are_user_errors_and_preserve_verdict() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("external.json");
+    let verdict = dir.path().join("verdict.json");
+    let preset = "version=1\nname='test'\n[[gates]]\nid='external'\nkind='custom'\nextension='example.rule'\n";
+    let mut records = serde_json::json!([{
+        "extension":"example.rule", "parameters":{},
+        "input":{"id":"article", "text":"abc", "source_text":"abc", "headings":null, "metadata":null, "evidence_sources":null},
+        "diagnostics":[{"message":"Review", "line":9, "column":1}]
+    }]);
+    for (line, expected) in [
+        (9, "external diagnostic line is outside projected text"),
+        (0, "external gate diagnostics are invalid or exceed limits"),
+    ] {
+        records[0]["diagnostics"][0]["line"] = line.into();
+        fs::write(&path, serde_json::to_vec(&records).unwrap()).unwrap();
+        fs::write(&verdict, "previous verdict").unwrap();
+        let output = run(
+            dir.path(),
+            &input(),
+            preset,
+            &["--extension-results", path.to_str().unwrap()],
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stderr).contains(expected));
+        assert_eq!(fs::read(&verdict).unwrap(), b"previous verdict");
+    }
+}
+
+#[test]
 fn external_gates_bind_each_entry_and_withhold_stale_results() {
     let dir = tempfile::tempdir().unwrap();
     let mut change = input();
