@@ -28,7 +28,7 @@ Markdown and EmDash adapters report where each heading, paragraph, list item and
 
 Literal matching for `forbidden_terms`, `required_terms`, `repeated_terms` and the claim of an evidence gate ignores whitespace differences: `best price` matches `best` and `price` separated by any run of whitespace without a blank line. Finding positions stay in the original text. Quote anchors in evidence sources remain exact.
 
-`forbidden_terms`, `required_terms` and `repeated_terms` accept `whole_words` (default `true`; set `false` for substring matches) and `case_insensitive` (default `false`). Case-insensitive matching lowercases each character, without full Unicode case folding. Word boundaries use Unicode alphanumeric characters and underscores. Adapter block boundaries also separate words even when no separator is inserted; a term never matches across a known block boundary. Thai, Lao, Myanmar, Khmer, CJK and Hangul characters do not act as word characters, because these scripts do not reliably separate words with spaces; a term in them matches inside surrounding text.
+`forbidden_terms`, `required_terms` and `repeated_terms` accept `whole_words` (default `true`; set `false` for substring matches) and `case_insensitive` (default `false`). Case-insensitive matching lowercases each character, without full Unicode case folding. Word boundaries use Unicode alphanumeric and identifier-continuation characters, including underscores and many combining marks; no Unicode normalization is performed. Adapter block boundaries also separate words even when no separator is inserted; a term never matches across a known block boundary. Thai, Lao, Myanmar, Khmer, CJK and Hangul characters do not act as word characters, because these scripts do not reliably separate words with spaces; a term in them matches inside surrounding text.
 
 ### Character count for multilingual content
 
@@ -829,7 +829,7 @@ Matching is non-overlapping and case-sensitive by default. The optional
 case-insensitive mode lowercases each character; it does not perform full Unicode
 case folding. Equivalent configured terms after case and whitespace normalization
 are rejected in this mode to avoid duplicate findings. By default Unicode alphanumeric
-characters and underscores define word boundaries; set `whole_words = false`
+characters, identifier-continuation marks and underscores define word boundaries; set `whole_words = false`
 for substring matches. It does not infer synonyms, grammar, or editorial intent.
 Each finding points to the first occurrence beyond the configured maximum,
 and measurements count configured and exceeded terms and matched occurrences.
