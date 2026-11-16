@@ -352,6 +352,8 @@ The latest published version observed on 2026-11-16 was 0.9.1.
   counts and status consistency. It does not produce a fresh evaluation,
   establish artifact freshness or authenticity, or authorize publication.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
+  Direct Rust collection uniqueness evaluation rejects ambiguous identities in
+  the examined prefix, matching CLI and EmDash input validation.
   Literal Markdown image alt labels map to their exact original positions for
   inline and reference images; transformed labels remain unlocated.
   HTML with CRLF line endings can retain exact source locations when lexical

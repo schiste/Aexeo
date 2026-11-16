@@ -865,7 +865,10 @@ across adapters, the gate examines at most 100,000 items, 10,000 distinct
 limited to 16 KiB. If a limit is reached, the result is `not_checked` and
 retains findings from the examined prefix. `collection_items` counts all
 supplied items, while `items_evaluated`, missing-field counts and duplicate
-counts describe only that prefix.
+counts describe only that prefix. Direct Rust evaluations reject blank or repeated
+item IDs encountered in the evaluated prefix, instead of producing ambiguous
+findings. CLI and EmDash validate the supplied collection identities at their
+boundaries.
 For `content-change`, a host can explicitly supply a post-change collection
 with `--collection-snapshot snapshot.json`. Its JSON shape is
 `{"change_id":"example","complete":false,"items":[{"id":"article","metadata":{"slug":"article"}}]}`.

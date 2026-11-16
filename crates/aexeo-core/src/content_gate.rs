@@ -1650,6 +1650,7 @@ impl ContentPreset {
                     Some(items) => {
                         measurements.insert("collection_items".into(), items.len());
                         let mut first_by_value = BTreeMap::new();
+                        let mut item_ids = BTreeSet::new();
                         let mut missing = 0;
                         let mut missing_group = 0;
                         let mut duplicates = 0;
@@ -1657,6 +1658,9 @@ impl ContentPreset {
                         let mut key_bytes = 0;
                         let mut limit_reason = None;
                         for item in items.iter().take(MAX_COLLECTION_ITEMS) {
+                            if item.id.trim().is_empty() || !item_ids.insert(item.id.as_str()) {
+                                bail!("collection item IDs must be nonempty and unique");
+                            }
                             let value = item.metadata.as_ref().and_then(|m| m.get(field));
                             let group = group_by.as_ref().and_then(|field| {
                                 item.metadata
@@ -3774,6 +3778,30 @@ field = "slug"
     }
 
     #[test]
+    fn collection_gate_rejects_ambiguous_item_identities_for_direct_hosts() {
+        let preset = ContentPreset::from_toml("version=1\nname='collection'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n").unwrap();
+        let item = |id: &str| ContentInput {
+            id: id.into(),
+            metadata: Some(BTreeMap::from([("slug".into(), "same".into())])),
+            ..Default::default()
+        };
+        let input = ContentInput::default();
+        for items in [vec![item("/a"), item("/a")], vec![item("  ")]] {
+            let result = preset.evaluate_with_capabilities(
+                &input,
+                &ContentEvaluationContext {
+                    collection: Some(&items),
+                    ..Default::default()
+                },
+            );
+            assert!(
+                result.is_err(),
+                "ambiguous collection identities must not yield findings"
+            );
+        }
+    }
+
+    #[test]
     fn collection_uniqueness_can_be_scoped_by_metadata() {
         let preset = ContentPreset::from_toml("version=1\nname='collection'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\ngroup_by='lang'\n").unwrap();
         let item = |id: &str, slug: Option<&str>, lang: Option<&str>| {
@@ -4211,8 +4239,11 @@ field = "slug"
         assert!(result.measurements["items_evaluated"] < long_values.len());
         assert!(result.reason.unwrap().contains("distinct"));
 
-        let repeated =
-            vec![item("same".into(), "same".into(), "en".into()); MAX_COLLECTION_ITEMS + 1];
+        let mut repeated: Vec<_> = (0..=MAX_COLLECTION_ITEMS)
+            .map(|id| item(id.to_string(), "same".into(), "en".into()))
+            .collect();
+        // The unexamined suffix is not validated; the result must remain unchecked.
+        repeated[MAX_COLLECTION_ITEMS].id = "0".into();
         let result = evaluate(&repeated);
         assert_eq!(result.status, GateStatus::NotChecked);
         assert_eq!(result.measurements["items_evaluated"], MAX_COLLECTION_ITEMS);
