@@ -47,6 +47,8 @@ export interface FindingsPayload {
     errors: number;
     warnings: number;
     documentsIndexed: number;
+    /** Indexed documents without a persisted findings record. */
+    documentsWithoutFindings?: number;
   };
   // Per-layer breakdown of findings (primary layer only, so the sum
   // matches totals.findings). Drives the dashboard widget's layer-
@@ -195,6 +197,15 @@ async function buildFindingsPayload(
       findings.push({ ...finding, route });
     }
   }
+  // An indexed document may have no findings record, for example if evaluation
+  // was interrupted. Include it without inventing an assessment or coverage.
+  let documentsWithoutFindings = 0;
+  for (const route of documents.keys()) {
+    if (!perRoute.has(route)) {
+      documentsWithoutFindings++;
+      perRoute.set(route, { findings: [], errors: 0, warnings: 0 });
+    }
+  }
   findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
 
   const routes: RouteSummary[] = [];
@@ -249,6 +260,7 @@ async function buildFindingsPayload(
       errors: findings.filter((f) => f.severity === "error").length,
       warnings: findings.filter((f) => f.severity === "warning").length,
       documentsIndexed: documents.size,
+      documentsWithoutFindings,
     },
     layerBreakdown,
     sitewideFindings: sitewide,

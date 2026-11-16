@@ -26,6 +26,7 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Include indexed documents without findings records in both editorial views, with unknown coverage and missing assessment rather than hiding them.
 - Report invalid and cross-origin inventory alias targets with aggregate-only telemetry, while preserving relative targets and original evidence.
 - Bound inventory URL resolution when a CMS returns more than 100 entries per requested page; report omitted entries and aggregate telemetry.
 - Keep CMS listing exception details out of refresh reports, treat malformed listings as incomplete, and emit aggregate listing coverage telemetry.

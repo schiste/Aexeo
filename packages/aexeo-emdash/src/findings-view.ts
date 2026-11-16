@@ -36,6 +36,7 @@ import {
   evaluateAndPersistAll,
   findingsKey,
   readAssessment,
+  readAllStoredDocuments,
 } from "./plugin.js";
 import type { SuppressionFilter } from "./suppressions.js";
 
@@ -280,12 +281,16 @@ interface FindingsSnapshot {
   incompleteBodies: number;
   unknownBodies: number;
   missingAssessments: number;
+  unrecordedDocuments: number;
 }
 
-async function readFindingsSnapshot(kv: KvNamespace): Promise<FindingsSnapshot> {
+async function readFindingsSnapshot(kv: KvNamespace, includeDocuments = false): Promise<FindingsSnapshot> {
   // Values are returned inline; include assessments with no findings so editors
   // can inspect passing, incomplete and failed evaluations from the picker.
-  const entries = await kv.list<{ route: string; findings: Finding[]; assessment?: DocumentAssessment; body_coverage?: CmsBodyCoverage }>("findings:");
+  const [entries, documents] = await Promise.all([
+    kv.list<{ route: string; findings: Finding[]; assessment?: DocumentAssessment; body_coverage?: CmsBodyCoverage }>("findings:"),
+    includeDocuments ? readAllStoredDocuments(kv) : Promise.resolve([]),
+  ]);
   const sitewideAssessment = entries.find((entry) => entry.key === "findings:*")?.value?.assessment;
   const incomplete = sitewideAssessment?.status === "error";
   const findings: FindingRow[] = [];
@@ -295,6 +300,7 @@ async function readFindingsSnapshot(kv: KvNamespace): Promise<FindingsSnapshot> 
   let incompleteBodies = 0;
   let unknownBodies = 0;
   let missingAssessments = 0;
+  let unrecordedDocuments = 0;
   for (const entry of entries) {
     if (entry.value === null) continue;
     const route = entry.key.replace(/^findings:/, "");
@@ -315,7 +321,19 @@ async function readFindingsSnapshot(kv: KvNamespace): Promise<FindingsSnapshot> 
       if (route === "*") routes.add(route);
     }
   }
-  return { findings, documentRoutes: [...routes].sort(), sitewideAssessment, failedAssessments, uncheckedGates, incompleteBodies, unknownBodies, missingAssessments };
+  if (includeDocuments) {
+    // Include indexed documents whose evaluation has not produced a record.
+    // These have neither an assessment nor observed body coverage.
+    for (const { document } of documents) {
+      if (document.route !== "*" && !routes.has(document.route)) {
+        routes.add(document.route);
+        unknownBodies++;
+        missingAssessments++;
+        unrecordedDocuments++;
+      }
+    }
+  }
+  return { findings, documentRoutes: [...routes].sort(), sitewideAssessment, failedAssessments, uncheckedGates, incompleteBodies, unknownBodies, missingAssessments, unrecordedDocuments };
 }
 
 export async function readAllFindings(kv: KvNamespace): Promise<FindingRow[]> {
@@ -343,7 +361,7 @@ export async function renderFindingsPage(
   kv: KvNamespace,
   tuning: AdminViewTuning,
 ): Promise<BlockResponse> {
-  const { findings, documentRoutes, sitewideAssessment, failedAssessments, uncheckedGates, incompleteBodies, unknownBodies, missingAssessments } = await readFindingsSnapshot(kv);
+  const { findings, documentRoutes, sitewideAssessment, failedAssessments, uncheckedGates, incompleteBodies, unknownBodies, missingAssessments, unrecordedDocuments } = await readFindingsSnapshot(kv, true);
   const errors = findings.filter((finding) => finding.severity === "error");
   const warnings = findings.filter(
     (finding) => finding.severity === "warning",
@@ -356,11 +374,12 @@ export async function renderFindingsPage(
       type: "context",
       text:
         findings.length === 0
-          ? documentRoutes.length === 0 ? "No CMS document results available — click Refresh to evaluate records." : "No findings reported for the available CMS checks. Inspect assessments for unchecked or failed evaluations."
+          ? documentRoutes.length === 0 ? "No CMS document results available — click Refresh to evaluate records." : unrecordedDocuments === documentRoutes.length ? "No evaluation records available for indexed documents — click Refresh to evaluate them." : "No findings reported for the available CMS checks. Inspect assessments for unchecked or failed evaluations."
           : `${findings.length} findings across ${routes.length} routes — ${errors.length} errors, ${warnings.length} warnings.`,
     },
     { type: "context", text: "Rendered page markup, semantic sections, generated metadata, duplicate pages and sitewide links are not checked here. Audit the built site for page-level and link findings." },
     ...(incompleteBodies || unknownBodies ? [{ type: "context", text: `${incompleteBodies} document bodies were incomplete or unavailable; coverage is unknown for ${unknownBodies} older or failed evaluations. Inspect individual documents.` }] : []),
+    ...(unrecordedDocuments ? [{ type: "context", text: `${unrecordedDocuments} indexed document(s) have no evaluation record; run Refresh to evaluate them.` }] : []),
     ...(missingAssessments ? [{ type: "context", text: `No content preset assessment was recorded for ${missingAssessments} document(s); absence of findings is not an editorial quality assessment.` }] : []),
     ...(failedAssessments || uncheckedGates ? [{ type: "context", text: `${failedAssessments} document evaluations failed; ${uncheckedGates} preset checks were not checked. Inspect individual documents for details.` }] : []),
     ...(sitewideAssessment?.status === "error" ? [{ type: "context", text: `Sitewide checks unavailable: ${sitewideAssessment.reason}. ${sitewideAssessment.detail}` }] : []),
