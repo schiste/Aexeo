@@ -587,10 +587,13 @@ describe("sandbox afterSave", () => {
       throw new Error("The EmDash test site did not resolve the public URL");
     }
     const documentKey = `document:${new URL(expectedPublicUrl).pathname}`;
+    // Saves dispatch hooks asynchronously; Vitest’s default one-second wait
+    // can expire before EmDash’s five-second hook budget under load.
+    const hookWait = { timeout: 10_000, interval: 50 };
     await vi.waitFor(async () => {
       expect(await host?.inspect.kv.get(documentKey)).not.toBeNull();
       expect(host?.http.requests()).toHaveLength(1);
-    });
+    }, hookWait);
     const stored = await host.inspect.kv.get<{
       document: {
         route: string;
@@ -644,7 +647,7 @@ describe("sandbox afterSave", () => {
         route: "/journal/hello/",
         findings: [],
       });
-    });
+    }, hookWait);
 
     // Route migration. `persistDocument` re-keys a document whenever the
     // same content id appears under a new route, and deletes the stale
@@ -692,7 +695,7 @@ describe("sandbox afterSave", () => {
         route: "/journal/hello/",
         findings: [movedFinding],
       });
-    });
+    }, hookWait);
     // The entry keeps serving its own current route; only the orphaned
     // keys for the route it left behind are removed.
     await expect(
