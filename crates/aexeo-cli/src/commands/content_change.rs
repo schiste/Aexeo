@@ -11,9 +11,9 @@ use aexeo_core::{
     content_gate::MAX_CONTENT_INPUT_BYTES,
     content_gate_sources::{ConfinedContentFiles, SourceError},
     content_gate_verdict::{
-        ChangeCollection, ChangeEvaluationHost, ChangeEvaluationOptions, ScopedBindingKind,
-        evaluate_change_with_collection_and_html_scope, verify_scoped_change_input_binding,
-        verify_scoped_change_verdict,
+        ChangeCollection, ChangeEvaluationHost, ChangeEvaluationOptions, ChangeLinkSnapshots,
+        ScopedBindingKind, evaluate_change_with_collection_and_html_scope,
+        verify_scoped_change_input_binding, verify_scoped_change_verdict,
     },
     content_presets::{builtin_content_presets, resolve_content_preset},
     error::UserContext,
@@ -40,14 +40,6 @@ struct CollectionSnapshot {
     change_id: String,
     complete: bool,
     items: Vec<aexeo_core::content_gate::ContentInput>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ChangeLinkSnapshots {
-    version: u32,
-    change_id: String,
-    entries: std::collections::BTreeMap<String, super::content::LinkObservationSnapshot>,
 }
 
 #[cfg(target_os = "linux")]
@@ -301,37 +293,14 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             }
             let snapshots: ChangeLinkSnapshots =
                 parse_lossless_json(&data).user_context("invalid link observations")?;
-            if snapshots.version != 1 || snapshots.change_id != change.change_id {
-                user_bail!("link observations do not match this change");
-            }
-            if !preset.gates.iter().any(|gate| {
-                matches!(
-                    gate,
-                    aexeo_core::content_gate::ContentGate::LinkReachability { .. }
-                )
-            }) {
-                user_bail!("link observations require a link reachability gate");
-            }
-            let entries: std::collections::BTreeMap<_, _> = change
-                .entries
-                .iter()
-                .map(|entry| (entry.entity_id.as_str(), entry))
-                .collect();
-            for (id, snapshot) in &snapshots.entries {
-                let entry = entries
-                    .get(id.as_str())
-                    .user_context("link observation entry is not present in the change")?;
-                if snapshot.version != 1
-                    || entry.after.as_ref().map(|state| state.sha256.as_str())
-                        != Some(snapshot.source_sha256.as_str())
-                    || snapshot.destinations.len() != snapshot.observations.len()
-                {
-                    user_bail!("link observations do not match the entry content");
-                }
-            }
             Ok(snapshots)
         })
         .transpose()?;
+    let mut snapshot_observer = snapshots
+        .as_ref()
+        .map(|value| value.observer(&change, &preset))
+        .transpose()
+        .user_context("invalid link observations")?;
     let snapshot_fingerprint = snapshots
         .as_ref()
         .map(|snapshots| -> Result<String> {
@@ -406,24 +375,11 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             .user_context("previous verdict does not match the current link evaluation inputs")?;
     }
     let mut link_session = None;
-    let mut used_snapshots = std::collections::BTreeSet::new();
-    let mut missing_entries = 0usize;
-    let mut missing_destinations = 0usize;
     let mut observe = |entity: &str, values: &[String]| -> Result<_> {
-        if let Some(snapshots) = &snapshots {
-            let Some(snapshot) = snapshots.entries.get(entity) else {
-                missing_entries += 1;
-                missing_destinations += values.len();
-                return Ok(vec![
-                        aexeo_core::content_gate::LinkReachabilityObservation::NotChecked;
-                        values.len()
-                    ]);
-            };
-            if snapshot.destinations != values {
-                user_bail!("link observations do not match extracted destinations");
-            }
-            used_snapshots.insert(entity.to_owned());
-            return Ok(snapshot.observations.clone());
+        if let Some(observer) = &mut snapshot_observer {
+            return observer
+                .observe(entity, values)
+                .user_context("invalid link observations");
         }
         use aexeo_core::runtime::link_reachability::{LinkReachabilitySession, gate_observations};
         let session = match &mut link_session {
@@ -475,9 +431,12 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         Err(error) => return Err(error),
     };
     if let Some(snapshots) = &snapshots {
-        if used_snapshots.len() != snapshots.entries.len() {
-            user_bail!("some link observation entries could not be assessed");
-        }
+        let observer = snapshot_observer
+            .as_ref()
+            .user_context("missing link snapshot observer")?;
+        observer
+            .finish()
+            .user_context("invalid link observations")?;
         if telemetry {
             let observations = snapshots
                 .entries
@@ -499,7 +458,7 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
                 "{}",
                 serde_json::json!({"event":"content_change_link_snapshots", "version":1,
                 "supplied_entries":snapshots.entries.len(), "supplied_observations":observations,
-                "unchecked_observations":unchecked + missing_destinations, "observed_entries_without_snapshot":missing_entries,
+                "unchecked_observations":unchecked + observer.missing_destinations, "observed_entries_without_snapshot":observer.missing_entries,
                 "elapsed_ms":snapshot_started.map(|started| started.elapsed().as_secs_f64() * 1000.0)})
             );
         }
