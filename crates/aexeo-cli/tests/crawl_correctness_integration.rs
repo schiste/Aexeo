@@ -1141,6 +1141,12 @@ fn an_inventory_seeded_crawl_reaches_an_unlinked_page_and_attests_completeness()
         .unwrap()
         .remove("snapshot")
         .unwrap();
+    let digest = observed["seeded_from"]
+        .as_object_mut()
+        .unwrap()
+        .remove("inventory_sha256_v1")
+        .unwrap();
+    assert_eq!(digest.as_str().unwrap().len(), 64);
     assert_eq!(
         observed,
         serde_json::json!({"seeded_from": {"inventory_identity": context["identity"], "url_count": 3},
@@ -1349,9 +1355,12 @@ fn inventory_seeds_survive_a_checkpoint_and_resume() {
         payload["artifact"]["crawl_attestation"]["unfetched_urls"],
         serde_json::json!([])
     );
-    assert_eq!(
-        audit_link_report(temp.path(), &audit)["crawl_complete"],
-        true
+    let report = audit_link_report(temp.path(), &audit);
+    assert_eq!(report["crawl_complete"], false);
+    assert!(
+        report["issues"]
+            .to_string()
+            .contains("audit_seed_inventory_resume_unverified")
     );
 }
 
@@ -1707,6 +1716,15 @@ fn inventory_aliases_are_checked_against_what_the_seeded_crawl_observed() {
     context["inventory"]["pages"][6]["disposition"] = "published".into();
     write(&temp.path().join("context.json"), &context.to_string());
     let report = audit_link_report(temp.path(), &audit);
+    assert_eq!(report["reconciliation"]["comparable"], false, "{report:#}");
+    assert!(
+        report["issues"]
+            .to_string()
+            .contains("audit_seed_inventory_digest_mismatch")
+    );
+    // A fresh crawl with that inventory can establish the changed classification.
+    let (_, fresh_audit) = seeded_crawl(&site, temp.path(), &context, &[]);
+    let report = audit_link_report(temp.path(), &fresh_audit);
     let reconciliation = &report["reconciliation"];
     assert_eq!(reconciliation["comparable"], true, "{report:#}");
     let eligible = ["/", "/fr/guide", "/guide", "/new"].map(|path| format!("{base}{path}"));
@@ -1886,6 +1904,47 @@ fn a_seeded_crawl_confirms_an_unlinked_published_page_in_one_command() {
     assert_eq!(
         payload["link_graph_summary"]["legacy_link_findings"]["confirmed"], 1,
         "{payload:#}"
+    );
+}
+
+#[test]
+fn inventory_metadata_changes_cannot_reuse_a_seed_attestation() {
+    let site = orphan_site();
+    site.serve_header("X-Release", "r1");
+    let temp = tempfile::tempdir().unwrap();
+    let context = inventory_context(&site, &["/", "/a", "/orphan"], &[]);
+    let (_, audit) = seeded_crawl(
+        &site,
+        temp.path(),
+        &context,
+        &["--release-header", "x-release"],
+    );
+    let original = audit_link_report(temp.path(), &audit);
+    assert_eq!(
+        original["reconciliation"]["comparable"], true,
+        "{original:#}"
+    );
+    let orphan = format!("{}/orphan", site.base_url);
+    assert_eq!(
+        legacy_finding(&original, "LNK002", &orphan)["conclusion"],
+        "confirmed"
+    );
+
+    // Same identity and URLs, but a different editorial classification.
+    let mut changed = context.clone();
+    changed["inventory"]["pages"][2]["locale"] = "en".into();
+    write(&temp.path().join("context.json"), &changed.to_string());
+    let report = audit_link_report(temp.path(), &audit);
+    assert!(
+        report["issues"]
+            .to_string()
+            .contains("audit_seed_inventory_digest_mismatch"),
+        "{report:#}"
+    );
+    assert_eq!(report["crawl_complete"], false);
+    assert_eq!(
+        legacy_finding(&report, "LNK002", &orphan)["conclusion"],
+        "not_eligible"
     );
 }
 

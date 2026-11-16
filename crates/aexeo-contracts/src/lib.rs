@@ -683,6 +683,10 @@ pub struct CrawlSnapshotWindow {
 pub struct CrawlSeedSource {
     /// The inventory's own identity; `None` when the inventory declared none.
     pub inventory_identity: Option<SurfaceIdentity>,
+    /// SHA-256 of the versioned, typed inventory projection used to seed the crawl.
+    /// Missing on older artifacts, which cannot attest the exact inventory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inventory_sha256_v1: Option<String>,
     /// Number of distinct same-origin URLs seeded.
     pub url_count: usize,
 }
@@ -954,6 +958,7 @@ mod tests {
                         surface: "public".into(),
                         snapshot: "s1".into(),
                     }),
+                    inventory_sha256_v1: None,
                     url_count: 2,
                 },
                 engine: "http".into(),

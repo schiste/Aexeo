@@ -298,12 +298,25 @@ fn normalized(url: &str) -> String {
 mod tests {
     use super::*;
     use crate::config::Config;
-    use crate::link_report::{
-        AuditLinkContext, build_link_report_from_audit, build_link_report_from_audit_with_context,
-    };
+    use crate::link_report::{AuditLinkContext, build_link_report_from_audit};
     use crate::link_rules::run_link_rules;
     use crate::verification::{diff_finding_sets, site_from_audit_artifact};
     use aexeo_contracts::AuditArtifact;
+
+    // The fixture is deliberately seeded from this exact test inventory.
+    fn bound_report(
+        artifact: &AuditArtifact,
+        context: Option<&AuditLinkContext>,
+    ) -> anyhow::Result<LinkReport> {
+        let mut artifact = artifact.clone();
+        if let (Some(attestation), Some(inventory)) = (
+            artifact.crawl_attestation.as_mut(),
+            context.and_then(|context| context.inventory.as_ref()),
+        ) {
+            attestation.seeded_from.inventory_sha256_v1 = inventory.sha256_v1();
+        }
+        crate::link_report::build_link_report_from_audit_with_context(&artifact, context)
+    }
 
     fn identity() -> serde_json::Value {
         serde_json::json!({"origin":"https://example.org", "release":"r1", "surface":"public", "snapshot":"s1"})
@@ -412,7 +425,7 @@ mod tests {
     fn an_eligible_page_without_inbound_links_confirms_the_orphan_finding() {
         let artifact = audit(orphan_site(), &Config::default());
         let context = context(&published(&["", "a", "orphan"]));
-        let report = build_link_report_from_audit_with_context(&artifact, Some(&context)).unwrap();
+        let report = bound_report(&artifact, Some(&context)).unwrap();
         assert!(report.crawl_complete, "{:?}", report.issues);
         let orphan = qualified(&report, "LNK002", "orphan");
         assert_eq!(orphan.conclusion, LegacyLinkConclusion::Confirmed);
@@ -442,8 +455,7 @@ mod tests {
                 &Config::default(),
             );
             let context = context(&published(&["", "a", "orphan"]));
-            let report =
-                build_link_report_from_audit_with_context(&artifact, Some(&context)).unwrap();
+            let report = bound_report(&artifact, Some(&context)).unwrap();
             assert!(report.crawl_complete);
             let reconciliation = report.reconciliation.as_ref().unwrap();
             assert!(!reconciliation.comparable, "{html}");
@@ -475,7 +487,7 @@ mod tests {
             &Config::default(),
         );
         let context = context(&published(&["", "a", "orphan"]));
-        let report = build_link_report_from_audit_with_context(&artifact, Some(&context)).unwrap();
+        let report = bound_report(&artifact, Some(&context)).unwrap();
         assert!(report.reconciliation.as_ref().unwrap().comparable);
         assert_eq!(
             qualified(&report, "LNK002", "orphan").conclusion,
@@ -518,7 +530,7 @@ mod tests {
             &config,
         );
         let context = context(&published(&["", "a", "b"]));
-        let report = build_link_report_from_audit_with_context(&artifact, Some(&context)).unwrap();
+        let report = bound_report(&artifact, Some(&context)).unwrap();
         let nav = qualified(&report, "LNK004", "a");
         assert_eq!(nav.conclusion, LegacyLinkConclusion::Confirmed);
         assert!(nav.navigation_only);
@@ -663,11 +675,7 @@ mod tests {
             ],
             &config,
         );
-        let report = build_link_report_from_audit_with_context(
-            &artifact,
-            Some(&context(&published(&["", "a"]))),
-        )
-        .unwrap();
+        let report = bound_report(&artifact, Some(&context(&published(&["", "a"])))).unwrap();
         assert_eq!(
             qualified(&report, "LNK004", "a").conclusion,
             LegacyLinkConclusion::ConditionalInbound
@@ -880,8 +888,7 @@ mod tests {
         );
         let mut entries = published(&["", "a"]);
         entries.push(("fr-a", "canonical_alias", Some("a")));
-        let report =
-            build_link_report_from_audit_with_context(&artifact, Some(&context(&entries))).unwrap();
+        let report = bound_report(&artifact, Some(&context(&entries))).unwrap();
         let alias = suppressed(&report, "LNK002", "fr-a");
         assert_eq!(alias.conclusion, LegacyLinkConclusion::InventoryAlias);
         assert!(
