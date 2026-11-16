@@ -19,6 +19,9 @@ MAX_MANIFEST_BYTES = 8192
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 MAX_BUNDLE_BYTES = 64 * 1024 * 1024
 BUNDLE_SCHEMA = "aexeo.offline-receipt-bundle/v1"
+LINK_BUNDLE_SCHEMA = "aexeo.link-snapshot-receipt-bundle/v1"
+RECEIPT_SCHEMAS = {BUNDLE_SCHEMA: "aexeo.offline-decision-receipt/v1",
+                   LINK_BUNDLE_SCHEMA: "aexeo.link-snapshot-decision-receipt/v1"}
 REQUIRED = ("change", "resolved_policy", "host_options", "evaluator")
 OPTIONAL = ("collection", "external_evidence")
 
@@ -130,12 +133,16 @@ def parse_bundle(data):
     except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
         raise VerificationError("invalid bundle JSON") from error
     if (not isinstance(bundle, dict) or set(bundle) != {"schema", "receipt", "artifacts"}
-            or bundle["schema"] != BUNDLE_SCHEMA or not isinstance(bundle["receipt"], dict)
+            or not isinstance(bundle["schema"], str) or bundle["schema"] not in RECEIPT_SCHEMAS
+            or not isinstance(bundle["receipt"], dict)
             or not isinstance(bundle["artifacts"], dict)
             or set(bundle["artifacts"]) != set(REQUIRED + OPTIONAL)):
         raise VerificationError("invalid bundle fields")
-    if bundle["artifacts"]["external_evidence"] is not None:
-        raise VerificationError("unsupported bundle external evidence")
+    if bundle["receipt"].get("schema") != RECEIPT_SCHEMAS[bundle["schema"]]:
+        raise VerificationError("bundle and receipt schemas differ")
+    evidence = bundle["artifacts"]["external_evidence"]
+    if (bundle["schema"] == BUNDLE_SCHEMA) != (evidence is None):
+        raise VerificationError("bundle external evidence does not match schema")
     try:
         manifest_data = json.dumps(bundle["receipt"]["decision_inputs"], separators=(",", ":")).encode("utf-8")
     except (KeyError, UnicodeEncodeError, ValueError, RecursionError) as error:

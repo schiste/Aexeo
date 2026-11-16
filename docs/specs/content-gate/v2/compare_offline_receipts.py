@@ -19,6 +19,7 @@ from verify_decision_inputs import (
 
 MAX_RECEIPT_BYTES = 16 * 1024 * 1024
 RECEIPT_SCHEMA = "aexeo.offline-decision-receipt/v1"
+LINK_RECEIPT_SCHEMA = "aexeo.link-snapshot-decision-receipt/v1"
 VERDICT_SCHEMA = "content-gate.verdict/v1"
 MAX_CONTENT_MAP_BYTES = 1024 * 1024
 MAX_CONTENT_STATES = 1024
@@ -40,7 +41,7 @@ def parse_receipt(data):
     except (UnicodeDecodeError, ValueError, RecursionError) as error:
         raise VerificationError("invalid receipt JSON") from error
     if (not isinstance(value, dict) or set(value) != {"schema", "decision_inputs", "verdict"}
-            or value["schema"] != RECEIPT_SCHEMA):
+            or value["schema"] not in (RECEIPT_SCHEMA, LINK_RECEIPT_SCHEMA)):
         raise VerificationError("invalid or unsupported receipt")
     verdict = value["verdict"]
     if (not isinstance(verdict, dict) or verdict.get("schema") != VERDICT_SCHEMA
@@ -261,13 +262,16 @@ def compare_receipts(previous_bytes, fresh_bytes, artifacts, validate=False, ver
         require_passed_checks(fresh["verdict"], required_checks)
     # Equal decisions must refer to the same input snapshot. Comparing the
     # manifests first also lets us read each supplied artifact just once.
+    if previous["schema"] != fresh["schema"]:
+        raise VerificationError("receipt schemas differ")
     if previous["decision_inputs"] != fresh["decision_inputs"]:
         raise VerificationError("receipt decision inputs differ")
     stats = verify_files(old_manifest, artifacts)
     if verify_change_subject or validate_change or verify_inline_content or content_files is not None:
         verify_subject(artifacts["change"], previous["decision_inputs"]["change"]["sha256"], previous["verdict"], validate_change=validate_change, verify_inline_content=verify_inline_content, content_files=content_files)
-    if previous["decision_inputs"]["external_evidence"] != {"state": "absent"} or fresh["decision_inputs"]["external_evidence"] != {"state": "absent"}:
-        raise VerificationError("offline receipts cannot contain external evidence")
+    evidence = previous["decision_inputs"]["external_evidence"]
+    if (previous["schema"] == RECEIPT_SCHEMA) != (evidence == {"state": "absent"}):
+        raise VerificationError("receipt external evidence does not match schema")
     before = dict(previous["verdict"])
     after = dict(fresh["verdict"])
     del before["evaluated_at"]

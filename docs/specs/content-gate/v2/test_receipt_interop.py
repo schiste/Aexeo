@@ -88,6 +88,66 @@ class ReceiptInterop(unittest.TestCase):
             self.assertNotEqual(subprocess.run(bundle_args, capture_output=True).returncode, 0)
             self.assertNotEqual(subprocess.run(compare_bundles, capture_output=True).returncode, 0)
 
+    def test_link_snapshot_bundle_against_independent_inputs(self):
+        with tempfile.TemporaryDirectory(prefix="aexeo links interop ") as temp:
+            directory = Path(temp)
+            source = "[first](https://example.org/a)"
+            digest = hashlib.sha256(source.encode()).hexdigest()
+            change = {"schema": "content-gate.change/v1", "change_id": "example",
+                      "created_at": "2026-01-01T00:00:00Z", "origin": {"kind": "manual"},
+                      "base": {"kind": "opaque", "revision": "r1"},
+                      "entries": [{"entity_id": "article", "operation": "create", "media_type": "text/markdown",
+                                   "after": {"inline": source, "sha256": digest}}]}
+            change_file = directory / "change.json"
+            change_file.write_text(json.dumps(change), encoding="utf-8")
+            policy = directory / "policy.toml"
+            policy.write_text("version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\n", encoding="utf-8")
+            snapshot = {"version": 1, "change_id": "example", "entries": {"article": {
+                "version": 1, "source_sha256": digest, "destinations": ["https://example.org/a"],
+                "observations": ["reachable"]}}}
+            snapshot_file = directory / "snapshot.json"
+            snapshot_file.write_text(json.dumps(snapshot, separators=(",", ":")), encoding="utf-8")
+            output = directory / "bundle.json"
+            env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(change_file), CONTENT_GATE_VERDICT_FILE=str(output))
+            command = ["cargo", "run", "--quiet", "-p", "aexeo-cli", "--", "content-change", "--preset", "test",
+                       "--preset-source", "test=" + str(policy), "--offline-receipt", "--offline-receipt-bundle",
+                       "--evaluator-identity", "trusted", "--link-observations", str(snapshot_file)]
+            run = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            bundle = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(bundle["schema"], "aexeo.link-snapshot-receipt-bundle/v1")
+            self.assertEqual(bundle["artifacts"]["external_evidence"], snapshot_file.read_text())
+            args = []
+            for role in ROLES:
+                value = bundle["artifacts"][role]
+                flag = "--" + role.replace("_", "-")
+                if value is None:
+                    args.append(flag + "-absent")
+                else:
+                    path = snapshot_file if role == "external_evidence" else directory / (role + ".bin")
+                    if role != "external_evidence":
+                        path.write_text(value, encoding="utf-8")
+                    args.extend([flag, str(path)])
+            verify = [sys.executable, str(VERIFIER), str(output), "--bundle", *args]
+            compare = [sys.executable, str(COMPARATOR), str(output), str(output),
+                       "--previous-bundle", "--fresh-bundle", *args]
+            for cmd in (verify, compare):
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+            snapshot_file.write_text("{}", encoding="utf-8")
+            for cmd in (verify, compare):
+                self.assertNotEqual(subprocess.run(cmd, capture_output=True).returncode, 0)
+            snapshot_file.write_text(bundle["artifacts"]["external_evidence"], encoding="utf-8")
+            for mutation in ("embedded", "receipt_schema", "bundle_schema", "missing"):
+                bad = json.loads(json.dumps(bundle))
+                if mutation == "embedded": bad["artifacts"]["external_evidence"] += " "
+                elif mutation == "receipt_schema": bad["receipt"]["schema"] = "aexeo.offline-decision-receipt/v1"
+                elif mutation == "bundle_schema": bad["schema"] = "aexeo.offline-receipt-bundle/v1"
+                else: bad["artifacts"]["external_evidence"] = None
+                output.write_text(json.dumps(bad), encoding="utf-8")
+                for cmd in (verify, compare):
+                    self.assertNotEqual(subprocess.run(cmd, capture_output=True).returncode, 0, mutation)
+
     def test_rust_receipt_inputs_against_python_cli(self):
         result = subprocess.run(
             ["cargo", "run", "--quiet", "-p", "aexeo-core", "--example", "decision_inputs_fixture"],

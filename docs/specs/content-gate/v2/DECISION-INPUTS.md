@@ -62,8 +62,12 @@ and content.
 
 The host must independently establish provenance, freshness and evaluator
 identity. This receipt is not the interoperable v2 verdict, does not authorize
-publication and does not execute network or custom extension callbacks. The CLI supports this format as described below; the independent receipt
-comparator does not yet support it.
+publication and does not execute network or custom extension callbacks. The CLI
+supports this format as described below. The independent Python verifier and
+comparator accept the matching link-snapshot receipt and bundle schemas, verify
+embedded artifact digests and require independently supplied current artifact
+bytes, including external evidence. They compare receipts and verdicts; they do
+not independently establish that the snapshot produced the verdict.
 
 ## Experimental Aexeo offline host API
 

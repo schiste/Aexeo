@@ -88,7 +88,8 @@ class DecisionInputTests(unittest.TestCase):
         values = {role: (None if path is None else path.read_text(encoding="utf-8"))
                   for role, path in self.artifacts.items()}
         bundle = {"schema": verifier.BUNDLE_SCHEMA,
-                  "receipt": {"decision_inputs": manifest}, "artifacts": values}
+                  "receipt": {"schema": verifier.RECEIPT_SCHEMAS[verifier.BUNDLE_SCHEMA],
+                              "decision_inputs": manifest}, "artifacts": values}
         valid = json.dumps(bundle, ensure_ascii=False).encode()
         self.assertEqual(verifier.verify_bundle(valid, self.artifacts)["files"], 4)
         cases = []

@@ -65,6 +65,29 @@ class CompareOfflineReceipts(unittest.TestCase):
             comparison.compare_receipts(self.encode(before), self.encode(before), self.artifacts,
                                         previous_bundle=True, fresh_bundle=True)
 
+    def test_snapshot_receipts_require_matching_schema_and_current_evidence(self):
+        snapshot = self.root / "snapshot"
+        snapshot.write_bytes(b"current snapshot")
+        self.artifacts["external_evidence"] = snapshot
+        receipt = copy.deepcopy(self.receipt)
+        receipt["schema"] = comparison.LINK_RECEIPT_SCHEMA
+        receipt["decision_inputs"]["external_evidence"] = {
+            "state": "present", "sha256": hashlib.sha256(snapshot.read_bytes()).hexdigest()}
+        encoded = self.encode(receipt)
+        comparison.compare_receipts(encoded, encoded, self.artifacts)
+        changed = copy.deepcopy(receipt)
+        changed["schema"] = comparison.RECEIPT_SCHEMA
+        with self.assertRaises(comparison.VerificationError):
+            comparison.compare_receipts(encoded, self.encode(changed), self.artifacts)
+        with self.assertRaises(comparison.VerificationError):
+            comparison.compare_receipts(self.encode(changed), self.encode(changed), self.artifacts)
+        self.artifacts["external_evidence"] = None
+        with self.assertRaises(comparison.VerificationError):
+            comparison.compare_receipts(encoded, encoded, self.artifacts)
+        receipt["decision_inputs"]["external_evidence"] = {"state": "absent"}
+        with self.assertRaises(comparison.VerificationError):
+            comparison.compare_receipts(self.encode(receipt), self.encode(receipt), self.artifacts)
+
     def test_rechecks_current_bytes_and_compares_full_typed_results(self):
         fresh = copy.deepcopy(self.receipt)
         fresh["verdict"]["evaluated_at"] = "t2"
