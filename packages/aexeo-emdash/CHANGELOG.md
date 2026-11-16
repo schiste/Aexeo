@@ -10,6 +10,7 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Explain each content gate’s scope and required input in both CMS assessment views.
 - Allow trusted hosts to supply separate evidence snapshots per CMS record, with aggregate provider telemetry and unchecked results on failure.
 - Report invalid, duplicate and cross-origin inventory URLs and missing alias targets with aggregate-only telemetry.
 - Add the optional `sentence-openings-review` preset for advisory review of consecutive sentence openings, with configurable thresholds and source locations. Short supported Latin sentences reset the sequence; uncertain word boundaries remain `not_checked`. This does not establish AI authorship.

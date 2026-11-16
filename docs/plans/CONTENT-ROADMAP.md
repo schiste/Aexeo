@@ -84,6 +84,7 @@ The latest published version observed on 2026-11-16 was 0.9.1.
 
 - [x] Withhold findings from known native rule families in CMS-only views, including old stored findings, except explicitly tagged content-preset results and two page-level checks supported by a complete body. Unknown host rule IDs remain the host evaluator’s responsibility; the native-family list must track new native rules.
 
+- [x] Both EmDash assessment views display each gate’s scope and required capability, including an unknown state for older records.
 - [x] Aggregate gate coverage and measurements for word count, required metadata,
   required headings and forbidden terms. Unavailable measurements remain absent.
 - [x] Report the number of sentence and paragraph length violations even when

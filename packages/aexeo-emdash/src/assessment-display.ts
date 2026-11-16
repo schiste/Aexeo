@@ -7,7 +7,11 @@ export function describeGate(gate: Gate): string {
   const status = gate.status === "not_checked" ? "not checked" : gate.status;
   const reason = gate.status === "not_checked" ? `: ${gate.reason ?? "required input unavailable"}` : "";
   const metrics = Object.entries(gate.measurements ?? {}).map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`).join(", ");
-  return `${gate.gate_id} ${status}${reason} (${gate.blocking ? "blocking" : "advisory"})${metrics ? ` — ${metrics}` : ""}`;
+  // Older persisted assessments may lack fields that current reports require.
+  const scope = typeof gate.scope === "string" ? gate.scope : "unknown";
+  const capability = typeof gate.required_capability === "string"
+    ? gate.required_capability.replaceAll("_", " ") : "unknown";
+  return `${gate.gate_id} ${status}${reason} (${gate.blocking ? "blocking" : "advisory"}; scope: ${scope}; requires: ${capability})${metrics ? ` — ${metrics}` : ""}`;
 }
 
 /** Counts describe only the gates that were configured, including unchecked gates. */
