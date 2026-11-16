@@ -6,17 +6,12 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.2] - Pending publication
+
 ### Added
 
 - Report invalid, duplicate and cross-origin inventory URLs and missing alias targets with aggregate-only telemetry.
-
-### Fixed
-
-- Keep CMS listing exception details out of refresh reports, treat malformed listings as incomplete, and emit aggregate listing coverage telemetry.
-
-## [0.9.2] - 2026-11-15
-
-### Added
+- Add the optional `sentence-openings-review` preset for advisory review of consecutive sentence openings, with configurable thresholds and source locations. Short supported Latin sentences reset the sequence; uncertain word boundaries remain `not_checked`. This does not establish AI authorship.
 
 - Show source-location coverage and its limits in both EmDash editorial views, including an unavailable state for older reports.
 - Support an optional `character_count` content gate with minimum and maximum Unicode scalar-value bounds and optional whitespace exclusion. Unavailable body text remains `not_checked`; limits do not measure grapheme clusters or linguistic words.
@@ -26,6 +21,7 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Keep CMS listing exception details out of refresh reports, treat malformed listings as incomplete, and emit aggregate listing coverage telemetry.
 - Withhold CMS findings when multiple records resolve to one route, preserve the ambiguity until all known affected collections are refreshed, and emit aggregate collision telemetry.
 - Keep optional telemetry failures, including rejected asynchronous callbacks, from disrupting content evaluation and inventory exports. Telemetry is not awaited.
 - Bound collection metadata uniqueness evaluation; when a limit interrupts the scan, retain observed duplicate findings and report the check as `not_checked`.

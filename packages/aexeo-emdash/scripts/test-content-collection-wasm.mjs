@@ -185,3 +185,16 @@ assert.equal(stale.gates[0].status, "not_checked");
 assert.equal(stale.gates[0].findings.length, 0);
 assert.equal(await projectLinkDestinations({ ...reachabilityDocument, body_capabilities: [] }), null);
 console.log("WASM bound link observation smoke test passed");
+
+// Exercise the shipped WASM preset, including short accented sentences and
+// exact UTF-16 source positions, rather than only the Rust bridge directly.
+const openingText = "The team plans. The team acts. The team checks. Été.";
+const openingDocument = { route: "/openings", title: "Openings", body: [{ children: [{ _type: "span", text: openingText }] }] };
+const openingReport = await evaluateContent(openingDocument, "sentence-openings-review");
+assert.equal(openingReport.gates[0].status, "failed");
+assert.equal(openingReport.gates[0].blocking, false);
+assert.equal(openingReport.gates[0].measurements.sentences_too_short, 1);
+assert.deepEqual(openingReport.source_locations, [{ gate_id: "editorial.sentence_openings", finding_index: 0, block_index: 0, span_index: 0, utf16_offset: openingText.indexOf("The team checks") }]);
+const unavailableOpenings = await evaluateContent({ route: "/openings", title: "Openings" }, "sentence-openings-review");
+assert.equal(unavailableOpenings.gates[0].status, "not_checked");
+console.log("WASM sentence-opening preset preserves accented coverage and source location");
