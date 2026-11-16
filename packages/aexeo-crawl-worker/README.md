@@ -92,6 +92,20 @@ unauthenticated `GET` routes back.**
    names; incomplete evaluations return an error instead of silently passing.
    See [content gates](../../docs/content-gates.md) for preset syntax.
 
+   The optional `CONTENT_PRESET_BY_LOCALE_JSON` and
+   `CONTENT_PRESET_BY_COLLECTION_LOCALE_JSON` variables select presets by the
+   document's exact, case-sensitive `lang`, using the same precedence as the
+   configured plugin: collection plus locale, locale, collection, fallback.
+   For example, `CONTENT_PRESET_BY_LOCALE_JSON = '{"fr-fr":"article-readable"}'`
+   and `CONTENT_PRESET_BY_COLLECTION_LOCALE_JSON = '{"blog_posts":{"en-gb":"article-quality"}}'`.
+   Locale maps do not infer language or fall back to a language prefix. A
+   collection-locale map requires collection names for every document. Both
+   variables are JSON strings: the first is a string map, the second maps
+   collections to string maps. With no match, the configured fallback applies;
+   select a language-neutral fallback where needed. Opt into aggregate matching
+   counts and success/error with `CONTENT_PRESET_SELECTION_TELEMETRY = "true"`;
+   the event contains no document routes, locale values or content.
+
    To run trusted external gates, deploy your own provider as a Cloudflare Worker
    and explicitly add a service binding at the top level of `wrangler.toml`:
 

@@ -318,6 +318,33 @@ quote="Quote"
   console.log("WASM document evidence provider runs on refresh and save");
 }
 
+// Locale selection applies the same way on whole-site refresh and individual saves.
+{
+  const events = [];
+  const configured = createPlugin({ contentPreset: {
+    name: "article", byCollection: { pages: "glossary" },
+    byLocale: { "fr-fr": "article-readable" },
+    byCollectionLocale: { pages: { "en-gb": "article-editorial" } },
+  } }, { onPresetSelectionTelemetry: (event) => events.push(event) });
+  const en = item("lang-en", { locale: "en-gb", data: { body: [block("p", "English text.")] } });
+  const fr = item("lang-fr", { locale: "fr-fr", data: { body: [block("p", "Texte français.")] } });
+  const ar = item("lang-ar", { locale: "ar-ae", data: { body: [block("p", "نص عربي.")] } });
+  const host = fakeHost([en, fr, ar]);
+  await configured.routes.refresh.handler(host.ctx);
+  assert.equal(host.store.get("findings:/lang-en").assessment.preset, "article-editorial");
+  assert.equal(host.store.get("findings:/lang-fr").assessment.preset, "article-readable");
+  assert.equal(host.store.get("findings:/lang-ar").assessment.preset, "glossary");
+  await configured.hooks["content:afterSave"].handler({ content: fr, collection: "pages", isNew: false }, host.ctx);
+  assert.equal(host.store.get("findings:/lang-fr").assessment.preset, "article-readable");
+  assert.deepEqual(events.map((event) => event.counts), [
+    { collection_locale: 1, locale: 1, collection: 1, fallback: 0, none: 0 },
+    { collection_locale: 0, locale: 1, collection: 0, fallback: 0, none: 0 },
+  ]);
+  assert.ok(!JSON.stringify(events).includes("fr-fr"));
+  assert.deepEqual(host.logged, []);
+  console.log("WASM configured presets select by collection and locale on refresh and save");
+}
+
 // --- A save must not invent findings from its one-page view -----------------
 
 {

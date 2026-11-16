@@ -254,3 +254,68 @@ describe("worker configuration", () => {
     }
   });
 });
+
+
+describe("locale-aware preset selection", () => {
+  it("uses the same precedence and exact locale matching in workerd", async () => {
+    const harness = createTestHarness({ workers: [{ config: {
+      name: "aexeo-locales", main: fileURLToPath(new URL("../src/worker.ts", import.meta.url)), compatibility_date: "2026-10-01",
+      vars: { SITE_URL, EVAL_TOKEN: TOKEN, CONTENT_PRESET: "article", CONTENT_PRESET_BY_COLLECTION_JSON: JSON.stringify({ posts: "glossary" }),
+        CONTENT_PRESET_BY_LOCALE_JSON: JSON.stringify({ "fr-fr": "article-readable" }),
+        CONTENT_PRESET_BY_COLLECTION_LOCALE_JSON: JSON.stringify({ posts: { "en-gb": "article-editorial" } }), CONTENT_PRESET_SELECTION_TELEMETRY: "true" },
+    } }] });
+    try {
+      await harness.listen();
+      const documents = [
+        { route: "/en", title: "English", lang: "en-gb", body: [{ children: [{ _type: "span", text: "English text." }] }] },
+        { route: "/fr", title: "French", lang: "fr-fr", body: [{ children: [{ _type: "span", text: "Texte français." }] }] },
+        { route: "/ar", title: "Arabic", lang: "ar-ae", body: [{ children: [{ _type: "span", text: "نص عربي." }] }] },
+        { route: "/fallback", title: "Page", lang: "fr", body: [{ children: [{ _type: "span", text: "Text." }] }] },
+      ];
+      const response = await post(harness.getWorker("aexeo-locales"), JSON.stringify({ documents, collections: ["posts", "pages", "posts", "pages"], responseFormat: 2 }));
+      assert.equal(response.status, 200, await response.clone().text());
+      const payload = await response.json();
+      assert.deepEqual(documents.map((doc) => payload.assessments[doc.route].preset), ["article-editorial", "article-readable", "glossary", "article"]);
+      const missing = await post(harness.getWorker("aexeo-locales"), JSON.stringify({ documents, responseFormat: 2 }));
+      assert.equal(missing.status, 500);
+      assert.match((await missing.json()).error, /collection names are required/);
+    } finally { await harness.close(); }
+  });
+});
+
+
+describe("invalid locale preset configuration", () => {
+  it("rejects malformed nested maps without silently choosing a preset", async () => {
+    const harness = createTestHarness({ workers: [{ config: {
+      name: "aexeo-invalid-locales", main: fileURLToPath(new URL("../src/worker.ts", import.meta.url)), compatibility_date: "2026-10-01",
+      vars: { SITE_URL, EVAL_TOKEN: TOKEN, CONTENT_PRESET: "article", CONTENT_PRESET_BY_COLLECTION_LOCALE_JSON: '{"posts":{"fr-fr":4}}' },
+    } }] });
+    try {
+      await harness.listen();
+      const response = await post(harness.getWorker("aexeo-invalid-locales"), JSON.stringify({ documents: [{ route: "/x", title: "x", lang: "fr-fr", body: [] }], collections: ["posts"], responseFormat: 2 }));
+      assert.equal(response.status, 500);
+      assert.match((await response.json()).error, /must be an object of locale maps/);
+    } finally { await harness.close(); }
+  });
+});
+
+
+describe("empty locale preset selection", () => {
+  for (const [label, vars, expected] of [
+    ["empty override", { CONTENT_PRESET: "article", CONTENT_PRESET_BY_LOCALE_JSON: '{"fr-fr":""}' }, 500],
+    ["empty fallback", { CONTENT_PRESET: "" }, 200],
+  ]) {
+    it(`preserves the ${label} behavior`, async () => {
+      const harness = createTestHarness({ workers: [{ config: {
+        name: "aexeo-empty-preset", main: fileURLToPath(new URL("../src/worker.ts", import.meta.url)), compatibility_date: "2026-10-01",
+        vars: { SITE_URL, EVAL_TOKEN: TOKEN, ...vars },
+      } }] });
+      try {
+        await harness.listen();
+        const response = await post(harness.getWorker("aexeo-empty-preset"), JSON.stringify({ documents: [{ route: "/x", title: "x", lang: "fr-fr", body: [] }], responseFormat: 2 }));
+        assert.equal(response.status, expected, await response.clone().text());
+        if (expected === 500) assert.match((await response.json()).error, /empty selected preset/);
+      } finally { await harness.close(); }
+    });
+  }
+});

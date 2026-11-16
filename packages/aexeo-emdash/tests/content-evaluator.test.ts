@@ -274,3 +274,39 @@ it("treats malformed evidence provider results as unavailable", async () => {
     expect(evaluate).toHaveBeenCalledTimes(1);
   }
 });
+
+it("selects presets by collection and exact document locale with explicit precedence", async () => {
+  const selections: string[] = [];
+  const evaluate = vi.fn(async (_doc: EmdashDocument, name: string) => { selections.push(name); return { ...report, gates: [] }; });
+  const options = { name: "fallback", byCollection: { posts: "posts" }, byLocale: { "fr-fr": "french" }, byCollectionLocale: { posts: { "fr-fr": "french-posts" } } };
+  const evaluator = withContentPreset(base, options, evaluate);
+  const docs = [ { ...doc, lang: "fr-fr" }, { ...doc, lang: "fr-fr" }, { ...doc, lang: "en-gb" }, { ...doc, lang: "en-gb" }, { ...doc, lang: "fr" }, doc ];
+  const result = await evaluator(docs, { collections: ["posts", "pages", "posts", "pages", "pages", "pages"] });
+  expect(result.ok).toBe(true);
+  expect(selections).toEqual(["french-posts", "french", "posts", "fallback", "fallback", "fallback"]);
+  const { aexeoPlugin } = await import("../src/index.js");
+  expect(aexeoPlugin({ contentPreset: options }).options.contentPreset).toEqual(options);
+});
+
+it("rejects an explicitly empty locale override instead of falling back", async () => {
+  const evaluate = vi.fn(async () => report);
+  const result = await withContentPreset(base, { name: "fallback", byLocale: { "fr-fr": "" } }, evaluate)([{ ...doc, lang: "fr-fr" }]);
+  expect(result.ok).toBe(false);
+  expect(evaluate).not.toHaveBeenCalled();
+});
+
+it("emits opt-in aggregate selection telemetry without document identifiers", async () => {
+  const events: unknown[] = [];
+  const options = { name: "article", byLocale: { "fr-fr": "glossary" }, byCollectionLocale: { posts: { "en-gb": "article-readable" } } };
+  const evaluate = async () => ({ ...report, gates: [] });
+  const evaluator = withContentPreset(base, options, evaluate, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, (event) => events.push(event));
+  await evaluator([{ ...doc, lang: "fr-fr" }, { ...doc, lang: "en-gb" }, doc], { collections: ["posts", "posts", "pages"] });
+  expect(events).toEqual([{ status: "success", counts: { collection_locale: 1, locale: 1, collection: 0, fallback: 1, none: 0 } }]);
+  expect(JSON.stringify(events)).not.toContain("fr-fr");
+  expect(JSON.stringify(events)).not.toContain("/test");
+  expect(JSON.stringify(events)).not.toContain("posts");
+  const failed: unknown[] = [];
+  const invalid = withContentPreset(base, { name: "article", byLocale: { "fr-fr": "" } }, evaluate, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, (event) => failed.push(event));
+  expect((await invalid([{ ...doc, lang: "fr-fr" }])).ok).toBe(false);
+  expect(failed).toEqual([{ status: "error", counts: { collection_locale: 0, locale: 1, collection: 0, fallback: 0, none: 0 } }]);
+});
