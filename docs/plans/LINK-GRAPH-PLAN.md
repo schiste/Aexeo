@@ -256,8 +256,8 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
 ## Remaining integration and validation
 
 A runtime crawl now binds the typed, ordered inventory used as its seed to its
-attestation. A report with a different or missing fingerprint cannot confirm
-an orphan, even when the declared identity and URLs match. Checkpoints do not
+attestation. An audit-derived report with a different or missing fingerprint
+cannot confirm an orphan, even when the declared identity and URLs match. Checkpoints do not
 bind the initial inventory yet, so resumed crawls also remain ineligible for
 confirmation; preserving and validating that binding across resume remains work.
 The fingerprint is not proof of source authenticity, freshness or completeness.

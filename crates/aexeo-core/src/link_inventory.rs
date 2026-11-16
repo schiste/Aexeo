@@ -235,6 +235,25 @@ mod tests {
             inventory.sha256_v1().as_deref(),
             Some("8bb28cd3a471b94ce92bef5a0126f937783baec7315c593a263a8b5e5596b165")
         );
+        let inventory = InventorySnapshot {
+            identity: Some(SurfaceIdentity {
+                origin: "https://example.org".into(),
+                release: "r1".into(),
+                surface: "public".into(),
+                snapshot: "s1".into(),
+            }),
+            complete: true,
+            pages: vec![InventoryPage {
+                url: "https://example.org/a".into(),
+                disposition: InventoryDisposition::CanonicalAlias,
+                target: Some("https://example.org/b".into()),
+                locale: Some("fr-FR".into()),
+            }],
+        };
+        assert_eq!(
+            inventory.sha256_v1().as_deref(),
+            Some("8bbdfb413623df4591e5615eaff57373add2242edebd977b608deee45ba626e5")
+        );
     }
 
     fn identity() -> SurfaceIdentity {
