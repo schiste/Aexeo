@@ -217,6 +217,9 @@ The latest published version observed on 2026-11-16 was 0.9.1.
   markup does not prove browser visibility or source freshness.
 - [ ] Integrate optional host observers with other adapters and continue adding
   independently validated editorial gates.
+  The single-content CLI accepts source- and destination-bound host link
+  observations for Markdown and HTML, with partial results and aggregate telemetry.
+  Observation authenticity and freshness remain host responsibilities.
 - [x] Explicit collection metadata uniqueness gate in core, CLI and EmDash/WASM
   ([PR #40](https://github.com/schiste/Aexeo/pull/40)); callers must supply the
   complete collection and missing metadata remains `not_checked`. Resource

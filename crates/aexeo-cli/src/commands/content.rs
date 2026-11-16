@@ -52,6 +52,16 @@ impl AuxiliaryBudget {
     }
 }
 
+/// Host-provided observations apply only to the exact source and link order.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LinkObservationSnapshot {
+    version: u32,
+    source_sha256: String,
+    destinations: Vec<String>,
+    observations: Vec<aexeo_core::content_gate::LinkReachabilityObservation>,
+}
+
 #[derive(Default)]
 struct GateTimer {
     started: Option<std::time::Instant>,
@@ -267,12 +277,13 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         text,
     ) {
         (Some("markdown"), Some(text)) => {
-            let (input, capabilities, links, map) = if preset.gates.iter().any(|gate| {
-                matches!(
-                    gate,
-                    ContentGate::LinkDestinations { .. } | ContentGate::LinkReachability { .. }
-                )
-            }) {
+            let (input, capabilities, links, map) = if args.get_flag("export-link-observations")
+                || preset.gates.iter().any(|gate| {
+                    matches!(
+                        gate,
+                        ContentGate::LinkDestinations { .. } | ContentGate::LinkReachability { .. }
+                    )
+                }) {
                 let adapted =
                     aexeo_core::markdown_adapter::markdown_input_with_source_map_and_destinations(
                         id, &text,
@@ -369,6 +380,30 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         println!("{}", serde_json::to_string_pretty(&input)?);
         return Ok(EXIT_SUCCESS);
     }
+    if args.get_flag("export-link-observations") {
+        let source = input
+            .source_text
+            .as_deref()
+            .user_context("link observation source is unavailable")?;
+        let extracted = destinations
+            .as_deref()
+            .user_context("link destinations are unavailable")?;
+        let snapshot = LinkObservationSnapshot {
+            version: 1,
+            source_sha256: super::feedback::text_hash(source.as_bytes()),
+            destinations: extracted.to_vec(),
+            observations: vec![
+                aexeo_core::content_gate::LinkReachabilityObservation::NotChecked;
+                extracted.len()
+            ],
+        };
+        let encoded = serde_json::to_string(&snapshot)?;
+        if encoded.len() > MAX_CONTENT_INPUT_BYTES {
+            user_bail!("link observation snapshot exceeds the size limit");
+        }
+        println!("{encoded}");
+        return Ok(EXIT_SUCCESS);
+    }
     let external_started =
         (measuring && args.contains_id("extension-results")).then(std::time::Instant::now);
     let external = args
@@ -377,7 +412,48 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         .transpose()?;
     let external_load_ms = external_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
     // Network access is an explicit host choice, never implied by a preset.
-    let link_observations = if args.get_flag("check-link-reachability")
+    let link_observations = if let Some(path) = args.get_one::<String>("link-observations") {
+        let snapshot_started = measuring.then(std::time::Instant::now);
+        let data = auxiliary.read(path, "link observations", MAX_CONTENT_INPUT_BYTES)?;
+        let snapshot: LinkObservationSnapshot =
+            aexeo_contracts::content_gate_change_validation::parse_lossless_json(data.as_bytes())
+                .user_context("invalid link observation snapshot")?;
+        let source = input
+            .source_text
+            .as_deref()
+            .user_context("link observation source is unavailable")?;
+        let extracted = destinations
+            .as_deref()
+            .user_context("link destinations are unavailable")?;
+        if snapshot.version != 1
+            || snapshot.source_sha256 != super::feedback::text_hash(source.as_bytes())
+            || snapshot.destinations != extracted
+            || snapshot.observations.len() != extracted.len()
+        {
+            user_bail!(
+                "link observation snapshot does not match this content and its destinations"
+            );
+        }
+        if let Some(started) = snapshot_started {
+            let unchecked = snapshot
+                .observations
+                .iter()
+                .filter(|item| {
+                    matches!(
+                        item,
+                        aexeo_core::content_gate::LinkReachabilityObservation::NotChecked
+                    )
+                })
+                .count();
+            eprintln!(
+                "{}",
+                serde_json::json!({"event":"content_link_snapshot", "version":1,
+                "elapsed_ms":started.elapsed().as_secs_f64() * 1000.0,
+                "destinations":snapshot.observations.len(), "unchecked":unchecked})
+            );
+        }
+        Some(snapshot.observations)
+    } else if args.get_flag("check-link-reachability")
         && preset
             .gates
             .iter()
