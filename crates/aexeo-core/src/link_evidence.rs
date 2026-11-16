@@ -662,14 +662,21 @@ mod tests {
 
     #[test]
     fn inline_visibility_properties_and_invalid_priorities_stay_independent() {
-        let html = "<main><a style='display:none;visibility:visible' href='/a'>a</a><a style='display:none!important;display:block!important' href='/b'>b</a><a style='display:none;display:block!invalid' href='/c'>c</a><div style='display:none'><a style='display:block' href='/d'>d</a></div></main>";
+        let html = "<main><a style='display:none;visibility:visible' href='/a'>a</a><a style='display:none!important;display:block!important' href='/b'>b</a><a style='display:none;display:block!invalid' href='/c'>c</a><div style='display:none'><a style='display:block' href='/d'>d</a></div><a style='display:none;display:var(--choice)!important;display:block' href='/e'>e</a><a style='display:none;display:var(--choice)!important;display:block!important' href='/f'>f</a></main>";
         let links = extract_links(html, "https://example.org/", "https://example.org", None);
         assert_eq!(
             links
                 .iter()
                 .map(|link| link.hidden_inline_style)
                 .collect::<Vec<_>>(),
-            vec![Some(true), Some(false), Some(true), Some(true)]
+            vec![
+                Some(true),
+                Some(false),
+                Some(true),
+                Some(true),
+                Some(true),
+                Some(false)
+            ]
         );
     }
 

@@ -347,8 +347,8 @@ pub(crate) fn style_hides_content(style: &str) -> bool {
         };
         let property = property.trim();
         let (slot, hidden) = if property.eq_ignore_ascii_case("display") {
-            if value.eq_ignore_ascii_case("none") {
-                (&mut display, true)
+            let hidden = if value.eq_ignore_ascii_case("none") {
+                Some(true)
             } else if [
                 "block",
                 "inline",
@@ -365,31 +365,41 @@ pub(crate) fn style_hides_content(style: &str) -> bool {
             .iter()
             .any(|candidate| value.eq_ignore_ascii_case(candidate))
             {
-                (&mut display, false)
+                Some(false)
             } else {
-                continue;
-            }
+                None
+            };
+            (&mut display, hidden)
         } else if property.eq_ignore_ascii_case("visibility") {
-            if value.eq_ignore_ascii_case("hidden") || value.eq_ignore_ascii_case("collapse") {
-                (&mut visibility, true)
-            } else if value.eq_ignore_ascii_case("visible") {
-                (&mut visibility, false)
-            } else {
-                continue;
-            }
+            let hidden =
+                if value.eq_ignore_ascii_case("hidden") || value.eq_ignore_ascii_case("collapse") {
+                    Some(true)
+                } else if value.eq_ignore_ascii_case("visible") {
+                    Some(false)
+                } else {
+                    None
+                };
+            (&mut visibility, hidden)
         } else if property.eq_ignore_ascii_case("content-visibility") {
-            if value.eq_ignore_ascii_case("hidden") {
-                (&mut content_visibility, true)
+            let hidden = if value.eq_ignore_ascii_case("hidden") {
+                Some(true)
             } else if value.eq_ignore_ascii_case("visible") || value.eq_ignore_ascii_case("auto") {
-                (&mut content_visibility, false)
+                Some(false)
             } else {
-                continue;
-            }
+                None
+            };
+            (&mut content_visibility, hidden)
         } else {
             continue;
         };
         if !matches!(*slot, Some((_, true))) || important {
-            *slot = Some((hidden, important));
+            if let Some(hidden) = hidden {
+                *slot = Some((hidden, important));
+            } else if matches!(*slot, Some((true, _))) {
+                // An unknown value might be a valid higher-priority hiding
+                // declaration, so a later lower-priority value cannot clear it.
+                *slot = Some((true, important));
+            }
         }
     }
     [display, visibility, content_visibility]
