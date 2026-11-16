@@ -10,6 +10,7 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Support the composable `metadata_length` gate for observed fields, with configurable Unicode scalar bounds and explicit unchecked results for missing or unobserved fields.
 - Select portable content presets per exact locale and collection, consistently in the configured plugin and crawl worker.
 - Explain each content gate’s scope and required input in both CMS assessment views.
 - Allow trusted hosts to supply separate evidence snapshots per CMS record, with aggregate provider telemetry and unchecked results on failure.

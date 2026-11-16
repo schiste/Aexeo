@@ -442,6 +442,27 @@ fn link_observer_reuses_same_destination_across_entries() {
 }
 
 #[test]
+fn metadata_length_gate_evaluates_change_metadata_without_prose_location() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut change = input();
+    change["entries"][0]["metadata"] = serde_json::json!({"title":"Long title"});
+    let preset = "version=1\nname='test'\n[[gates]]\nid='title'\nkind='metadata_length'\nfield='title'\nmax=4\n";
+    let output = run(dir.path(), &change, preset, &[]);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let verdict: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+    assert_eq!(verdict["status"], "fail");
+    assert!(verdict["findings"][0].get("location").is_none());
+    change["entries"][0]["metadata"] = serde_json::json!({});
+    assert_eq!(run(dir.path(), &change, preset, &[]).status.code(), Some(2));
+}
+
+#[test]
 fn external_results_with_duplicate_nested_keys_do_not_replace_verdict() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("external.json");

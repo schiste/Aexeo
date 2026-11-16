@@ -223,6 +223,17 @@ pub enum ContentGate {
         #[serde(default)]
         ignore_whitespace: bool,
     },
+    /// Bounds Unicode scalar values in one observed metadata field.
+    MetadataLength {
+        id: String,
+        field: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+        min: Option<usize>,
+        max: Option<usize>,
+    },
     /// Bounds the number of adapter-supplied paragraphs.
     ParagraphCount {
         id: String,
@@ -537,6 +548,7 @@ impl ContentGate {
         match self {
             Self::WordCount { severity, .. }
             | Self::CharacterCount { severity, .. }
+            | Self::MetadataLength { severity, .. }
             | Self::LinkCount { severity, .. }
             | Self::LinkDestinations { severity, .. }
             | Self::LinkReachability { severity, .. }
@@ -568,6 +580,7 @@ impl ContentGate {
         match self {
             Self::WordCount { blocking, .. }
             | Self::CharacterCount { blocking, .. }
+            | Self::MetadataLength { blocking, .. }
             | Self::LinkCount { blocking, .. }
             | Self::LinkDestinations { blocking, .. }
             | Self::LinkReachability { blocking, .. }
@@ -616,7 +629,7 @@ impl ContentGate {
             Self::LinkCount { .. } => "links",
             Self::LinkDestinations { .. } => "link_destinations",
             Self::LinkReachability { .. } => "link_reachability",
-            Self::RequiredMetadata { .. } => "metadata",
+            Self::RequiredMetadata { .. } | Self::MetadataLength { .. } => "metadata",
             Self::ParagraphCount { .. }
             | Self::ParagraphLength { .. }
             | Self::ParagraphCharacterLength { .. }
@@ -639,6 +652,7 @@ impl ContentGate {
         match self {
             Self::WordCount { id, .. }
             | Self::CharacterCount { id, .. }
+            | Self::MetadataLength { id, .. }
             | Self::LinkCount { id, .. }
             | Self::LinkDestinations { id, .. }
             | Self::LinkReachability { id, .. }
@@ -719,6 +733,9 @@ fn editorial_suggestion(gate: &ContentGate) -> Option<&'static str> {
         ),
         ContentGate::RequiredMetadata { .. } => {
             Some("Provide the required metadata if applicable, or update the configured policy.")
+        }
+        ContentGate::MetadataLength { .. } => {
+            Some("Review the metadata length against the configured limits without losing meaning.")
         }
         ContentGate::FinalNewline { .. } => Some("Add a final newline to the source text."),
         _ => None,
@@ -1156,6 +1173,14 @@ impl ContentPreset {
                         || matches!((min, max), (Some(a), Some(b)) if a > b) =>
                 {
                     bail!("invalid character count bounds for {}", gate.id())
+                }
+                ContentGate::MetadataLength {
+                    field, min, max, ..
+                } if field.trim().is_empty()
+                    || min.is_none() && max.is_none()
+                    || matches!((min, max), (Some(a), Some(b)) if a > b) =>
+                {
+                    bail!("invalid metadata length field or bounds for {}", gate.id())
                 }
                 ContentGate::ParagraphCount { min, max, .. }
                     if min.is_none() && max.is_none()
@@ -2621,6 +2646,49 @@ impl ContentPreset {
                     }
                     None => reason = Some("site is unavailable from this adapter".into()),
                 },
+                ContentGate::MetadataLength {
+                    field, min, max, ..
+                } => {
+                    if let Some(min) = min {
+                        measurements.insert("min_characters".into(), *min);
+                    }
+                    if let Some(max) = max {
+                        measurements.insert("max_characters".into(), *max);
+                    }
+                    let unavailable =
+                        context.is_some_and(|ctx| ctx.unavailable_metadata_fields.contains(field));
+                    if unavailable || input.metadata.is_none() {
+                        reason = Some("metadata field is unavailable from this adapter".into());
+                    } else if let Some(value) = input
+                        .metadata
+                        .as_ref()
+                        .and_then(|metadata| metadata.get(field))
+                    {
+                        let count = value.chars().count();
+                        measurements.insert("character_count".into(), count);
+                        if let Some(minimum) = min.filter(|n| count < *n) {
+                            emit(
+                                format!(
+                                    "Metadata {field} length {count} is below the minimum of {minimum}"
+                                ),
+                                1,
+                                1,
+                            );
+                        }
+                        if let Some(maximum) = max.filter(|n| count > *n) {
+                            emit(
+                                format!(
+                                    "Metadata {field} length {count} exceeds the maximum of {maximum}"
+                                ),
+                                1,
+                                1,
+                            );
+                        }
+                    } else {
+                        reason =
+                            Some("metadata field is absent; its length cannot be assessed".into());
+                    }
+                }
                 ContentGate::RequiredMetadata { fields, .. } => {
                     measurements.insert("required_fields".into(), fields.len());
                     match &input.metadata {
@@ -2658,6 +2726,7 @@ impl ContentPreset {
                 && !matches!(
                     gate,
                     ContentGate::RequiredMetadata { .. }
+                        | ContentGate::MetadataLength { .. }
                         | ContentGate::UniqueCollectionMetadata { .. }
                         | ContentGate::Custom { .. }
                         | ContentGate::SiteGroup { .. }
@@ -2723,6 +2792,86 @@ impl ContentPreset {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn metadata_length_validates_bounds_and_distinguishes_observation_states() {
+        let config = "version=1\nname='test'\n[[gates]]\nid='length'\nkind='metadata_length'\nfield='title'\nmin=2\nmax=3\n";
+        let preset = ContentPreset::from_toml(config).unwrap();
+        for invalid in [
+            config.replace("field='title'", "field=' '"),
+            config.replace("min=2\nmax=3", ""),
+            config.replace("max=3", "max=1"),
+        ] {
+            assert!(ContentPreset::from_toml(&invalid).is_err());
+        }
+        let mut input = ContentInput {
+            id: "draft".into(),
+            metadata: Some(BTreeMap::new()),
+            ..Default::default()
+        };
+        let absent = preset.evaluate(&input).unwrap();
+        assert_eq!(absent.gates[0].status, GateStatus::NotChecked);
+        assert!(
+            absent.gates[0]
+                .reason
+                .as_deref()
+                .unwrap()
+                .contains("absent")
+        );
+        assert!(!absent.gates[0].measurements.contains_key("character_count"));
+        input
+            .metadata
+            .as_mut()
+            .unwrap()
+            .insert("title".into(), String::new());
+        let empty = preset.evaluate(&input).unwrap();
+        assert_eq!(empty.gates[0].status, GateStatus::Failed);
+        assert_eq!(empty.gates[0].measurements["character_count"], 0);
+        input
+            .metadata
+            .as_mut()
+            .unwrap()
+            .insert("title".into(), "é🙂".into());
+        let passed = preset.evaluate(&input).unwrap();
+        assert_eq!(passed.gates[0].status, GateStatus::Passed);
+        assert_eq!(passed.gates[0].measurements["character_count"], 2);
+        input
+            .metadata
+            .as_mut()
+            .unwrap()
+            .insert("title".into(), "abcd".into());
+        let failed = preset.evaluate(&input).unwrap();
+        assert_eq!(failed.gates[0].status, GateStatus::Failed);
+        assert_eq!(failed.gates[0].required_capability, "metadata");
+        let adapter = ContentContext {
+            unavailable_metadata_fields: vec!["title".into()],
+            input_limit: Some("body unavailable".into()),
+            ..Default::default()
+        };
+        let unavailable = preset
+            .evaluate_with_capabilities(
+                &input,
+                &ContentEvaluationContext {
+                    adapter: Some(&adapter),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(unavailable.gates[0].status, GateStatus::NotChecked);
+        assert!(
+            unavailable.gates[0]
+                .reason
+                .as_deref()
+                .unwrap()
+                .contains("unavailable")
+        );
+        assert!(unavailable.gates[0].findings.is_empty());
+        input.metadata = None;
+        assert_eq!(
+            preset.evaluate(&input).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+    }
+
     #[test]
     fn required_content_measurements_keep_missing_and_unavailable_distinct() {
         let preset = ContentPreset::from_toml("version=1\nname='counts'\n[[gates]]\nid='metadata'\nkind='required_metadata'\nfields=['title','description','author']\n[[gates]]\nid='headings'\nkind='required_headings'\nheadings=['Intro','Summary']\n").unwrap();
