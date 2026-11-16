@@ -627,8 +627,12 @@ with URLs default to `unknown` disposition. A host may supply `classify` when
 it has authoritative indexability and alias information. Repeated or missing
 cursors, failures, malformed collection responses or entries, and page limits are reported.
 Malformed entries are omitted; a malformed collection page stops that collection
-without discarding other collections. The inventory is always marked
-incomplete because pagination alone cannot establish a transactional snapshot or
+without discarding other collections. If a host returns more than the requested
+100 entries on a page, only the first 100 are resolved; the rest count as
+scanned and omitted, with `collection_batch_limit_exceeded` and the opt-in
+`batch_entries_omitted` aggregate. Later pages can still be processed. This
+bounds downstream processing, not the host's response allocation. The inventory
+is always marked incomplete because pagination alone cannot establish a transactional snapshot or
 include routes outside the chosen collections. No HTTP endpoint is installed by
 this API. It cannot by itself establish that a crawl and CMS view describe the
 same publication, release and point in time.

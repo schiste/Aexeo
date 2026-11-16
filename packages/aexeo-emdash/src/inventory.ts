@@ -14,6 +14,8 @@ export type LinkInventoryDisposition =
   | "published" | "draft" | "noindex" | "redirect" | "canonical_alias"
   | "locale_fallback" | "unknown";
 
+const MAX_ITEMS_PER_PAGE = 100;
+
 const DISPOSITIONS: ReadonlySet<string> = new Set([
   "published", "draft", "noindex", "redirect", "canonical_alias", "locale_fallback", "unknown",
 ]);
@@ -64,7 +66,7 @@ export async function exportLinkInventory(
     /** Maximum simultaneous public URL resolutions, from 1 to 100 (default 8). */
     urlResolutionConcurrency?: number;
     /** Optional aggregate-only local telemetry; no URLs or content are included. */
-    onTelemetry?: (event: { event: "link_inventory_export"; elapsed_ms: number; scanned: number; omitted: number; page_count: number; issue_count: number; classification_failures: number; malformed_entries: number; invalid_urls: number; duplicate_urls: number; cross_origin_urls: number; aliases_missing_target: number }) => void;
+    onTelemetry?: (event: { event: "link_inventory_export"; elapsed_ms: number; scanned: number; omitted: number; page_count: number; issue_count: number; classification_failures: number; batch_entries_omitted: number; malformed_entries: number; invalid_urls: number; duplicate_urls: number; cross_origin_urls: number; aliases_missing_target: number }) => void;
     /** Override URL resolution when the host renderer uses a different route mapping. */
     resolveUrl?: (collection: string, item: EmdashContentItem) => Promise<string | null>;
     /** Classify using host-owned publication rules; locale defaults to the CMS value. */
@@ -93,6 +95,7 @@ export async function exportLinkInventory(
   let scanned = 0;
   let omitted = 0;
   let classificationFailures = 0;
+  let batchEntriesOmitted = 0;
   let malformedEntries = 0;
   const origin = options.identity === null ? null : parseInventoryUrl(options.identity.origin, true);
   if (options.identity !== null && origin === null) issues.add("invalid_inventory_origin");
@@ -107,7 +110,7 @@ export async function exportLinkInventory(
     for (let count = 0; count < limit; count += 1) {
       let batch;
       try {
-        batch = await content.list(collection, { limit: 100, ...(cursor === undefined ? {} : { cursor }) });
+        batch = await content.list(collection, { limit: MAX_ITEMS_PER_PAGE, ...(cursor === undefined ? {} : { cursor }) });
       } catch {
         issues.add("collection_read_failed");
         break;
@@ -118,16 +121,27 @@ export async function exportLinkInventory(
         issues.add("invalid_collection_response");
         break;
       }
+      // Enforce the requested page size even if a host ignores the limit. Count
+      // dropped entries without resolving or classifying them and retain the
+      // incomplete inventory signal when later pages can still be processed.
+      const excess = Math.max(0, batch.items.length - MAX_ITEMS_PER_PAGE);
+      if (excess > 0) {
+        issues.add("collection_batch_limit_exceeded");
+        scanned += excess;
+        omitted += excess;
+        batchEntriesOmitted += excess;
+      }
+      const items = excess ? batch.items.slice(0, MAX_ITEMS_PER_PAGE) : batch.items;
       // Resolve concurrently without changing classification order or allowing an
       // unbounded number of CMS requests. A failed item does not abort a batch.
-      const urls: ({ url: string | null } | { error: true } | { malformed: true })[] = new Array(batch.items.length);
+      const urls: ({ url: string | null } | { error: true } | { malformed: true })[] = new Array(items.length);
       let next = 0;
-      await Promise.all(Array.from({ length: Math.min(concurrency, batch.items.length) }, async () => {
+      await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, async () => {
         for (;;) {
           const index = next++;
-          if (index >= batch.items.length) return;
+          if (index >= items.length) return;
           try {
-            const item = batch.items[index]!;
+            const item = items[index]!;
             if (!item || typeof item !== "object" || typeof item.id !== "string" || item.id.trim() === ""
                 || (item.locale != null && typeof item.locale !== "string")) {
               urls[index] = { malformed: true };
@@ -143,7 +157,7 @@ export async function exportLinkInventory(
           }
         }
       }));
-      for (const [index, item] of batch.items.entries()) {
+      for (const [index, item] of items.entries()) {
         scanned += 1;
         const resolution = urls[index]!;
         if ("malformed" in resolution) {
@@ -218,7 +232,7 @@ export async function exportLinkInventory(
   pages.sort((left, right) => left.url < right.url ? -1 : left.url > right.url ? 1 : 0);
   const result: LinkInventoryExport = { inventory: { identity: options.identity, complete: false, pages }, issues: [...issues].sort(), scanned, omitted };
   if (options.onTelemetry) {
-    emitTelemetry(options.onTelemetry, { event: "link_inventory_export", elapsed_ms: Math.max(0, Date.now() - started), scanned, omitted, page_count: pages.length, issue_count: issues.size, classification_failures: classificationFailures, malformed_entries: malformedEntries, invalid_urls: invalidUrls, duplicate_urls: duplicateUrls, cross_origin_urls: crossOriginUrls, aliases_missing_target: aliasesMissingTarget });
+    emitTelemetry(options.onTelemetry, { event: "link_inventory_export", elapsed_ms: Math.max(0, Date.now() - started), scanned, omitted, page_count: pages.length, issue_count: issues.size, classification_failures: classificationFailures, batch_entries_omitted: batchEntriesOmitted, malformed_entries: malformedEntries, invalid_urls: invalidUrls, duplicate_urls: duplicateUrls, cross_origin_urls: crossOriginUrls, aliases_missing_target: aliasesMissingTarget });
   }
   return result;
 }

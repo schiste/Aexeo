@@ -217,6 +217,30 @@ describe("conservative EmDash link inventory", () => {
     expect(onTelemetry.mock.calls[0]?.[0].classification_failures).toBe(2);
   });
 
+  it("bounds oversized host pages and reports omitted entries while continuing other pages", async () => {
+    const list = vi.fn(async (_collection: string, options?: { cursor?: string }) =>
+      options?.cursor
+        ? { items: [item("later")], hasMore: false }
+        : { items: Array.from({ length: 105 }, (_, i) => item(`item-${i}`)), hasMore: true, cursor: "next" },
+    );
+    const getPublicUrl = vi.fn(async (_collection: string, id: string) => `https://example.org/${id}`);
+    const onTelemetry = vi.fn();
+    const result = await exportLinkInventory({ list, getPublicUrl }, {
+      collections: ["posts"], identity: null, onTelemetry,
+    });
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(getPublicUrl).toHaveBeenCalledTimes(101);
+    expect(getPublicUrl).not.toHaveBeenCalledWith("posts", "item-100");
+    expect(result.scanned).toBe(106);
+    expect(result.omitted).toBe(5);
+    expect(result.inventory.pages).toHaveLength(101);
+    expect(result.inventory.pages.some((page) => page.url.endsWith("/later"))).toBe(true);
+    expect(result.inventory.complete).toBe(false);
+    expect(result.issues).toContain("collection_batch_limit_exceeded");
+    expect(onTelemetry.mock.calls[0]?.[0].batch_entries_omitted).toBe(5);
+    expect(JSON.stringify(onTelemetry.mock.calls)).not.toContain("item-");
+  });
+
   it("bounds concurrent URL lookups, retains classification order and accounts for failures", async () => {
     const list = vi.fn(async () => ({ items: [item("a"), item("b"), item("c"), item("d")], hasMore: false }));
     let active = 0;

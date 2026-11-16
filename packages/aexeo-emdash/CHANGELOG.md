@@ -26,6 +26,7 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Bound inventory URL resolution when a CMS returns more than 100 entries per requested page; report omitted entries and aggregate telemetry.
 - Keep CMS listing exception details out of refresh reports, treat malformed listings as incomplete, and emit aggregate listing coverage telemetry.
 - Withhold CMS findings when multiple records resolve to one route, preserve the ambiguity until all known affected collections are refreshed, and emit aggregate collision telemetry.
 - Keep optional telemetry failures, including rejected asynchronous callbacks, from disrupting content evaluation and inventory exports. Telemetry is not awaited.
