@@ -166,24 +166,27 @@ class EvaluateTests(unittest.TestCase):
         fingerprint = {"version": 1, "sha256": eval_module.typed_policy_hash(policy)}
         def item(i, policy_value=None, binding=None):
             text = f"private {i}"
-            review = {"reviewer": "r", "method": "manual", "text_sha256": hashlib.sha256(text.encode()).hexdigest(), "expected": "passed"}
+            review = {"reviewer": "r", "method": "manual", "text_sha256": hashlib.sha256(text.encode()).hexdigest(), "expected": "passed", "input_format": "text"}
             if policy_value is not None:
                 review["resolved_policy_fingerprint"] = policy_value
             if binding is not None:
                 review["report_binding"] = binding
             return {"id": str(i), "split": "holdout", "text": text, "expected": "passed", "review_status": "reviewed", "review": review}
-        items = [item(1, fingerprint, "verified"), item(2, {"version": 1, "sha256": "0" * 64}, "verified"), item(3), item(4, fingerprint, "unverified"), item(5, fingerprint, "verified")]
+        items = [item(1, fingerprint, "verified"), item(2, {"version": 1, "sha256": "0" * 64}, "verified"), item(3), item(4, fingerprint, "unverified"), item(5, fingerprint, "verified"), item(6, fingerprint, "verified"), item(7, fingerprint, "verified")]
+        del items[5]["review"]["input_format"]
         corpus = {"version": 1, "preset": "x", "gate_id": "g", "examples": items}
-        def response(i, with_fingerprint=True):
+        def response(i, with_fingerprint=True, with_format=True):
             report = {"gates": [{"gate_id": "g", "status": "passed"}], "input_fingerprint": {"version": 1, "text_sha256": hashlib.sha256(f"private {i}".encode()).hexdigest(), "metadata_sha256": None}}
             if with_fingerprint:
                 report["resolved_policy_fingerprint"] = fingerprint
+            if with_format:
+                report["input_format"] = "text"
             return SimpleNamespace(returncode=0, stdout=json.dumps(report))
-        with patch.object(eval_module.subprocess, "run", side_effect=[response(1), response(2), response(3), response(4), response(5, False)]):
+        with patch.object(eval_module.subprocess, "run", side_effect=[response(1), response(2), response(3), response(4), response(5, False), response(6), response(7, with_format=False)]):
             result = eval_module.evaluate("cli", corpus, "holdout")
-        self.assertEqual(result["review_policy_binding_counts"], {"matching": 1, "different": 1, "unbound": 1, "unverified_input": 1, "unverified_run": 1})
+        self.assertEqual(result["review_policy_binding_counts"], {"matching": 1, "different": 1, "unbound": 1, "unverified_input": 1, "unverified_run": 1, "unverified_format": 2})
         self.assertEqual(result["policy_bound_reviewed_metrics"]["examples"], 1)
-        self.assertEqual(result["reviewed_metrics"]["examples"], 5)
+        self.assertEqual(result["reviewed_metrics"]["examples"], 7)
         self.assertNotIn("private", json.dumps(result))
         items[0]["review"]["resolved_policy_fingerprint"] = {"version": 1, "sha256": "bad"}
         with self.assertRaisesRegex(ValueError, "policy fingerprint"):
