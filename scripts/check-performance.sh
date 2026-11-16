@@ -6,6 +6,8 @@ node --test scripts/test-check-performance-budget.js
 STATIC_JSON=$(cargo run --release -q -p aexeo-core --example bench_static_audit -- --json 5)
 RUNTIME_JSON=$(cargo run --release -q -p aexeo-core --example bench_runtime_audit -- --json 5)
 CONTENT_JSON=$(cargo run --release -q -p aexeo-core --example content_bench -- --json)
+# Collect runner timing before setting a calibrated budget for composed gates.
+cargo run --release -q -p aexeo-core --example literal_gate_bench
 LINK_GRAPH_JSON=$(cargo run --release -q -p aexeo-core --example link_graph_bench -- --json 20)
 EDITORIAL_JSON=$(cargo run --release -q -p aexeo-core --example editorial_bench -- --json 20)
 EMDASH_JSON=$(cargo run --release -q -p aexeo-emdash-bridge --example emdash_content_bench)
