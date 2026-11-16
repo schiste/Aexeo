@@ -1365,6 +1365,7 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
         if item_preset.gates.is_empty() {
             continue;
         }
+        let mut heading_levels = None;
         let (mut input, context, link_count, destinations, source_map) = match entry
             .media_type
             .as_str()
@@ -1372,6 +1373,7 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
             "text/markdown" => {
                 let adapted =
                     markdown_input_with_source_map_and_destinations(&entry.entity_id, &text)?;
+                heading_levels = adapted.source_map.heading_levels().map(<[u8]>::to_vec);
                 (
                     adapted.input,
                     Some(adapted.context),
@@ -1381,12 +1383,13 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
                 )
             }
             "text/html" => {
-                match crate::html_content_adapter::html_content_with_scope(
+                match crate::html_content_adapter::html_content_with_scope_and_heading_levels(
                     &entry.entity_id,
                     &text,
                     html_scope,
                 ) {
-                    Ok(adapted) => {
+                    Ok((adapted, levels)) => {
+                        heading_levels = Some(levels);
                         let count = adapted.destinations.len();
                         (
                             adapted.input,
@@ -1503,10 +1506,11 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
             link_reachability: observations.as_deref(),
             collection: collection.as_ref().map(|collection| collection.items),
         };
-        let report = item_preset.evaluate_with_collection_completeness(
+        let report = item_preset.evaluate_with_heading_levels(
             &input,
             &capabilities,
             destinations.as_deref(),
+            heading_levels.as_deref(),
             collection
                 .as_ref()
                 .is_some_and(|collection| collection.complete),
@@ -1538,38 +1542,74 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
         let plain_index = needs_plain_index
             .then(|| crate::text_index::LineIndex::new(input.text.as_deref().unwrap_or_default()));
         for (definition, gate) in item_preset.gates.iter().zip(report.gates) {
-            let positions = source_map
-                .as_ref()
-                .and_then(|map| {
-                    gate_source_positions(
-                        map,
-                        input.source_text.as_deref()?,
-                        &input,
-                        definition,
-                        &gate,
-                        destinations.as_deref(),
-                        observations.as_deref(),
-                    )
-                })
-                .or_else(|| {
-                    crate::html_content_adapter::gate_source_positions_with_links(
-                        html_map.as_ref()?,
-                        input.source_text.as_deref()?,
-                        &input,
-                        definition,
-                        &gate,
-                        destinations.as_deref(),
-                        observations.as_deref(),
-                    )
-                })
-                .or_else(|| {
-                    crate::plain_text_adapter::gate_source_positions(
-                        plain_index.as_ref()?,
-                        input.text.as_deref()?,
-                        definition,
-                        &gate,
-                    )
-                });
+            let hierarchy_positions = if let (
+                crate::content_gate::ContentGate::HeadingHierarchy { initial_level, .. },
+                Some(levels),
+                Some(source),
+            ) = (
+                definition,
+                heading_levels.as_deref(),
+                input.source_text.as_deref(),
+            ) {
+                source_map
+                    .as_ref()
+                    .and_then(|map| {
+                        crate::markdown_adapter::hierarchy_source_positions(
+                            map,
+                            source,
+                            levels,
+                            *initial_level,
+                            &gate,
+                        )
+                    })
+                    .or_else(|| {
+                        html_map.as_ref().and_then(|map| {
+                            crate::html_content_adapter::hierarchy_source_positions(
+                                map,
+                                source,
+                                levels,
+                                *initial_level,
+                                &gate,
+                            )
+                        })
+                    })
+            } else {
+                None
+            };
+            let positions = hierarchy_positions.or_else(|| {
+                source_map
+                    .as_ref()
+                    .and_then(|map| {
+                        gate_source_positions(
+                            map,
+                            input.source_text.as_deref()?,
+                            &input,
+                            definition,
+                            &gate,
+                            destinations.as_deref(),
+                            observations.as_deref(),
+                        )
+                    })
+                    .or_else(|| {
+                        crate::html_content_adapter::gate_source_positions_with_links(
+                            html_map.as_ref()?,
+                            input.source_text.as_deref()?,
+                            &input,
+                            definition,
+                            &gate,
+                            destinations.as_deref(),
+                            observations.as_deref(),
+                        )
+                    })
+                    .or_else(|| {
+                        crate::plain_text_adapter::gate_source_positions(
+                            plain_index.as_ref()?,
+                            input.text.as_deref()?,
+                            definition,
+                            &gate,
+                        )
+                    })
+            });
             let check_id = scoped_id("gate", &entry.entity_id, &gate.gate_id);
             omitted = omitted.saturating_add(
                 gate.measurements
@@ -3551,6 +3591,44 @@ mod tests {
             report.findings[0].location,
             Some(protocol::Location { line: 2, column: 3 })
         );
+    }
+
+    #[test]
+    fn heading_hierarchy_verdict_maps_markdown_and_html_positions() {
+        use sha2::{Digest, Sha256};
+        let policy = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='hierarchy'\nkind='heading_hierarchy'\n",
+        )
+        .unwrap();
+        for (media_type, source, line, column) in [
+            ("text/markdown", "## First\n\n#### Fourth\n", 3, 1),
+            (
+                "text/html",
+                "<main><h2>First</h2><h4>Fourth</h4></main>",
+                1,
+                21,
+            ),
+        ] {
+            let mut input = change();
+            input.entries[0].media_type = media_type.into();
+            let state = input.entries[0].after.as_mut().unwrap();
+            state.inline = Some(source.into());
+            state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+            let report = evaluate_change(
+                &input,
+                &mut NoFiles,
+                &policy,
+                "2026-01-01T00:00:00Z",
+                1024,
+                1024,
+            )
+            .unwrap();
+            assert_eq!(report.findings.len(), 1);
+            assert_eq!(
+                report.findings[0].location,
+                Some(protocol::Location { line, column })
+            );
+        }
     }
 
     #[test]

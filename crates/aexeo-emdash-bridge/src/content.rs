@@ -7,16 +7,20 @@ use aexeo_core::content_gate::{
 use anyhow::Result;
 use std::collections::BTreeMap;
 
+fn heading_level(style: &crate::BlockStyle) -> Option<u8> {
+    match style {
+        crate::BlockStyle::H1 => Some(1),
+        crate::BlockStyle::H2 => Some(2),
+        crate::BlockStyle::H3 => Some(3),
+        crate::BlockStyle::H4 => Some(4),
+        crate::BlockStyle::H5 => Some(5),
+        crate::BlockStyle::H6 => Some(6),
+        _ => None,
+    }
+}
+
 fn is_heading(style: &crate::BlockStyle) -> bool {
-    matches!(
-        style,
-        crate::BlockStyle::H1
-            | crate::BlockStyle::H2
-            | crate::BlockStyle::H3
-            | crate::BlockStyle::H4
-            | crate::BlockStyle::H5
-            | crate::BlockStyle::H6
-    )
+    heading_level(style).is_some()
 }
 
 fn content_metadata(document: &EmdashDocument) -> BTreeMap<String, String> {
@@ -219,7 +223,9 @@ pub fn source_locations_with_reachability(
         .any(|(gate, result)| {
             matches!(
                 gate,
-                ContentGate::HeadingLength { .. } | ContentGate::DuplicateHeadings { .. }
+                ContentGate::HeadingHierarchy { .. }
+                    | ContentGate::HeadingLength { .. }
+                    | ContentGate::DuplicateHeadings { .. }
             ) && !result.findings.is_empty()
         });
     let needs_links = preset
@@ -356,7 +362,19 @@ pub fn source_locations_with_reachability(
             }
             continue;
         }
-        if let Some(indices) = aexeo_core::content_gate::heading_finding_indices(gate, &headings) {
+        let indices = if let ContentGate::HeadingHierarchy { initial_level, .. } = gate {
+            let levels: Vec<_> = heading_blocks
+                .iter()
+                .filter_map(|(_, block)| heading_level(&block.style))
+                .collect();
+            Some(
+                aexeo_core::content_gate::heading_hierarchy_indices(&levels, *initial_level)
+                    .collect(),
+            )
+        } else {
+            aexeo_core::content_gate::heading_finding_indices(gate, &headings)
+        };
+        if let Some(indices) = indices {
             if indices.len() == evaluated.total_findings() {
                 for (finding_index, index) in indices
                     .into_iter()
@@ -644,7 +662,14 @@ pub fn evaluate_content_with_reachability(
             )
         }))
     .then(|| content_link_destinations(document));
-    preset.evaluate_with_destinations(
+    let heading_levels: Option<Vec<u8>> = headings.then(|| {
+        document
+            .body
+            .iter()
+            .filter_map(|block| heading_level(&block.style))
+            .collect()
+    });
+    preset.evaluate_with_heading_levels(
         &input,
         &ContentEvaluationContext {
             adapter: Some(&context),
@@ -654,6 +679,9 @@ pub fn evaluate_content_with_reachability(
             ..Default::default()
         },
         destinations.as_deref(),
+        heading_levels.as_deref(),
+        true,
+        None,
     )
 }
 
@@ -931,6 +959,47 @@ mod tests {
             (1, 1, 4)
         );
     }
+    #[test]
+    fn heading_hierarchy_respects_complete_and_partial_emdash_body() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"style":"h2","children":[{"_type":"span","text":"One"}]},{"style":"h4","children":[{"_type":"span","text":"Two"}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='hierarchy'\nkind='heading_hierarchy'\n",
+        )
+        .unwrap();
+        let complete = evaluate_content_with_body_capabilities(
+            &document,
+            &preset,
+            None,
+            [true, true, true, true],
+        )
+        .unwrap();
+        assert_eq!(complete.gates[0].status, GateStatus::Failed);
+        assert_eq!(complete.gates[0].measurements["skipped_levels"], 1);
+        let locations = source_locations(&document, &preset, &complete);
+        assert_eq!(locations.len(), 1);
+        assert_eq!(
+            (
+                locations[0].block_index,
+                locations[0].span_index,
+                locations[0].utf16_offset
+            ),
+            (1, 0, 0)
+        );
+        assert_eq!(
+            source_mapping_coverage(&preset, &complete, &locations).mapped,
+            1
+        );
+        let partial = evaluate_content_with_body_capabilities(
+            &document,
+            &preset,
+            None,
+            [true, false, true, true],
+        )
+        .unwrap();
+        assert_eq!(partial.gates[0].status, GateStatus::NotChecked);
+        assert!(partial.gates[0].findings.is_empty());
+    }
+
     #[test]
     fn heading_findings_map_to_their_emdash_blocks() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/test","title":"Test","body":[{"children":[{"_type":"span","text":"prose"}]},{"style":"h2","children":[{"_type":"span","text":"é😀abc"}]},{"style":"h3","children":[{"_type":"span","text":""},{"_type":"span","text":"É😀abc"}]}]}"#).unwrap();

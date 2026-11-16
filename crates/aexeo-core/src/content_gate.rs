@@ -424,6 +424,17 @@ pub enum ContentGate {
         blocking: bool,
         max_chars: usize,
     },
+    /// Report skipped heading levels in a complete ordered heading sequence.
+    HeadingHierarchy {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default = "default_blocking")]
+        blocking: bool,
+        /// Optional preceding heading level supplied by the surrounding template.
+        #[serde(default)]
+        initial_level: Option<u8>,
+    },
     /// Detect repeated non-empty headings within one content item.
     DuplicateHeadings {
         id: String,
@@ -565,6 +576,7 @@ impl ContentGate {
             | Self::ForbiddenTerms { severity, .. }
             | Self::RequiredMetadata { severity, .. }
             | Self::RequiredHeadings { severity, .. }
+            | Self::HeadingHierarchy { severity, .. }
             | Self::DuplicateHeadings { severity, .. }
             | Self::HeadingLength { severity, .. }
             | Self::FinalNewline { severity, .. }
@@ -597,6 +609,7 @@ impl ContentGate {
             | Self::ForbiddenTerms { blocking, .. }
             | Self::RequiredMetadata { blocking, .. }
             | Self::RequiredHeadings { blocking, .. }
+            | Self::HeadingHierarchy { blocking, .. }
             | Self::DuplicateHeadings { blocking, .. }
             | Self::HeadingLength { blocking, .. }
             | Self::FinalNewline { blocking, .. }
@@ -636,6 +649,7 @@ impl ContentGate {
             | Self::RepeatedParagraphOpenings { .. }
             | Self::RepeatedSentenceOpenings { .. }
             | Self::DuplicateParagraphs { .. } => "paragraphs",
+            Self::HeadingHierarchy { .. } => "heading_levels",
             Self::RequiredHeadings { .. }
             | Self::DuplicateHeadings { .. }
             | Self::HeadingLength { .. } => "headings",
@@ -669,6 +683,7 @@ impl ContentGate {
             | Self::ForbiddenTerms { id, .. }
             | Self::RequiredMetadata { id, .. }
             | Self::RequiredHeadings { id, .. }
+            | Self::HeadingHierarchy { id, .. }
             | Self::DuplicateHeadings { id, .. }
             | Self::HeadingLength { id, .. }
             | Self::FinalNewline { id, .. }
@@ -716,6 +731,9 @@ fn editorial_suggestion(gate: &ContentGate) -> Option<&'static str> {
         ContentGate::RequiredHeadings { .. } => Some(
             "Check whether the missing heading belongs in this content or the configured policy needs adjustment.",
         ),
+        ContentGate::HeadingHierarchy { .. } => {
+            Some("Review the heading levels and nesting in the context of the surrounding page.")
+        }
         ContentGate::DuplicateHeadings { .. } => Some(
             "Review the repeated heading and distinguish it where the repetition is unintended.",
         ),
@@ -744,6 +762,23 @@ fn editorial_suggestion(gate: &ContentGate) -> Option<&'static str> {
 
 /// Return offending heading indices for heading gates, in finding order.
 /// Other gate types return `None`.
+/// Indices whose level skips at least one step from the preceding heading.
+pub fn heading_hierarchy_indices(
+    levels: &[u8],
+    initial_level: Option<u8>,
+) -> impl Iterator<Item = usize> + '_ {
+    levels
+        .iter()
+        .copied()
+        .enumerate()
+        .scan(initial_level, |previous, (index, level)| {
+            let skipped = previous.is_some_and(|prior| level > prior.saturating_add(1));
+            *previous = Some(level);
+            Some(skipped.then_some(index))
+        })
+        .flatten()
+}
+
 pub fn heading_finding_indices(gate: &ContentGate, headings: &[String]) -> Option<Vec<usize>> {
     match gate {
         ContentGate::HeadingLength { max_chars, .. } => Some(
@@ -1208,6 +1243,15 @@ impl ContentPreset {
                         gate.id()
                     )
                 }
+                ContentGate::HeadingHierarchy {
+                    initial_level: Some(level),
+                    ..
+                } if !(1..=6).contains(level) => {
+                    bail!(
+                        "initial heading level must be between 1 and 6 for {}",
+                        gate.id()
+                    )
+                }
                 ContentGate::HeadingLength { max_chars, .. } if *max_chars == 0 => {
                     bail!("heading length max_chars must be greater than zero");
                 }
@@ -1487,7 +1531,7 @@ impl ContentPreset {
         capabilities: &ContentEvaluationContext<'_>,
         destinations: Option<&[String]>,
     ) -> Result<ContentReport> {
-        self.evaluate_with_observer_inner(input, capabilities, destinations, true, None)
+        self.evaluate_with_observer_inner(input, capabilities, destinations, true, None, None)
     }
 
     /// Evaluate while notifying the host before and after each gate, in preset order.
@@ -1499,7 +1543,14 @@ impl ContentPreset {
         destinations: Option<&[String]>,
         observer: &mut dyn FnMut(GateObservation),
     ) -> Result<ContentReport> {
-        self.evaluate_with_observer_inner(input, capabilities, destinations, true, Some(observer))
+        self.evaluate_with_observer_inner(
+            input,
+            capabilities,
+            destinations,
+            true,
+            Some(observer),
+            None,
+        )
     }
 
     /// Evaluate with an explicit completeness declaration for collection gates.
@@ -1512,7 +1563,36 @@ impl ContentPreset {
         complete: bool,
         observer: Option<&mut dyn FnMut(GateObservation)>,
     ) -> Result<ContentReport> {
-        self.evaluate_with_observer_inner(input, capabilities, destinations, complete, observer)
+        self.evaluate_with_observer_inner(
+            input,
+            capabilities,
+            destinations,
+            complete,
+            observer,
+            None,
+        )
+    }
+
+    /// Evaluate a complete ordered sequence of heading levels supplied by the host.
+    /// Levels must correspond one-to-one with `input.headings`. Omit them when
+    /// any heading is unobserved; malformed or mismatched data is not checked.
+    pub fn evaluate_with_heading_levels(
+        &self,
+        input: &ContentInput,
+        capabilities: &ContentEvaluationContext<'_>,
+        destinations: Option<&[String]>,
+        heading_levels: Option<&[u8]>,
+        collection_complete: bool,
+        observer: Option<&mut dyn FnMut(GateObservation)>,
+    ) -> Result<ContentReport> {
+        self.evaluate_with_observer_inner(
+            input,
+            capabilities,
+            destinations,
+            collection_complete,
+            observer,
+            heading_levels,
+        )
     }
 
     fn evaluate_with_observer_inner(
@@ -1522,6 +1602,7 @@ impl ContentPreset {
         destinations: Option<&[String]>,
         collection_complete: bool,
         mut observer: Option<&mut dyn FnMut(GateObservation)>,
+        heading_levels: Option<&[u8]>,
     ) -> Result<ContentReport> {
         let site = capabilities.site;
         let extensions = capabilities.extensions;
@@ -2438,6 +2519,40 @@ impl ContentPreset {
                             measurements.insert("missing_headings".into(), missing);
                         }
                         None => reason = Some("headings are unavailable from this adapter".into()),
+                    }
+                }
+                ContentGate::HeadingHierarchy { initial_level, .. } => {
+                    match (input.headings.as_ref(), heading_levels) {
+                        (Some(headings), Some(levels))
+                            if headings.len() == levels.len()
+                                && levels.iter().all(|level| (1..=6).contains(level)) =>
+                        {
+                            measurements.insert("heading_count".into(), levels.len());
+                            let mut skipped = 0;
+                            for index in heading_hierarchy_indices(levels, *initial_level) {
+                                skipped += 1;
+                                let prior = if index == 0 {
+                                    initial_level.unwrap_or(levels[index])
+                                } else {
+                                    levels[index - 1]
+                                };
+                                let level = levels[index];
+                                emit(
+                                    format!(
+                                        "Heading #{} skips from H{prior} to H{level}",
+                                        index + 1
+                                    ),
+                                    1,
+                                    1,
+                                );
+                            }
+                            measurements.insert("skipped_levels".into(), skipped);
+                        }
+                        _ => {
+                            reason = Some(
+                                "complete heading levels are unavailable from this adapter".into(),
+                            )
+                        }
                     }
                 }
                 ContentGate::HeadingLength { max_chars, .. } => {
@@ -3943,6 +4058,42 @@ field = "slug"
         assert_eq!(empty.gates[0].status, GateStatus::Passed);
         assert_eq!(empty.gates[0].measurements["longest_heading_chars"], 0);
         assert!(ContentPreset::from_toml("version=1\nname='headings'\n[[gates]]\nid='length'\nkind='heading_length'\nmax_chars=0\n").is_err());
+    }
+
+    #[test]
+    fn heading_hierarchy_requires_complete_levels_and_respects_fragment_context() {
+        let preset = ContentPreset::from_toml("version=1\nname='headings'\n[[gates]]\nid='hierarchy'\nkind='heading_hierarchy'\nblocking=false\n").unwrap();
+        let input = ContentInput {
+            headings: Some(vec!["One".into(), "Two".into(), "Three".into()]),
+            ..Default::default()
+        };
+        let context = ContentEvaluationContext::default();
+        assert_eq!(
+            preset.evaluate(&input).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+        let evaluate = |levels: &[u8]| {
+            preset
+                .evaluate_with_heading_levels(&input, &context, None, Some(levels), true, None)
+                .unwrap()
+        };
+        assert_eq!(evaluate(&[2, 3, 2]).gates[0].status, GateStatus::Passed);
+        let report = evaluate(&[2, 4, 2]);
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[0].measurements["skipped_levels"], 1);
+        assert!(report.gates[0].findings[0].message.contains("#2"));
+        assert_eq!(evaluate(&[2, 4]).gates[0].status, GateStatus::NotChecked);
+        assert_eq!(evaluate(&[2, 7, 2]).gates[0].status, GateStatus::NotChecked);
+        let fragment = ContentPreset::from_toml("version=1\nname='fragment'\n[[gates]]\nid='hierarchy'\nkind='heading_hierarchy'\ninitial_level=1\n").unwrap();
+        assert_eq!(
+            fragment
+                .evaluate_with_heading_levels(&input, &context, None, Some(&[3, 3, 2]), true, None)
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::Failed
+        );
+        assert!(ContentPreset::from_toml("version=1\nname='bad'\n[[gates]]\nid='h'\nkind='heading_hierarchy'\ninitial_level=7\n").is_err());
     }
 
     #[test]

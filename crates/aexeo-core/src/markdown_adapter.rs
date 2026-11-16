@@ -29,9 +29,16 @@ pub struct MarkdownSourceMap {
     projected_index: LineIndex,
     link_starts: Vec<Option<usize>>,
     heading_starts: Vec<Option<usize>>,
+    heading_levels: Vec<u8>,
+    heading_levels_complete: bool,
 }
 
 impl MarkdownSourceMap {
+    /// Heading levels in the same order as the projected headings.
+    pub fn heading_levels(&self) -> Option<&[u8]> {
+        self.heading_levels_complete.then_some(&self.heading_levels)
+    }
+
     /// Resolve a zero-based heading index to the start of its Markdown node.
     pub fn heading_source_position(&self, source: &str, index: usize) -> Option<(usize, usize)> {
         self.source_index
@@ -100,6 +107,23 @@ impl ContentSourceMap for MarkdownSourceMap {
 /// gate has no positional semantics; missing positions are never guessed.
 /// Counts are checked, but callers must still pass the same source, input,
 /// destinations and observations used to evaluate the report.
+/// Map hierarchy findings against the same unchanged projection and level sequence.
+pub fn hierarchy_source_positions(
+    map: &MarkdownSourceMap,
+    source: &str,
+    levels: &[u8],
+    initial_level: Option<u8>,
+    result: &crate::content_gate::ContentGateResult,
+) -> Option<Vec<Option<(usize, usize)>>> {
+    crate::source_mapping::map_heading_hierarchy_positions(
+        map,
+        source,
+        levels,
+        initial_level,
+        result,
+    )
+}
+
 pub fn gate_source_positions(
     map: &MarkdownSourceMap,
     source: &str,
@@ -636,8 +660,10 @@ impl Projection {
                 source_map,
             ),
             Node::Break(_) => self.text.push('\n'),
+            Node::Html(_) => source_map.heading_levels_complete = false,
             Node::Heading(heading) => {
                 if source_map.enabled {
+                    source_map.heading_levels.push(heading.depth);
                     source_map
                         .heading_starts
                         .push(heading.position.as_ref().map(|pos| pos.start.offset));
@@ -683,6 +709,7 @@ fn extract_markdown_from_root(
 ) -> Result<(ContentInput, ContentContext, usize, MarkdownSourceMap)> {
     let mut source_map = MarkdownSourceMap {
         enabled: map_source,
+        heading_levels_complete: map_source,
         ..Default::default()
     };
     let mut projection = Projection::default();

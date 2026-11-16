@@ -258,6 +258,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     });
     let mut link_count = None;
     let mut source_map = None;
+    let mut heading_levels = None;
     let mut destinations = None;
     // The event exists only on request and never contains content, paths, or URLs.
     let mut html_projection = (measuring
@@ -290,6 +291,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             } else {
                 aexeo_core::markdown_adapter::markdown_input_with_source_map(id, &text)?
             };
+            heading_levels = map.heading_levels().map(<[u8]>::to_vec);
             source_map = Some(map);
             context = Some(capabilities);
             link_count = Some(links);
@@ -302,8 +304,11 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             } else {
                 aexeo_core::html_content_adapter::HtmlContentScope::Document
             };
-            match aexeo_core::html_content_adapter::html_content_with_scope(&id, &text, scope) {
-                Ok(adapted) => {
+            match aexeo_core::html_content_adapter::html_content_with_scope_and_heading_levels(
+                &id, &text, scope,
+            ) {
+                Ok((adapted, levels)) => {
+                    heading_levels = Some(levels);
                     if html_projection.is_some() {
                         html_projection = Some(serde_json::json!({
                             "status": "complete",
@@ -478,18 +483,20 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     };
     let mut gate_timer = GateTimer::default();
     let mut report = if measuring {
-        preset.evaluate_with_collection_completeness(
+        preset.evaluate_with_heading_levels(
             &input,
             &capabilities,
             destinations.as_deref(),
+            heading_levels.as_deref(),
             !args.get_flag("collection-incomplete"),
             Some(&mut |event| gate_timer.observe(event)),
         )?
     } else {
-        preset.evaluate_with_collection_completeness(
+        preset.evaluate_with_heading_levels(
             &input,
             &capabilities,
             destinations.as_deref(),
+            heading_levels.as_deref(),
             !args.get_flag("collection-incomplete"),
             None,
         )?
@@ -546,38 +553,74 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         })
         .map(aexeo_core::text_index::LineIndex::new);
     for (gate, result) in preset.gates.iter().zip(&report.gates) {
-        let positions = source_map
-            .as_ref()
-            .and_then(|map| {
-                aexeo_core::markdown_adapter::gate_source_positions(
-                    map,
-                    input.source_text.as_deref()?,
-                    &input,
-                    gate,
-                    result,
-                    destinations.as_deref(),
-                    link_observations.as_deref(),
-                )
-            })
-            .or_else(|| {
-                aexeo_core::html_content_adapter::gate_source_positions_with_links(
-                    html_map.as_ref()?,
-                    input.source_text.as_deref()?,
-                    &input,
-                    gate,
-                    result,
-                    destinations.as_deref(),
-                    link_observations.as_deref(),
-                )
-            })
-            .or_else(|| {
-                aexeo_core::plain_text_adapter::gate_source_positions(
-                    plain_index.as_ref()?,
-                    plain_source?,
-                    gate,
-                    result,
-                )
-            });
+        let hierarchy_positions = if let (
+            ContentGate::HeadingHierarchy { initial_level, .. },
+            Some(levels),
+            Some(source),
+        ) = (
+            gate,
+            heading_levels.as_deref(),
+            input.source_text.as_deref(),
+        ) {
+            source_map
+                .as_ref()
+                .and_then(|map| {
+                    aexeo_core::markdown_adapter::hierarchy_source_positions(
+                        map,
+                        source,
+                        levels,
+                        *initial_level,
+                        result,
+                    )
+                })
+                .or_else(|| {
+                    html_map.as_ref().and_then(|map| {
+                        aexeo_core::html_content_adapter::hierarchy_source_positions(
+                            map,
+                            source,
+                            levels,
+                            *initial_level,
+                            result,
+                        )
+                    })
+                })
+        } else {
+            None
+        };
+        let positions = hierarchy_positions.or_else(|| {
+            source_map
+                .as_ref()
+                .and_then(|map| {
+                    aexeo_core::markdown_adapter::gate_source_positions(
+                        map,
+                        input.source_text.as_deref()?,
+                        &input,
+                        gate,
+                        result,
+                        destinations.as_deref(),
+                        link_observations.as_deref(),
+                    )
+                })
+                .or_else(|| {
+                    aexeo_core::html_content_adapter::gate_source_positions_with_links(
+                        html_map.as_ref()?,
+                        input.source_text.as_deref()?,
+                        &input,
+                        gate,
+                        result,
+                        destinations.as_deref(),
+                        link_observations.as_deref(),
+                    )
+                })
+                .or_else(|| {
+                    aexeo_core::plain_text_adapter::gate_source_positions(
+                        plain_index.as_ref()?,
+                        plain_source?,
+                        gate,
+                        result,
+                    )
+                })
+        });
         if let Some(positions) = positions {
             for (finding_index, position) in positions.into_iter().enumerate() {
                 if let Some((line, column)) = position {
