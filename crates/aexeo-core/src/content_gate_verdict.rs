@@ -47,6 +47,110 @@ pub fn evaluate_change<P: ConfinedContentFiles>(
 pub type LinkObserver<'a> = dyn FnMut(&str, &[String]) -> Result<Vec<crate::content_gate::LinkReachabilityObservation>>
     + 'a;
 
+/// Observations supplied for the exact source bytes and extracted link order.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LinkObservationSnapshot {
+    pub version: u32,
+    pub source_sha256: String,
+    pub destinations: Vec<String>,
+    pub observations: Vec<crate::content_gate::LinkReachabilityObservation>,
+}
+
+/// A host-provided, source-bound set of link observations for a change.
+/// These observations are not authenticated or guaranteed to be fresh.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChangeLinkSnapshots {
+    pub version: u32,
+    pub change_id: String,
+    pub entries: std::collections::BTreeMap<String, LinkObservationSnapshot>,
+}
+
+/// Tracks use of a validated snapshot during one evaluation.
+pub struct ChangeLinkSnapshotObserver<'a> {
+    snapshots: &'a ChangeLinkSnapshots,
+    used: std::collections::BTreeSet<String>,
+    pub missing_entries: usize,
+    pub missing_destinations: usize,
+}
+
+impl ChangeLinkSnapshots {
+    /// Bind each supplied entry to its proposed content before evaluating it.
+    pub fn observer<'a>(
+        &'a self,
+        change: &Change,
+        preset: &ContentPreset,
+    ) -> Result<ChangeLinkSnapshotObserver<'a>> {
+        if self.version != 1 || self.change_id != change.change_id {
+            bail!("link observations do not match this change");
+        }
+        if !preset.gates.iter().any(|gate| {
+            matches!(
+                gate,
+                crate::content_gate::ContentGate::LinkReachability { .. }
+            )
+        }) {
+            bail!("link observations require a link reachability gate");
+        }
+        let mut entries = std::collections::BTreeMap::new();
+        for entry in &change.entries {
+            if entries.insert(entry.entity_id.as_str(), entry).is_some() {
+                bail!("change contains duplicate entry IDs");
+            }
+        }
+        for (id, snapshot) in &self.entries {
+            let entry = entries.get(id.as_str()).ok_or_else(|| {
+                anyhow::anyhow!("link observation entry is not present in the change")
+            })?;
+            if snapshot.version != 1
+                || entry.after.as_ref().map(|state| state.sha256.as_str())
+                    != Some(snapshot.source_sha256.as_str())
+                || snapshot.destinations.len() != snapshot.observations.len()
+            {
+                bail!("link observations do not match the entry content");
+            }
+        }
+        Ok(ChangeLinkSnapshotObserver {
+            snapshots: self,
+            used: Default::default(),
+            missing_entries: 0,
+            missing_destinations: 0,
+        })
+    }
+}
+
+impl ChangeLinkSnapshotObserver<'_> {
+    /// Return observations only when extracted destinations match exactly.
+    pub fn observe(
+        &mut self,
+        entity: &str,
+        destinations: &[String],
+    ) -> Result<Vec<crate::content_gate::LinkReachabilityObservation>> {
+        let Some(snapshot) = self.snapshots.entries.get(entity) else {
+            self.missing_entries += 1;
+            self.missing_destinations += destinations.len();
+            return Ok(vec![
+                    crate::content_gate::LinkReachabilityObservation::NotChecked;
+                    destinations.len()
+                ]);
+        };
+        if snapshot.destinations != destinations {
+            bail!("link observations do not match extracted destinations");
+        }
+        self.used.insert(entity.to_owned());
+        Ok(snapshot.observations.clone())
+    }
+
+    /// Reject supplied entries that were never observed during evaluation.
+    pub fn finish(&self) -> Result<()> {
+        if self.used.len() != self.snapshots.entries.len() {
+            bail!("some link observation entries could not be assessed");
+        }
+        Ok(())
+    }
+}
+
 /// Evaluate with an explicitly supplied host observer. The observer receives the
 /// entity and its extracted destinations only after every content digest is verified.
 /// No observer means reachability remains not checked.
@@ -1563,6 +1667,72 @@ mod tests {
             "entries":[{"entity_id":"article", "operation":"create", "media_type":"text/plain",
                 "after":{"inline":"abc", "sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}}]
         })).unwrap()
+    }
+
+    #[test]
+    fn snapshot_observer_binds_source_and_order_and_rejects_unused_entries() {
+        use crate::content_gate::LinkReachabilityObservation as Observation;
+        let change = change();
+        let policy = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\n",
+        )
+        .unwrap();
+        let snapshot = LinkObservationSnapshot {
+            version: 1,
+            source_sha256: change.entries[0].after.as_ref().unwrap().sha256.clone(),
+            destinations: vec![
+                "https://example.org/a".into(),
+                "https://example.org/b".into(),
+            ],
+            observations: vec![Observation::Reachable, Observation::NotFound],
+        };
+        let mut snapshots = ChangeLinkSnapshots {
+            version: 1,
+            change_id: change.change_id.clone(),
+            entries: [("article".into(), snapshot)].into(),
+        };
+        let mut observer = snapshots.observer(&change, &policy).unwrap();
+        assert!(observer.finish().is_err());
+        assert!(
+            observer
+                .observe(
+                    "article",
+                    &[
+                        "https://example.org/b".into(),
+                        "https://example.org/a".into()
+                    ]
+                )
+                .is_err()
+        );
+        assert_eq!(
+            observer
+                .observe("missing", &["https://example.org/".into()])
+                .unwrap(),
+            vec![Observation::NotChecked]
+        );
+        assert_eq!(observer.missing_entries, 1);
+        assert_eq!(observer.missing_destinations, 1);
+        assert_eq!(
+            observer
+                .observe(
+                    "article",
+                    &[
+                        "https://example.org/a".into(),
+                        "https://example.org/b".into()
+                    ]
+                )
+                .unwrap(),
+            vec![Observation::Reachable, Observation::NotFound]
+        );
+        observer.finish().unwrap();
+        snapshots.entries.get_mut("article").unwrap().source_sha256 = "changed".into();
+        assert!(snapshots.observer(&change, &policy).is_err());
+        assert!(snapshots.observer(&change, &preset(1)).is_err());
+        snapshots.entries.get_mut("article").unwrap().source_sha256 =
+            change.entries[0].after.as_ref().unwrap().sha256.clone();
+        let mut duplicate = change.clone();
+        duplicate.entries.push(duplicate.entries[0].clone());
+        assert!(snapshots.observer(&duplicate, &policy).is_err());
     }
 
     fn preset(min: usize) -> ContentPreset {

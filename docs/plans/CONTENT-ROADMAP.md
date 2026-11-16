@@ -352,6 +352,10 @@ The latest published version observed on 2026-11-16 was 0.9.1.
   counts and status consistency. It does not produce a fresh evaluation,
   establish artifact freshness or authenticity, or authorize publication.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
+  Shared Rust change-link snapshots now bind observations to change IDs, source
+  digests and extracted link order, and reject unused supplied entries. Hosts
+  must finish the observer after evaluation and establish evidence provenance and
+  freshness independently; this does not add link evidence to offline receipts.
   Direct Rust collection uniqueness evaluation rejects ambiguous identities in
   the examined prefix, matching CLI and EmDash input validation.
   Literal Markdown image alt labels map to their exact original positions for
