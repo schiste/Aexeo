@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::config::RuntimeConfig;
-use crate::link_evidence::crawl_links;
+use crate::link_evidence::{crawl_links_and_metadata, root_relative_links_local};
 use crate::site::audited_link_targets;
 
 const ASSET_EXTENSIONS: &[&str] = &[
@@ -32,10 +32,16 @@ pub(crate) fn should_enqueue_link(target: &str) -> bool {
 /// contents; leaving them out let a complete crawl report a link broken that it
 /// never requested.
 pub(crate) fn page_link_routes(body: &str, page_url: &str) -> Vec<String> {
-    crawl_links(body, page_url)
+    let (links, metadata) = crawl_links_and_metadata(body, page_url);
+    let audited = if root_relative_links_local(page_url, metadata.base_href.as_deref()) {
+        audited_link_targets(body)
+    } else {
+        Vec::new()
+    };
+    links
         .into_iter()
         .map(|link| link.route)
-        .chain(audited_link_targets(body))
+        .chain(audited)
         .filter(|route| should_enqueue_link(route))
         .collect()
 }
@@ -85,6 +91,25 @@ mod tests {
             <a href="http://example.com/other-scheme">scheme</a>
             <a href="https://example.com:8443/other-port">port</a>"#;
         assert_eq!(page_link_routes(html, "https://example.com/"), ["allowed"]);
+    }
+
+    #[test]
+    fn external_or_invalid_base_does_not_enqueue_legacy_root_links() {
+        for base in [
+            "https://other.example/",
+            "https://example.com:8443/",
+            "https://u:p@example.com/",
+        ] {
+            let html = format!(
+                "<head><base href='{base}'></head><body><template><a href='/legacy'>link</a></template><a href='/normal'>link</a></body>"
+            );
+            assert!(
+                page_link_routes(&html, "https://example.com/").is_empty(),
+                "{base}"
+            );
+        }
+        let local = "<head><base href='/local/'></head><body><template><a href='/legacy'>link</a></template></body>";
+        assert!(page_link_routes(local, "https://example.com/").contains(&"legacy".to_string()));
     }
 
     #[test]

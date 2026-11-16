@@ -604,11 +604,20 @@ fn apply_crawled_links(page: &mut Page) {
     else {
         return;
     };
+    let (crawled_links, metadata) =
+        crate::link_evidence::crawl_links_and_metadata(&page.raw_text, url);
+    if !crate::link_evidence::root_relative_links_local(url, metadata.base_href.as_deref()) {
+        for link in &mut page.links {
+            if normalize_internal_href(&link.href).is_some() {
+                link.target = None;
+            }
+        }
+    }
     for crate::link_evidence::CrawlLink {
         href,
         anchor,
         route,
-    } in crate::link_evidence::crawl_links(&page.raw_text, url)
+    } in crawled_links
     {
         let mut located = false;
         for link in page.links.iter_mut().filter(|link| link.href == href) {
@@ -864,6 +873,62 @@ mod tests {
             fs::create_dir_all(parent).unwrap();
         }
         fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn crawled_page_does_not_claim_external_base_links_are_local() {
+        for base in [
+            "https://other.example/",
+            "https://example.org:8443/",
+            "https://u:p@example.org/",
+        ] {
+            let raw = format!(
+                "<head><base href='{base}'></head><body><a href='/external'>External</a><a href='https://example.org/local'>Local</a></body>"
+            );
+            let mut page = super::build_page_from_source(
+                "crawl/index.html".into(),
+                "index.html".into(),
+                raw,
+                Default::default(),
+            );
+            page.crawl_response = Some(aexeo_contracts::CrawlResponseProvenance {
+                observed_url: Some("https://example.org/".into()),
+                ..Default::default()
+            });
+            super::apply_crawled_links(&mut page);
+            assert!(
+                page.links
+                    .iter()
+                    .filter(|link| link.href == "/external")
+                    .all(|link| link.target.is_none()),
+                "{base}"
+            );
+            assert!(
+                !page
+                    .internal_links
+                    .iter()
+                    .any(|target| target == "external"),
+                "{base}"
+            );
+            if !base.contains("u:p") {
+                assert!(
+                    page.internal_links.iter().any(|target| target == "local"),
+                    "{base}"
+                );
+            }
+        }
+        let mut page = super::build_page_from_source(
+            "crawl/index.html".into(),
+            "index.html".into(),
+            "<base href='/section/'><a href='/local'>Local</a>".into(),
+            Default::default(),
+        );
+        page.crawl_response = Some(aexeo_contracts::CrawlResponseProvenance {
+            observed_url: Some("https://example.org/".into()),
+            ..Default::default()
+        });
+        super::apply_crawled_links(&mut page);
+        assert!(page.internal_links.iter().any(|target| target == "local"));
     }
 
     #[test]

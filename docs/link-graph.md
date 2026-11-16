@@ -720,3 +720,9 @@ Crawl discovery treats bare and `www.` hosts as equivalent only when their
 scheme and effective port match. Absolute links to another scheme or port
 remain external observations and are not rewritten into routes on the current
 crawl origin.
+
+For a crawled page, a root-relative link follows the document’s observed
+`base` URL. If that base is external or invalid, legacy broken-link analysis
+does not treat the link as a local target, and discovery does not enqueue its
+path on the crawl origin. Static files without an observed URL retain legacy
+behavior.
