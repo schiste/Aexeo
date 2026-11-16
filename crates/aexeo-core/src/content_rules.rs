@@ -4,7 +4,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::config::Config;
-use crate::site::{Page, PageKind, Site, collapse_whitespace, normalize_internal_href, strip_tags};
+use crate::image_rules::local_asset_relative_path;
+use crate::site::{Page, PageKind, Site, collapse_whitespace, strip_tags};
 use crate::text::prefix_at_char_boundary;
 
 fn finding(
@@ -38,15 +39,6 @@ fn normalized_visible_text(text: &str) -> String {
 
 fn is_feature_route(route: &str) -> bool {
     route.starts_with("features/")
-}
-
-fn normalize_internal_image_target(image_src: &str, config: &Config) -> Option<String> {
-    if image_src.starts_with('/') {
-        return normalize_internal_href(image_src);
-    }
-    let base = config.site().site_url?.trim_end_matches('/');
-    let remainder = image_src.strip_prefix(base)?;
-    normalize_internal_href(&format!("/{}", remainder.trim_start_matches('/')))
 }
 
 fn collect_page_size_findings(page: &Page, config: &Config) -> Vec<Finding> {
@@ -104,6 +96,9 @@ fn collect_feature_marker_findings(page: &Page, config: &Config) -> Vec<Finding>
 
 fn collect_image_findings(page: &Page, site: &Site, config: &Config) -> Vec<Finding> {
     let mut findings = Vec::new();
+    let canonical_root = (!page.images.is_empty())
+        .then(|| fs::canonicalize(&site.root).ok())
+        .flatten();
     for image in &page.images {
         if image.alt.is_none() {
             findings.push(
@@ -118,14 +113,25 @@ fn collect_image_findings(page: &Page, site: &Site, config: &Config) -> Vec<Find
                 .with_subject(image.src.as_str()),
             );
         }
-        let Some(normalized) = normalize_internal_image_target(&image.src, config) else {
+        let Some(relative_path) =
+            local_asset_relative_path(page, &image.src, config.site_url.as_deref())
+        else {
             continue;
         };
-        if !site.indexed_paths.contains(&normalized) {
+        let indexed_path = relative_path.to_string_lossy().replace('\\', "/");
+        if !site.indexed_paths.contains(&indexed_path) {
             continue;
         }
-        let asset_path = site.root.join(&normalized);
-        let Ok(metadata) = fs::metadata(&asset_path) else {
+        let Some(canonical_root) = canonical_root.as_deref() else {
+            continue;
+        };
+        let Ok(asset_path) = fs::canonicalize(site.root.join(&relative_path)) else {
+            continue;
+        };
+        if !asset_path.starts_with(canonical_root) {
+            continue;
+        }
+        let Ok(metadata) = fs::metadata(asset_path) else {
             continue;
         };
         if metadata.is_file() && metadata.len() > 5_000_000 {
@@ -405,6 +411,71 @@ mod tests {
             "<html lang=\"en\"><head><title>x</title><meta name=\"description\" content=\"y\"><link rel=\"canonical\" href=\"{}\"></head><body><h1>x</h1>{}</body></html>",
             canonical, body,
         )
+    }
+
+    #[test]
+    fn oversized_images_resolve_local_urls_without_confusing_other_origins() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path();
+        fs::create_dir_all(root.join("articles/images")).unwrap();
+        fs::File::create(root.join("articles/images/large.webp"))
+            .unwrap()
+            .set_len(5_000_001)
+            .unwrap();
+        write(
+            &root.join("articles/index.html"),
+            &make_page(
+                "articles",
+                r#"
+                <img src="images/large.webp" alt="relative">
+                <img src="/articles/images/large.webp?size=large" alt="root">
+                <img src="https://example.com/articles/images/large.webp" alt="absolute">
+                <img src="//example.com/articles/images/large.webp" alt="protocol relative">
+                <img src="https://example.com.evil.test/articles/images/large.webp" alt="other host">
+                <img src="https://example.com:444/articles/images/large.webp" alt="other port">
+                <img src="//evil.test/articles/images/large.webp" alt="other host relative">
+            "#,
+            ),
+        );
+        let findings = run_content_rules(&load_site(root).unwrap(), &Config::default());
+        let images: Vec<_> = findings
+            .iter()
+            .filter(|finding| finding.rule_id == "CNT004")
+            .collect();
+        assert_eq!(images.len(), 4, "{images:?}");
+        for image in images {
+            assert!(!image.message.contains("evil.test"));
+            assert!(!image.message.contains(":444"));
+        }
+        let mut partial_site = load_site(root).unwrap();
+        partial_site
+            .indexed_paths
+            .remove("articles/images/large.webp");
+        assert!(
+            !run_content_rules(&partial_site, &Config::default())
+                .iter()
+                .any(|finding| finding.rule_id == "CNT004")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn oversized_image_does_not_inspect_a_symlink_outside_the_site() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let root = temp_dir.path().join("site");
+        fs::create_dir_all(&root).unwrap();
+        let outside = temp_dir.path().join("outside.webp");
+        fs::File::create(&outside)
+            .unwrap()
+            .set_len(5_000_001)
+            .unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("image.webp")).unwrap();
+        write(
+            &root.join("index.html"),
+            &make_page("", r#"<img src="/image.webp" alt="external">"#),
+        );
+        let findings = run_content_rules(&load_site(&root).unwrap(), &Config::default());
+        assert!(!findings.iter().any(|finding| finding.rule_id == "CNT004"));
     }
 
     #[test]
