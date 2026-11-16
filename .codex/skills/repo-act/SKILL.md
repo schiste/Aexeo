@@ -20,6 +20,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   preparation is not configured: cleanup can remove ignored `node_modules`.
   Restore them with the package lockfile (`npm ci`) before Node tests; avoid
   an `npx` invocation that could install an unpinned missing executable.
+- If broker status reports schema version 0, check read-only whether its SQLite
+  database is locked and whether an Aethyme cleanup process is still live. A
+  transient lock can accompany that error; wait and retry before assuming a
+  schema migration is needed. Never delete or rewrite the broker database to
+  clear a lock.
 - Before a guarded PR merge, fetch the full live `headRefOid` directly from
   `gh pr view --json headRefOid` and pass that exact value to
   `--match-head-commit`; never reconstruct a full SHA from an abbreviated log.
