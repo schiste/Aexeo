@@ -186,12 +186,15 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
     if bytes.len() as u64 > MAX_CHANGE_BYTES {
         user_bail!("change document exceeds the size limit");
     }
-    let change = if args.get_flag("offline-receipt") {
+    let change = if args.get_flag("offline-receipt") || args.get_flag("export-link-observations") {
         parse_strict_validated_change(&bytes)
     } else {
         parse_validated_change(&bytes)
     }
     .user_context("invalid change document")?;
+    if args.get_flag("export-link-observations") {
+        return export_link_observations(args, &change, Path::new(&verdict_path), html_scope);
+    }
     let mut sources = builtin_content_presets();
     if let Some(entries) = args.get_many::<String>("preset-source") {
         for entry in entries {
@@ -804,6 +807,89 @@ fn command_offline_receipt(
         );
     }
     Ok(code)
+}
+
+fn export_link_observations(
+    args: &ArgMatches,
+    change: &aexeo_contracts::content_gate_protocol::Change,
+    output: &Path,
+    html_scope: HtmlContentScope,
+) -> Result<i32> {
+    use aexeo_core::content_gate::{ContentPreset, LinkReachabilityObservation};
+    let started = std::time::Instant::now();
+    let sources: std::collections::BTreeMap<_, _> = change
+        .entries
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .after
+                .as_ref()
+                .map(|after| (entry.entity_id.clone(), after.sha256.clone()))
+        })
+        .collect();
+    let mut entries = std::collections::BTreeMap::new();
+    let mut observe = |entity: &str, destinations: &[String]| -> Result<_> {
+        let sha256 = sources
+            .get(entity)
+            .user_context("link export has an unknown content entry")?;
+        let observations = vec![LinkReachabilityObservation::NotChecked; destinations.len()];
+        entries.insert(
+            entity.to_owned(),
+            super::content::LinkObservationSnapshot {
+                version: 1,
+                source_sha256: sha256.clone(),
+                destinations: destinations.to_vec(),
+                observations: observations.clone(),
+            },
+        );
+        Ok(observations)
+    };
+    let preset = ContentPreset::from_toml(
+        "version=1\nname='link-export'\n[[gates]]\nid='links'\nkind='link_reachability'\n",
+    )?;
+    let mut provider = HostFiles::new(
+        args.get_one::<String>("content-root").map(String::as_str),
+        output,
+    )?;
+    evaluate_change_with_collection_and_html_scope(
+        change,
+        &mut provider,
+        &preset,
+        &iso_now(),
+        MAX_CONTENT_INPUT_BYTES,
+        MAX_TOTAL_CONTENT_BYTES,
+        ChangeEvaluationHost {
+            options: ChangeEvaluationOptions {
+                link_observer: Some(&mut observe),
+                plain_text_paragraphs: false,
+            },
+            extensions: None,
+        },
+        None,
+        html_scope,
+    )
+    .user_context("content change could not be evaluated for link export")?;
+    if entries.len() != sources.len() {
+        user_bail!("some content entries could not be projected for link export");
+    }
+    let destinations: usize = entries.values().map(|entry| entry.destinations.len()).sum();
+    let snapshot = ChangeLinkSnapshots {
+        version: 1,
+        change_id: change.change_id.clone(),
+        entries,
+    };
+    let json = serde_json::to_vec(&snapshot)?;
+    if json.len() as u64 >= MAX_CHANGE_BYTES {
+        user_bail!("link observation template exceeds the size limit");
+    }
+    write_atomic(output, &json).user_context("writing link observation template")?;
+    if args.get_flag("telemetry") {
+        eprintln!(
+            "{}",
+            serde_json::json!({"event":"content_change_link_snapshot_export", "version":1, "entries":snapshot.entries.len(), "destinations":destinations, "elapsed_ms":started.elapsed().as_millis()})
+        );
+    }
+    Ok(EXIT_SUCCESS)
 }
 
 fn write_atomic(destination: &Path, contents: &[u8]) -> io::Result<()> {

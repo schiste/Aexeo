@@ -1177,6 +1177,113 @@ fn revalidates_previous_verdict_against_current_inputs_and_result() {
 }
 
 #[test]
+fn exports_change_link_templates_and_imports_them_without_network() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut change = input();
+    change["entries"][0]["media_type"] = "text/markdown".into();
+    change["entries"][0]["after"] = serde_json::json!({"inline":"[first](https://example.org/a)", "sha256":"9b109ca77f8b3af5b0f54a9ae1aeb8d01f5ed6fbd1d350ffe84289bf42000e09"});
+    change["entries"].as_array_mut().unwrap().push(serde_json::json!({"entity_id":"other", "operation":"create", "media_type":"text/html", "after":{"inline":"<main><p><a href=\"https://example.org/b\">second</a></p></main>", "sha256":"b65d7ee38bc936bda3e4e654a4f99e5d68833e81ac6eb9fc19563664b22dc5e4"}}));
+    let change_path = dir.path().join("source.json");
+    let snapshot = dir.path().join("links.json");
+    fs::write(&change_path, serde_json::to_vec(&change).unwrap()).unwrap();
+    let export = || {
+        Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content-change",
+                "--export-link-observations",
+                "--html-scope",
+                "main",
+                "--telemetry",
+            ])
+            .env("CONTENT_GATE_CHANGE_FILE", &change_path)
+            .env("CONTENT_GATE_VERDICT_FILE", &snapshot)
+            .output()
+            .unwrap()
+    };
+    let result = export();
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let event: serde_json::Value = serde_json::from_slice(&result.stderr).unwrap();
+    assert_eq!(event["event"], "content_change_link_snapshot_export");
+    assert_eq!(event["entries"], 2);
+    assert!(!String::from_utf8_lossy(&result.stderr).contains("example.org"));
+    let data: serde_json::Value = serde_json::from_slice(&fs::read(&snapshot).unwrap()).unwrap();
+    assert_eq!(data["change_id"], "example");
+    assert_eq!(
+        data["entries"]["article"]["destinations"],
+        serde_json::json!(["https://example.org/a"])
+    );
+    assert_eq!(
+        data["entries"]["other"]["destinations"],
+        serde_json::json!(["https://example.org/b"])
+    );
+    assert_eq!(
+        data["entries"]["article"]["observations"],
+        serde_json::json!(["not_checked"])
+    );
+    let preset = "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\n";
+    let checked = run(
+        dir.path(),
+        &change,
+        preset,
+        &[
+            "--link-observations",
+            snapshot.to_str().unwrap(),
+            "--html-scope",
+            "main",
+        ],
+    );
+    assert_eq!(checked.status.code(), Some(0));
+    let verdict: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+    assert!(
+        verdict["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["status"] == "not_checked")
+    );
+    let before = fs::read(&snapshot).unwrap();
+    change["entries"][0]["after"]["sha256"] = "0".repeat(64).into();
+    fs::write(&change_path, serde_json::to_vec(&change).unwrap()).unwrap();
+    let failure = export();
+    assert_eq!(failure.status.code(), Some(2));
+    assert_eq!(fs::read(&snapshot).unwrap(), before);
+}
+
+#[test]
+fn change_link_export_rejects_unavailable_input_without_replacing_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let change_path = dir.path().join("change.json");
+    let output = dir.path().join("output.json");
+    fs::write(&change_path, serde_json::to_vec(&input()).unwrap()).unwrap();
+    fs::write(&output, b"existing").unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(["content-change", "--export-link-observations"])
+        .env("CONTENT_GATE_CHANGE_FILE", &change_path)
+        .env("CONTENT_GATE_VERDICT_FILE", &output)
+        .output()
+        .unwrap();
+    assert_eq!(result.status.code(), Some(2));
+    assert_eq!(fs::read(&output).unwrap(), b"existing");
+    let aliased = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(["content-change", "--export-link-observations"])
+        .env("CONTENT_GATE_CHANGE_FILE", &change_path)
+        .env("CONTENT_GATE_VERDICT_FILE", &change_path)
+        .output()
+        .unwrap();
+    assert_eq!(aliased.status.code(), Some(2));
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&fs::read(&change_path).unwrap()).unwrap(),
+        input()
+    );
+}
+
+#[test]
 fn host_link_snapshot_never_contacts_the_destination() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
