@@ -74,6 +74,25 @@ headings = ["Summary"]
     let openings_preset = ContentPreset::from_toml(
         "version=1\nname='openings'\n[[gates]]\nid='opening'\nkind='repeated_paragraph_openings'\nopening_words=3\nmax_occurrences=2\n",
     )?;
+    let sentence_source =
+        "The team plans. The team acts. The team checks. Others respond.\n\n".repeat(500);
+    let sentence_preset = ContentPreset::from_toml(
+        "version=1\nname='sentence-openings'\n[[gates]]\nid='sentence-opening'\nkind='repeated_sentence_openings'\nopening_words=2\nmax_consecutive=2\n",
+    )?;
+    let (sentence_input, sentence_context, _) =
+        markdown_input_with_links("sentence-benchmark.md", &sentence_source)?;
+    let sentence_capabilities = ContentEvaluationContext {
+        adapter: Some(&sentence_context),
+        ..Default::default()
+    };
+    let sentence_check =
+        sentence_preset.evaluate_with_capabilities(&sentence_input, &sentence_capabilities)?;
+    anyhow::ensure!(
+        sentence_check.gates[0].measurements["sentences_evaluated"] == 2000
+            && sentence_check.gates[0].measurements["sentences_exceeding_limit"] == 500
+            && sentence_check.gates[0].findings.len() == 500,
+        "sentence-opening benchmark lost observations"
+    );
     let (openings_input, openings_context, _) = markdown_input_with_links("benchmark.md", &source)?;
     let openings_capabilities = aexeo_core::content_gate::ContentEvaluationContext {
         adapter: Some(&openings_context),
@@ -98,6 +117,7 @@ headings = ["Summary"]
     let mut html_projection = Vec::new();
     let mut html_eval = Vec::new();
     let mut openings_eval = Vec::new();
+    let mut sentence_openings_eval = Vec::new();
     let mut eval = Vec::new();
     let mut dense_eval = Vec::new();
     let mut parse_and_eval = Vec::new();
@@ -132,6 +152,12 @@ headings = ["Summary"]
                 .evaluate_with_capabilities(black_box(&openings_input), &openings_capabilities)?,
         );
         openings_eval.push(start.elapsed().as_micros());
+        let start = Instant::now();
+        black_box(
+            sentence_preset
+                .evaluate_with_capabilities(black_box(&sentence_input), &sentence_capabilities)?,
+        );
+        sentence_openings_eval.push(start.elapsed().as_micros());
         let start = Instant::now();
         black_box(dense_preset.evaluate(black_box(&dense_input))?);
         dense_eval.push(start.elapsed().as_micros());
@@ -187,6 +213,7 @@ headings = ["Summary"]
     html_projection.sort_unstable();
     html_eval.sort_unstable();
     openings_eval.sort_unstable();
+    sentence_openings_eval.sort_unstable();
     eval.sort_unstable();
     dense_eval.sort_unstable();
     parse_and_eval.sort_unstable();
@@ -199,6 +226,10 @@ headings = ["Summary"]
             ("content/html_projection", &html_projection),
             ("content/html_projection_and_evaluation", &html_eval),
             ("content/repeated_paragraph_openings", &openings_eval),
+            (
+                "content/repeated_sentence_openings",
+                &sentence_openings_eval,
+            ),
             ("content/evaluation", &eval),
             ("content/dense_forbidden_terms", &dense_eval),
             ("content/markdown_and_evaluation", &parse_and_eval),
@@ -212,7 +243,7 @@ headings = ["Summary"]
             let avg_ms = samples.iter().sum::<u128>() as f64 / samples.len() as f64 / 1000.0;
             println!(
                 "{}",
-                serde_json::json!({"name": name, "avg_ms": avg_ms, "p50_ms": samples[49] as f64 / 1000.0, "p95_ms": samples[94] as f64 / 1000.0, "iterations": samples.len(), "input_bytes": if name == "content/dense_forbidden_terms" { dense_source.len() } else if name.starts_with("content/html_") { html_source.len() } else if name.starts_with("content/markdown_links_") { link_source.len() } else { source.len() }})
+                serde_json::json!({"name": name, "avg_ms": avg_ms, "p50_ms": samples[49] as f64 / 1000.0, "p95_ms": samples[94] as f64 / 1000.0, "iterations": samples.len(), "input_bytes": if name == "content/repeated_sentence_openings" { sentence_source.len() } else if name == "content/dense_forbidden_terms" { dense_source.len() } else if name.starts_with("content/html_") { html_source.len() } else if name.starts_with("content/markdown_links_") { link_source.len() } else { source.len() }})
             );
         }
         return Ok(());
@@ -229,6 +260,10 @@ headings = ["Summary"]
     println!(
         "paragraph_openings_us p50={} p95={}",
         openings_eval[49], openings_eval[94]
+    );
+    println!(
+        "sentence_openings_us p50={} p95={}",
+        sentence_openings_eval[49], sentence_openings_eval[94]
     );
     println!("evaluation_us p50={} p95={}", eval[49], eval[94]);
     println!(
