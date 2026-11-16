@@ -708,6 +708,29 @@ describe("assessment persistence", () => {
     expect(missing).toContain("No evaluation is available");
     expect(missing).not.toContain("No findings");
   });
+  it("shows indexed documents whose findings records are absent in both views", async () => {
+    const { ctx, store } = host();
+    await save(ctx, item("missing", NEW), returning());
+    await save(ctx, item("present", NEW), returning());
+    store.delete(findingsKey("/missing"));
+    const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator: returning() });
+    expect(payload.totals.documentsIndexed).toBe(2);
+    expect(payload.totals.documentsWithoutFindings).toBe(1);
+    expect(payload.routes.map(route => route.route).sort()).toEqual(["/missing", "/present"]);
+    expect(payload.routes.find(route => route.route === "/missing")).toMatchObject({ findingCount: 0, title: "missing" });
+    expect(payload.routes.find(route => route.route === "/missing")?.assessment).toBeUndefined();
+    expect(payload.routes.find(route => route.route === "/missing")?.body_coverage).toBeUndefined();
+    const page = JSON.stringify(await renderFindingsPage(ctx.kv, { emptyFindingsText: "empty", emptyScoreText: "empty", refreshFailureVariant: "error", score: async () => null, truthLabel: () => "" }));
+    expect(page).toContain("/missing");
+    expect(page).toContain("coverage is unknown for 1 older or failed evaluations");
+    expect(page).toContain("1 indexed document(s) have no evaluation record");
+    expect(page).toContain("No content preset assessment was recorded for 2 document(s)");
+    expect(JSON.stringify(await renderDocumentPanel(ctx.kv, "/missing"))).toContain("No evaluation is available");
+    store.delete(findingsKey("/present"));
+    const noResults = JSON.stringify(await renderFindingsPage(ctx.kv, { emptyFindingsText: "empty", emptyScoreText: "empty", refreshFailureVariant: "error", score: async () => null, truthLabel: () => "" }));
+    expect(noResults).toContain("No evaluation records available for indexed documents");
+    expect(noResults).not.toContain("No findings reported for the available CMS checks");
+  });
   it("stores body coverage with the evaluated revision and exposes it in both views", async () => {
     const { ctx, store } = host();
     const missing = item("a", OLD);

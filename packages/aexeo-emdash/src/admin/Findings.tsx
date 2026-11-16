@@ -156,7 +156,7 @@ export function Findings(): React.JSX.Element {
           <h1 className="text-xl font-semibold">SEO findings</h1>
           <p className="mt-1 text-sm text-kumo-subtle">
             {payload.totals.findings === 0 ? (
-              <>{payload.totals.documentsIndexed === 0 ? "No CMS records indexed yet." : "No findings from the available CMS checks."}</>
+              <>{payload.totals.documentsIndexed === 0 ? "No CMS records indexed yet." : payload.totals.documentsWithoutFindings === payload.totals.documentsIndexed ? "No evaluation records available for indexed documents." : "No findings from the available CMS checks."}</>
             ) : (
               <>
                 {payload.totals.findings} findings across {payload.totals.routes} routes —{" "}
@@ -177,6 +177,7 @@ export function Findings(): React.JSX.Element {
 
       <p className="text-sm text-kumo-subtle">Rendered page markup, generated metadata and sitewide link inventory are not checked here. Audit the built site for page-level and link findings.</p>
 
+      {(payload.totals.documentsWithoutFindings ?? 0) > 0 && <p className="rounded border border-kumo-line p-3 text-sm">{payload.totals.documentsWithoutFindings} indexed document(s) have no evaluation record; run Refresh to evaluate them.</p>}
       {missingAssessments > 0 && <p className="rounded border border-kumo-line p-3 text-sm">No content preset assessment was recorded for {missingAssessments} document(s); absence of findings is not an editorial quality assessment.</p>}
 
       {toast !== null && (
@@ -208,6 +209,7 @@ export function Findings(): React.JSX.Element {
         <section key={route.route} className="rounded border border-kumo-line p-3 text-sm">
           <strong>{route.route}</strong>
           {route.assessment?.status !== "error" && cmsBodyCoverageNotice(route.body_coverage) && <p>{cmsBodyCoverageNotice(route.body_coverage)}</p>}
+          {route.assessment === undefined && <p>No content preset assessment is available for this document.</p>}
           {route.assessment?.status === "error" ? <p>Evaluation failed: {route.assessment.reason}. Findings are unavailable for this revision.</p> :
             route.assessment?.status === "evaluated" ? <ContentAssessmentDetails assessment={route.assessment} /> : null}
         </section>
