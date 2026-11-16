@@ -153,6 +153,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - When moving CLI validation into shared engine code, preserve the host’s
   translation of invalid inputs to user errors. Test the actual CLI exit code,
   diagnostic and unchanged prior output, including failures during callbacks.
+- For CLI autofixes, stage a candidate and force failures during input loading
+  and gate evaluation. Assert the original file bytes remain unchanged, the
+  expected diagnostic appears, and unavailable gates do not apply the fix.
 - For CLI revalidation failures, assert the specific error exit and diagnostic,
   and that any previous output remains unchanged. A nonzero exit alone can be
   an ordinary failed editorial gate rather than a rejected revalidation.
