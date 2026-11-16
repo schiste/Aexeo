@@ -55,9 +55,13 @@ Only reviews bound to the current example are included in `reviewed_metrics`.
 When `bind-review` has a report fingerprint it preserves the policy fingerprint
 and whether the report text and metadata were verified. The additive
 `review_policy_binding_counts` classifies otherwise bound reviews as matching,
-different, unbound, unverified input, or unverified evaluation run. The separate
-`policy_bound_reviewed_metrics` includes only matching reviews for which the
-current CLI report also binds its policy and exact text and metadata. Legacy
+different, unbound, unverified input, unverified evaluation run, or unverified
+format. The separate `policy_bound_reviewed_metrics` includes only matching
+reviews for which the current CLI report also binds its policy and exact text
+and metadata, and both the review and current report declare the corpus input
+format. An omitted format in either is counted as `unverified_format`, not as
+a match. A conflicting declared format is rejected. Format declarations are
+not authenticated or included in the fingerprint. Legacy
 reviews and results remain in the original metrics. A supplied malformed or
 mismatched current input fingerprint is rejected. These fingerprints do not
 authenticate the reviewer or report, identify the executable, or bind external

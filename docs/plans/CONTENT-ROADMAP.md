@@ -39,6 +39,9 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 
 ## Delivery tracker
 
+- [x] Exclude format-unbound reviews and runs from policy-bound reviewed metrics,
+  while retaining them in legacy aggregates and reporting their count. Format
+  declarations are not authenticated.
 - [x] Preserve the declared input format in new CLI feedback and reject known
   corpus format mismatches. Legacy artifacts without a format remain unverified;
   neither the format nor the fingerprint authenticates the evaluator.

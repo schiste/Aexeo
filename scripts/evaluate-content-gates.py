@@ -427,7 +427,7 @@ def evaluate(binary, corpus, split, review_log=None, reject_normalized_overlap=F
     counts = empty_counts()
     reviewed_counts = empty_counts()
     policy_reviewed_counts = empty_counts()
-    policy_review_bindings = {"matching": 0, "different": 0, "unbound": 0, "unverified_input": 0, "unverified_run": 0}
+    policy_review_bindings = {"matching": 0, "different": 0, "unbound": 0, "unverified_input": 0, "unverified_run": 0, "unverified_format": 0}
     unique_counts = empty_counts()
     unique_reviewed_counts = empty_counts()
     unique_reviewed_examples = 0
@@ -517,6 +517,8 @@ def evaluate(binary, corpus, split, review_log=None, reject_normalized_overlap=F
                         category = "different"
                     elif not report_has_policy or not report_has_input:
                         category = "unverified_run"
+                    elif "input_format" not in review or "input_format" not in report:
+                        category = "unverified_format"
                     else:
                         category = "matching"
                         record_result(policy_reviewed_counts, actual, expected)
