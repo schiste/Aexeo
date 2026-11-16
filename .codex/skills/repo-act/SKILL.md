@@ -20,6 +20,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   preparation is not configured: cleanup can remove ignored `node_modules`.
   Restore them with the package lockfile (`npm ci`) before Node tests; avoid
   an `npx` invocation that could install an unpinned missing executable.
+- If Aethyme reports that access to its host-scoped coordination state is
+  denied, check the active filesystem sandbox and retry the authorized action
+  with access to that state. Do not switch to a private coordination directory
+  merely to bypass the restriction: it cannot see the host’s other sessions.
 - If broker status reports schema version 0, check read-only whether its SQLite
   database is locked and whether an Aethyme cleanup process is still live. A
   transient lock can accompany that error; wait and retry before assuming a
