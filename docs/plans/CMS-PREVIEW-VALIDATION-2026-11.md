@@ -101,3 +101,25 @@ review; it is not a determination that sources are absent. A regression fixture
 includes both a linked study and a separate reference section. CMS-record audits
 continue to withhold this rendered-context rule. The fixture does not verify the
 actual rendered Preview pages or the reliability and relevance of their sources.
+
+## Multilingual preset selection, 16 November 2026
+
+Read fresh Preview CMS copies and ran the configured after-save handler locally
+with a freshly built plugin bundle and WASM, an in-memory host and mocked public
+URLs and translations. No CMS record was saved or published. One slug lookup
+without a locale returned the Arabic variant; explicit locale selection was used
+to retrieve its English and French variants.
+
+The test configured `natural-style-en` for `en-gb`, `natural-style-fr` for
+`fr-fr`, and `article-quality` as the fallback. The English and French
+small-business records selected their corresponding presets; the Arabic record
+selected the configured fallback. A mixed-component English record selected
+the English preset but its gate remained `not_checked` because body capability
+was unavailable. The other three tested records had complete body coverage;
+the configured checks passed. These results do not validate either language's
+editorial quality, language identification, source support, or whether the
+chosen presets are appropriate for the actual site. The fallback was a test
+configuration and should not be assumed appropriate for Arabic. The hosted UI,
+current rendered pages, production configuration, source lists, cross-page
+state and matching website release were not observed. The local website checkout
+was behind its remote and cannot establish the deployed renderer version.

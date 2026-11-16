@@ -1,3 +1,4 @@
+import { emptyPresetSelectionCounts, selectContentPreset, type PresetSelectionCounts } from "./preset-selection.js";
 import { emitTelemetry } from "./telemetry.js";
 import type { ContentReport, ContentEvaluationTelemetry, ExtensionInput, ExternalGateResult, LinkDestinationProjection, BoundLinkObservations } from "./content.js";
 import type { EvaluatorFn } from "./plugin.js";
@@ -8,6 +9,8 @@ export interface ContentPresetOptions {
   sources?: Record<string, string>;
   evidenceSources?: Record<string, string>;
   byCollection?: Record<string, string>;
+  byLocale?: Record<string, string>;
+  byCollectionLocale?: Record<string, Record<string, string>>;
   /** Restrict preset evaluation to these collections; site checks still run for all. */
   collections?: readonly string[];
 }
@@ -25,6 +28,11 @@ export type EvidenceSourceProvider = (request: {
   preset: string;
   collection: string | undefined;
 }) => Promise<Record<string, string>>;
+
+export interface PresetSelectionTelemetry {
+  counts: PresetSelectionCounts;
+  status: "success" | "error";
+}
 
 export interface EvidenceSourceTelemetry {
   duration_ms: number;
@@ -61,6 +69,7 @@ export function withContentPreset(
   onLinkProviderTelemetry?: (event: LinkProviderTelemetry) => void,
   evidenceProvider?: EvidenceSourceProvider,
   onEvidenceSourceTelemetry?: (event: EvidenceSourceTelemetry) => void,
+  onPresetSelectionTelemetry?: (event: PresetSelectionTelemetry) => void,
 ): EvaluatorFn {
   if (!preset) return base;
   return async (documents, context) => {
@@ -68,6 +77,8 @@ export function withContentPreset(
     if (!result.ok) return result;
     const findings = [...result.findings];
     const assessments = { ...result.assessments };
+    const selectionCounts = onPresetSelectionTelemetry ? emptyPresetSelectionCounts() : undefined;
+    let selectionStatus: PresetSelectionTelemetry["status"] = "error";
     try {
       for (const [index, document] of documents.entries()) {
         const collection = context?.collections[index];
@@ -75,9 +86,9 @@ export function withContentPreset(
           if (collection === undefined) throw new Error("collection is required for a scoped content preset");
           if (!preset.collections.includes(collection)) continue;
         }
-        const selected = collection !== undefined && preset.byCollection !== undefined && Object.hasOwn(preset.byCollection, collection)
-          ? preset.byCollection[collection] : undefined;
-        const name = selected ?? preset.name;
+        const selected = selectContentPreset(preset, collection, document.lang);
+        if (selectionCounts) selectionCounts[selected.source]++;
+        const name = selected.name;
         if (!name) throw new Error(`empty preset name for collection ${collection}`);
         // Inspect the resolved gates before sending private content to a host.
         // A configured provider replaces static snapshots. Never fall back to
@@ -177,9 +188,12 @@ export function withContentPreset(
             ...(location === undefined ? {} : { aexeo_source_location: { block_index: location.block_index, span_index: location.span_index, utf16_offset: location.utf16_offset } }) };
         }));
       }
+      selectionStatus = "success";
       return { ok: true, findings, assessments };
     } catch (error) {
       return { ok: false, reason: "content_preset_error", detail: error instanceof Error ? error.message : String(error) };
+    } finally {
+      if (selectionCounts && onPresetSelectionTelemetry) emitTelemetry(onPresetSelectionTelemetry, { counts: selectionCounts, status: selectionStatus });
     }
   };
 }

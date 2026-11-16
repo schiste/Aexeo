@@ -23,6 +23,33 @@ aexeoPlugin({
 })
 ```
 
+## Language-specific content presets
+
+The configured plugin can select different presets for languages within the same
+collection. Selection precedence is `byCollectionLocale`, `byLocale`,
+`byCollection`, then `name`. Keys match the document's `lang` exactly and are
+case-sensitive; there is no implicit language-prefix fallback. For EmDash
+records, `lang` comes from the record's locale or, when absent, the host's
+default locale. Choose a language-neutral fallback when unmatched or missing
+locales must not receive language-specific rules. A selected empty name is an
+error. Collection restrictions still apply before preset selection.
+
+```js
+aexeoPlugin({
+  contentPreset: {
+    name: "article", // minimal fallback; choose checks appropriate for each locale
+    byLocale: { "fr-fr": "natural-style-fr" },
+    byCollectionLocale: { blog_posts: { "en-gb": "article-readable", "fr-fr": "article-quality" } },
+  },
+})
+```
+
+Use custom composed presets to combine the editorial and language-specific rules
+appropriate to each collection. Language selection does not translate content,
+infer its actual language, or establish that a heuristic is appropriate. Trusted
+runtime hosts may pass `onPresetSelectionTelemetry` to receive aggregate counts
+by matching level and success/error; it contains no locales, routes or content.
+
 ## External gates in configured mode
 
 The default descriptor loads no external code. Hosts that need custom gates can
