@@ -60,6 +60,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 ## Validation Checklist
 
 - Run the fastest relevant test command first.
+- Before combining fixture setup with package tests, resolve paths relative to
+  the command working directory and stop on setup failure (for example, use
+  `&&`). A succeeding test command alone does not prove setup ran.
 - For rules with overlapping triggers, isolate the trigger under test in the
   regression fixture and confirm the test fails before the fix; another
   matching trigger can otherwise hide the defect.
