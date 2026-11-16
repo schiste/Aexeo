@@ -153,6 +153,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For Python JSON Schema format checks, verify each required format checker is
   registered: optional dependencies can otherwise make validation silently skip
   it. Test malformed format values and fail closed when a checker is missing.
+- When revalidating JSON artifacts, test duplicate keys inside nested extension
+  maps as well as typed fields, and verify rejection preserves prior output;
+  ordinary map decoding can silently retain only one value.
 - For JSON contracts, test omitted fields and explicit `null` separately when
   the schema distinguishes them: Serde `Option` normally collapses both.
 - Test unknown fields inside every tagged enum variant, including unit variants:
