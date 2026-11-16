@@ -534,3 +534,6 @@ sources with different identifiers remain undetected and require human review.
 
 Selected EmDash body fields distinguish unobserved fields from explicit nulls:
 missing fields retain observed prose but make body capabilities unavailable.
+
+- [x] Export one offline, source-bound link-observation template for a complete
+  multi-entry content change; reject incomplete projections without replacing output.

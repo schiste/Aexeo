@@ -56,7 +56,7 @@ pub fn build_cli() -> Command {
         .subcommand(
             Command::new("content-change")
                 .about("Evaluate a content-gate change and write a bound verdict")
-                .arg(Arg::new("preset").long("preset").required(true).help("Explicit content preset name"))
+                .arg(Arg::new("preset").long("preset").required_unless_present("export-link-observations").help("Explicit content preset name"))
                 .arg(Arg::new("preset-source").long("preset-source").num_args(1).action(ArgAction::Append).help("Load a named TOML preset as NAME=PATH; may be repeated"))
                 .arg(Arg::new("content-root").long("content-root").help("Authorize this absolute content root for local file references (Linux and supported macOS kernels)"))
                 .arg(Arg::new("extension-results").long("extension-results").num_args(1).help("Load explicitly supplied, input-bound external gate results for change entries"))
@@ -70,6 +70,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("verify-offline-receipt").long("verify-offline-receipt").requires("offline-receipt").help("Re-evaluate and compare a previous experimental offline receipt"))
                 .arg(Arg::new("check-link-reachability").long("check-link-reachability").action(ArgAction::SetTrue).help("Explicitly enable bounded external HTTP observations for reachability gates"))
                 .arg(Arg::new("link-observations").long("link-observations").num_args(1).conflicts_with_all(["check-link-reachability", "offline-receipt"]).help("Load trusted source-bound observations for change entries without network access"))
+                .arg(Arg::new("export-link-observations").long("export-link-observations").action(ArgAction::SetTrue).conflicts_with_all(["preset", "preset-source", "extension-results", "plain-text-paragraphs", "collection-snapshot", "verify-verdict", "offline-receipt", "offline-receipt-bundle", "evaluator-identity", "verify-offline-receipt", "check-link-reachability", "link-observations"]).help("Write an offline, source-bound observation template; it may contain private URLs"))
                 .arg(Arg::new("link-max-checks").long("link-max-checks").value_parser(value_parser!(u64).range(1..=100)).default_value("20").help("Maximum external link checks across the entire change"))
                 .arg(Arg::new("link-timeout").long("link-timeout").value_parser(value_parser!(u64).range(1..=30)).default_value("5").help("Maximum seconds per external link including redirects"))
                 .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate link observation counts to stderr")),

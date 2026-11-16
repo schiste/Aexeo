@@ -320,8 +320,21 @@ counts and elapsed time, with no source, paths or destinations.
 ### Change-wide host observations
 
 A `content-change` host may pass `--link-observations change-links.json` to
-supply observations without network access. Compose the individual snapshots
-from `content --export-link-observations` under their change entry identifiers:
+supply observations without network access. Generate the complete template in one
+offline operation, using the same HTML scope as the subsequent evaluation:
+
+```sh
+CONTENT_GATE_CHANGE_FILE=change.json CONTENT_GATE_VERDICT_FILE=change-links.json \
+  aexeo-cli content-change --export-link-observations --html-scope main --telemetry
+```
+
+No preset or network access is needed. The command validates source digests and
+rejects the entire export if any post-change entry cannot be projected; a prior
+output remains intact on failure. All observations start as `not_checked`; a
+trusted host can replace them with its own results before importing the file.
+Telemetry contains aggregate counts and elapsed time only. The template may
+contain private URLs. Individual `content --export-link-observations` snapshots
+can also be assembled under their change entry identifiers:
 
 ```json
 {

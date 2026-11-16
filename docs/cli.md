@@ -168,7 +168,7 @@ Evaluate a content-gate change and write a bound verdict
 ```text
 Evaluate a content-gate change and write a bound verdict
 
-Usage: content-change [OPTIONS] --preset <preset>
+Usage: content-change [OPTIONS]
 
 Options:
       --preset <preset>
@@ -215,6 +215,9 @@ Options:
 
       --link-observations <link-observations>
           Load trusted source-bound observations for change entries without network access
+
+      --export-link-observations
+          Write an offline, source-bound observation template; it may contain private URLs
 
       --link-max-checks <link-max-checks>
           Maximum external link checks across the entire change
