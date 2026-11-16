@@ -74,7 +74,7 @@ fn conditional_markup_is_not_reported_as_body_or_navigation() {
         "identity":{"origin":"https://example.org","release":"r1","surface":"public","snapshot":"s1"},
         "snapshot_date":"2026-11-05T00:00:00Z", "crawl_complete":false,
         "pages":[
-            {"url":"https://example.org/a", "status_code":200, "response_headers":{}, "html":"<main><noscript><a href='/b'>fallback</a></noscript><template><nav><a href='/b'>template</a></nav></template></main>"},
+            {"url":"https://example.org/a", "status_code":200, "response_headers":{}, "html":"<main><noscript><a href='/b'>fallback</a></noscript><template><nav><a href='/b'>template</a></nav></template><dialog><a href='/b'>dialog</a></dialog></main>"},
             {"url":"https://example.org/b", "status_code":200, "response_headers":{}, "html":"<main>B</main>"}
         ]
     });
@@ -101,10 +101,11 @@ fn conditional_markup_is_not_reported_as_body_or_navigation() {
     );
     assert_eq!(destination["evidence"][0]["component"], "noscript");
     assert_eq!(destination["evidence"][1]["component"], "template");
+    assert_eq!(destination["evidence"][2]["component"], "dialog");
     assert_eq!(destination["conditional_source_pages"], 1);
     assert_eq!(destination["nonconditional_source_pages"], 0);
     let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
-    assert_eq!(telemetry["conditional_link_count"], 2);
+    assert_eq!(telemetry["conditional_link_count"], 3);
     assert_eq!(telemetry["unclassified_markup_link_count"], 0);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("example.org"));
 }

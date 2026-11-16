@@ -31,7 +31,7 @@ pub struct LinkEvidence {
     pub context: LinkContext,
     pub component: Option<String>,
     pub paragraph: Option<String>,
-    /// Whether the link appeared inside template or noscript source markup.
+    /// Whether the link appeared inside template, noscript, or a closed dialog.
     /// Absent in older reports, where its status cannot be established.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conditional_markup: Option<bool>,
@@ -87,7 +87,7 @@ struct Scope {
     explicit: bool,
     /// Inside an `aside` or `header`, which `article` and `main` cannot promote to body.
     non_body_landmark: bool,
-    /// Source-only markup may not be displayed in the evaluated page.
+    /// Markup that may not be displayed in the evaluated page.
     conditional_markup: bool,
     hidden_attribute: bool,
     hidden_inline_style: bool,
@@ -304,7 +304,10 @@ pub fn extract_document(
             {
                 scope.hidden_inline_style = true;
             }
-            if matches!(tag, "template" | "noscript") && !scope.conditional_markup {
+            if (matches!(tag, "template" | "noscript")
+                || (tag == "dialog" && attribute(&node, "open").is_none()))
+                && !scope.conditional_markup
+            {
                 scope.conditional_markup = true;
                 scope.context = LinkContext::Unknown;
                 scope.component = Some(tag.to_string());
@@ -664,6 +667,25 @@ mod tests {
         let old: LinkEvidence = serde_json::from_value(old).unwrap();
         assert_eq!(old.hidden_inline_style, None);
         assert!(!old.is_nonconditional());
+    }
+
+    #[test]
+    fn closed_dialog_links_are_conditional_even_inside_an_open_dialog() {
+        let html = r#"<main><dialog><a href='/closed'>closed</a><dialog open><a href='/nested'>nested</a></dialog></dialog><dialog open='false'><a href='/open'>open</a></dialog><a href='/outside'>outside</a></main>"#;
+        let links = extract_links(html, "https://example.org/a", "https://example.org", None);
+        assert_eq!(links.len(), 4);
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| link.conditional_markup)
+                .collect::<Vec<_>>(),
+            vec![Some(true), Some(true), Some(false), Some(false)]
+        );
+        assert_eq!(links[0].context, LinkContext::Unknown);
+        assert_eq!(links[0].component.as_deref(), Some("dialog"));
+        assert_eq!(links[1].component.as_deref(), Some("dialog"));
+        assert_eq!(links[2].context, LinkContext::Body);
+        assert!(links[2].is_nonconditional());
     }
 
     #[test]
