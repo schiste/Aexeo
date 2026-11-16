@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { ContentAssessmentDetails } from "../src/admin/Findings.js";
+import { ContentAssessmentDetails, findingRouteCount } from "../src/admin/Findings.js";
 import type { DocumentAssessment } from "../src/plugin.js";
 
 describe("React content assessment", () => {
+  it("counts distinct finding routes for legacy dashboard payloads", () => {
+    const totals: { routesWithFindings?: number } = {};
+    const findings = ["/a", "/a", "/b"].map(route => ({ route }));
+    expect(findingRouteCount({ totals, findings })).toBe(2);
+    expect(findingRouteCount({ totals: { ...totals, routesWithFindings: 1 }, findings })).toBe(1);
+    expect(findingRouteCount({ totals: { ...totals, routesWithFindings: 0 }, findings })).toBe(0);
+  });
   it("renders location coverage for current and older assessments", () => {
     const assessment: Extract<DocumentAssessment, { status: "evaluated" }> = {
       status: "evaluated", preset: "article", gates: [],

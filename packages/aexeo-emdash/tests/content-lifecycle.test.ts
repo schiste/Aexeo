@@ -708,6 +708,15 @@ describe("assessment persistence", () => {
     expect(missing).toContain("No evaluation is available");
     expect(missing).not.toContain("No findings");
   });
+  it("counts only routes with findings separately from all indexed routes", async () => {
+    const { ctx } = host();
+    await save(ctx, item("flagged", NEW), returning("CUSTOM001", "CUSTOM002"));
+    await save(ctx, item("clear", NEW), returning());
+    const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator: returning() });
+    expect(payload.totals).toMatchObject({ documentsIndexed: 2, routes: 2, findings: 2, routesWithFindings: 1 });
+    expect(payload.routes.find(route => route.route === "/clear")?.findingCount).toBe(0);
+    expect(payload.routes.find(route => route.route === "/flagged")?.findingCount).toBe(2);
+  });
   it("shows indexed documents whose findings records are absent in both views", async () => {
     const { ctx, store } = host();
     await save(ctx, item("missing", NEW), returning());

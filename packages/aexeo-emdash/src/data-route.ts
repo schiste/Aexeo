@@ -43,6 +43,8 @@ export interface FindingsPayload {
   // findings array shape mutation could throw it off.
   totals: {
     routes: number;
+    /** Distinct document routes represented by findings; excludes sitewide findings. */
+    routesWithFindings?: number;
     findings: number;
     errors: number;
     warnings: number;
@@ -256,6 +258,7 @@ async function buildFindingsPayload(
     findings,
     totals: {
       routes: routes.length,
+      routesWithFindings: routes.filter((route) => route.findingCount > 0).length,
       findings: findings.length,
       errors: findings.filter((f) => f.severity === "error").length,
       warnings: findings.filter((f) => f.severity === "warning").length,

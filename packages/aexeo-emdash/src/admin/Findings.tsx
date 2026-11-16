@@ -41,6 +41,11 @@ interface FetchState {
   payload: FindingsPayload | null;
 }
 
+/** Use the aggregate when supplied, otherwise derive it from legacy finding rows. */
+export function findingRouteCount(payload: { totals: { routesWithFindings?: number }; findings: ReadonlyArray<{ route: string }> }): number {
+  return payload.totals.routesWithFindings ?? new Set(payload.findings.map((finding) => finding.route)).size;
+}
+
 /** Shared presentation of one persisted assessment, including older records. */
 export function ContentAssessmentDetails({ assessment }: { assessment: Extract<DocumentAssessment, { status: "evaluated" }> }): React.JSX.Element {
   return <details>
@@ -143,6 +148,9 @@ export function Findings(): React.JSX.Element {
     return <div className="p-4 text-sm text-kumo-subtle">No data.</div>;
   }
 
+  // Older payloads lack the aggregate. Their finding rows still provide the
+  // distinct routes, including findings that predate indexed route summaries.
+  const routesWithFindings = findingRouteCount(payload);
   const missingAssessments = payload.routes.filter((route) => route.assessment === undefined).length;
   const routesByPath = new Map<string, RouteSummary>();
   for (const route of payload.routes) {
@@ -159,7 +167,7 @@ export function Findings(): React.JSX.Element {
               <>{payload.totals.documentsIndexed === 0 ? "No CMS records indexed yet." : payload.totals.documentsWithoutFindings === payload.totals.documentsIndexed ? "No evaluation records available for indexed documents." : "No findings from the available CMS checks."}</>
             ) : (
               <>
-                {payload.totals.findings} findings across {payload.totals.routes} routes —{" "}
+                {payload.totals.findings} findings across {routesWithFindings} routes —{" "}
                 {payload.totals.errors} errors, {payload.totals.warnings} warnings.
               </>
             )}
