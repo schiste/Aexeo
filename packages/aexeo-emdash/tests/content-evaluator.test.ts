@@ -10,7 +10,7 @@ const report: ContentReport = { preset: "custom", input_id: "/test", applied_fix
   findings: [{ rule_id: "heading", path: "/test", message: "Missing heading", line: 1, column: 1, severity: "warning", suggestion: null, scope: "page" }], reason: null,
 }] };
 
-const externalReport: ContentReport = { ...report, gates: [{ ...report.gates[0]!, gate_id: "external", required_capability: "extension", status: "not_checked", findings: [], reason: "extension unavailable" }] };
+const externalReport: ContentReport = { ...report, gates: [{ ...report.gates[0]!, gate_id: "external", required_capability: "extension" as const, status: "not_checked", findings: [], reason: "extension unavailable" }] };
 
 describe("configured content preset", () => {
   it("adds findings without replacing the existing evaluator", async () => {
@@ -216,4 +216,61 @@ it("preserves not-checked findings if the link provider fails or the adapter lac
   }
   expect(events).toEqual(["error", "unavailable"]);
   expect(evaluate).toHaveBeenCalledTimes(2);
+});
+
+it("uses document-specific evidence only when the preset needs it", async () => {
+  const evidenceGate = { ...report.gates[0]!, required_capability: "text_and_evidence" as const, status: "not_checked" as const, findings: [] };
+  const provider = vi.fn(async ({ route }: { route: string }) => ({ study: `snapshot ${route}` }));
+  const evaluate = vi.fn(async (_doc: EmdashDocument, _name: string, _sources?: Record<string, string>, evidence?: Record<string, string>) => ({ ...report, gates: [evidenceGate], evidence }));
+  const evaluator = withContentPreset(base, { name: "article", evidenceSources: { static: "unused" } }, evaluate, undefined, undefined, undefined, undefined, undefined, undefined, provider);
+  const result = await evaluator([doc, { ...doc, route: "/second" }], { collections: ["posts", "posts"] });
+  expect(result.ok).toBe(true);
+  expect(provider).toHaveBeenCalledWith({ route: "/test", preset: "article", collection: "posts" });
+  expect(evaluate).toHaveBeenCalledWith(doc, "article", undefined, { study: "snapshot /test" });
+  expect(evaluate).toHaveBeenCalledWith(expect.objectContaining({ route: "/second" }), "article", undefined, { study: "snapshot /second" });
+  const unused = vi.fn();
+  await withContentPreset(base, { name: "article" }, async () => report, undefined, undefined, undefined, undefined, undefined, undefined, unused)([doc]);
+  expect(unused).not.toHaveBeenCalled();
+});
+
+it("keeps evidence gates unchecked and local findings on evidence provider failure", async () => {
+  const evidenceGate = { ...report.gates[0]!, gate_id: "evidence", required_capability: "text_and_evidence" as const, status: "not_checked" as const, findings: [] };
+  const evaluate = vi.fn(async () => ({ ...report, gates: [report.gates[0]!, evidenceGate] }));
+  const events: unknown[] = [];
+  const evaluator = withContentPreset(base, { name: "article", evidenceSources: { stale: "snapshot" } }, evaluate, undefined, undefined, undefined, undefined, undefined, undefined, async () => { throw new Error("private detail"); }, (event) => events.push(event));
+  const result = await evaluator([doc]);
+  expect(evaluate).toHaveBeenCalledWith(doc, "article", undefined);
+  expect(result.ok && result.findings.some((finding) => finding.rule_id === "heading")).toBe(true);
+  expect(result.ok && result.assessments?.["/test"]?.status === "evaluated" && result.assessments["/test"].gates).toEqual(expect.arrayContaining([expect.objectContaining({ gate_id: "evidence", status: "not_checked", reason: "evidence source provider failed" })]));
+  expect(events).toEqual([expect.objectContaining({ status: "error" })]);
+  expect(JSON.stringify(events)).not.toContain("private detail");
+});
+
+it("retains document evidence during external and link evaluation", async () => {
+  const gates = [
+    { ...report.gates[0]!, required_capability: "text_and_evidence" as const, status: "not_checked" as const, findings: [] },
+    { ...report.gates[0]!, required_capability: "extension" as const, status: "not_checked" as const, findings: [] },
+    { ...report.gates[0]!, required_capability: "link_reachability" as const, status: "not_checked" as const, findings: [] },
+  ];
+  const evaluate = vi.fn(async () => ({ ...report, gates }));
+  const project = vi.fn(async () => ({ id: "/test", text: "x", source_text: null, headings: null, metadata: null, evidence_sources: { s: "current" } }));
+  const external = vi.fn(async () => []);
+  const links = vi.fn(async () => ["reachable" as const]);
+  const projection = async () => ({ destinations: ["https://example.org"], snapshot: "abc" });
+  const events: unknown[] = [];
+  const evaluator = withContentPreset(base, { name: "article" }, evaluate, external, project, undefined, links, projection as never, undefined, async () => ({ s: "current" }), (event) => events.push(event));
+  expect((await evaluator([doc])).ok).toBe(true);
+  expect(project).toHaveBeenCalledWith(doc, { s: "current" });
+  expect(evaluate).toHaveBeenLastCalledWith(doc, "article", undefined, { s: "current" }, undefined, [], expect.objectContaining({ observations: ["reachable"] }));
+  expect(events).toEqual([expect.objectContaining({ status: "success" })]);
+});
+
+it("treats malformed evidence provider results as unavailable", async () => {
+  const gate = { ...report.gates[0]!, required_capability: "text_and_evidence" as const, status: "not_checked" as const, findings: [] };
+  for (const bad of [null, [], { s: 1 }, { "": "text" }]) {
+    const evaluate = vi.fn(async () => ({ ...report, gates: [gate] }));
+    const result = await withContentPreset(base, { name: "article" }, evaluate, undefined, undefined, undefined, undefined, undefined, undefined, async () => bad as never)([doc]);
+    expect(result.ok && result.assessments?.["/test"]?.status === "evaluated" && result.assessments["/test"].gates[0]?.reason).toBe("evidence source provider failed");
+    expect(evaluate).toHaveBeenCalledTimes(1);
+  }
 });

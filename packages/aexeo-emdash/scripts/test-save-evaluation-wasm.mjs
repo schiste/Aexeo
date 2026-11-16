@@ -280,6 +280,44 @@ kind="link_reachability"
   console.log("WASM configured link provider runs on refresh and save");
 }
 
+// Evidence is selected separately for each CMS record, on refresh and save.
+{
+  const preset = `version=1
+name="evidence"
+[[gates]]
+id="anchor"
+kind="evidence_anchors"
+source="study"
+claim="Claim"
+quote="Quote"
+`;
+  let fail = false;
+  const calls = [];
+  const telemetry = [];
+  const configured = createPlugin({ contentPreset: { name: "custom", sources: { custom: preset }, evidenceSources: { study: "stale Quote" } } }, {
+    evidenceSources: async ({ route, preset: selected, collection }) => {
+      calls.push({ route, selected, collection });
+      if (fail) throw new Error("private failure");
+      return { study: route === "/evidence-a" ? "Quote" : "other" };
+    },
+    onEvidenceSourceTelemetry: (event) => telemetry.push(event),
+  });
+  const first = item("evidence-a", { data: { body: [block("p", "Claim")] } });
+  const second = item("evidence-b", { data: { body: [block("p", "Claim")] } });
+  const host = fakeHost([first, second]);
+  await configured.routes.refresh.handler(host.ctx);
+  assert.equal(host.store.get("findings:/evidence-a").assessment.gates[0].status, "passed");
+  assert.equal(host.store.get("findings:/evidence-b").assessment.gates[0].status, "failed");
+  fail = true;
+  await configured.hooks["content:afterSave"].handler({ content: first, collection: "pages", isNew: false }, host.ctx);
+  assert.equal(host.store.get("findings:/evidence-a").assessment.gates[0].status, "not_checked");
+  assert.equal(calls.length, 3);
+  assert.deepEqual(telemetry.map((event) => event.status), ["success", "success", "error"]);
+  assert.ok(!JSON.stringify(telemetry).includes("private"));
+  assert.deepEqual(host.logged, []);
+  console.log("WASM document evidence provider runs on refresh and save");
+}
+
 // --- A save must not invent findings from its one-page view -----------------
 
 {
