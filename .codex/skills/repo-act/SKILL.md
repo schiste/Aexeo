@@ -100,6 +100,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   unreadable settings through both save and refresh. A failed settings read must
   not certify body capabilities via an automatic fallback; verify coverage
   telemetry and that recognized prose remains available.
+- For CMS listings, test malformed response shapes, items and cursors as well
+  as exceptions containing private text. Assert sitewide checks stay incomplete,
+  other collections remain usable, and reports and telemetry omit host errors.
 - For route-keyed EmDash findings, test duplicate routes on save and refresh,
   including collisions across collections and incomplete or partial inventories.
   Check that an unscanned owner is not overwritten and that a single save or
