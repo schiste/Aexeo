@@ -453,7 +453,10 @@ is safe or that a heuristic establishes quality. Unavailable inputs remain
 4. **Improve adapters and scopes.** Define and document capabilities and source
    locations across Markdown, EmDash and website adapters. Support collection
    checks explicitly, and show what could not run rather than silently passing.
-   Exercise equivalent fixtures across CLI and WASM/EmDash.
+   A shared synthetic fixture now exercises CLI Markdown and EmDash/WASM for
+   matching gate outcomes, source locations, observed empty content and aggregate
+   telemetry; unavailable EmDash content is separately checked. Expand parity
+   coverage to more gates, formats and real host projections.
 5. **Make agent loops practical.** Ship discoverable skills and a single-item
    lint workflow with structured diagnostics, localized safe fixes and bounded
    retries. Re-evaluate after changes; do not treat a model's approval as ground

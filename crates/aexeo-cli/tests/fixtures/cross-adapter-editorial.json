@@ -1,0 +1,91 @@
+{
+  "preset": "version=1\nname='cross'\n[[gates]]\nid='style'\nkind='forbidden_terms'\nterms=['generic phrase']\n[[gates]]\nid='paragraphs'\nkind='paragraph_count'\nmin=1\nmax=2\n[[gates]]\nid='links'\nkind='link_count'\nmin=1\n[[gates]]\nid='description'\nkind='required_metadata'\nfields=['description']\n",
+  "markdown": "# Élan\n\n😀 generic phrase and [source](https://example.org).\n",
+  "document": {
+    "route": "/example",
+    "title": "Élan",
+    "description_source_observed": false,
+    "body": [
+      {
+        "style": "h1",
+        "children": [
+          {
+            "_type": "span",
+            "text": "Élan"
+          }
+        ]
+      },
+      {
+        "children": [
+          {
+            "_type": "span",
+            "text": "😀 "
+          },
+          {
+            "_type": "span",
+            "text": "generic phrase and "
+          },
+          {
+            "_type": "span",
+            "text": "source",
+            "marks": [
+              "ref"
+            ]
+          },
+          {
+            "_type": "span",
+            "text": "."
+          }
+        ],
+        "markDefs": [
+          {
+            "_key": "ref",
+            "_type": "link",
+            "href": "https://example.org"
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "statuses": [
+      "failed",
+      "passed",
+      "passed",
+      "not_checked"
+    ],
+    "paragraph_count": 1,
+    "link_count": 1,
+    "markdown_location": {
+      "gate_id": "style",
+      "finding_index": 0,
+      "line": 3,
+      "column": 3
+    },
+    "emdash_location": {
+      "gate_id": "style",
+      "finding_index": 0,
+      "block_index": 1,
+      "span_index": 1,
+      "utf16_offset": 0
+    },
+    "source_mapping": {
+      "eligible": 1,
+      "mapped": 1,
+      "unmapped": 0
+    }
+  },
+  "empty_markdown": "",
+  "empty_document": {
+    "route": "/empty",
+    "title": "Empty",
+    "description_source_observed": false,
+    "body": []
+  },
+  "empty_statuses": [
+    "passed",
+    "failed",
+    "failed",
+    "not_checked"
+  ]
+}
