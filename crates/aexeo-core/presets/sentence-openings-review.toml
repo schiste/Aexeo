@@ -1,0 +1,9 @@
+version = 1
+name = "Sentence openings review starter"
+
+[[gates]]
+id = "editorial.sentence_openings"
+kind = "repeated_sentence_openings"
+opening_words = 2
+max_consecutive = 2
+blocking = false

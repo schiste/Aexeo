@@ -55,3 +55,5 @@ Existing source and factuality work is outside this plan.
   and the scripted multi-format revisions do not test autonomous retry enforcement. The project
   currently has only the user and agent available, so independent multi-reviewer
   results remain unavailable rather than being inferred from these examples.
+
+- Added an opt-in, advisory repeated sentence-opening gate with configurable segmentation and source mapping for CLI and EmDash; it does not infer authorship.

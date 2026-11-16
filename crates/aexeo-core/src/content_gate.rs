@@ -72,6 +72,104 @@ const MAX_DUPLICATE_PARAGRAPH_BYTES: usize = 16 * 1024;
 const MAX_DUPLICATE_PARAGRAPH_KEYS: usize = 10_000;
 const MAX_DUPLICATE_PARAGRAPH_KEY_BYTES: usize = 4 * 1024 * 1024;
 
+// Visit exactly the same heuristic sentence boundaries for every sentence gate.
+// Positions refer to the projected adapter text, not necessarily the source file.
+fn for_each_sentence(
+    text: &str,
+    mut line: usize,
+    mut column: usize,
+    block_ends: &[usize],
+    delimiters: &str,
+    abbreviations: &[String],
+    mut visit: impl FnMut(&str, usize, usize),
+) {
+    let mut segment_start = 0;
+    let mut first_position = None;
+    let mut next_block = 0;
+    let mut after_delimiter = false;
+    let mut adjacent_to_delimiter = false;
+    for (offset, ch) in text
+        .char_indices()
+        .map(|(offset, ch)| (offset, Some(ch)))
+        .chain(std::iter::once((text.len(), None)))
+    {
+        while block_ends.get(next_block).is_some_and(|&end| end < offset) {
+            next_block += 1;
+        }
+        let block_end = block_ends.get(next_block) == Some(&offset);
+        if after_delimiter && !block_end {
+            if ch.is_some_and(char::is_whitespace) {
+                adjacent_to_delimiter = false;
+            } else if let Some(c) = ch.filter(|c| {
+                matches!(c, '»' | '”' | '’' | ')' | ']' | '}')
+                    || (adjacent_to_delimiter && matches!(c, '\'' | '"'))
+            }) {
+                segment_start = offset + c.len_utf8();
+                first_position = None;
+                column += 1;
+                continue;
+            } else {
+                after_delimiter = false;
+            }
+        }
+        let decimal_point = !block_end
+            && ch == Some('.')
+            && text[..offset]
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_ascii_digit())
+            && text[offset + 1..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit());
+        let abbreviation = !block_end
+            && ch == Some('.')
+            && !abbreviations.is_empty()
+            && abbreviations.iter().any(|abbr| {
+                let Some(word) = abbr.strip_suffix('.') else {
+                    return false;
+                };
+                let Some(start) = offset.checked_sub(word.len()) else {
+                    return false;
+                };
+                start >= segment_start
+                    && text.get(start..offset) == Some(word)
+                    && (start == segment_start
+                        || text[..start]
+                            .chars()
+                            .next_back()
+                            .is_some_and(char::is_whitespace))
+            });
+        let delimiter =
+            !decimal_point && !abbreviation && ch.is_none_or(|ch| delimiters.contains(ch));
+        if block_end || delimiter {
+            after_delimiter = delimiter && ch.is_some();
+            adjacent_to_delimiter = after_delimiter;
+            let (start_line, start_column) = first_position.unwrap_or((line, column));
+            visit(&text[segment_start..offset], start_line, start_column);
+            segment_start = offset
+                + if delimiter {
+                    ch.map_or(0, char::len_utf8)
+                } else {
+                    0
+                };
+            first_position = if !delimiter && ch.is_some_and(|ch| !ch.is_whitespace()) {
+                Some((line, column))
+            } else {
+                None
+            };
+        } else if ch.is_some_and(|ch| !ch.is_whitespace()) && first_position.is_none() {
+            first_position = Some((line, column));
+        }
+        if ch == Some('\n') {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+}
+
 fn default_min_paragraph_chars() -> usize {
     1
 }
@@ -140,6 +238,20 @@ pub enum ContentGate {
         blocking: bool,
         opening_words: usize,
         max_occurrences: usize,
+    },
+    /// Flags consecutive sentences with the same literal opening within a paragraph.
+    RepeatedSentenceOpenings {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default)]
+        blocking: bool,
+        opening_words: usize,
+        max_consecutive: usize,
+        #[serde(default = "default_sentence_delimiters")]
+        delimiters: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        abbreviations: Vec<String>,
     },
     /// Finds exact repeated paragraphs after whitespace normalization.
     DuplicateParagraphs {
@@ -420,6 +532,7 @@ impl ContentGate {
             | Self::ParagraphCount { severity, .. }
             | Self::ParagraphLength { severity, .. }
             | Self::RepeatedParagraphOpenings { severity, .. }
+            | Self::RepeatedSentenceOpenings { severity, .. }
             | Self::DuplicateParagraphs { severity, .. }
             | Self::ParagraphCharacterLength { severity, .. }
             | Self::RepeatedTerms { severity, .. }
@@ -450,6 +563,7 @@ impl ContentGate {
             | Self::ParagraphCount { blocking, .. }
             | Self::ParagraphLength { blocking, .. }
             | Self::RepeatedParagraphOpenings { blocking, .. }
+            | Self::RepeatedSentenceOpenings { blocking, .. }
             | Self::DuplicateParagraphs { blocking, .. }
             | Self::ParagraphCharacterLength { blocking, .. }
             | Self::RepeatedTerms { blocking, .. }
@@ -494,6 +608,7 @@ impl ContentGate {
             | Self::ParagraphLength { .. }
             | Self::ParagraphCharacterLength { .. }
             | Self::RepeatedParagraphOpenings { .. }
+            | Self::RepeatedSentenceOpenings { .. }
             | Self::DuplicateParagraphs { .. } => "paragraphs",
             Self::RequiredHeadings { .. }
             | Self::DuplicateHeadings { .. }
@@ -519,6 +634,7 @@ impl ContentGate {
             | Self::ParagraphCount { id, .. }
             | Self::ParagraphLength { id, .. }
             | Self::RepeatedParagraphOpenings { id, .. }
+            | Self::RepeatedSentenceOpenings { id, .. }
             | Self::DuplicateParagraphs { id, .. }
             | Self::ParagraphCharacterLength { id, .. }
             | Self::RepeatedTerms { id, .. }
@@ -554,7 +670,8 @@ fn editorial_suggestion(gate: &ContentGate) -> Option<&'static str> {
         ContentGate::SentenceLength { .. } | ContentGate::SentenceCharacterLength { .. } => Some(
             "Review the sentence boundary and consider shortening the sentence while preserving its meaning.",
         ),
-        ContentGate::RepeatedParagraphOpenings { .. } => {
+        ContentGate::RepeatedParagraphOpenings { .. }
+        | ContentGate::RepeatedSentenceOpenings { .. } => {
             Some("Review the repeated openings and vary them where repetition is unintended.")
         }
         ContentGate::DuplicateParagraphs { .. } => Some(
@@ -1066,6 +1183,21 @@ impl ContentPreset {
                         gate.id()
                     )
                 }
+                ContentGate::RepeatedSentenceOpenings {
+                    opening_words,
+                    max_consecutive,
+                    delimiters,
+                    ..
+                } if *opening_words == 0
+                    || *opening_words > 16
+                    || *max_consecutive == 0
+                    || delimiters.is_empty() =>
+                {
+                    bail!(
+                        "sentence openings need 1 to 16 words, a positive consecutive limit and delimiters for {}",
+                        gate.id()
+                    )
+                }
                 ContentGate::DuplicateParagraphs {
                     max_occurrences,
                     min_chars,
@@ -1102,6 +1234,7 @@ impl ContentPreset {
                 }
                 ContentGate::SentenceLength { abbreviations, .. }
                 | ContentGate::SentenceCharacterLength { abbreviations, .. }
+                | ContentGate::RepeatedSentenceOpenings { abbreviations, .. }
                     if abbreviations.iter().any(|abbr| {
                         abbr.strip_suffix('.').is_none_or(|word| {
                             word.is_empty()
@@ -1917,6 +2050,97 @@ impl ContentPreset {
                         }
                     }
                 }
+                ContentGate::RepeatedSentenceOpenings {
+                    opening_words,
+                    max_consecutive,
+                    delimiters,
+                    abbreviations,
+                    ..
+                } => {
+                    measurements.insert("opening_words".into(), *opening_words);
+                    measurements.insert("max_consecutive".into(), *max_consecutive);
+                    if let Some(paragraphs) =
+                        context.and_then(|context| context.paragraphs.as_ref())
+                    {
+                        let mut evaluated = 0usize;
+                        let mut skipped = 0usize;
+                        let mut exceeding = 0usize;
+                        let mut bytes_seen = 0usize;
+                        for paragraph in paragraphs.iter().take(MAX_PARAGRAPH_OPENINGS) {
+                            bytes_seen = bytes_seen.saturating_add(paragraph.text.len());
+                            if bytes_seen > MAX_CONTENT_INPUT_BYTES {
+                                reason =
+                                    Some("paragraph text exceeds the supported byte limit".into());
+                                break;
+                            }
+                            let mut previous: Option<Vec<String>> = None;
+                            let mut consecutive = 0usize;
+                            for_each_sentence(
+                                &paragraph.text,
+                                paragraph.line,
+                                paragraph.column,
+                                &[],
+                                delimiters,
+                                abbreviations,
+                                |segment, line, column| {
+                                    if segment.trim().is_empty() {
+                                        return;
+                                    }
+                                    let mut bytes = 0usize;
+                                    let mut words = Vec::with_capacity(*opening_words);
+                                    for word in segment.split_whitespace().take(*opening_words) {
+                                        bytes = bytes.saturating_add(word.len());
+                                        if bytes > MAX_PARAGRAPH_OPENING_BYTES {
+                                            break;
+                                        }
+                                        words.push(
+                                            word.trim_matches(|ch: char| !ch.is_alphanumeric())
+                                                .to_lowercase(),
+                                        );
+                                    }
+                                    if bytes > MAX_PARAGRAPH_OPENING_BYTES
+                                        || words.len() != *opening_words
+                                        || words.iter().any(String::is_empty)
+                                    {
+                                        skipped += 1;
+                                        previous = None;
+                                        consecutive = 0;
+                                        return;
+                                    }
+                                    evaluated += 1;
+                                    if previous.as_ref() == Some(&words) {
+                                        consecutive += 1;
+                                    } else {
+                                        consecutive = 1;
+                                    }
+                                    previous = Some(words);
+                                    if consecutive > *max_consecutive {
+                                        exceeding += 1;
+                                        emit(
+                                            format!(
+                                                "Sentence opening repeats {consecutive} times consecutively; maximum is {max_consecutive}"
+                                            ),
+                                            line,
+                                            column,
+                                        );
+                                    }
+                                },
+                            );
+                        }
+                        if reason.is_none() && paragraphs.len() > MAX_PARAGRAPH_OPENINGS {
+                            reason = Some("too many paragraphs to assess completely".into());
+                        }
+                        measurements.insert("paragraph_count".into(), paragraphs.len());
+                        measurements.insert("sentences_evaluated".into(), evaluated);
+                        measurements.insert("sentences_skipped".into(), skipped);
+                        measurements.insert("sentences_exceeding_limit".into(), exceeding);
+                        if reason.is_none() && skipped > 0 {
+                            reason = Some("some sentence openings could not be assessed using whitespace-separated words".into());
+                        }
+                    } else {
+                        reason = Some("paragraphs are unavailable from this adapter".into());
+                    }
+                }
                 ContentGate::SentenceLength {
                     max_words: limit,
                     delimiters,
@@ -1967,72 +2191,15 @@ impl ContentPreset {
                                     .filter(|_| !*paragraphs_only)
                                     .map(|text| (text.as_str(), 1, 1, block_ends)),
                             );
-                        for (text, mut line, mut column, segment_block_ends) in segments {
-                            let mut segment_start = 0;
-                            let mut first_position = None;
-                            let mut next_block = 0;
-                            let mut after_delimiter = false;
-                            let mut adjacent_to_delimiter = false;
-                            for (offset, ch) in text
-                                .char_indices()
-                                .map(|(offset, ch)| (offset, Some(ch)))
-                                .chain(std::iter::once((text.len(), None)))
-                            {
-                                while segment_block_ends
-                                    .get(next_block)
-                                    .is_some_and(|&end| end < offset)
-                                {
-                                    next_block += 1;
-                                }
-                                let block_end = segment_block_ends.get(next_block) == Some(&offset);
-                                // Closing marks belong to the preceding sentence. ASCII
-                                // quotes are ambiguous, so skip them only when adjacent.
-                                if after_delimiter && !block_end {
-                                    if ch.is_some_and(char::is_whitespace) {
-                                        adjacent_to_delimiter = false;
-                                    } else if let Some(c) = ch.filter(|c| {
-                                        matches!(c, '»' | '”' | '’' | ')' | ']' | '}')
-                                            || (adjacent_to_delimiter && matches!(c, '\'' | '"'))
-                                    }) {
-                                        segment_start = offset + c.len_utf8();
-                                        first_position = None;
-                                        column += 1;
-                                        continue;
-                                    } else {
-                                        after_delimiter = false;
-                                    }
-                                }
-                                // A block boundary precedes the character at its byte offset.
-                                // A separator is not required, and decimal/abbreviation
-                                // context must not cross into the next block.
-                                let decimal_point = !block_end
-                                    && ch == Some('.')
-                                    && text[..offset]
-                                        .chars()
-                                        .next_back()
-                                        .is_some_and(|c| c.is_ascii_digit())
-                                    && text[offset + 1..]
-                                        .chars()
-                                        .next()
-                                        .is_some_and(|c| c.is_ascii_digit());
-                                let abbreviation = !block_end
-                                    && ch == Some('.')
-                                    && !abbreviations.is_empty()
-                                    && text[segment_start..offset]
-                                        .split_whitespace()
-                                        .next_back()
-                                        .is_some_and(|word| {
-                                            abbreviations
-                                                .iter()
-                                                .any(|abbr| abbr.strip_suffix('.') == Some(word))
-                                        });
-                                let delimiter = !decimal_point
-                                    && !abbreviation
-                                    && ch.is_none_or(|ch| delimiters.contains(ch));
-                                if block_end || delimiter {
-                                    after_delimiter = delimiter && ch.is_some();
-                                    adjacent_to_delimiter = after_delimiter;
-                                    let segment = &text[segment_start..offset];
+                        for (text, line, column, segment_block_ends) in segments {
+                            for_each_sentence(
+                                text,
+                                line,
+                                column,
+                                segment_block_ends,
+                                delimiters,
+                                abbreviations,
+                                |segment, start_line, start_column| {
                                     let count = if chars {
                                         segment.trim().chars().count()
                                     } else {
@@ -2065,8 +2232,6 @@ impl ContentPreset {
                                         longest = longest.max(count);
                                         if count > *limit {
                                             exceeding += 1;
-                                            let (start_line, start_column) =
-                                                first_position.unwrap_or((line, column));
                                             emit(
                                                 format!(
                                                     "Sentence has {count} {unit}; maximum is {limit}"
@@ -2076,30 +2241,8 @@ impl ContentPreset {
                                             );
                                         }
                                     }
-                                    segment_start = offset
-                                        + if delimiter {
-                                            ch.map_or(0, char::len_utf8)
-                                        } else {
-                                            0
-                                        };
-                                    first_position =
-                                        if !delimiter && ch.is_some_and(|ch| !ch.is_whitespace()) {
-                                            Some((line, column))
-                                        } else {
-                                            None
-                                        };
-                                } else if ch.is_some_and(|ch| !ch.is_whitespace())
-                                    && first_position.is_none()
-                                {
-                                    first_position = Some((line, column));
-                                }
-                                if ch == Some('\n') {
-                                    line += 1;
-                                    column = 1;
-                                } else {
-                                    column += 1;
-                                }
-                            }
+                                },
+                            );
                         }
                         measurements.insert("sentence_count".into(), sentence_count);
                         measurements.insert("sentences_exceeding_limit".into(), exceeding);
@@ -4142,6 +4285,95 @@ terms = ["bad"]
         ]));
         assert_eq!(partial.status, GateStatus::NotChecked);
         assert_eq!(partial.findings.len(), 1);
+    }
+
+    #[test]
+    fn repeated_sentence_openings_handles_uncertainty_and_configuration() {
+        let source = "version=1\nname='t'\n[[gates]]\nid='opening'\nkind='repeated_sentence_openings'\nopening_words=2\nmax_consecutive=2\nabbreviations=['Dr.']\n";
+        let preset = ContentPreset::from_toml(source).unwrap();
+        let input = ContentInput {
+            text: Some(String::new()),
+            ..Default::default()
+        };
+        let context = |text: &str| ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: text.into(),
+                line: 1,
+                column: 1,
+            }]),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(
+                &input,
+                None,
+                None,
+                Some(&context(
+                    "Dr. Smith acts. Dr. Smith plans. Dr. Smith checks. Hi.",
+                )),
+            )
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::NotChecked);
+        assert_eq!(report.gates[0].findings.len(), 1);
+        assert_eq!(report.gates[0].measurements["sentences_skipped"], 1);
+        let unavailable = preset
+            .evaluate_with_context(&input, None, None, None)
+            .unwrap();
+        assert_eq!(unavailable.gates[0].status, GateStatus::NotChecked);
+        let reset = preset
+            .evaluate_with_context(
+                &input,
+                None,
+                None,
+                Some(&context(
+                    "The team acts. Other people help. The team plans. The team checks.",
+                )),
+            )
+            .unwrap();
+        assert_eq!(reset.gates[0].status, GateStatus::Passed);
+        for (field, value) in [
+            ("opening_words", "0"),
+            ("opening_words", "17"),
+            ("max_consecutive", "0"),
+        ] {
+            let invalid = format!(
+                "version=1\nname='t'\n[[gates]]\nid='opening'\nkind='repeated_sentence_openings'\n{field}={value}\n"
+            );
+            assert!(ContentPreset::from_toml(&invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn repeated_sentence_openings_are_consecutive_scoped_and_located() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='opening'\nkind='repeated_sentence_openings'\nopening_words=2\nmax_consecutive=2\nblocking=false\n").unwrap();
+        let input = ContentInput {
+            text: Some(String::new()),
+            ..Default::default()
+        };
+        let context = ContentContext {
+            paragraphs: Some(vec![
+                ContentParagraph {
+                    text: "The team plans. The team acts. THE TEAM checks.".into(),
+                    line: 3,
+                    column: 1,
+                },
+                ContentParagraph {
+                    text: "The team improves.".into(),
+                    line: 5,
+                    column: 1,
+                },
+            ]),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        let gate = &report.gates[0];
+        assert_eq!(gate.status, GateStatus::Failed);
+        assert!(!gate.blocking);
+        assert_eq!(gate.findings.len(), 1);
+        assert_eq!((gate.findings[0].line, gate.findings[0].column), (3, 32));
+        assert_eq!(gate.measurements["sentences_evaluated"], 4);
     }
 
     #[test]

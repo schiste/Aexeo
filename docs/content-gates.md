@@ -1134,3 +1134,22 @@ failure. This mode rejects `--verify-verdict`, `--extension-results` and
 not prove collection completeness, input authenticity, build identity or
 freshness at publication. Coordinate concurrent changes at the host boundary.
 `--telemetry` reports an aggregate receipt-revalidation match boolean; with main scope it also reports the scope and eligible HTML entry count.
+
+### Repeated sentence openings
+
+The optional `sentence-openings-review` preset flags the third and subsequent consecutive sentences in a paragraph that begin with the same two words. It is advisory and can be composed or overridden in a TOML preset:
+
+```toml
+extends = ["sentence-openings-review"]
+
+[[gates]]
+id = "editorial.sentence_openings"
+kind = "repeated_sentence_openings"
+opening_words = 2
+max_consecutive = 2
+blocking = false
+# delimiters = ".!?"
+# abbreviations = ["Dr.", "e.g."]
+```
+
+Comparison ignores case and punctuation around whitespace-separated opening words. Sentence delimiters and abbreviations follow the sentence-length gates; sentence segmentation is heuristic, and no language is selected automatically. Paragraph boundaries reset the sequence. Short or unrecognizable openings, unavailable paragraphs and resource limits produce `not_checked` rather than a complete pass; findings already observed remain in the report. Measurements describe counts, and opt-in telemetry contains aggregate timings without content. This is a prompt for editorial judgment, not an assessment of authorship or AI detection.
