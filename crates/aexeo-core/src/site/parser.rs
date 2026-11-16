@@ -744,7 +744,13 @@ fn tag_snippets<'a>(raw: &'a str, tag: &str) -> Vec<&'a str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{figure_content_ranges, image_markup_events};
+    use super::{figure_content_ranges, image_markup_events, visible_text};
+
+    #[test]
+    fn visible_caption_text_uses_inline_declaration_precedence() {
+        let caption = r#"A <span style="display:none;display:block">visible</span> <span style="display:none!important;display:block">hidden</span> caption"#;
+        assert_eq!(visible_text(caption), "A visible caption");
+    }
 
     #[test]
     fn a_close_tag_inside_an_attribute_gives_no_inverted_figure_range() {
