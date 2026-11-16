@@ -28,7 +28,7 @@ Markdown and EmDash adapters report where each heading, paragraph, list item and
 
 Literal matching for `forbidden_terms`, `required_terms`, `repeated_terms` and the claim of an evidence gate ignores whitespace differences: `best price` matches `best` and `price` separated by any run of whitespace without a blank line. Finding positions stay in the original text. Quote anchors in evidence sources remain exact.
 
-`forbidden_terms`, `required_terms` and `repeated_terms` accept `whole_words` (default `true`; set `false` for substring matches) and `case_insensitive` (default `false`). Case-insensitive matching lowercases each character, without full Unicode case folding. Word boundaries use Unicode alphanumeric characters and underscores. Adapter block boundaries also separate words even when no separator is inserted; a term never matches across a known block boundary. Thai, Lao, Myanmar, Khmer, CJK and Hangul characters do not act as word characters, because these scripts do not reliably separate words with spaces; a term in them matches inside surrounding text.
+`forbidden_terms`, `required_terms` and `repeated_terms` accept `whole_words` (default `true`; set `false` for substring matches) and `case_insensitive` (default `false`). Case-insensitive matching lowercases each character, without full Unicode case folding. Word boundaries use Unicode alphanumeric and identifier-continuation characters, including underscores and many combining marks; no Unicode normalization is performed. Adapter block boundaries also separate words even when no separator is inserted; a term never matches across a known block boundary. Thai, Lao, Myanmar, Khmer, CJK and Hangul characters do not act as word characters, because these scripts do not reliably separate words with spaces; a term in them matches inside surrounding text.
 
 ### Character count for multilingual content
 
@@ -647,6 +647,8 @@ For local content, `stages.input_load_ms` covers input loading and `stages.adapt
 
 Run `cargo run --release --locked --offline -p aexeo-core --example content_bench` to measure the content gates alone and Markdown parsing plus evaluation over a synthetic 29 KB document. It reports p50 and p95 across 100 iterations; figures depend on hardware and concurrent load and exclude CLI process startup. With `--json` it also emits machine-readable p50, p95 and average measurements for individual evaluation, Markdown parsing plus evaluation, batches of 50, and HTML projection with and without evaluation. The HTML fixture contains 500 paragraphs and links; its evaluation covers word count, forbidden terms, required headings and link destinations. `scripts/check-performance.sh` enforces generous average-time and p95 regression ceilings; these are not latency guarantees for other workloads. The fresh-process CLI benchmark includes startup and evaluation of a tiny text input, but does not flush operating-system caches and is not a cold-cache measurement.
 
+For a synthetic preset with twelve case-insensitive literal gates, run `cargo run --release --locked -p aexeo-core --example literal_gate_bench`. It emits aggregate input size, iteration count and p50/p95 timings locally; `-- --report` also prints the synthetic report for output comparison. CI enforces an initial average and p95 budget for this fixture. The limits include substantial headroom over a single GitHub runner observation (1.011 ms p50, 1.046 ms p95); they are provisional and do not guarantee performance for other workloads. Literal gates reuse at most one prepared case mode during an evaluation, never across content inputs; alternating modes rebuild it.
+
 ## Explicit safe fix
 
 The `final_newline` gate requires the original source text and reports a non-empty file without a final newline. Add `[[gates]]`, an `id`, and `kind = "final_newline"` to a preset to enable it. Run `aexeo-cli content article.md --preset custom --preset-source custom=rules.toml --fix` to append a newline when needed. The fix preserves existing CRLF line endings, reports its gate ID in `applied_fixes`, and is idempotent. It requires a local regular file, rejects symlinks and, on Unix, files with multiple hard links, and compares the open file with the version read before appending. The candidate is evaluated in memory before the file is changed; loading or evaluation errors leave it untouched. Opt-in telemetry reports the number of applied fixes without content or identifiers. It does not change prose. The EmDash adapter has no original file source, so this gate is `not_checked` there.
@@ -829,7 +831,7 @@ Matching is non-overlapping and case-sensitive by default. The optional
 case-insensitive mode lowercases each character; it does not perform full Unicode
 case folding. Equivalent configured terms after case and whitespace normalization
 are rejected in this mode to avoid duplicate findings. By default Unicode alphanumeric
-characters and underscores define word boundaries; set `whole_words = false`
+characters, identifier-continuation marks and underscores define word boundaries; set `whole_words = false`
 for substring matches. It does not infer synonyms, grammar, or editorial intent.
 Each finding points to the first occurrence beyond the configured maximum,
 and measurements count configured and exceeded terms and matched occurrences.

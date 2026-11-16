@@ -958,8 +958,8 @@ impl<'a> LiteralText<'a> {
     }
 
     /// Visit non-overlapping occurrences as original byte offsets, stopping when
-    /// the visitor returns true. Word boundaries use Unicode alphanumeric
-    /// characters and underscore, outside scripts written without spaces.
+    /// the visitor returns true. Word boundaries use Unicode alphanumeric and identifier-continuation
+    /// characters, outside scripts written without spaces.
     fn visit_matches(
         &self,
         term: &str,
@@ -967,7 +967,7 @@ impl<'a> LiteralText<'a> {
         mut visit: impl FnMut(usize) -> bool,
     ) -> bool {
         fn word(ch: char) -> bool {
-            (ch.is_alphanumeric() || ch == '_') && !unsegmented_script(ch)
+            (ch.is_alphanumeric() || unicode_ident::is_xid_continue(ch)) && !unsegmented_script(ch)
         }
         let (needle, _) = fold_literal(term, self.case_insensitive);
         let text = self.folded.as_str();
@@ -1005,6 +1005,23 @@ impl<'a> LiteralText<'a> {
         }
         false
     }
+}
+
+// Cache only the most recent matching mode for this evaluation. This bounds the
+// retained allocation to one projection and never shares content across inputs.
+fn cached_literal<'a, 'cache>(
+    cache: &'cache mut Option<LiteralText<'a>>,
+    text: &'a str,
+    block_ends: &'a [usize],
+    case_insensitive: bool,
+) -> &'cache LiteralText<'a> {
+    if cache
+        .as_ref()
+        .is_some_and(|literal| literal.case_insensitive != case_insensitive)
+    {
+        *cache = None;
+    }
+    cache.get_or_insert_with(|| LiteralText::new(text, block_ends, case_insensitive))
 }
 
 // Whitespace remains the word heuristic; known block ends add boundaries
@@ -1613,6 +1630,7 @@ impl ContentPreset {
         let mut results = Vec::with_capacity(self.gates.len());
         let mut word_count = None;
         let mut character_counts = [None, None];
+        let mut literal_cache = None;
         let block_ends = context
             .and_then(|context| context.block_ends.as_deref())
             .unwrap_or_default();
@@ -2410,7 +2428,12 @@ impl ContentPreset {
                         Some(text) => {
                             let mut total = 0;
                             let mut exceeded = 0;
-                            let literal = LiteralText::new(text, block_ends, *case_insensitive);
+                            let literal = cached_literal(
+                                &mut literal_cache,
+                                text,
+                                block_ends,
+                                *case_insensitive,
+                            );
                             for term in terms {
                                 let mut first_excess = None;
                                 let mut count = 0;
@@ -2453,7 +2476,12 @@ impl ContentPreset {
                     measurements.insert("configured_terms".into(), terms.len());
                     match &input.text {
                         Some(text) => {
-                            let literal = LiteralText::new(text, block_ends, *case_insensitive);
+                            let literal = cached_literal(
+                                &mut literal_cache,
+                                text,
+                                block_ends,
+                                *case_insensitive,
+                            );
                             let mut missing = 0;
                             for term in terms {
                                 if !literal.visit_matches(term, *whole_words, |_| true) {
@@ -2477,7 +2505,12 @@ impl ContentPreset {
                     match &input.text {
                         Some(text) => {
                             let mut matches = 0;
-                            let literal = LiteralText::new(text, block_ends, *case_insensitive);
+                            let literal = cached_literal(
+                                &mut literal_cache,
+                                text,
+                                block_ends,
+                                *case_insensitive,
+                            );
                             for term in terms {
                                 let (mut cursor, mut line, mut column) = (0, 1, 1);
                                 literal.visit_matches(term, *whole_words, |offset| {
@@ -3325,6 +3358,54 @@ mod tests {
             no_boundaries.gates[1].measurements["matching_occurrences"],
             0
         );
+    }
+
+    #[test]
+    fn whole_word_gates_do_not_split_combining_marks() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='forbidden'\nkind='forbidden_terms'\nterms=['cafe']\n[[gates]]\nid='required'\nkind='required_terms'\nterms=['cafe']\n[[gates]]\nid='repeated'\nkind='repeated_terms'\nterms=['cafe']\nmax_occurrences=1\n").unwrap();
+        let report = preset
+            .evaluate(&literal_input("cafe\u{301} cafe\u{301}"))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Passed);
+        assert_eq!(report.gates[1].status, GateStatus::Failed);
+        assert_eq!(report.gates[2].status, GateStatus::Passed);
+        let literal = LiteralText::new("cafe\u{301} cafe", &[], false);
+        let mut positions = Vec::new();
+        literal.visit_matches("cafe", true, |offset| {
+            positions.push(offset);
+            false
+        });
+        assert_eq!(positions, ["cafe\u{301} ".len()]);
+        assert!(literal.visit_matches("cafe\u{301}", true, |_| true));
+        assert!(literal.visit_matches("cafe", false, |_| true));
+        assert!(!LiteralText::new("İ", &[], true).visit_matches("i", true, |_| true));
+    }
+
+    #[test]
+    fn composed_literal_gates_match_individual_results_with_mixed_modes() {
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='first'\nkind='forbidden_terms'\nterms=['cafe']\ncase_insensitive=true\n[[gates]]\nid='second'\nkind='required_terms'\nterms=['cafe']\ncase_insensitive=true\n[[gates]]\nid='third'\nkind='repeated_terms'\nterms=['Cafe']\nmax_occurrences=1\n[[gates]]\nid='fourth'\nkind='required_terms'\nterms=['cafe']\ncase_insensitive=true\n").unwrap();
+        let input = literal_input("cafe\u{301} CAFE Cafe Cafe");
+        let context = ContentContext {
+            block_ends: Some(vec!["cafe\u{301} CAFE ".len()]),
+            ..Default::default()
+        };
+        let all = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        for (index, gate) in preset.gates.iter().enumerate() {
+            let individual = ContentPreset {
+                version: preset.version,
+                name: preset.name.clone(),
+                gates: vec![gate.clone()],
+            };
+            let result = individual
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap();
+            assert_eq!(
+                serde_json::to_value(&all.gates[index]).unwrap(),
+                serde_json::to_value(&result.gates[0]).unwrap()
+            );
+        }
     }
 
     #[test]

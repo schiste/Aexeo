@@ -78,6 +78,54 @@ fn character_count_works_across_cli_adapters_and_missing_text() {
 }
 
 #[test]
+fn whole_word_combining_marks_work_across_content_adapters() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("terms.toml");
+    std::fs::write(&preset, "version=1\nname='terms'\n[[gates]]\nid='forbidden'\nkind='forbidden_terms'\nterms=['cafe']\ncase_insensitive=true\n").unwrap();
+    let source = format!("custom={}", preset.display());
+    for (format, content) in [
+        ("text", "CAFE\u{301}"),
+        ("paragraph-text", "CAFE\u{301}"),
+        ("markdown", "CAFE\u{301}"),
+        ("html", "<p>CAFE\u{301}</p>"),
+    ] {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                "-",
+                "--preset",
+                "custom",
+                "--preset-source",
+                &source,
+                "--input-format",
+                format,
+                "--format",
+                "json",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(content.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{format}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["gates"][0]["status"], "passed", "{format}");
+        assert_eq!(report["gates"][0]["measurements"]["matches"], 0, "{format}");
+    }
+}
+
+#[test]
 fn stdin_content_returns_structured_findings() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
         .args(["content", "-", "--preset", "glossary", "--format", "json"])
