@@ -1,5 +1,5 @@
 {
-  "preset": "version=1\nname='cross'\n[[gates]]\nid='style'\nkind='forbidden_terms'\nterms=['generic phrase']\n[[gates]]\nid='paragraphs'\nkind='paragraph_count'\nmin=1\nmax=2\n[[gates]]\nid='links'\nkind='link_count'\nmin=1\n[[gates]]\nid='description'\nkind='required_metadata'\nfields=['description']\n",
+  "preset": "version=1\nname='cross'\n[[gates]]\nid='style'\nkind='forbidden_terms'\nterms=['generic phrase']\n[[gates]]\nid='paragraphs'\nkind='paragraph_count'\nmin=1\nmax=2\n[[gates]]\nid='links'\nkind='link_count'\nmin=1\n[[gates]]\nid='description'\nkind='required_metadata'\nfields=['description']\n[[gates]]\nid='heading'\nkind='heading_length'\nmax_chars=3\n",
   "markdown": "# Élan\n\n😀 generic phrase and [source](https://example.org).\n",
   "document": {
     "route": "/example",
@@ -52,7 +52,8 @@
       "failed",
       "passed",
       "passed",
-      "not_checked"
+      "not_checked",
+      "failed"
     ],
     "paragraph_count": 1,
     "link_count": 1,
@@ -70,9 +71,34 @@
       "utf16_offset": 0
     },
     "source_mapping": {
-      "eligible": 1,
-      "mapped": 1,
+      "eligible": 2,
+      "mapped": 2,
       "unmapped": 0
+    },
+    "html_location": {
+      "gate_id": "style",
+      "finding_index": 0,
+      "line": 2,
+      "column": 6
+    },
+    "markdown_heading_location": {
+      "gate_id": "heading",
+      "finding_index": 0,
+      "line": 1,
+      "column": 1
+    },
+    "html_heading_location": {
+      "gate_id": "heading",
+      "finding_index": 0,
+      "line": 1,
+      "column": 1
+    },
+    "emdash_heading_location": {
+      "gate_id": "heading",
+      "finding_index": 0,
+      "block_index": 0,
+      "span_index": 0,
+      "utf16_offset": 0
     }
   },
   "empty_markdown": "",
@@ -86,6 +112,9 @@
     "passed",
     "failed",
     "failed",
-    "not_checked"
-  ]
+    "not_checked",
+    "passed"
+  ],
+  "html": "<h1>Élan</h1>\n<p>😀 generic phrase and <a href=\"https://example.org\">source</a>.</p>\n",
+  "empty_html": ""
 }

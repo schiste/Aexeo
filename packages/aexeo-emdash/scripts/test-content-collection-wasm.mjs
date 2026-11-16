@@ -200,12 +200,12 @@ const unavailableOpenings = await evaluateContent({ route: "/openings", title: "
 assert.equal(unavailableOpenings.gates[0].status, "not_checked");
 console.log("WASM sentence-opening preset preserves accented coverage and source location");
 
-// The same synthetic example is checked by the Markdown CLI integration test.
+// The same synthetic example is checked by the Markdown and HTML CLI integration test.
 const shared = JSON.parse(await readFile(new URL("../../../crates/aexeo-cli/tests/fixtures/cross-adapter-editorial.json", import.meta.url), "utf8"));
 const sharedTelemetry = [];
 const sharedReport = await evaluateContent(shared.document, "cross", { cross: shared.preset }, undefined, (event) => sharedTelemetry.push(event));
-assert.equal(sharedTelemetry[0].source_locations_mapped, 1);
-assert.equal(sharedTelemetry[0].source_locations_eligible, 1);
+assert.equal(sharedTelemetry[0].source_locations_mapped, 2);
+assert.equal(sharedTelemetry[0].source_locations_eligible, 2);
 assert.equal(sharedTelemetry[0].source_locations_unmapped, 0);
 assert.ok(!JSON.stringify(sharedTelemetry).includes("generic phrase"));
 assert.ok(!JSON.stringify(sharedTelemetry).includes("example.org"));
@@ -213,13 +213,13 @@ assert.deepEqual(sharedReport.gates.map((gate) => gate.status), shared.expected.
 assert.equal(sharedReport.gates[1].measurements.paragraph_count, shared.expected.paragraph_count);
 assert.equal(sharedReport.gates[2].measurements.link_count, shared.expected.link_count);
 assert.deepEqual(sharedReport.source_mapping, shared.expected.source_mapping);
-assert.deepEqual(sharedReport.source_locations, [shared.expected.emdash_location]);
+assert.deepEqual(sharedReport.source_locations, [shared.expected.emdash_location, shared.expected.emdash_heading_location]);
 const emptyReport = await evaluateContent(shared.empty_document, "cross", { cross: shared.preset });
 assert.deepEqual(emptyReport.gates.map((gate) => gate.status), shared.empty_statuses);
 assert.equal(emptyReport.gates[1].measurements.paragraph_count, 0);
 assert.equal(emptyReport.gates[2].measurements.link_count, 0);
 const unavailableReport = await evaluateContent({ ...shared.document, body_capabilities: [] }, "cross", { cross: shared.preset });
-assert.deepEqual(unavailableReport.gates.map((gate) => gate.status), ["not_checked", "not_checked", "not_checked", "not_checked"]);
+assert.deepEqual(unavailableReport.gates.map((gate) => gate.status), ["not_checked", "not_checked", "not_checked", "not_checked", "not_checked"]);
 assert.deepEqual(unavailableReport.source_locations, []);
 assert.ok(unavailableReport.gates.every((gate) => gate.findings.length === 0));
-console.log("WASM and Markdown CLI share an editorial fixture");
+console.log("WASM, Markdown and HTML CLI share an editorial fixture");

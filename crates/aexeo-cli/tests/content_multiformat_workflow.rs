@@ -202,111 +202,116 @@ fn scoped_html_reports_body_coordinates_after_head_script_comparison() {
 }
 
 #[test]
-fn shared_editorial_fixture_matches_markdown_cli_contract() {
+fn shared_editorial_fixture_matches_markdown_and_html_cli_contracts() {
     let fixture: Value =
         serde_json::from_str(include_str!("fixtures/cross-adapter-editorial.json")).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let draft = dir.path().join("example.md");
+    let draft = dir.path().join("example");
     let preset = dir.path().join("cross.toml");
-    fs::write(&draft, fixture["markdown"].as_str().unwrap()).unwrap();
     fs::write(&preset, fixture["preset"].as_str().unwrap()).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
-        .args([
-            "content",
-            draft.to_str().unwrap(),
-            "--input-format",
-            "markdown",
-            "--preset",
-            "cross",
-            "--preset-source",
-            &format!("cross={}", preset.display()),
-            "--format",
-            "json",
-            "--telemetry",
-        ])
-        .output()
-        .unwrap();
-    assert_eq!(
-        output.status.code(),
-        Some(2),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let telemetry: Value = serde_json::from_slice(&output.stderr).unwrap();
-    for field in ["eligible", "mapped", "unmapped"] {
+    for format in ["markdown", "html"] {
+        fs::write(&draft, fixture[format].as_str().unwrap()).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                draft.to_str().unwrap(),
+                "--input-format",
+                format,
+                "--preset",
+                "cross",
+                "--preset-source",
+                &format!("cross={}", preset.display()),
+                "--format",
+                "json",
+                "--telemetry",
+            ])
+            .output()
+            .unwrap();
         assert_eq!(
-            telemetry["source_mapping"][field],
-            fixture["expected"]["source_mapping"][field]
+            output.status.code(),
+            Some(2),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
         );
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let telemetry: Value = serde_json::from_slice(&output.stderr).unwrap();
+        for field in ["eligible", "mapped", "unmapped"] {
+            assert_eq!(
+                telemetry["source_mapping"][field],
+                fixture["expected"]["source_mapping"][field]
+            );
+        }
+        assert!(
+            telemetry["source_mapping"]["duration_ms"]
+                .as_f64()
+                .is_some()
+        );
+        let serialized = String::from_utf8_lossy(&output.stderr);
+        assert!(!serialized.contains("generic phrase"));
+        assert!(!serialized.contains("example.org"));
+        let statuses: Vec<_> = report["gates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|g| g["status"].clone())
+            .collect();
+        assert_eq!(
+            statuses,
+            fixture["expected"]["statuses"].as_array().unwrap().clone()
+        );
+        assert_eq!(
+            report["gates"][1]["measurements"]["paragraph_count"],
+            fixture["expected"]["paragraph_count"]
+        );
+        assert_eq!(
+            report["gates"][2]["measurements"]["link_count"],
+            fixture["expected"]["link_count"]
+        );
+        assert_eq!(
+            report["source_mapping"],
+            fixture["expected"]["source_mapping"]
+        );
+        assert_eq!(
+            report["source_locations"],
+            serde_json::json!([
+                fixture["expected"][format!("{format}_location")].clone(),
+                fixture["expected"][format!("{format}_heading_location")].clone()
+            ])
+        );
+        fs::write(&draft, fixture[format!("empty_{format}")].as_str().unwrap()).unwrap();
+        let empty = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                draft.to_str().unwrap(),
+                "--input-format",
+                format,
+                "--preset",
+                "cross",
+                "--preset-source",
+                &format!("cross={}", preset.display()),
+                "--format",
+                "json",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(
+            empty.status.code(),
+            Some(2),
+            "{}",
+            String::from_utf8_lossy(&empty.stderr)
+        );
+        let empty: Value = serde_json::from_slice(&empty.stdout).unwrap();
+        let statuses: Vec<_> = empty["gates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|g| g["status"].clone())
+            .collect();
+        assert_eq!(
+            statuses,
+            fixture["empty_statuses"].as_array().unwrap().clone()
+        );
+        assert_eq!(empty["gates"][1]["measurements"]["paragraph_count"], 0);
+        assert_eq!(empty["gates"][2]["measurements"]["link_count"], 0);
     }
-    assert!(
-        telemetry["source_mapping"]["duration_ms"]
-            .as_f64()
-            .is_some()
-    );
-    let serialized = String::from_utf8_lossy(&output.stderr);
-    assert!(!serialized.contains("generic phrase"));
-    assert!(!serialized.contains("example.org"));
-    let statuses: Vec<_> = report["gates"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|g| g["status"].clone())
-        .collect();
-    assert_eq!(
-        statuses,
-        fixture["expected"]["statuses"].as_array().unwrap().clone()
-    );
-    assert_eq!(
-        report["gates"][1]["measurements"]["paragraph_count"],
-        fixture["expected"]["paragraph_count"]
-    );
-    assert_eq!(
-        report["gates"][2]["measurements"]["link_count"],
-        fixture["expected"]["link_count"]
-    );
-    assert_eq!(
-        report["source_mapping"],
-        fixture["expected"]["source_mapping"]
-    );
-    assert_eq!(
-        report["source_locations"],
-        serde_json::json!([fixture["expected"]["markdown_location"].clone()])
-    );
-    fs::write(&draft, fixture["empty_markdown"].as_str().unwrap()).unwrap();
-    let empty = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
-        .args([
-            "content",
-            draft.to_str().unwrap(),
-            "--input-format",
-            "markdown",
-            "--preset",
-            "cross",
-            "--preset-source",
-            &format!("cross={}", preset.display()),
-            "--format",
-            "json",
-        ])
-        .output()
-        .unwrap();
-    assert_eq!(
-        empty.status.code(),
-        Some(2),
-        "{}",
-        String::from_utf8_lossy(&empty.stderr)
-    );
-    let empty: Value = serde_json::from_slice(&empty.stdout).unwrap();
-    let statuses: Vec<_> = empty["gates"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|g| g["status"].clone())
-        .collect();
-    assert_eq!(
-        statuses,
-        fixture["empty_statuses"].as_array().unwrap().clone()
-    );
-    assert_eq!(empty["gates"][1]["measurements"]["paragraph_count"], 0);
-    assert_eq!(empty["gates"][2]["measurements"]["link_count"], 0);
 }
