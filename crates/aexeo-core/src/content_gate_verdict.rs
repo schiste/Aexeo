@@ -1050,6 +1050,162 @@ pub fn revalidate_offline_receipt_with_html_scope<P: ConfinedContentFiles>(
     })
 }
 
+/// Experimental snapshot-bound receipt. This is not a portable v2 verdict.
+/// Older offline-receipt verifiers must reject this distinct receipt schema.
+pub const LINK_SNAPSHOT_RECEIPT_SCHEMA: &str = "aexeo.link-snapshot-decision-receipt/v1";
+
+/// The snapshot must be obtained independently and be current for the host's use.
+/// The evaluator never performs network requests or invokes custom extensions.
+pub struct LinkSnapshotDecisionContext<'a> {
+    pub offline: &'a OfflineDecisionContext<'a>,
+    pub snapshots: &'a ChangeLinkSnapshots,
+}
+
+/// Exact Aexeo-specific artifacts for a link-snapshot receipt. These may expose
+/// sensitive content and URLs; their hashes do not establish authenticity.
+pub struct LinkSnapshotDecisionArtifacts {
+    pub offline: OfflineDecisionArtifacts,
+    pub external_evidence: Vec<u8>,
+}
+
+impl LinkSnapshotDecisionArtifacts {
+    pub fn as_inputs(
+        &self,
+    ) -> aexeo_contracts::content_gate_decision_inputs::DecisionInputBytes<'_> {
+        let mut inputs = self.offline.as_inputs();
+        inputs.external_evidence = Some(&self.external_evidence);
+        inputs
+    }
+}
+
+impl LinkSnapshotDecisionContext<'_> {
+    /// Materialize exact artifacts for independently acquired comparison.
+    pub fn artifacts_with_html_scope(
+        &self,
+        html_scope: HtmlContentScope,
+    ) -> Result<LinkSnapshotDecisionArtifacts> {
+        Ok(LinkSnapshotDecisionArtifacts {
+            offline: self.offline.artifacts_with_html_scope(html_scope)?,
+            external_evidence: serde_json::to_vec(self.snapshots)?,
+        })
+    }
+
+    fn manifest_with_html_scope(
+        &self,
+        html_scope: HtmlContentScope,
+    ) -> Result<aexeo_contracts::content_gate_decision_inputs::DecisionInputs> {
+        let mut manifest = self.offline.manifest_with_html_scope(html_scope)?;
+        manifest.external_evidence =
+            aexeo_contracts::content_gate_decision_inputs::Component::Present {
+                sha256: hash_json(self.snapshots)?,
+            };
+        Ok(manifest)
+    }
+}
+
+fn evaluate_link_snapshot_context<P: ConfinedContentFiles>(
+    context: &LinkSnapshotDecisionContext<'_>,
+    provider: &mut P,
+    evaluated_at: &str,
+    html_scope: HtmlContentScope,
+) -> Result<Verdict> {
+    let offline = context.offline;
+    let mut snapshot_observer = context.snapshots.observer(offline.change, offline.preset)?;
+    let mut observe =
+        |entity: &str, destinations: &[String]| snapshot_observer.observe(entity, destinations);
+    let verdict = evaluate_change_with_collection_and_html_scope(
+        offline.change,
+        provider,
+        offline.preset,
+        evaluated_at,
+        offline.max_entry_bytes,
+        offline.max_total_bytes,
+        ChangeEvaluationHost {
+            options: ChangeEvaluationOptions {
+                link_observer: Some(&mut observe),
+                plain_text_paragraphs: offline.plain_text_paragraphs,
+            },
+            extensions: None,
+        },
+        offline.collection.as_ref().map(|c| ChangeCollection {
+            change_id: c.change_id,
+            items: c.items,
+            complete: c.complete,
+        }),
+        html_scope,
+    )?;
+    snapshot_observer.finish()?;
+    Ok(verdict)
+}
+
+/// Evaluate with a source-bound link snapshot, without network or custom gates.
+/// The caller must independently establish evidence authenticity and freshness.
+pub fn evaluate_link_snapshot_receipt_with_html_scope<P: ConfinedContentFiles>(
+    context: &LinkSnapshotDecisionContext<'_>,
+    provider: &mut P,
+    evaluated_at: &str,
+    html_scope: HtmlContentScope,
+) -> Result<OfflineDecisionReceipt> {
+    let decision_inputs = context.manifest_with_html_scope(html_scope)?;
+    let verdict = evaluate_link_snapshot_context(context, provider, evaluated_at, html_scope)?;
+    Ok(OfflineDecisionReceipt {
+        schema: LINK_SNAPSHOT_RECEIPT_SCHEMA.into(),
+        decision_inputs,
+        verdict,
+    })
+}
+
+/// Compare independently supplied current inputs before re-evaluation, then
+/// compare all verdict fields except evaluation time. Does not authorize publication.
+pub fn revalidate_link_snapshot_receipt_with_html_scope<P: ConfinedContentFiles>(
+    previous: &OfflineDecisionReceipt,
+    context: &LinkSnapshotDecisionContext<'_>,
+    provider: &mut P,
+    evaluated_at: &str,
+    html_scope: HtmlContentScope,
+) -> Result<OfflineDecisionReceipt> {
+    if previous.schema != LINK_SNAPSHOT_RECEIPT_SCHEMA {
+        bail!("unsupported link snapshot receipt schema");
+    }
+    previous
+        .decision_inputs
+        .validate()
+        .map_err(anyhow::Error::msg)?;
+    if previous.decision_inputs != context.manifest_with_html_scope(html_scope)? {
+        bail!("link snapshot receipt decision inputs differ");
+    }
+    let offline = context.offline;
+    verify_scoped_change_input_binding(
+        &previous.verdict,
+        offline.change,
+        offline.preset,
+        offline.max_entry_bytes,
+        offline.max_total_bytes,
+        offline.plain_text_paragraphs,
+        offline.collection.as_ref(),
+        html_scope,
+        ScopedBindingKind::ObservedLinks,
+    )?;
+    let verdict = evaluate_link_snapshot_context(context, provider, evaluated_at, html_scope)?;
+    verify_scoped_change_verdict(
+        &previous.verdict,
+        &verdict,
+        offline.change,
+        offline.preset,
+        offline.max_entry_bytes,
+        offline.max_total_bytes,
+        offline.plain_text_paragraphs,
+        offline.collection.as_ref(),
+        html_scope,
+        ScopedBindingKind::ObservedLinks,
+    )?;
+    Ok(OfflineDecisionReceipt {
+        schema: LINK_SNAPSHOT_RECEIPT_SCHEMA.into(),
+        decision_inputs: previous.decision_inputs.clone(),
+        verdict,
+    })
+}
+
 /// Explicitly supplied host capabilities. No extension is executed by a preset.
 #[derive(Default)]
 pub struct ChangeEvaluationHost<'a, 'b> {
@@ -3043,6 +3199,155 @@ mod tests {
             .map(|(offset, _)| (offset + 1) as u64)
             .collect();
         assert_eq!(positions, [Some((1, anchors[0])), Some((1, anchors[2]))]);
+    }
+
+    #[test]
+    fn link_snapshot_receipt_binds_evidence_and_revalidates_without_downgrade() {
+        use crate::content_gate::LinkReachabilityObservation as Observation;
+        use sha2::{Digest, Sha256};
+        let mut input = change();
+        input.entries[0].media_type = "text/markdown".into();
+        let source = "[link](https://example.org/private)";
+        let state = input.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let policy = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\n",
+        )
+        .unwrap();
+        let mut snapshots = ChangeLinkSnapshots {
+            version: 1,
+            change_id: input.change_id.clone(),
+            entries: [(
+                "article".into(),
+                LinkObservationSnapshot {
+                    version: 1,
+                    source_sha256: input.entries[0].after.as_ref().unwrap().sha256.clone(),
+                    destinations: vec!["https://example.org/private".into()],
+                    observations: vec![Observation::Reachable],
+                },
+            )]
+            .into(),
+        };
+        let offline = OfflineDecisionContext {
+            change: &input,
+            preset: &policy,
+            max_entry_bytes: 1024,
+            max_total_bytes: 1024,
+            plain_text_paragraphs: false,
+            collection: None,
+            evaluator_identity: b"build-id",
+        };
+        let context = LinkSnapshotDecisionContext {
+            offline: &offline,
+            snapshots: &snapshots,
+        };
+        let receipt = evaluate_link_snapshot_receipt_with_html_scope(
+            &context,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        assert_eq!(receipt.schema, LINK_SNAPSHOT_RECEIPT_SCHEMA);
+        let artifacts = context
+            .artifacts_with_html_scope(HtmlContentScope::Document)
+            .unwrap();
+        receipt
+            .decision_inputs
+            .verify(&artifacts.as_inputs())
+            .unwrap();
+        revalidate_link_snapshot_receipt_with_html_scope(
+            &receipt,
+            &context,
+            &mut NoFiles,
+            "2026-01-02T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        assert!(
+            revalidate_offline_receipt(&receipt, &offline, &mut NoFiles, "2026-01-02T00:00:00Z")
+                .is_err()
+        );
+        assert!(
+            revalidate_link_snapshot_receipt_with_html_scope(
+                &receipt,
+                &context,
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Main
+            )
+            .is_err()
+        );
+        let absent = ChangeLinkSnapshots {
+            version: 1,
+            change_id: input.change_id.clone(),
+            entries: Default::default(),
+        };
+        let incomplete_context = LinkSnapshotDecisionContext {
+            offline: &offline,
+            snapshots: &absent,
+        };
+        let incomplete = evaluate_link_snapshot_receipt_with_html_scope(
+            &incomplete_context,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        assert_eq!(incomplete.verdict.checks[0].status, CheckStatus::NotChecked);
+        assert!(
+            revalidate_link_snapshot_receipt_with_html_scope(
+                &receipt,
+                &incomplete_context,
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
+        let mut forged = receipt.clone();
+        forged.verdict.status = VerdictStatus::Fail;
+        assert!(
+            revalidate_link_snapshot_receipt_with_html_scope(
+                &forged,
+                &context,
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
+        snapshots.entries.get_mut("article").unwrap().observations[0] = Observation::NotFound;
+        let changed = LinkSnapshotDecisionContext {
+            offline: &offline,
+            snapshots: &snapshots,
+        };
+        assert!(
+            revalidate_link_snapshot_receipt_with_html_scope(
+                &receipt,
+                &changed,
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
+        snapshots.entries.get_mut("article").unwrap().destinations[0] =
+            "https://wrong.invalid".into();
+        let mismatched = LinkSnapshotDecisionContext {
+            offline: &offline,
+            snapshots: &snapshots,
+        };
+        assert!(
+            evaluate_link_snapshot_receipt_with_html_scope(
+                &mismatched,
+                &mut NoFiles,
+                "2026-01-01T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
     }
 
     #[test]

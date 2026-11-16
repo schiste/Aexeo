@@ -45,6 +45,26 @@ manifest nor a hash is an authentication, freshness or truth guarantee.
 Aexeo's experimental offline receipts embed a manifest, but neither the manifest
 nor the receipt is a v2 verdict.
 
+## Experimental Rust link-snapshot receipts
+
+Rust hosts can construct a `LinkSnapshotDecisionContext` from an offline
+context and `ChangeLinkSnapshots`, and call
+`evaluate_link_snapshot_receipt_with_html_scope` or
+`revalidate_link_snapshot_receipt_with_html_scope`. The distinct
+`aexeo.link-snapshot-decision-receipt/v1` schema prevents an offline-only
+verifier from accepting it as its own receipt. The manifest includes the exact
+compact Serde JSON snapshot bytes as external evidence. The evaluator checks
+source digests, extracted link order and use of supplied entries; missing
+observations remain unchecked. Revalidation compares independently supplied
+current inputs before re-evaluation. `artifacts_with_html_scope` exposes the
+exact bytes for independent manifest comparison; they may contain private URLs
+and content.
+
+The host must independently establish provenance, freshness and evaluator
+identity. This receipt is not the interoperable v2 verdict, does not authorize
+publication and does not execute network or custom extension callbacks. The
+CLI and independent receipt comparator do not yet support this receipt format.
+
 ## Experimental Aexeo offline host API
 
 A Rust host can call `evaluate_offline_receipt` and

@@ -312,6 +312,10 @@ The latest published version observed on 2026-11-16 was 0.9.1.
   binds content digests and base only; runners must independently retain and
   compare the other inputs or fail closed. Do not claim an optional extension
   protects legacy runners that ignore it.
+  The experimental Rust link-snapshot receipt binds supplied ordered link
+  observations in its manifest under a distinct schema and re-evaluates them.
+  It is not yet supported by the CLI or independent receipt comparator and does
+  not authenticate evidence or establish freshness.
   PR #315 added a standalone manifest, independently checked JSON
   Schema and an experimental Rust offline receipt. It is not yet a v2 verdict,
   a cross-implementation runner or integrated with EmDash; external
