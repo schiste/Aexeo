@@ -328,23 +328,83 @@ fn has_hidden_inline_style(snippet: &str) -> bool {
 }
 
 pub(crate) fn style_hides_content(style: &str) -> bool {
-    style.split(';').any(|declaration| {
+    // This recognizes only a small literal subset of CSS. Track the last
+    // recognized declaration for each property, respecting !important; an
+    // unknown value cannot safely cancel an earlier hiding declaration.
+    let mut display = None;
+    let mut visibility = None;
+    let mut content_visibility = None;
+    for declaration in style.split(';') {
         let Some((property, value)) = declaration.split_once(':') else {
-            return false;
+            continue;
         };
-        let value = value
-            .split_once('!')
-            .map_or(value, |(value, _)| value)
-            .trim();
-        match property.trim().to_ascii_lowercase().as_str() {
-            "display" => value.eq_ignore_ascii_case("none"),
-            "visibility" => {
-                value.eq_ignore_ascii_case("hidden") || value.eq_ignore_ascii_case("collapse")
+        let (value, important) = match value.split_once('!') {
+            Some((value, priority)) if priority.trim().eq_ignore_ascii_case("important") => {
+                (value.trim(), true)
             }
-            "content-visibility" => value.eq_ignore_ascii_case("hidden"),
-            _ => false,
+            Some(_) => continue,
+            None => (value.trim(), false),
+        };
+        let property = property.trim();
+        let (slot, hidden) = if property.eq_ignore_ascii_case("display") {
+            let hidden = if value.eq_ignore_ascii_case("none") {
+                Some(true)
+            } else if [
+                "block",
+                "inline",
+                "inline-block",
+                "flex",
+                "inline-flex",
+                "grid",
+                "inline-grid",
+                "flow-root",
+                "contents",
+                "table",
+                "list-item",
+            ]
+            .iter()
+            .any(|candidate| value.eq_ignore_ascii_case(candidate))
+            {
+                Some(false)
+            } else {
+                None
+            };
+            (&mut display, hidden)
+        } else if property.eq_ignore_ascii_case("visibility") {
+            let hidden =
+                if value.eq_ignore_ascii_case("hidden") || value.eq_ignore_ascii_case("collapse") {
+                    Some(true)
+                } else if value.eq_ignore_ascii_case("visible") {
+                    Some(false)
+                } else {
+                    None
+                };
+            (&mut visibility, hidden)
+        } else if property.eq_ignore_ascii_case("content-visibility") {
+            let hidden = if value.eq_ignore_ascii_case("hidden") {
+                Some(true)
+            } else if value.eq_ignore_ascii_case("visible") || value.eq_ignore_ascii_case("auto") {
+                Some(false)
+            } else {
+                None
+            };
+            (&mut content_visibility, hidden)
+        } else {
+            continue;
+        };
+        if !matches!(*slot, Some((_, true))) || important {
+            if let Some(hidden) = hidden {
+                *slot = Some((hidden, important));
+            } else if matches!(*slot, Some((true, _))) {
+                // An unknown value might be a valid higher-priority hiding
+                // declaration, so a later lower-priority value cannot clear it.
+                *slot = Some((true, important));
+            }
         }
-    })
+    }
+    [display, visibility, content_visibility]
+        .into_iter()
+        .any(|state| matches!(state, Some((true, _))))
 }
 
 /// Text of a fragment without the elements marked hidden. A hidden element with
@@ -694,7 +754,13 @@ fn tag_snippets<'a>(raw: &'a str, tag: &str) -> Vec<&'a str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{figure_content_ranges, image_markup_events};
+    use super::{figure_content_ranges, image_markup_events, visible_text};
+
+    #[test]
+    fn visible_caption_text_uses_inline_declaration_precedence() {
+        let caption = r#"A <span style="display:none;display:block">visible</span> <span style="display:none!important;display:block">hidden</span> caption"#;
+        assert_eq!(visible_text(caption), "A visible caption");
+    }
 
     #[test]
     fn a_close_tag_inside_an_attribute_gives_no_inverted_figure_range() {

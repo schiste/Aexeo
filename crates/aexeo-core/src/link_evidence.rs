@@ -641,6 +641,46 @@ mod tests {
     }
 
     #[test]
+    fn inline_visibility_honors_later_and_important_declarations() {
+        let html = "<main><a style='display:none;display:block' href='/shown'>shown</a><a style='display:none!important;display:block' href='/important'>hidden</a><a style='visibility:hidden;visibility:visible!important' href='/visible'>visible</a><a style='content-visibility:hidden;content-visibility:auto' href='/auto'>auto</a><a style='display:block!important;display:none' href='/priority'>visible</a><a style='display:none;display:invalid-value' href='/invalid'>hidden</a></main>";
+        let links = extract_links(html, "https://example.org/", "https://example.org", None);
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| link.hidden_inline_style)
+                .collect::<Vec<_>>(),
+            vec![
+                Some(false),
+                Some(true),
+                Some(false),
+                Some(false),
+                Some(false),
+                Some(true)
+            ]
+        );
+    }
+
+    #[test]
+    fn inline_visibility_properties_and_invalid_priorities_stay_independent() {
+        let html = "<main><a style='display:none;visibility:visible' href='/a'>a</a><a style='display:none!important;display:block!important' href='/b'>b</a><a style='display:none;display:block!invalid' href='/c'>c</a><div style='display:none'><a style='display:block' href='/d'>d</a></div><a style='display:none;display:var(--choice)!important;display:block' href='/e'>e</a><a style='display:none;display:var(--choice)!important;display:block!important' href='/f'>f</a></main>";
+        let links = extract_links(html, "https://example.org/", "https://example.org", None);
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| link.hidden_inline_style)
+                .collect::<Vec<_>>(),
+            vec![
+                Some(true),
+                Some(false),
+                Some(true),
+                Some(true),
+                Some(true),
+                Some(false)
+            ]
+        );
+    }
+
+    #[test]
     fn inline_hidden_styles_are_inherited_and_legacy_evidence_is_unobserved() {
         let links = extract_links(
             "<main><div style='DISPLAY: none !important'><a href='/a'>a</a></div><a style='visibility: collapse' href='/b'>b</a><div style='content-visibility:hidden'><a href='/c'>c</a></div><a style='display:block' href='/d'>d</a></main>",
