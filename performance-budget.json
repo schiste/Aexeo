@@ -80,5 +80,9 @@
   "content/dense_forbidden_terms": {
     "max_avg_ms": 50,
     "max_p95_ms": 100
+  },
+  "content/composed_literal_gates": {
+    "max_avg_ms": 10,
+    "max_p95_ms": 20
   }
 }
