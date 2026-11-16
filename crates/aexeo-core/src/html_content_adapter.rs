@@ -201,6 +201,9 @@ pub fn html_content_with_scope(
     })
 }
 
+// Bound source-map memory even for entity-heavy or newline-heavy documents.
+const MAX_HTML_SOURCE_MAP_SPANS: usize = 100_000;
+
 /// Exact source mapping for a deliberately restricted, well-nested HTML subset.
 /// Unsupported markup and transformed text return no map, never guessed positions.
 #[derive(Debug)]
@@ -321,7 +324,12 @@ pub fn html_source_map_with_scope(
     scope: HtmlContentScope,
 ) -> Option<HtmlSourceMap> {
     use crate::site::markup::{open_tag_end, tag_breaks_text};
-    if source.len() > MAX_CONTENT_INPUT_BYTES || source.contains(['\r', '\0', '\x0b']) {
+    if source.len() > MAX_CONTENT_INPUT_BYTES
+        || source.contains(['\0', '\x0b'])
+        || source
+            .match_indices('\r')
+            .any(|(i, _)| source.as_bytes().get(i + 1) != Some(&b'\n'))
+    {
         return None;
     }
     let mut stack: Vec<String> = Vec::new();
@@ -354,6 +362,9 @@ pub fn html_source_map_with_scope(
             }
             let mut within = 0;
             while within < literal.len() {
+                if spans.len() >= MAX_HTML_SOURCE_MAP_SPANS {
+                    return None;
+                }
                 let rest = &literal[within..];
                 if rest.starts_with('&') {
                     // HTML's longest named entity is 33 bytes including & and ;.
@@ -366,8 +377,15 @@ pub fn html_source_map_with_scope(
                     }
                     spans.push((start, output.len(), cursor + within, true));
                     within += semicolon + 1;
+                } else if rest.starts_with("\r\n") {
+                    // HTML preprocessing normalizes CRLF to one LF. The
+                    // projected newline points to the first source byte.
+                    let start = output.len();
+                    output.push('\n');
+                    spans.push((start, output.len(), cursor + within, true));
+                    within += 2;
                 } else {
-                    let length = rest.find('&').unwrap_or(rest.len());
+                    let length = rest.find(['&', '\r']).unwrap_or(rest.len());
                     let start = output.len();
                     output.push_str(&rest[..length]);
                     spans.push((start, output.len(), cursor + within, false));
@@ -911,6 +929,44 @@ mod tests {
                 "{html}"
             );
         }
+    }
+
+    #[test]
+    fn maps_crlf_html_to_original_lines_and_rejects_bare_cr() {
+        let html = "<main>\r\n<p>Élan &amp;\r\nmonde</p>\r\n</main>";
+        for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+            let adapted = html_content_with_scope("x", html, scope).unwrap();
+            let projected = adapted.input.text.as_deref().unwrap();
+            let map = html_source_map_with_scope(html, projected, scope).unwrap();
+            let projected_index = crate::text_index::LineIndex::new(projected);
+            let source_index = crate::text_index::LineIndex::new(html);
+            for needle in ["Élan", "monde"] {
+                let (line, column) = projected_index
+                    .position(projected, projected.find(needle).unwrap())
+                    .unwrap();
+                assert_eq!(
+                    map.source_position(html, projected, line, column),
+                    source_index.position(html, html.find(needle).unwrap()),
+                );
+            }
+            let (line, column) = projected_index
+                .position(projected, projected.find('&').unwrap())
+                .unwrap();
+            assert_eq!(
+                map.source_position(html, projected, line, column),
+                source_index.position(html, html.find("&amp;").unwrap())
+            );
+        }
+        let bare_cr = "<p>first\rsecond</p>";
+        let adapted = html_content("x", bare_cr).unwrap();
+        assert!(html_source_map(bare_cr, adapted.input.text.as_deref().unwrap()).is_none());
+    }
+
+    #[test]
+    fn rejects_source_maps_with_too_many_transformed_spans() {
+        let html = format!("<p>{}</p>", "x&amp;".repeat(MAX_HTML_SOURCE_MAP_SPANS + 1));
+        let adapted = html_content("x", &html).unwrap();
+        assert!(html_source_map(&html, adapted.input.text.as_deref().unwrap()).is_none());
     }
 
     #[test]
