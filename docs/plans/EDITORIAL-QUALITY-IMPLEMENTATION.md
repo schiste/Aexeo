@@ -57,3 +57,15 @@ Existing source and factuality work is outside this plan.
   results remain unavailable rather than being inferred from these examples.
 
 - Added an opt-in, advisory repeated sentence-opening gate with configurable segmentation and source mapping for CLI and EmDash; it does not infer authorship.
+
+- The optional `sentence-openings-review` preset was evaluated locally on the 19
+  unreviewed development excerpts (Markdown CMS projections): 595 sentence
+  openings were evaluated, 14 short ASCII sentences were excluded, no openings
+  exceeded the limit and all 19 gates passed. The three holdout examples were
+  not used. These counts establish coverage for this convenience sample only;
+  without human labels they do not measure false positives, false negatives or
+  quality, and the CMS projections may omit components.
+- The performance suite includes a 500-paragraph, 2,000-sentence fixture for
+  repeated sentence openings, asserts 500 findings and checks average and p95
+  time against a dedicated budget. This synthetic workload does not establish
+  real-world latency or editorial accuracy.
