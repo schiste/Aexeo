@@ -686,7 +686,7 @@ describe("assessment persistence", () => {
     const panel = JSON.stringify(await renderDocumentPanel(ctx.kv, "/a"));
     expect(panel).toContain("Content preset: article");
     expect(panel).toContain("Source locations: 1 of 2 emitted findings mapped; 1 unmapped.");
-    expect(panel).toContain("words passed (advisory) — word count: 50, min words: 20");
+    expect(panel).toContain("words passed (advisory; scope: document; requires: text) — word count: 50, min words: 20");
     const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator: returning() });
     expect(payload.routes.find((route) => route.route === "/a")?.assessment).toMatchObject({ gates: [{ measurements: { word_count: 50, min_words: 20 } }] });
   });
