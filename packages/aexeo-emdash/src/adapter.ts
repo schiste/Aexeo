@@ -205,7 +205,11 @@ function adaptContentItemInternal(content: EmdashContentItem, options: AdaptCont
     : extractSelectedContent(content.data, options.contentFields, options.blockMappings);
   if (body !== null) {
     document.body = body.blocks;
-    if (body.capabilities !== undefined) document.body_capabilities = body.capabilities;
+    const capabilities = body.capabilities ?? BODY_CAPABILITIES;
+    const linksComplete = body.blocks.every(hasUnambiguousLinkMarks);
+    if (body.capabilities !== undefined || !linksComplete) {
+      document.body_capabilities = capabilities.filter((capability) => capability !== "links" || linksComplete);
+    }
   }
 
   const bodySourcePaths = body === null || !includeSourcePaths ? undefined : portableTextSourcePaths(content.data, body.blocks);
@@ -283,6 +287,26 @@ function portableTextSourcePaths(data: Record<string, unknown>, blocks: readonly
 
 type ExtractedBody = { blocks: PortableTextBlock[]; capabilities?: BodyCapability[] };
 const BODY_CAPABILITIES: readonly BodyCapability[] = ["text", "headings", "paragraphs", "links"];
+const PORTABLE_DECORATIONS = new Set(["strong", "em", "code", "underline", "strike-through"]);
+
+// The bridge understands link marks and these decorations. A used custom or
+// unresolved mark may represent a link in the host renderer; duplicate keys
+// or decoration collisions also make its destination ambiguous.
+function hasUnambiguousLinkMarks(block: PortableTextBlock): boolean {
+  const definitions = new Map<string, string | null>();
+  for (const def of block.markDefs ?? []) {
+    definitions.set(def._key, definitions.has(def._key) ? null : def._type);
+  }
+  for (const span of block.children) {
+    for (const mark of span.marks ?? []) {
+      const definition = definitions.get(mark);
+      if (PORTABLE_DECORATIONS.has(mark)) {
+        if (definitions.has(mark)) return false;
+      } else if (definition !== "link") return false;
+    }
+  }
+  return true;
+}
 function intersectCapabilities(current: readonly BodyCapability[], other?: readonly BodyCapability[]): BodyCapability[] {
   return other === undefined ? [...current] : current.filter((capability) => other.includes(capability));
 }

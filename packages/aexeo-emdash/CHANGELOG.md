@@ -26,6 +26,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Mark link coverage unavailable for used unknown, unresolved or ambiguous Portable Text annotations while preserving available prose capabilities.
+
 - Count only routes with findings in the React dashboard headline; preserve the total route count and expose a separate aggregate for consumers.
 - Include indexed documents without findings records in both editorial views, with unknown coverage and missing assessment rather than hiding them.
 - Report invalid and cross-origin inventory alias targets with aggregate-only telemetry, while preserving relative targets and original evidence.
