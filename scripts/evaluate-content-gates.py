@@ -114,6 +114,12 @@ def corpus_projection(corpus):
     return None
 
 
+def check_input_format(container, corpus):
+    """Check declared adapter identity when available; old artifacts remain unbound."""
+    if "input_format" in container and container["input_format"] != (corpus.get("input_format") or "text"):
+        raise ValueError("input format does not match the corpus")
+
+
 def check_projection(container, expected):
     """Reject mismatched or absent scope where scoped data is required."""
     if ("content_projection" in container) != (expected is not None) or (expected is not None and container["content_projection"] != expected):
@@ -184,6 +190,7 @@ def validate_corpus(corpus):
             if not isinstance(review, dict) or any(not isinstance(review.get(key), str) or not review[key].strip() for key in ("reviewer", "method")):
                 raise ValueError("reviewed examples require reviewer and method provenance")
             check_projection(review, projection)
+            check_input_format(review, corpus)
             if "resolved_policy_fingerprint" in review:
                 validate_policy_fingerprint(review["resolved_policy_fingerprint"])
             if "report_binding" in review and (not isinstance(review["report_binding"], str) or review["report_binding"] not in {"verified", "unverified"}):
@@ -217,6 +224,7 @@ def aggregate_blind_review_events(corpus, split, review_log):
         if status not in {"passed", "failed", "uncertain"}:
             raise ValueError("invalid blind review status")
         check_projection(event, projection)
+        check_input_format(event, corpus)
         if event.get("text_sha256") != hashlib.sha256(item["text"].encode("utf-8")).hexdigest():
             raise ValueError("blind review does not match current example text")
         if "metadata" in item:
@@ -278,6 +286,7 @@ def aggregate_review_events(corpus, split, review_log, current_policy=None):
         seen.add(key)
         item = by_id[identifier]
         check_projection(event, projection)
+        check_input_format(event, corpus)
         digest = hashlib.sha256(item["text"].encode("utf-8")).hexdigest()
         if event.get("text_sha256") != digest:
             raise ValueError("review event does not match the current example text")
@@ -460,6 +469,7 @@ def evaluate(binary, corpus, split, review_log=None, reject_normalized_overlap=F
                 raise ValueError(f"CLI failed for {item['id']}: exit {result.returncode}")
             report = json.loads(result.stdout)
             check_projection(report, projection)
+            check_input_format(report, corpus)
             report_has_policy = "resolved_policy_fingerprint" in report
             if report_has_policy:
                 fingerprint = validate_policy_fingerprint(report["resolved_policy_fingerprint"])

@@ -219,5 +219,8 @@ The standalone native CLI currently supports capture and event export only.
 
 Corpora may set `input_format` to `paragraph-text` to evaluate blank-line-separated
 plain text with paragraph capabilities. As with text and Markdown corpora, the
-feedback fingerprint does not bind the adapter format; retain and verify the
-format used for the original report before importing feedback.
+feedback fingerprint binds only text and metadata. New reports additionally
+record `input_format`, which is retained with feedback and checked against the
+corpus. Older reports without it remain accepted but their adapter format is
+unverified; retain and verify that context separately. These fields are unsigned
+and do not establish authenticity.

@@ -130,6 +130,14 @@ fn export_matches_existing_python_validator_on_representative_inputs() {
     cases.push((paragraph_corpus.clone(), note.clone()));
     paragraph_corpus["content_projection"] = json!({"format":"html", "scope":"main"});
     cases.push((paragraph_corpus, note.clone()));
+    let mut format_note = note.clone();
+    format_note["input_format"] = json!("paragraph-text");
+    let mut format_corpus = corpus.clone();
+    format_corpus["input_format"] = json!("paragraph-text");
+    cases.push((format_corpus.clone(), format_note.clone()));
+    cases.push((corpus.clone(), format_note.clone()));
+    format_note["input_format"] = json!(null);
+    cases.push((format_corpus, format_note));
     let mut policy_note = note.clone();
     policy_note["resolved_policy_fingerprint"] = json!({"version": 1, "sha256": "a".repeat(64)});
     cases.push((corpus.clone(), policy_note.clone()));
@@ -304,6 +312,7 @@ fn capture_checks_report_against_original_markdown_and_metadata() {
     fs::write(&report, &evaluated.stdout).unwrap();
     let report_json: serde_json::Value = serde_json::from_slice(&evaluated.stdout).unwrap();
     assert_eq!(report_json["input_fingerprint"]["version"], 1);
+    assert_eq!(report_json["input_format"], "markdown");
     assert!(!String::from_utf8_lossy(&evaluated.stdout).contains("Texte privé"));
     let capture = |output: &std::path::Path| {
         Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
@@ -333,6 +342,7 @@ fn capture_checks_report_against_original_markdown_and_metadata() {
     );
     let note_json: serde_json::Value = serde_json::from_slice(&fs::read(note).unwrap()).unwrap();
     assert_eq!(note_json["report_binding"], "verified");
+    assert_eq!(note_json["input_format"], "markdown");
     assert_eq!(
         note_json["resolved_policy_fingerprint"],
         report_json["resolved_policy_fingerprint"]

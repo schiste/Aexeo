@@ -52,6 +52,10 @@ def capture(text, report, gate_id, example_id, human_status=None, reviewer=None,
         raise ValueError("report input fingerprint does not match the text and metadata")
     else:
         note["report_binding"] = "verified"
+    if "input_format" in report:
+        if report["input_format"] not in ("text", "paragraph-text", "markdown", "html"):
+            raise ValueError("invalid report input format")
+        note["input_format"] = report["input_format"]
     if "content_projection" in report:
         projection = report["content_projection"]
         if projection != {"format": "html", "scope": "main"}:
@@ -69,6 +73,7 @@ def _review_event(corpus, note, module, version):
     if note.get("version") != 1 or note.get("kind") != "reported_human_feedback":
         raise ValueError("unsupported feedback note")
     module.check_projection(note, module.corpus_projection(corpus))
+    module.check_input_format(note, corpus)
     if note.get("gate_id") != corpus.get("gate_id"):
         raise ValueError("feedback gate does not match corpus")
     statuses = {"passed", "failed", "uncertain"} if version == 3 else {"passed", "failed"}
@@ -80,6 +85,8 @@ def _review_event(corpus, note, module, version):
     event = {"example_id": note.get("example_id"), "text_sha256": note.get("text_sha256"),
              "model_status": note.get("model_status"), "reviewer_status": note["human_status"],
              "reviewer": note["reviewer"], "method": note["method"]}
+    if "input_format" in note:
+        event["input_format"] = note["input_format"]
     if "metadata_sha256" in note:
         event["metadata_sha256"] = note["metadata_sha256"]
     if "content_projection" in note:
@@ -133,7 +140,7 @@ def bind_review(corpus, note, accept_human_label=False):
                       "text_sha256": event["text_sha256"], "expected": item["expected"]}
     if "metadata_sha256" in event:
         item["review"]["metadata_sha256"] = event["metadata_sha256"]
-    for key in ("resolved_policy_fingerprint", "report_binding", "content_projection"):
+    for key in ("resolved_policy_fingerprint", "report_binding", "content_projection", "input_format"):
         if key in event:
             item["review"][key] = copy.deepcopy(event[key])
     if label_changed:
