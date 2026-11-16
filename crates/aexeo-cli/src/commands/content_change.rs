@@ -433,7 +433,7 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
     if let Some(snapshots) = &snapshots {
         let observer = snapshot_observer
             .as_ref()
-            .expect("snapshot observer exists");
+            .user_context("missing link snapshot observer")?;
         observer
             .finish()
             .user_context("invalid link observations")?;
