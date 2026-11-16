@@ -55,11 +55,11 @@ impl AuxiliaryBudget {
 /// Host-provided observations apply only to the exact source and link order.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct LinkObservationSnapshot {
-    version: u32,
-    source_sha256: String,
-    destinations: Vec<String>,
-    observations: Vec<aexeo_core::content_gate::LinkReachabilityObservation>,
+pub(super) struct LinkObservationSnapshot {
+    pub(super) version: u32,
+    pub(super) source_sha256: String,
+    pub(super) destinations: Vec<String>,
+    pub(super) observations: Vec<aexeo_core::content_gate::LinkReachabilityObservation>,
 }
 
 #[derive(Default)]

@@ -64,11 +64,12 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("html-scope").long("html-scope").value_parser(["document", "main"]).default_value("document").help("Project each HTML entry as a whole document or its unique main element"))
                 .arg(Arg::new("collection-snapshot").long("collection-snapshot").help("Host-supplied post-change collection JSON with explicit completeness"))
                 .arg(Arg::new("verify-verdict").long("verify-verdict").help("Re-evaluate and compare a previous verdict before writing a fresh verdict"))
-                .arg(Arg::new("offline-receipt").long("offline-receipt").action(ArgAction::SetTrue).requires("evaluator-identity").conflicts_with_all(["verify-verdict", "check-link-reachability", "extension-results"]).help("Write an experimental offline receipt instead of a v1 verdict"))
+                .arg(Arg::new("offline-receipt").long("offline-receipt").action(ArgAction::SetTrue).requires("evaluator-identity").conflicts_with_all(["verify-verdict", "check-link-reachability", "link-observations", "extension-results"]).help("Write an experimental offline receipt instead of a v1 verdict"))
                 .arg(Arg::new("offline-receipt-bundle").long("offline-receipt-bundle").action(ArgAction::SetTrue).requires("offline-receipt").help("Include private decision input bytes in the experimental receipt output"))
                 .arg(Arg::new("evaluator-identity").long("evaluator-identity").requires("offline-receipt").help("Host-asserted trusted evaluator build identity (not authenticated by Aexeo)"))
                 .arg(Arg::new("verify-offline-receipt").long("verify-offline-receipt").requires("offline-receipt").help("Re-evaluate and compare a previous experimental offline receipt"))
                 .arg(Arg::new("check-link-reachability").long("check-link-reachability").action(ArgAction::SetTrue).help("Explicitly enable bounded external HTTP observations for reachability gates"))
+                .arg(Arg::new("link-observations").long("link-observations").num_args(1).conflicts_with_all(["check-link-reachability", "offline-receipt"]).help("Load trusted source-bound observations for change entries without network access"))
                 .arg(Arg::new("link-max-checks").long("link-max-checks").value_parser(value_parser!(u64).range(1..=100)).default_value("20").help("Maximum external link checks across the entire change"))
                 .arg(Arg::new("link-timeout").long("link-timeout").value_parser(value_parser!(u64).range(1..=30)).default_value("5").help("Maximum seconds per external link including redirects"))
                 .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate link observation counts to stderr")),

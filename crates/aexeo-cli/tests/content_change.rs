@@ -569,10 +569,34 @@ fn revalidates_custom_results_alone_and_with_observed_links() {
     change["entries"][0]["media_type"] = "text/markdown".into();
     change["entries"][0]["after"] = serde_json::json!({"inline":"[x](/x)", "sha256":"f0028e4ca25f0bd43662926fcd36d300576e7e7b3d49045cc6f89a409eaf971e"});
     let preset = "version=1\nname='test'\n[[gates]]\nid='external'\nkind='custom'\nextension='example.rule'\n[[gates]]\nid='links'\nkind='link_reachability'\nblocking=false\n";
-    for with_links in [false, true] {
+    let exported_links = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            source.to_str().unwrap(),
+            "--input-format",
+            "markdown",
+            "--export-link-observations",
+        ])
+        .output()
+        .unwrap();
+    assert!(exported_links.status.success());
+    let mut entry: serde_json::Value = serde_json::from_slice(&exported_links.stdout).unwrap();
+    entry["observations"][0] = "not_applicable".into();
+    let snapshots = dir.path().join("links.json");
+    fs::write(
+        &snapshots,
+        serde_json::to_vec(
+            &serde_json::json!({"version":1,"change_id":"example","entries":{"article":entry}}),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    for mode in 0..3 {
         let mut flags = vec!["--extension-results", ext];
-        if with_links {
+        if mode == 1 {
             flags.push("--check-link-reachability");
+        } else if mode == 2 {
+            flags.extend(["--link-observations", snapshots.to_str().unwrap()]);
         }
         let first = run(dir.path(), &change, preset, &flags);
         assert_eq!(
@@ -588,7 +612,7 @@ fn revalidates_custom_results_alone_and_with_observed_links() {
         let saved: serde_json::Value = serde_json::from_slice(&original).unwrap();
         let binding = &saved["extensions"]["aexeo.external-observations.v1"];
         assert!(binding["extensions_sha256"].as_str().is_some());
-        assert_eq!(binding["links_sha256"].is_string(), with_links);
+        assert_eq!(binding["links_sha256"].is_string(), mode != 0);
         assert!(!binding.to_string().contains("example.rule"));
         flags.extend([
             "--verify-verdict",
@@ -814,6 +838,7 @@ fn rejects_verdict_aliases_of_configuration_inputs() {
     for (target, extra) in [
         (&preset, None),
         (&snapshot, Some("--collection-snapshot")),
+        (&snapshot, Some("--link-observations")),
         (&external, Some("--extension-results")),
     ] {
         let original = fs::read(target).unwrap();
@@ -1149,6 +1174,212 @@ fn revalidates_previous_verdict_against_current_inputs_and_result() {
         String::from_utf8_lossy(&result.stderr)
             .contains("differs from the current offline evaluation")
     );
+}
+
+#[test]
+fn host_link_snapshot_never_contacts_the_destination() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let source = format!("[local](http://{}/private)", listener.local_addr().unwrap());
+    let article = dir.path().join("article.md");
+    fs::write(&article, &source).unwrap();
+    let exported = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            article.to_str().unwrap(),
+            "--input-format",
+            "markdown",
+            "--export-link-observations",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        exported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&exported.stderr)
+    );
+    let mut entry: serde_json::Value = serde_json::from_slice(&exported.stdout).unwrap();
+    entry["observations"][0] = "reachable".into();
+    let mut change = input();
+    change["entries"][0]["media_type"] = "text/markdown".into();
+    change["entries"][0]["after"] =
+        serde_json::json!({"inline":source,"sha256":entry["source_sha256"]});
+    let snapshot = dir.path().join("observations.json");
+    fs::write(
+        &snapshot,
+        serde_json::to_vec(
+            &serde_json::json!({"version":1,"change_id":"example","entries":{"article":entry}}),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\n";
+    let options = ["--link-observations", snapshot.to_str().unwrap()];
+    let result = run(dir.path(), &change, policy, &options);
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    let saved = fs::read(dir.path().join("verdict.json")).unwrap();
+    let conflict = run(
+        dir.path(),
+        &change,
+        policy,
+        &[
+            "--link-observations",
+            snapshot.to_str().unwrap(),
+            "--check-link-reachability",
+        ],
+    );
+    assert_eq!(conflict.status.code(), Some(2));
+    assert_eq!(fs::read(dir.path().join("verdict.json")).unwrap(), saved);
+}
+
+#[test]
+fn host_link_snapshots_bind_multiple_entries_and_revalidate() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut change = input();
+    change["entries"][0]["media_type"] = "text/markdown".into();
+    change["entries"][0]["after"] = serde_json::json!({"inline":"[first](https://example.org/a)", "sha256":"9b109ca77f8b3af5b0f54a9ae1aeb8d01f5ed6fbd1d350ffe84289bf42000e09"});
+    change["entries"].as_array_mut().unwrap().push(serde_json::json!({"entity_id":"other", "operation":"create", "media_type":"text/html", "after":{"inline":"<main><p><a href=\"https://example.org/b\">second</a></p></main>", "sha256":"b65d7ee38bc936bda3e4e654a4f99e5d68833e81ac6eb9fc19563664b22dc5e4"}}));
+    let policy = "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\n";
+    let snapshot = dir.path().join("link-snapshot.json");
+    let mut body = serde_json::json!({"version":1,"change_id":"example","entries":{
+        "article":{"version":1,"source_sha256":"9b109ca77f8b3af5b0f54a9ae1aeb8d01f5ed6fbd1d350ffe84289bf42000e09", "destinations":["https://example.org/a"],"observations":["not_found"]},
+        "other":{"version":1,"source_sha256":"b65d7ee38bc936bda3e4e654a4f99e5d68833e81ac6eb9fc19563664b22dc5e4", "destinations":["https://example.org/b"],"observations":["not_checked"]}
+    }});
+    fs::write(&snapshot, serde_json::to_vec(&body).unwrap()).unwrap();
+    let path = snapshot.to_str().unwrap();
+    let first = run(
+        dir.path(),
+        &change,
+        policy,
+        &["--link-observations", path, "--telemetry"],
+    );
+    let events: Vec<serde_json::Value> = String::from_utf8_lossy(&first.stderr)
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(events[0]["event"], "content_change_link_snapshots");
+    assert_eq!(events[0]["unchecked_observations"], 1);
+    assert_eq!(events[0]["entries_without_snapshot"], 0);
+    assert!(!String::from_utf8_lossy(&first.stderr).contains("example.org"));
+    assert!(
+        first.status.code().is_some(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let output = dir.path().join("verdict.json");
+    let first_verdict: serde_json::Value =
+        serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert!(
+        first_verdict["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["entity_id"] == "article")
+    );
+    assert!(
+        first_verdict["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["status"] == "not_checked")
+    );
+    let previous = dir.path().join("previous.json");
+    fs::copy(&output, &previous).unwrap();
+    let options = [
+        "--link-observations",
+        path,
+        "--verify-verdict",
+        previous.to_str().unwrap(),
+    ];
+    let again = run(dir.path(), &change, policy, &options);
+    assert_eq!(
+        again.status.code(),
+        first.status.code(),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    let saved = fs::read(&output).unwrap();
+    for altered in [
+        {
+            let mut v = body.clone();
+            v["entries"]["article"]["source_sha256"] = "0".repeat(64).into();
+            v
+        },
+        {
+            let mut v = body.clone();
+            v["entries"]["article"]["destinations"][0] = "https://wrong.invalid".into();
+            v
+        },
+        {
+            let mut v = body.clone();
+            v["entries"]["article"]["observations"] = serde_json::json!([]);
+            v
+        },
+        {
+            let mut v = body.clone();
+            v["change_id"] = "other-change".into();
+            v
+        },
+        {
+            let mut v = body.clone();
+            v["entries"]["unknown"] = v["entries"]["article"].clone();
+            v
+        },
+    ] {
+        fs::write(&snapshot, serde_json::to_vec(&altered).unwrap()).unwrap();
+        let rejected = run(dir.path(), &change, policy, &["--link-observations", path]);
+        assert_eq!(
+            rejected.status.code(),
+            Some(2),
+            "{}",
+            String::from_utf8_lossy(&rejected.stderr)
+        );
+        assert_eq!(fs::read(&output).unwrap(), saved);
+    }
+    let raw = serde_json::to_string(&body).unwrap();
+    let duplicate = raw.replacen("\"version\":1", "\"version\":1,\"version\":1", 1);
+    assert_ne!(duplicate, raw);
+    fs::write(&snapshot, duplicate).unwrap();
+    let rejected = run(dir.path(), &change, policy, &["--link-observations", path]);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("invalid link observations"));
+    assert_eq!(fs::read(&output).unwrap(), saved);
+    let mut partial = body.clone();
+    partial["entries"].as_object_mut().unwrap().remove("other");
+    fs::write(&snapshot, serde_json::to_vec(&partial).unwrap()).unwrap();
+    let partial_result = run(
+        dir.path(),
+        &change,
+        policy,
+        &["--link-observations", path, "--telemetry"],
+    );
+    let partial_event: serde_json::Value = serde_json::from_str(
+        String::from_utf8_lossy(&partial_result.stderr)
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(partial_event["entries_without_snapshot"], 1);
+    assert_eq!(partial_event["unchecked_observations"], 1);
+    assert_eq!(partial_result.status.code(), first.status.code());
+    fs::write(&output, &saved).unwrap();
+    body["entries"]["article"]["observations"][0] = "reachable".into();
+    fs::write(&snapshot, serde_json::to_vec(&body).unwrap()).unwrap();
+    let rejected = run(dir.path(), &change, policy, &options);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("previous verdict"));
+    assert_eq!(fs::read(&output).unwrap(), saved);
 }
 
 #[test]

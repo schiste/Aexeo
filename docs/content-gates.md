@@ -317,6 +317,41 @@ are applicable; matching the source does not establish freshness or accuracy.
 Snapshot files may contain private URLs. Optional telemetry emits only aggregate
 counts and elapsed time, with no source, paths or destinations.
 
+### Change-wide host observations
+
+A `content-change` host may pass `--link-observations change-links.json` to
+supply observations without network access. Compose the individual snapshots
+from `content --export-link-observations` under their change entry identifiers:
+
+```json
+{
+  "version": 1,
+  "change_id": "example",
+  "entries": {
+    "article": {
+      "version": 1,
+      "source_sha256": "<SHA-256 of the exact entry bytes>",
+      "destinations": ["https://example.org/a"],
+      "observations": ["not_checked"]
+    }
+  }
+}
+```
+
+Each supplied entry must refer to an `after` state with the same digest and
+its extracted destinations in the same order. Export using the same HTML
+scope as the change evaluation. Links in missing entries and inconclusive
+observations remain `not_checked`; a supplied entry that cannot be assessed, a mismatch,
+duplicate keys or unknown fields rejects the run before replacing the verdict.
+The snapshot is limited to 64 MiB and must use a path distinct from the output.
+It cannot be combined with live checks or offline receipts. It can be combined
+with external gate results. During `--verify-verdict`, Aexeo compares a digest
+of the complete supplied snapshot before evaluating and checks the observations
+used in the fresh verdict. The host must establish the trust and freshness of
+observations and prevent concurrent input changes. Snapshots contain URLs and
+may be private; optional `content_change_link_snapshots` telemetry contains only
+aggregate supplied and missing counts and elapsed time.
+
 ### EmDash host observations
 
 The `@aeptus/aexeo-emdash/content` API can supply the same gate without making
