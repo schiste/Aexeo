@@ -201,7 +201,7 @@ fn html_main_maps_to_article_body_in_a_complete_document() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("article.html");
     let preset = dir.path().join("preset.toml");
-    fs::write(&file, "<!doctype html>\n<html lang=\"en\"><head><title>shared</title><meta charset=\"utf-8\"></head>\n<body><nav><a href=\"/same\">shared</a></nav>\n<main><h1>Heading</h1><p><a href=\"/same\">shared</a></p></main>\n</body></html>").unwrap();
+    fs::write(&file, "<!doctype html>\n<html lang=\"en\"><head><title>shared</title><meta charset=\"utf-8\"><!-- shared --><link rel=\"stylesheet\" href=\"/site.css\"><script>let x = 'shared';</script><style>p { color: red }</style></head>\n<body><nav><a href=\"/same\">shared</a></nav>\n<main><h1>Heading</h1><p><a href=\"/same\">shared</a></p></main>\n</body></html>").unwrap();
     fs::write(
         &preset,
         "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['shared']\n",
