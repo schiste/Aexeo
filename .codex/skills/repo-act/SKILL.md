@@ -150,6 +150,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   Lexical checks and per-component no-follow opens alone do not prevent a
   concurrent directory rename from escaping the root; use an atomic platform
   primitive or fail closed, and run the tests on each supported platform.
+- When moving CLI validation into shared engine code, preserve the host’s
+  translation of invalid inputs to user errors. Test the actual CLI exit code,
+  diagnostic and unchanged prior output, including failures during callbacks.
 - For CLI revalidation failures, assert the specific error exit and diagnostic,
   and that any previous output remains unchanged. A nonzero exit alone can be
   an ordinary failed editorial gate rather than a rejected revalidation.
