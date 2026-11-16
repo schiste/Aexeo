@@ -259,6 +259,9 @@ Options:
       --link-observations <link-observations>
           Load trusted, source-bound link observations as JSON without network access
 
+      --export-link-observations
+          Export a source-bound link observation template as JSON; may contain private URLs
+
       --link-max-checks <link-max-checks>
           Maximum unique external link checks
 

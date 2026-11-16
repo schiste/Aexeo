@@ -277,12 +277,13 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         text,
     ) {
         (Some("markdown"), Some(text)) => {
-            let (input, capabilities, links, map) = if preset.gates.iter().any(|gate| {
-                matches!(
-                    gate,
-                    ContentGate::LinkDestinations { .. } | ContentGate::LinkReachability { .. }
-                )
-            }) {
+            let (input, capabilities, links, map) = if args.get_flag("export-link-observations")
+                || preset.gates.iter().any(|gate| {
+                    matches!(
+                        gate,
+                        ContentGate::LinkDestinations { .. } | ContentGate::LinkReachability { .. }
+                    )
+                }) {
                 let adapted =
                     aexeo_core::markdown_adapter::markdown_input_with_source_map_and_destinations(
                         id, &text,
@@ -377,6 +378,30 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     input.evidence_sources = evidence_sources;
     if args.get_flag("export-adapter-input") {
         println!("{}", serde_json::to_string_pretty(&input)?);
+        return Ok(EXIT_SUCCESS);
+    }
+    if args.get_flag("export-link-observations") {
+        let source = input
+            .source_text
+            .as_deref()
+            .user_context("link observation source is unavailable")?;
+        let extracted = destinations
+            .as_deref()
+            .user_context("link destinations are unavailable")?;
+        let snapshot = LinkObservationSnapshot {
+            version: 1,
+            source_sha256: super::feedback::text_hash(source.as_bytes()),
+            destinations: extracted.to_vec(),
+            observations: vec![
+                aexeo_core::content_gate::LinkReachabilityObservation::NotChecked;
+                extracted.len()
+            ],
+        };
+        let encoded = serde_json::to_string(&snapshot)?;
+        if encoded.len() > MAX_CONTENT_INPUT_BYTES {
+            user_bail!("link observation snapshot exceeds the size limit");
+        }
+        println!("{encoded}");
         return Ok(EXIT_SUCCESS);
     }
     let external_started =

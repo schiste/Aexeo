@@ -288,8 +288,12 @@ snapshot and destination order. Aexeo does not authenticate those observations.
 ### CLI host observations
 
 A trusted host can instead supply `--link-observations observations.json` for a
-single Markdown or HTML document, without network access. The strict UTF-8 JSON
-snapshot has this shape (replace the digest and entries with the exact input):
+single Markdown or HTML document, without network access. Generate a template
+with `aexeo-cli content article.md --input-format markdown --export-link-observations`;
+it contains the digest and extracted destinations with every observation set to
+`not_checked`. The output can contain private URLs. A trusted host may fill in
+its observations and supply the resulting snapshot to the content command.
+The strict UTF-8 JSON snapshot has this shape:
 
 ```json
 {

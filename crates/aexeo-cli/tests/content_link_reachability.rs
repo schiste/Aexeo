@@ -125,9 +125,28 @@ fn host_link_snapshot_is_bound_to_source_and_order_for_markdown_and_html() {
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect();
-        let mut value = serde_json::json!({"version":1,"source_sha256":hash,
-            "destinations":["https://example.org/a", "https://example.org/b"],
-            "observations":["not_found", "not_checked"]});
+        let exported = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                article.to_str().unwrap(),
+                "--input-format",
+                format,
+                "--export-link-observations",
+            ])
+            .output()
+            .unwrap();
+        assert!(exported.status.success());
+        let mut value: serde_json::Value = serde_json::from_slice(&exported.stdout).unwrap();
+        assert_eq!(value["source_sha256"], hash);
+        assert_eq!(
+            value["destinations"],
+            serde_json::json!(["https://example.org/a", "https://example.org/b"])
+        );
+        assert_eq!(
+            value["observations"],
+            serde_json::json!(["not_checked", "not_checked"])
+        );
+        value["observations"] = serde_json::json!(["not_found", "not_checked"]);
         let run = || {
             Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
                 .args([
