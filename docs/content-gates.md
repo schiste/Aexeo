@@ -649,7 +649,7 @@ Run `cargo run --release --locked --offline -p aexeo-core --example content_benc
 
 ## Explicit safe fix
 
-The `final_newline` gate requires the original source text and reports a non-empty file without a final newline. Add `[[gates]]`, an `id`, and `kind = "final_newline"` to a preset to enable it. Run `aexeo-cli content article.md --preset custom --preset-source custom=rules.toml --fix` to append a newline when needed. The fix preserves existing CRLF line endings, reports its gate ID in `applied_fixes`, and is idempotent. It requires a local regular file, rejects symlinks and, on Unix, files with multiple hard links, and compares the open file with the version read before appending. It does not change prose. The EmDash adapter has no original file source, so this gate is `not_checked` there.
+The `final_newline` gate requires the original source text and reports a non-empty file without a final newline. Add `[[gates]]`, an `id`, and `kind = "final_newline"` to a preset to enable it. Run `aexeo-cli content article.md --preset custom --preset-source custom=rules.toml --fix` to append a newline when needed. The fix preserves existing CRLF line endings, reports its gate ID in `applied_fixes`, and is idempotent. It requires a local regular file, rejects symlinks and, on Unix, files with multiple hard links, and compares the open file with the version read before appending. The candidate is evaluated in memory before the file is changed; loading or evaluation errors leave it untouched. Opt-in telemetry reports the number of applied fixes without content or identifiers. It does not change prose. The EmDash adapter has no original file source, so this gate is `not_checked` there.
 
 ## Literal evidence anchors
 

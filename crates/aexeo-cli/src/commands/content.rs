@@ -221,7 +221,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             Ok((aexeo_core::load_site(&site_root)?, config))
         })
         .transpose()?;
-    let mut applied_fixes = Vec::new();
+    let mut pending_fix = None;
     let fix_gate = preset
         .gates
         .iter()
@@ -235,9 +235,9 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             } else {
                 "\n"
             };
-            append_final_newline(std::path::Path::new(path), source, suffix)?;
+            let original_len = source.len();
             source.push_str(suffix);
-            applied_fixes.push(gate.id().to_owned());
+            pending_fix = Some((gate.id().to_owned(), original_len, suffix));
         }
         _ => {}
     }
@@ -502,7 +502,6 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         )?
     };
     let evaluation_ms = started.elapsed().as_secs_f64() * 1000.0;
-    report.applied_fixes = applied_fixes;
     let mapping_started = measuring.then(std::time::Instant::now);
     // Keep the established projected finding coordinates unchanged. Supply
     // separately indexed source coordinates for positional prose and link gates.
@@ -638,12 +637,35 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     let eligible_findings = aexeo_core::source_mapping::eligible_findings(&preset, &report);
     let mapped_findings = source_locations.len();
     let unmapped_findings = eligible_findings.saturating_sub(mapped_findings);
-    if let Some(started) = mapping_started {
+    let mapping_elapsed_ms =
+        mapping_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
+    // The candidate is evaluated in memory first. Never modify the file if
+    // loading observations, parsing content, or evaluating a gate failed.
+    if let Some((gate_id, original_len, suffix)) = pending_fix
+        && report
+            .gates
+            .iter()
+            .any(|gate| gate.gate_id == gate_id && gate.status == GateStatus::Passed)
+    {
+        let candidate = input
+            .source_text
+            .as_deref()
+            .context("fixed source is unavailable")?;
+        if candidate.get(original_len..) != Some(suffix) {
+            anyhow::bail!("fixed source does not match the staged suffix");
+        }
+        let original = candidate
+            .get(..original_len)
+            .context("fixed source boundary is invalid")?;
+        append_final_newline(std::path::Path::new(path), original, suffix)?;
+        report.applied_fixes.push(gate_id);
+    }
+    if let Some(mapping_elapsed_ms) = mapping_elapsed_ms {
         let mapping = Some((
             eligible_findings,
             mapped_findings,
             unmapped_findings,
-            started.elapsed().as_secs_f64() * 1000.0,
+            mapping_elapsed_ms,
         ));
         print_telemetry(
             &report,
@@ -960,6 +982,9 @@ fn print_telemetry(
     html_projection: Option<(&serde_json::Value, bool, bool)>,
 ) -> Result<()> {
     let mut event = serde_json::json!({"schema_version": 1, "event": "content_evaluation", "evaluation_ms": evaluation_ms, "summary": report.summary});
+    if !report.applied_fixes.is_empty() {
+        event["safe_fixes_applied"] = serde_json::json!(report.applied_fixes.len());
+    }
     let mut length_checks = 0usize;
     let mut length_exceedances = 0usize;
     for (gate, configuration) in report.gates.iter().zip(&preset.gates) {

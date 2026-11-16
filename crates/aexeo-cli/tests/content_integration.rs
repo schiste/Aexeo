@@ -279,6 +279,7 @@ fn explicit_fix_adds_only_the_configured_final_newline_and_is_idempotent() {
                 "--format",
                 "json",
                 "--fix",
+                "--telemetry",
             ])
             .output()
             .unwrap()
@@ -291,6 +292,9 @@ fn explicit_fix_adds_only_the_configured_final_newline_and_is_idempotent() {
     );
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["applied_fixes"], serde_json::json!(["newline"]));
+    let event: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(event["safe_fixes_applied"], 1);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("First line"));
     let output = invoke();
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["applied_fixes"], serde_json::json!([]));
@@ -1219,4 +1223,107 @@ fn markdown_reports_source_positions_between_entities_and_escapes() {
     assert_eq!(report["source_locations"][0]["line"], 1);
     assert_eq!(report["source_locations"][0]["column"], 13);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("milieu"));
+}
+
+#[test]
+fn fix_does_not_modify_content_when_external_results_are_invalid() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    let article = dir.path().join("article.md");
+    let external = dir.path().join("invalid-results.json");
+    std::fs::write(
+        &preset,
+        "version=1\nname='format'\n[[gates]]\nid='newline'\nkind='final_newline'\n",
+    )
+    .unwrap();
+    std::fs::write(&article, "unchanged").unwrap();
+    std::fs::write(&external, "not valid json").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            article.to_str().unwrap(),
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--extension-results",
+            external.to_str().unwrap(),
+            "--fix",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(std::fs::read(&article).unwrap(), b"unchanged");
+}
+
+#[test]
+fn fix_does_not_modify_content_when_selected_html_scope_is_unavailable() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    let article = dir.path().join("article.html");
+    std::fs::write(
+        &preset,
+        "version=1\nname='format'\n[[gates]]\nid='newline'\nkind='final_newline'\n",
+    )
+    .unwrap();
+    std::fs::write(&article, "<p>unchanged</p>").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            article.to_str().unwrap(),
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--input-format",
+            "html",
+            "--html-scope",
+            "main",
+            "--format",
+            "json",
+            "--fix",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "not_checked");
+    assert_eq!(report["applied_fixes"], serde_json::json!([]));
+    assert_eq!(std::fs::read(&article).unwrap(), b"<p>unchanged</p>");
+}
+
+#[test]
+fn fix_does_not_modify_content_when_external_gate_evaluation_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    let article = dir.path().join("article.md");
+    let external = dir.path().join("results.json");
+    std::fs::write(&preset, "version=1\nname='format'\n[[gates]]\nid='newline'\nkind='final_newline'\n[[gates]]\nid='external'\nkind='custom'\nextension='example.rule'\n").unwrap();
+    std::fs::write(&article, "unchanged").unwrap();
+    let records = serde_json::json!([{
+        "extension": "example.rule", "parameters": {},
+        "input": {"id": article.to_str().unwrap(), "text": "unchanged\n", "source_text": "unchanged\n", "headings": null, "metadata": null, "evidence_sources": null},
+        "diagnostics": [{"message": "Review", "line": 9, "column": 1}]
+    }]);
+    std::fs::write(&external, serde_json::to_vec(&records).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            article.to_str().unwrap(),
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--extension-results",
+            external.to_str().unwrap(),
+            "--fix",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(70));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("external diagnostic line is outside projected text")
+    );
+    assert_eq!(std::fs::read(&article).unwrap(), b"unchanged");
 }
