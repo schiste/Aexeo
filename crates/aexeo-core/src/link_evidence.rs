@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::rc::Rc;
 use url::Url;
 
-use crate::link_graph::{LinkResolution, resolve_link, same_site_host};
+use crate::link_graph::{LinkResolution, resolve_link, same_crawl_origin};
 use crate::site::route_from_urlish;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -429,7 +429,7 @@ pub(crate) struct CrawlLink {
 ///
 /// Parsing and resolution reuse the link graph path, so relative references,
 /// unquoted attributes and `<base href>` behave as in a browser. Bare and `www.`
-/// hosts count as one site, as they do for the crawl itself.
+/// hosts count as one site only when the scheme and port also match.
 ///
 /// The query string is deliberately not part of a route: `?page=2` resolves to
 /// the route of its path, so query variants, including query pagination, are
@@ -439,19 +439,12 @@ pub(crate) fn crawl_links(html: &str, page_url: &str) -> Vec<CrawlLink> {
     let Ok(page) = Url::parse(page_url) else {
         return Vec::new();
     };
-    let site_host = page.host_str().unwrap_or_default();
     extract_links(html, page_url, &page.origin().ascii_serialization(), None)
         .into_iter()
         .filter_map(|link| {
             let url = match &link.resolution {
                 LinkResolution::Internal { url } => url,
-                LinkResolution::External { url }
-                    if Url::parse(url).ok().is_some_and(|target| {
-                        same_site_host(site_host, target.host_str().unwrap_or_default())
-                    }) =>
-                {
-                    url
-                }
+                LinkResolution::External { url } if same_crawl_origin(page_url, url) => url,
                 _ => return None,
             };
             let route = route_from_urlish(url)?;
@@ -510,6 +503,20 @@ mod tests {
             routes(html, "https://www.example.com/"),
             ["about", "contact", "legal"]
         );
+    }
+
+    #[test]
+    fn crawl_rejects_same_host_on_another_scheme_or_port() {
+        let html = r#"<a href="https://www.example.com/same">same</a>
+            <a href="http://example.com/wrong-scheme">http</a>
+            <a href="https://example.com:8443/wrong-port">port</a>
+            <a href="//www.example.com:443/default-port">default port</a>"#;
+        assert_eq!(
+            routes(html, "https://example.com/"),
+            ["same", "default-port"]
+        );
+        let base = r#"<base href="https://example.com:8443/"><a href="child">other service</a>"#;
+        assert!(routes(base, "https://example.com/").is_empty());
     }
 
     #[test]

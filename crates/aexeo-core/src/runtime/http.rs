@@ -16,7 +16,7 @@ use aexeo_contracts::RedirectHop;
 use super::egress::{CrawlEgress, FetchRefused, is_refused};
 use super::fetcher::{FetchOutcome, crawl_user_agent};
 use crate::link_graph::redact_url;
-pub(crate) use crate::link_graph::same_site_host;
+pub(crate) use crate::link_graph::{same_crawl_origin, same_site_host};
 
 #[derive(Debug, Clone)]
 pub(crate) struct FetchResult {
@@ -77,20 +77,6 @@ pub(crate) fn host_for_url(url: &str) -> String {
             Some(format!("{host}{port}"))
         })
         .unwrap_or_default()
-}
-
-/// Whether two URLs are the same crawl origin: scheme, host and port, treating
-/// `www.` as equivalent only when scheme and port match.
-pub(crate) fn same_crawl_origin(left: &str, right: &str) -> bool {
-    let (Ok(left), Ok(right)) = (Url::parse(left), Url::parse(right)) else {
-        return false;
-    };
-    let (Some(left_host), Some(right_host)) = (left.host_str(), right.host_str()) else {
-        return false;
-    };
-    left.scheme() == right.scheme()
-        && left.port_or_known_default() == right.port_or_known_default()
-        && same_site_host(left_host, right_host)
 }
 
 fn headers_from_map(headers: &BTreeMap<String, String>) -> Result<HeaderMap> {

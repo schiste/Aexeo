@@ -127,6 +127,20 @@ pub(crate) fn same_site_host(left: &str, right: &str) -> bool {
     comparable_host(left) == comparable_host(right)
 }
 
+/// Whether two URLs are the same crawl origin: scheme, host and port, treating
+/// `www.` as equivalent only when scheme and port match.
+pub(crate) fn same_crawl_origin(left: &str, right: &str) -> bool {
+    let (Ok(left), Ok(right)) = (Url::parse(left), Url::parse(right)) else {
+        return false;
+    };
+    let (Some(left_host), Some(right_host)) = (left.host_str(), right.host_str()) else {
+        return false;
+    };
+    left.scheme() == right.scheme()
+        && left.port_or_known_default() == right.port_or_known_default()
+        && same_site_host(left_host, right_host)
+}
+
 /// A URL safe to record in findings and artifacts, which may be shared. Userinfo,
 /// query and fragment are dropped because they can carry credentials and tokens.
 /// Routes never include a query, so this loses nothing the audit depends on.
