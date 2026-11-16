@@ -103,7 +103,7 @@ HTML_MAIN_PROJECTION = {"format": "html", "scope": "main"}
 def corpus_projection(corpus):
     """Validate the declared adapter and return its explicit projection, if any."""
     input_format = corpus.get("input_format")
-    if input_format not in (None, "text", "markdown", "html"):
+    if input_format not in (None, "text", "paragraph-text", "markdown", "html"):
         raise ValueError("unsupported input format")
     if input_format == "html":
         if corpus.get("content_projection") != HTML_MAIN_PROJECTION:

@@ -252,7 +252,9 @@ fn export_review(corpus: &Value, note: &Value) -> Result<Value> {
                 bail!("content projection requires HTML input");
             }
         }
-        Some(Value::String(format)) if format == "text" || format == "markdown" => {
+        Some(Value::String(format))
+            if format == "text" || format == "paragraph-text" || format == "markdown" =>
+        {
             if projection.is_some() {
                 bail!("content projection requires HTML input");
             }
