@@ -92,6 +92,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   assert it matches the actual TypeScript exporter and pass those same bytes to
   the Rust or CLI consumer. Cover incomplete and unknown inputs separately;
   a fixture or CMS listing alone does not establish a matching rendered site.
+- For JavaScript URL checks matching Rust inventory rules, test empty fragment
+  markers explicitly: `new URL("https://example.org/a#").hash` is empty even
+  though the original URL has a fragment marker that Rust rejects.
 - For partially observed metadata in core tests, put
   `unavailable_metadata_fields` in a `ContentContext` and pass it through
   `ContentEvaluationContext.adapter`; assert unknown fields stay distinct
