@@ -278,8 +278,10 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             args,
             &change,
             &preset,
-            &collection,
-            snapshots.as_ref(),
+            ReceiptSnapshots {
+                collection: &collection,
+                links: snapshots.as_ref(),
+            },
             &mut provider,
             Path::new(&verdict_path),
             html_scope,
@@ -678,12 +680,16 @@ fn parse_previous_offline_receipt(
     }
 }
 
+struct ReceiptSnapshots<'a> {
+    collection: &'a Option<CollectionSnapshot>,
+    links: Option<&'a ChangeLinkSnapshots>,
+}
+
 fn command_offline_receipt(
     args: &ArgMatches,
     change: &aexeo_contracts::content_gate_protocol::Change,
     preset: &aexeo_core::content_gate::ContentPreset,
-    collection: &Option<CollectionSnapshot>,
-    snapshots: Option<&ChangeLinkSnapshots>,
+    snapshots: ReceiptSnapshots<'_>,
     provider: &mut HostFiles,
     output: &Path,
     html_scope: HtmlContentScope,
@@ -694,6 +700,10 @@ fn command_offline_receipt(
         revalidate_link_snapshot_receipt_with_html_scope,
         revalidate_offline_receipt_with_html_scope,
     };
+    let ReceiptSnapshots {
+        collection,
+        links: snapshots,
+    } = snapshots;
     let identity = args
         .get_one::<String>("evaluator-identity")
         .user_context("evaluator identity is required")?;
