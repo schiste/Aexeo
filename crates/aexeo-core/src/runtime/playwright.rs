@@ -871,6 +871,20 @@ fn runner_refusal(message: &str) -> Option<FetchRefused> {
         .then(|| FetchRefused(message.to_string()))
 }
 
+// Some filesystems briefly reject execution while an executable is still open
+// for writing. Retry only that OS error, before a child has been created.
+fn retry_executable_busy<T>(mut attempt: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    for _ in 0..2 {
+        match attempt() {
+            Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                thread::sleep(Duration::from_millis(50));
+            }
+            result => return result,
+        }
+    }
+    attempt()
+}
+
 fn fetch_with_playwright_spec(
     executable: Option<PathBuf>,
     spec: &PlaywrightSpec<'_>,
@@ -896,7 +910,7 @@ fn fetch_with_playwright_spec(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let mut child = command.spawn().with_context(|| {
+    let mut child = retry_executable_busy(|| command.spawn()).with_context(|| {
         format!(
             "failed to spawn playwright runtime for {}",
             redact_url(spec.url)
@@ -1075,6 +1089,63 @@ mod tests {
         assert_eq!(fetched.status_code, Some(200));
         assert_eq!(fetched.effective_url, "https://example.com/");
         assert!(fetched.body.unwrap().contains("/about"));
+    }
+
+    #[test]
+    fn busy_spawn_retries_only_busy_and_stops_at_limit() {
+        use std::io::{Error, ErrorKind};
+        let mut attempts = 0;
+        let result = super::retry_executable_busy(|| {
+            attempts += 1;
+            if attempts < 3 {
+                Err(Error::from(ErrorKind::ExecutableFileBusy))
+            } else {
+                Ok(7)
+            }
+        });
+        assert_eq!(result.unwrap(), 7);
+        assert_eq!(attempts, 3);
+        let mut permanent_attempts = 0;
+        let error = super::retry_executable_busy(|| -> std::io::Result<()> {
+            permanent_attempts += 1;
+            Err(Error::from(ErrorKind::PermissionDenied))
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::PermissionDenied);
+        assert_eq!(permanent_attempts, 1);
+        let mut busy_attempts = 0;
+        let error = super::retry_executable_busy(|| -> std::io::Result<()> {
+            busy_attempts += 1;
+            Err(Error::from(ErrorKind::ExecutableFileBusy))
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::ExecutableFileBusy);
+        assert_eq!(busy_attempts, 3);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn busy_spawn_recovers_after_the_real_executable_is_released() {
+        use std::process::Command;
+        let temp_dir = tempfile::tempdir().unwrap();
+        let runner = fake_runner(temp_dir.path(), "#!/bin/sh\nexit 0\n");
+        let mut writer = Some(fs::OpenOptions::new().write(true).open(&runner).unwrap());
+        let mut attempts = 0;
+        let mut child = super::retry_executable_busy(|| {
+            attempts += 1;
+            let result = Command::new(&runner).spawn();
+            if attempts == 1 {
+                assert_eq!(
+                    result.as_ref().unwrap_err().kind(),
+                    std::io::ErrorKind::ExecutableFileBusy
+                );
+                drop(writer.take());
+            }
+            result
+        })
+        .unwrap();
+        assert_eq!(attempts, 2);
+        assert!(child.wait().unwrap().success());
     }
 
     #[test]
