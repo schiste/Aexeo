@@ -62,6 +62,11 @@ The latest published version observed on 2026-11-16 was 0.9.1.
   before evaluation and snapshot fingerprinting in both content CLI paths.
   This does not authenticate the result producer or establish factual accuracy.
 
+- [x] Composable metadata length gate with per-field Unicode-scalar bounds,
+  aggregate counts and distinct absent/unavailable reasons, shared by CLI,
+  content-change and EmDash. Presence is controlled by `required_metadata`;
+  metadata findings do not claim a body source location.
+
 - [x] Optional, composable total character-count gate for text, Markdown, HTML,
   EmDash and change evaluation, with optional Unicode whitespace exclusion and
   explicit unavailable-text handling. Counts Unicode scalar values, not visual

@@ -168,6 +168,25 @@ Save this as `product.toml`, then run:
 aexeo-cli content article.md --preset product --preset-source product=product.toml --metadata metadata.json --format json
 ```
 
+To bound the length of one metadata value, compose a `metadata_length` gate:
+
+```toml
+[[gates]]
+id = "metadata.description_length"
+kind = "metadata_length"
+field = "description"
+min = 40
+max = 160
+blocking = false
+```
+
+Bounds count Unicode scalar values, including whitespace; they are not visual
+width or grapheme counts. At least one bound is required. An absent field and an
+unavailable field both leave the length `not_checked`, with distinct reasons;
+an explicitly empty value has length zero. Compose `required_metadata` when
+presence must also be enforced. Findings are not assigned a position in the
+article body. Length does not establish SEO performance or editorial quality.
+
 Heading names are matched exactly and case-sensitively. Raw-text input has no heading capability, so heading gates are `not_checked`; Markdown and EmDash provide it.
 
 Metadata must be a JSON object with string values. Without `--metadata`, metadata gates are `not_checked`, rather than treating missing input as an empty set of fields. An empty object indicates that metadata was supplied but contains no fields. Adapters can also mark individual metadata fields unavailable. A required-metadata gate then remains `not_checked`, while findings for other known-missing fields remain visible. Its `unavailable_fields` measurement counts unknown required fields; `present_fields` counts known, nonempty fields. EmDash treats an unobserved description as unavailable, while an explicitly observed empty description is missing.

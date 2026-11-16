@@ -124,6 +124,27 @@ ignore_whitespace=true
   console.log("WASM character count handles observed and incomplete content");
 }
 
+// Metadata bounds run through configured saves and the real WASM bridge.
+{
+  const preset = `version=1
+name="metadata"
+[[gates]]
+id="title"
+kind="metadata_length"
+field="title"
+max=3
+`;
+  const configured = createPlugin({ contentPreset: { name: "metadata", sources: { metadata: preset } } });
+  const page = item("metadata-length");
+  const host = fakeHost([page]);
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  const gate = host.store.get("findings:/metadata-length").assessment.gates.find((item) => item.gate_id === "title");
+  assert.equal(gate.status, "failed");
+  assert.ok(gate.measurements.character_count > 3);
+  assert.deepEqual(host.logged, []);
+  console.log("WASM metadata length evaluates the configured title");
+}
+
 // The shipped preset must work through configured save and real WASM, with
 // a source location an editor can use and a clean recheck after revision.
 {

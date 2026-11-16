@@ -667,6 +667,29 @@ mod tests {
     };
 
     #[test]
+    fn metadata_length_respects_description_observation() {
+        let mut document: EmdashDocument =
+            serde_json::from_str(r#"{"route":"/t","title":"Title","body":[]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='description'\nkind='metadata_length'\nfield='description'\nmax=3\n").unwrap();
+        document.description_source_observed = Some(false);
+        document.description = Some("long".into());
+        assert_eq!(
+            evaluate_content(&document, &preset).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+        document.description_source_observed = Some(true);
+        let failed = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(failed.gates[0].status, GateStatus::Failed);
+        assert_eq!(failed.gates[0].measurements["character_count"], 4);
+        assert!(source_locations(&document, &preset, &failed).is_empty());
+        document.description = None;
+        assert_eq!(
+            evaluate_content(&document, &preset).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+    }
+
+    #[test]
     fn description_metadata_distinguishes_unknown_absent_and_present() {
         let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='meta'\nkind='required_metadata'\nfields=['title','description']\n").unwrap();
         let mut document: EmdashDocument =

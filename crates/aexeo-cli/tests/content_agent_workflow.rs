@@ -259,6 +259,43 @@ fn external_extension_results_are_bound_to_the_projected_input_and_parameters() 
 }
 
 #[test]
+fn metadata_length_gate_uses_supplied_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("draft.md");
+    let preset = dir.path().join("preset.toml");
+    let metadata = dir.path().join("metadata.json");
+    fs::write(&draft, "# A draft\n").unwrap();
+    fs::write(&preset, "version=1\nname='test'\n[[gates]]\nid='title'\nkind='metadata_length'\nfield='title'\nmax=3\nblocking=false\n").unwrap();
+    fs::write(&metadata, r#"{"title":"é🙂ab"}"#).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            draft.to_str().unwrap(),
+            "--input-format",
+            "markdown",
+            "--preset",
+            "review",
+            "--preset-source",
+            &format!("review={}", preset.display()),
+            "--metadata",
+            metadata.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(status(&report, "title"), "failed");
+    assert_eq!(report["gates"][0]["measurements"]["character_count"], 4);
+    assert!(report["source_locations"].as_array().unwrap().is_empty());
+}
+
+#[test]
 fn external_results_reject_duplicate_nested_keys() {
     let dir = tempfile::tempdir().unwrap();
     let draft = dir.path().join("draft.txt");
