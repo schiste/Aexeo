@@ -49,9 +49,9 @@ Existing source and factuality work is outside this plan.
   sidecar's service binding, actual WASM, and rejection of stale results.
 - [Three synthetic editorial revision trials](EDITORIAL-AGENT-TRIAL.md) cover
   article, glossary and product profiles. Open-ended agent work, retry-exhaustion
-  across formats and independent human evaluation remain outstanding. A single
-  open-ended Markdown authoring exercise, two additional open-ended paragraph
-  text and HTML drafts, and a deliberately strict Markdown three-retry failure
-  case are recorded in the same trial report; none is independent. The project
+  and independent human evaluation remain outstanding. Open-ended Markdown,
+  paragraph-text and HTML drafts and deliberately strict three-revision failure
+  cases for each format are recorded in the same trial report; none is independent
+  and the scripted multi-format revisions do not test autonomous retry enforcement. The project
   currently has only the user and agent available, so independent multi-reviewer
   results remain unavailable rather than being inferred from these examples.

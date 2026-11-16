@@ -1,0 +1,9 @@
+Keep context clear.
+
+Name the owner.
+
+Make each next action specific. Name an owner, describe the expected result, and add a date only when the team has agreed on one. For work without an owner, say how the owner will be chosen rather than assigning someone by default.
+
+Keep open questions separate from decisions. A reader should be able to distinguish a choice the team has made from a proposal still under discussion. Link to the decision record and note when the next review is due.
+
+Before sharing the note, ask a colleague who has not followed the work to find the next action. Their questions will show which parts need more context. Remove temporary access details and keep sensitive material in the appropriate shared location.
