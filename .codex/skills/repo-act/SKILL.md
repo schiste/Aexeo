@@ -68,6 +68,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - Before combining fixture setup with package tests, resolve paths relative to
   the command working directory and stop on setup failure (for example, use
   `&&`). A succeeding test command alone does not prove setup ran.
+- For whole-word literal gates, test decomposed combining marks and lowercase
+  expansions, both whole-word and substring modes, and confirm later match
+  positions across CLI adapters and the rebuilt EmDash WASM bridge.
 - For rules with overlapping triggers, isolate the trigger under test in the
   regression fixture and confirm the test fails before the fix; another
   matching trigger can otherwise hide the defect.
