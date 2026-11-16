@@ -2064,6 +2064,7 @@ impl ContentPreset {
                     {
                         let mut evaluated = 0usize;
                         let mut skipped = 0usize;
+                        let mut too_short = 0usize;
                         let mut exceeding = 0usize;
                         let mut bytes_seen = 0usize;
                         for paragraph in paragraphs.iter().take(MAX_PARAGRAPH_OPENINGS) {
@@ -2097,6 +2098,20 @@ impl ContentPreset {
                                             word.trim_matches(|ch: char| !ch.is_alphanumeric())
                                                 .to_lowercase(),
                                         );
+                                    }
+                                    // A short ASCII sentence has no complete opening of the
+                                    // configured size. Non-ASCII text may use a script without
+                                    // whitespace word boundaries, so keep that case uncertain.
+                                    if bytes <= MAX_PARAGRAPH_OPENING_BYTES
+                                        && words.len() < *opening_words
+                                        && !words.is_empty()
+                                        && segment.is_ascii()
+                                        && words.iter().all(|word| !word.is_empty())
+                                    {
+                                        too_short += 1;
+                                        previous = None;
+                                        consecutive = 0;
+                                        return;
                                     }
                                     if bytes > MAX_PARAGRAPH_OPENING_BYTES
                                         || words.len() != *opening_words
@@ -2133,6 +2148,7 @@ impl ContentPreset {
                         measurements.insert("paragraph_count".into(), paragraphs.len());
                         measurements.insert("sentences_evaluated".into(), evaluated);
                         measurements.insert("sentences_skipped".into(), skipped);
+                        measurements.insert("sentences_too_short".into(), too_short);
                         measurements.insert("sentences_exceeding_limit".into(), exceeding);
                         if reason.is_none() && skipped > 0 {
                             reason = Some("some sentence openings could not be assessed using whitespace-separated words".into());
@@ -4313,9 +4329,38 @@ terms = ["bad"]
                 )),
             )
             .unwrap();
-        assert_eq!(report.gates[0].status, GateStatus::NotChecked);
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
         assert_eq!(report.gates[0].findings.len(), 1);
-        assert_eq!(report.gates[0].measurements["sentences_skipped"], 1);
+        assert_eq!(report.gates[0].measurements["sentences_too_short"], 1);
+        assert_eq!(report.gates[0].measurements["sentences_skipped"], 0);
+        let uncertain = preset
+            .evaluate_with_context(&input, None, None, Some(&context("これは文です。")))
+            .unwrap();
+        assert_eq!(uncertain.gates[0].status, GateStatus::NotChecked);
+        let unicode_fold = preset
+            .evaluate_with_context(&input, None, None, Some(&context("K.")))
+            .unwrap();
+        assert_eq!(unicode_fold.gates[0].status, GateStatus::NotChecked);
+        let oversized = format!(
+            "Dr. Smith acts. Dr. Smith plans. Dr. Smith checks. {} word.",
+            "x".repeat(MAX_PARAGRAPH_OPENING_BYTES + 1)
+        );
+        let partial = preset
+            .evaluate_with_context(&input, None, None, Some(&context(&oversized)))
+            .unwrap();
+        assert_eq!(partial.gates[0].status, GateStatus::NotChecked);
+        assert_eq!(partial.gates[0].findings.len(), 1);
+        let short_reset = preset
+            .evaluate_with_context(
+                &input,
+                None,
+                None,
+                Some(&context(
+                    "The team acts. Yes. The team plans. The team checks.",
+                )),
+            )
+            .unwrap();
+        assert_eq!(short_reset.gates[0].status, GateStatus::Passed);
         let unavailable = preset
             .evaluate_with_context(&input, None, None, None)
             .unwrap();
