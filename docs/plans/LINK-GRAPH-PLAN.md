@@ -287,6 +287,18 @@ missing and unspecified languages are not treated as an observed mismatch.
 - [ ] Validate the EmDash inventory exporter with an explicit publication, route,
   locale, status and surface mapping on a real matching site; do not infer
   completeness from `routable` or from a non-transactional export.
+  On 2026-11-16 a read-only Preview CMS listing returned 22 published
+  `blog_posts` in five locales with no next cursor. A locally rebuilt exporter
+  consumed only their IDs, slugs, statuses and locales via an in-memory host;
+  an explicit candidate route mapper based on website `origin/main` commit
+  `a70d0e36` projected all 22 without omissions or duplicate URLs. Every
+  disposition remained `unknown` and inventory completeness remained false;
+  telemetry contained aggregate counts only. This was not the CMS sandbox's
+  own `getPublicUrl` or a transactional export. A direct Preview article request
+  redirected to Cloudflare Access, so the route mapper, rendered pages and their
+  release identity could not be matched to this CMS listing. The exercise does
+  not validate the deployed surface, indexability, locale fallback or orphans;
+  the item remains open.
 - [x] Mark links with `hidden` on themselves or an ancestor as conditional
   observations, including redirect credit; expose evidence and aggregate opt-in
   telemetry. HTML alone does not establish CSS or script visibility.
