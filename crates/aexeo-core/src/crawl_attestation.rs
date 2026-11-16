@@ -84,6 +84,7 @@ fn crawl_engine(artifact: &AuditArtifact) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InventorySeed {
     pub inventory_identity: Option<SurfaceIdentity>,
+    pub inventory_sha256_v1: Option<String>,
     /// Distinct same-origin page URLs, serialized after parsing.
     pub urls: Vec<String>,
     /// Entries left out, redacted: another origin, or not an HTTP(S) page URL.
@@ -115,6 +116,7 @@ pub fn inventory_seed(inventory: &InventorySnapshot, target_url: &str) -> Invent
     }
     InventorySeed {
         inventory_identity: inventory.identity.clone(),
+        inventory_sha256_v1: inventory.sha256_v1(),
         urls: urls.into_iter().collect(),
         out_of_origin_urls: out_of_origin.into_iter().collect(),
     }
@@ -164,6 +166,7 @@ pub fn attest_crawl(seed: &InventorySeed, artifact: &AuditArtifact) -> CrawlAtte
     CrawlAttestation {
         seeded_from: CrawlSeedSource {
             inventory_identity: seed.inventory_identity.clone(),
+            inventory_sha256_v1: seed.inventory_sha256_v1.clone(),
             url_count: seed.urls.len(),
         },
         engine: crawl_engine(artifact),

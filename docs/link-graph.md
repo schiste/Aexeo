@@ -313,10 +313,26 @@ are unchanged, and older artifacts load without it. Without a seed file,
 `seeded_from` is `{"inventory_identity": null, "url_count": 0}`, which never
 counts as seeded.
 
+A seeded crawl also records `inventory_sha256_v1`, a SHA-256 fingerprint of
+`aexeo-inventory-v1\0` followed by the UTF-8 JSON serialization of the typed
+inventory (identity, completeness, and ordered page URLs, dispositions, targets
+and locales). The report compares it with the inventory supplied for
+reconciliation. Different page order is treated as a mismatch. Unknown input
+fields discarded during parsing are not bound. This fingerprint detects
+accidental changes but does not authenticate the inventory, prove freshness,
+or establish that its completeness claim is true. Because hashes can reveal
+whether a guessed inventory was used, treat the audit artifact accordingly.
+
+Older artifacts without this fingerprint stay readable, but cannot confirm
+orphan findings. Checkpoints do not yet bind the initial inventory: resumed
+crawls are likewise ineligible for confirmation even if the supplied inventory
+matches the final attestation. The report states the reason explicitly.
+
 ```json
 "crawl_attestation": {
   "seeded_from": {
     "inventory_identity": {"origin": "https://example.org", "release": "r1", "surface": "public", "snapshot": "s1"},
+    "inventory_sha256_v1": "<64 lowercase hexadecimal characters>",
     "url_count": 120
   },
   "engine": "http",

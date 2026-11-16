@@ -742,6 +742,10 @@ fn crawl_audit_completeness_issues(
     match attestation.filter(|value| value.seeded_from.url_count > 0) {
         None => issues.push("audit_not_inventory_seeded"),
         Some(attestation) => {
+            // Checkpoints do not yet bind the original seed inventory.
+            if attestation.snapshot.as_ref().is_some_and(|s| s.resumed) {
+                issues.push("audit_seed_inventory_resume_unverified");
+            }
             if !attestation.unfetched_urls.is_empty() {
                 issues.push("audit_seed_unfetched");
             }
@@ -749,6 +753,15 @@ fn crawl_audit_completeness_issues(
             let reconciled = inventory.and_then(|inventory| inventory.identity.as_ref());
             if seeded.is_none() || seeded != reconciled {
                 issues.push("audit_seed_inventory_mismatch");
+            }
+            match (
+                attestation.seeded_from.inventory_sha256_v1.as_deref(),
+                inventory,
+            ) {
+                (Some(expected), Some(inventory))
+                    if Some(expected) == inventory.sha256_v1().as_deref() => {}
+                (None, _) => issues.push("audit_seed_inventory_digest_missing"),
+                _ => issues.push("audit_seed_inventory_digest_mismatch"),
             }
         }
     }
@@ -1724,6 +1737,50 @@ mod tests {
     }
 
     #[test]
+    fn inventory_binding_is_required_and_must_match_the_actual_input() {
+        let (mut artifact, context) = attested_audit();
+        let raw_report = |value: &serde_json::Value, context: &AuditLinkContext| {
+            build_link_report_from_audit_with_context(
+                &serde_json::from_value(value.clone()).unwrap(),
+                Some(context),
+            )
+            .unwrap()
+        };
+        let old = raw_report(&artifact, &context);
+        assert!(
+            old.issues
+                .iter()
+                .any(|i| i == "audit_seed_inventory_digest_missing")
+        );
+        assert!(!old.crawl_complete);
+        let digest = context.inventory.as_ref().unwrap().sha256_v1().unwrap();
+        artifact["crawl_attestation"]["seeded_from"]["inventory_sha256_v1"] = digest.into();
+        let valid = raw_report(&artifact, &context);
+        assert!(valid.crawl_complete, "{:?}", valid.issues);
+        let mut changed = context.clone();
+        changed.inventory.as_mut().unwrap().pages[2].locale = Some("en".into());
+        let mismatch = raw_report(&artifact, &changed);
+        assert!(
+            mismatch
+                .issues
+                .iter()
+                .any(|i| i == "audit_seed_inventory_digest_mismatch")
+        );
+        assert!(!mismatch.crawl_complete);
+        artifact["crawl_attestation"]["snapshot"] = serde_json::json!({
+            "started_at":"2026-11-07T00:00:00Z", "finished_at":"2026-11-07T00:01:00Z", "resumed":true
+        });
+        let resumed = raw_report(&artifact, &context);
+        assert!(
+            resumed
+                .issues
+                .iter()
+                .any(|i| i == "audit_seed_inventory_resume_unverified")
+        );
+        assert!(!resumed.crawl_complete);
+    }
+
+    #[test]
     fn conflicting_document_language_withholds_inventory_eligibility() {
         let (mut artifact, mut context) = attested_audit();
         context.inventory.as_mut().unwrap().pages[2].locale = Some("fr-FR".into());
@@ -1773,8 +1830,17 @@ mod tests {
     type Mutation = fn(&mut serde_json::Value, &mut AuditLinkContext);
 
     fn attested_report(artifact: &serde_json::Value, context: &AuditLinkContext) -> LinkReport {
+        let mut artifact = artifact.clone();
+        if let (Some(inventory), Some(seed)) = (
+            &context.inventory,
+            artifact
+                .get_mut("crawl_attestation")
+                .and_then(|a| a.get_mut("seeded_from")),
+        ) {
+            seed["inventory_sha256_v1"] = inventory.sha256_v1().unwrap().into();
+        }
         build_link_report_from_audit_with_context(
-            &serde_json::from_value(artifact.clone()).unwrap(),
+            &serde_json::from_value(artifact).unwrap(),
             Some(context),
         )
         .unwrap()

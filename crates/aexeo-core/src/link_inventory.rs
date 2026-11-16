@@ -40,6 +40,16 @@ pub struct InventorySnapshot {
 }
 
 impl InventorySnapshot {
+    /// Fingerprint the ordered, typed inventory including identity and metadata.
+    /// This detects mismatches; it does not authenticate the inventory producer.
+    pub fn sha256_v1(&self) -> Option<String> {
+        use sha2::{Digest, Sha256};
+        let mut digest = Sha256::new();
+        digest.update(b"aexeo-inventory-v1\0");
+        digest.update(serde_json::to_vec(self).ok()?);
+        Some(format!("{:x}", digest.finalize()))
+    }
+
     /// Read an inventory either on its own or under an `inventory` key, as in
     /// a link graph input, an audit link context or an EmDash export.
     pub fn from_json_document(data: &[u8]) -> anyhow::Result<Self> {
@@ -213,6 +223,38 @@ pub fn reconcile_with_verified_aliases(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inventory_sha256_v1_has_a_stable_wire_representation() {
+        let inventory = InventorySnapshot {
+            identity: None,
+            complete: false,
+            pages: vec![],
+        };
+        assert_eq!(
+            inventory.sha256_v1().as_deref(),
+            Some("8bb28cd3a471b94ce92bef5a0126f937783baec7315c593a263a8b5e5596b165")
+        );
+        let inventory = InventorySnapshot {
+            identity: Some(SurfaceIdentity {
+                origin: "https://example.org".into(),
+                release: "r1".into(),
+                surface: "public".into(),
+                snapshot: "s1".into(),
+            }),
+            complete: true,
+            pages: vec![InventoryPage {
+                url: "https://example.org/a".into(),
+                disposition: InventoryDisposition::CanonicalAlias,
+                target: Some("https://example.org/b".into()),
+                locale: Some("fr-FR".into()),
+            }],
+        };
+        assert_eq!(
+            inventory.sha256_v1().as_deref(),
+            Some("8bbdfb413623df4591e5615eaff57373add2242edebd977b608deee45ba626e5")
+        );
+    }
 
     fn identity() -> SurfaceIdentity {
         SurfaceIdentity {
