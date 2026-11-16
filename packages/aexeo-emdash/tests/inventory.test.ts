@@ -46,6 +46,46 @@ describe("conservative EmDash link inventory", () => {
     expect(result.issues).toContain("transactional_snapshot_unavailable");
   });
 
+  it("reports conflicting inventory URLs and missing alias targets without discarding evidence", async () => {
+    const list = vi.fn(async () => ({ items: [item("a"), item("b"), item("foreign"), item("invalid"), item("alias")], hasMore: false }));
+    const urls: Record<string, string> = {
+      a: "https://EXAMPLE.org:443/a", b: "https://example.org/a", foreign: "https://other.example/page",
+      invalid: "javascript:alert(1)", alias: "https://example.org/alias",
+    };
+    const getPublicUrl = vi.fn(async (_collection: string, id: string) => urls[id]!);
+    const onTelemetry = vi.fn();
+    const result = await exportLinkInventory({ list, getPublicUrl }, {
+      collections: ["posts"], identity: { origin: "https://example.org", release: "r", surface: "public", snapshot: "s" },
+      classify: (entry) => ({ disposition: entry.id === "alias" ? "redirect" : "published" }), onTelemetry,
+    });
+    expect(result.inventory.pages).toHaveLength(5);
+    expect(result.inventory.complete).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining(["duplicate_public_url", "cross_origin_public_url", "invalid_public_url", "alias_target_missing"]));
+    expect(onTelemetry.mock.calls[0]?.[0]).toMatchObject({ duplicate_urls: 1, cross_origin_urls: 1, invalid_urls: 1, aliases_missing_target: 1 });
+    expect(JSON.stringify(onTelemetry.mock.calls)).not.toContain("example.org");
+  });
+
+  it.each(["https://user:password@example.org/a", "https://example.org/a#", "/relative", "not a URL"]) (
+    "marks the invalid public URL %s while preserving it for inspection", async (url) => {
+      const list = vi.fn(async () => ({ items: [item("a")], hasMore: false }));
+      const getPublicUrl = vi.fn(async () => url);
+      const result = await exportLinkInventory({ list, getPublicUrl }, { collections: ["posts"], identity: null });
+      expect(result.issues).toContain("invalid_public_url");
+      expect(result.inventory.pages[0]?.url).toBe(url);
+      expect(result.inventory.complete).toBe(false);
+    },
+  );
+
+  it("reports an invalid declared inventory origin without inventing a cross-origin comparison", async () => {
+    const list = vi.fn(async () => ({ items: [item("a")], hasMore: false }));
+    const getPublicUrl = vi.fn(async () => "https://example.org/a");
+    const result = await exportLinkInventory({ list, getPublicUrl }, {
+      collections: ["posts"], identity: { origin: "https://example.org/subpath", release: "r", surface: "public", snapshot: "s" },
+    });
+    expect(result.issues).toContain("invalid_inventory_origin");
+    expect(result.issues).not.toContain("cross_origin_public_url");
+  });
+
   it("uses only explicit classification and detects repeated cursors", async () => {
     const list = vi.fn(async () => ({ items: [item("article")], hasMore: true, cursor: "same" }));
     const getPublicUrl = vi.fn(async () => "https://example.org/a");

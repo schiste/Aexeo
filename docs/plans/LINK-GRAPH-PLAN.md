@@ -255,6 +255,11 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
 
 ## Remaining integration and validation
 
+The EmDash exporter reports invalid and normalized duplicate URLs, cross-origin
+URLs when a valid origin is supplied, and aliases without targets. It retains
+the original records for reconciliation and emits aggregate-only counts. These
+checks do not establish matching site snapshots or confirm orphans.
+
 The graph reports the inventory locale and root HTML language when present. A
 conflicting primary language makes inventory comparison ineligible for orphan
 conclusions. Matching languages do not prove a locale, region or surface match;
