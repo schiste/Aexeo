@@ -256,6 +256,9 @@ Options:
       --check-link-reachability
           Explicitly enable bounded external HTTP link observations for configured reachability gates
 
+      --link-observations <link-observations>
+          Load trusted, source-bound link observations as JSON without network access
+
       --link-max-checks <link-max-checks>
           Maximum unique external link checks
 

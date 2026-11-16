@@ -271,8 +271,9 @@ Run Markdown evaluation with `aexeo-cli content article.md --input-format markdo
 --preset custom --preset-source custom=policy.toml --check-link-reachability`.
 The explicit flag enables network access only when this gate is present; otherwise
 no link checks are made. `--link-max-checks` (1–100, default 20) and
-`--link-timeout` (1–30 seconds, default 5) bound requests. Without the flag, or
-when the adapter cannot supply complete destinations, the gate is `not_checked`.
+`--link-timeout` (1–30 seconds, default 5) bound requests. Without either an
+observer flag or an observation snapshot, or when the adapter cannot supply
+complete destinations, the gate is `not_checked`.
 Valid relative links and non-HTTP schemes are outside this external gate. Malformed
 or scheme-relative destinations and refused, failed or budget-exhausted requests
 leave coverage incomplete.
@@ -283,6 +284,34 @@ The optional local telemetry event contains counts and elapsed time, not URLs;
 external servers necessarily receive requested URLs. Other hosts may supply
 observations through the core context, bound by the host to the same immutable
 snapshot and destination order. Aexeo does not authenticate those observations.
+
+### CLI host observations
+
+A trusted host can instead supply `--link-observations observations.json` for a
+single Markdown or HTML document, without network access. The strict UTF-8 JSON
+snapshot has this shape (replace the digest and entries with the exact input):
+
+```json
+{
+  "version": 1,
+  "source_sha256": "<lowercase SHA-256 of the exact source bytes>",
+  "destinations": ["https://example.org/a", "https://example.org/b"],
+  "observations": ["not_found", "not_checked"]
+}
+```
+
+The source digest, destination values and occurrence order, and observation
+count must all match the document currently evaluated. Duplicate and unknown JSON
+fields are rejected. Valid observations are `reachable`, `not_found`,
+`not_checked`, and `not_applicable`. A mismatch is an error; incomplete
+observations retain any observed findings but leave the gate `not_checked`.
+The snapshot is mutually exclusive with live link checks and `--fix`. It is
+limited to 16 MiB and counts against the shared auxiliary input limit.
+
+The host must supply trustworthy, current observations and decide which links
+are applicable; matching the source does not establish freshness or accuracy.
+Snapshot files may contain private URLs. Optional telemetry emits only aggregate
+counts and elapsed time, with no source, paths or destinations.
 
 ### EmDash host observations
 
