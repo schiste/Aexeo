@@ -335,6 +335,8 @@ The latest published version observed on 2026-11-16 was 0.9.1.
   counts and status consistency. It does not produce a fresh evaluation,
   establish artifact freshness or authenticity, or authorize publication.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
+  Literal Markdown image alt labels map to their exact original positions for
+  inline and reference images; transformed labels remain unlocated.
 - [x] Preserve preset and input-report provenance when binding human feedback; report policy-matched reviewed metrics separately from legacy metrics. Fingerprints do not authenticate people or bind external evidence.
 - [x] Include a fingerprint of the CLI-resolved preset in corpus evaluation
   results and reject a policy change observed during a run. This identifies the

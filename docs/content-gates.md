@@ -930,7 +930,9 @@ source is unchanged. Multiline container prefixes, such as block-quote markers,
 are mapped when every line in the text node matches exactly after those prefixes;
 entities and escapes retain the conservative edge-only behavior. This mapping is
 limited to 10,000 lines per node and otherwise falls back to its exact edges. Inline
-code maps to its value inside the backticks. The map is local; opt-in telemetry includes only mapped and
+code maps to its value inside the backticks. Literal image alt labels map to
+their original Markdown text for both inline and reference images; transformed
+alt labels remain unmapped. The map is local; opt-in telemetry includes only mapped and
 unmapped counts and mapping duration, without positions or content.
 
 ### EmDash source locations and telemetry

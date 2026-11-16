@@ -566,6 +566,26 @@ struct Projection {
 }
 
 impl Projection {
+    fn image_alt(
+        &mut self,
+        alt: &str,
+        position: Option<(usize, usize)>,
+        source: &str,
+        source_map: &mut MarkdownSourceMap,
+    ) {
+        let start = self.text.len();
+        self.text.push_str(alt);
+        if source_map.enabled
+            && !alt.is_empty()
+            && let Some((a, b)) = position
+            && let Some(raw) = source.get(a..b)
+            && let Some(rest) = raw.strip_prefix("![").and_then(|raw| raw.strip_prefix(alt))
+            && rest.starts_with(']')
+        {
+            source_map.spans.push((start, self.text.len(), a + 2));
+        }
+    }
+
     fn visit_children(&mut self, node: &Node, source: &str, source_map: &mut MarkdownSourceMap) {
         if let Some(children) = node.children() {
             for child in children {
@@ -599,8 +619,22 @@ impl Projection {
                     }
                 }
             }
-            Node::Image(item) => self.text.push_str(&item.alt),
-            Node::ImageReference(item) => self.text.push_str(&item.alt),
+            Node::Image(item) => self.image_alt(
+                &item.alt,
+                item.position
+                    .as_ref()
+                    .map(|pos| (pos.start.offset, pos.end.offset)),
+                source,
+                source_map,
+            ),
+            Node::ImageReference(item) => self.image_alt(
+                &item.alt,
+                item.position
+                    .as_ref()
+                    .map(|pos| (pos.start.offset, pos.end.offset)),
+                source,
+                source_map,
+            ),
             Node::Break(_) => self.text.push('\n'),
             Node::Heading(heading) => {
                 if source_map.enabled {
@@ -792,6 +826,23 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn image_alt_source_mapping_requires_an_exact_literal_label() {
+        let source = "![Café](image.png)\n\n![bravo][ref]\n\n[ref]: image.png\n";
+        let (input, _, _, map) = markdown_input_with_source_map("x", source).unwrap();
+        let projected = input.text.as_deref().unwrap();
+        assert_eq!(projected, "Café\nbravo\n");
+        assert_eq!(map.source_position(source, projected, 1, 1), Some((1, 3)));
+        assert_eq!(map.source_position(source, projected, 1, 4), Some((1, 6)));
+        assert_eq!(map.source_position(source, projected, 2, 1), Some((3, 3)));
+
+        let source = "![A &amp; B](image.png)";
+        let (input, _, _, map) = markdown_input_with_source_map("x", source).unwrap();
+        let projected = input.text.as_deref().unwrap();
+        assert_eq!(projected, "A & B\n");
+        assert_eq!(map.source_position(source, projected, 1, 1), None);
     }
 
     #[test]

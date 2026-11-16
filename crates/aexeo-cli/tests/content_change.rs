@@ -702,6 +702,29 @@ fn verdict_contains_plain_text_source_location() {
 }
 
 #[test]
+fn markdown_image_alt_finding_has_original_source_location() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset =
+        "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['bad']\n";
+    let mut change = input();
+    change["entries"][0]["media_type"] = "text/markdown".into();
+    change["entries"][0]["after"] = serde_json::json!({"inline":"![bad](x)", "sha256":"4109ea405f70db2e2f6936be0a07a2b3e67393dc75b6c80b3b974b6bd23c03f6"});
+    let output = run(dir.path(), &change, preset, &[]);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let verdict: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+    assert_eq!(
+        verdict["findings"][0]["location"],
+        serde_json::json!({"line":1,"column":3})
+    );
+}
+
+#[test]
 fn digest_mismatch_and_unapproved_files_cannot_succeed() {
     let dir = tempfile::tempdir().unwrap();
     let preset = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
