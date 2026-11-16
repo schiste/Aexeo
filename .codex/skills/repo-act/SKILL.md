@@ -88,6 +88,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   covers libraries and binaries, while CI separately lints test targets.
 - When changing CLI arguments, regenerate and verify the CLI reference with
   `cargo run -q -p aexeo-cli -- docs generate .` and `cargo run -q -p aexeo-cli -- docs check .`; CI checks generated documentation.
+- For EmDash save-hook host tests, wait for the final persisted result before
+  disposing the host. Vitest’s default one-second polling timeout can expire
+  before the asynchronous hook’s five-second budget under load; use a bounded
+  wait and keep assertions on the actual result. A longer test wait does not
+  prevent or excuse a real production hook timeout.
 - EmDash Vitest runs in the plugin test host, whose filesystem is sandboxed;
   checks that must read repository files should run as a separate Node script
   outside the host. Test paths containing spaces as well as CI paths.
