@@ -324,9 +324,12 @@ or establish that its completeness claim is true. Because hashes can reveal
 whether a guessed inventory was used, treat the audit artifact accordingly.
 
 Older artifacts without this fingerprint stay readable, but cannot confirm
-orphan findings. Checkpoints do not yet bind the initial inventory: resumed
-crawls are likewise ineligible for confirmation even if the supplied inventory
-matches the final attestation. The report states the reason explicitly.
+orphan findings. New checkpoints retain the original fingerprint; resuming one
+requires the same inventory and refuses a mismatch before fetching pages. A
+matching resumed crawl can qualify when all other coverage checks pass. Older
+checkpoints remain resumable but cannot establish the original binding, even
+through further checkpoints; their reports remain ineligible for confirmation.
+The report states the reason explicitly. Checkpoint data is not authenticated.
 
 ```json
 "crawl_attestation": {

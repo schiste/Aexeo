@@ -257,9 +257,9 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
 
 A runtime crawl now binds the typed, ordered inventory used as its seed to its
 attestation. An audit-derived report with a different or missing fingerprint
-cannot confirm an orphan, even when the declared identity and URLs match. Checkpoints do not
-bind the initial inventory yet, so resumed crawls also remain ineligible for
-confirmation; preserving and validating that binding across resume remains work.
+cannot confirm an orphan, even when the declared identity and URLs match. New
+checkpoints retain that fingerprint and refuse different inventories on resume;
+old unbound checkpoints remain ineligible even through subsequent checkpoints.
 The fingerprint is not proof of source authenticity, freshness or completeness.
 
 The EmDash exporter reports invalid and normalized duplicate URLs, cross-origin
