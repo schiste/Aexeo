@@ -221,7 +221,9 @@ The latest published version observed on 2026-11-16 was 0.9.1.
   observations for Markdown and HTML, with partial results and aggregate telemetry.
   Observation authenticity and freshness remain host responsibilities.
   Content-change hosts can also bind per-entry snapshots and revalidate their
-  complete input fingerprint; omitted entries remain unchecked.
+  complete input fingerprint; omitted entries remain unchecked. EmDash observers
+  receive route and locale context, and unchecked assessments distinguish a failed
+  observation from an unavailable projection without exposing provider errors.
 - [x] Explicit collection metadata uniqueness gate in core, CLI and EmDash/WASM
   ([PR #40](https://github.com/schiste/Aexeo/pull/40)); callers must supply the
   complete collection and missing metadata remains `not_checked`. Resource
