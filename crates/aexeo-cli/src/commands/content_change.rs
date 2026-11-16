@@ -248,32 +248,6 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         args.get_one::<String>("content-root").map(String::as_str),
         Path::new(&verdict_path),
     )?;
-    if args.get_flag("offline-receipt") {
-        if args.get_flag("telemetry") {
-            report_html_scope(&change, html_scope);
-        }
-        return command_offline_receipt(
-            args,
-            &change,
-            &preset,
-            &collection,
-            &mut provider,
-            Path::new(&verdict_path),
-            html_scope,
-        );
-    }
-    let max_checks = *args
-        .get_one::<u64>("link-max-checks")
-        .user_context("missing link-max-checks")? as usize;
-    let timeout = std::time::Duration::from_secs(
-        *args
-            .get_one::<u64>("link-timeout")
-            .user_context("missing link-timeout")?,
-    );
-    let telemetry = args.get_flag("telemetry");
-    let check_links = args.get_flag("check-link-reachability");
-    let snapshot_started =
-        (telemetry && args.contains_id("link-observations")).then(std::time::Instant::now);
     let snapshots = args
         .get_one::<String>("link-observations")
         .map(|path| -> Result<ChangeLinkSnapshots> {
@@ -296,6 +270,35 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             Ok(snapshots)
         })
         .transpose()?;
+    if args.get_flag("offline-receipt") {
+        if args.get_flag("telemetry") {
+            report_html_scope(&change, html_scope);
+        }
+        return command_offline_receipt(
+            args,
+            &change,
+            &preset,
+            ReceiptSnapshots {
+                collection: &collection,
+                links: snapshots.as_ref(),
+            },
+            &mut provider,
+            Path::new(&verdict_path),
+            html_scope,
+        );
+    }
+    let max_checks = *args
+        .get_one::<u64>("link-max-checks")
+        .user_context("missing link-max-checks")? as usize;
+    let timeout = std::time::Duration::from_secs(
+        *args
+            .get_one::<u64>("link-timeout")
+            .user_context("missing link-timeout")?,
+    );
+    let telemetry = args.get_flag("telemetry");
+    let check_links = args.get_flag("check-link-reachability");
+    let snapshot_started =
+        (telemetry && args.contains_id("link-observations")).then(std::time::Instant::now);
     let mut snapshot_observer = snapshots
         .as_ref()
         .map(|value| value.observer(&change, &preset))
@@ -581,6 +584,7 @@ fn report_html_scope(
 }
 
 const OFFLINE_BUNDLE_SCHEMA: &str = "aexeo.offline-receipt-bundle/v1";
+const LINK_SNAPSHOT_BUNDLE_SCHEMA: &str = "aexeo.link-snapshot-receipt-bundle/v1";
 
 /// Exact UTF-8 artifact bytes are included for transport, not as trusted inputs.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -614,8 +618,10 @@ impl OfflineReceiptArtifacts {
         &self,
         receipt: &aexeo_core::content_gate_verdict::OfflineDecisionReceipt,
     ) -> Result<()> {
-        if self.external_evidence.is_some() {
-            user_bail!("offline bundles cannot contain external evidence");
+        let is_snapshot =
+            receipt.schema == aexeo_core::content_gate_verdict::LINK_SNAPSHOT_RECEIPT_SCHEMA;
+        if is_snapshot != self.external_evidence.is_some() {
+            user_bail!("receipt evidence does not match its schema");
         }
         let inputs = aexeo_contracts::content_gate_decision_inputs::DecisionInputBytes {
             change: self.change.as_bytes(),
@@ -623,7 +629,7 @@ impl OfflineReceiptArtifacts {
             host_options: self.host_options.as_bytes(),
             evaluator: self.evaluator.as_bytes(),
             collection: self.collection.as_deref().map(str::as_bytes),
-            external_evidence: None,
+            external_evidence: self.external_evidence.as_deref().map(str::as_bytes),
         };
         receipt
             .decision_inputs
@@ -654,7 +660,14 @@ fn parse_previous_offline_receipt(
     // artifacts are checked for consistency but never used as current inputs.
     match parse_lossless_json(data).user_context("invalid previous receipt")? {
         PreviousOfflineReceipt::Bundle(bundle) => {
-            if bundle.schema != OFFLINE_BUNDLE_SCHEMA {
+            let expected = if bundle.receipt.schema
+                == aexeo_core::content_gate_verdict::LINK_SNAPSHOT_RECEIPT_SCHEMA
+            {
+                LINK_SNAPSHOT_BUNDLE_SCHEMA
+            } else {
+                OFFLINE_BUNDLE_SCHEMA
+            };
+            if bundle.schema != expected {
                 user_bail!("unsupported previous receipt bundle schema");
             }
             bundle
@@ -667,19 +680,30 @@ fn parse_previous_offline_receipt(
     }
 }
 
+struct ReceiptSnapshots<'a> {
+    collection: &'a Option<CollectionSnapshot>,
+    links: Option<&'a ChangeLinkSnapshots>,
+}
+
 fn command_offline_receipt(
     args: &ArgMatches,
     change: &aexeo_contracts::content_gate_protocol::Change,
     preset: &aexeo_core::content_gate::ContentPreset,
-    collection: &Option<CollectionSnapshot>,
+    snapshots: ReceiptSnapshots<'_>,
     provider: &mut HostFiles,
     output: &Path,
     html_scope: HtmlContentScope,
 ) -> Result<i32> {
     use aexeo_core::content_gate_verdict::{
-        OfflineDecisionContext, OfflineDecisionReceipt, evaluate_offline_receipt_with_html_scope,
+        LinkSnapshotDecisionContext, OfflineDecisionContext, OfflineDecisionReceipt,
+        evaluate_link_snapshot_receipt_with_html_scope, evaluate_offline_receipt_with_html_scope,
+        revalidate_link_snapshot_receipt_with_html_scope,
         revalidate_offline_receipt_with_html_scope,
     };
+    let ReceiptSnapshots {
+        collection,
+        links: snapshots,
+    } = snapshots;
     let identity = args
         .get_one::<String>("evaluator-identity")
         .user_context("evaluator identity is required")?;
@@ -699,6 +723,10 @@ fn command_offline_receipt(
         }),
         evaluator_identity: identity.as_bytes(),
     };
+    let link_context = snapshots.map(|snapshots| LinkSnapshotDecisionContext {
+        offline: &context,
+        snapshots,
+    });
     let receipt = if let Some(path) = args.get_one::<String>("verify-offline-receipt") {
         protect_input(Path::new(path), output, "previous receipt")?;
         let mut data = Vec::new();
@@ -711,13 +739,23 @@ fn command_offline_receipt(
             user_bail!("previous receipt exceeds the size limit");
         }
         let previous: OfflineDecisionReceipt = parse_previous_offline_receipt(&data)?;
-        let result = revalidate_offline_receipt_with_html_scope(
-            &previous,
-            &context,
-            provider,
-            &iso_now(),
-            html_scope,
-        );
+        let result = if let Some(link_context) = &link_context {
+            revalidate_link_snapshot_receipt_with_html_scope(
+                &previous,
+                link_context,
+                provider,
+                &iso_now(),
+                html_scope,
+            )
+        } else {
+            revalidate_offline_receipt_with_html_scope(
+                &previous,
+                &context,
+                provider,
+                &iso_now(),
+                html_scope,
+            )
+        };
         if args.get_flag("telemetry") {
             eprintln!(
                 "{}",
@@ -726,8 +764,17 @@ fn command_offline_receipt(
         }
         result.user_context("previous receipt does not match current inputs or evaluation")?
     } else {
-        evaluate_offline_receipt_with_html_scope(&context, provider, &iso_now(), html_scope)
-            .user_context("offline receipt evaluation failed")?
+        if let Some(link_context) = &link_context {
+            evaluate_link_snapshot_receipt_with_html_scope(
+                link_context,
+                provider,
+                &iso_now(),
+                html_scope,
+            )
+        } else {
+            evaluate_offline_receipt_with_html_scope(&context, provider, &iso_now(), html_scope)
+        }
+        .user_context("offline receipt evaluation failed")?
     };
     let code = match receipt.verdict.status {
         VerdictStatus::Pass => EXIT_SUCCESS,
@@ -736,13 +783,21 @@ fn command_offline_receipt(
         VerdictStatus::Error => EXIT_INTERNAL_ERROR,
     };
     let bytes = if args.get_flag("offline-receipt-bundle") {
-        let artifacts = OfflineReceiptArtifacts::from_context(&context, html_scope)
+        let mut artifacts = OfflineReceiptArtifacts::from_context(&context, html_scope)
             .user_context("preparing offline receipt artifacts")?;
+        if let Some(snapshots) = snapshots {
+            artifacts.external_evidence = Some(serde_json::to_string(snapshots)?);
+        }
         artifacts
             .verify(&receipt)
             .user_context("offline receipt artifacts differ")?;
         let bundle = OfflineReceiptBundle {
-            schema: OFFLINE_BUNDLE_SCHEMA.into(),
+            schema: if link_context.is_some() {
+                LINK_SNAPSHOT_BUNDLE_SCHEMA
+            } else {
+                OFFLINE_BUNDLE_SCHEMA
+            }
+            .into(),
             receipt,
             artifacts,
         };
@@ -761,7 +816,7 @@ fn command_offline_receipt(
             "{}",
             serde_json::json!({
                 "event":"content_change_offline_bundle", "version":1,
-                "artifact_count":4 + usize::from(collection.is_some()), "bundle_bytes":bytes.len() + 1
+                "artifact_count":4 + usize::from(collection.is_some()) + usize::from(snapshots.is_some()), "bundle_bytes":bytes.len() + 1
             })
         );
     }

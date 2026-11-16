@@ -62,8 +62,8 @@ and content.
 
 The host must independently establish provenance, freshness and evaluator
 identity. This receipt is not the interoperable v2 verdict, does not authorize
-publication and does not execute network or custom extension callbacks. The
-CLI and independent receipt comparator do not yet support this receipt format.
+publication and does not execute network or custom extension callbacks. The CLI supports this format as described below; the independent receipt
+comparator does not yet support it.
 
 ## Experimental Aexeo offline host API
 
@@ -98,6 +98,24 @@ identity, collection completeness and publication state. The CLI receipt mode re
 not prove that an external input was absent, fresh, true or authenticated.
 The CLI supports an explicit offline receipt mode; it does not use the v2
 verdict protocol. EmDash does not produce or consume these receipts.
+
+### CLI link-snapshot receipts
+
+Add `--link-observations SNAPSHOT` to `content-change --offline-receipt
+--evaluator-identity BUILD_ID` to evaluate a supplied change-link snapshot
+without network access. The receipt has schema
+`aexeo.link-snapshot-decision-receipt/v1`. When
+`--offline-receipt-bundle` is also specified, the bundle uses the distinct
+`aexeo.link-snapshot-receipt-bundle/v1` schema and carries the compact snapshot
+JSON as `external_evidence`. The bundle may contain private URLs and content.
+
+Revalidation requires the host to supply the current snapshot again using
+`--link-observations`; embedded artifacts are checked but never trusted as
+current input. An old offline receipt and a snapshot-bound receipt are not
+interchangeable. Invalid, modified or missing evidence fails without replacing
+the previous output. The host must establish evidence origin and freshness;
+no receipt authorizes publication. Network observation and custom extensions
+remain excluded in this mode.
 
 ### Optional CLI transport bundle
 

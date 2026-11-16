@@ -314,8 +314,9 @@ The latest published version observed on 2026-11-16 was 0.9.1.
   protects legacy runners that ignore it.
   The experimental Rust link-snapshot receipt binds supplied ordered link
   observations in its manifest under a distinct schema and re-evaluates them.
-  It is not yet supported by the CLI or independent receipt comparator and does
-  not authenticate evidence or establish freshness.
+  The CLI can create, bundle and revalidate this receipt with independently
+  supplied link snapshots. The independent receipt comparator does not yet
+  support it; the format does not authenticate evidence or establish freshness.
   PR #315 added a standalone manifest, independently checked JSON
   Schema and an experimental Rust offline receipt. It is not yet a v2 verdict,
   a cross-implementation runner or integrated with EmDash; external

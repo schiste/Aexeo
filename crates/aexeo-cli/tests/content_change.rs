@@ -1676,6 +1676,110 @@ fn revalidation_detects_changed_collection_without_overwriting_output() {
 }
 
 #[test]
+fn link_snapshot_receipt_bundle_revalidates_and_rejects_tampering() {
+    use aexeo_contracts::content_gate_decision_inputs::{DecisionInputBytes, DecisionInputs};
+    let dir = tempfile::tempdir().unwrap();
+    let mut change = input();
+    change["entries"][0]["media_type"] = "text/markdown".into();
+    change["entries"][0]["after"] = serde_json::json!({"inline":"[first](https://example.org/a)", "sha256":"9b109ca77f8b3af5b0f54a9ae1aeb8d01f5ed6fbd1d350ffe84289bf42000e09"});
+    let policy = "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\n";
+    let snapshot = dir.path().join("snapshot.json");
+    let mut data = serde_json::json!({"version":1,"change_id":"example","entries":{"article":{"version":1,"source_sha256":"9b109ca77f8b3af5b0f54a9ae1aeb8d01f5ed6fbd1d350ffe84289bf42000e09","destinations":["https://example.org/a"],"observations":["reachable"]}}});
+    fs::write(&snapshot, serde_json::to_vec(&data).unwrap()).unwrap();
+    let path = snapshot.to_str().unwrap();
+    let args = [
+        "--offline-receipt",
+        "--offline-receipt-bundle",
+        "--evaluator-identity",
+        "trusted",
+        "--link-observations",
+        path,
+        "--telemetry",
+    ];
+    let created = run(dir.path(), &change, policy, &args);
+    assert_eq!(
+        created.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    let telemetry: serde_json::Value = serde_json::from_slice(&created.stderr).unwrap();
+    assert_eq!(telemetry["artifact_count"], 5);
+    assert!(!String::from_utf8_lossy(&created.stderr).contains("example.org"));
+    let output = dir.path().join("verdict.json");
+    let mut bundle: serde_json::Value =
+        serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert_eq!(bundle["schema"], "aexeo.link-snapshot-receipt-bundle/v1");
+    assert_eq!(
+        bundle["receipt"]["schema"],
+        "aexeo.link-snapshot-decision-receipt/v1"
+    );
+    let manifest: DecisionInputs =
+        serde_json::from_value(bundle["receipt"]["decision_inputs"].clone()).unwrap();
+    let artifact = |name: &str| bundle["artifacts"][name].as_str().unwrap().as_bytes();
+    manifest
+        .verify(&DecisionInputBytes {
+            change: artifact("change"),
+            resolved_policy: artifact("resolved_policy"),
+            host_options: artifact("host_options"),
+            evaluator: artifact("evaluator"),
+            collection: None,
+            external_evidence: Some(artifact("external_evidence")),
+        })
+        .unwrap();
+    let previous = dir.path().join("previous.json");
+    fs::copy(&output, &previous).unwrap();
+    let verify = [
+        "--offline-receipt",
+        "--offline-receipt-bundle",
+        "--evaluator-identity",
+        "trusted",
+        "--link-observations",
+        path,
+        "--verify-offline-receipt",
+        previous.to_str().unwrap(),
+    ];
+    let verified = run(dir.path(), &change, policy, &verify);
+    assert_eq!(
+        verified.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&verified.stderr)
+    );
+    let saved = fs::read(&output).unwrap();
+    data["entries"]["article"]["observations"][0] = "not_found".into();
+    fs::write(&snapshot, serde_json::to_vec(&data).unwrap()).unwrap();
+    let rejected = run(dir.path(), &change, policy, &verify);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert_eq!(fs::read(&output).unwrap(), saved);
+    let offline_only = [
+        "--offline-receipt",
+        "--evaluator-identity",
+        "trusted",
+        "--verify-offline-receipt",
+        previous.to_str().unwrap(),
+    ];
+    assert_eq!(
+        run(dir.path(), &change, policy, &offline_only)
+            .status
+            .code(),
+        Some(2)
+    );
+    assert_eq!(fs::read(&output).unwrap(), saved);
+    data["entries"]["article"]["observations"][0] = "reachable".into();
+    fs::write(&snapshot, serde_json::to_vec(&data).unwrap()).unwrap();
+    bundle["artifacts"]["external_evidence"] = "tampered".into();
+    fs::write(&previous, serde_json::to_vec(&bundle).unwrap()).unwrap();
+    let rejected_bundle = run(dir.path(), &change, policy, &verify);
+    assert_eq!(rejected_bundle.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&rejected_bundle.stderr)
+            .contains("invalid previous receipt bundle artifacts")
+    );
+    assert_eq!(fs::read(&output).unwrap(), saved);
+}
+
+#[test]
 fn offline_receipt_bundle_exports_exact_inputs_and_rejects_tampering() {
     use aexeo_contracts::content_gate_decision_inputs::{DecisionInputBytes, DecisionInputs};
     let dir = tempfile::tempdir().unwrap();
