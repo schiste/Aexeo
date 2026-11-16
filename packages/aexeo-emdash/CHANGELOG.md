@@ -6,14 +6,11 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added
-
-- Supply the document route and locale to configured link observers and explain failed or unavailable observations in unchecked assessments without exposing provider errors.
-
 ## [0.9.2] - Pending publication
 
 ### Added
 
+- Supply the document route and locale to configured link observers and explain failed or unavailable observations in unchecked assessments without exposing provider errors.
 - Support the composable `metadata_length` gate for observed fields, with configurable Unicode scalar bounds and explicit unchecked results for missing or unobserved fields.
 - Select portable content presets per exact locale and collection, consistently in the configured plugin and crawl worker.
 - Explain each content gate’s scope and required input in both CMS assessment views.
