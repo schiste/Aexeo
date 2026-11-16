@@ -271,6 +271,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     ) {
         (Some("markdown"), Some(text)) => {
             let (input, capabilities, links, map) = if args.get_flag("export-link-observations")
+                || args.contains_id("link-observations")
                 || preset.gates.iter().any(|gate| {
                     matches!(
                         gate,
