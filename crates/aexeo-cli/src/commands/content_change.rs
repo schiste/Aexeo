@@ -165,7 +165,8 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             if data.len() as u64 > MAX_CHANGE_BYTES {
                 user_bail!("previous verdict exceeds the size limit");
             }
-            serde_json::from_slice(&data).user_context("invalid previous verdict")
+            let value = parse_unique_json_value(&data).user_context("invalid previous verdict")?;
+            serde_json::from_value(value).user_context("invalid previous verdict")
         })
         .transpose()?;
     let mut bytes = Vec::new();
