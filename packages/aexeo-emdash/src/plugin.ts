@@ -826,6 +826,7 @@ export async function evaluateAndPersistAll(
   const documentRoutes = new Set<string>();
   const duplicateRoutes = new Set<string>();
   const adaptationFailures: Array<{ item: EmdashContentItem; collection: string }> = [];
+  const listingCoverage = { collections: collections.length, read_failures: 0, invalid_responses: 0, invalid_items: 0, pagination_failures: 0 };
   for (const collection of collections) {
     let cursor: string | undefined;
     const seenCursors = new Set<string>();
@@ -835,7 +836,17 @@ export async function evaluateAndPersistAll(
           limit: 100,
           ...(cursor === undefined ? {} : { cursor }),
         });
+        if (!page || !Array.isArray(page.items) || typeof page.hasMore !== "boolean") {
+          listingCoverage.invalid_responses += 1;
+          summary.errors.push(`${collection}: invalid content listing response`);
+          break;
+        }
         for (const item of page.items) {
+          if (!item || typeof item !== "object" || typeof item.id !== "string" || item.id.trim() === "") {
+            listingCoverage.invalid_items += 1;
+            summary.errors.push(`${collection}: invalid content listing item`);
+            continue;
+          }
           try {
             const adapted = await adaptContentItemWithContext(
               item,
@@ -862,19 +873,25 @@ export async function evaluateAndPersistAll(
           }
         }
         if (page.hasMore) {
-          if (!page.cursor || seenCursors.has(page.cursor)) throw new Error("incomplete pagination: missing or repeated cursor");
+          if (typeof page.cursor !== "string" || page.cursor.trim() === "" || seenCursors.has(page.cursor)) {
+            listingCoverage.pagination_failures += 1;
+            summary.errors.push(`${collection}: incomplete pagination: missing or repeated cursor`);
+            break;
+          }
           seenCursors.add(page.cursor);
           cursor = page.cursor;
         } else {
           cursor = undefined;
         }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        summary.errors.push(`${collection}: ${message}`);
+      } catch {
+        // Host exceptions may contain content or credentials; never expose them.
+        listingCoverage.read_failures += 1;
+        summary.errors.push(`${collection}: content listing failed`);
         cursor = undefined;
       }
     } while (cursor !== undefined);
   }
+  try { ctx.log?.info?.("aexeo.cms_listing", listingCoverage); } catch { /* best effort */ }
   summary.documentsScanned = documents.length;
   recordContentCoverage(ctx, documents);
   // A partial sweep cannot displace an owner from an unscanned collection.
