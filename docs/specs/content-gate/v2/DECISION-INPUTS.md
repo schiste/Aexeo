@@ -181,6 +181,16 @@ python3 docs/specs/content-gate/v2/compare_offline_receipts.py old.json fresh.js
   --evaluator evaluator.bin --collection-absent --external-evidence-absent --telemetry
 ```
 
+Either input can be an optional transport bundle by adding `--previous-bundle`
+and/or `--fresh-bundle`. The comparator verifies each bundle's embedded bytes
+against its manifest, then checks independently supplied current files once for the manifest comparison
+and compares the receipts. Subject and content verification options may reread
+the relevant files. It never substitutes
+embedded artifacts for those files. Bundle inputs are limited to 64 MiB; nested
+receipts remain limited to 16 MiB. Telemetry records only whether each input was
+a bundle, not paths or contents. These checks do not make bundled artifacts
+independent, fresh or authentic.
+
 Without the optional validation mode, the comparison checks only the verdict
 envelope. It does not independently execute an evaluator,
 authenticate either receipt or its inputs, or enforce a pass decision. Identical

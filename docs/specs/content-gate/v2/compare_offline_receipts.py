@@ -13,8 +13,8 @@ import sys
 import time
 
 from verify_decision_inputs import (
-    MAX_ARTIFACT_BYTES, MAX_MANIFEST_BYTES, OPTIONAL, REQUIRED, VerificationError, _open_regular,
-    _reject_constant, _unique_object, _digest_file, verify_files,
+    MAX_ARTIFACT_BYTES, MAX_BUNDLE_BYTES, MAX_MANIFEST_BYTES, OPTIONAL, REQUIRED, VerificationError, _open_regular,
+    _reject_constant, _unique_object, _digest_file, parse_bundle, verify_files,
 )
 
 MAX_RECEIPT_BYTES = 16 * 1024 * 1024
@@ -237,11 +237,22 @@ def verify_subject(change_path, expected_digest, verdict, validate_change=False,
         raise VerificationError("unable to verify verdict subject") from error
 
 
-def compare_receipts(previous_bytes, fresh_bytes, artifacts, validate=False, verify_change_subject=False, validate_change=False, verify_inline_content=False, content_files=None, required_checks=None):
+def _receipt_from_input(data, is_bundle):
+    if not is_bundle:
+        return parse_receipt(data)
+    receipt, _ = parse_bundle(data)
+    try:
+        encoded = json.dumps(receipt, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    except (ValueError, TypeError, UnicodeEncodeError, RecursionError) as error:
+        raise VerificationError("invalid bundled receipt") from error
+    return parse_receipt(encoded)
+
+
+def compare_receipts(previous_bytes, fresh_bytes, artifacts, validate=False, verify_change_subject=False, validate_change=False, verify_inline_content=False, content_files=None, required_checks=None, previous_bundle=False, fresh_bundle=False):
     if verify_inline_content and content_files is not None:
         raise VerificationError("content verification modes are mutually exclusive")
-    previous, old_manifest = parse_receipt(previous_bytes)
-    fresh, _ = parse_receipt(fresh_bytes)
+    previous, old_manifest = _receipt_from_input(previous_bytes, previous_bundle)
+    fresh, _ = _receipt_from_input(fresh_bytes, fresh_bundle)
     if validate or required_checks is not None:
         validate_verdict(previous["verdict"])
         validate_verdict(fresh["verdict"])
@@ -274,6 +285,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("previous")
     parser.add_argument("fresh", help="independently generated current receipt")
+    parser.add_argument("--previous-bundle", action="store_true", help="previous input is an offline receipt bundle")
+    parser.add_argument("--fresh-bundle", action="store_true", help="fresh input is an offline receipt bundle")
     for role in REQUIRED:
         parser.add_argument("--" + role.replace("_", "-"), required=True)
     for role in OPTIONAL:
@@ -295,6 +308,7 @@ def main(argv=None):
             return
         event = {"event": "offline_receipt_comparison", "status": status,
                  "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+                 "previous_bundle": args.previous_bundle, "fresh_bundle": args.fresh_bundle,
                  "verdict_validation_requested": args.validate_verdicts or args.require_check is not None,
                  "required_check_count": len(args.require_check or []),
                  "subject_verification_requested": args.verify_subject or args.validate_change or args.verify_inline_content or args.content_files is not None,
@@ -309,15 +323,16 @@ def main(argv=None):
             pass
     try:
         with _open_regular(args.previous) as source:
-            previous = source.read(MAX_RECEIPT_BYTES + 1)
+            previous = source.read((MAX_BUNDLE_BYTES if args.previous_bundle else MAX_RECEIPT_BYTES) + 1)
         with _open_regular(args.fresh) as source:
-            fresh = source.read(MAX_RECEIPT_BYTES + 1)
+            fresh = source.read((MAX_BUNDLE_BYTES if args.fresh_bundle else MAX_RECEIPT_BYTES) + 1)
         artifacts = {role: getattr(args, role) for role in REQUIRED + OPTIONAL}
         stats = compare_receipts(previous, fresh, artifacts, validate=args.validate_verdicts,
                                  verify_change_subject=args.verify_subject, validate_change=args.validate_change,
                                  verify_inline_content=args.verify_inline_content,
                                  content_files=read_content_map(args.content_files) if args.content_files is not None else None,
-                                 required_checks=args.require_check)
+                                 required_checks=args.require_check,
+                                 previous_bundle=args.previous_bundle, fresh_bundle=args.fresh_bundle)
     except (OSError, VerificationError):
         telemetry("error")
         print("Offline receipt comparison failed.", file=sys.stderr)

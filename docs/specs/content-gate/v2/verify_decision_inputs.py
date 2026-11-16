@@ -117,8 +117,11 @@ def verify_files(manifest_bytes, artifacts, max_bytes=MAX_ARTIFACT_BYTES):
     return {"files": files, "bytes": total_bytes}
 
 
-def verify_bundle(data, artifacts, max_bytes=MAX_ARTIFACT_BYTES):
-    """Verify embedded bytes and independently supplied current artifact files."""
+def parse_bundle(data):
+    """Validate embedded artifacts and return the receipt and manifest bytes.
+
+    This does not validate the receipt verdict or compare independent inputs.
+    """
     if len(data) > MAX_BUNDLE_BYTES:
         raise VerificationError("bundle exceeds size limit")
     try:
@@ -153,6 +156,12 @@ def verify_bundle(data, artifacts, max_bytes=MAX_ARTIFACT_BYTES):
                 raise VerificationError("bundle artifacts differ")
         else:
             raise VerificationError("bundle artifacts differ")
+    return bundle["receipt"], manifest_data
+
+
+def verify_bundle(data, artifacts, max_bytes=MAX_ARTIFACT_BYTES):
+    """Verify embedded bytes and independently supplied current artifact files."""
+    _, manifest_data = parse_bundle(data)
     return verify_files(manifest_data, artifacts, max_bytes)
 
 

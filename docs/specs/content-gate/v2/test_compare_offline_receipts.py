@@ -37,6 +37,34 @@ class CompareOfflineReceipts(unittest.TestCase):
     def encode(self, value):
         return json.dumps(value).encode()
 
+    def bundle(self, receipt):
+        return {"schema": "aexeo.offline-receipt-bundle/v1", "receipt": receipt,
+                "artifacts": {role: None if path is None else path.read_text()
+                              for role, path in self.artifacts.items()}}
+
+    def test_compares_bundles_without_trusting_their_embedded_inputs(self):
+        before = self.bundle(copy.deepcopy(self.receipt))
+        after = copy.deepcopy(before)
+        after["receipt"]["verdict"]["evaluated_at"] = "t2"
+        with mock.patch.object(comparison, "verify_files", wraps=comparison.verify_files) as reads:
+            comparison.compare_receipts(self.encode(before), self.encode(after), self.artifacts,
+                                        previous_bundle=True, fresh_bundle=True)
+            self.assertEqual(reads.call_count, 1)
+        comparison.compare_receipts(self.encode(before), self.encode(after["receipt"]), self.artifacts,
+                                    previous_bundle=True)
+        after["artifacts"]["change"] = "tampered"
+        with self.assertRaises(comparison.VerificationError):
+            comparison.compare_receipts(self.encode(before), self.encode(after), self.artifacts,
+                                        previous_bundle=True, fresh_bundle=True)
+        for invalid in (b'{"schema":"x","schema":"y"}', b'{"schema":"x","receipt":{},"artifacts":{}}'):
+            with self.assertRaises(comparison.VerificationError):
+                comparison.compare_receipts(invalid, self.encode(before), self.artifacts,
+                                            previous_bundle=True, fresh_bundle=True)
+        self.artifacts["change"].write_text("different current input")
+        with self.assertRaises(comparison.VerificationError):
+            comparison.compare_receipts(self.encode(before), self.encode(before), self.artifacts,
+                                        previous_bundle=True, fresh_bundle=True)
+
     def test_rechecks_current_bytes_and_compares_full_typed_results(self):
         fresh = copy.deepcopy(self.receipt)
         fresh["verdict"]["evaluated_at"] = "t2"

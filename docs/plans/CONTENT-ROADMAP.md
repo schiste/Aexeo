@@ -323,6 +323,11 @@ The latest published version observed on 2026-11-16 was 0.9.1.
   artifact bytes and compares their verdicts except the evaluation timestamp.
   It rejects different decision manifests before reading artifacts and hashes
   each supplied artifact once; the host still must ensure stable, trusted inputs.
+  The independent comparator can compare either a receipt or an explicit
+  transport bundle on each side. It checks each bundle's embedded artifacts,
+  then compares independently supplied current artifacts once per manifest check.
+  Optional subject and content checks can reread files. This does not
+  make the bundle's contents fresh, authentic or a portable v2 verdict.
   The independent comparator can additionally require a host-supplied list of
   exact blocking check IDs to have passed; this does not establish evaluator
   authenticity, complete required coverage or publication authorization.
