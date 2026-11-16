@@ -122,6 +122,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   `unavailable_metadata_fields` in a `ContentContext` and pass it through
   `ContentEvaluationContext.adapter`; assert unknown fields stay distinct
   from observed missing fields and retain `not_checked`.
+- For collection gate changes, test the public Rust API as well as CLI and
+  EmDash adapters: blank or repeated item IDs must not produce ambiguous
+  findings. Exercise the scan limit separately and keep unexamined items
+  explicitly unchecked.
 - For EmDash adapter configuration changes, test absent, valid, malformed and
   unreadable settings through both save and refresh. A failed settings read must
   not certify body capabilities via an automatic fallback; verify coverage
