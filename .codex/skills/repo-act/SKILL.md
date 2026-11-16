@@ -52,6 +52,8 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   submit and finish. Never overwrite the old branch without verified authority.
   Run a broker-coordinated push with `HEAD` from the session worktree: from
   another checkout, `HEAD` resolves there and the broker refuses the push.
+  Run `broker commit` from the session worktree too; it checks the current
+  directory even when the session ID is supplied.
 - Root `package.json` sets `type: module`: use ES module imports for root
   `.js` scripts and tests, or explicitly use `.cjs` for CommonJS. Run the
   script directly with Node to verify its entrypoint as well as its tests.
