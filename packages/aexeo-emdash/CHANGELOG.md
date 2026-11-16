@@ -18,6 +18,7 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Withhold CMS findings when multiple records resolve to one route, preserve the ambiguity until all known affected collections are refreshed, and emit aggregate collision telemetry.
 - Keep optional telemetry failures, including rejected asynchronous callbacks, from disrupting content evaluation and inventory exports. Telemetry is not awaited.
 - Bound collection metadata uniqueness evaluation; when a limit interrupts the scan, retain observed duplicate findings and report the check as `not_checked`.
 - Require explicit custom-block mappings; inherited properties no longer certify body coverage.
