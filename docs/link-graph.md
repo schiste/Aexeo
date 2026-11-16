@@ -143,7 +143,8 @@ an unmarked `div` inside `main` counts as `body`, because class names are not
 treated as semantics, and needs an explicit marker. The parser cannot reliably
 preserve source line and column, so these are null.
 
-Links in `template` and `noscript` remain in discovery and evidence but have
+Links in `template`, `noscript`, and a `dialog` without the boolean `open`
+attribute remain in discovery and evidence but have
 `unknown` context and identify the outer conditional component. The source HTML
 does not establish that these links were displayed; even an explicit context
 marker inside such markup cannot establish visibility. Existing observed-source
@@ -152,7 +153,9 @@ totals still include them. `conditional_source_pages` and
 overlap when the same page contains both types. Redirect credits report the
 same breakdown. Evidence includes `conditional_markup`; its absence in an older
 report means unknown, not false; the new counts are also absent in old reports,
-not zero. A link with an HTML `hidden` attribute on itself or an ancestor is
+not zero. Reports generated before closed-dialog detection may incorrectly count
+those links as nonconditional; regenerate them. Scripts and CSS can change the
+dialog state or appearance. A link with an HTML `hidden` attribute on itself or an ancestor is
 also counted as conditional, including `hidden="until-found"`. Evidence records
 `hidden_attribute`; its absence in older reports means unobserved. Historical
 aggregate counts were calculated before this field existed and are not revised:

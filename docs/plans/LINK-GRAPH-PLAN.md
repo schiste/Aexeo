@@ -32,6 +32,10 @@ not change their counts or assert confirmed orphans.
 
 ## Progress
 
+- Links inside a closed `dialog` remain discoverable but are classified as
+  conditional markup, including inside nested open dialogs. Older reports must
+  be regenerated to account for this distinction.
+
 - For crawled pages, legacy root-relative discovery and broken-link checks
   respect an external or invalid `base` rather than assuming the crawl origin.
   Static files without an observed page URL retain the prior behavior.

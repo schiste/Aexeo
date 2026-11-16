@@ -704,6 +704,7 @@ mod tests {
         for html in [
             "<main><div hidden><a href='/old'>Old</a></div></main>",
             "<main><details><summary>More</summary><a href='/old'>Old</a></details></main>",
+            "<main><dialog><a href='/old'>Old</a></dialog></main>",
         ] {
             let mut new = page("new", "<main>New</main>");
             new["crawl_response"]["requested_url"] = "https://example.org/old".into();
