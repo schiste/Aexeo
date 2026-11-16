@@ -140,3 +140,40 @@ target/debug/aexeo-cli content eval/workflow-trials/open-handover.html \
   --preset-source trial=eval/workflow-trials/article.toml \
   --metadata eval/workflow-trials/open-handover-metadata.json --format json --telemetry
 ```
+
+## Bounded paragraph-text and HTML revisions
+
+The same intentionally unreasonable three-word sentence limit was applied to
+both open-ended handover drafts. In each format, three predetermined localized
+paragraph replacements were made and the same preset was rerun after each edit.
+The policy still failed after revision 3, at which point the exercise stopped;
+no pass was claimed. These synthetic scripted edits exercise the observable
+failure path; they do not demonstrate an autonomous agent enforcing a retry
+budget, independent human review, or improved prose. In fact, deleting context
+to satisfy this policy would often make a handover worse.
+
+| Snapshot | Paragraph-text findings | HTML findings | Gate / CLI exit |
+| --- | ---: | ---: | --- |
+| Original | 14 | 14 | failed / 1 |
+| Revision 1 | 12 | 12 | failed / 1 |
+| Revision 2 | 9 | 9 | failed / 1 |
+| Revision 3 | 6 | 6 | failed / 1 |
+
+All findings mapped to source positions in these local runs. HTML used the
+`main` scope, with a literal HTML source map. These counts characterize only
+these drafts, this preset and this execution; no accuracy or latency claim
+follows. The snapshots are `bounded-text-{1,2,3}.txt` and
+`bounded-html-{1,2,3}.html` in `eval/workflow-trials`.
+
+Reproduce each evaluation (the nonzero exit is expected):
+
+```sh
+for file in eval/workflow-trials/open-handover.txt eval/workflow-trials/bounded-text-{1,2,3}.txt; do
+  target/debug/aexeo-cli content "$file" --input-format paragraph-text --preset trial \
+    --preset-source trial=eval/workflow-trials/bounded.toml --format json --telemetry
+done
+for file in eval/workflow-trials/open-handover.html eval/workflow-trials/bounded-html-{1,2,3}.html; do
+  target/debug/aexeo-cli content "$file" --input-format html --html-scope main --preset trial \
+    --preset-source trial=eval/workflow-trials/bounded.toml --format json --telemetry
+done
+```
