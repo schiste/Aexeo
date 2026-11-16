@@ -80,6 +80,14 @@ mod tests {
     use crate::config::Config;
 
     #[test]
+    fn planner_routes_do_not_rewrite_cross_origin_absolute_links() {
+        let html = r#"<a href="https://www.example.com/allowed">allowed</a>
+            <a href="http://example.com/other-scheme">scheme</a>
+            <a href="https://example.com:8443/other-port">port</a>"#;
+        assert_eq!(page_link_routes(html, "https://example.com/"), ["allowed"]);
+    }
+
+    #[test]
     fn rejects_cloudflare_infrastructure_routes() {
         let config = Config::default();
         let runtime = config.runtime();

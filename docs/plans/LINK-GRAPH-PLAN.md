@@ -32,6 +32,10 @@ not change their counts or assert confirmed orphans.
 
 ## Progress
 
+- Crawl discovery no longer rewrites absolute links to the same host on a
+  different scheme or port into local paths. Bare and `www.` aliases still
+  require matching scheme and effective port, consistent with crawl egress.
+
 - Anchor evidence retains literal `aria-label` or image `alt` when link text is
   absent, with aggregate opt-in counts of empty and nonempty labels. It does not
   compute browser accessibility names or establish rendered visibility; old
