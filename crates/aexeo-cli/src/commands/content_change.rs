@@ -496,7 +496,7 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
                 "{}",
                 serde_json::json!({"event":"content_change_link_snapshots", "version":1,
                 "supplied_entries":snapshots.entries.len(), "supplied_observations":observations,
-                "unchecked_observations":unchecked + missing_destinations, "entries_without_snapshot":missing_entries,
+                "unchecked_observations":unchecked + missing_destinations, "observed_entries_without_snapshot":missing_entries,
                 "elapsed_ms":snapshot_started.map(|started| started.elapsed().as_secs_f64() * 1000.0)})
             );
         }

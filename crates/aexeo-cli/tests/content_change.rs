@@ -1269,7 +1269,7 @@ fn host_link_snapshots_bind_multiple_entries_and_revalidate() {
         .collect();
     assert_eq!(events[0]["event"], "content_change_link_snapshots");
     assert_eq!(events[0]["unchecked_observations"], 1);
-    assert_eq!(events[0]["entries_without_snapshot"], 0);
+    assert_eq!(events[0]["observed_entries_without_snapshot"], 0);
     assert!(!String::from_utf8_lossy(&first.stderr).contains("example.org"));
     assert!(
         first.status.code().is_some(),
@@ -1370,7 +1370,7 @@ fn host_link_snapshots_bind_multiple_entries_and_revalidate() {
             .unwrap(),
     )
     .unwrap();
-    assert_eq!(partial_event["entries_without_snapshot"], 1);
+    assert_eq!(partial_event["observed_entries_without_snapshot"], 1);
     assert_eq!(partial_event["unchecked_observations"], 1);
     assert_eq!(partial_result.status.code(), first.status.code());
     fs::write(&output, &saved).unwrap();
