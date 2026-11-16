@@ -665,8 +665,12 @@ pub(super) fn load_external_gate_results(
     if data.len() as u64 > LIMIT {
         user_bail!("external gate results exceed the size limit");
     }
+    // A duplicated nested key can otherwise change meaning between producers,
+    // validators and this host before the validated snapshot is fingerprinted.
+    let value = aexeo_contracts::content_gate_change_validation::parse_unique_json_value(&data)
+        .user_context("invalid external gate results JSON")?;
     let results =
-        serde_json::from_slice(&data).user_context("invalid external gate results JSON")?;
+        serde_json::from_value(value).user_context("invalid external gate results JSON")?;
     if batch {
         aexeo_core::content_extensions::ExternalGateResults::new_for_batch(results)
     } else {
