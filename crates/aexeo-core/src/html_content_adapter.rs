@@ -327,6 +327,9 @@ pub fn html_source_map_with_scope(
     let mut stack: Vec<String> = Vec::new();
     let mut selected_depth = None;
     let mut main_seen = false;
+    let mut head_seen = false;
+    let mut body_seen = false;
+    let mut html_start = None;
     let mut spans = Vec::new();
     let mut heading_starts = Vec::new();
     let mut link_starts = Vec::new();
@@ -339,6 +342,13 @@ pub fn html_source_map_with_scope(
                 .map_or(source.len(), |n| cursor + n);
             let literal = &source[cursor..end];
             if scope == HtmlContentScope::Main && selected_depth.is_none() {
+                if head_seen
+                    && !body_seen
+                    && stack.last().map(String::as_str) == Some("html")
+                    && !literal.trim().is_empty()
+                {
+                    return None;
+                }
                 cursor = end;
                 continue;
             }
@@ -369,6 +379,13 @@ pub fn html_source_map_with_scope(
         }
         let end = open_tag_end(source, cursor)?;
         let raw = &source[cursor..=end];
+        if scope == HtmlContentScope::Main && raw.eq_ignore_ascii_case("<!doctype html>") {
+            if !stack.is_empty() || !source[..cursor].trim().is_empty() {
+                return None;
+            }
+            cursor = end + 1;
+            continue;
+        }
         let inner = raw.strip_prefix('<')?.strip_suffix('>')?;
         let (closing, inner) = inner
             .strip_prefix('/')
@@ -382,6 +399,9 @@ pub fn html_source_map_with_scope(
             tag.as_str(),
             "html"
                 | "body"
+                | "head"
+                | "title"
+                | "meta"
                 | "main"
                 | "header"
                 | "nav"
@@ -407,6 +427,65 @@ pub fn html_source_map_with_scope(
             return None;
         }
         let rest = &inner[name_len..];
+        // Only a simple, explicit head outside the selected main is supported.
+        // Raw-text elements, hidden subtrees and malformed head placement remain
+        // unmapped because HTML's error recovery can relocate their contents.
+        if matches!(tag.as_str(), "head" | "title" | "meta") && scope != HtmlContentScope::Main {
+            return None;
+        }
+        if tag == "html"
+            && !closing
+            && html_start.replace(cursor).is_some()
+            && scope == HtmlContentScope::Main
+        {
+            return None;
+        }
+        if tag == "head" && !closing {
+            let root = html_start?;
+            let prefix = source[..root].trim();
+            let root_end = open_tag_end(source, root)?;
+            if (!prefix.is_empty() && !prefix.eq_ignore_ascii_case("<!doctype html>"))
+                || !source[root_end + 1..cursor].trim().is_empty()
+                || head_seen
+                || body_seen
+                || main_seen
+                || stack.len() != 1
+                || stack.last().map(String::as_str) != Some("html")
+            {
+                return None;
+            }
+            head_seen = true;
+        }
+        if head_seen
+            && !body_seen
+            && stack.last().map(String::as_str) == Some("html")
+            && !((tag == "body" || tag == "head") && !closing)
+        {
+            return None;
+        }
+        if tag == "body" && !closing && scope == HtmlContentScope::Main {
+            if body_seen || head_seen && stack.last().map(String::as_str) != Some("html") {
+                return None;
+            }
+            body_seen = true;
+        }
+        if tag == "main" && !closing && head_seen && !stack.iter().any(|parent| parent == "body") {
+            return None;
+        }
+        if stack.iter().any(|parent| parent == "head") {
+            let parent = stack.last().map(String::as_str);
+            if !matches!(
+                (tag.as_str(), closing, parent),
+                ("head", true, Some("head"))
+                    | ("title", false, Some("head"))
+                    | ("title", true, Some("title"))
+                    | ("meta", false, Some("head"))
+            ) {
+                return None;
+            }
+        } else if matches!(tag.as_str(), "title" | "meta") {
+            return None;
+        }
         if closing {
             if !rest.trim().is_empty() || stack.pop().as_deref() != Some(&tag) {
                 return None;
@@ -433,7 +512,9 @@ pub fn html_source_map_with_scope(
             let selected = scope == HtmlContentScope::Document || selected_depth.is_some();
             // Restrict attributes to a form that cannot affect projection or
             // hide a subtree. Other valid HTML is still evaluated without a map.
-            if !safe_mapping_attributes(rest, tag == "br") || stack.len() >= 256 {
+            if !safe_mapping_attributes(rest, matches!(tag.as_str(), "br" | "meta"))
+                || stack.len() >= 256
+            {
                 return None;
             }
             if selected && matches!(tag.as_str(), "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
@@ -471,7 +552,7 @@ pub fn html_source_map_with_scope(
                 if selected {
                     output.push('\n');
                 }
-            } else {
+            } else if tag != "meta" {
                 if selected && block && !output.is_empty() && !output.ends_with('\n') {
                     output.push('\n');
                 }
@@ -593,6 +674,37 @@ mod tests {
             assert!(
                 html_source_map_with_scope(source, "word\n\n", HtmlContentScope::Main).is_none()
             );
+        }
+    }
+
+    #[test]
+    fn maps_main_in_standard_document_with_head_without_mapping_head_text() {
+        use crate::source_mapping::ContentSourceMap;
+        let source = "<!doctype html>\n<html lang=\"en\"><head><title>shared</title><meta charset=\"utf-8\"></head>\n<body><nav><a href=\"/same\">shared</a></nav>\n<main><h1>Heading</h1><p><a href=\"/same\">shared</a></p></main>\n</body></html>";
+        let adapted = html_content_with_scope("x", source, HtmlContentScope::Main).unwrap();
+        let text = adapted.input.text.as_deref().unwrap();
+        let map = html_source_map_with_scope(source, text, HtmlContentScope::Main).unwrap();
+        assert_eq!(map.heading_position(source, 0), Some((4, 7)));
+        assert_eq!(map.link_position(source, 0), Some((4, 26)));
+        assert_eq!(map.source_position(source, text, 2, 1), Some((4, 42)));
+        for invalid in [
+            "stray<html><head><title>word</title></head><body><main><p>word</p></main></body></html>",
+            "<html><div>stray</div><head><title>word</title></head><body><main><p>word</p></main></body></html>",
+            "<html><head><title>word</title></head>stray<body><main><p>word</p></main></body></html>",
+            "<!doctype html><html><head><script>let x = 1;</script></head><body><main><p>word</p></main></body></html>",
+            "<!doctype html><html><head><main><p>word</p></main></head><body></body></html>",
+            "<!doctype html><html><head><title>word</title></head><head><title>word</title></head><body><main><p>word</p></main></body></html>",
+        ] {
+            if let Ok(projected) = html_content_with_scope("x", invalid, HtmlContentScope::Main) {
+                assert!(
+                    html_source_map_with_scope(
+                        invalid,
+                        projected.input.text.as_deref().unwrap(),
+                        HtmlContentScope::Main
+                    )
+                    .is_none()
+                );
+            }
         }
     }
 

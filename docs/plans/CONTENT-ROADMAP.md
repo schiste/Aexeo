@@ -461,6 +461,8 @@ findings eligible for source positions, including when no trustworthy mapping is
 available. Text reports summarize coverage when positional findings exist. The same aggregate counts appear in opt-in CLI telemetry; they omit
 truncated findings and carry no source content. EmDash uses the same gate
 eligibility definition. A mapped position identifies only the evaluated snapshot.
+For scoped HTML, simple complete documents with a doctype and head can map
+positions within `main`; ambiguous or unsupported markup remains unmapped.
 
 ### EmDash source mapping coverage
 
