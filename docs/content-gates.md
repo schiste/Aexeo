@@ -1105,6 +1105,33 @@ so tune this opt-in rule to the content type. An adapter without headings report
 `not_checked`. The report includes heading and duplicate counts; a finding uses
 the heading ordinal and does not claim an exact source position.
 
+## Heading hierarchy
+
+The opt-in `heading_hierarchy` gate flags a heading that skips a level from
+its immediate predecessor, for example H2 followed by H4. It is advisory when
+`blocking = false` and does not decide whether the overall outline is good.
+
+```toml
+[[gates]]
+id = "editorial.heading-hierarchy"
+kind = "heading_hierarchy"
+blocking = false
+# Optional: the level supplied by the surrounding page template (1 through 6).
+initial_level = 1
+```
+
+Without `initial_level`, the first heading may have any level: this supports
+fragments whose surrounding template is unknown. Set it only when the host
+knows the immediately preceding heading level. The gate reports the heading
+count and number of skipped transitions. Markdown and static HTML adapters and
+the EmDash Portable Text adapter provide levels, with source positions when
+available. Markdown containing raw HTML and partially observed CMS headings
+are `not_checked`: the projected sequence cannot establish all headings.
+Static HTML results cover the supplied markup and scope; they do not establish
+what a browser renders. Plain text and hosts without a complete ordered level
+sequence are also `not_checked`. This gate is opt-in and does not change the
+built-in presets.
+
 ## Heading length
 
 The opt-in `heading_length` gate counts Unicode scalar values in each heading

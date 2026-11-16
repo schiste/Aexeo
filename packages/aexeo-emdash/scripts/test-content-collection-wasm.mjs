@@ -105,6 +105,27 @@ const headingReport = await evaluateContent({ route: "/heading", title: "Heading
 assert.deepEqual(headingReport.source_locations, [{ gate_id: "length", finding_index: 0, block_index: 0, span_index: 0, utf16_offset: 0 }]);
 console.log("WASM heading location smoke test passed");
 
+const hierarchyPreset = `version=1
+name="heading hierarchy"
+[[gates]]
+id="hierarchy"
+kind="heading_hierarchy"
+blocking=false
+`;
+const hierarchyDocument = { route: "/hierarchy", title: "Hierarchy", body: [
+  { style: "h2", children: [{ _type: "span", text: "First" }] },
+  { style: "h4", children: [{ _type: "span", text: "Fourth" }] },
+] };
+const hierarchyReport = await evaluateContent(hierarchyDocument, "test", { test: hierarchyPreset });
+assert.equal(hierarchyReport.gates[0].status, "failed");
+assert.equal(hierarchyReport.gates[0].required_capability, "heading_levels");
+assert.equal(hierarchyReport.gates[0].measurements.skipped_levels, 1);
+assert.deepEqual(hierarchyReport.source_locations, [{ gate_id: "hierarchy", finding_index: 0, block_index: 1, span_index: 0, utf16_offset: 0 }]);
+const incompleteHierarchy = await evaluateContent({ ...hierarchyDocument, body_capabilities: ["text"] }, "test", { test: hierarchyPreset });
+assert.equal(incompleteHierarchy.gates[0].status, "not_checked");
+assert.deepEqual(incompleteHierarchy.gates[0].findings, []);
+console.log("WASM heading hierarchy smoke test passed");
+
 const paragraphCountPreset = `version=1
 name="paragraph count"
 [[gates]]

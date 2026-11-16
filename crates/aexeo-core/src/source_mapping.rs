@@ -35,7 +35,8 @@ pub fn eligible_findings(
             prose_gate_has_positions(gate)
                 || matches!(
                     gate,
-                    ContentGate::HeadingLength { .. }
+                    ContentGate::HeadingHierarchy { .. }
+                        | ContentGate::HeadingLength { .. }
                         | ContentGate::DuplicateHeadings { .. }
                         | ContentGate::LinkDestinations { .. }
                         | ContentGate::LinkReachability { .. }
@@ -58,6 +59,30 @@ pub(crate) trait ContentSourceMap {
     ) -> Option<(usize, usize)>;
     fn heading_position(&self, source: &str, index: usize) -> Option<(usize, usize)>;
     fn link_position(&self, source: &str, index: usize) -> Option<(usize, usize)>;
+}
+
+pub(crate) fn map_heading_hierarchy_positions(
+    map: &dyn ContentSourceMap,
+    source: &str,
+    levels: &[u8],
+    initial_level: Option<u8>,
+    result: &crate::content_gate::ContentGateResult,
+) -> Option<Vec<Option<(usize, usize)>>> {
+    if map.heading_count() != levels.len() || levels.iter().any(|level| !(1..=6).contains(level)) {
+        return None;
+    }
+    let indices: Vec<_> =
+        crate::content_gate::heading_hierarchy_indices(levels, initial_level).collect();
+    if indices.len() != result.total_findings() {
+        return None;
+    }
+    Some(
+        indices
+            .into_iter()
+            .take(result.findings.len())
+            .map(|index| map.heading_position(source, index))
+            .collect(),
+    )
 }
 
 pub(crate) fn map_gate_source_positions(

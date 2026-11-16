@@ -21,7 +21,7 @@ enum Event {
     Enter(Handle),
     EndBlock {
         start: usize,
-        heading: bool,
+        heading: Option<u8>,
         paragraph: bool,
     },
 }
@@ -60,6 +60,15 @@ pub fn html_content_with_scope(
     source: &str,
     scope: HtmlContentScope,
 ) -> Result<HtmlContent, &'static str> {
+    html_content_with_scope_and_heading_levels(id, source, scope).map(|(content, _)| content)
+}
+
+/// Project the same selected HTML scope and its complete ordered heading levels.
+pub fn html_content_with_scope_and_heading_levels(
+    id: impl Into<String>,
+    source: &str,
+    scope: HtmlContentScope,
+) -> Result<(HtmlContent, Vec<u8>), &'static str> {
     if source.len() > MAX_CONTENT_INPUT_BYTES {
         return Err("HTML exceeds the content input byte limit");
     }
@@ -92,6 +101,7 @@ pub fn html_content_with_scope(
     let mut stack = vec![Event::Enter(root)];
     let mut text = String::new();
     let mut headings = Vec::new();
+    let mut heading_levels = Vec::new();
     let mut ranges = Vec::new();
     let mut block_ends = Vec::new();
     let mut destinations = Vec::new();
@@ -103,8 +113,9 @@ pub fn html_content_with_scope(
                 heading,
                 paragraph,
             } => {
-                if heading {
+                if let Some(level) = heading {
                     headings.push(collapse_whitespace(&text[start..]));
+                    heading_levels.push(level);
                 }
                 if paragraph {
                     ranges.push((start, text.len()));
@@ -140,7 +151,15 @@ pub fn html_content_with_scope(
                         if tag == "br" {
                             text.push('\n');
                         }
-                        let heading = matches!(tag, "h1" | "h2" | "h3" | "h4" | "h5" | "h6");
+                        let heading = match tag {
+                            "h1" => Some(1),
+                            "h2" => Some(2),
+                            "h3" => Some(3),
+                            "h4" => Some(4),
+                            "h5" => Some(5),
+                            "h6" => Some(6),
+                            _ => None,
+                        };
                         let paragraph = tag == "p";
                         if tag != "br" && crate::site::markup::tag_breaks_text(tag) {
                             if !text.is_empty() && !text.ends_with('\n') {
@@ -184,21 +203,24 @@ pub fn html_content_with_scope(
         });
         cursor = start;
     }
-    Ok(HtmlContent {
-        input: ContentInput {
-            id: id.into(),
-            text: Some(text),
-            source_text: Some(source.into()),
-            headings: Some(headings),
-            ..Default::default()
+    Ok((
+        HtmlContent {
+            input: ContentInput {
+                id: id.into(),
+                text: Some(text),
+                source_text: Some(source.into()),
+                headings: Some(headings),
+                ..Default::default()
+            },
+            context: ContentContext {
+                paragraphs: Some(paragraphs),
+                block_ends: Some(block_ends),
+                ..Default::default()
+            },
+            destinations,
         },
-        context: ContentContext {
-            paragraphs: Some(paragraphs),
-            block_ends: Some(block_ends),
-            ..Default::default()
-        },
-        destinations,
-    })
+        heading_levels,
+    ))
 }
 
 // Bound source-map memory even for entity-heavy or newline-heavy documents.
@@ -696,6 +718,23 @@ impl crate::source_mapping::ContentSourceMap for HtmlSourceMap {
 }
 
 /// Map findings from the unchanged HTML projection, without link observations.
+/// Map hierarchy findings against the same unchanged projection and level sequence.
+pub fn hierarchy_source_positions(
+    map: &HtmlSourceMap,
+    source: &str,
+    levels: &[u8],
+    initial_level: Option<u8>,
+    result: &crate::content_gate::ContentGateResult,
+) -> Option<Vec<Option<(usize, usize)>>> {
+    crate::source_mapping::map_heading_hierarchy_positions(
+        map,
+        source,
+        levels,
+        initial_level,
+        result,
+    )
+}
+
 pub fn gate_source_positions(
     map: &HtmlSourceMap,
     source: &str,

@@ -762,6 +762,23 @@ fn editorial_suggestion(gate: &ContentGate) -> Option<&'static str> {
 
 /// Return offending heading indices for heading gates, in finding order.
 /// Other gate types return `None`.
+/// Indices whose level skips at least one step from the preceding heading.
+pub fn heading_hierarchy_indices(
+    levels: &[u8],
+    initial_level: Option<u8>,
+) -> impl Iterator<Item = usize> + '_ {
+    levels
+        .iter()
+        .copied()
+        .enumerate()
+        .scan(initial_level, |previous, (index, level)| {
+            let skipped = previous.is_some_and(|prior| level > prior.saturating_add(1));
+            *previous = Some(level);
+            Some(skipped.then_some(index))
+        })
+        .flatten()
+}
+
 pub fn heading_finding_indices(gate: &ContentGate, headings: &[String]) -> Option<Vec<usize>> {
     match gate {
         ContentGate::HeadingLength { max_chars, .. } => Some(
@@ -2511,23 +2528,23 @@ impl ContentPreset {
                                 && levels.iter().all(|level| (1..=6).contains(level)) =>
                         {
                             measurements.insert("heading_count".into(), levels.len());
-                            let mut previous = *initial_level;
                             let mut skipped = 0;
-                            for (index, &level) in levels.iter().enumerate() {
-                                if let Some(prior) = previous
-                                    && level > prior + 1
-                                {
-                                    skipped += 1;
-                                    emit(
-                                        format!(
-                                            "Heading #{} skips from H{prior} to H{level}",
-                                            index + 1
-                                        ),
-                                        1,
-                                        1,
-                                    );
-                                }
-                                previous = Some(level);
+                            for index in heading_hierarchy_indices(levels, *initial_level) {
+                                skipped += 1;
+                                let prior = if index == 0 {
+                                    initial_level.unwrap_or(levels[index])
+                                } else {
+                                    levels[index - 1]
+                                };
+                                let level = levels[index];
+                                emit(
+                                    format!(
+                                        "Heading #{} skips from H{prior} to H{level}",
+                                        index + 1
+                                    ),
+                                    1,
+                                    1,
+                                );
                             }
                             measurements.insert("skipped_levels".into(), skipped);
                         }

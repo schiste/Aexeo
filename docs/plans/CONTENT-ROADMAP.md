@@ -458,10 +458,10 @@ is safe or that a heuristic establishes quality. Unavailable inputs remain
    content and aggregate telemetry; unavailable EmDash content is separately
    checked. Static HTML projection does not establish browser-rendered visibility.
    Expand parity coverage to more gates, formats and real host projections.
-   Heading hierarchy is not assessed: adapters currently project heading text
-   without a shared, complete level sequence. A future hierarchy check must
-   account for CMS fragments whose first heading follows a template-provided H1,
-   and report unavailable levels rather than infer them from text.
+   An opt-in heading hierarchy gate checks complete level sequences in Markdown,
+   static HTML and EmDash. A configured initial level handles fragments under
+   a template heading; unobserved or incomplete levels stay `not_checked`.
+   Extend parity and real-host validation before making it a default.
 5. **Make agent loops practical.** Ship discoverable skills and a single-item
    lint workflow with structured diagnostics, localized safe fixes and bounded
    retries. Re-evaluate after changes; do not treat a model's approval as ground
