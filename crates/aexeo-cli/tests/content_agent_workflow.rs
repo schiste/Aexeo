@@ -259,6 +259,28 @@ fn external_extension_results_are_bound_to_the_projected_input_and_parameters() 
 }
 
 #[test]
+fn external_results_reject_duplicate_nested_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("draft.txt");
+    let results = dir.path().join("results.json");
+    fs::write(&draft, "abc").unwrap();
+    fs::write(&results, r#"[{"extension":"example.rule","parameters":{"mode":"a","mode":"b"},"input":{"id":"draft"},"diagnostics":[]}]"#).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            draft.to_str().unwrap(),
+            "--preset",
+            "article",
+            "--extension-results",
+            results.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_ne!(output.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid external gate results JSON"));
+}
+
+#[test]
 fn sentence_openings_builtin_supports_revision_and_private_telemetry() {
     let dir = tempfile::tempdir().unwrap();
     let draft = dir.path().join("draft.md");

@@ -442,6 +442,25 @@ fn link_observer_reuses_same_destination_across_entries() {
 }
 
 #[test]
+fn external_results_with_duplicate_nested_keys_do_not_replace_verdict() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("external.json");
+    let verdict = dir.path().join("verdict.json");
+    fs::write(&verdict, "previous verdict").unwrap();
+    fs::write(&path, r#"[{"extension":"example.rule","parameters":{"mode":"a","mode":"b"},"input":{"id":"article"},"diagnostics":[]}]"#).unwrap();
+    let preset = "version=1\nname='test'\n[[gates]]\nid='external'\nkind='custom'\nextension='example.rule'\n";
+    let output = run(
+        dir.path(),
+        &input(),
+        preset,
+        &["--extension-results", path.to_str().unwrap()],
+    );
+    assert_ne!(output.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid external gate results JSON"));
+    assert_eq!(fs::read(&verdict).unwrap(), b"previous verdict");
+}
+
+#[test]
 fn external_gates_bind_each_entry_and_withhold_stale_results() {
     let dir = tempfile::tempdir().unwrap();
     let mut change = input();

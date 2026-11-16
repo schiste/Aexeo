@@ -58,6 +58,10 @@ package and its WASM from the exact release commit, then publish and independent
 check that exact artifact against the registry before considering it delivered.
 The latest published version observed on 2026-11-16 was 0.9.1.
 
+- [x] Reject duplicate JSON keys at any depth in supplied external gate results
+  before evaluation and snapshot fingerprinting in both content CLI paths.
+  This does not authenticate the result producer or establish factual accuracy.
+
 - [x] Optional, composable total character-count gate for text, Markdown, HTML,
   EmDash and change evaluation, with optional Unicode whitespace exclusion and
   explicit unavailable-text handling. Counts Unicode scalar values, not visual
