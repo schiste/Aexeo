@@ -257,3 +257,43 @@ fn external_extension_results_are_bound_to_the_projected_input_and_parameters() 
     let stale: serde_json::Value = serde_json::from_slice(&run().stdout).unwrap();
     assert_eq!(status(&stale, "external"), "not_checked");
 }
+
+#[test]
+fn sentence_openings_builtin_supports_revision_and_private_telemetry() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("draft.md");
+    fs::write(&draft, "The team plans. The team acts. THE TEAM checks.\n").unwrap();
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                draft.to_str().unwrap(),
+                "--input-format",
+                "markdown",
+                "--preset",
+                "sentence-openings-review",
+                "--format",
+                "json",
+                "--telemetry",
+            ])
+            .output()
+            .unwrap()
+    };
+    let output = run();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(status(&report, "editorial.sentence_openings"), "failed");
+    assert_eq!(report["source_locations"][0]["line"], 1);
+    assert_eq!(report["source_locations"][0]["column"], 32);
+    let event: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert!(event["gate_timings_ms"].is_array());
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("The team"));
+    fs::write(
+        &draft,
+        "The team plans. The team acts. Then everyone checks.\n",
+    )
+    .unwrap();
+    let output = run();
+    let revised: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(status(&revised, "editorial.sentence_openings"), "passed");
+}
