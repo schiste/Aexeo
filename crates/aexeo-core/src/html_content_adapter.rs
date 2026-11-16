@@ -377,6 +377,25 @@ pub fn html_source_map_with_scope(
             cursor = end;
             continue;
         }
+        if source[cursor..].starts_with("<!--") {
+            // Only ordinary, terminated comments in parsed HTML elements are
+            // accepted. RCDATA and malformed comment recovery are ambiguous.
+            if stack.is_empty() || stack.last().map(String::as_str) == Some("title") {
+                return None;
+            }
+            let body = &source[cursor + 4..];
+            let comment_end = body.find("-->")?;
+            let comment = &body[..comment_end];
+            if comment.contains("--")
+                || comment.starts_with('>')
+                || comment.starts_with("->")
+                || comment.ends_with('-')
+            {
+                return None;
+            }
+            cursor += 4 + comment_end + 3;
+            continue;
+        }
         let end = open_tag_end(source, cursor)?;
         let raw = &source[cursor..=end];
         if scope == HtmlContentScope::Main && raw.eq_ignore_ascii_case("<!doctype html>") {
@@ -402,6 +421,9 @@ pub fn html_source_map_with_scope(
                 | "head"
                 | "title"
                 | "meta"
+                | "link"
+                | "script"
+                | "style"
                 | "main"
                 | "header"
                 | "nav"
@@ -427,10 +449,23 @@ pub fn html_source_map_with_scope(
             return None;
         }
         let rest = &inner[name_len..];
+        // An HTML tag name can include '-' and other characters. Refuse an
+        // unknown suffix instead of mistaking e.g. <script-widget> for script.
+        if rest
+            .chars()
+            .next()
+            .is_some_and(|ch| !ch.is_ascii_whitespace() && ch != '/')
+        {
+            return None;
+        }
         // Only a simple, explicit head outside the selected main is supported.
-        // Raw-text elements, hidden subtrees and malformed head placement remain
-        // unmapped because HTML's error recovery can relocate their contents.
-        if matches!(tag.as_str(), "head" | "title" | "meta") && scope != HtmlContentScope::Main {
+        // Unsupported raw text, hidden subtrees and malformed head placement
+        // remain unmapped because parser recovery can relocate their contents.
+        if matches!(
+            tag.as_str(),
+            "head" | "title" | "meta" | "link" | "script" | "style"
+        ) && scope != HtmlContentScope::Main
+        {
             return None;
         }
         if tag == "html"
@@ -480,11 +515,42 @@ pub fn html_source_map_with_scope(
                     | ("title", false, Some("head"))
                     | ("title", true, Some("title"))
                     | ("meta", false, Some("head"))
+                    | ("link", false, Some("head"))
+                    | ("script", false, Some("head"))
+                    | ("style", false, Some("head"))
             ) {
                 return None;
             }
-        } else if matches!(tag.as_str(), "title" | "meta") {
+        } else if matches!(tag.as_str(), "title" | "meta" | "link" | "style") {
             return None;
+        }
+        if matches!(tag.as_str(), "script" | "style") {
+            // Treat raw text as opaque only when it contains no '<', so the
+            // first following tag is unambiguously its exact closing tag.
+            // Scripts inside main are deliberately outside this mapping subset.
+            if closing
+                || selected_depth.is_some()
+                || (tag == "script"
+                    && !matches!(stack.last().map(String::as_str), Some("head" | "body")))
+                || !safe_mapping_attributes(rest, false)
+            {
+                return None;
+            }
+            let close_start = end + 1 + source[end + 1..].find('<')?;
+            let close = if tag == "script" {
+                "</script>"
+            } else {
+                "</style>"
+            };
+            let close_end = close_start.checked_add(close.len())?;
+            if !source
+                .get(close_start..close_end)?
+                .eq_ignore_ascii_case(close)
+            {
+                return None;
+            }
+            cursor = close_end;
+            continue;
         }
         if closing {
             if !rest.trim().is_empty() || stack.pop().as_deref() != Some(&tag) {
@@ -512,7 +578,7 @@ pub fn html_source_map_with_scope(
             let selected = scope == HtmlContentScope::Document || selected_depth.is_some();
             // Restrict attributes to a form that cannot affect projection or
             // hide a subtree. Other valid HTML is still evaluated without a map.
-            if !safe_mapping_attributes(rest, matches!(tag.as_str(), "br" | "meta"))
+            if !safe_mapping_attributes(rest, matches!(tag.as_str(), "br" | "meta" | "link"))
                 || stack.len() >= 256
             {
                 return None;
@@ -552,7 +618,7 @@ pub fn html_source_map_with_scope(
                 if selected {
                     output.push('\n');
                 }
-            } else if tag != "meta" {
+            } else if !matches!(tag.as_str(), "meta" | "link") {
                 if selected && block && !output.is_empty() && !output.ends_with('\n') {
                     output.push('\n');
                 }
@@ -691,7 +757,7 @@ mod tests {
             "stray<html><head><title>word</title></head><body><main><p>word</p></main></body></html>",
             "<html><div>stray</div><head><title>word</title></head><body><main><p>word</p></main></body></html>",
             "<html><head><title>word</title></head>stray<body><main><p>word</p></main></body></html>",
-            "<!doctype html><html><head><script>let x = 1;</script></head><body><main><p>word</p></main></body></html>",
+            "<!doctype html><html><head><script>let x = 1 < 2;</script></head><body><main><p>word</p></main></body></html>",
             "<!doctype html><html><head><main><p>word</p></main></head><body></body></html>",
             "<!doctype html><html><head><title>word</title></head><head><title>word</title></head><body><main><p>word</p></main></body></html>",
         ] {
@@ -705,6 +771,37 @@ mod tests {
                     .is_none()
                 );
             }
+        }
+    }
+
+    #[test]
+    fn maps_main_in_document_with_safe_head_resources_and_comments() {
+        let source = "<!doctype html>\n<html><head><!-- shared --><link rel='stylesheet' href='/site.css'><script>let x = 'shared';</script><style>p { color: red }</style></head>\n<body><nav>shared</nav>\n<main><!-- shared --><p>alpha<!-- aside --> shared</p></main>\n</body></html>";
+        let adapted = html_content_with_scope("x", source, HtmlContentScope::Main).unwrap();
+        let text = adapted.input.text.as_deref().unwrap();
+        let map = html_source_map_with_scope(source, text, HtmlContentScope::Main).unwrap();
+        let body_line = source.lines().nth(3).unwrap();
+        assert_eq!(
+            map.source_position(source, text, 1, 7),
+            Some((4, body_line.rfind("shared").unwrap() + 1))
+        );
+        for unsafe_html in [
+            "<html><head><script>let x = 1 < 2;</script></head><body><main><p>word</p></main></body></html>",
+            "<html><head></head><body><main><script>word</script><p>word</p></main></body></html>",
+            "<html><head><!-- bad -- comment --></head><body><main><p>word</p></main></body></html>",
+            "<html><head><script-widget>ignored</script-widget></head><body><main><p>word</p></main></body></html>",
+            "<html><head><link-widget></head><body><main><p>word</p></main></body></html>",
+        ] {
+            let adapted =
+                html_content_with_scope("x", unsafe_html, HtmlContentScope::Main).unwrap();
+            assert!(
+                html_source_map_with_scope(
+                    unsafe_html,
+                    adapted.input.text.as_deref().unwrap(),
+                    HtmlContentScope::Main
+                )
+                .is_none()
+            );
         }
     }
 

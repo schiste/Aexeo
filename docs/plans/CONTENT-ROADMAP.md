@@ -462,7 +462,9 @@ available. Text reports summarize coverage when positional findings exist. The s
 truncated findings and carry no source content. EmDash uses the same gate
 eligibility definition. A mapped position identifies only the evaluated snapshot.
 For scoped HTML, simple complete documents with a doctype and head can map
-positions within `main`; ambiguous or unsupported markup remains unmapped.
+positions within `main`, including conservative comments, linked head resources
+and raw-text head elements without embedded `<`. Ambiguous or unsupported markup
+remains unmapped.
 
 ### EmDash source mapping coverage
 
