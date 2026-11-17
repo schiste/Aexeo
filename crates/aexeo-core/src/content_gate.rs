@@ -3216,6 +3216,9 @@ impl ContentPreset {
                         measurements.insert("sentences_exceeding_limit".into(), exceeding);
                         if reason.is_none() && skipped > 0 {
                             reason = Some("some sentence openings could not be assessed using whitespace-separated words".into());
+                        } else if reason.is_none() && evaluated == 0 {
+                            reason =
+                                Some("no sentence openings were available for assessment".into());
                         }
                     } else {
                         reason = Some("paragraphs are unavailable from this adapter".into());
@@ -5905,6 +5908,21 @@ terms = ["bad"]
         let accent = run(&["Équipe agit. Autre aide. E\u{301}QUIPE planifie. équipe vérifie."]);
         assert_eq!(accent.status, GateStatus::Failed);
         assert_eq!(accent.findings.len(), 1);
+        let french = run(&["L’équipe agit. Autre chose. l’équipe planifie. L’ÉQUIPE vérifie."]);
+        assert_eq!(french.status, GateStatus::Failed);
+        let short_preset = ContentPreset::from_toml("version=1\nname='short'\n[[gates]]\nid='opening'\nkind='sentence_opening_window'\nopening_words=2\nwindow_size=4\nmax_occurrences=2\n").unwrap();
+        let short_context = ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: "Oui.".into(),
+                line: 1,
+                column: 1,
+            }]),
+            ..Default::default()
+        };
+        let short = short_preset
+            .evaluate_with_context(&input, None, None, Some(&short_context))
+            .unwrap();
+        assert_eq!(short.gates[0].status, GateStatus::NotChecked);
         let all_ignored = run(&["The. Team acts. Team plans."]);
         assert_eq!(all_ignored.status, GateStatus::Passed);
         assert_eq!(all_ignored.measurements["sentences_too_short"], 1);
@@ -5912,12 +5930,19 @@ terms = ["bad"]
             "Team acts. Team plans. Team checks. {}.",
             "x".repeat(MAX_PARAGRAPH_OPENING_BYTES + 1)
         );
+        let ellipsis = run(&["Une phrase…"]);
+        assert_eq!(ellipsis.status, GateStatus::NotChecked);
         let chinese = run(&["这是一个句子。"]);
         assert_eq!(chinese.status, GateStatus::NotChecked);
         assert_eq!(chinese.measurements["sentences_skipped"], 1);
         let quoted = run(&["Team acts. « Team plans. Team checks. » Other works."]);
         assert_eq!(quoted.status, GateStatus::Passed);
         assert_eq!(quoted.measurements["sentences_quoted"], 2);
+        for text in ["", "The.", "« Team plans. Team checks. »"] {
+            let unmeasurable = run(&[text]);
+            assert_eq!(unmeasurable.status, GateStatus::NotChecked, "{text}");
+            assert_eq!(unmeasurable.measurements["sentences_evaluated"], 0);
+        }
         let unclosed = run(&["Team acts. « Team plans. Team checks."]);
         assert_eq!(unclosed.status, GateStatus::NotChecked);
         let unknown = run(&[&long]);
