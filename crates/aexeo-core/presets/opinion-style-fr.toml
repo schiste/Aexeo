@@ -1,10 +1,26 @@
 version = 1
 name = "Opinion style review, French"
-extends = ["transition-review-fr", "punctuation-review", "sentence-openings-review", "sentence-rhythm-review", "natural-style-fr"]
+extends = ["transition-review-fr", "punctuation-review", "sentence-openings-review", "sentence-rhythm-review", "sentence-variance-review", "sentence-opening-window-review", "natural-style-fr"]
 
 [[gates]]
 id = "editorial.em_dashes"
 kind = "repeated_punctuation"
 mark = "—"
 max_per_paragraph = 3
+blocking = false
+
+# Provisional editorial examples; override to fit the publication.
+[[gates]]
+id = "editorial.sentence_variance"
+kind = "sentence_length_variance"
+window_size = 8
+min_stddev_words = 5
+blocking = false
+
+[[gates]]
+id = "editorial.sentence_opening_window"
+kind = "sentence_opening_window"
+opening_words = 1
+window_size = 8
+max_occurrences = 3
 blocking = false
