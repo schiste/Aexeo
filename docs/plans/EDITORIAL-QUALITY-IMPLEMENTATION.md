@@ -69,3 +69,7 @@ Existing source and factuality work is outside this plan.
   repeated sentence openings, asserts 500 findings and checks average and p95
   time against a dedicated budget. This synthetic workload does not establish
   real-world latency or editorial accuracy.
+
+- Repeated sentence and paragraph opening checks normalize canonically equivalent
+  Unicode spellings and preserve combining accents. Regression cases distinguish
+  different accents and verify equivalent composed and decomposed text.
