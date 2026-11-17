@@ -349,6 +349,9 @@ Options:
       --explain
           Print the resolved preset as TOML (or JSON with --format json) without reading content
 
+      --explain-origins
+          Include the winning source name of each resolved gate
+
       --format <format>
           [default: text]
           [possible values: text, json]

@@ -107,6 +107,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("list-site-groups").long("list-site-groups").action(ArgAction::SetTrue).help("List native website groups usable in presets"))
                 .arg(Arg::new("list-presets").long("list-presets").action(ArgAction::SetTrue).help("List available preset names"))
                 .arg(Arg::new("explain").long("explain").action(ArgAction::SetTrue).help("Print the resolved preset as TOML (or JSON with --format json) without reading content"))
+                .arg(Arg::new("explain-origins").long("explain-origins").action(ArgAction::SetTrue).requires("explain").help("Include the winning source name of each resolved gate"))
                 .arg(Arg::new("format").long("format").value_parser(["text", "json"]).default_value("text")),
         )
         .subcommand(

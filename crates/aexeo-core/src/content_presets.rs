@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::content_gate::{ContentGate, ContentPreset};
 use crate::error::into_user_error;
@@ -26,29 +26,68 @@ struct PresetSource {
 /// Maximum number of presets on one inheritance path.
 pub const MAX_PRESET_INHERITANCE_DEPTH: usize = 64;
 
+/// A gate's winning source name after inheritance and overrides.
+#[derive(Debug, Clone, Serialize)]
+pub struct GateOrigin {
+    pub gate_id: String,
+    pub source: String,
+}
+
+/// Resolved policy and its winning source for each gate, in gate order.
+#[derive(Debug, Clone, Serialize)]
+pub struct ContentPresetExplanation {
+    pub preset: ContentPreset,
+    pub gate_origins: Vec<GateOrigin>,
+}
+
+impl ContentPresetExplanation {
+    /// Serialize an explanation as TOML; this envelope is not a preset source.
+    pub fn to_toml(&self) -> Result<String> {
+        Ok(toml::to_string_pretty(self)?)
+    }
+}
+
 /// Resolve named TOML sources. Parents are applied from left to right; gates
 /// with the same ID are replaced in place, keeping the original order.
 pub fn resolve_content_preset(
     name: &str,
     sources: &BTreeMap<String, String>,
 ) -> Result<ContentPreset> {
+    Ok(resolve(name, sources, false)?.preset)
+}
+
+/// Explain the resolved policy without reading content. Source names are the
+/// caller-supplied keys, not authenticated file paths or configuration authors.
+pub fn explain_content_preset(
+    name: &str,
+    sources: &BTreeMap<String, String>,
+) -> Result<ContentPresetExplanation> {
+    resolve(name, sources, true)
+}
+
+fn resolve(
+    name: &str,
+    sources: &BTreeMap<String, String>,
+    with_origins: bool,
+) -> Result<ContentPresetExplanation> {
     fn visit(
         name: &str,
         sources: &BTreeMap<String, String>,
         stack: &mut Vec<String>,
-        memo: &mut BTreeMap<String, (ContentPreset, usize)>,
-    ) -> Result<(ContentPreset, usize)> {
+        memo: &mut BTreeMap<String, (ContentPresetExplanation, usize)>,
+        with_origins: bool,
+    ) -> Result<(ContentPresetExplanation, usize)> {
         if stack.iter().any(|item| item == name) {
             stack.push(name.to_owned());
             bail!("preset inheritance cycle: {}", stack.join(" -> "));
         }
-        if let Some((preset, height)) = memo.get(name) {
+        if let Some((resolved, height)) = memo.get(name) {
             if stack.len() + height > MAX_PRESET_INHERITANCE_DEPTH {
                 bail!(
                     "preset inheritance exceeds the maximum depth of {MAX_PRESET_INHERITANCE_DEPTH}"
                 );
             }
-            return Ok((preset.clone(), *height));
+            return Ok((resolved.clone(), *height));
         }
         if stack.len() >= MAX_PRESET_INHERITANCE_DEPTH {
             bail!("preset inheritance exceeds the maximum depth of {MAX_PRESET_INHERITANCE_DEPTH}");
@@ -75,12 +114,19 @@ pub fn resolve_content_preset(
         }
         stack.push(name.to_owned());
         let mut gates: Vec<ContentGate> = Vec::new();
+        let mut origins: Vec<GateOrigin> = Vec::new();
         let mut height = 1;
         for parent in &spec.extends {
-            let (resolved, parent_height) = visit(parent, sources, stack, memo)?;
+            let (resolved, parent_height) = visit(parent, sources, stack, memo, with_origins)?;
             height = height.max(parent_height + 1);
-            for gate in resolved.gates {
-                merge_gate(&mut gates, gate);
+            let mut parent_origins = resolved.gate_origins.into_iter();
+            for gate in resolved.preset.gates {
+                let origin = if with_origins {
+                    parent_origins.next()
+                } else {
+                    None
+                };
+                merge_gate(&mut gates, &mut origins, gate, origin);
             }
         }
         stack.pop();
@@ -90,37 +136,64 @@ pub fn resolve_content_preset(
                 .position(|gate| gate.id() == id)
                 .with_context(|| format!("cannot disable unknown inherited gate {id} in {name}"))?;
             gates.remove(index);
+            if with_origins {
+                origins.remove(index);
+            }
         }
         for gate in spec.gates {
-            merge_gate(&mut gates, gate);
+            let origin = with_origins.then(|| GateOrigin {
+                gate_id: gate.id().to_owned(),
+                source: name.to_owned(),
+            });
+            merge_gate(&mut gates, &mut origins, gate, origin);
         }
         let preset = ContentPreset {
             version: spec.version,
             name: spec.name,
             gates,
         };
-        // A parent may contribute no gates; only the resolved result must have some.
         if !preset.gates.is_empty() {
             preset
                 .validate()
                 .with_context(|| format!("invalid resolved preset {name}"))?;
         }
-        memo.insert(name.to_owned(), (preset.clone(), height));
-        Ok((preset, height))
+        let resolved = ContentPresetExplanation {
+            preset,
+            gate_origins: origins,
+        };
+        memo.insert(name.to_owned(), (resolved.clone(), height));
+        Ok((resolved, height))
     }
-    let (preset, _) =
-        visit(name, sources, &mut Vec::new(), &mut BTreeMap::new()).map_err(into_user_error)?;
-    if preset.gates.is_empty() {
+    let (resolved, _) = visit(
+        name,
+        sources,
+        &mut Vec::new(),
+        &mut BTreeMap::new(),
+        with_origins,
+    )
+    .map_err(into_user_error)?;
+    if resolved.preset.gates.is_empty() {
         crate::user_bail!("preset {name} resolves to no gates, so it would check nothing");
     }
-    Ok(preset)
+    Ok(resolved)
 }
 
-fn merge_gate(gates: &mut Vec<ContentGate>, gate: ContentGate) {
+fn merge_gate(
+    gates: &mut Vec<ContentGate>,
+    origins: &mut Vec<GateOrigin>,
+    gate: ContentGate,
+    origin: Option<GateOrigin>,
+) {
     if let Some(index) = gates.iter().position(|item| item.id() == gate.id()) {
         gates[index] = gate;
+        if let Some(origin) = origin {
+            origins[index] = origin;
+        }
     } else {
         gates.push(gate);
+        if let Some(origin) = origin {
+            origins.push(origin);
+        }
     }
 }
 
@@ -201,6 +274,36 @@ pub fn builtin_content_presets() -> BTreeMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn explanation_tracks_winning_sources_across_diamond_overrides_and_disables() {
+        let sources = BTreeMap::from([
+            ("base".into(), "version=1\nname='Base'\n[[gates]]\nid='shared'\nkind='word_count'\nmin=1\n[[gates]]\nid='removed'\nkind='word_count'\nmin=1\n".into()),
+            ("left".into(), "version=1\nname='Left'\nextends=['base']\n[[gates]]\nid='shared'\nkind='word_count'\nmin=2\n[[gates]]\nid='left-only'\nkind='word_count'\nmin=1\n".into()),
+            ("right".into(), "version=1\nname='Right'\nextends=['base']\n[[gates]]\nid='right-only'\nkind='word_count'\nmin=1\n".into()),
+            ("root".into(), "version=1\nname='Root'\nextends=['left','right']\ndisable=['removed']\n[[gates]]\nid='left-only'\nkind='word_count'\nmin=3\n".into()),
+        ]);
+        let explained = explain_content_preset("root", &sources).unwrap();
+        let normal = resolve_content_preset("root", &sources).unwrap();
+        assert_eq!(
+            serde_json::to_value(&explained.preset).unwrap(),
+            serde_json::to_value(normal).unwrap()
+        );
+        let origins: Vec<_> = explained
+            .gate_origins
+            .iter()
+            .map(|origin| (origin.gate_id.as_str(), origin.source.as_str()))
+            .collect();
+        assert_eq!(
+            origins,
+            vec![
+                ("shared", "base"),
+                ("left-only", "root"),
+                ("right-only", "right")
+            ]
+        );
+        assert!(explain_content_preset("missing", &sources).is_err());
+    }
+
     #[test]
     fn resolved_preset_without_gates_is_an_error_but_an_empty_parent_is_not() {
         let sources = BTreeMap::from([
