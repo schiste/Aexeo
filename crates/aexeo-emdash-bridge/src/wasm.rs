@@ -197,7 +197,9 @@ pub fn evaluate_content_collection_js(
         .map_err(|error| JsError::new(&format!("failed to serialize report: {error}")))
 }
 
-fn parse_content_document(document_json: &str) -> Result<(EmdashDocument, [bool; 4]), JsError> {
+fn parse_content_document(
+    document_json: &str,
+) -> Result<(EmdashDocument, [bool; 4], bool), JsError> {
     let raw: serde_json::Value = serde_json::from_str(document_json)
         .map_err(|error| JsError::new(&format!("failed to parse document: {error}")))?;
     let capabilities = if raw.get("body").is_none() {
@@ -211,9 +213,15 @@ fn parse_content_document(document_json: &str) -> Result<(EmdashDocument, [bool;
     } else {
         [true; 4]
     };
+    let lists_complete = raw
+        .get("list_structure_complete")
+        .and_then(|value| value.as_bool())
+        == Some(true)
+        && raw.get("body").is_some()
+        && capabilities.iter().all(|capability| *capability);
     let document = serde_json::from_value(raw)
         .map_err(|error| JsError::new(&format!("failed to parse document: {error}")))?;
-    Ok((document, capabilities))
+    Ok((document, capabilities, lists_complete))
 }
 
 /// Return the exact projected input that external extensions must bind to.
@@ -222,7 +230,7 @@ pub fn project_content_input_js(
     document_json: &str,
     evidence_json: Option<String>,
 ) -> Result<String, JsError> {
-    let (document, capabilities) = parse_content_document(document_json)?;
+    let (document, capabilities, _) = parse_content_document(document_json)?;
     let evidence = evidence_json
         .as_deref()
         .filter(|s| !s.is_empty())
@@ -241,7 +249,7 @@ pub fn project_content_input_js(
 /// Returns JSON null when the adapter cannot supply complete link destinations.
 #[wasm_bindgen(js_name = "projectLinkDestinations")]
 pub fn project_link_destinations_js(document_json: &str) -> Result<String, JsError> {
-    let (document, capabilities) = parse_content_document(document_json)?;
+    let (document, capabilities, _) = parse_content_document(document_json)?;
     if !capabilities[3] {
         return Ok("null".into());
     }
@@ -267,7 +275,7 @@ pub fn evaluate_content_js(
     link_observations_json: Option<String>,
 ) -> Result<String, JsError> {
     install_panic_hook();
-    let (document, capabilities) = parse_content_document(document_json)?;
+    let (document, capabilities, lists_complete) = parse_content_document(document_json)?;
     let preset = resolve_content_preset_js(preset_name, sources_json.as_deref())?;
     let evidence = evidence_json
         .as_deref()
@@ -311,7 +319,7 @@ pub fn evaluate_content_js(
     } else {
         None
     };
-    let report = crate::content::evaluate_content_with_reachability(
+    let report = crate::content::evaluate_content_with_list_completeness(
         &document,
         &preset,
         evidence,
@@ -320,6 +328,7 @@ pub fn evaluate_content_js(
             .as_ref()
             .map(|host| host as &dyn aexeo_core::content_gate::ContentGateExtensions),
         observations,
+        lists_complete,
     )
     .map_err(|error| JsError::new(&format!("content evaluation failed: {error:#}")))?;
     let locations = crate::content::source_locations_with_reachability(

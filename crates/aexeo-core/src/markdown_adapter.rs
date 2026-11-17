@@ -321,6 +321,56 @@ fn link_destinations_from_root(root: &Node, source: &str) -> Option<Vec<Extracte
     collect_links(root, &definitions, &mut links, source).map(|_| links)
 }
 
+/// An observed structural list. `item_count` counts direct items only;
+/// nested lists are separate observations. Positions are one-based source
+/// coordinates, not offsets into the projected plain text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuredList {
+    pub item_count: usize,
+    pub depth: usize,
+    pub line: usize,
+    pub column: usize,
+}
+
+/// Observe Markdown list structure without treating unobserved HTML as empty.
+/// `None` means an embedded HTML node prevents complete list observation.
+/// A complete document without lists returns `Some(Vec::new())`.
+pub fn markdown_structured_lists(source: &str) -> Result<Option<Vec<StructuredList>>> {
+    if source.len() > crate::content_gate::MAX_CONTENT_INPUT_BYTES {
+        return Ok(None);
+    }
+    let root = parse_markdown(source)?;
+    let mut lists = Vec::new();
+    let mut pending = vec![(&root, 0usize)];
+    while let Some((node, depth)) = pending.pop() {
+        if matches!(node, Node::Html(_)) {
+            return Ok(None);
+        }
+        let child_depth = if let Node::List(list) = node {
+            let Some(position) = list.position.as_ref() else {
+                return Ok(None);
+            };
+            lists.push(StructuredList {
+                item_count: list
+                    .children
+                    .iter()
+                    .filter(|child| matches!(child, Node::ListItem(_)))
+                    .count(),
+                depth: depth + 1,
+                line: position.start.line,
+                column: position.start.column,
+            });
+            depth + 1
+        } else {
+            depth
+        };
+        if let Some(children) = node.children() {
+            pending.extend(children.iter().rev().map(|child| (child, child_depth)));
+        }
+    }
+    Ok(Some(lists))
+}
+
 /// Extract prose and headings from Markdown, excluding code, HTML, and front matter.
 pub fn markdown_input(id: impl Into<String>, source: &str) -> Result<ContentInput> {
     Ok(markdown_input_with_context(id, source)?.0)
@@ -765,6 +815,31 @@ fn extract_markdown_from_root(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn structured_lists_keep_nested_counts_and_reject_unobserved_html() {
+        let source =
+            "- one\n  - nested one\n  - nested two\n- two\n- three\n\n1. first\n2. second\n";
+        let lists = markdown_structured_lists(source).unwrap().unwrap();
+        assert_eq!(
+            lists
+                .iter()
+                .map(|list| (list.item_count, list.depth, list.line))
+                .collect::<Vec<_>>(),
+            vec![(3, 1, 1), (2, 2, 2), (2, 1, 7)]
+        );
+        assert_eq!(markdown_structured_lists("prose").unwrap(), Some(vec![]));
+        assert_eq!(
+            markdown_structured_lists("<ul><li>hidden</li></ul>").unwrap(),
+            None
+        );
+        assert!(
+            markdown_structured_lists("```\n- code\n```")
+                .unwrap()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
     #[test]
     fn source_mapping_rejects_mismatched_heading_and_link_counts() {
         use crate::content_gate::{
