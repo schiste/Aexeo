@@ -314,6 +314,10 @@ The latest published version observed on 2026-11-16 was 0.9.1.
   binds content digests and base only; runners must independently retain and
   compare the other inputs or fail closed. Do not claim an optional extension
   protects legacy runners that ignore it.
+  The experimental candidate binding also supports host-supplied ordered link
+  snapshots, with a distinct envelope and offline revalidation. Independent
+  Rust/Python byte-binding checks do not establish source authenticity,
+  freshness, publication safety, or a portable v2 contract.
   The experimental Rust link-snapshot receipt binds supplied ordered link
   observations in its manifest under a distinct schema and re-evaluates them.
   The CLI can create, bundle and revalidate this receipt with independently
