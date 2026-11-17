@@ -79,6 +79,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - If a shared Cargo target makes tests resolve `CARGO_MANIFEST_DIR` to another
   worktree or a removed merge simulation, rerun with a fresh `CARGO_TARGET_DIR`
   for this worktree before treating the missing fixture as a product failure.
+- For shared fixtures used by Rust crate tests, place them inside the crate
+  and verify `cargo package --list` includes them. A repository-relative
+  `include_str!` can work locally while referring outside the published crate.
 - For report performance changes, compare release builds on the same reproducible synthetic input before and after, verify the full output stays equivalent, and report workload and timing variability rather than generalizing one measurement.
 - Python test scripts with hyphens in their filenames are not discovered by
   `unittest discover`; run the relevant files directly, or use the repository
