@@ -32,7 +32,7 @@ class Doc:
     def __init__(self, sentences):
         self.sents = sentences
 
-    def has_annotation(self, _):
+    def has_annotation(self, _, require_complete=False):
         return True
 
 
@@ -101,6 +101,14 @@ class TestSyntaxAdapter(unittest.TestCase):
                     self.assertEqual(review.main(), 0)
                     self.assertEqual(json.loads(out.getvalue()), [])
                     self.assertNotIn("private content", err.getvalue())
+
+    def test_json_files_are_bounded_before_decoding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "oversized.json"
+            path.write_bytes(b"1234567890")
+            with self.assertRaises(ValueError):
+                review.load_json(path, 9)
+            self.assertEqual(review.load_json(path, 10), 1234567890)
 
     def test_actual_cli_without_spacy_produces_no_extension_result(self):
         with tempfile.TemporaryDirectory() as directory:

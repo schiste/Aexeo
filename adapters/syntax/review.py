@@ -10,6 +10,8 @@ import sys
 EXTENSION = "syntax.similarity"
 MAX_TEXT = 200_000
 MAX_SENTENCES = 1_000
+MAX_JSON_BYTES = 32 * 1024 * 1024
+MAX_PARAMETERS_BYTES = 16 * 1024
 
 
 class Unavailable(Exception):
@@ -95,7 +97,7 @@ def evaluate(input_data, raw_parameters, nlp):
     if "parser" not in nlp.pipe_names:
         raise Unavailable("dependency parser unavailable")
     doc = nlp(text)
-    if not doc.has_annotation("DEP") or not doc.has_annotation("POS") or not doc.has_annotation("SENT_START"):
+    if not doc.has_annotation("DEP", require_complete=True) or not doc.has_annotation("POS", require_complete=True) or not doc.has_annotation("SENT_START", require_complete=True):
         raise Unavailable("required annotations unavailable")
     sentences = list(doc.sents)
     if len(sentences) < minimum or len(sentences) > MAX_SENTENCES:
@@ -122,6 +124,15 @@ def evaluate(input_data, raw_parameters, nlp):
     return [{"extension": EXTENSION, "parameters": raw_parameters, "input": input_data, "diagnostics": findings}]
 
 
+def load_json(path, limit):
+    """Read at most the accepted limit plus one byte, then decode JSON."""
+    with open(path, "rb") as handle:
+        data = handle.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError("JSON input exceeds configured size limit")
+    return json.loads(data)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", help="private JSON produced by --export-adapter-input")
@@ -129,10 +140,8 @@ def main():
     parser.add_argument("--text-complete", action="store_true", help="attest that the projected text covers the whole intended content")
     args = parser.parse_args()
     try:
-        with open(args.input, encoding="utf-8") as handle:
-            data = json.load(handle)
-        with open(args.parameters, encoding="utf-8") as handle:
-            config = json.load(handle)
+        data = load_json(args.input, MAX_JSON_BYTES)
+        config = load_json(args.parameters, MAX_PARAMETERS_BYTES)
         parameters(config)
         try:
             if not args.text_complete:
@@ -144,8 +153,11 @@ def main():
 
             print(f"syntax gate not checked: {type(exc).__name__}", file=sys.stderr)
             result = []
-        json.dump(result, sys.stdout, ensure_ascii=False)
-        print()
+        output = json.dumps(result, ensure_ascii=False)
+        if len(output.encode("utf-8")) > MAX_JSON_BYTES:
+            print("syntax gate not checked: output exceeds size limit", file=sys.stderr)
+            output = "[]"
+        print(output)
     except (ValueError, OSError, json.JSONDecodeError) as exc:
         print(f"invalid syntax adapter input: {type(exc).__name__}", file=sys.stderr)
         return 2
