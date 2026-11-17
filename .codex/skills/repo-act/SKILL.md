@@ -79,6 +79,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - If a shared Cargo target makes tests resolve `CARGO_MANIFEST_DIR` to another
   worktree or a removed merge simulation, rerun with a fresh `CARGO_TARGET_DIR`
   for this worktree before treating the missing fixture as a product failure.
+- When adding a Cargo dependency, inspect the full `Cargo.lock` diff for
+  unrelated resolution changes. Restore unrelated entries only after verifying
+  a real `cargo check --locked` succeeds with the intended lockfile; metadata
+  without dependency resolution alone does not prove the build is locked.
 - For shared fixtures used by Rust crate tests, place them inside the crate
   and verify `cargo package --list` includes them. A repository-relative
   `include_str!` can work locally while referring outside the published crate.
