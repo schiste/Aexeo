@@ -68,10 +68,11 @@ continuing. Keep the old verdict as historical evidence; this version change
 does not itself modify content. Other verdict consumers should check their own
 version requirements.
 
-### Upgrading from 0.0.22 to 0.0.23
+### Upgrading from 0.0.21 or 0.0.22 to 0.0.23
 
-As with the previous upgrade, regenerate offline input and observed-link bound
-verdicts with the new engine; retain earlier verdicts as historical evidence.
+When upgrading directly from 0.0.21 or from 0.0.22, regenerate offline input
+and observed-link bound verdicts with the new engine; retain earlier verdicts
+as historical evidence.
 Rebuild the EmDash WASM bridge before publishing an npm package containing the
 new engine. The existing v0.0.22 tag must not be moved or reused.
 
