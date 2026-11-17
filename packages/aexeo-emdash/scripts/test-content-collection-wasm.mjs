@@ -80,6 +80,41 @@ assert.deepEqual(positionalReport.source_locations, [{ gate_id: "terms", finding
 assert.deepEqual(positionalReport.source_mapping, { eligible: 1, mapped: 1, unmapped: 0 });
 console.log("WASM source location smoke test passed");
 
+const stylePreset = `version=1
+name="style"
+[[gates]]
+id="transitions"
+kind="sentence_opening_terms"
+terms=["Moreover"]
+max_per_paragraph=0
+[[gates]]
+id="punctuation"
+kind="repeated_punctuation"
+mark="—"
+max_per_paragraph=1
+[[gates]]
+id="tail"
+kind="trailing_ing_clause"
+[[gates]]
+id="triples"
+kind="inline_triple_candidates"
+conjunction="and"
+`;
+const styleDocument = { route: "/style", title: "Style", body: [
+  { children: [{ _type: "span", text: "Moreover, apples, pears, and plums. The team acted, increasing the total. A — B — C." }] },
+] };
+const styleReport = await evaluateContent(styleDocument, "test", { test: stylePreset });
+for (const id of ["transitions", "punctuation", "tail", "triples"]) {
+  assert.equal(styleReport.gates.find((gate) => gate.gate_id === id).status, "failed", id);
+  assert.ok(styleReport.source_locations.some((location) => location.gate_id === id), id);
+}
+const incompleteStyle = await evaluateContent({ ...styleDocument, body_capabilities: [] }, "test", { test: stylePreset });
+for (const gate of incompleteStyle.gates) {
+  assert.equal(gate.status, "not_checked");
+  assert.deepEqual(gate.findings, []);
+}
+console.log("WASM style gates honor source locations and incomplete content");
+
 const linkPreset = `version=1
 name="links"
 [[gates]]
