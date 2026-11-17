@@ -1281,12 +1281,13 @@ impl ContentPreset {
                 }
                 ContentGate::ListItemCount { flagged_counts, .. }
                     if flagged_counts.is_empty()
+                        || flagged_counts.len() > 256
                         || flagged_counts.contains(&0)
                         || flagged_counts.iter().collect::<BTreeSet<_>>().len()
                             != flagged_counts.len() =>
                 {
                     bail!(
-                        "list item counts must be positive and unique for {}",
+                        "list item counts must contain 1 to 256 positive, unique values for {}",
                         gate.id()
                     )
                 }
@@ -1769,11 +1770,12 @@ impl ContentPreset {
                 ContentGate::ListItemCount { flagged_counts, .. } => match lists {
                     Some(lists) if lists.len() <= MAX_COLLECTION_ITEMS => {
                         measurements.insert("lists_observed".into(), lists.len());
-                        for list in lists {
+                        for (index, list) in lists.iter().enumerate() {
                             if flagged_counts.contains(&list.item_count) {
                                 emit(
                                     format!(
-                                        "List has {} direct items; review whether this structure suits the content",
+                                        "List {} has {} direct items; review whether this structure suits the content",
+                                        index + 1,
                                         list.item_count
                                     ),
                                     1,

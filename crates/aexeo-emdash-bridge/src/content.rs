@@ -137,7 +137,7 @@ pub fn portable_text_structured_lists(
     complete: bool,
 ) -> Option<Vec<aexeo_core::markdown_adapter::StructuredList>> {
     use aexeo_core::markdown_adapter::StructuredList;
-    if !complete {
+    if !complete || document.body.len() > 100_000 {
         return None;
     }
     let mut result: Vec<StructuredList> = Vec::new();
