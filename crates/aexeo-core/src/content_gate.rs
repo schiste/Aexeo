@@ -96,7 +96,7 @@ fn is_simple_latin_sentence(text: &str) -> bool {
     text.chars().all(|ch| {
         ch.is_ascii()
             || ch.is_whitespace()
-            || matches!(ch, '«' | '»' | '“' | '”' | '‘' | '–' | '—')
+            || matches!(ch, '«' | '»' | '“' | '”' | '‘' | '’' | '…' | '–' | '—')
             || (ch.is_alphabetic()
                 && matches!(ch, '\u{00c0}'..='\u{024f}' | '\u{1e00}'..='\u{1eff}'))
             || matches!(ch, '\u{0300}'..='\u{036f}')
