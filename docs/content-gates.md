@@ -1459,6 +1459,11 @@ inside quotations and other inline prose, and are not linguistic analysis. No
 punctuation is replaced. The composable `news-style-en`, `news-style-fr`, `opinion-style-en`, and
 `opinion-style-fr` starters combine this gate with transition and opening review; their different
 limits are examples for projects to override, not universal standards.
+They also compose sentence variance and opening-window reviews. News uses a six-sentence
+window with a six-word standard-deviation threshold and at most two identical openings;
+opinion uses eight sentences, a five-word threshold and at most three identical openings.
+These advisory examples are not calibrated recommendations. Override either gate in your
+preset to match your audience, language and editorial judgment.
 
 ### English trailing clause review
 
