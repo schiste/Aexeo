@@ -43,6 +43,17 @@ Until those contracts exist, agents can manually author and review source-bound 
 
 `editorial-patch suggest-transitions --source draft.txt --language en --input-format text` is an explicit opt-in. It returns JSON with `status: proposed`, `abstained`, or `no_candidates`. A proposal contains `heuristic: true` and a source-bound `patch`; it does not change any file. For a proposed result, save the `patch` object as a JSON file, run `editorial-patch review`, inspect the diff and context, and only then use `apply` with the reviewed proposal hash. Re-run the appropriate content gates. This does not create or publish a CMS change.
 
+For example, after setting a restrictive umask and inspecting the report status:
+
+```sh
+aexeo editorial-patch suggest-transitions --source draft.txt --language en --input-format text > suggestions.json
+jq '.patch' suggestions.json > proposal.json
+aexeo editorial-patch review --source draft.txt --patch proposal.json > candidate.txt
+diff -u draft.txt candidate.txt
+```
+
+Only extract `patch` when `status` is `proposed`; `abstained` and `no_candidates` have no patch. The review command prints the hash needed for a later explicit `apply`.
+
 This first version considers only the first line of each paragraph, exact English/French terms selected from the built-in transition presets, a comma followed by one space, and a lowercase first character with an unambiguous Unicode uppercase form. It preserves original byte offsets and line endings. It does not suggest deleting causal or concluding connectives; even additive transitions can carry meaning, so review remains essential. It is not a semantic-preservation check, a quality score, or an AI-authorship detector.
 
 The command abstains for the whole document when it detects possible quotations, links, code, markup, unsupported punctuation, decomposed accents, or ambiguous syntax. This intentionally creates false negatives. The `text` declaration and scanner do not prove that every protected context is absent: an unmarked quotation, code fragment, or host-recognized link may look like ordinary prose. Only use the feature when the host supplies the complete original plain-text document and the editor can review context; never treat it as suitable for automatically rewriting Markdown, HTML, or CMS projections. Suggestions are based on paragraph openings rather than on a particular gate finding or threshold.
