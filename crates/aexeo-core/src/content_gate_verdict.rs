@@ -2579,7 +2579,8 @@ mod tests {
         wrong_subject.subject.change_id = "other".into();
         assert!(verify(&wrong_subject, &input, &policy, 1024, false, None).is_err());
         let mut wrong_version = verdict.clone();
-        wrong_version.validator.version = "different".into();
+        // The 0.0.22 release must not reuse a 0.0.21 offline binding.
+        wrong_version.validator.version = "0.0.21".into();
         assert!(verify(&wrong_version, &input, &policy, 1024, false, None).is_err());
     }
 

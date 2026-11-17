@@ -48,6 +48,26 @@ npm ci
 npm run build
 ```
 
+## Preparing a CLI version
+
+Update `[workspace.package].version` and the version requirements of the local
+path dependencies together, then refresh `Cargo.lock` without upgrading other
+dependencies. Verify `cargo run --locked -p aexeo-cli -- --version` reports the
+intended version. All five workspace crates share that version; the npm package
+has its own independent version and release process. Check that the intended
+`v` tag is still unused immediately before publishing. A version bump alone does
+not create a tag or publish artifacts.
+
+### Upgrading from 0.0.21 to 0.0.22
+
+Offline input bindings and observed-link bindings require the verdict's Aexeo
+engine version to match the current engine. A 0.0.22 verifier therefore cannot
+reuse a 0.0.21 bound verdict as proof for those workflows. Re-evaluate the
+original change and its evidence with 0.0.22 to create a fresh verdict before
+continuing. Keep the old verdict as historical evidence; this version change
+does not itself modify content. Other verdict consumers should check their own
+version requirements.
+
 ## CLI Release Artifacts
 
 Package release assets:
