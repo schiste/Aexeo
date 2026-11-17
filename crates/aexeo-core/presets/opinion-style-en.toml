@@ -1,0 +1,10 @@
+version = 1
+name = "Opinion style review, English"
+extends = ["transition-review-en", "trailing-ing-review-en", "punctuation-review", "sentence-openings-review", "sentence-rhythm-review", "natural-style-en"]
+
+[[gates]]
+id = "editorial.em_dashes"
+kind = "repeated_punctuation"
+mark = "—"
+max_per_paragraph = 3
+blocking = false
