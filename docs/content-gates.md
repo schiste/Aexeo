@@ -199,7 +199,8 @@ winning source name for each active gate, in gate order; add `--format json`
 for structured output. This separate explanation envelope is not a reusable
 preset file. A source name is the caller-supplied key, not proof of authorship
 or an authenticated path. Disabled gates are absent. If a custom source uses
-the same key as a built-in, it replaces that built-in before resolution.
+the same key as a built-in, it replaces that built-in before resolution. If the
+CLI receives the same source key more than once, the last supplied source wins.
 The existing `--explain` output remains a standalone resolved preset.
 
 
