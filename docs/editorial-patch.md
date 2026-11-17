@@ -8,6 +8,8 @@ Create an array of edits as JSON. Positions are zero-based UTF-8 byte offsets in
 [{"start":0,"end":3,"expected":"One","replacement":"A","reason":"Editorial review"}]
 ```
 
+Shell redirection creates the proposal and review files using the shell’s permissions and umask; protect those files before running these commands (for example, use `umask 077`).
+
 ```sh
 aexeo editorial-patch propose --source draft.txt --edits edits.json > proposal.json
 aexeo editorial-patch review --source draft.txt --patch proposal.json > candidate.txt
@@ -17,7 +19,7 @@ aexeo editorial-patch apply --source draft.txt --patch proposal.json --confirm S
 aexeo content approved-candidate.txt --preset article
 ```
 
-`review` prints the complete candidate to stdout and the proposal hash to stderr. Review the diff and context; `--confirm` binds application to those exact proposal bytes, while the source hash binds it to the exact document. Aexeo checks the source again immediately before creating the output. The source can still change after that check: the new file represents the reviewed snapshot, not a lock on the original. Application exclusively creates a new file; it never overwrites the source or publishes to a CMS. A failed write can leave an incomplete newly created file; remove it before retrying. Re-run the appropriate content gates on the candidate and have the host manage any later CMS update or publication.
+`review` prints the complete candidate to stdout and the proposal hash to stderr. Review the diff and context; `--confirm` binds application to those exact proposal bytes, while the source hash binds it to the exact document. Aexeo checks the source again immediately before creating the output. The source can still change after that check: the new file represents the reviewed snapshot, not a lock on the original. Application exclusively creates a new file; on Unix it requests mode 0600 (the process umask may restrict it further). It never overwrites the source or publishes to a CMS. A failed write can leave an incomplete newly created file; remove it before retrying. Re-run the appropriate content gates on the candidate and have the host manage any later CMS update or publication.
 
 This byte-level tool does not parse Markdown or HTML. It does not automatically protect quoted passages, code, links, or markup. The author and reviewer must avoid changing those regions unless the change is deliberate and appropriately checked. No clause, list item, transition, or punctuation is removed automatically. This preserves editorial choice, but an explicitly supplied replacement can still change meaning.
 
@@ -36,3 +38,22 @@ A future opt-in English/French proposal generator needs all of the following bef
 - Tests covering duplicate expressions, NFC/decomposed Unicode, multibyte offsets, nested quotations, inline and fenced code, links and their labels, malformed markup, incomplete source maps, mixed CMS blocks, both locales, stale sources, and idempotent proposal generation.
 
 Until those contracts exist, agents can manually author and review source-bound edits, while the transition gate only reports observations.
+
+## Optional transition suggestions for declared plain text
+
+`editorial-patch suggest-transitions --source draft.txt --language en --input-format text` is an explicit opt-in. It returns JSON with `status: proposed`, `abstained`, or `no_candidates`. A proposal contains `heuristic: true` and a source-bound `patch`; it does not change any file. For a proposed result, save the `patch` object as a JSON file, run `editorial-patch review`, inspect the diff and context, and only then use `apply` with the reviewed proposal hash. Re-run the appropriate content gates. This does not create or publish a CMS change.
+
+For example, after setting a restrictive umask and inspecting the report status:
+
+```sh
+aexeo editorial-patch suggest-transitions --source draft.txt --language en --input-format text > suggestions.json
+jq '.patch' suggestions.json > proposal.json
+aexeo editorial-patch review --source draft.txt --patch proposal.json > candidate.txt
+diff -u draft.txt candidate.txt
+```
+
+Only extract `patch` when `status` is `proposed`; `abstained` and `no_candidates` have no patch. The review command prints the hash needed for a later explicit `apply`.
+
+This first version considers only the first line of each paragraph, exact English/French terms selected from the built-in transition presets, a comma followed by one space, and a lowercase first character with an unambiguous Unicode uppercase form. It preserves original byte offsets and line endings. It does not suggest deleting causal or concluding connectives; even additive transitions can carry meaning, so review remains essential. It is not a semantic-preservation check, a quality score, or an AI-authorship detector.
+
+The command abstains for the whole document when it detects possible quotations, links, code, markup, unsupported punctuation, decomposed accents, or ambiguous syntax. This intentionally creates false negatives. The `text` declaration and scanner do not prove that every protected context is absent: an unmarked quotation, code fragment, or host-recognized link may look like ordinary prose. Only use the feature when the host supplies the complete original plain-text document and the editor can review context; never treat it as suitable for automatically rewriting Markdown, HTML, or CMS projections. Suggestions are based on paragraph openings rather than on a particular gate finding or threshold.

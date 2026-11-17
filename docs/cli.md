@@ -15,11 +15,21 @@ Usage: editorial-patch [OPTIONS] --source <source> <operation>
 
 Arguments:
   <operation>
-          [possible values: propose, review, apply]
+          [possible values: propose, review, apply, suggest-transitions]
 
 Options:
       --source <source>
 
+
+      --language <language>
+          Language for heuristic transition suggestions
+
+          [possible values: en, fr]
+
+      --input-format <input-format>
+          Explicitly declare a complete plain-text source
+
+          [possible values: text]
 
       --edits <edits>
 

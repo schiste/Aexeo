@@ -6,6 +6,10 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- Support advisory checks of structured list item counts when a host explicitly attests complete Portable Text list coverage for a collection. Incomplete or unattested structure is `not_checked`.
+- Add optional English and French news and opinion style presets and advisory reviews of repeated sentence-opening transitions, punctuation and sentence rhythm. English content can also be reviewed for possible trailing `-ing` clauses; optional locale-specific inline enumeration heuristics are available separately. These checks are configurable, preserve the original content and do not establish AI authorship.
+- Skip recognized quoted sentences in the new sentence-level style checks and report an incomplete assessment for quotations left open at a paragraph boundary. Quotation and sentence detection remain heuristic.
+
 - Preserve body evaluation when only Portable Text block or span identity keys are malformed; normalized keys are not used to fabricate source locations.
 
 ## [0.9.2] - Pending publication

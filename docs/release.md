@@ -129,7 +129,6 @@ release on its own:
 The release assets are:
 
 - `aexeo-cli-darwin-arm64` and `aexeo-cli-linux-x86_64`
-- `aexeo-cli-darwin-arm64.sha256` and `aexeo-cli-linux-x86_64.sha256`
 - `SHA256SUMS.txt`, with one `<hex>  <basename>` line per binary
 
 What still needs a human:
