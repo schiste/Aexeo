@@ -108,7 +108,8 @@ extends = ["product-editorial", "natural-style-fr"]
 The optional `writing-patterns` preset flags the third and subsequent paragraphs
 that begin with the same three whitespace-separated words. Configure the
 `repeated_paragraph_openings` gate using `opening_words` (1–16) and positive
-`max_occurrences`. Matching lowercases and trims surrounding punctuation; it
+`max_occurrences`. Matching lowercases, trims surrounding punctuation and
+compares canonically equivalent Unicode spellings while preserving accents; it
 does not infer meaning or identify authorship. Repeated openings may be
 intentional, and languages without whitespace word boundaries need different
 rules. A missing paragraph capability is `not_checked`. Findings point to the
@@ -1286,4 +1287,4 @@ blocking = false
 # abbreviations = ["Dr.", "e.g."]
 ```
 
-Comparison ignores case and punctuation around whitespace-separated opening words. Sentence delimiters and abbreviations follow the sentence-length gates; sentence segmentation is heuristic, and no language is selected automatically. Paragraph boundaries reset the sequence. Sentences with fewer than the configured number of opening words reset the sequence and are counted as `sentences_too_short` when their characters belong to a conservative Latin subset, including common accented letters and typographic quotation marks. Other short sentences can be `not_checked` because their word boundaries may be uncertain. Unrecognizable openings, unavailable paragraphs and resource limits also produce `not_checked` rather than a complete pass; findings already observed remain in the report. Measurements describe counts, and opt-in telemetry contains aggregate timings without content. This is a prompt for editorial judgment, not an assessment of authorship or AI detection.
+Comparison ignores case and punctuation around whitespace-separated opening words and compares canonically equivalent Unicode spellings together while preserving accents. Sentence delimiters and abbreviations follow the sentence-length gates; sentence segmentation is heuristic, and no language is selected automatically. Paragraph boundaries reset the sequence. Sentences with fewer than the configured number of opening words reset the sequence and are counted as `sentences_too_short` when their characters belong to a conservative Latin subset, including common accented letters and typographic quotation marks. Other short sentences can be `not_checked` because their word boundaries may be uncertain. Unrecognizable openings, unavailable paragraphs and resource limits also produce `not_checked` rather than a complete pass; findings already observed remain in the report. Measurements describe counts, and opt-in telemetry contains aggregate timings without content. This is a prompt for editorial judgment, not an assessment of authorship or AI detection.
