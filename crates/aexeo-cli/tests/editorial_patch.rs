@@ -137,3 +137,65 @@ fn rejects_duplicate_keys() {
     ]);
     assert!(!result.status.success());
 }
+
+#[test]
+fn opt_in_transition_suggestions_stay_reviewable_and_abstain_on_markup() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source.txt");
+    let patch = dir.path().join("patch.json");
+    fs::write(&source, "Moreover, the team acted.\r\n").unwrap();
+    let source = source.to_str().unwrap();
+    let patch = patch.to_str().unwrap();
+    let args = [
+        "editorial-patch",
+        "suggest-transitions",
+        "--source",
+        source,
+        "--language",
+        "en",
+        "--input-format",
+        "text",
+    ];
+    let result = run(&args);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(report["status"], "proposed");
+    assert_eq!(report["heuristic"], true);
+    assert_eq!(
+        fs::read_to_string(source).unwrap(),
+        "Moreover, the team acted.\r\n"
+    );
+    fs::write(patch, serde_json::to_vec(&report["patch"]).unwrap()).unwrap();
+    let review = run(&[
+        "editorial-patch",
+        "review",
+        "--source",
+        source,
+        "--patch",
+        patch,
+    ]);
+    assert!(review.status.success());
+    assert_eq!(review.stdout, b"The team acted.\r\n");
+    assert!(
+        !run(&[
+            "editorial-patch",
+            "suggest-transitions",
+            "--source",
+            source,
+            "--language",
+            "en"
+        ])
+        .status
+        .success()
+    );
+    fs::write(source, "Moreover, the [link](https://example.com) works.").unwrap();
+    let blocked = run(&args);
+    assert!(blocked.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&blocked.stdout).unwrap();
+    assert_eq!(report["status"], "abstained");
+    assert!(report.get("patch").is_none());
+}
