@@ -79,3 +79,5 @@ only when the corpus, snapshot hash, human verdict and reviewer/method are known
 Do not add feedback to a holdout or transmit it without the project's permission
 and review process. The repository's Python equivalents and schema are documented
 in `eval/content/README.md`.
+
+For optional syntactic repetition review, use the local `adapters/syntax/` external-gate workflow only with an explicitly chosen, installed language model and matching parameters. Export the exact projected input, establish that coverage is complete before attesting it, and keep the resulting files private. Missing analysis is `not_checked`, not a pass. Review intentional parallelism before editing, preserve the author's meaning, and re-run the relevant gates after a targeted change.
