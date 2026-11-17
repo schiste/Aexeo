@@ -1461,6 +1461,46 @@ sentence boundaries; unsupported scripts, unavailable paragraphs and bounded
 input limits are reported as `not_checked`. Similar lengths may be intentional
 and are not evidence of AI authorship.
 
+### Sentence length variance review
+
+The opt-in `sentence-variance-review` preset reports rolling windows of six
+eligible sentences with a population standard deviation below six words. This
+initial threshold is advisory, not a calibrated quality standard. Sentences
+can span paragraph boundaries; quotations and unsupported word boundaries break
+a window. Insufficient observations, incomplete quotes, unsupported scripts,
+unavailable paragraphs and input limits are `not_checked`. Segmentation and
+word counts are heuristics; repeated lengths may be an intentional choice.
+
+Compose or override the fixed setting:
+
+```toml
+version = 1
+name = "My variance review"
+[[gates]]
+id = "editorial.sentence_variance"
+kind = "sentence_length_variance"
+window_size = 6
+min_stddev_words = 6
+blocking = false
+```
+
+Alternatively replace `min_stddev_words` with all three seeded range settings:
+
+```toml
+random_min_stddev_words = 6
+random_max_stddev_words = 10
+random_seed = 42
+```
+
+Bounds are inclusive integer word counts from 1 to 1000; the window size is
+2 to 64 sentences. The seed is explicit. A versioned SHA-256 derivation of the
+seed and gate ID chooses one threshold for the gate, not for each sentence or
+revision. The same policy therefore yields the same threshold across adapters;
+change the seed deliberately to select another. The report records
+`effective_min_stddev_words`, `windows_checked` and `low_variance_windows`.
+Neither the configuration nor findings establish authorship or guarantee any
+outcome from AI detectors. Review the passage before proposing an edit.
+
 ### Possible inline triples
 
 The opt-in `inline-triples-en` and `inline-triples-fr` presets report surface
