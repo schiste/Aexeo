@@ -871,5 +871,10 @@ allow_relative=true
   assert.ok(stored?.assessment, "assessment should be persisted");
   assert.equal(stored.assessment.gates.find((gate) => gate.gate_id === "words").status, "passed");
   assert.equal(stored.assessment.gates.find((gate) => gate.gate_id === "links").status, "not_checked");
+  page.data.body[0].markDefs = [{ _key: "internal", _type: "link", href: 12 }];
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  const malformed = host.store.get("findings:/custom-annotation");
+  assert.equal(malformed.assessment.gates.find((gate) => gate.gate_id === "words").status, "passed");
+  assert.equal(malformed.assessment.gates.find((gate) => gate.gate_id === "links").status, "not_checked");
   assert.deepEqual(host.logged, []);
 }
