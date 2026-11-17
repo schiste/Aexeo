@@ -1,0 +1,108 @@
+use std::{
+    fs,
+    process::{Command, Output},
+};
+
+fn run(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn review_and_explicit_application_are_bound_to_source_and_proposal() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source.txt");
+    let edits = dir.path().join("edits.json");
+    let patch = dir.path().join("patch.json");
+    let output = dir.path().join("result.txt");
+    fs::write(&source, "One sentence.\n").unwrap();
+    fs::write(
+        &edits,
+        r#"[{"start":0,"end":3,"expected":"One","replacement":"A","reason":"reviewed"}]"#,
+    )
+    .unwrap();
+    let source = source.to_str().unwrap();
+    let edits = edits.to_str().unwrap();
+    let patch = patch.to_str().unwrap();
+    let output = output.to_str().unwrap();
+    let proposal = run(&[
+        "editorial-patch",
+        "propose",
+        "--source",
+        source,
+        "--edits",
+        edits,
+    ]);
+    assert!(
+        proposal.status.success(),
+        "{}",
+        String::from_utf8_lossy(&proposal.stderr)
+    );
+    fs::write(patch, &proposal.stdout).unwrap();
+    let review = run(&[
+        "editorial-patch",
+        "review",
+        "--source",
+        source,
+        "--patch",
+        patch,
+        "--telemetry",
+    ]);
+    assert!(
+        review.status.success(),
+        "{}",
+        String::from_utf8_lossy(&review.stderr)
+    );
+    assert_eq!(review.stdout, b"A sentence.\n");
+    let stderr = String::from_utf8(review.stderr).unwrap();
+    let hash = stderr
+        .lines()
+        .next()
+        .unwrap()
+        .strip_prefix("reviewed proposal SHA-256: ")
+        .unwrap();
+    assert!(!stderr.contains("sentence"));
+    let args = [
+        "editorial-patch",
+        "apply",
+        "--source",
+        source,
+        "--patch",
+        patch,
+        "--output",
+        output,
+        "--confirm",
+        hash,
+    ];
+    assert!(run(&args).status.success());
+    assert_eq!(fs::read_to_string(output).unwrap(), "A sentence.\n");
+    assert!(!run(&args).status.success());
+    fs::remove_file(output).unwrap();
+    fs::write(source, "Changed source.\n").unwrap();
+    assert!(!run(&args).status.success());
+    assert!(!std::path::Path::new(output).exists());
+}
+
+#[test]
+fn rejects_duplicate_keys_and_changed_reviewed_proposals() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source");
+    let edits = dir.path().join("edits");
+    fs::write(&source, "a").unwrap();
+    fs::write(
+        &edits,
+        r#"[{"start":0,"start":0,"end":1,"expected":"a","replacement":"b","reason":"x"}]"#,
+    )
+    .unwrap();
+    let result = run(&[
+        "editorial-patch",
+        "propose",
+        "--source",
+        source.to_str().unwrap(),
+        "--edits",
+        edits.to_str().unwrap(),
+    ]);
+    assert!(!result.status.success());
+}
