@@ -3269,6 +3269,7 @@ impl ContentPreset {
                         context.and_then(|context| context.paragraphs.as_ref())
                     {
                         let mut evaluated = 0usize;
+                        let mut assessable_windows = 0usize;
                         let mut skipped = 0usize;
                         let mut quoted = 0usize;
                         let mut too_short = 0usize;
@@ -3364,6 +3365,11 @@ impl ContentPreset {
                                     if window.len() > *window_size {
                                         window.pop_front();
                                     }
+                                    if window.iter().filter(|entry| entry.is_some()).count()
+                                        > *max_occurrences
+                                    {
+                                        assessable_windows += 1;
+                                    }
                                     let count = window
                                         .iter()
                                         .filter(|entry| entry.as_ref() == Some(&words))
@@ -3392,15 +3398,15 @@ impl ContentPreset {
                         }
                         measurements.insert("paragraph_count".into(), paragraphs.len());
                         measurements.insert("sentences_evaluated".into(), evaluated);
+                        measurements.insert("assessable_windows".into(), assessable_windows);
                         measurements.insert("sentences_skipped".into(), skipped);
                         measurements.insert("sentences_quoted".into(), quoted);
                         measurements.insert("sentences_too_short".into(), too_short);
                         measurements.insert("sentences_exceeding_limit".into(), exceeding);
                         if reason.is_none() && skipped > 0 {
                             reason = Some("some sentence openings could not be assessed using whitespace-separated words".into());
-                        } else if reason.is_none() && evaluated == 0 {
-                            reason =
-                                Some("no sentence openings were available for assessment".into());
+                        } else if reason.is_none() && assessable_windows == 0 {
+                            reason = Some("no sentence window contains enough evaluable openings to exceed the configured occurrence limit".into());
                         }
                     } else {
                         reason = Some("paragraphs are unavailable from this adapter".into());
@@ -6059,7 +6065,10 @@ terms = ["bad"]
         assert!(repeated.findings[0].message.contains("3 times"));
         assert_eq!(repeated.measurements["window_size"], 5);
         assert_eq!(repeated.measurements["max_occurrences"], 2);
-        let reset = run(&["Team acts. Team plans.", "Team checks. Other works."]);
+        let reset = run(&[
+            "Team acts. Team plans. Another helps.",
+            "Team checks. Other works.",
+        ]);
         assert_eq!(reset.status, GateStatus::Passed);
         let across =
             ContentPreset::from_toml(&format!("{config}window_across_paragraphs=true\n")).unwrap();
@@ -6105,7 +6114,7 @@ terms = ["bad"]
             .evaluate_with_context(&input, None, None, Some(&short_context))
             .unwrap();
         assert_eq!(short.gates[0].status, GateStatus::NotChecked);
-        let all_ignored = run(&["The. Team acts. Team plans."]);
+        let all_ignored = run(&["The. Team acts. Team plans. Other helps."]);
         assert_eq!(all_ignored.status, GateStatus::Passed);
         assert_eq!(all_ignored.measurements["sentences_too_short"], 1);
         let long = format!(
@@ -6113,11 +6122,12 @@ terms = ["bad"]
             "x".repeat(MAX_PARAGRAPH_OPENING_BYTES + 1)
         );
         let ellipsis = run(&["Une phrase…"]);
-        assert_eq!(ellipsis.status, GateStatus::Passed);
+        assert_eq!(ellipsis.status, GateStatus::NotChecked);
+        assert_eq!(ellipsis.measurements["sentences_evaluated"], 1);
         let chinese = run(&["这是一个句子。"]);
         assert_eq!(chinese.status, GateStatus::NotChecked);
         assert_eq!(chinese.measurements["sentences_skipped"], 1);
-        let quoted = run(&["Team acts. « Team plans. Team checks. » Other works."]);
+        let quoted = run(&["Team acts. « Team plans. Team checks. » Other works. More arrives."]);
         assert_eq!(quoted.status, GateStatus::Passed);
         assert_eq!(quoted.measurements["sentences_quoted"], 2);
         for text in ["", "The.", "« Team plans. Team checks. »"] {
@@ -6125,6 +6135,12 @@ terms = ["bad"]
             assert_eq!(unmeasurable.status, GateStatus::NotChecked, "{text}");
             assert_eq!(unmeasurable.measurements["sentences_evaluated"], 0);
         }
+        let too_few = run(&["Team acts. Team plans."]);
+        assert_eq!(too_few.status, GateStatus::NotChecked);
+        assert_eq!(too_few.measurements["sentences_evaluated"], 2);
+        assert_eq!(too_few.measurements["assessable_windows"], 0);
+        let split_too_few = run(&["One. Two.", "Three. Four."]);
+        assert_eq!(split_too_few.status, GateStatus::NotChecked);
         let unclosed = run(&["Team acts. « Team plans. Team checks."]);
         assert_eq!(unclosed.status, GateStatus::NotChecked);
         let unknown = run(&[&long]);
