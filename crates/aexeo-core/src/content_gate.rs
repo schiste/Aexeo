@@ -305,6 +305,21 @@ pub enum ContentGate {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         abbreviations: Vec<String>,
     },
+    /// Reviews configured connective phrases at sentence openings.
+    SentenceOpeningTerms {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default)]
+        blocking: bool,
+        terms: Vec<String>,
+        #[serde(default)]
+        max_per_paragraph: usize,
+        #[serde(default = "default_sentence_delimiters")]
+        delimiters: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        abbreviations: Vec<String>,
+    },
     /// Finds exact repeated paragraphs after whitespace normalization.
     DuplicateParagraphs {
         id: String,
@@ -598,6 +613,7 @@ impl ContentGate {
             | Self::ParagraphLength { severity, .. }
             | Self::RepeatedParagraphOpenings { severity, .. }
             | Self::RepeatedSentenceOpenings { severity, .. }
+            | Self::SentenceOpeningTerms { severity, .. }
             | Self::DuplicateParagraphs { severity, .. }
             | Self::ParagraphCharacterLength { severity, .. }
             | Self::RepeatedTerms { severity, .. }
@@ -632,6 +648,7 @@ impl ContentGate {
             | Self::ParagraphLength { blocking, .. }
             | Self::RepeatedParagraphOpenings { blocking, .. }
             | Self::RepeatedSentenceOpenings { blocking, .. }
+            | Self::SentenceOpeningTerms { blocking, .. }
             | Self::DuplicateParagraphs { blocking, .. }
             | Self::ParagraphCharacterLength { blocking, .. }
             | Self::RepeatedTerms { blocking, .. }
@@ -678,6 +695,7 @@ impl ContentGate {
             | Self::ParagraphCharacterLength { .. }
             | Self::RepeatedParagraphOpenings { .. }
             | Self::RepeatedSentenceOpenings { .. }
+            | Self::SentenceOpeningTerms { .. }
             | Self::DuplicateParagraphs { .. } => "paragraphs",
             Self::HeadingHierarchy { .. } => "heading_levels",
             Self::RequiredHeadings { .. }
@@ -708,6 +726,7 @@ impl ContentGate {
             | Self::ParagraphLength { id, .. }
             | Self::RepeatedParagraphOpenings { id, .. }
             | Self::RepeatedSentenceOpenings { id, .. }
+            | Self::SentenceOpeningTerms { id, .. }
             | Self::DuplicateParagraphs { id, .. }
             | Self::ParagraphCharacterLength { id, .. }
             | Self::RepeatedTerms { id, .. }
@@ -743,6 +762,9 @@ fn editorial_suggestion(gate: &ContentGate) -> Option<&'static str> {
         ),
         ContentGate::SentenceLength { .. } | ContentGate::SentenceCharacterLength { .. } => Some(
             "Review the sentence boundary and consider shortening the sentence while preserving its meaning.",
+        ),
+        ContentGate::SentenceOpeningTerms { .. } => Some(
+            "Review the connective in context; retain it when it conveys a meaningful relationship.",
         ),
         ContentGate::RepeatedParagraphOpenings { .. }
         | ContentGate::RepeatedSentenceOpenings { .. } => {
@@ -1346,6 +1368,23 @@ impl ContentPreset {
                         gate.id()
                     )
                 }
+                ContentGate::SentenceOpeningTerms {
+                    terms, delimiters, ..
+                } if terms.is_empty()
+                    || terms.len() > 128
+                    || delimiters.is_empty()
+                    || terms.iter().any(|term| {
+                        term.trim() != term
+                            || term.is_empty()
+                            || term.len() > 256
+                            || term.chars().any(char::is_control)
+                    }) =>
+                {
+                    bail!(
+                        "sentence opening terms need 1 to 128 nonempty bounded terms and delimiters for {}",
+                        gate.id()
+                    );
+                }
                 ContentGate::DuplicateParagraphs {
                     max_occurrences,
                     min_chars,
@@ -1383,6 +1422,7 @@ impl ContentPreset {
                 ContentGate::SentenceLength { abbreviations, .. }
                 | ContentGate::SentenceCharacterLength { abbreviations, .. }
                 | ContentGate::RepeatedSentenceOpenings { abbreviations, .. }
+                | ContentGate::SentenceOpeningTerms { abbreviations, .. }
                     if abbreviations.iter().any(|abbr| {
                         abbr.strip_suffix('.').is_none_or(|word| {
                             word.is_empty()
@@ -2296,6 +2336,77 @@ impl ContentPreset {
                         None => {
                             reason = Some("paragraphs are unavailable from this adapter".into())
                         }
+                    }
+                }
+                ContentGate::SentenceOpeningTerms {
+                    terms,
+                    max_per_paragraph,
+                    delimiters,
+                    abbreviations,
+                    ..
+                } => {
+                    measurements.insert("max_per_paragraph".into(), *max_per_paragraph);
+                    if let Some(paragraphs) =
+                        context.and_then(|context| context.paragraphs.as_ref())
+                    {
+                        let normalized: Vec<String> = terms
+                            .iter()
+                            .map(|term| term.nfc().flat_map(char::to_lowercase).nfc().collect())
+                            .collect();
+                        let mut bytes_seen = 0usize;
+                        let mut matches = 0usize;
+                        for paragraph in paragraphs.iter().take(MAX_PARAGRAPH_OPENINGS) {
+                            bytes_seen = bytes_seen.saturating_add(paragraph.text.len());
+                            if bytes_seen > MAX_CONTENT_INPUT_BYTES {
+                                reason =
+                                    Some("paragraph text exceeds the supported byte limit".into());
+                                break;
+                            }
+                            let mut in_paragraph = 0usize;
+                            for_each_sentence(
+                                &paragraph.text,
+                                paragraph.line,
+                                paragraph.column,
+                                &[],
+                                delimiters,
+                                abbreviations,
+                                |segment, line, column| {
+                                    let segment = segment.trim_start();
+                                    // Do not propose changes inside explicitly quoted openings.
+                                    if segment.starts_with(['"', '\'', '«', '“', '‘']) {
+                                        return;
+                                    }
+                                    let folded: String =
+                                        segment.nfc().flat_map(char::to_lowercase).nfc().collect();
+                                    if normalized.iter().any(|term| {
+                                        folded.strip_prefix(term).is_some_and(|tail| {
+                                            tail.chars()
+                                                .next()
+                                                .is_none_or(|ch| !ch.is_alphanumeric() && ch != '_')
+                                        })
+                                    }) {
+                                        matches += 1;
+                                        in_paragraph += 1;
+                                        if in_paragraph > *max_per_paragraph {
+                                            emit(
+                                                format!(
+                                                    "Configured sentence-opening expression occurs {in_paragraph} times in this paragraph; review the transition in context"
+                                                ),
+                                                line,
+                                                column,
+                                            );
+                                        }
+                                    }
+                                },
+                            );
+                        }
+                        measurements.insert("paragraph_count".into(), paragraphs.len());
+                        measurements.insert("matching_openings".into(), matches);
+                        if paragraphs.len() > MAX_PARAGRAPH_OPENINGS {
+                            reason = Some("too many paragraphs to assess completely".into());
+                        }
+                    } else {
+                        reason = Some("paragraphs are unavailable from this adapter".into());
                     }
                 }
                 ContentGate::RepeatedSentenceOpenings {
@@ -4958,6 +5069,48 @@ terms = ["bad"]
             );
             assert!(ContentPreset::from_toml(&invalid).is_err());
         }
+    }
+
+    #[test]
+    fn sentence_opening_terms_are_advisory_paragraph_scoped_and_require_observation() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='transitions'\nkind='sentence_opening_terms'\nterms=['Moreover','En outre']\nmax_per_paragraph=1\n").unwrap();
+        let input = ContentInput {
+            text: Some(String::new()),
+            ..Default::default()
+        };
+        let context = ContentContext {
+            paragraphs: Some(vec![
+                ContentParagraph {
+                    text: "Moreover, one. En outre, deux. Moreoverish is different.".into(),
+                    line: 3,
+                    column: 1,
+                },
+                ContentParagraph {
+                    text: "Moreover, another paragraph.".into(),
+                    line: 4,
+                    column: 1,
+                },
+            ]),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert!(!report.gates[0].blocking);
+        assert_eq!(report.gates[0].findings.len(), 1);
+        assert_eq!(report.gates[0].measurements["matching_openings"], 3);
+        assert_eq!(report.gates[0].findings[0].line, 3);
+        assert_eq!(
+            preset.evaluate(&input).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+        assert!(
+            ContentPreset::from_toml(
+                "version=1\nname='t'\n[[gates]]\nid='x'\nkind='sentence_opening_terms'\nterms=[]\n"
+            )
+            .is_err()
+        );
     }
 
     #[test]

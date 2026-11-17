@@ -1383,3 +1383,30 @@ its bounds. A gate override replaces the whole gate, rather than merging individ
 Profiles and structured input are bounded; the JSON Schema cannot express all
 of Aexeo's aggregate resource limits. A schema-valid response can therefore
 still be refused if it exceeds those limits.
+
+### Repeated transition openings
+
+The opt-in `transition-review-en` and `transition-review-fr` presets flag
+configured connective expressions at the start of a sentence when their count
+in a paragraph exceeds `max_per_paragraph`. Choose the preset for the actual
+content language; locale is not inferred. The `sentence_opening_terms` gate
+accepts a custom `terms` list, `max_per_paragraph`, `delimiters` and sentence
+`abbreviations`; it is advisory and non-blocking by default. It requires
+paragraphs and reports `not_checked` when the adapter cannot provide them.
+Sentence segmentation is heuristic. Quoted openings are skipped, and the gate
+never removes or rewrites a transition: it may express an essential causal or
+logical relationship. The finding is an invitation to review the paragraph,
+not evidence of AI authorship or a detector outcome.
+
+```toml
+version = 1
+name = "News transitions"
+extends = ["transition-review-en"]
+
+[[gates]]
+id = "editorial.transition_openings"
+kind = "sentence_opening_terms"
+terms = ["Moreover", "Additionally", "In conclusion"]
+max_per_paragraph = 2
+blocking = false
+```

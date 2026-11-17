@@ -209,6 +209,14 @@ pub fn builtin_content_presets() -> BTreeMap<String, String> {
             include_str!("../presets/opinion-pacing.toml").into(),
         ),
         (
+            "transition-review-en".into(),
+            include_str!("../presets/transition-review-en.toml").into(),
+        ),
+        (
+            "transition-review-fr".into(),
+            include_str!("../presets/transition-review-fr.toml").into(),
+        ),
+        (
             "sentence-openings-review".into(),
             include_str!("../presets/sentence-openings-review.toml").into(),
         ),

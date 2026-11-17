@@ -928,6 +928,31 @@ mod tests {
     }
 
     #[test]
+    fn transition_opening_maps_to_emdash_and_withholds_missing_paragraphs() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/t","title":"T","body":[{"children":[{"_type":"span","text":"First. "},{"_type":"span","text":"Moreover, next."}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='transitions'\nkind='sentence_opening_terms'\nterms=['Moreover']\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        let locations = source_locations(&document, &preset, &report);
+        assert_eq!(
+            (
+                locations[0].block_index,
+                locations[0].span_index,
+                locations[0].utf16_offset
+            ),
+            (0, 1, 0)
+        );
+        let unavailable = evaluate_content_with_body_capabilities(
+            &document,
+            &preset,
+            None,
+            [true, true, false, true],
+        )
+        .unwrap();
+        assert_eq!(unavailable.gates[0].status, GateStatus::NotChecked);
+    }
+
+    #[test]
     fn duplicate_paragraph_maps_to_emdash_block() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/t","title":"T","body":[{"children":[{"_type":"span","text":"Repeated prose."}]},{"children":[{"_type":"span","text":"Repeated prose."}]}]}"#).unwrap();
         let preset = ContentPreset::from_toml("version=1\nname='review'\n[[gates]]\nid='dupe'\nkind='duplicate_paragraphs'\nmax_occurrences=1\n").unwrap();
