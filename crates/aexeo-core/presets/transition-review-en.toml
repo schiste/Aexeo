@@ -1,0 +1,9 @@
+version = 1
+name = "English transition review"
+
+[[gates]]
+id = "editorial.transition_openings"
+kind = "sentence_opening_terms"
+terms = ["Moreover", "Additionally", "Furthermore", "Consequently", "In conclusion"]
+max_per_paragraph = 1
+blocking = false
