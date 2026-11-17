@@ -1693,6 +1693,7 @@ impl ContentPreset {
     }
 
     /// Evaluate with a complete list observation, or `None` when unavailable.
+    #[allow(clippy::too_many_arguments)] // Preserve the existing evaluation capabilities in an additive API.
     pub fn evaluate_with_structured_lists(
         &self,
         input: &ContentInput,
@@ -1714,6 +1715,7 @@ impl ContentPreset {
         )
     }
 
+    #[allow(clippy::too_many_arguments)] // Internal continuation of the public evaluation APIs.
     fn evaluate_with_observer_inner(
         &self,
         input: &ContentInput,
