@@ -4,6 +4,44 @@
 
 ## Commands
 
+## `composition`
+
+Inspect and assess a structured editorial composition
+
+```text
+Inspect and assess a structured editorial composition
+
+Usage: composition [OPTIONS] --profile <profile>
+
+Options:
+      --profile <profile>
+          Built-in profile (news or opinion) or TOML profile path
+
+      --schema
+          Export the profile's JSON Schema
+
+      --emit-preset
+          Export a composable TOML gate preset from this exact profile
+
+      --input <input>
+          Structured JSON composition to assess
+
+      --document <document>
+          Compare the assembled snapshot with this exact UTF-8 document
+
+      --assemble
+          Print validated assembled text
+
+      --allow-advisory-violations
+          Assemble well-formed input even if profile bounds fail
+
+      --telemetry
+          Emit aggregate local telemetry to stderr
+
+  -h, --help
+          Print help
+```
+
 ## `link-reachability`
 
 Explicitly check external HTTP(S) destinations; results are advisory

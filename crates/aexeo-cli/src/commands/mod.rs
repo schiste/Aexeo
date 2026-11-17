@@ -1,4 +1,5 @@
 pub mod common;
+pub mod composition;
 pub mod config;
 pub mod content;
 pub mod content_change;

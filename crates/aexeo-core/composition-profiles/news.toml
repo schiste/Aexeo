@@ -1,0 +1,21 @@
+version = 1
+name = "news"
+separator = "\n\n"
+
+[[fields]]
+name = "opening_hook"
+min_characters = 1
+max_characters = 45
+
+[[fields]]
+name = "context"
+min_characters = 160
+max_characters = 240
+
+[[fields]]
+name = "key_fact"
+min_characters = 1
+
+[[fields]]
+name = "caveat"
+min_characters = 1

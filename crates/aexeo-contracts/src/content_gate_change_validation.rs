@@ -29,7 +29,12 @@ pub fn parse_validated_change(bytes: &[u8]) -> Result<Change, ChangeValidationEr
     let change: Change = serde_json::from_value(value)
         .map_err(|_| ChangeValidationError("invalid change fields"))?;
     validate_change_structure(&change)?;
-    if chrono::DateTime::parse_from_rfc3339(&change.created_at).is_err() {
+    if time::OffsetDateTime::parse(
+        &change.created_at,
+        &time::format_description::well_known::Rfc3339,
+    )
+    .is_err()
+    {
         return Err(ChangeValidationError("invalid change timestamp"));
     }
     if change.content_root.as_ref().is_some_and(String::is_empty)
@@ -360,6 +365,27 @@ mod strict_json_tests {
             br#"{"payload":null,"unknown":1}"#.as_slice(),
         ] {
             assert!(parse_lossless_json::<Example>(invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn change_timestamps_accept_rfc3339_and_reject_invalid_dates() {
+        for (timestamp, valid) in [
+            ("2026-01-01T00:00:00Z", true),
+            ("2024-02-29T12:34:56.123+01:00", true),
+            ("2026-02-29T12:34:56Z", false),
+            ("2026-01-01T24:00:00Z", false),
+            ("2026-01-01T00:00:00", false),
+        ] {
+            let change = serde_json::json!({
+                "schema": "content-gate.change/v1", "change_id": "example",
+                "created_at": timestamp, "origin": {"kind": "manual"},
+                "base": {"kind": "opaque", "revision": "r1"},
+                "entries": [{"entity_id": "article", "operation": "create", "media_type": "text/plain",
+                    "after": {"inline": "abc", "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}}]
+            });
+            let bytes = serde_json::to_vec(&change).unwrap();
+            assert_eq!(parse_validated_change(&bytes).is_ok(), valid, "{timestamp}");
         }
     }
 }

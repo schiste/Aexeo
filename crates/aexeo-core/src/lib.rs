@@ -12,6 +12,7 @@ pub mod content_gate_verdict;
 pub mod content_presets;
 pub mod content_rules;
 pub mod docs;
+pub mod editorial_pacing;
 pub mod editorial_rules;
 pub mod error;
 pub mod fix;

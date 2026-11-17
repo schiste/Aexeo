@@ -218,6 +218,18 @@ pub struct ContentPreset {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ContentGate {
+    /// Check a supplied structured snapshot against the exact content source.
+    EditorialPacing {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default)]
+        blocking: bool,
+        source: String,
+        profile: crate::editorial_pacing::CompositionProfileRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        projection_separator: Option<String>,
+    },
     WordCount {
         id: String,
         #[serde(default)]
@@ -573,7 +585,8 @@ pub enum GateObservation {
 impl ContentGate {
     pub fn severity(&self) -> Severity {
         match self {
-            Self::WordCount { severity, .. }
+            Self::EditorialPacing { severity, .. }
+            | Self::WordCount { severity, .. }
             | Self::CharacterCount { severity, .. }
             | Self::MetadataLength { severity, .. }
             | Self::LinkCount { severity, .. }
@@ -606,7 +619,8 @@ impl ContentGate {
     }
     pub fn blocking(&self) -> bool {
         match self {
-            Self::WordCount { blocking, .. }
+            Self::EditorialPacing { blocking, .. }
+            | Self::WordCount { blocking, .. }
             | Self::CharacterCount { blocking, .. }
             | Self::MetadataLength { blocking, .. }
             | Self::LinkCount { blocking, .. }
@@ -672,7 +686,8 @@ impl ContentGate {
             Self::FinalNewline { .. } => "source_text",
             Self::UniqueCollectionMetadata { .. } => "collection_metadata",
             Self::Custom { .. } => "extension",
-            Self::EvidenceAnchors { .. }
+            Self::EditorialPacing { .. }
+            | Self::EvidenceAnchors { .. }
             | Self::StructuredFact { .. }
             | Self::EvidenceReview { .. } => "text_and_evidence",
             Self::SiteAudit { .. } | Self::SiteGroup { .. } => "site",
@@ -680,7 +695,8 @@ impl ContentGate {
     }
     pub fn id(&self) -> &str {
         match self {
-            Self::WordCount { id, .. }
+            Self::EditorialPacing { id, .. }
+            | Self::WordCount { id, .. }
             | Self::CharacterCount { id, .. }
             | Self::MetadataLength { id, .. }
             | Self::LinkCount { id, .. }
@@ -1230,6 +1246,23 @@ impl ContentPreset {
                 bail!("gate IDs must be nonempty and unique: {:?}", gate.id());
             }
             match gate {
+                ContentGate::EditorialPacing {
+                    source,
+                    profile,
+                    projection_separator,
+                    ..
+                } => {
+                    if projection_separator
+                        .as_ref()
+                        .is_some_and(|separator| separator.len() > 1024)
+                    {
+                        bail!("projection separator is too long for {}", gate.id());
+                    }
+                    if source.trim().is_empty() {
+                        bail!("composition source name is empty for {}", gate.id());
+                    }
+                    profile.resolve()?;
+                }
                 ContentGate::WordCount { min, max, .. }
                     if min.is_none() && max.is_none()
                         || matches!((min, max), (Some(a), Some(b)) if a > b) =>
@@ -1680,6 +1713,67 @@ impl ContentPreset {
                 })
             };
             match gate {
+                ContentGate::EditorialPacing {
+                    source,
+                    profile,
+                    projection_separator,
+                    ..
+                } => {
+                    let document = input.source_text.as_ref().or(input.text.as_ref());
+                    let snapshot = input
+                        .evidence_sources
+                        .as_ref()
+                        .and_then(|sources| sources.get(source));
+                    match (document, snapshot) {
+                        (Some(document), Some(snapshot))
+                            if snapshot.len() <= MAX_CONTENT_INPUT_BYTES =>
+                        {
+                            let parsed = aexeo_contracts::content_gate_change_validation::parse_unique_json_value(snapshot.as_bytes());
+                            let mut profile = profile.resolve()?;
+                            if input.source_text.is_none()
+                                && let Some(separator) = projection_separator
+                            {
+                                profile.separator.clone_from(separator);
+                            }
+                            match parsed.ok().and_then(|value| {
+                                let issues = profile.assess(&value).ok()?;
+                                let text = profile.assemble_snapshot(&value).ok()?;
+                                Some((issues, text))
+                            }) {
+                                Some((issues, text)) if text == *document => {
+                                    measurements.insert("issue_count".into(), issues.len());
+                                    for issue in issues {
+                                        emit(
+                                            format!(
+                                                "Field {:?}: {} (actual {:?}, expected {:?})",
+                                                issue.field,
+                                                issue.code,
+                                                issue.actual,
+                                                issue.expected
+                                            ),
+                                            1,
+                                            1,
+                                        );
+                                    }
+                                }
+                                Some(_) => reason = Some(
+                                    "structured composition does not match this document snapshot"
+                                        .into(),
+                                ),
+                                None => {
+                                    reason = Some(
+                                        "structured composition is invalid or exceeds limits"
+                                            .into(),
+                                    )
+                                }
+                            }
+                        }
+                        _ => {
+                            reason =
+                                Some("document or structured composition is unavailable".into())
+                        }
+                    }
+                }
                 ContentGate::WordCount { min, max, .. } => {
                     if let Some(min) = min {
                         measurements.insert("min_words".into(), *min);

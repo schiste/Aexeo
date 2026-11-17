@@ -1300,3 +1300,86 @@ blocking = false
 ```
 
 Comparison ignores case and punctuation around whitespace-separated opening words and compares canonically equivalent Unicode spellings together while preserving accents. Sentence delimiters and abbreviations follow the sentence-length gates; sentence segmentation is heuristic, and no language is selected automatically. Paragraph boundaries reset the sequence. Sentences with fewer than the configured number of opening words reset the sequence and are counted as `sentences_too_short` when their characters belong to a conservative Latin subset, including common accented letters and typographic quotation marks. Other short sentences can be `not_checked` because their word boundaries may be uncertain. Unrecognizable openings, unavailable paragraphs and resource limits also produce `not_checked` rather than a complete pass; findings already observed remain in the report. Measurements describe counts, and opt-in telemetry contains aggregate timings without content. This is a prompt for editorial judgment, not an assessment of authorship or AI detection.
+
+## Structured editorial pacing
+
+The opt-in `news-pacing` and `opinion-pacing` presets contain an advisory,
+non-blocking `editorial_pacing` gate. They can be inherited or overridden by
+other portable content presets. Their `news` and `opinion` composition profiles
+are starting points, not quality standards or measures of authorship. The
+`news` hook has at most 45 Unicode scalar values and its context has 160–240;
+`opinion` permits a 90-character hook and an argument of at least 120. These
+bounds are independent of words and sentences and can be inappropriate for a
+particular story or language.
+
+Export the JSON Schema for an agent, validate its structured output, and
+assemble the exact content without model-generated transitions:
+
+```sh
+aexeo-cli composition --profile news --schema > schema.json
+aexeo-cli composition --profile news --input composition.json
+aexeo-cli composition --profile news --input composition.json --assemble > draft.txt
+aexeo-cli content draft.txt --preset news-pacing --evidence-source composition=composition.json --format json
+```
+
+The schema requires every field and rejects unknown fields. JSON Schema length
+bounds count Unicode scalar values, not visual characters or words. The CLI
+rejects duplicate JSON keys and limits input sizes. `--assemble` only emits text
+for an input satisfying the profile and does not add a trailing newline. If an
+editor intentionally accepts a bounds violation, `--allow-advisory-violations`
+permits assembly of well-formed fields while preserving the later gate finding;
+missing, unexpected or incorrectly typed fields are still rejected. The
+composition may include private content; telemetry is opt-in and reports only
+aggregate counts and status.
+
+To check an existing document, pass `--document draft.txt` to `composition`.
+The document gate checks the exact adapter-supplied source (or, when unavailable,
+the host-declared complete text projection) against the assembled snapshot before
+making findings. A matching projection does not establish rendered-page equivalence
+or preserve formatting. The optional gate parameter `projection_separator` specifies
+how a complete adapter text projection joins fields when the original source is
+unavailable. Built-in and exported pacing presets use `"\\n"` for EmDash; hosts
+with another projection can override it. Original source bytes always use the
+profile's assembly separator. Missing, malformed, oversized or
+nonmatching snapshots and unavailable source text are `not_checked`; they are
+not evidence that a document passed. Recreate the structured snapshot after
+editing. This exact-byte check does not authenticate content or verify facts.
+
+Custom profiles use TOML with ordered `[[fields]]`. Each string can specify
+`min_characters` or `max_characters`; a list is declared with a nonempty
+`allowed_counts` array, such as `[{ max = 2 }, { min = 4 }]`, and contains
+strings. List items are assembled in order using the same profile separator.
+A project can pass a profile path to `composition --profile` and embed the
+same profile as a TOML table in a custom `editorial_pacing` gate. The gate's
+`profile` can instead be the built-in name `news` or `opinion`. Gate severity
+and blocking are configurable; the defaults are warning and non-blocking.
+These structural checks do not assert that a field contains one sentence, that
+its role is semantically accurate, or that an AI detector will give any result.
+
+For example, a custom preset can inherit other checks and replace the pacing
+policy by gate ID:
+
+```toml
+version = 1
+name = "My news policy"
+extends = ["article-quality", "news-pacing"]
+
+[[gates]]
+id = "editorial.pacing"
+kind = "editorial_pacing"
+source = "composition"
+profile = { version = 1, name = "my-news", fields = [
+  { name = "opening_hook", max_characters = 70 },
+  { name = "context", min_characters = 80, max_characters = 280 },
+  { name = "examples", allowed_counts = [{ max = 2 }, { min = 4 }] },
+] }
+```
+
+For a custom profile in `profile.toml`, export the matching gate preset with
+`aexeo-cli composition --profile profile.toml --emit-preset > pacing.toml`.
+Load it as a named `--preset-source` and compose it with other presets. This
+uses the exact profile used for schema generation instead of manually copying
+its bounds. A gate override replaces the whole gate, rather than merging individual fields.
+Profiles and structured input are bounded; the JSON Schema cannot express all
+of Aexeo's aggregate resource limits. A schema-valid response can therefore
+still be refused if it exceeds those limits.
