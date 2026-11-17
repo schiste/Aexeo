@@ -470,6 +470,9 @@ pub fn html_source_map_with_scope(
                 | "footer"
                 | "article"
                 | "section"
+                | "ul"
+                | "ol"
+                | "li"
                 | "div"
                 | "p"
                 | "h1"
@@ -603,6 +606,16 @@ pub fn html_source_map_with_scope(
                 search = candidate + 1;
             }
             continue;
+        }
+        // Restrict list structure to explicit direct items; HTML recovery can
+        // otherwise implicitly close or reparent elements and shift locations.
+        if !closing {
+            let parent = stack.last().map(String::as_str);
+            if (tag == "li" && !matches!(parent, Some("ul" | "ol")))
+                || (matches!(parent, Some("ul" | "ol")) && tag != "li")
+            {
+                return None;
+            }
         }
         if closing {
             if !rest.trim().is_empty() || stack.pop().as_deref() != Some(&tag) {
@@ -789,6 +802,41 @@ mod tests {
                 .unwrap()
                 .contains("Navigation")
         );
+    }
+
+    #[test]
+    fn maps_explicit_html_lists_and_rejects_ambiguous_items() {
+        use crate::source_mapping::ContentSourceMap;
+        let source = "<main><ul><li>Alpha <a href='/a'>link</a></li><li><ol><li>Élan</li></ol></li></ul></main>";
+        for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+            let adapted = html_content_with_scope("x", source, scope).unwrap();
+            let text = adapted.input.text.as_deref().unwrap();
+            let map = html_source_map_with_scope(source, text, scope).unwrap();
+            let projected_index = crate::text_index::LineIndex::new(text);
+            let source_index = crate::text_index::LineIndex::new(source);
+            let position = projected_index
+                .position(text, text.find("Élan").unwrap())
+                .unwrap();
+            assert_eq!(
+                map.source_position(source, text, position.0, position.1),
+                source_index.position(source, source.find("Élan").unwrap())
+            );
+            assert_eq!(
+                map.link_position(source, 0),
+                source_index.position(source, source.find("<a ").unwrap())
+            );
+        }
+        for source in [
+            "<main><ul><li>one<li>two</li></ul></main>",
+            "<main><div><li>one</li></div></main>",
+            "<main><ul><li hidden>one</li></ul></main>",
+        ] {
+            let adapted = html_content("x", source).unwrap();
+            assert!(
+                html_source_map(source, adapted.input.text.as_deref().unwrap()).is_none(),
+                "{source}"
+            );
+        }
     }
 
     #[test]

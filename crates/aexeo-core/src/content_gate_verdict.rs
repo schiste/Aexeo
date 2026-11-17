@@ -3594,6 +3594,32 @@ mod tests {
     }
 
     #[test]
+    fn html_list_finding_maps_to_original_source() {
+        use sha2::{Digest, Sha256};
+        let source = "<main>\n<ul><li>First</li>\n<li>forbidden</li></ul>\n</main>";
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['forbidden']\n").unwrap();
+        let mut input = change();
+        input.entries[0].media_type = "text/html".into();
+        let state = input.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let report = evaluate_change(
+            &input,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+        )
+        .unwrap();
+        assert_eq!(report.findings.len(), 1);
+        assert_eq!(
+            report.findings[0].location,
+            Some(protocol::Location { line: 3, column: 5 })
+        );
+    }
+
+    #[test]
     fn heading_hierarchy_verdict_maps_markdown_and_html_positions() {
         use sha2::{Digest, Sha256};
         let policy = ContentPreset::from_toml(
