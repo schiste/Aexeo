@@ -1,0 +1,102 @@
+{
+  "preset": "version=1\nname='workflow'\n[[gates]]\nid='paragraph'\nkind='repeated_paragraph_openings'\nopening_words=1\nmax_occurrences=1\nblocking=false\n[[gates]]\nid='sentence'\nkind='repeated_sentence_openings'\nopening_words=1\nmax_consecutive=1\nblocking=false\n",
+  "cases": [
+    {
+      "name": "equivalent",
+      "markdown": "Café arrive. Café repart.\n\nCAFÉ revient.\n",
+      "html": "<p>Café arrive. Café repart.</p>\n<p>CAFÉ revient.</p>\n",
+      "document": {
+        "route": "/unicode",
+        "title": "Example",
+        "body": [
+          {
+            "children": [
+              {
+                "_type": "span",
+                "text": "Café arrive. Cafe"
+              },
+              {
+                "_type": "span",
+                "text": "́ repart."
+              }
+            ]
+          },
+          {
+            "children": [
+              {
+                "_type": "span",
+                "text": "CAFÉ revient."
+              }
+            ]
+          }
+        ]
+      },
+      "statuses": [
+        "failed",
+        "failed"
+      ]
+    },
+    {
+      "name": "distinct",
+      "markdown": "café arrive. cafè repart.\n\ncafè revient.\n",
+      "html": "<p>café arrive. cafè repart.</p>\n<p>cafè revient.</p>\n",
+      "document": {
+        "route": "/unicode",
+        "title": "Example",
+        "body": [
+          {
+            "children": [
+              {
+                "_type": "span",
+                "text": "café arrive. cafè repart."
+              }
+            ]
+          },
+          {
+            "children": [
+              {
+                "_type": "span",
+                "text": "cafè revient."
+              }
+            ]
+          }
+        ]
+      },
+      "statuses": [
+        "passed",
+        "passed"
+      ]
+    },
+    {
+      "name": "revised",
+      "markdown": "Café arrive. Le café repart.\n\nLe café revient.\n",
+      "html": "<p>Café arrive. Le café repart.</p>\n<p>Le café revient.</p>\n",
+      "document": {
+        "route": "/unicode",
+        "title": "Example",
+        "body": [
+          {
+            "children": [
+              {
+                "_type": "span",
+                "text": "Café arrive. Le café repart."
+              }
+            ]
+          },
+          {
+            "children": [
+              {
+                "_type": "span",
+                "text": "Le café revient."
+              }
+            ]
+          }
+        ]
+      },
+      "statuses": [
+        "passed",
+        "passed"
+      ]
+    }
+  ]
+}

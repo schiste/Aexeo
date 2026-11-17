@@ -315,3 +315,59 @@ fn shared_editorial_fixture_matches_markdown_and_html_cli_contracts() {
         assert_eq!(empty["gates"][2]["measurements"]["link_count"], 0);
     }
 }
+
+#[test]
+fn unicode_openings_match_across_markdown_and_html() {
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/cross-adapter-openings.json")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("draft");
+    let preset = dir.path().join("workflow.toml");
+    fs::write(&preset, fixture["preset"].as_str().unwrap()).unwrap();
+    for case in fixture["cases"].as_array().unwrap() {
+        for format in ["markdown", "html"] {
+            fs::write(&draft, case[format].as_str().unwrap()).unwrap();
+            let (report, telemetry) = evaluate(&draft, &preset, format);
+            let statuses: Vec<_> = report["gates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|gate| gate["status"].clone())
+                .collect();
+            assert_eq!(
+                statuses,
+                *case["statuses"].as_array().unwrap(),
+                "{} {format}",
+                case["name"]
+            );
+            assert!(!telemetry.to_string().contains("Café"));
+            if case["name"] == "equivalent" {
+                let locations = report["source_locations"].as_array().unwrap();
+                assert_eq!(locations.len(), 2);
+                let paragraph = locations
+                    .iter()
+                    .find(|item| item["gate_id"] == "paragraph")
+                    .unwrap();
+                let sentence = locations
+                    .iter()
+                    .find(|item| item["gate_id"] == "sentence")
+                    .unwrap();
+                assert_eq!(
+                    (
+                        paragraph["line"].as_u64().unwrap(),
+                        paragraph["column"].as_u64().unwrap()
+                    ),
+                    if format == "html" { (2, 4) } else { (3, 1) }
+                );
+                assert_eq!(
+                    (
+                        sentence["line"].as_u64().unwrap(),
+                        sentence["column"].as_u64().unwrap()
+                    ),
+                    if format == "html" { (1, 17) } else { (1, 14) }
+                );
+                assert_eq!(telemetry["source_mapping"]["mapped"], 2);
+            }
+        }
+    }
+}
