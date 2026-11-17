@@ -87,6 +87,11 @@ class ReleaseGuardTests(unittest.TestCase):
 
 
 class PinTests(unittest.TestCase):
+    def test_release_builds_arm64_on_supported_macos_runner(self):
+        workflow = WORKFLOWS[1].read_text()
+        self.assertRegex(workflow, r"(?m)^\s*- runner: macos-15\s*\n\s*target: darwin-arm64\s*$")
+
+
     def test_toolchain_channel_is_an_exact_release(self):
         channel = tomllib.loads((ROOT / "rust-toolchain.toml").read_text())["toolchain"]["channel"]
         self.assertRegex(channel, r"^\d+\.\d+\.\d+$")
