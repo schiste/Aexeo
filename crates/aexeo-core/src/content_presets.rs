@@ -221,6 +221,10 @@ pub fn builtin_content_presets() -> BTreeMap<String, String> {
             include_str!("../presets/sentence-rhythm-review.toml").into(),
         ),
         (
+            "sentence-variance-review".into(),
+            include_str!("../presets/sentence-variance-review.toml").into(),
+        ),
+        (
             "trailing-ing-review-en".into(),
             include_str!("../presets/trailing-ing-review-en.toml").into(),
         ),
@@ -461,6 +465,22 @@ mod tests {
                     .any(|gate| matches!(gate, ContentGate::SentenceOpeningTerms { .. }))
             );
         }
+    }
+
+    #[test]
+    fn variance_review_starter_is_discoverable_and_advisory() {
+        let preset =
+            resolve_content_preset("sentence-variance-review", &builtin_content_presets()).unwrap();
+        assert_eq!(preset.gates.len(), 1);
+        assert!(!preset.gates[0].blocking());
+        assert!(matches!(
+            &preset.gates[0],
+            ContentGate::SentenceLengthVariance {
+                window_size: 6,
+                min_stddev_words: Some(6),
+                ..
+            }
+        ));
     }
 
     #[test]

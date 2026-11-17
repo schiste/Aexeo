@@ -295,3 +295,12 @@ assert.deepEqual(unavailableReport.gates.map((gate) => gate.status), ["not_check
 assert.deepEqual(unavailableReport.source_locations, []);
 assert.ok(unavailableReport.gates.every((gate) => gate.findings.length === 0));
 console.log("WASM, Markdown and HTML CLI share an editorial fixture");
+
+// Shared with the CLI integration test: deterministic threshold across adapters.
+const varianceFixture = JSON.parse(await readFile(new URL("../../../crates/aexeo-cli/tests/fixtures/cross-adapter-variance.json", import.meta.url), "utf8"));
+const varianceReport = await evaluateContent(varianceFixture.document, "cross", { cross: varianceFixture.preset });
+assert.equal(varianceReport.gates[0].status, "failed");
+assert.equal(varianceReport.gates[0].measurements.effective_min_stddev_words, varianceFixture.expected_threshold);
+assert.equal(varianceReport.gates[0].measurements.windows_checked, 1);
+assert.equal(varianceReport.source_locations[0].utf16_offset, 0);
+console.log("Seeded variance is reproducible across CLI and WASM");

@@ -1468,3 +1468,45 @@ fn fix_does_not_modify_content_when_external_gate_evaluation_fails() {
     );
     assert_eq!(std::fs::read(&article).unwrap(), b"unchanged");
 }
+
+#[test]
+fn seeded_variance_matches_cross_adapter_fixture() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/cross-adapter-variance.json")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("variance.toml");
+    std::fs::write(&preset, fixture["preset"].as_str().unwrap()).unwrap();
+    let source = format!("cross={}", preset.display());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "-",
+            "--preset",
+            "cross",
+            "--preset-source",
+            &source,
+            "--input-format",
+            "markdown",
+            "--format",
+            "json",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(fixture["content"].as_str().unwrap().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "failed");
+    assert_eq!(
+        report["gates"][0]["measurements"]["effective_min_stddev_words"],
+        fixture["expected_threshold"]
+    );
+    assert_eq!(report["gates"][0]["measurements"]["windows_checked"], 1);
+}
