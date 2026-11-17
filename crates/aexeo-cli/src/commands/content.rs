@@ -280,6 +280,7 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     let mut link_count = None;
     let mut source_map = None;
     let mut heading_levels = None;
+    let mut structured_lists = None;
     let mut destinations = None;
     // The event exists only on request and never contains content, paths, or URLs.
     let mut html_projection = (measuring
@@ -291,6 +292,13 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         text,
     ) {
         (Some("markdown"), Some(text)) => {
+            if preset
+                .gates
+                .iter()
+                .any(|gate| matches!(gate, ContentGate::ListItemCount { .. }))
+            {
+                structured_lists = aexeo_core::markdown_adapter::markdown_structured_lists(&text)?;
+            }
             let (input, capabilities, links, map) = if args.get_flag("export-link-observations")
                 || args.contains_id("link-observations")
                 || preset.gates.iter().any(|gate| {
@@ -505,22 +513,24 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     };
     let mut gate_timer = GateTimer::default();
     let mut report = if measuring {
-        preset.evaluate_with_heading_levels(
+        preset.evaluate_with_structured_lists(
             &input,
             &capabilities,
             destinations.as_deref(),
             heading_levels.as_deref(),
             !args.get_flag("collection-incomplete"),
             Some(&mut |event| gate_timer.observe(event)),
+            structured_lists.as_deref(),
         )?
     } else {
-        preset.evaluate_with_heading_levels(
+        preset.evaluate_with_structured_lists(
             &input,
             &capabilities,
             destinations.as_deref(),
             heading_levels.as_deref(),
             !args.get_flag("collection-incomplete"),
             None,
+            structured_lists.as_deref(),
         )?
     };
     let evaluation_ms = started.elapsed().as_secs_f64() * 1000.0;

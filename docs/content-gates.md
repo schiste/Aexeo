@@ -1384,6 +1384,21 @@ Profiles and structured input are bounded; the JSON Schema cannot express all
 of Aexeo's aggregate resource limits. A schema-valid response can therefore
 still be refused if it exceeds those limits.
 
+### Structured list item counts
+
+The optional `list_item_count` gate asks for editorial review of lists with configured direct item counts. It does not infer authorship or quality and never deletes list items. Nested lists are counted separately. Configure it in a portable preset:
+
+```toml
+[[gates]]
+id = "editorial.review_three_item_lists"
+kind = "list_item_count"
+flagged_counts = [3]
+blocking = false
+```
+
+The Markdown CLI supplies observations when the list structure is fully visible. Embedded HTML, plain text, unsupported adapters and incomplete snapshots yield `not_checked`; an observed document without lists passes. Hosts may supply complete observations through the additive `evaluate_with_structured_lists` API. For Rust EmDash hosts, `evaluate_content_with_list_completeness` accepts an explicit `list_structure_complete` assertion; set it only when all list blocks, including custom components, are represented in order. Existing CMS calls make no such assertion and therefore report this gate as `not_checked`. Observations are advisory, and line 1 is a placeholder rather than a precise list location.
+
+To opt in through the configured EmDash plugin, set `contentPreset.listStructureCompleteByCollection = ["blog_posts"]` only after verifying that the host projects every list block in those collections in order, including any custom components. A missing body or incomplete existing body capabilities still reports `not_checked`. This assertion defaults to off. Direct WASM hosts can set `list_structure_complete: true` on the document under the same condition.
 ### Repeated transition openings
 
 The opt-in `transition-review-en` and `transition-review-fr` presets flag
