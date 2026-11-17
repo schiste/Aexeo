@@ -209,6 +209,50 @@ pub fn builtin_content_presets() -> BTreeMap<String, String> {
             include_str!("../presets/opinion-pacing.toml").into(),
         ),
         (
+            "inline-triples-en".into(),
+            include_str!("../presets/inline-triples-en.toml").into(),
+        ),
+        (
+            "inline-triples-fr".into(),
+            include_str!("../presets/inline-triples-fr.toml").into(),
+        ),
+        (
+            "sentence-rhythm-review".into(),
+            include_str!("../presets/sentence-rhythm-review.toml").into(),
+        ),
+        (
+            "trailing-ing-review-en".into(),
+            include_str!("../presets/trailing-ing-review-en.toml").into(),
+        ),
+        (
+            "punctuation-review".into(),
+            include_str!("../presets/punctuation-review.toml").into(),
+        ),
+        (
+            "news-style-en".into(),
+            include_str!("../presets/news-style-en.toml").into(),
+        ),
+        (
+            "news-style-fr".into(),
+            include_str!("../presets/news-style-fr.toml").into(),
+        ),
+        (
+            "opinion-style-en".into(),
+            include_str!("../presets/opinion-style-en.toml").into(),
+        ),
+        (
+            "opinion-style-fr".into(),
+            include_str!("../presets/opinion-style-fr.toml").into(),
+        ),
+        (
+            "transition-review-en".into(),
+            include_str!("../presets/transition-review-en.toml").into(),
+        ),
+        (
+            "transition-review-fr".into(),
+            include_str!("../presets/transition-review-fr.toml").into(),
+        ),
+        (
             "sentence-openings-review".into(),
             include_str!("../presets/sentence-openings-review.toml").into(),
         ),
@@ -396,6 +440,27 @@ mod tests {
                 .to_string()
                 .contains("maximum depth")
         );
+    }
+
+    #[test]
+    fn style_starters_resolve_and_use_distinct_punctuation_limits() {
+        let sources = builtin_content_presets();
+        for (name, maximum) in [
+            ("news-style-en", 2),
+            ("news-style-fr", 2),
+            ("opinion-style-en", 3),
+            ("opinion-style-fr", 3),
+        ] {
+            let preset = resolve_content_preset(name, &sources).unwrap();
+            assert!(preset.gates.iter().all(|gate| !gate.blocking()));
+            assert!(preset.gates.iter().any(|gate| matches!(gate, ContentGate::RepeatedPunctuation { max_per_paragraph, .. } if *max_per_paragraph == maximum)));
+            assert!(
+                preset
+                    .gates
+                    .iter()
+                    .any(|gate| matches!(gate, ContentGate::SentenceOpeningTerms { .. }))
+            );
+        }
     }
 
     #[test]

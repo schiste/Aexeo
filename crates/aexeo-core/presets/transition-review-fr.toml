@@ -1,0 +1,9 @@
+version = 1
+name = "French transition review"
+
+[[gates]]
+id = "editorial.transition_openings"
+kind = "sentence_opening_terms"
+terms = ["En outre", "De plus", "Par conséquent", "En conclusion"]
+max_per_paragraph = 1
+blocking = false

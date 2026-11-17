@@ -1383,3 +1383,75 @@ its bounds. A gate override replaces the whole gate, rather than merging individ
 Profiles and structured input are bounded; the JSON Schema cannot express all
 of Aexeo's aggregate resource limits. A schema-valid response can therefore
 still be refused if it exceeds those limits.
+
+### Repeated transition openings
+
+The opt-in `transition-review-en` and `transition-review-fr` presets flag
+configured connective expressions at the start of a sentence when their count
+in a paragraph exceeds `max_per_paragraph`. Choose the preset for the actual
+content language; locale is not inferred. The `sentence_opening_terms` gate
+accepts a custom `terms` list, `max_per_paragraph`, `delimiters` and sentence
+`abbreviations`; it is advisory and non-blocking by default. It requires
+paragraphs and reports `not_checked` when the adapter cannot provide them.
+Sentence segmentation is heuristic. These style checks conservatively skip
+sentences containing or inside common double, curly or French quotation marks.
+A quotation left open at a paragraph boundary makes the result `not_checked`;
+straight single quotes are not tracked because they also mark contractions.
+Quotation recognition is heuristic and cannot establish every quoted span.
+The gate never removes or rewrites a transition: it may express an essential causal or
+logical relationship. The finding is an invitation to review the paragraph,
+not evidence of AI authorship or a detector outcome.
+
+```toml
+version = 1
+name = "News transitions"
+extends = ["transition-review-en"]
+
+[[gates]]
+id = "editorial.transition_openings"
+kind = "sentence_opening_terms"
+terms = ["Moreover", "Additionally", "In conclusion"]
+max_per_paragraph = 2
+blocking = false
+```
+
+### Punctuation review
+
+The optional `punctuation-review` preset counts em dashes in each observed
+paragraph and asks for review above the configured limit. The
+`repeated_punctuation` gate accepts a single Unicode punctuation or symbol
+`mark` and a `max_per_paragraph` limit. It is advisory and requires observed
+paragraphs; missing paragraphs are `not_checked`. Counts include punctuation
+inside quotations and other inline prose, and are not linguistic analysis. No
+punctuation is replaced. The composable `news-style-en`, `news-style-fr`, `opinion-style-en`, and
+`opinion-style-fr` starters combine this gate with transition and opening review; their different
+limits are examples for projects to override, not universal standards.
+
+### English trailing clause review
+
+`trailing-ing-review-en` flags a sentence whose last comma is followed by an
+ASCII word ending in `ing`. This is a deliberately narrow surface heuristic:
+it does not parse grammar, identify causation, or establish that the clause is
+unnecessary. It can miss clauses and flag valid wording. Use it only for English
+content, review any candidates in context, and retain all relevant information.
+The gate does not delete clauses. Unavailable paragraphs remain `not_checked`.
+
+### Sentence rhythm review
+
+`sentence-rhythm-review` flags runs of four sentences whose whitespace-separated
+word counts differ by no more than two words. Configure `run_length` (2–64),
+`tolerance_words`, sentence delimiters and abbreviations to fit the content.
+The check resets at paragraph boundaries. It is advisory and uses heuristic
+sentence boundaries; unsupported scripts, unavailable paragraphs and bounded
+input limits are reported as `not_checked`. Similar lengths may be intentional
+and are not evidence of AI authorship.
+
+### Possible inline triples
+
+The opt-in `inline-triples-en` and `inline-triples-fr` presets report surface
+patterns resembling a three-item inline enumeration with a configurable
+conjunction. This is not a dependency parser or a complete list inventory: it
+can miss or misclassify examples, does not inspect structured list boundaries,
+and cannot establish whether an enumeration is repetitive or inappropriate.
+It never deletes or splits an item. Select the correct language explicitly and
+review candidates in context; unavailable paragraphs are `not_checked`.

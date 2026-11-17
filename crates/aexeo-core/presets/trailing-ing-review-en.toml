@@ -1,0 +1,7 @@
+version = 1
+name = "English trailing clause review"
+
+[[gates]]
+id = "editorial.trailing_ing_clause"
+kind = "trailing_ing_clause"
+blocking = false

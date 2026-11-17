@@ -1,0 +1,8 @@
+version = 1
+name = "Possible inline triples, English"
+
+[[gates]]
+id = "editorial.inline_triples"
+kind = "inline_triple_candidates"
+conjunction = "and"
+blocking = false
