@@ -156,6 +156,12 @@ in an isolated environment, then run
 and positive and negative examples with Python `jsonschema`. Schema validation
 cannot detect duplicate JSON keys after parsing or enforce the raw byte limit.
 
+The comparator's opt-in change validation also checks that entity IDs are
+unique, as required by the v1 protocol but not expressible by its JSON Schema.
+The inline and supplied-file content verification modes apply this check too.
+Subject-only comparison remains a compatibility mode and does not validate
+this requirement. No mode establishes input authenticity or freshness.
+
 ## Independent reference verifier
 
 `verify_decision_inputs.py` is a separate Python implementation of manifest

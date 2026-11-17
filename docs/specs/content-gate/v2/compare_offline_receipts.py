@@ -229,6 +229,11 @@ def verify_subject(change_path, expected_digest, verdict, validate_change=False,
             raise VerificationError("invalid change subject fields")
         if validate_change or verify_inline_content or content_files is not None:
             _validate_schema(change, "change.schema.json")
+            # The v1 protocol requires entity IDs to be unique, which its
+            # JSON Schema cannot express for a property of array objects.
+            entity_ids = [entry["entity_id"] for entry in change["entries"]]
+            if len(set(entity_ids)) != len(entity_ids):
+                raise VerificationError("duplicate entity ID")
         if verify_inline_content or content_files is not None:
             verify_content_states(change, {} if content_files is None else content_files)
         entries = []
