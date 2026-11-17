@@ -73,3 +73,7 @@ Existing source and factuality work is outside this plan.
 - Repeated sentence and paragraph opening checks normalize canonically equivalent
   Unicode spellings and preserve combining accents. Regression cases distinguish
   different accents and verify equivalent composed and decomposed text.
+
+- A shared synthetic fixture exercises Unicode-equivalent and distinct openings
+  across Markdown, HTML and real EmDash WASM, including a combining mark split
+  across CMS spans, mapped findings, a revision and aggregate telemetry.

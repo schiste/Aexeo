@@ -221,6 +221,22 @@ const unavailableOpenings = await evaluateContent({ route: "/openings", title: "
 assert.equal(unavailableOpenings.gates[0].status, "not_checked");
 console.log("WASM sentence-opening preset preserves accented coverage and source location");
 
+// Identical fixtures exercise Unicode normalization and location mapping across
+// Markdown, HTML and the actual EmDash WASM bridge, including split spans.
+const unicodeOpenings = JSON.parse(await readFile(new URL("../../../crates/aexeo-cli/tests/fixtures/cross-adapter-openings.json", import.meta.url), "utf8"));
+for (const scenario of unicodeOpenings.cases) {
+  const events = [];
+  const report = await evaluateContent(scenario.document, "workflow", { workflow: unicodeOpenings.preset }, undefined, (event) => events.push(event));
+  assert.deepEqual(report.gates.map((gate) => gate.status), scenario.statuses, scenario.name);
+  assert.ok(!JSON.stringify(events).includes("Café"));
+  if (scenario.name === "equivalent") {
+    assert.equal(report.source_locations.length, 2);
+    assert.deepEqual(report.source_locations.find((location) => location.gate_id === "paragraph"), { gate_id: "paragraph", finding_index: 0, block_index: 1, span_index: 0, utf16_offset: 0 });
+    assert.deepEqual(report.source_locations.find((location) => location.gate_id === "sentence"), { gate_id: "sentence", finding_index: 0, block_index: 0, span_index: 0, utf16_offset: "Café arrive. ".length });
+  }
+}
+console.log("WASM Unicode openings match shared CLI cases and map split spans");
+
 // The same synthetic example is checked by the Markdown and HTML CLI integration test.
 const shared = JSON.parse(await readFile(new URL("../../../crates/aexeo-cli/tests/fixtures/cross-adapter-editorial.json", import.meta.url), "utf8"));
 const sharedTelemetry = [];
