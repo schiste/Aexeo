@@ -885,3 +885,37 @@ allow_relative=true
   assert.equal(badKeys.assessment.gates.find((gate) => gate.gate_id === "links").status, "passed");
   assert.deepEqual(host.logged, []);
 }
+
+// Pacing binds the supplied structured snapshot to the CMS text projection.
+{
+  const preset = `version=1
+name="pacing"
+[[gates]]
+id="editorial.pacing"
+kind="editorial_pacing"
+source="composition"
+projection_separator="\\n"
+profile={version=1,name="test",fields=[{name="hook",max_characters=3},{name="context"}]}
+`;
+  let structured = { hook: "four", context: "context" };
+  const configured = createPlugin(
+    { contentPreset: { name: "pacing", sources: { pacing: preset } } },
+    { evidenceSources: async () => ({ composition: JSON.stringify(structured) }) },
+  );
+  const page = item("pacing", { data: { body: [block("p", "four"), block("p", "context")] } });
+  const host = fakeHost([page]);
+  const evaluate = () => configured.hooks["content:afterSave"].handler(
+    { content: page, collection: "pages", isNew: false }, host.ctx,
+  );
+  const status = () => host.store.get("findings:/pacing").assessment.gates[0].status;
+  await evaluate();
+  assert.equal(status(), "failed");
+  page.data.body = [block("p", "ok"), block("p", "context")];
+  await evaluate();
+  assert.equal(status(), "not_checked");
+  structured = { hook: "ok", context: "context" };
+  await evaluate();
+  assert.equal(status(), "passed");
+  assert.deepEqual(host.logged, []);
+  console.log("WASM editorial pacing binds the complete CMS projection");
+}

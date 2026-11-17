@@ -1336,7 +1336,11 @@ To check an existing document, pass `--document draft.txt` to `composition`.
 The document gate checks the exact adapter-supplied source (or, when unavailable,
 the host-declared complete text projection) against the assembled snapshot before
 making findings. A matching projection does not establish rendered-page equivalence
-or preserve formatting. Missing, malformed, oversized or
+or preserve formatting. The optional gate parameter `projection_separator` specifies
+how a complete adapter text projection joins fields when the original source is
+unavailable. Built-in and exported pacing presets use `"\\n"` for EmDash; hosts
+with another projection can override it. Original source bytes always use the
+profile's assembly separator. Missing, malformed, oversized or
 nonmatching snapshots and unavailable source text are `not_checked`; they are
 not evidence that a document passed. Recreate the structured snapshot after
 editing. This exact-byte check does not authenticate content or verify facts.

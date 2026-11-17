@@ -26,7 +26,7 @@ fn read_bounded(path: &str) -> Result<Vec<u8>> {
 }
 
 pub fn command_composition(args: &ArgMatches) -> Result<i32> {
-    let path = args.get_one::<String>("profile").expect("required profile");
+    let path = crate::commands::common::required_arg(args, "profile")?;
     let profile_bytes = if let Some(profile) = builtin_profile(path) {
         profile.as_bytes().to_vec()
     } else {
@@ -56,6 +56,7 @@ pub fn command_composition(args: &ArgMatches) -> Result<i32> {
                 blocking: false,
                 source: "composition".into(),
                 profile: aexeo_core::editorial_pacing::CompositionProfileRef::Inline(profile),
+                projection_separator: Some("\n".into()),
             }],
         };
         print!("{}", preset.to_toml()?);

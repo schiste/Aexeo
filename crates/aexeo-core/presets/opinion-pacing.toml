@@ -5,6 +5,7 @@ name = "Opinion composition pacing"
 id = "editorial.pacing"
 kind = "editorial_pacing"
 source = "composition"
+projection_separator = "\n"
 profile = "opinion"
 severity = "warning"
 blocking = false

@@ -309,15 +309,23 @@ impl CompositionProfile {
         {
             bail!("composition has invalid structure");
         }
-        let object = input.as_object().expect("assess checked object");
+        let object = input
+            .as_object()
+            .ok_or_else(|| anyhow::anyhow!("composition must be a JSON object"))?;
         let mut parts = Vec::new();
         for field in &self.fields {
-            let value = &object[&field.name];
+            let value = object
+                .get(&field.name)
+                .ok_or_else(|| anyhow::anyhow!("composition field is missing"))?;
             if let Some(text) = value.as_str() {
                 parts.push(text.to_owned());
             } else if let Some(array) = value.as_array() {
                 for item in array {
-                    parts.push(item.as_str().expect("assess checked items").to_owned());
+                    parts.push(
+                        item.as_str()
+                            .ok_or_else(|| anyhow::anyhow!("composition item is not a string"))?
+                            .to_owned(),
+                    );
                 }
             }
         }
@@ -355,6 +363,12 @@ mod tests {
         assert_eq!(schema["properties"]["hook"]["maxLength"], 3);
         let valid = json!({"examples":["one","two"],"hook":"é😀!"});
         assert!(profile.assess(&valid).unwrap().is_empty());
+        assert!(
+            profile
+                .assess(&json!({"hook":"ok", "examples":["a","b","c","d"]}))
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(profile.assemble(&valid).unwrap(), "é😀!\n\none\n\ntwo");
         let bad = json!({"hook":"four", "examples":["a","b","c"]});
         let issues = profile.assess(&bad).unwrap();
@@ -383,6 +397,7 @@ mod tests {
                 blocking: false,
                 source: "composition".into(),
                 profile: CompositionProfileRef::Inline(profile),
+                projection_separator: None,
             }],
         };
         let mut input = ContentInput {

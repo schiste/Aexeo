@@ -696,10 +696,12 @@ mod tests {
 
     #[test]
     fn pacing_checks_complete_projection_and_withholds_partial_projection() {
-        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/x","title":"Title","body":[{"children":[{"_type":"span","text":"four"}]}]}"#).unwrap();
-        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='pacing'\nkind='editorial_pacing'\nsource='composition'\nprofile={version=1,name='test',fields=[{name='hook',max_characters=3}]}\n").unwrap();
-        let snapshots =
-            BTreeMap::from([("composition".to_string(), r#"{"hook":"four"}"#.to_string())]);
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/x","title":"Title","body":[{"children":[{"_type":"span","text":"four"}]},{"children":[{"_type":"span","text":"context"}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='pacing'\nkind='editorial_pacing'\nsource='composition'\nprojection_separator=\"\\n\"\nprofile={version=1,name='test',fields=[{name='hook',max_characters=3},{name='context'}]}\n").unwrap();
+        let snapshots = BTreeMap::from([(
+            "composition".to_string(),
+            r#"{"hook":"four","context":"context"}"#.to_string(),
+        )]);
         let complete = evaluate_content_with_body_capabilities(
             &document,
             &preset,

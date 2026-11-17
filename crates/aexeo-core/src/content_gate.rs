@@ -227,6 +227,8 @@ pub enum ContentGate {
         blocking: bool,
         source: String,
         profile: crate::editorial_pacing::CompositionProfileRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        projection_separator: Option<String>,
     },
     WordCount {
         id: String,
@@ -1245,8 +1247,17 @@ impl ContentPreset {
             }
             match gate {
                 ContentGate::EditorialPacing {
-                    source, profile, ..
+                    source,
+                    profile,
+                    projection_separator,
+                    ..
                 } => {
+                    if projection_separator
+                        .as_ref()
+                        .is_some_and(|separator| separator.len() > 1024)
+                    {
+                        bail!("projection separator is too long for {}", gate.id());
+                    }
                     if source.trim().is_empty() {
                         bail!("composition source name is empty for {}", gate.id());
                     }
@@ -1703,7 +1714,10 @@ impl ContentPreset {
             };
             match gate {
                 ContentGate::EditorialPacing {
-                    source, profile, ..
+                    source,
+                    profile,
+                    projection_separator,
+                    ..
                 } => {
                     let document = input.source_text.as_ref().or(input.text.as_ref());
                     let snapshot = input
@@ -1715,7 +1729,12 @@ impl ContentPreset {
                             if snapshot.len() <= MAX_CONTENT_INPUT_BYTES =>
                         {
                             let parsed = aexeo_contracts::content_gate_change_validation::parse_unique_json_value(snapshot.as_bytes());
-                            let profile = profile.resolve()?;
+                            let mut profile = profile.resolve()?;
+                            if input.source_text.is_none() {
+                                if let Some(separator) = projection_separator {
+                                    profile.separator.clone_from(separator);
+                                }
+                            }
                             match parsed.ok().and_then(|value| {
                                 let issues = profile.assess(&value).ok()?;
                                 let text = profile.assemble_snapshot(&value).ok()?;
