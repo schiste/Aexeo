@@ -1770,7 +1770,15 @@ impl ContentPreset {
             };
             match gate {
                 ContentGate::ListItemCount { flagged_counts, .. } => match lists {
-                    Some(lists) if lists.len() <= MAX_COLLECTION_ITEMS => {
+                    Some(lists)
+                        if lists.len() <= MAX_COLLECTION_ITEMS
+                            && lists.iter().all(|list| {
+                                list.item_count > 0
+                                    && (1..=100).contains(&list.depth)
+                                    && list.line > 0
+                                    && list.column > 0
+                            }) =>
+                    {
                         measurements.insert("lists_observed".into(), lists.len());
                         for (index, list) in lists.iter().enumerate() {
                             if flagged_counts.contains(&list.item_count) {
@@ -1786,7 +1794,9 @@ impl ContentPreset {
                             }
                         }
                     }
-                    Some(_) => reason = Some("too many lists to assess completely".into()),
+                    Some(_) => {
+                        reason = Some("list observations are invalid or exceed the limit".into())
+                    }
                     None => {
                         reason = Some(
                             "complete structured lists are unavailable from this adapter".into(),
@@ -3171,6 +3181,24 @@ mod tests {
             )
             .unwrap();
         assert_eq!(empty.gates[0].status, GateStatus::Passed);
+        let invalid = [crate::markdown_adapter::StructuredList {
+            item_count: 0,
+            depth: 1,
+            line: 1,
+            column: 1,
+        }];
+        let report = preset
+            .evaluate_with_structured_lists(
+                &input,
+                &capabilities,
+                None,
+                None,
+                true,
+                None,
+                Some(&invalid),
+            )
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::NotChecked);
     }
 
     #[test]
