@@ -201,7 +201,9 @@ preset file. A source name is the caller-supplied key, not proof of authorship
 or an authenticated path. Disabled gates are absent. If a custom source uses
 the same key as a built-in, it replaces that built-in before resolution. If the
 CLI receives the same source key more than once, the last supplied source wins.
-The existing `--explain` output remains a standalone resolved preset.
+The existing `--explain` output remains a standalone resolved preset. Optional
+`--telemetry` emits only the number of active gates and whether origins were
+requested, without preset names, paths or rule parameters.
 
 
 Each gate may set `severity` to `error` or `warning` (default), and `blocking` to true (default) or false. Status always reports the gate result; the CLI exits 1 for a failed blocking gate, 2 if a blocking gate was not checked (even if another blocking gate failed), and 0 otherwise. Non-blocking gates still appear in the report, including when they could not be checked. Invalid configuration, invalid presets and unreadable inputs exit 2; 70 is reserved for internal errors in Aexeo. Content is unchanged unless `--fix` is passed explicitly.

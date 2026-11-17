@@ -502,6 +502,36 @@ fn explain_origins_identifies_the_winning_source_without_changing_existing_outpu
     let toml = String::from_utf8(toml.stdout).unwrap();
     assert!(toml.contains("[[gate_origins]]"));
     assert!(toml.contains("source = \"custom\""));
+    let telemetry = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &argument,
+            "--explain",
+            "--explain-origins",
+            "--telemetry",
+        ])
+        .output()
+        .unwrap();
+    assert!(telemetry.status.success());
+    let event: serde_json::Value = serde_json::from_slice(&telemetry.stderr).unwrap();
+    assert_eq!(
+        event,
+        serde_json::json!({"event":"content_preset_explanation", "version":1, "gate_count":3, "origins_included":true})
+    );
+    assert!(!String::from_utf8_lossy(&telemetry.stderr).contains(source.to_str().unwrap()));
+    let plain_telemetry = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(["content", "--preset", "article", "--explain", "--telemetry"])
+        .output()
+        .unwrap();
+    assert!(plain_telemetry.status.success());
+    let event: serde_json::Value = serde_json::from_slice(&plain_telemetry.stderr).unwrap();
+    assert_eq!(
+        event,
+        serde_json::json!({"event":"content_preset_explanation", "version":1, "gate_count":1, "origins_included":false})
+    );
     let no_explain = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
         .args(["content", "--preset", "article", "--explain-origins"])
         .output()

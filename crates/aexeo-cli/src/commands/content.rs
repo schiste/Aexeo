@@ -141,6 +141,12 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
         } else {
             println!("{}", explanation.to_toml()?);
         }
+        if args.get_flag("telemetry") {
+            eprintln!(
+                "{}",
+                serde_json::json!({"event":"content_preset_explanation", "version":1, "gate_count":explanation.preset.gates.len(), "origins_included":true})
+            );
+        }
         return Ok(EXIT_SUCCESS);
     }
     let preset = resolve_content_preset(preset_name, &sources)?;
@@ -149,6 +155,12 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
             println!("{}", serde_json::to_string_pretty(&preset)?);
         } else {
             println!("{}", toml_output(&preset)?);
+        }
+        if args.get_flag("telemetry") {
+            eprintln!(
+                "{}",
+                serde_json::json!({"event":"content_preset_explanation", "version":1, "gate_count":preset.gates.len(), "origins_included":false})
+            );
         }
         return Ok(EXIT_SUCCESS);
     }

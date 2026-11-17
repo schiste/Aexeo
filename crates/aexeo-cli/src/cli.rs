@@ -101,7 +101,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("crawl-engine").long("crawl-engine").value_parser(["http", "playwright"]).default_value("http").help("Crawl engine"))
                 .arg(Arg::new("input-format").long("input-format").value_parser(["text", "paragraph-text", "markdown", "html"]).default_value("text").help("Interpret content as raw text, blank-line-separated paragraphs, Markdown, or static HTML"))
                 .arg(Arg::new("html-scope").long("html-scope").value_parser(["document", "main"]).default_value("document").help("Project the whole static HTML document or its unique main element"))
-                .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).conflicts_with_all(["list-presets", "list-site-groups", "explain"]).help("Write local evaluation timing and aggregate counts as JSON to stderr"))
+                .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).conflicts_with_all(["list-presets", "list-site-groups"]).help("Write local evaluation timing and aggregate counts as JSON to stderr"))
                 .arg(Arg::new("fix").long("fix").action(ArgAction::SetTrue).help("Apply supported safe fixes to a local file"))
                 .arg(Arg::new("no-text").long("no-text").action(ArgAction::SetTrue).help("Do not read a text input"))
                 .arg(Arg::new("list-site-groups").long("list-site-groups").action(ArgAction::SetTrue).help("List native website groups usable in presets"))
