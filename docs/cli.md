@@ -4,6 +4,42 @@
 
 ## Commands
 
+## `editorial-patch`
+
+Propose, review, or explicitly apply source-bound editorial edits
+
+```text
+Propose, review, or explicitly apply source-bound editorial edits
+
+Usage: editorial-patch [OPTIONS] --source <source> <operation>
+
+Arguments:
+  <operation>
+          [possible values: propose, review, apply]
+
+Options:
+      --source <source>
+
+
+      --edits <edits>
+
+
+      --patch <patch>
+
+
+      --output <output>
+          Create a new output file; existing files are never overwritten
+
+      --confirm <confirm>
+          SHA-256 of the exact reviewed proposal file
+
+      --telemetry
+          Emit aggregate counts without document content
+
+  -h, --help
+          Print help
+```
+
 ## `composition`
 
 Inspect and assess a structured editorial composition
