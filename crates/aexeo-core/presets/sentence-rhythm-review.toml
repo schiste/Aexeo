@@ -1,0 +1,9 @@
+version = 1
+name = "Sentence rhythm review"
+
+[[gates]]
+id = "editorial.sentence_rhythm"
+kind = "similar_sentence_lengths"
+run_length = 4
+tolerance_words = 2
+blocking = false

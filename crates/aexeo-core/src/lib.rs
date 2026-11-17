@@ -39,6 +39,7 @@ pub mod plain_text_adapter;
 pub mod plugin;
 pub mod policy;
 pub mod quality;
+pub mod quote_tracking;
 pub mod registry;
 pub mod reporting;
 pub mod robots_rules;
