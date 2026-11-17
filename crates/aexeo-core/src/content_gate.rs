@@ -73,6 +73,10 @@ const MAX_DUPLICATE_PARAGRAPH_BYTES: usize = 16 * 1024;
 const MAX_DUPLICATE_PARAGRAPH_KEYS: usize = 10_000;
 const MAX_DUPLICATE_PARAGRAPH_KEY_BYTES: usize = 4 * 1024 * 1024;
 
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
 // Preserve accents while ignoring outer punctuation. Canonically equivalent
 // Unicode spellings must have the same key; ASCII avoids normalization overhead.
 fn opening_word_key(word: &str) -> String {
@@ -324,6 +328,25 @@ pub enum ContentGate {
         blocking: bool,
         opening_words: usize,
         max_consecutive: usize,
+        #[serde(default = "default_sentence_delimiters")]
+        delimiters: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        abbreviations: Vec<String>,
+    },
+    /// Reviews repeated openings in a bounded sliding sentence window.
+    SentenceOpeningWindow {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default)]
+        blocking: bool,
+        opening_words: usize,
+        window_size: usize,
+        max_occurrences: usize,
+        #[serde(default, skip_serializing_if = "is_false")]
+        window_across_paragraphs: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        ignored_words: Vec<String>,
         #[serde(default = "default_sentence_delimiters")]
         delimiters: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -687,6 +710,7 @@ impl ContentGate {
             | Self::ParagraphLength { severity, .. }
             | Self::RepeatedParagraphOpenings { severity, .. }
             | Self::RepeatedSentenceOpenings { severity, .. }
+            | Self::SentenceOpeningWindow { severity, .. }
             | Self::SentenceOpeningTerms { severity, .. }
             | Self::RepeatedPunctuation { severity, .. }
             | Self::TrailingIngClause { severity, .. }
@@ -727,6 +751,7 @@ impl ContentGate {
             | Self::ParagraphLength { blocking, .. }
             | Self::RepeatedParagraphOpenings { blocking, .. }
             | Self::RepeatedSentenceOpenings { blocking, .. }
+            | Self::SentenceOpeningWindow { blocking, .. }
             | Self::SentenceOpeningTerms { blocking, .. }
             | Self::RepeatedPunctuation { blocking, .. }
             | Self::TrailingIngClause { blocking, .. }
@@ -779,6 +804,7 @@ impl ContentGate {
             | Self::ParagraphCharacterLength { .. }
             | Self::RepeatedParagraphOpenings { .. }
             | Self::RepeatedSentenceOpenings { .. }
+            | Self::SentenceOpeningWindow { .. }
             | Self::SentenceOpeningTerms { .. }
             | Self::RepeatedPunctuation { .. }
             | Self::TrailingIngClause { .. }
@@ -815,6 +841,7 @@ impl ContentGate {
             | Self::ParagraphLength { id, .. }
             | Self::RepeatedParagraphOpenings { id, .. }
             | Self::RepeatedSentenceOpenings { id, .. }
+            | Self::SentenceOpeningWindow { id, .. }
             | Self::SentenceOpeningTerms { id, .. }
             | Self::RepeatedPunctuation { id, .. }
             | Self::TrailingIngClause { id, .. }
@@ -869,7 +896,8 @@ fn editorial_suggestion(gate: &ContentGate) -> Option<&'static str> {
             "Review the connective in context; retain it when it conveys a meaningful relationship.",
         ),
         ContentGate::RepeatedParagraphOpenings { .. }
-        | ContentGate::RepeatedSentenceOpenings { .. } => {
+        | ContentGate::RepeatedSentenceOpenings { .. }
+        | ContentGate::SentenceOpeningWindow { .. } => {
             Some("Review the repeated openings and vary them where repetition is unintended.")
         }
         ContentGate::DuplicateParagraphs { .. } => Some(
@@ -1482,6 +1510,38 @@ impl ContentPreset {
                         gate.id()
                     )
                 }
+                ContentGate::SentenceOpeningWindow {
+                    opening_words,
+                    window_size,
+                    max_occurrences,
+                    ignored_words,
+                    delimiters,
+                    ..
+                } if *opening_words == 0
+                    || *opening_words > 16
+                    || !(2..=64).contains(window_size)
+                    || *max_occurrences == 0
+                    || max_occurrences >= window_size
+                    || delimiters.is_empty()
+                    || ignored_words.len() > 64
+                    || ignored_words.iter().any(|word| {
+                        word.is_empty()
+                            || word.len() > MAX_PARAGRAPH_OPENING_BYTES
+                            || word.split_whitespace().count() != 1
+                            || opening_word_key(word).is_empty()
+                    })
+                    || ignored_words
+                        .iter()
+                        .map(|word| opening_word_key(word))
+                        .collect::<BTreeSet<_>>()
+                        .len()
+                        != ignored_words.len() =>
+                {
+                    bail!(
+                        "sentence opening window needs 1 to 16 opening words, a window of 2 to 64, a positive occurrence limit smaller than the window, delimiters and unique valid ignored words for {}",
+                        gate.id()
+                    )
+                }
                 ContentGate::InlineTripleCandidates {
                     conjunction,
                     delimiters,
@@ -1571,6 +1631,7 @@ impl ContentPreset {
                 ContentGate::SentenceLength { abbreviations, .. }
                 | ContentGate::SentenceCharacterLength { abbreviations, .. }
                 | ContentGate::RepeatedSentenceOpenings { abbreviations, .. }
+                | ContentGate::SentenceOpeningWindow { abbreviations, .. }
                 | ContentGate::SentenceOpeningTerms { abbreviations, .. }
                 | ContentGate::TrailingIngClause { abbreviations, .. }
                 | ContentGate::SimilarSentenceLengths { abbreviations, .. }
@@ -2980,6 +3041,135 @@ impl ContentPreset {
                                         emit(
                                             format!(
                                                 "Sentence opening repeats {consecutive} times consecutively; maximum is {max_consecutive}"
+                                            ),
+                                            line,
+                                            column,
+                                        );
+                                    }
+                                },
+                            );
+                        }
+                        if reason.is_none() && paragraphs.len() > MAX_PARAGRAPH_OPENINGS {
+                            reason = Some("too many paragraphs to assess completely".into());
+                        }
+                        measurements.insert("paragraph_count".into(), paragraphs.len());
+                        measurements.insert("sentences_evaluated".into(), evaluated);
+                        measurements.insert("sentences_skipped".into(), skipped);
+                        measurements.insert("sentences_too_short".into(), too_short);
+                        measurements.insert("sentences_exceeding_limit".into(), exceeding);
+                        if reason.is_none() && skipped > 0 {
+                            reason = Some("some sentence openings could not be assessed using whitespace-separated words".into());
+                        }
+                    } else {
+                        reason = Some("paragraphs are unavailable from this adapter".into());
+                    }
+                }
+                ContentGate::SentenceOpeningWindow {
+                    opening_words,
+                    window_size,
+                    window_across_paragraphs,
+                    max_occurrences,
+                    ignored_words,
+                    delimiters,
+                    abbreviations,
+                    ..
+                } => {
+                    measurements.insert("opening_words".into(), *opening_words);
+                    measurements.insert("window_size".into(), *window_size);
+                    measurements.insert("max_occurrences".into(), *max_occurrences);
+                    let ignored: BTreeSet<String> = ignored_words
+                        .iter()
+                        .map(|word| opening_word_key(word))
+                        .collect();
+                    if let Some(paragraphs) =
+                        context.and_then(|context| context.paragraphs.as_ref())
+                    {
+                        let mut evaluated = 0usize;
+                        let mut skipped = 0usize;
+                        let mut too_short = 0usize;
+                        let mut exceeding = 0usize;
+                        let mut bytes_seen = 0usize;
+                        let mut window = std::collections::VecDeque::<Option<Vec<String>>>::new();
+                        for paragraph in paragraphs.iter().take(MAX_PARAGRAPH_OPENINGS) {
+                            if !window_across_paragraphs {
+                                window.clear();
+                            }
+                            bytes_seen = bytes_seen.saturating_add(paragraph.text.len());
+                            if bytes_seen > MAX_CONTENT_INPUT_BYTES {
+                                reason =
+                                    Some("paragraph text exceeds the supported byte limit".into());
+                                break;
+                            }
+                            for_each_sentence(
+                                &paragraph.text,
+                                paragraph.line,
+                                paragraph.column,
+                                &[],
+                                delimiters,
+                                abbreviations,
+                                |segment, line, column| {
+                                    if segment.trim().is_empty() {
+                                        return;
+                                    }
+                                    let mut bytes = 0usize;
+                                    let mut words = Vec::with_capacity(*opening_words);
+                                    let mut ignored_count = 0usize;
+                                    for word in segment.split_whitespace() {
+                                        bytes = bytes.saturating_add(word.len());
+                                        if bytes > MAX_PARAGRAPH_OPENING_BYTES {
+                                            break;
+                                        }
+                                        let key = opening_word_key(word);
+                                        if words.is_empty() && ignored.contains(&key) {
+                                            ignored_count += 1;
+                                            continue;
+                                        }
+                                        words.push(key);
+                                        if words.len() == *opening_words {
+                                            break;
+                                        }
+                                    }
+                                    // A short sentence in the supported Latin subset cannot
+                                    // contain a complete opening. Other scripts may not use
+                                    // whitespace word boundaries and remain uncertain.
+                                    if bytes <= MAX_PARAGRAPH_OPENING_BYTES
+                                        && words.len() < *opening_words
+                                        && (!words.is_empty() || ignored_count > 0)
+                                        && is_simple_latin_sentence(segment)
+                                        && words.iter().all(|word| !word.is_empty())
+                                    {
+                                        too_short += 1;
+                                        window.push_back(None);
+                                        if window.len() > *window_size {
+                                            window.pop_front();
+                                        }
+                                        return;
+                                    }
+                                    if bytes > MAX_PARAGRAPH_OPENING_BYTES
+                                        || words.len() != *opening_words
+                                        || words.iter().any(String::is_empty)
+                                    {
+                                        skipped += 1;
+                                        window.push_back(None);
+                                        if window.len() > *window_size {
+                                            window.pop_front();
+                                        }
+                                        return;
+                                    }
+                                    evaluated += 1;
+                                    window.push_back(Some(words.clone()));
+                                    if window.len() > *window_size {
+                                        window.pop_front();
+                                    }
+                                    let count = window
+                                        .iter()
+                                        .filter(|entry| entry.as_ref() == Some(&words))
+                                        .count();
+                                    if count > *max_occurrences {
+                                        exceeding += 1;
+                                        emit(
+                                            format!(
+                                                "Sentence opening occurs {count} times in the last {window_size} sentences; maximum is {max_occurrences}; review repetition in context"
                                             ),
                                             line,
                                             column,
@@ -5621,6 +5811,96 @@ terms = ["bad"]
                 "version=1\nname='t'\n[[gates]]\nid='opening'\nkind='repeated_sentence_openings'\n{field}={value}\n"
             );
             assert!(ContentPreset::from_toml(&invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn sentence_opening_window_and_ignored_words_are_configurable() {
+        let config = "version=1\nname='window'\n[[gates]]\nid='opening'\nkind='sentence_opening_window'\nopening_words=1\nwindow_size=5\nmax_occurrences=2\nignored_words=['The','le']\n";
+        let preset = ContentPreset::from_toml(config).unwrap();
+        let input = ContentInput::default();
+        let run = |texts: &[&str]| {
+            let context = ContentContext {
+                paragraphs: Some(
+                    texts
+                        .iter()
+                        .enumerate()
+                        .map(|(i, text)| ContentParagraph {
+                            text: (*text).into(),
+                            line: i + 1,
+                            column: 1,
+                        })
+                        .collect(),
+                ),
+                ..Default::default()
+            };
+            preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates
+                .remove(0)
+        };
+        let repeated = run(&["The team acts. Other people help. team plans. Le team checks."]);
+        assert_eq!(repeated.status, GateStatus::Failed);
+        assert_eq!(repeated.findings.len(), 1);
+        assert!(repeated.findings[0].message.contains("3 times"));
+        assert_eq!(repeated.measurements["window_size"], 5);
+        assert_eq!(repeated.measurements["max_occurrences"], 2);
+        let reset = run(&["Team acts. Team plans.", "Team checks. Other works."]);
+        assert_eq!(reset.status, GateStatus::Passed);
+        let across =
+            ContentPreset::from_toml(&format!("{config}window_across_paragraphs=true\n")).unwrap();
+        let context = ContentContext {
+            paragraphs: Some(vec![
+                ContentParagraph {
+                    text: "Team acts. Team plans.".into(),
+                    line: 1,
+                    column: 1,
+                },
+                ContentParagraph {
+                    text: "Team checks. Other works.".into(),
+                    line: 2,
+                    column: 1,
+                },
+            ]),
+            ..Default::default()
+        };
+        let result = across
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert_eq!(result.gates[0].status, GateStatus::Failed);
+        assert_eq!(result.gates[0].findings[0].line, 2);
+        let falling_out = run(&[
+            "Team acts. Other works. Another helps. Someone waits. Different works. Team checks.",
+        ]);
+        assert_eq!(falling_out.status, GateStatus::Passed);
+        let accent = run(&["Équipe agit. Autre aide. E\u{301}QUIPE planifie. équipe vérifie."]);
+        assert_eq!(accent.status, GateStatus::Failed);
+        assert_eq!(accent.findings.len(), 1);
+        let all_ignored = run(&["The. Team acts. Team plans."]);
+        assert_eq!(all_ignored.status, GateStatus::Passed);
+        assert_eq!(all_ignored.measurements["sentences_too_short"], 1);
+        let long = format!(
+            "Team acts. Team plans. Team checks. {}.",
+            "x".repeat(MAX_PARAGRAPH_OPENING_BYTES + 1)
+        );
+        let unknown = run(&[&long]);
+        assert_eq!(unknown.status, GateStatus::NotChecked);
+        assert_eq!(unknown.findings.len(), 1);
+        for extra in [
+            "window_size=1\nmax_occurrences=1",
+            "window_size=65\nmax_occurrences=2",
+            "window_size=3",
+            "window_across_paragraphs=true",
+            "max_occurrences=2",
+            "window_size=3\nmax_occurrences=3",
+            "ignored_words=['THE','the']",
+            "ignored_words=['two words']",
+        ] {
+            let source = format!(
+                "version=1\nname='bad'\n[[gates]]\nid='opening'\nkind='sentence_opening_window'\nopening_words=1\n{extra}\n"
+            );
+            assert!(ContentPreset::from_toml(&source).is_err(), "{extra}");
         }
     }
 
