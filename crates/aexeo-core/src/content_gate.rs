@@ -330,6 +330,32 @@ pub enum ContentGate {
         mark: char,
         max_per_paragraph: usize,
     },
+    /// Reviews English sentence tails that resemble comma + an -ing word.
+    TrailingIngClause {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default)]
+        blocking: bool,
+        #[serde(default = "default_sentence_delimiters")]
+        delimiters: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        abbreviations: Vec<String>,
+    },
+    /// Reviews runs of sentences with similar whitespace-separated word counts.
+    SimilarSentenceLengths {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default)]
+        blocking: bool,
+        run_length: usize,
+        tolerance_words: usize,
+        #[serde(default = "default_sentence_delimiters")]
+        delimiters: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        abbreviations: Vec<String>,
+    },
     /// Finds exact repeated paragraphs after whitespace normalization.
     DuplicateParagraphs {
         id: String,
@@ -625,6 +651,8 @@ impl ContentGate {
             | Self::RepeatedSentenceOpenings { severity, .. }
             | Self::SentenceOpeningTerms { severity, .. }
             | Self::RepeatedPunctuation { severity, .. }
+            | Self::TrailingIngClause { severity, .. }
+            | Self::SimilarSentenceLengths { severity, .. }
             | Self::DuplicateParagraphs { severity, .. }
             | Self::ParagraphCharacterLength { severity, .. }
             | Self::RepeatedTerms { severity, .. }
@@ -661,6 +689,8 @@ impl ContentGate {
             | Self::RepeatedSentenceOpenings { blocking, .. }
             | Self::SentenceOpeningTerms { blocking, .. }
             | Self::RepeatedPunctuation { blocking, .. }
+            | Self::TrailingIngClause { blocking, .. }
+            | Self::SimilarSentenceLengths { blocking, .. }
             | Self::DuplicateParagraphs { blocking, .. }
             | Self::ParagraphCharacterLength { blocking, .. }
             | Self::RepeatedTerms { blocking, .. }
@@ -709,6 +739,8 @@ impl ContentGate {
             | Self::RepeatedSentenceOpenings { .. }
             | Self::SentenceOpeningTerms { .. }
             | Self::RepeatedPunctuation { .. }
+            | Self::TrailingIngClause { .. }
+            | Self::SimilarSentenceLengths { .. }
             | Self::DuplicateParagraphs { .. } => "paragraphs",
             Self::HeadingHierarchy { .. } => "heading_levels",
             Self::RequiredHeadings { .. }
@@ -741,6 +773,8 @@ impl ContentGate {
             | Self::RepeatedSentenceOpenings { id, .. }
             | Self::SentenceOpeningTerms { id, .. }
             | Self::RepeatedPunctuation { id, .. }
+            | Self::TrailingIngClause { id, .. }
+            | Self::SimilarSentenceLengths { id, .. }
             | Self::DuplicateParagraphs { id, .. }
             | Self::ParagraphCharacterLength { id, .. }
             | Self::RepeatedTerms { id, .. }
@@ -777,6 +811,9 @@ fn editorial_suggestion(gate: &ContentGate) -> Option<&'static str> {
         ContentGate::SentenceLength { .. } | ContentGate::SentenceCharacterLength { .. } => Some(
             "Review the sentence boundary and consider shortening the sentence while preserving its meaning.",
         ),
+        ContentGate::TrailingIngClause { .. } => {
+            Some("Review the clause in context; preserve its facts and any causal relationship.")
+        }
         ContentGate::RepeatedPunctuation { .. } => Some(
             "Review punctuation in context; retain it when it serves the author's meaning or voice.",
         ),
@@ -1385,6 +1422,19 @@ impl ContentPreset {
                         gate.id()
                     )
                 }
+                ContentGate::SimilarSentenceLengths {
+                    run_length,
+                    delimiters,
+                    ..
+                } if *run_length < 2 || *run_length > 64 || delimiters.is_empty() => {
+                    bail!(
+                        "sentence rhythm needs a run of 2 to 64 sentences and delimiters for {}",
+                        gate.id()
+                    );
+                }
+                ContentGate::TrailingIngClause { delimiters, .. } if delimiters.is_empty() => {
+                    bail!("sentence delimiters must not be empty for {}", gate.id());
+                }
                 ContentGate::RepeatedPunctuation { mark, .. }
                     if mark.is_alphanumeric() || mark.is_whitespace() || mark.is_control() =>
                 {
@@ -1448,6 +1498,8 @@ impl ContentPreset {
                 | ContentGate::SentenceCharacterLength { abbreviations, .. }
                 | ContentGate::RepeatedSentenceOpenings { abbreviations, .. }
                 | ContentGate::SentenceOpeningTerms { abbreviations, .. }
+                | ContentGate::TrailingIngClause { abbreviations, .. }
+                | ContentGate::SimilarSentenceLengths { abbreviations, .. }
                     if abbreviations.iter().any(|abbr| {
                         abbr.strip_suffix('.').is_none_or(|word| {
                             word.is_empty()
@@ -2361,6 +2413,135 @@ impl ContentPreset {
                         None => {
                             reason = Some("paragraphs are unavailable from this adapter".into())
                         }
+                    }
+                }
+                ContentGate::SimilarSentenceLengths {
+                    run_length,
+                    tolerance_words,
+                    delimiters,
+                    abbreviations,
+                    ..
+                } => {
+                    measurements.insert("run_length".into(), *run_length);
+                    measurements.insert("tolerance_words".into(), *tolerance_words);
+                    if let Some(paragraphs) =
+                        context.and_then(|context| context.paragraphs.as_ref())
+                    {
+                        let mut bytes_seen = 0usize;
+                        let mut flagged = 0usize;
+                        let mut uncertain = 0usize;
+                        for paragraph in paragraphs.iter().take(MAX_PARAGRAPH_OPENINGS) {
+                            bytes_seen = bytes_seen.saturating_add(paragraph.text.len());
+                            if bytes_seen > MAX_CONTENT_INPUT_BYTES {
+                                reason =
+                                    Some("paragraph text exceeds the supported byte limit".into());
+                                break;
+                            }
+                            let mut lengths = std::collections::VecDeque::new();
+                            for_each_sentence(
+                                &paragraph.text,
+                                paragraph.line,
+                                paragraph.column,
+                                &[],
+                                delimiters,
+                                abbreviations,
+                                |segment, line, column| {
+                                    if segment.trim().is_empty() {
+                                        return;
+                                    }
+                                    if !is_simple_latin_sentence(segment) {
+                                        lengths.clear();
+                                        uncertain += 1;
+                                        return;
+                                    }
+                                    lengths.push_back(segment.split_whitespace().count());
+                                    if lengths.len() > *run_length {
+                                        lengths.pop_front();
+                                    }
+                                    if lengths.len() == *run_length {
+                                        let min = lengths.iter().copied().min().unwrap_or(0);
+                                        let max = lengths.iter().copied().max().unwrap_or(0);
+                                        if max - min <= *tolerance_words {
+                                            flagged += 1;
+                                            emit(
+                                                format!(
+                                                    "A run of {run_length} sentences has similar word counts; review its rhythm in context"
+                                                ),
+                                                line,
+                                                column,
+                                            );
+                                        }
+                                    }
+                                },
+                            );
+                        }
+                        measurements.insert("paragraph_count".into(), paragraphs.len());
+                        measurements.insert("similar_runs".into(), flagged);
+                        if paragraphs.len() > MAX_PARAGRAPH_OPENINGS {
+                            reason = Some("too many paragraphs to assess completely".into());
+                        }
+                        if reason.is_none() && uncertain > 0 {
+                            reason = Some("some sentences use unsupported word boundaries".into());
+                        }
+                    } else {
+                        reason = Some("paragraphs are unavailable from this adapter".into());
+                    }
+                }
+                ContentGate::TrailingIngClause {
+                    delimiters,
+                    abbreviations,
+                    ..
+                } => {
+                    if let Some(paragraphs) =
+                        context.and_then(|context| context.paragraphs.as_ref())
+                    {
+                        let mut bytes_seen = 0usize;
+                        let mut candidates = 0usize;
+                        for paragraph in paragraphs.iter().take(MAX_PARAGRAPH_OPENINGS) {
+                            bytes_seen = bytes_seen.saturating_add(paragraph.text.len());
+                            if bytes_seen > MAX_CONTENT_INPUT_BYTES {
+                                reason =
+                                    Some("paragraph text exceeds the supported byte limit".into());
+                                break;
+                            }
+                            for_each_sentence(
+                                &paragraph.text,
+                                paragraph.line,
+                                paragraph.column,
+                                &[],
+                                delimiters,
+                                abbreviations,
+                                |segment, line, column| {
+                                    if segment.trim_start().starts_with(['"', '\'', '«', '“', '‘'])
+                                    {
+                                        return;
+                                    }
+                                    let Some((prefix, tail)) = segment.rsplit_once(',') else {
+                                        return;
+                                    };
+                                    if prefix.trim().is_empty()
+                                        || !tail.starts_with(char::is_whitespace)
+                                    {
+                                        return;
+                                    }
+                                    let first = tail.split_whitespace().next().unwrap_or_default();
+                                    if first.len() >= 5
+                                        && first.chars().all(|ch| ch.is_ascii_alphabetic())
+                                        && first.to_ascii_lowercase().ends_with("ing")
+                                    {
+                                        candidates += 1;
+                                        emit("Sentence ends with a possible English -ing clause; review it without removing information".into(), line, column);
+                                    }
+                                },
+                            );
+                        }
+                        measurements.insert("paragraph_count".into(), paragraphs.len());
+                        measurements.insert("candidate_clauses".into(), candidates);
+                        if paragraphs.len() > MAX_PARAGRAPH_OPENINGS {
+                            reason = Some("too many paragraphs to assess completely".into());
+                        }
+                    } else {
+                        reason = Some("paragraphs are unavailable from this adapter".into());
                     }
                 }
                 ContentGate::RepeatedPunctuation {
@@ -5133,6 +5314,74 @@ terms = ["bad"]
             );
             assert!(ContentPreset::from_toml(&invalid).is_err());
         }
+    }
+
+    #[test]
+    fn similar_sentence_lengths_reports_runs_and_withholds_uncertain_scripts() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='rhythm'\nkind='similar_sentence_lengths'\nrun_length=3\ntolerance_words=1\n").unwrap();
+        let input = ContentInput {
+            text: Some(String::new()),
+            ..Default::default()
+        };
+        let mut context = ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: "One two three. Four five six. Seven eight nine.".into(),
+                line: 1,
+                column: 1,
+            }]),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert!(!report.gates[0].blocking);
+        assert_eq!(report.gates[0].measurements["similar_runs"], 1);
+        context.paragraphs.as_mut().unwrap()[0].text = "你好世界。".into();
+        assert_eq!(
+            preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::NotChecked
+        );
+        assert_eq!(
+            preset.evaluate(&input).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+    }
+
+    #[test]
+    fn trailing_ing_review_is_english_heuristic_and_preserves_prose() {
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='t'\n[[gates]]\nid='tail'\nkind='trailing_ing_clause'\n",
+        )
+        .unwrap();
+        let text = "Sales rose, increasing profits. One,ring. Plain words.";
+        let input = ContentInput {
+            text: Some(text.into()),
+            ..Default::default()
+        };
+        let context = ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: text.into(),
+                line: 1,
+                column: 1,
+            }]),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert!(!report.gates[0].blocking);
+        assert_eq!(report.gates[0].measurements["candidate_clauses"], 1);
+        assert_eq!(input.text.as_deref(), Some(text));
+        assert_eq!(
+            preset.evaluate(&input).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
     }
 
     #[test]

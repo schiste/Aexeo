@@ -1422,3 +1422,22 @@ inside quotations and other inline prose, and are not linguistic analysis. No
 punctuation is replaced. The composable `news-style-en`, `news-style-fr`, `opinion-style-en`, and
 `opinion-style-fr` starters combine this gate with transition and opening review; their different
 limits are examples for projects to override, not universal standards.
+
+### English trailing clause review
+
+`trailing-ing-review-en` flags a sentence whose last comma is followed by an
+ASCII word ending in `ing`. This is a deliberately narrow surface heuristic:
+it does not parse grammar, identify causation, or establish that the clause is
+unnecessary. It can miss clauses and flag valid wording. Use it only for English
+content, review any candidates in context, and retain all relevant information.
+The gate does not delete clauses. Unavailable paragraphs remain `not_checked`.
+
+### Sentence rhythm review
+
+`sentence-rhythm-review` flags runs of four sentences whose whitespace-separated
+word counts differ by no more than two words. Configure `run_length` (2–64),
+`tolerance_words`, sentence delimiters and abbreviations to fit the content.
+The check resets at paragraph boundaries. It is advisory and uses heuristic
+sentence boundaries; unsupported scripts, unavailable paragraphs and bounded
+input limits are reported as `not_checked`. Similar lengths may be intentional
+and are not evidence of AI authorship.

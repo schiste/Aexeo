@@ -1,6 +1,6 @@
 version = 1
 name = "Opinion style review, French"
-extends = ["transition-review-fr", "punctuation-review", "sentence-openings-review", "natural-style-fr"]
+extends = ["transition-review-fr", "punctuation-review", "sentence-openings-review", "sentence-rhythm-review", "natural-style-fr"]
 
 [[gates]]
 id = "editorial.em_dashes"
