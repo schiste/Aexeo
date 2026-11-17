@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import review
@@ -83,13 +84,26 @@ class TestSyntaxAdapter(unittest.TestCase):
         with self.assertRaises(ValueError):
             review.parameters({**PARAMS, "extra": "x"})
 
+    def test_missing_attestation_or_parser_error_omits_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            (path / "input.json").write_text('{"text":"First. Second."}')
+            (path / "params.json").write_text(json.dumps(PARAMS))
+            arguments = ["review.py", str(path / "input.json"), str(path / "params.json")]
+            for extra in ([], ["--text-complete"]):
+                fake_spacy = type("Fake", (), {"load": staticmethod(lambda name: (_ for _ in ()).throw(RuntimeError("private content")))})()
+                with self.subTest(extra=extra), patch.object(sys, "argv", arguments + extra), patch.dict(sys.modules, {"spacy": fake_spacy}), contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+                    self.assertEqual(review.main(), 0)
+                    self.assertEqual(json.loads(out.getvalue()), [])
+                    self.assertNotIn("private content", err.getvalue())
+
     def test_actual_cli_without_spacy_produces_no_extension_result(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
             (path / "input.json").write_text('{"text":"First. Second."}')
             (path / "params.json").write_text(json.dumps(PARAMS))
             # -S guarantees spaCy is absent regardless of the developer environment.
-            result = subprocess.run([sys.executable, "-S", str(Path(review.__file__)), str(path / "input.json"), str(path / "params.json")], capture_output=True, text=True, check=True)
+            result = subprocess.run([sys.executable, "-S", str(Path(review.__file__)), str(path / "input.json"), str(path / "params.json"), "--text-complete"], capture_output=True, text=True, check=True)
             self.assertEqual(json.loads(result.stdout), [])
             self.assertIn("not checked", result.stderr)
 

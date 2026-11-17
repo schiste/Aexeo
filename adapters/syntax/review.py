@@ -126,6 +126,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", help="private JSON produced by --export-adapter-input")
     parser.add_argument("parameters", help="JSON string map matching the preset's gate parameters")
+    parser.add_argument("--text-complete", action="store_true", help="attest that the projected text covers the whole intended content")
     args = parser.parse_args()
     try:
         with open(args.input, encoding="utf-8") as handle:
@@ -134,10 +135,13 @@ def main():
             config = json.load(handle)
         parameters(config)
         try:
+            if not args.text_complete:
+                raise Unavailable("text coverage not attested")
             import spacy
             nlp = spacy.load(config["model"])
             result = evaluate(data, config, nlp)
-        except (ImportError, OSError, Unavailable) as exc:
+        except Exception as exc:  # Untrusted parser failures are never a clean pass.
+
             print(f"syntax gate not checked: {type(exc).__name__}", file=sys.stderr)
             result = []
         json.dump(result, sys.stdout, ensure_ascii=False)
