@@ -4,6 +4,7 @@ pub mod config;
 pub mod content;
 pub mod content_change;
 pub mod docs;
+pub mod editorial_patch;
 pub mod exit_code;
 pub mod facts;
 pub mod feedback;
