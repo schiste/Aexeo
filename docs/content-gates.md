@@ -1441,3 +1441,13 @@ The check resets at paragraph boundaries. It is advisory and uses heuristic
 sentence boundaries; unsupported scripts, unavailable paragraphs and bounded
 input limits are reported as `not_checked`. Similar lengths may be intentional
 and are not evidence of AI authorship.
+
+### Possible inline triples
+
+The opt-in `inline-triples-en` and `inline-triples-fr` presets report surface
+patterns resembling a three-item inline enumeration with a configurable
+conjunction. This is not a dependency parser or a complete list inventory: it
+can miss or misclassify examples, does not inspect structured list boundaries,
+and cannot establish whether an enumeration is repetitive or inappropriate.
+It never deletes or splits an item. Select the correct language explicitly and
+review candidates in context; unavailable paragraphs are `not_checked`.

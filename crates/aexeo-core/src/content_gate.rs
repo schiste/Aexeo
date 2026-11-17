@@ -356,6 +356,19 @@ pub enum ContentGate {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         abbreviations: Vec<String>,
     },
+    /// Flags surface-form candidates for three coordinated inline items.
+    InlineTripleCandidates {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default)]
+        blocking: bool,
+        conjunction: String,
+        #[serde(default = "default_sentence_delimiters")]
+        delimiters: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        abbreviations: Vec<String>,
+    },
     /// Finds exact repeated paragraphs after whitespace normalization.
     DuplicateParagraphs {
         id: String,
@@ -653,6 +666,7 @@ impl ContentGate {
             | Self::RepeatedPunctuation { severity, .. }
             | Self::TrailingIngClause { severity, .. }
             | Self::SimilarSentenceLengths { severity, .. }
+            | Self::InlineTripleCandidates { severity, .. }
             | Self::DuplicateParagraphs { severity, .. }
             | Self::ParagraphCharacterLength { severity, .. }
             | Self::RepeatedTerms { severity, .. }
@@ -691,6 +705,7 @@ impl ContentGate {
             | Self::RepeatedPunctuation { blocking, .. }
             | Self::TrailingIngClause { blocking, .. }
             | Self::SimilarSentenceLengths { blocking, .. }
+            | Self::InlineTripleCandidates { blocking, .. }
             | Self::DuplicateParagraphs { blocking, .. }
             | Self::ParagraphCharacterLength { blocking, .. }
             | Self::RepeatedTerms { blocking, .. }
@@ -741,6 +756,7 @@ impl ContentGate {
             | Self::RepeatedPunctuation { .. }
             | Self::TrailingIngClause { .. }
             | Self::SimilarSentenceLengths { .. }
+            | Self::InlineTripleCandidates { .. }
             | Self::DuplicateParagraphs { .. } => "paragraphs",
             Self::HeadingHierarchy { .. } => "heading_levels",
             Self::RequiredHeadings { .. }
@@ -775,6 +791,7 @@ impl ContentGate {
             | Self::RepeatedPunctuation { id, .. }
             | Self::TrailingIngClause { id, .. }
             | Self::SimilarSentenceLengths { id, .. }
+            | Self::InlineTripleCandidates { id, .. }
             | Self::DuplicateParagraphs { id, .. }
             | Self::ParagraphCharacterLength { id, .. }
             | Self::RepeatedTerms { id, .. }
@@ -1422,6 +1439,20 @@ impl ContentPreset {
                         gate.id()
                     )
                 }
+                ContentGate::InlineTripleCandidates {
+                    conjunction,
+                    delimiters,
+                    ..
+                } if conjunction.is_empty()
+                    || conjunction.len() > 32
+                    || !conjunction.chars().all(char::is_alphabetic)
+                    || delimiters.is_empty() =>
+                {
+                    bail!(
+                        "inline triple candidates need a bounded alphabetic conjunction and sentence delimiters for {}",
+                        gate.id()
+                    );
+                }
                 ContentGate::SimilarSentenceLengths {
                     run_length,
                     delimiters,
@@ -1500,6 +1531,7 @@ impl ContentPreset {
                 | ContentGate::SentenceOpeningTerms { abbreviations, .. }
                 | ContentGate::TrailingIngClause { abbreviations, .. }
                 | ContentGate::SimilarSentenceLengths { abbreviations, .. }
+                | ContentGate::InlineTripleCandidates { abbreviations, .. }
                     if abbreviations.iter().any(|abbr| {
                         abbr.strip_suffix('.').is_none_or(|word| {
                             word.is_empty()
@@ -2413,6 +2445,69 @@ impl ContentPreset {
                         None => {
                             reason = Some("paragraphs are unavailable from this adapter".into())
                         }
+                    }
+                }
+                ContentGate::InlineTripleCandidates {
+                    conjunction,
+                    delimiters,
+                    abbreviations,
+                    ..
+                } => {
+                    if let Some(paragraphs) =
+                        context.and_then(|context| context.paragraphs.as_ref())
+                    {
+                        let marker = format!(" {} ", conjunction.to_lowercase());
+                        let mut bytes_seen = 0usize;
+                        let mut candidates = 0usize;
+                        for paragraph in paragraphs.iter().take(MAX_PARAGRAPH_OPENINGS) {
+                            bytes_seen = bytes_seen.saturating_add(paragraph.text.len());
+                            if bytes_seen > MAX_CONTENT_INPUT_BYTES {
+                                reason =
+                                    Some("paragraph text exceeds the supported byte limit".into());
+                                break;
+                            }
+                            for_each_sentence(
+                                &paragraph.text,
+                                paragraph.line,
+                                paragraph.column,
+                                &[],
+                                delimiters,
+                                abbreviations,
+                                |segment, line, column| {
+                                    let segment = segment.trim();
+                                    if segment.starts_with(['"', '\'', '«', '“', '‘']) {
+                                        return;
+                                    }
+                                    let folded = segment.to_lowercase();
+                                    let Some((left, right)) = folded.rsplit_once(&marker) else {
+                                        return;
+                                    };
+                                    let left = left.trim_end_matches(',').trim_end();
+                                    let Some((first, second)) = left.rsplit_once(',') else {
+                                        return;
+                                    };
+                                    let valid_item = |part: &str| {
+                                        let part = part.trim();
+                                        !part.is_empty()
+                                            && part.split_whitespace().count() <= 6
+                                            && !part.contains(',')
+                                            && part.chars().any(char::is_alphabetic)
+                                    };
+                                    if valid_item(first) && valid_item(second) && valid_item(right)
+                                    {
+                                        candidates += 1;
+                                        emit("Possible three-item inline enumeration; review whether the repetition is intentional".into(), line, column);
+                                    }
+                                },
+                            );
+                        }
+                        measurements.insert("paragraph_count".into(), paragraphs.len());
+                        measurements.insert("candidate_enumerations".into(), candidates);
+                        if paragraphs.len() > MAX_PARAGRAPH_OPENINGS {
+                            reason = Some("too many paragraphs to assess completely".into());
+                        }
+                    } else {
+                        reason = Some("paragraphs are unavailable from this adapter".into());
                     }
                 }
                 ContentGate::SimilarSentenceLengths {
@@ -5314,6 +5409,36 @@ terms = ["bad"]
             );
             assert!(ContentPreset::from_toml(&invalid).is_err());
         }
+    }
+
+    #[test]
+    fn inline_triple_candidates_preserve_all_items_and_respect_configuration() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='triples'\nkind='inline_triple_candidates'\nconjunction='and'\n").unwrap();
+        let text = "We have apples, pears, and plums. We have red and blue.";
+        let input = ContentInput {
+            text: Some(text.into()),
+            ..Default::default()
+        };
+        let context = ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: text.into(),
+                line: 1,
+                column: 1,
+            }]),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert!(!report.gates[0].blocking);
+        assert_eq!(report.gates[0].measurements["candidate_enumerations"], 1);
+        assert_eq!(input.text.as_deref(), Some(text));
+        assert_eq!(
+            preset.evaluate(&input).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+        assert!(ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='x'\nkind='inline_triple_candidates'\nconjunction='and or'\n").is_err());
     }
 
     #[test]

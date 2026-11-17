@@ -953,6 +953,31 @@ mod tests {
     }
 
     #[test]
+    fn inline_triple_candidate_maps_to_source_and_withholds_partial_text() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/t","title":"T","body":[{"children":[{"_type":"span","text":"We have apples, pears, and plums."}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='triples'\nkind='inline_triple_candidates'\nconjunction='and'\n").unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        let locations = source_locations(&document, &preset, &report);
+        assert_eq!(
+            (
+                locations[0].block_index,
+                locations[0].span_index,
+                locations[0].utf16_offset
+            ),
+            (0, 0, 0)
+        );
+        let partial = evaluate_content_with_body_capabilities(
+            &document,
+            &preset,
+            None,
+            [true, true, false, true],
+        )
+        .unwrap();
+        assert_eq!(partial.gates[0].status, GateStatus::NotChecked);
+    }
+
+    #[test]
     fn duplicate_paragraph_maps_to_emdash_block() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/t","title":"T","body":[{"children":[{"_type":"span","text":"Repeated prose."}]},{"children":[{"_type":"span","text":"Repeated prose."}]}]}"#).unwrap();
         let preset = ContentPreset::from_toml("version=1\nname='review'\n[[gates]]\nid='dupe'\nkind='duplicate_paragraphs'\nmax_occurrences=1\n").unwrap();
