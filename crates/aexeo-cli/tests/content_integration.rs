@@ -817,6 +817,8 @@ fn windowed_openings_report_cli_positions_and_missing_input() {
         .args([
             "content",
             "-",
+            "--input-format",
+            "paragraph-text",
             "--preset",
             "custom",
             "--preset-source",
@@ -839,7 +841,7 @@ fn windowed_openings_report_cli_positions_and_missing_input() {
     let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(report["gates"][0]["status"], "failed");
     assert_eq!(report["gates"][0]["findings"][0]["line"], 1);
-    assert_eq!(report["gates"][0]["findings"][0]["column"], 40);
+    assert_eq!(report["gates"][0]["findings"][0]["column"], 41);
     let missing = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
         .args([
             "content",

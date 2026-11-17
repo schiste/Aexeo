@@ -92,7 +92,7 @@ ignored_words=["the"]
 `;
 const openingWindow = await evaluateContent({route:"/window", title:"Window", body:[{children:[{_type:"span", text:"The team plans. Other works. Team acts. The team checks."}]}]}, "test", {test:openingWindowPreset});
 assert.equal(openingWindow.gates[0].status, "failed");
-assert.equal(openingWindow.source_locations[0].utf16_offset, 39);
+assert.equal(openingWindow.source_locations[0].utf16_offset, 40);
 assert.equal(openingWindow.source_mapping.mapped, 1);
 const unavailableWindow = await evaluateContent({route:"/window", title:"Window", body:[], body_capabilities:[]}, "test", {test:openingWindowPreset});
 assert.equal(unavailableWindow.gates[0].status, "not_checked");

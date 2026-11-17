@@ -447,6 +447,16 @@ mod tests {
     }
 
     #[test]
+    fn windowed_openings_starter_is_discoverable_and_advisory() {
+        let sources = builtin_content_presets();
+        let preset = resolve_content_preset("sentence-opening-window-review", &sources).unwrap();
+        assert_eq!(preset.gates.len(), 1);
+        assert!(
+            matches!(&preset.gates[0], ContentGate::SentenceOpeningWindow { window_size: 6, max_occurrences: 2, ignored_words, blocking: false, .. } if ignored_words.is_empty())
+        );
+    }
+
+    #[test]
     fn style_starters_resolve_and_use_distinct_punctuation_limits() {
         let sources = builtin_content_presets();
         for (name, maximum) in [
