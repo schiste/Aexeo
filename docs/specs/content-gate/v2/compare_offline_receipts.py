@@ -87,6 +87,14 @@ def validate_verdict(verdict):
     """Validate the public v1 verdict schema and counts."""
     _validate_schema(verdict, "verdict.schema.json")
     checks = verdict["checks"]
+    # Ambiguous IDs make check references impossible to interpret. A finding
+    # may omit check_id in v1, but an explicit reference must resolve exactly.
+    check_ids = {check["id"] for check in checks}
+    if len(check_ids) != len(checks):
+        raise VerificationError("duplicate check ID")
+    if any("check_id" in finding and finding["check_id"] not in check_ids
+           for finding in verdict["findings"]):
+        raise VerificationError("finding references an unknown check")
     summary = verdict["summary"]
     expected = {
         "checks": len(checks),

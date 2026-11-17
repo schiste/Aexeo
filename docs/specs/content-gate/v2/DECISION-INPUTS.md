@@ -245,7 +245,9 @@ or a v2 verdict. The exact artifact format remains Aexeo-specific.
 
 The opt-in `--validate-verdicts` additionally checks both v1 verdicts against
 `v1/verdict.schema.json`, including RFC 3339 timestamps, and verifies summary
-counts and status precedence against the reported checks. Install the pinned
+counts and status precedence against the reported checks. It also requires unique
+check IDs and rejects a finding whose explicit `check_id` is absent from the
+verdict; a finding without a `check_id` remains valid under v1. Install the pinned
 `requirements-test.txt` dependencies in an isolated environment first. Missing
 schema-validation or date-time support fails closed. Without this flag the
 comparator continues to check only the envelope. Schema and consistency checks
