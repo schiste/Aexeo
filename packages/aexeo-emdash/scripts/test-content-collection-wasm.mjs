@@ -101,7 +101,7 @@ kind="inline_triple_candidates"
 conjunction="and"
 `;
 const styleDocument = { route: "/style", title: "Style", body: [
-  { children: [{ _type: "span", text: "Moreover, apples, pears, and plums. The team acted, increasing the total. A — B — C." }] },
+  { children: [{ _type: "span", text: "Moreover, an introduction. We have apples, pears, and plums. The team acted, increasing the total. A — B — C." }] },
 ] };
 const styleReport = await evaluateContent(styleDocument, "test", { test: stylePreset });
 for (const id of ["transitions", "punctuation", "tail", "triples"]) {

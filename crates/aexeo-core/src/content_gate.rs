@@ -96,11 +96,26 @@ fn is_simple_latin_sentence(text: &str) -> bool {
     text.chars().all(|ch| {
         ch.is_ascii()
             || ch.is_whitespace()
-            || matches!(ch, '«' | '»' | '“' | '”' | '‘' | '’' | '–' | '—')
+            || matches!(ch, '«' | '»' | '“' | '”' | '‘' | '–' | '—')
             || (ch.is_alphabetic()
                 && matches!(ch, '\u{00c0}'..='\u{024f}' | '\u{1e00}'..='\u{1eff}'))
             || matches!(ch, '\u{0300}'..='\u{036f}')
     })
+}
+
+// Sentence slices originate in `text`; use their byte offset so quote state also
+// includes delimiters and closing marks skipped by sentence segmentation.
+fn sentence_is_quoted(
+    tracker: &mut crate::quote_tracking::QuoteTracker<'_>,
+    text: &str,
+    segment: &str,
+) -> bool {
+    let segment = segment.trim_start();
+    let offset = segment.as_ptr() as usize - text.as_ptr() as usize;
+    tracker.quoted_at(offset)
+        || segment
+            .chars()
+            .any(|ch| matches!(ch, '"' | '«' | '»' | '“' | '”' | '‘'))
 }
 
 fn for_each_sentence(
@@ -2466,6 +2481,8 @@ impl ContentPreset {
                                     Some("paragraph text exceeds the supported byte limit".into());
                                 break;
                             }
+                            let mut quotes =
+                                crate::quote_tracking::QuoteTracker::new(&paragraph.text);
                             for_each_sentence(
                                 &paragraph.text,
                                 paragraph.line,
@@ -2474,6 +2491,9 @@ impl ContentPreset {
                                 delimiters,
                                 abbreviations,
                                 |segment, line, column| {
+                                    if sentence_is_quoted(&mut quotes, &paragraph.text, segment) {
+                                        return;
+                                    }
                                     let segment = segment.trim();
                                     if segment.starts_with(['"', '\'', '«', '“', '‘']) {
                                         return;
@@ -2500,6 +2520,12 @@ impl ContentPreset {
                                     }
                                 },
                             );
+                            if !quotes.finish() {
+                                reason = Some(
+                                    "a quotation continues beyond the observed paragraph".into(),
+                                );
+                                break;
+                            }
                         }
                         measurements.insert("paragraph_count".into(), paragraphs.len());
                         measurements.insert("candidate_enumerations".into(), candidates);
@@ -2533,6 +2559,8 @@ impl ContentPreset {
                                 break;
                             }
                             let mut lengths = std::collections::VecDeque::new();
+                            let mut quotes =
+                                crate::quote_tracking::QuoteTracker::new(&paragraph.text);
                             for_each_sentence(
                                 &paragraph.text,
                                 paragraph.line,
@@ -2541,6 +2569,10 @@ impl ContentPreset {
                                 delimiters,
                                 abbreviations,
                                 |segment, line, column| {
+                                    if sentence_is_quoted(&mut quotes, &paragraph.text, segment) {
+                                        lengths.clear();
+                                        return;
+                                    }
                                     if segment.trim().is_empty() {
                                         return;
                                     }
@@ -2569,6 +2601,12 @@ impl ContentPreset {
                                     }
                                 },
                             );
+                            if !quotes.finish() {
+                                reason = Some(
+                                    "a quotation continues beyond the observed paragraph".into(),
+                                );
+                                break;
+                            }
                         }
                         measurements.insert("paragraph_count".into(), paragraphs.len());
                         measurements.insert("similar_runs".into(), flagged);
@@ -2599,6 +2637,8 @@ impl ContentPreset {
                                     Some("paragraph text exceeds the supported byte limit".into());
                                 break;
                             }
+                            let mut quotes =
+                                crate::quote_tracking::QuoteTracker::new(&paragraph.text);
                             for_each_sentence(
                                 &paragraph.text,
                                 paragraph.line,
@@ -2607,6 +2647,9 @@ impl ContentPreset {
                                 delimiters,
                                 abbreviations,
                                 |segment, line, column| {
+                                    if sentence_is_quoted(&mut quotes, &paragraph.text, segment) {
+                                        return;
+                                    }
                                     if segment.trim_start().starts_with(['"', '\'', '«', '“', '‘'])
                                     {
                                         return;
@@ -2629,6 +2672,12 @@ impl ContentPreset {
                                     }
                                 },
                             );
+                            if !quotes.finish() {
+                                reason = Some(
+                                    "a quotation continues beyond the observed paragraph".into(),
+                                );
+                                break;
+                            }
                         }
                         measurements.insert("paragraph_count".into(), paragraphs.len());
                         measurements.insert("candidate_clauses".into(), candidates);
@@ -2703,6 +2752,8 @@ impl ContentPreset {
                                 break;
                             }
                             let mut in_paragraph = 0usize;
+                            let mut quotes =
+                                crate::quote_tracking::QuoteTracker::new(&paragraph.text);
                             for_each_sentence(
                                 &paragraph.text,
                                 paragraph.line,
@@ -2711,6 +2762,9 @@ impl ContentPreset {
                                 delimiters,
                                 abbreviations,
                                 |segment, line, column| {
+                                    if sentence_is_quoted(&mut quotes, &paragraph.text, segment) {
+                                        return;
+                                    }
                                     let segment = segment.trim_start();
                                     // Do not propose changes inside explicitly quoted openings.
                                     if segment.starts_with(['"', '\'', '«', '“', '‘']) {
@@ -2739,6 +2793,12 @@ impl ContentPreset {
                                     }
                                 },
                             );
+                            if !quotes.finish() {
+                                reason = Some(
+                                    "a quotation continues beyond the observed paragraph".into(),
+                                );
+                                break;
+                            }
                         }
                         measurements.insert("paragraph_count".into(), paragraphs.len());
                         measurements.insert("matching_openings".into(), matches);
@@ -5409,6 +5469,61 @@ terms = ["bad"]
             );
             assert!(ContentPreset::from_toml(&invalid).is_err());
         }
+    }
+
+    #[test]
+    fn style_gates_skip_multisentence_quotes_and_report_unclosed_quotes() {
+        let preset = ContentPreset::from_toml("version=1\nname='quotes'\n[[gates]]\nid='opening'\nkind='sentence_opening_terms'\nterms=['Moreover']\nmax_per_paragraph=0\n[[gates]]\nid='tail'\nkind='trailing_ing_clause'\n[[gates]]\nid='list'\nkind='inline_triple_candidates'\nconjunction='and'\n").unwrap();
+        let input = ContentInput::default();
+        let context = |text: &str| ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: text.into(),
+                line: 1,
+                column: 1,
+            }]),
+            ..Default::default()
+        };
+        for text in [
+            "Before. “First sentence. Moreover, apples, pears, and plums. It grew, increasing sales.” After.",
+            "Before. « First sentence. Moreover, apples, pears, and plums. It grew, increasing sales. » After.",
+            "Before. \"First sentence. Moreover, apples, pears, and plums. It grew, increasing sales.\" After.",
+        ] {
+            let report = preset
+                .evaluate_with_context(&input, None, None, Some(&context(text)))
+                .unwrap();
+            assert!(
+                report
+                    .gates
+                    .iter()
+                    .all(|gate| gate.status == GateStatus::Passed),
+                "{text}: {:?}",
+                report.gates
+            );
+        }
+        let report = preset
+            .evaluate_with_context(
+                &input,
+                None,
+                None,
+                Some(&context("Before. “First. Moreover, unclosed.")),
+            )
+            .unwrap();
+        assert!(
+            report
+                .gates
+                .iter()
+                .all(|gate| gate.status == GateStatus::NotChecked)
+        );
+        let report = preset
+            .evaluate_with_context(
+                &input,
+                None,
+                None,
+                Some(&context("“Quoted. Moreover, ignored.” Moreover, reviewed.")),
+            )
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[0].findings.len(), 1);
     }
 
     #[test]

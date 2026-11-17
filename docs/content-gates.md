@@ -1393,8 +1393,12 @@ content language; locale is not inferred. The `sentence_opening_terms` gate
 accepts a custom `terms` list, `max_per_paragraph`, `delimiters` and sentence
 `abbreviations`; it is advisory and non-blocking by default. It requires
 paragraphs and reports `not_checked` when the adapter cannot provide them.
-Sentence segmentation is heuristic. Quoted openings are skipped, and the gate
-never removes or rewrites a transition: it may express an essential causal or
+Sentence segmentation is heuristic. These style checks conservatively skip
+sentences containing or inside common double, curly or French quotation marks.
+A quotation left open at a paragraph boundary makes the result `not_checked`;
+straight single quotes are not tracked because they also mark contractions.
+Quotation recognition is heuristic and cannot establish every quoted span.
+The gate never removes or rewrites a transition: it may express an essential causal or
 logical relationship. The finding is an invitation to review the paragraph,
 not evidence of AI authorship or a detector outcome.
 
