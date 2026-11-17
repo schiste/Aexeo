@@ -2,6 +2,8 @@ use crate::commands::common::required_arg;
 use aexeo_core::editorial_patch::{self, EditorialEdit, EditorialPatch, MAX_PATCH_BYTES};
 use anyhow::{Context, Result, ensure};
 use clap::ArgMatches;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
@@ -28,6 +30,19 @@ pub fn command_editorial_patch(matches: &ArgMatches) -> Result<i32> {
     let operation = required_arg(matches, "operation")?;
     let edits_count;
     match operation {
+        "suggest-transitions" => {
+            let language = required_arg(matches, "language")?;
+            let _declared_format = required_arg(matches, "input-format")?;
+            let result = aexeo_core::editorial_transition_suggestions::suggest(&source, language)?;
+            edits_count = match &result {
+                aexeo_core::editorial_transition_suggestions::TransitionSuggestion::Proposed {
+                    patch,
+                    ..
+                } => patch.edits.len(),
+                _ => 0,
+            };
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
         "propose" => {
             let path = required_arg(matches, "edits")?;
             let edits: Vec<EditorialEdit> = parse(&read_bounded(path)?)?;
@@ -59,9 +74,11 @@ pub fn command_editorial_patch(matches: &ArgMatches) -> Result<i32> {
                     read_bounded(source_path)? == source.as_bytes(),
                     "source changed during application"
                 );
-                let mut file = OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
+                let mut options = OpenOptions::new();
+                options.write(true).create_new(true);
+                #[cfg(unix)]
+                options.mode(0o600);
+                let mut file = options
                     .open(output)
                     .context("cannot create output; existing files are never overwritten")?;
                 file.write_all(result.as_bytes())?;

@@ -15,6 +15,7 @@ pub mod docs;
 pub mod editorial_pacing;
 pub mod editorial_patch;
 pub mod editorial_rules;
+pub mod editorial_transition_suggestions;
 pub mod error;
 pub mod fix;
 pub mod generate;
