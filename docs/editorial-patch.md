@@ -38,3 +38,11 @@ A future opt-in English/French proposal generator needs all of the following bef
 - Tests covering duplicate expressions, NFC/decomposed Unicode, multibyte offsets, nested quotations, inline and fenced code, links and their labels, malformed markup, incomplete source maps, mixed CMS blocks, both locales, stale sources, and idempotent proposal generation.
 
 Until those contracts exist, agents can manually author and review source-bound edits, while the transition gate only reports observations.
+
+## Optional transition suggestions for declared plain text
+
+`editorial-patch suggest-transitions --source draft.txt --language en --input-format text` is an explicit opt-in. It returns JSON with `status: proposed`, `abstained`, or `no_candidates`. A proposal contains `heuristic: true` and a source-bound `patch`; it does not change any file. For a proposed result, save the `patch` object as a JSON file, run `editorial-patch review`, inspect the diff and context, and only then use `apply` with the reviewed proposal hash. Re-run the appropriate content gates. This does not create or publish a CMS change.
+
+This first version considers only the first line of each paragraph, exact English/French terms selected from the built-in transition presets, a comma followed by one space, and a lowercase first character with an unambiguous Unicode uppercase form. It preserves original byte offsets and line endings. It does not suggest deleting causal or concluding connectives; even additive transitions can carry meaning, so review remains essential. It is not a semantic-preservation check, a quality score, or an AI-authorship detector.
+
+The command abstains for the whole document when it detects possible quotations, links, code, markup, unsupported punctuation, decomposed accents, or ambiguous syntax. This intentionally creates false negatives. The `text` declaration and scanner do not prove that every protected context is absent: an unmarked quotation, code fragment, or host-recognized link may look like ordinary prose. Only use the feature when the host supplies the complete original plain-text document and the editor can review context; never treat it as suitable for automatically rewriting Markdown, HTML, or CMS projections. Suggestions are based on paragraph openings rather than on a particular gate finding or threshold.

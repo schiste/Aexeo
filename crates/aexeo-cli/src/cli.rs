@@ -8,8 +8,10 @@ pub fn build_cli() -> Command {
         .subcommand(
             Command::new("editorial-patch")
                 .about("Propose, review, or explicitly apply source-bound editorial edits")
-                .arg(Arg::new("operation").required(true).value_parser(["propose", "review", "apply"]))
+                .arg(Arg::new("operation").required(true).value_parser(["propose", "review", "apply", "suggest-transitions"]))
                 .arg(Arg::new("source").long("source").required(true))
+                .arg(Arg::new("language").long("language").value_parser(["en", "fr"]).required_if_eq("operation", "suggest-transitions").help("Language for heuristic transition suggestions"))
+                .arg(Arg::new("input-format").long("input-format").value_parser(["text"]).required_if_eq("operation", "suggest-transitions").help("Explicitly declare a complete plain-text source"))
                 .arg(Arg::new("edits").long("edits").required_if_eq("operation", "propose").conflicts_with("patch"))
                 .arg(Arg::new("patch").long("patch").required_if_eq_any([("operation", "review"), ("operation", "apply")]))
                 .arg(Arg::new("output").long("output").required_if_eq("operation", "apply").help("Create a new output file; existing files are never overwritten"))
