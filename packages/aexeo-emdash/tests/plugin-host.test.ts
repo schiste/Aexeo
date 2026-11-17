@@ -48,6 +48,20 @@ describe("plugin configuration", () => {
 });
 
 describe("EmDash content adaptation", () => {
+  it("preserves body capabilities when only source keys are malformed", () => {
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: { content: [{
+      _type: "block", _key: 42, style: "normal", children: [{ _type: "span", _key: false, text: "Readable prose", marks: ["ref"] }],
+      markDefs: [{ _key: "ref", _type: "link", href: "/source" }],
+    }] } };
+    const adapted = adaptContentItem(item);
+    expect(adapted.document.body?.[0]?.children[0]?.text).toBe("Readable prose");
+    expect(adapted.document.body_capabilities).toBeUndefined();
+    expect(adapted.document.body?.[0]?._key).toBeUndefined();
+    expect(adapted.document.body?.[0]?.children[0]?._key).toBeUndefined();
+    expect(adapted.meta.bodySourcePaths).toBeUndefined();
+    expect(adapted.meta.bodySourceSpanPaths).toBeUndefined();
+    expect((item.data.content as Array<Record<string, unknown>>)[0]?._key).toBe(42);
+  });
   it("preserves prose capabilities when only link annotations are malformed", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: {} };
     for (const block of [

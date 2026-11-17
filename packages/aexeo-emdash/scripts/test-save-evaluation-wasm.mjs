@@ -876,5 +876,12 @@ allow_relative=true
   const malformed = host.store.get("findings:/custom-annotation");
   assert.equal(malformed.assessment.gates.find((gate) => gate.gate_id === "words").status, "passed");
   assert.equal(malformed.assessment.gates.find((gate) => gate.gate_id === "links").status, "not_checked");
+  page.data.body[0]._key = 42;
+  page.data.body[0].children[0]._key = false;
+  page.data.body[0].markDefs = [{ _key: "internal", _type: "link", href: "/destination" }];
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  const badKeys = host.store.get("findings:/custom-annotation");
+  assert.equal(badKeys.assessment.gates.find((gate) => gate.gate_id === "words").status, "passed");
+  assert.equal(badKeys.assessment.gates.find((gate) => gate.gate_id === "links").status, "passed");
   assert.deepEqual(host.logged, []);
 }

@@ -6,6 +6,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- Preserve body evaluation when only Portable Text block or span identity keys are malformed; normalized keys are not used to fabricate source locations.
+
 ## [0.9.2] - Pending publication
 
 ### Added

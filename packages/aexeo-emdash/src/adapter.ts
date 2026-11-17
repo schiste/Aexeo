@@ -509,7 +509,7 @@ function normalizePortableBlock(block: Record<string, unknown>): { block: Record
   const normalized = { ...block };
   let incomplete = false;
   let linksIncomplete = false;
-  if (normalized["_key"] != null && typeof normalized["_key"] !== "string") { delete normalized["_key"]; incomplete = true; }
+  if (normalized["_key"] != null && typeof normalized["_key"] !== "string") { delete normalized["_key"]; }
   if (normalized["style"] !== undefined && (typeof normalized["style"] !== "string" || !["normal", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote"].includes(normalized["style"]))) { delete normalized["style"]; incomplete = true; }
   if (normalized["listItem"] != null && normalized["listItem"] !== "bullet" && normalized["listItem"] !== "number") { delete normalized["listItem"]; incomplete = true; }
   const level = normalized["level"];
@@ -524,7 +524,7 @@ function normalizePortableBlock(block: Record<string, unknown>): { block: Record
   normalized["children"] = (block["children"] as unknown[]).map((child) => {
     if (!isPortableTextSpan(child) || !isRecord(child) || isWireSafeSpan(child)) return child;
     const span = { ...child };
-    if (span["_key"] != null && typeof span["_key"] !== "string") { delete span["_key"]; incomplete = true; }
+    if (span["_key"] != null && typeof span["_key"] !== "string") { delete span["_key"]; }
     if (span["marks"] !== undefined && (!Array.isArray(span["marks"]) || !span["marks"].every((mark) => typeof mark === "string"))) { delete span["marks"]; linksIncomplete = true; }
     return span;
   });
