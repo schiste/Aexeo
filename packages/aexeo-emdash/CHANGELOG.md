@@ -26,6 +26,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Preserve valid prose capabilities when malformed Portable Text annotation data affects only link coverage.
+
 - Mark link coverage unavailable for used unknown, unresolved or ambiguous Portable Text annotations while preserving available prose capabilities.
 
 - Count only routes with findings in the React dashboard headline; preserve the total route count and expose a separate aggregate for consumers.

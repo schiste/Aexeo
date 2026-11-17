@@ -48,6 +48,18 @@ describe("plugin configuration", () => {
 });
 
 describe("EmDash content adaptation", () => {
+  it("preserves prose capabilities when only link annotations are malformed", () => {
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: {} };
+    for (const block of [
+      { _type: "block", style: "normal", children: [{ _type: "span", text: "Readable prose", marks: ["ref"] }], markDefs: [{ _key: "ref", _type: "link", href: 12 }] },
+      { _type: "block", style: "normal", children: [{ _type: "span", text: "Readable prose", marks: null }], markDefs: [] },
+      { _type: "block", style: "normal", children: [{ _type: "span", text: "Readable prose", marks: [] }], markDefs: null },
+    ]) {
+      const doc = contentItemToEmdashDocument({ ...item, data: { content: [block] } });
+      expect(doc.body?.[0]?.children[0]?.text).toBe("Readable prose");
+      expect(doc.body_capabilities).toEqual(["text", "headings", "paragraphs"]);
+    }
+  });
   it("withholds only link coverage for ambiguous or unsupported used annotations", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: {} };
     const project = (marks: string[], markDefs: Array<Record<string, unknown>>) => contentItemToEmdashDocument({ ...item, data: {

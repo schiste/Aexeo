@@ -161,7 +161,9 @@ Used annotations that are not supported link marks or standard decorations,
 unresolved annotation keys, and ambiguous duplicate keys leave link coverage
 unavailable: link-dependent gates are not checked. Readable text, headings and
 paragraphs remain available when their other inputs are complete. Unused
-annotations do not affect coverage.
+annotations do not affect coverage. Malformed annotation definitions or span
+marks also leave link coverage unavailable; readable prose remains available
+when the rest of the block is valid.
 
 For an inline object inside a Portable Text block, use an explicit `inline`
 mapping. It projects text and links in place without creating a new paragraph:
