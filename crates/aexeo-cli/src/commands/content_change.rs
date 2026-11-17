@@ -727,13 +727,20 @@ fn command_offline_receipt(
         }),
         evaluator_identity: identity.as_bytes(),
     };
-    if args.get_flag("experimental-bound-verdict") {
-        return command_experimental_bound_verdict(args, &context, provider, output, html_scope);
-    }
     let link_context = snapshots.map(|snapshots| LinkSnapshotDecisionContext {
         offline: &context,
         snapshots,
     });
+    if args.get_flag("experimental-bound-verdict") {
+        return command_experimental_bound_verdict(
+            args,
+            &context,
+            link_context.as_ref(),
+            provider,
+            output,
+            html_scope,
+        );
+    }
     let receipt = if let Some(path) = args.get_one::<String>("verify-offline-receipt") {
         protect_input(Path::new(path), output, "previous receipt")?;
         let mut data = Vec::new();
@@ -828,13 +835,15 @@ fn command_offline_receipt(
 fn command_experimental_bound_verdict(
     args: &ArgMatches,
     context: &aexeo_core::content_gate_verdict::OfflineDecisionContext<'_>,
+    links: Option<&aexeo_core::content_gate_verdict::LinkSnapshotDecisionContext<'_>>,
     provider: &mut HostFiles,
     output: &Path,
     html_scope: HtmlContentScope,
 ) -> Result<i32> {
     use aexeo_core::content_gate_verdict::{
         ExperimentalBoundVerdict, evaluate_experimental_bound_verdict,
-        revalidate_experimental_bound_verdict,
+        evaluate_experimental_link_bound_verdict, revalidate_experimental_bound_verdict,
+        revalidate_experimental_link_bound_verdict,
     };
     let verdict = if let Some(path) = args.get_one::<String>("verify-offline-receipt") {
         protect_input(Path::new(path), output, "previous bound verdict")?;
@@ -849,13 +858,23 @@ fn command_experimental_bound_verdict(
         }
         let previous: ExperimentalBoundVerdict =
             parse_lossless_json(&data).user_context("invalid previous bound verdict")?;
-        let result = revalidate_experimental_bound_verdict(
-            &previous,
-            context,
-            provider,
-            &iso_now(),
-            html_scope,
-        );
+        let result = if let Some(links) = links {
+            revalidate_experimental_link_bound_verdict(
+                &previous,
+                links,
+                provider,
+                &iso_now(),
+                html_scope,
+            )
+        } else {
+            revalidate_experimental_bound_verdict(
+                &previous,
+                context,
+                provider,
+                &iso_now(),
+                html_scope,
+            )
+        };
         if args.get_flag("telemetry") {
             eprintln!(
                 "{}",
@@ -866,8 +885,12 @@ fn command_experimental_bound_verdict(
         }
         result.user_context("previous bound verdict does not match current inputs or evaluation")?
     } else {
-        evaluate_experimental_bound_verdict(context, provider, &iso_now(), html_scope)
-            .user_context("experimental bound verdict evaluation failed")?
+        (if let Some(links) = links {
+            evaluate_experimental_link_bound_verdict(links, provider, &iso_now(), html_scope)
+        } else {
+            evaluate_experimental_bound_verdict(context, provider, &iso_now(), html_scope)
+        })
+        .user_context("experimental bound verdict evaluation failed")?
     };
     let code = verdict_exit_code(verdict.receipt.verdict.status);
     let bytes = serde_json::to_vec_pretty(&verdict)?;

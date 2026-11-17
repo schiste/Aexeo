@@ -133,6 +133,40 @@ class ReceiptInterop(unittest.TestCase):
             bundle = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(bundle["schema"], "aexeo.link-snapshot-receipt-bundle/v1")
             self.assertEqual(bundle["artifacts"]["external_evidence"], snapshot_file.read_text())
+            bound_path = directory / "bound.json"
+            bound_env = dict(env, CONTENT_GATE_VERDICT_FILE=str(bound_path))
+            bound_command = ["--experimental-bound-verdict" if arg == "--offline-receipt-bundle" else arg for arg in command]
+            run = subprocess.run(bound_command, cwd=ROOT, env=bound_env, capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            bound = json.loads(bound_path.read_text(encoding="utf-8"))
+            artifacts = {role: None if value is None else value.encode("utf-8")
+                         for role, value in bundle["artifacts"].items()}
+            self.assertEqual(bound["schema"], "aexeo.experimental-link-bound-verdict/v1")
+            self.assertEqual(binding(artifacts), bound["binding"])
+            previous = directory / "prior.json"
+            previous.write_bytes(bound_path.read_bytes())
+            verify_bound = bound_command + ["--verify-offline-receipt", str(previous), "--telemetry"]
+            run = subprocess.run(verify_bound, cwd=ROOT, env=bound_env, capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertTrue(json.loads(run.stderr)["matched"])
+            original_output = bound_path.read_bytes()
+            snapshot["entries"]["article"]["observations"] = ["not_checked"]
+            snapshot_file.write_text(json.dumps(snapshot, separators=(",", ":")), encoding="utf-8")
+            run = subprocess.run(verify_bound, cwd=ROOT, env=bound_env, capture_output=True, text=True)
+            self.assertNotEqual(run.returncode, 0)
+            self.assertEqual(bound_path.read_bytes(), original_output)
+            snapshot_file.write_text(bundle["artifacts"]["external_evidence"], encoding="utf-8")
+            for bad_schema in ("aexeo.experimental-bound-verdict/v1", "unknown"):
+                altered = dict(bound, schema=bad_schema)
+                previous.write_text(json.dumps(altered), encoding="utf-8")
+                run = subprocess.run(verify_bound, cwd=ROOT, env=bound_env, capture_output=True, text=True)
+                self.assertNotEqual(run.returncode, 0, bad_schema)
+                self.assertEqual(bound_path.read_bytes(), original_output)
+            previous.write_text(json.dumps(bound), encoding="utf-8")
+            no_links = [arg for arg in bound_command if arg not in ("--link-observations", str(snapshot_file))]
+            run = subprocess.run(no_links + ["--verify-offline-receipt", str(previous)], cwd=ROOT, env=bound_env, capture_output=True, text=True)
+            self.assertNotEqual(run.returncode, 0)
+            self.assertEqual(bound_path.read_bytes(), original_output)
             args = []
             for role in ROLES:
                 value = bundle["artifacts"][role]
