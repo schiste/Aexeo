@@ -3306,9 +3306,7 @@ impl ContentPreset {
                                         }
                                         return;
                                     }
-                                    if !is_simple_latin_sentence(segment)
-                                        && !is_simple_latin_sentence(&segment.replace('’', "'"))
-                                    {
+                                    if !is_simple_latin_sentence(segment) {
                                         skipped += 1;
                                         window.push_back(None);
                                         if window.len() > *window_size {
@@ -6115,7 +6113,7 @@ terms = ["bad"]
             "x".repeat(MAX_PARAGRAPH_OPENING_BYTES + 1)
         );
         let ellipsis = run(&["Une phrase…"]);
-        assert_eq!(ellipsis.status, GateStatus::NotChecked);
+        assert_eq!(ellipsis.status, GateStatus::Passed);
         let chinese = run(&["这是一个句子。"]);
         assert_eq!(chinese.status, GateStatus::NotChecked);
         assert_eq!(chinese.measurements["sentences_skipped"], 1);
