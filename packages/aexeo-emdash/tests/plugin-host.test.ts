@@ -48,6 +48,23 @@ describe("plugin configuration", () => {
 });
 
 describe("EmDash content adaptation", () => {
+  it("withholds only link coverage for ambiguous or unsupported used annotations", () => {
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: {} };
+    const project = (marks: string[], markDefs: Array<Record<string, unknown>>) => contentItemToEmdashDocument({ ...item, data: {
+      content: [{ _type: "block", children: [{ _type: "span", text: "Readable prose", marks }], markDefs }],
+    } });
+    for (const document of [
+      project(["ref"], [{ _key: "ref", _type: "internalLink", target: "/article" }]),
+      project(["missing"], []),
+      project(["strong"], [{ _key: "strong", _type: "link", href: "/ambiguous" }]),
+      project(["ref"], [{ _key: "ref", _type: "link", href: "/first" }, { _key: "ref", _type: "link", href: "/second" }]),
+    ]) {
+      expect(document.body?.[0]?.children[0]?.text).toBe("Readable prose");
+      expect(document.body_capabilities).toEqual(["text", "headings", "paragraphs"]);
+    }
+    expect(project(["strong", "ref"], [{ _key: "ref", _type: "link", href: "/known" }]).body_capabilities).toBeUndefined();
+    expect(project([], [{ _key: "unused", _type: "internalLink", target: "/unused" }]).body_capabilities).toBeUndefined();
+  });
   it("records source paths for unchanged blocks across fields and nested custom content", () => {
     const before = body("Before");
     const after = body("After");
@@ -236,7 +253,7 @@ describe("EmDash content adaptation", () => {
 
   it("maps inline text and links without changing surrounding block structure", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "published", locale: "en", data: { content: [
-      { _type: "block", style: "h2", markDefs: [{ _key: "aexeo-inline-0", _type: "link", href: "/original" }], children: [
+      { _type: "block", style: "h2", markDefs: [{ _key: "aexeo-inline-0", _type: "link", href: "/original" }, { _key: "aexeo-inline-1", _type: "link", href: "/existing" }], children: [
         { _type: "span", text: "Before ", marks: ["aexeo-inline-1"] },
         { _type: "badge", label: "Badge", linkText: "docs", href: "/docs" },
         { _type: "span", text: " after", marks: [] },
@@ -248,7 +265,7 @@ describe("EmDash content adaptation", () => {
     expect(doc.body?.[0]?.style).toBe("h2");
     expect(doc.body?.[0]?.children.map((span) => span.text)).toEqual(["Before ", "Badge", "docs", " after"]);
     expect(doc.body?.[0]?.children[2]?.marks).toEqual(["aexeo-inline-2"]);
-    expect(doc.body?.[0]?.markDefs?.[1]).toEqual({ _key: "aexeo-inline-2", _type: "link", href: "/docs" });
+    expect(doc.body?.[0]?.markDefs?.[2]).toEqual({ _key: "aexeo-inline-2", _type: "link", href: "/docs" });
     expect(JSON.parse(JSON.stringify(aexeoPlugin({ blockMappings: mappings }).options)).blockMappings).toEqual(mappings);
     const partial = contentItemToEmdashDocument(item, { badge: { ...mappings.badge, capabilities: ["text"] } });
     expect(partial.body_capabilities).toEqual(["text"]);

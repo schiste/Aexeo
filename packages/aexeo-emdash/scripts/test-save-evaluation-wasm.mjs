@@ -844,3 +844,32 @@ paragraphs_only=true
   assert.deepEqual(finding.aexeo_source_location, { block_index: 0, span_index: 0, utf16_offset: 10 });
   assert.deepEqual(finding.aexeo_cms_location, { path: ["data", "content", 0, "children", 0, "text"], utf16_offset: 10 });
 }
+
+// Unsupported annotations may represent host-rendered links, so preserve
+// prose but do not report link checks as complete.
+{
+  const preset = `version=1
+name="annotation-coverage"
+[[gates]]
+id="words"
+kind="word_count"
+min=1
+[[gates]]
+id="links"
+kind="link_destinations"
+allowed_schemes=["https"]
+allow_relative=true
+`;
+  const page = item("custom-annotation", { data: { body: [{
+    _type: "block", children: [{ _type: "span", text: "Readable text", marks: ["internal"] }],
+    markDefs: [{ _key: "internal", _type: "internalLink", target: "/destination" }],
+  }] } });
+  const host = fakeHost([page]);
+  const configured = createPlugin({ contentPreset: { name: "annotation", sources: { annotation: preset } } });
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  const stored = host.store.get("findings:/custom-annotation");
+  assert.ok(stored?.assessment, "assessment should be persisted");
+  assert.equal(stored.assessment.gates.find((gate) => gate.gate_id === "words").status, "passed");
+  assert.equal(stored.assessment.gates.find((gate) => gate.gate_id === "links").status, "not_checked");
+  assert.deepEqual(host.logged, []);
+}

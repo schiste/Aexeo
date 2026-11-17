@@ -157,6 +157,12 @@ unverified. Best-effort text extracted from an unknown component is bounded to
 it may therefore be incomplete and must not be treated as a complete body. A host may map a component to `[]` only when it has verified that
 the component contributes no content relevant to the evaluated body.
 
+Used annotations that are not supported link marks or standard decorations,
+unresolved annotation keys, and ambiguous duplicate keys leave link coverage
+unavailable: link-dependent gates are not checked. Readable text, headings and
+paragraphs remain available when their other inputs are complete. Unused
+annotations do not affect coverage.
+
 For an inline object inside a Portable Text block, use an explicit `inline`
 mapping. It projects text and links in place without creating a new paragraph:
 
