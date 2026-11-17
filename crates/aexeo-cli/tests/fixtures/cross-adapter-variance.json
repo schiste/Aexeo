@@ -1,0 +1,19 @@
+{
+  "preset": "version=1\nname='cross-variance'\n[[gates]]\nid='variance'\nkind='sentence_length_variance'\nwindow_size=4\nrandom_min_stddev_words=6\nrandom_max_stddev_words=10\nrandom_seed=42\n",
+  "content": "One two three. Four five six. Seven eight nine. Ten eleven twelve.",
+  "document": {
+    "route": "/variance",
+    "title": "Variance",
+    "body": [
+      {
+        "children": [
+          {
+            "_type": "span",
+            "text": "One two three. Four five six. Seven eight nine. Ten eleven twelve."
+          }
+        ]
+      }
+    ]
+  },
+  "expected_threshold": 10
+}

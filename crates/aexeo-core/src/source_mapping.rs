@@ -18,6 +18,7 @@ pub fn prose_gate_has_positions(gate: &crate::content_gate::ContentGate) -> bool
             | ContentGate::RepeatedPunctuation { .. }
             | ContentGate::TrailingIngClause { .. }
             | ContentGate::SimilarSentenceLengths { .. }
+            | ContentGate::SentenceLengthVariance { .. }
             | ContentGate::InlineTripleCandidates { .. }
             | ContentGate::DuplicateParagraphs { .. }
             | ContentGate::ParagraphCharacterLength { .. }
