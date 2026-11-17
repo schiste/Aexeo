@@ -80,13 +80,20 @@ fn review_and_explicit_application_are_bound_to_source_and_proposal() {
     assert_eq!(fs::read_to_string(output).unwrap(), "A sentence.\n");
     assert!(!run(&args).status.success());
     fs::remove_file(output).unwrap();
+    let original_patch = fs::read(patch).unwrap();
+    let mut modified_patch = original_patch.clone();
+    modified_patch.push(b' ');
+    fs::write(patch, modified_patch).unwrap();
+    assert!(!run(&args).status.success());
+    assert!(!std::path::Path::new(output).exists());
+    fs::write(patch, original_patch).unwrap();
     fs::write(source, "Changed source.\n").unwrap();
     assert!(!run(&args).status.success());
     assert!(!std::path::Path::new(output).exists());
 }
 
 #[test]
-fn rejects_duplicate_keys_and_changed_reviewed_proposals() {
+fn rejects_duplicate_keys() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("source");
     let edits = dir.path().join("edits");
