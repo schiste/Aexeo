@@ -72,10 +72,15 @@ class TestSyntaxAdapter(unittest.TestCase):
                 review.evaluate({"text": "A. B."}, changed, model)
         with self.assertRaises(review.Unavailable):
             review.evaluate({"text": "A.\n\nB."}, PARAMS, Model([Sentence(0, 2, 0), Sentence(4, 6, 2)]))
-        bad = Sentence(0, 2, 0)
-        bad[0].dep_ = ""
+        for attr in ("dep_", "pos_"):
+            bad = Sentence(0, 2, 0)
+            setattr(bad[0], attr, "")
+            with self.subTest(missing=attr), self.assertRaises(review.Unavailable):
+                review.evaluate({"text": "A. B."}, PARAMS, Model([bad, Sentence(3, 5, 2)]))
+        no_parser = Model([Sentence(0, 2, 0), Sentence(3, 5, 2)])
+        no_parser.pipe_names = []
         with self.assertRaises(review.Unavailable):
-            review.evaluate({"text": "A. B."}, PARAMS, Model([bad, Sentence(3, 5, 2)]))
+            review.evaluate({"text": "A. B."}, PARAMS, no_parser)
 
     def test_bad_configuration_is_rejected(self):
         for value in ("nan", "-1", "2"):
