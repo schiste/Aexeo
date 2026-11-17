@@ -79,6 +79,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - If a shared Cargo target makes tests resolve `CARGO_MANIFEST_DIR` to another
   worktree or a removed merge simulation, rerun with a fresh `CARGO_TARGET_DIR`
   for this worktree before treating the missing fixture as a product failure.
+- If Cargo validation stalls, inspect the process tree before diagnosing a test
+  failure. When `sccache` clients are waiting without an active `rustc`, retry
+  the same validation with `RUSTC_WRAPPER=` and a fresh session-specific
+  `CARGO_TARGET_DIR` on a volume with enough free space; do not delete shared
+  caches or another session's artifacts. Confirm the retried gate completes.
 - When adding a Cargo dependency, inspect the full `Cargo.lock` diff for
   unrelated resolution changes. Restore unrelated entries only after verifying
   a real `cargo check --locked` succeeds with the intended lockfile; metadata
