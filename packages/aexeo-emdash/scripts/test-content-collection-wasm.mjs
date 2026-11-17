@@ -80,6 +80,24 @@ assert.deepEqual(positionalReport.source_locations, [{ gate_id: "terms", finding
 assert.deepEqual(positionalReport.source_mapping, { eligible: 1, mapped: 1, unmapped: 0 });
 console.log("WASM source location smoke test passed");
 
+const openingWindowPreset = `version=1
+name="window"
+[[gates]]
+id="opening"
+kind="sentence_opening_window"
+opening_words=1
+window_size=4
+max_occurrences=2
+ignored_words=["the"]
+`;
+const openingWindow = await evaluateContent({route:"/window", title:"Window", body:[{children:[{_type:"span", text:"The team plans. Other works. Team acts. The team checks."}]}]}, "test", {test:openingWindowPreset});
+assert.equal(openingWindow.gates[0].status, "failed");
+assert.equal(openingWindow.source_locations[0].utf16_offset, 40);
+assert.equal(openingWindow.source_mapping.mapped, 1);
+const unavailableWindow = await evaluateContent({route:"/window", title:"Window", body:[], body_capabilities:[]}, "test", {test:openingWindowPreset});
+assert.equal(unavailableWindow.gates[0].status, "not_checked");
+console.log("WASM windowed sentence openings report and map correctly");
+
 const stylePreset = `version=1
 name="style"
 [[gates]]

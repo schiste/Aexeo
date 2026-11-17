@@ -261,6 +261,10 @@ pub fn builtin_content_presets() -> BTreeMap<String, String> {
             include_str!("../presets/sentence-openings-review.toml").into(),
         ),
         (
+            "sentence-opening-window-review".into(),
+            include_str!("../presets/sentence-opening-window-review.toml").into(),
+        ),
+        (
             "duplicate-paragraph-review".into(),
             include_str!("../presets/duplicate-paragraph-review.toml").into(),
         ),
@@ -443,6 +447,16 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("maximum depth")
+        );
+    }
+
+    #[test]
+    fn windowed_openings_starter_is_discoverable_and_advisory() {
+        let sources = builtin_content_presets();
+        let preset = resolve_content_preset("sentence-opening-window-review", &sources).unwrap();
+        assert_eq!(preset.gates.len(), 1);
+        assert!(
+            matches!(&preset.gates[0], ContentGate::SentenceOpeningWindow { window_size: 6, max_occurrences: 2, ignored_words, blocking: false, .. } if ignored_words.is_empty())
         );
     }
 
