@@ -1,0 +1,20 @@
+version = 1
+name = "opinion"
+separator = "\n\n"
+
+[[fields]]
+name = "opening_hook"
+max_characters = 90
+
+[[fields]]
+name = "position"
+
+[[fields]]
+name = "argument"
+min_characters = 120
+
+[[fields]]
+name = "counterpoint"
+
+[[fields]]
+name = "conclusion"
