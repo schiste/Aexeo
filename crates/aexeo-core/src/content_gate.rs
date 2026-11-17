@@ -230,6 +230,15 @@ pub enum ContentGate {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         projection_separator: Option<String>,
     },
+    /// Advisory review of structured lists with configured item counts.
+    ListItemCount {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default)]
+        blocking: bool,
+        flagged_counts: Vec<usize>,
+    },
     WordCount {
         id: String,
         #[serde(default)]
@@ -586,6 +595,7 @@ impl ContentGate {
     pub fn severity(&self) -> Severity {
         match self {
             Self::EditorialPacing { severity, .. }
+            | Self::ListItemCount { severity, .. }
             | Self::WordCount { severity, .. }
             | Self::CharacterCount { severity, .. }
             | Self::MetadataLength { severity, .. }
@@ -620,6 +630,7 @@ impl ContentGate {
     pub fn blocking(&self) -> bool {
         match self {
             Self::EditorialPacing { blocking, .. }
+            | Self::ListItemCount { blocking, .. }
             | Self::WordCount { blocking, .. }
             | Self::CharacterCount { blocking, .. }
             | Self::MetadataLength { blocking, .. }
@@ -669,6 +680,7 @@ impl ContentGate {
             | Self::RepeatedTerms { .. }
             | Self::RequiredTerms { .. }
             | Self::ForbiddenTerms { .. } => "text",
+            Self::ListItemCount { .. } => "structured_lists",
             Self::LinkCount { .. } => "links",
             Self::LinkDestinations { .. } => "link_destinations",
             Self::LinkReachability { .. } => "link_reachability",
@@ -696,6 +708,7 @@ impl ContentGate {
     pub fn id(&self) -> &str {
         match self {
             Self::EditorialPacing { id, .. }
+            | Self::ListItemCount { id, .. }
             | Self::WordCount { id, .. }
             | Self::CharacterCount { id, .. }
             | Self::MetadataLength { id, .. }
@@ -733,6 +746,9 @@ impl ContentGate {
 // Guidance is advisory: thresholds and literal matches do not establish editorial quality.
 fn editorial_suggestion(gate: &ContentGate) -> Option<&'static str> {
     match gate {
+        ContentGate::ListItemCount { .. } => Some(
+            "Review the list in context; preserve every necessary item and change the structure only when it improves the content.",
+        ),
         ContentGate::WordCount { .. }
         | ContentGate::CharacterCount { .. }
         | ContentGate::ParagraphCount { .. } => Some(
@@ -1263,6 +1279,17 @@ impl ContentPreset {
                     }
                     profile.resolve()?;
                 }
+                ContentGate::ListItemCount { flagged_counts, .. }
+                    if flagged_counts.is_empty()
+                        || flagged_counts.contains(&0)
+                        || flagged_counts.iter().collect::<BTreeSet<_>>().len()
+                            != flagged_counts.len() =>
+                {
+                    bail!(
+                        "list item counts must be positive and unique for {}",
+                        gate.id()
+                    )
+                }
                 ContentGate::WordCount { min, max, .. }
                     if min.is_none() && max.is_none()
                         || matches!((min, max), (Some(a), Some(b)) if a > b) =>
@@ -1597,7 +1624,7 @@ impl ContentPreset {
         capabilities: &ContentEvaluationContext<'_>,
         destinations: Option<&[String]>,
     ) -> Result<ContentReport> {
-        self.evaluate_with_observer_inner(input, capabilities, destinations, true, None, None)
+        self.evaluate_with_observer_inner(input, capabilities, destinations, true, None, None, None)
     }
 
     /// Evaluate while notifying the host before and after each gate, in preset order.
@@ -1615,6 +1642,7 @@ impl ContentPreset {
             destinations,
             true,
             Some(observer),
+            None,
             None,
         )
     }
@@ -1635,6 +1663,7 @@ impl ContentPreset {
             destinations,
             complete,
             observer,
+            None,
             None,
         )
     }
@@ -1658,6 +1687,29 @@ impl ContentPreset {
             collection_complete,
             observer,
             heading_levels,
+            None,
+        )
+    }
+
+    /// Evaluate with a complete list observation, or `None` when unavailable.
+    pub fn evaluate_with_structured_lists(
+        &self,
+        input: &ContentInput,
+        capabilities: &ContentEvaluationContext<'_>,
+        destinations: Option<&[String]>,
+        heading_levels: Option<&[u8]>,
+        collection_complete: bool,
+        observer: Option<&mut dyn FnMut(GateObservation)>,
+        lists: Option<&[crate::markdown_adapter::StructuredList]>,
+    ) -> Result<ContentReport> {
+        self.evaluate_with_observer_inner(
+            input,
+            capabilities,
+            destinations,
+            collection_complete,
+            observer,
+            heading_levels,
+            lists,
         )
     }
 
@@ -1669,6 +1721,7 @@ impl ContentPreset {
         collection_complete: bool,
         mut observer: Option<&mut dyn FnMut(GateObservation)>,
         heading_levels: Option<&[u8]>,
+        lists: Option<&[crate::markdown_adapter::StructuredList]>,
     ) -> Result<ContentReport> {
         let site = capabilities.site;
         let extensions = capabilities.extensions;
@@ -1713,6 +1766,29 @@ impl ContentPreset {
                 })
             };
             match gate {
+                ContentGate::ListItemCount { flagged_counts, .. } => match lists {
+                    Some(lists) if lists.len() <= MAX_COLLECTION_ITEMS => {
+                        measurements.insert("lists_observed".into(), lists.len());
+                        for list in lists {
+                            if flagged_counts.contains(&list.item_count) {
+                                emit(
+                                    format!(
+                                        "List has {} direct items; review whether this structure suits the content",
+                                        list.item_count
+                                    ),
+                                    1,
+                                    1,
+                                );
+                            }
+                        }
+                    }
+                    Some(_) => reason = Some("too many lists to assess completely".into()),
+                    None => {
+                        reason = Some(
+                            "complete structured lists are unavailable from this adapter".into(),
+                        )
+                    }
+                },
                 ContentGate::EditorialPacing {
                     source,
                     profile,
@@ -3048,6 +3124,51 @@ impl ContentPreset {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn structured_list_gate_requires_complete_observations() {
+        let preset = ContentPreset::from_toml("version=1\nname='lists'\n[[gates]]\nid='list'\nkind='list_item_count'\nflagged_counts=[3]\n").unwrap();
+        let input = ContentInput {
+            id: "article".into(),
+            ..Default::default()
+        };
+        let capabilities = ContentEvaluationContext::default();
+        let unavailable = preset
+            .evaluate_with_capabilities(&input, &capabilities)
+            .unwrap();
+        assert_eq!(unavailable.gates[0].status, GateStatus::NotChecked);
+        let lists = [crate::markdown_adapter::StructuredList {
+            item_count: 3,
+            depth: 1,
+            line: 1,
+            column: 1,
+        }];
+        let flagged = preset
+            .evaluate_with_structured_lists(
+                &input,
+                &capabilities,
+                None,
+                None,
+                true,
+                None,
+                Some(&lists),
+            )
+            .unwrap();
+        assert_eq!(flagged.gates[0].status, GateStatus::Failed);
+        assert!(!flagged.gates[0].blocking);
+        let empty = preset
+            .evaluate_with_structured_lists(
+                &input,
+                &capabilities,
+                None,
+                None,
+                true,
+                None,
+                Some(&[]),
+            )
+            .unwrap();
+        assert_eq!(empty.gates[0].status, GateStatus::Passed);
+    }
+
     #[test]
     fn metadata_length_validates_bounds_and_distinguishes_observation_states() {
         let config = "version=1\nname='test'\n[[gates]]\nid='length'\nkind='metadata_length'\nfield='title'\nmin=2\nmax=3\n";

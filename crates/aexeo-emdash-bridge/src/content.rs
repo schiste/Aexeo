@@ -129,6 +129,54 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
     )
 }
 
+/// Observe complete Portable Text list structure. Returns `None` when the host
+/// cannot guarantee the body includes every list item, or when nesting is
+/// malformed. Positions refer to the projected plain-text snapshot.
+pub fn portable_text_structured_lists(
+    document: &EmdashDocument,
+    complete: bool,
+) -> Option<Vec<aexeo_core::markdown_adapter::StructuredList>> {
+    use aexeo_core::markdown_adapter::StructuredList;
+    if !complete {
+        return None;
+    }
+    let mut result: Vec<StructuredList> = Vec::new();
+    let mut stack: Vec<(crate::ListItem, usize)> = Vec::new();
+    let mut line = 1;
+    for block in &document.body {
+        if let Some(kind) = &block.list_item {
+            let depth = usize::try_from(block.level.unwrap_or(1)).ok()?;
+            if depth == 0 || depth > 100 || depth > stack.len() + 1 {
+                return None;
+            }
+            stack.truncate(depth);
+            if stack.len() == depth && stack[depth - 1].0 != *kind {
+                stack.pop();
+            }
+            if stack.len() < depth {
+                result.push(StructuredList {
+                    item_count: 0,
+                    depth,
+                    line,
+                    column: 1,
+                });
+                stack.push((kind.clone(), result.len() - 1));
+            }
+            result[stack[depth - 1].1].item_count += 1;
+        } else {
+            stack.clear();
+        }
+        line += 1 + block
+            .children
+            .iter()
+            .map(|child| match child {
+                PortableTextChild::Span(span) => span.text.bytes().filter(|b| *b == b'\n').count(),
+            })
+            .sum::<usize>();
+    }
+    Some(result)
+}
+
 /// Location inside the exact Portable Text snapshot passed to evaluation.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct EmdashSourceLocation {
@@ -693,6 +741,25 @@ mod tests {
         content_presets::{builtin_content_presets, resolve_content_preset},
         markdown_adapter::markdown_input_with_links,
     };
+
+    #[test]
+    fn structured_lists_require_complete_valid_body_and_count_nested_items() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/x","title":"T","body":[{"listItem":"bullet","level":1,"children":[]},{"listItem":"bullet","level":2,"children":[]},{"listItem":"bullet","level":2,"children":[]},{"listItem":"bullet","level":1,"children":[]}]}"#).unwrap();
+        assert_eq!(portable_text_structured_lists(&document, false), None);
+        let lists = portable_text_structured_lists(&document, true).unwrap();
+        assert_eq!(
+            lists
+                .iter()
+                .map(|list| (list.depth, list.item_count))
+                .collect::<Vec<_>>(),
+            vec![(1, 2), (2, 2)]
+        );
+        let invalid: EmdashDocument = serde_json::from_str(
+            r#"{"route":"/x","title":"T","body":[{"listItem":"bullet","level":2,"children":[]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(portable_text_structured_lists(&invalid, true), None);
+    }
 
     #[test]
     fn pacing_checks_complete_projection_and_withholds_partial_projection() {

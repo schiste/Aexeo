@@ -1383,3 +1383,17 @@ its bounds. A gate override replaces the whole gate, rather than merging individ
 Profiles and structured input are bounded; the JSON Schema cannot express all
 of Aexeo's aggregate resource limits. A schema-valid response can therefore
 still be refused if it exceeds those limits.
+
+### Structured list item counts
+
+The optional `list_item_count` gate asks for editorial review of lists with configured direct item counts. It does not infer authorship or quality and never deletes list items. Nested lists are counted separately. Configure it in a portable preset:
+
+```toml
+[[gates]]
+id = "editorial.review_three_item_lists"
+kind = "list_item_count"
+flagged_counts = [3]
+blocking = false
+```
+
+The Markdown CLI supplies observations when the list structure is fully visible. Embedded HTML, plain text, unsupported adapters and incomplete snapshots yield `not_checked`; an observed document without lists passes. Hosts may supply complete observations through the additive `evaluate_with_structured_lists` API. The Portable Text helper requires an explicit completeness declaration; existing CMS integrations do not assume such completeness. Observations are advisory, and line 1 is a placeholder rather than a precise list location.
