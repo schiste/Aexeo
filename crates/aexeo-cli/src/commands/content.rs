@@ -4,7 +4,7 @@ use aexeo_core::{
         ContentContext, ContentEvaluationContext, ContentGate, ContentInput, GateStatus,
         MAX_CONTENT_INPUT_BYTES,
     },
-    content_presets::{builtin_content_presets, resolve_content_preset},
+    content_presets::{builtin_content_presets, explain_content_preset, resolve_content_preset},
     error::UserContext,
     user_bail,
 };
@@ -134,12 +134,33 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
     let preset_name = args
         .get_one::<String>("preset")
         .user_context("missing preset argument")?;
+    if args.get_flag("explain-origins") {
+        let explanation = explain_content_preset(preset_name, &sources)?;
+        if args.get_one::<String>("format").map(String::as_str) == Some("json") {
+            println!("{}", serde_json::to_string_pretty(&explanation)?);
+        } else {
+            println!("{}", explanation.to_toml()?);
+        }
+        if args.get_flag("telemetry") {
+            eprintln!(
+                "{}",
+                serde_json::json!({"event":"content_preset_explanation", "version":1, "gate_count":explanation.preset.gates.len(), "origins_included":true})
+            );
+        }
+        return Ok(EXIT_SUCCESS);
+    }
     let preset = resolve_content_preset(preset_name, &sources)?;
     if args.get_flag("explain") {
         if args.get_one::<String>("format").map(String::as_str) == Some("json") {
             println!("{}", serde_json::to_string_pretty(&preset)?);
         } else {
             println!("{}", toml_output(&preset)?);
+        }
+        if args.get_flag("telemetry") {
+            eprintln!(
+                "{}",
+                serde_json::json!({"event":"content_preset_explanation", "version":1, "gate_count":preset.gates.len(), "origins_included":false})
+            );
         }
         return Ok(EXIT_SUCCESS);
     }

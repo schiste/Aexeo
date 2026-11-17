@@ -76,6 +76,10 @@ The latest published version observed on 2026-11-16 was 0.9.1.
   optional local telemetry records limit events without paths or input data.
   Exceeding a limit aborts the command instead of returning a partial report.
 
+- [x] Optionally explain the winning source key for each resolved preset gate,
+  including inherited overrides and disables, without changing the existing
+  reusable `--explain` output. Source keys do not authenticate authorship.
+
 - [x] Resolve shared preset ancestors once per call and limit inheritance paths to
   64 presets, including when a cached ancestor is reused. No cross-call cache is
   retained, so updated sources are reflected on the next resolution.
