@@ -4,6 +4,7 @@ use clap::{Arg, ArgAction, Command, value_parser};
 
 pub fn build_cli() -> Command {
     Command::new("aexeo-cli")
+        .version(env!("CARGO_PKG_VERSION"))
         .about("SEO and GEO linting for static websites")
         .subcommand(
             Command::new("editorial-patch")

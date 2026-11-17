@@ -48,6 +48,16 @@ npm ci
 npm run build
 ```
 
+## Preparing a CLI version
+
+Update `[workspace.package].version` and the version requirements of the local
+path dependencies together, then refresh `Cargo.lock` without upgrading other
+dependencies. Verify `cargo run --locked -p aexeo-cli -- --version` reports the
+intended version. All five workspace crates share that version; the npm package
+has its own independent version and release process. Check that the intended
+`v` tag is still unused immediately before publishing. A version bump alone does
+not create a tag or publish artifacts.
+
 ## CLI Release Artifacts
 
 Package release assets:

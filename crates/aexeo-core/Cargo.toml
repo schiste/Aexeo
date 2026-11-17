@@ -29,10 +29,10 @@ toml.workspace = true
 unicode-ident = "1"
 unicode-normalization = "0.1"
 url.workspace = true
-aexeo-contracts = { version = "0.0.21", path = "../aexeo-contracts" }
+aexeo-contracts = { version = "0.0.22", path = "../aexeo-contracts" }
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 rustix = { version = "1.1.6", features = ["fs"] }
 
 [dev-dependencies]
-tempfile = { version = "0.0.21", path = "../tempfile" }
+tempfile = { version = "0.0.22", path = "../tempfile" }
