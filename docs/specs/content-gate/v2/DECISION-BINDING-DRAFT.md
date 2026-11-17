@@ -1,9 +1,8 @@
 # Experimental decision-input binding encoding
 
 This is a draft primitive, not a version 2 verdict, a verifier, or an
-interoperable policy format. It is not integrated with Aexeo evaluation or any
-consumer and must not be used to authorize publication. The v2 roadmap remains
-open until artifact semantics, the wire contract, production, independent
+interoperable policy format. It is not integrated into a CLI or consumer and
+must not be used to authorize publication. The v2 roadmap remains open until artifact semantics, the wire contract, production, independent
 verification and consumers are implemented and tested together.
 
 For independent implementations, the candidate SHA-256 preimage is the exact
@@ -30,3 +29,16 @@ independently determine the complete set, establish absence, validate formats,
 content hashes, evaluator identity and evidence freshness, and protect the
 publication boundary. The candidate does not define those artifact formats,
 a verdict or an algorithm for discovering unrepresented ambient inputs.
+
+## Offline Rust experiment
+
+`evaluate_experimental_bound_verdict` and `revalidate_experimental_bound_verdict`
+exercise the candidate binding against Aexeo's existing offline receipt. The
+second API compares independently supplied current artifacts and re-evaluates
+the original receipt. Its distinct `aexeo.experimental-bound-verdict/v1`
+envelope is not a v2 verdict. The artifact encodings remain Aexeo-specific;
+external observations and custom extensions are unavailable in this mode.
+The host must establish freshness, provenance, evaluator identity, complete
+inputs and publication safety. Hosts must bound and strictly parse untrusted
+serialized envelopes, including rejecting duplicate or discarded fields, before
+calling this typed API. No CLI or EmDash consumer uses this envelope.

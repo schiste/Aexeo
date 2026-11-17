@@ -797,6 +797,82 @@ pub struct OfflineDecisionReceipt {
 
 const OFFLINE_RECEIPT_SCHEMA: &str = "aexeo.offline-decision-receipt/v1";
 
+/// Experimental envelope for testing the candidate v2 byte binding against
+/// an actual offline evaluation. This is not a portable v2 verdict.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExperimentalBoundVerdict {
+    pub schema: String,
+    pub binding: String,
+    pub receipt: OfflineDecisionReceipt,
+}
+
+const EXPERIMENTAL_BOUND_VERDICT_SCHEMA: &str = "aexeo.experimental-bound-verdict/v1";
+
+fn experimental_offline_binding(
+    context: &OfflineDecisionContext<'_>,
+    scope: HtmlContentScope,
+) -> Result<String> {
+    let artifacts = context.artifacts_with_html_scope(scope)?;
+    let digest = aexeo_contracts::content_gate_binding_v2::decision_binding(&[
+        ("change", Some(&artifacts.change)),
+        ("resolved_policy", Some(&artifacts.resolved_policy)),
+        ("host_options", Some(&artifacts.host_options)),
+        ("evaluator", Some(&artifacts.evaluator)),
+        ("collection", artifacts.collection.as_deref()),
+        ("external_evidence", None),
+    ])
+    .map_err(anyhow::Error::msg)?;
+    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+/// Evaluate offline and attach a candidate input binding. The host must still
+/// establish current inputs, evaluator identity, provenance and publication safety.
+pub fn evaluate_experimental_bound_verdict<P: ConfinedContentFiles>(
+    context: &OfflineDecisionContext<'_>,
+    provider: &mut P,
+    evaluated_at: &str,
+    scope: HtmlContentScope,
+) -> Result<ExperimentalBoundVerdict> {
+    let binding = experimental_offline_binding(context, scope)?;
+    let receipt = evaluate_offline_receipt_with_html_scope(context, provider, evaluated_at, scope)?;
+    Ok(ExperimentalBoundVerdict {
+        schema: EXPERIMENTAL_BOUND_VERDICT_SCHEMA.into(),
+        binding,
+        receipt,
+    })
+}
+
+/// Compare independently supplied current inputs, then re-evaluate the verdict.
+/// External observations and custom extensions are not supported by this API.
+pub fn revalidate_experimental_bound_verdict<P: ConfinedContentFiles>(
+    previous: &ExperimentalBoundVerdict,
+    context: &OfflineDecisionContext<'_>,
+    provider: &mut P,
+    evaluated_at: &str,
+    scope: HtmlContentScope,
+) -> Result<ExperimentalBoundVerdict> {
+    if previous.schema != EXPERIMENTAL_BOUND_VERDICT_SCHEMA {
+        bail!("unsupported experimental bound verdict schema");
+    }
+    let binding = experimental_offline_binding(context, scope)?;
+    if previous.binding != binding {
+        bail!("experimental decision inputs differ");
+    }
+    let receipt = revalidate_offline_receipt_with_html_scope(
+        &previous.receipt,
+        context,
+        provider,
+        evaluated_at,
+        scope,
+    )?;
+    Ok(ExperimentalBoundVerdict {
+        schema: EXPERIMENTAL_BOUND_VERDICT_SCHEMA.into(),
+        binding,
+        receipt,
+    })
+}
+
 /// Inputs selected by the host for an offline evaluation. `evaluator_identity`
 /// must identify a trusted build; an engine version string is not sufficient.
 pub struct OfflineDecisionContext<'a> {
@@ -2099,6 +2175,177 @@ mod tests {
             evaluator_identity: b"",
         };
         assert!(context.artifacts().is_err());
+    }
+
+    #[test]
+    fn experimental_bound_verdict_rejects_changed_current_inputs_and_results() {
+        let input = change();
+        let policy = preset(1);
+        let context = || OfflineDecisionContext {
+            change: &input,
+            preset: &policy,
+            max_entry_bytes: 1024,
+            max_total_bytes: 1024,
+            plain_text_paragraphs: false,
+            collection: None,
+            evaluator_identity: b"trusted-build",
+        };
+        let previous = evaluate_experimental_bound_verdict(
+            &context(),
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        assert!(
+            revalidate_experimental_bound_verdict(
+                &previous,
+                &context(),
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document,
+            )
+            .is_ok()
+        );
+        let serialized = serde_json::to_vec(&previous).unwrap();
+        let restored: ExperimentalBoundVerdict =
+            aexeo_contracts::content_gate_change_validation::parse_lossless_json(&serialized)
+                .unwrap();
+        assert!(
+            revalidate_experimental_bound_verdict(
+                &restored,
+                &context(),
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document,
+            )
+            .is_ok()
+        );
+        let mut changed_input = input.clone();
+        changed_input.entries[0].metadata = Some(std::collections::BTreeMap::from([(
+            "title".into(),
+            "changed".into(),
+        )]));
+        assert!(
+            revalidate_experimental_bound_verdict(
+                &previous,
+                &OfflineDecisionContext {
+                    change: &changed_input,
+                    ..context()
+                },
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document,
+            )
+            .is_err()
+        );
+        assert!(
+            revalidate_experimental_bound_verdict(
+                &previous,
+                &OfflineDecisionContext {
+                    plain_text_paragraphs: true,
+                    ..context()
+                },
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document,
+            )
+            .is_err()
+        );
+        let items = vec![ContentInput {
+            id: "article".into(),
+            ..Default::default()
+        }];
+        assert!(
+            revalidate_experimental_bound_verdict(
+                &previous,
+                &OfflineDecisionContext {
+                    collection: Some(ChangeCollection {
+                        change_id: "x",
+                        items: &items,
+                        complete: true
+                    }),
+                    ..context()
+                },
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document,
+            )
+            .is_err()
+        );
+        let mut tampered = previous.clone();
+        tampered.binding = "00".repeat(32);
+        assert!(
+            revalidate_experimental_bound_verdict(
+                &tampered,
+                &context(),
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document,
+            )
+            .is_err()
+        );
+        let changed_policy = preset(2);
+        assert!(
+            revalidate_experimental_bound_verdict(
+                &previous,
+                &OfflineDecisionContext {
+                    preset: &changed_policy,
+                    ..context()
+                },
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document,
+            )
+            .is_err()
+        );
+        assert!(
+            revalidate_experimental_bound_verdict(
+                &previous,
+                &OfflineDecisionContext {
+                    evaluator_identity: b"other",
+                    ..context()
+                },
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document,
+            )
+            .is_err()
+        );
+        assert!(
+            revalidate_experimental_bound_verdict(
+                &previous,
+                &context(),
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Main,
+            )
+            .is_err()
+        );
+        let mut altered = previous.clone();
+        altered.receipt.verdict.status = VerdictStatus::Fail;
+        assert!(
+            revalidate_experimental_bound_verdict(
+                &altered,
+                &context(),
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document,
+            )
+            .is_err()
+        );
+        altered = previous.clone();
+        altered.schema = "content-gate.verdict/v2".into();
+        assert!(
+            revalidate_experimental_bound_verdict(
+                &altered,
+                &context(),
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document,
+            )
+            .is_err()
+        );
     }
 
     #[test]
