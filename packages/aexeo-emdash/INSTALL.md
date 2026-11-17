@@ -164,6 +164,9 @@ paragraphs remain available when their other inputs are complete. Unused
 annotations do not affect coverage. Malformed annotation definitions or span
 marks also leave link coverage unavailable; readable prose remains available
 when the rest of the block is valid.
+Malformed block or span identity keys are omitted from the projected body;
+they do not invalidate otherwise observed content or links. A normalized
+object may lack a source location, and the host must still verify its renderer.
 
 For an inline object inside a Portable Text block, use an explicit `inline`
 mapping. It projects text and links in place without creating a new paragraph:
