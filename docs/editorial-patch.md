@@ -8,6 +8,8 @@ Create an array of edits as JSON. Positions are zero-based UTF-8 byte offsets in
 [{"start":0,"end":3,"expected":"One","replacement":"A","reason":"Editorial review"}]
 ```
 
+Shell redirection creates the proposal and review files using the shell’s permissions and umask; protect those files before running these commands (for example, use `umask 077`).
+
 ```sh
 aexeo editorial-patch propose --source draft.txt --edits edits.json > proposal.json
 aexeo editorial-patch review --source draft.txt --patch proposal.json > candidate.txt
