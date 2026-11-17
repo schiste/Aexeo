@@ -1,0 +1,9 @@
+version = 1
+name = "Punctuation review"
+
+[[gates]]
+id = "editorial.em_dashes"
+kind = "repeated_punctuation"
+mark = "—"
+max_per_paragraph = 2
+blocking = false

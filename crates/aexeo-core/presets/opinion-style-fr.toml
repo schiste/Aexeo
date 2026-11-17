@@ -1,0 +1,10 @@
+version = 1
+name = "Opinion style review, French"
+extends = ["transition-review-fr", "punctuation-review", "sentence-openings-review", "natural-style-fr"]
+
+[[gates]]
+id = "editorial.em_dashes"
+kind = "repeated_punctuation"
+mark = "—"
+max_per_paragraph = 3
+blocking = false

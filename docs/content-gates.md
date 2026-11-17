@@ -1410,3 +1410,15 @@ terms = ["Moreover", "Additionally", "In conclusion"]
 max_per_paragraph = 2
 blocking = false
 ```
+
+### Punctuation review
+
+The optional `punctuation-review` preset counts em dashes in each observed
+paragraph and asks for review above the configured limit. The
+`repeated_punctuation` gate accepts a single Unicode punctuation or symbol
+`mark` and a `max_per_paragraph` limit. It is advisory and requires observed
+paragraphs; missing paragraphs are `not_checked`. Counts include punctuation
+inside quotations and other inline prose, and are not linguistic analysis. No
+punctuation is replaced. The composable `news-style-en`, `news-style-fr`, `opinion-style-en`, and
+`opinion-style-fr` starters combine this gate with transition and opening review; their different
+limits are examples for projects to override, not universal standards.

@@ -320,6 +320,16 @@ pub enum ContentGate {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         abbreviations: Vec<String>,
     },
+    /// Reviews repeated occurrences of one punctuation character per paragraph.
+    RepeatedPunctuation {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default)]
+        blocking: bool,
+        mark: char,
+        max_per_paragraph: usize,
+    },
     /// Finds exact repeated paragraphs after whitespace normalization.
     DuplicateParagraphs {
         id: String,
@@ -614,6 +624,7 @@ impl ContentGate {
             | Self::RepeatedParagraphOpenings { severity, .. }
             | Self::RepeatedSentenceOpenings { severity, .. }
             | Self::SentenceOpeningTerms { severity, .. }
+            | Self::RepeatedPunctuation { severity, .. }
             | Self::DuplicateParagraphs { severity, .. }
             | Self::ParagraphCharacterLength { severity, .. }
             | Self::RepeatedTerms { severity, .. }
@@ -649,6 +660,7 @@ impl ContentGate {
             | Self::RepeatedParagraphOpenings { blocking, .. }
             | Self::RepeatedSentenceOpenings { blocking, .. }
             | Self::SentenceOpeningTerms { blocking, .. }
+            | Self::RepeatedPunctuation { blocking, .. }
             | Self::DuplicateParagraphs { blocking, .. }
             | Self::ParagraphCharacterLength { blocking, .. }
             | Self::RepeatedTerms { blocking, .. }
@@ -696,6 +708,7 @@ impl ContentGate {
             | Self::RepeatedParagraphOpenings { .. }
             | Self::RepeatedSentenceOpenings { .. }
             | Self::SentenceOpeningTerms { .. }
+            | Self::RepeatedPunctuation { .. }
             | Self::DuplicateParagraphs { .. } => "paragraphs",
             Self::HeadingHierarchy { .. } => "heading_levels",
             Self::RequiredHeadings { .. }
@@ -727,6 +740,7 @@ impl ContentGate {
             | Self::RepeatedParagraphOpenings { id, .. }
             | Self::RepeatedSentenceOpenings { id, .. }
             | Self::SentenceOpeningTerms { id, .. }
+            | Self::RepeatedPunctuation { id, .. }
             | Self::DuplicateParagraphs { id, .. }
             | Self::ParagraphCharacterLength { id, .. }
             | Self::RepeatedTerms { id, .. }
@@ -762,6 +776,9 @@ fn editorial_suggestion(gate: &ContentGate) -> Option<&'static str> {
         ),
         ContentGate::SentenceLength { .. } | ContentGate::SentenceCharacterLength { .. } => Some(
             "Review the sentence boundary and consider shortening the sentence while preserving its meaning.",
+        ),
+        ContentGate::RepeatedPunctuation { .. } => Some(
+            "Review punctuation in context; retain it when it serves the author's meaning or voice.",
         ),
         ContentGate::SentenceOpeningTerms { .. } => Some(
             "Review the connective in context; retain it when it conveys a meaningful relationship.",
@@ -1367,6 +1384,14 @@ impl ContentPreset {
                         "sentence openings need 1 to 16 words, a positive consecutive limit and delimiters for {}",
                         gate.id()
                     )
+                }
+                ContentGate::RepeatedPunctuation { mark, .. }
+                    if mark.is_alphanumeric() || mark.is_whitespace() || mark.is_control() =>
+                {
+                    bail!(
+                        "punctuation mark must be a non-whitespace symbol for {}",
+                        gate.id()
+                    );
                 }
                 ContentGate::SentenceOpeningTerms {
                     terms, delimiters, ..
@@ -2336,6 +2361,45 @@ impl ContentPreset {
                         None => {
                             reason = Some("paragraphs are unavailable from this adapter".into())
                         }
+                    }
+                }
+                ContentGate::RepeatedPunctuation {
+                    mark,
+                    max_per_paragraph,
+                    ..
+                } => {
+                    measurements.insert("max_per_paragraph".into(), *max_per_paragraph);
+                    if let Some(paragraphs) =
+                        context.and_then(|context| context.paragraphs.as_ref())
+                    {
+                        let mut bytes_seen = 0usize;
+                        let mut exceeding = 0usize;
+                        for paragraph in paragraphs.iter().take(MAX_PARAGRAPH_OPENINGS) {
+                            bytes_seen = bytes_seen.saturating_add(paragraph.text.len());
+                            if bytes_seen > MAX_CONTENT_INPUT_BYTES {
+                                reason =
+                                    Some("paragraph text exceeds the supported byte limit".into());
+                                break;
+                            }
+                            let count = paragraph.text.chars().filter(|ch| ch == mark).count();
+                            if count > *max_per_paragraph {
+                                exceeding += 1;
+                                emit(
+                                    format!(
+                                        "Punctuation mark occurs {count} times in this paragraph; configured maximum is {max_per_paragraph}"
+                                    ),
+                                    paragraph.line,
+                                    paragraph.column,
+                                );
+                            }
+                        }
+                        measurements.insert("paragraph_count".into(), paragraphs.len());
+                        measurements.insert("paragraphs_exceeding_limit".into(), exceeding);
+                        if paragraphs.len() > MAX_PARAGRAPH_OPENINGS {
+                            reason = Some("too many paragraphs to assess completely".into());
+                        }
+                    } else {
+                        reason = Some("paragraphs are unavailable from this adapter".into());
                     }
                 }
                 ContentGate::SentenceOpeningTerms {
@@ -5069,6 +5133,39 @@ terms = ["bad"]
             );
             assert!(ContentPreset::from_toml(&invalid).is_err());
         }
+    }
+
+    #[test]
+    fn punctuation_review_reports_repetition_without_rewriting() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='dash'\nkind='repeated_punctuation'\nmark='—'\nmax_per_paragraph=1\n").unwrap();
+        let original = "One — then two — and three.";
+        let input = ContentInput {
+            text: Some(original.into()),
+            ..Default::default()
+        };
+        let context = ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: original.into(),
+                line: 2,
+                column: 1,
+            }]),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert!(!report.gates[0].blocking);
+        assert_eq!(
+            report.gates[0].measurements["paragraphs_exceeding_limit"],
+            1
+        );
+        assert_eq!(input.text.as_deref(), Some(original));
+        assert_eq!(
+            preset.evaluate(&input).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+        assert!(ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='x'\nkind='repeated_punctuation'\nmark='a'\nmax_per_paragraph=1\n").is_err());
     }
 
     #[test]

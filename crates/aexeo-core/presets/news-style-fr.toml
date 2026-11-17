@@ -1,0 +1,3 @@
+version = 1
+name = "News style review, French"
+extends = ["transition-review-fr", "punctuation-review", "sentence-openings-review", "natural-style-fr"]
