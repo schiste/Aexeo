@@ -13,6 +13,8 @@ export interface ContentPresetOptions {
   byCollectionLocale?: Record<string, Record<string, string>>;
   /** Restrict preset evaluation to these collections; site checks still run for all. */
   collections?: readonly string[];
+  /** Host attests complete list projection for these collections, including custom blocks. */
+  listStructureCompleteByCollection?: readonly string[];
 }
 
 /** Trusted host code, installed explicitly at runtime; presets never load providers. */
@@ -83,8 +85,10 @@ export function withContentPreset(
     const selectionCounts = onPresetSelectionTelemetry ? emptyPresetSelectionCounts() : undefined;
     let selectionStatus: PresetSelectionTelemetry["status"] = "error";
     try {
-      for (const [index, document] of documents.entries()) {
+      for (const [index, originalDocument] of documents.entries()) {
         const collection = context?.collections[index];
+        const attested = collection !== undefined && preset.listStructureCompleteByCollection?.includes(collection) === true;
+        const document = attested ? { ...originalDocument, list_structure_complete: true } : originalDocument;
         if (preset.collections !== undefined) {
           if (collection === undefined) throw new Error("collection is required for a scoped content preset");
           if (!preset.collections.includes(collection)) continue;

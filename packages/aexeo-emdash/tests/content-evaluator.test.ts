@@ -328,3 +328,13 @@ it("emits opt-in aggregate selection telemetry without document identifiers", as
   expect((await invalid([{ ...doc, lang: "fr-fr" }])).ok).toBe(false);
   expect(failed).toEqual([{ status: "error", counts: { collection_locale: 0, locale: 1, collection: 0, fallback: 0, none: 0 } }]);
 });
+
+
+it("attests list completeness only for configured collections without mutating documents", async () => {
+  const seen: EmdashDocument[] = [];
+  const evaluator = withContentPreset(base, { name: "article", listStructureCompleteByCollection: ["posts"] }, async (document) => { seen.push(document); return { ...report, gates: [] }; });
+  await evaluator([doc, { ...doc, route: "/other" }], { collections: ["posts", "pages"] });
+  expect(seen[0]?.list_structure_complete).toBe(true);
+  expect(seen[1]?.list_structure_complete).toBeUndefined();
+  expect(doc.list_structure_complete).toBeUndefined();
+});

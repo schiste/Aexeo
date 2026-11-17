@@ -60,6 +60,8 @@ export interface EmdashDocument {
   body?: PortableTextBlock[];
   /** Body features faithfully represented by an adapter; omitted means all. */
   body_capabilities?: ("text" | "headings" | "paragraphs" | "links")[];
+  /** Trusted host attests that every source list block is represented in order. */
+  list_structure_complete?: boolean;
 }
 
 export type FindingSeverity = "error" | "warning";
