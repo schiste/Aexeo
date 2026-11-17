@@ -311,6 +311,36 @@ class CompareOfflineReceipts(unittest.TestCase):
         with self.assertRaises(comparison.VerificationError):
             comparison.compare_receipts(self.encode(altered), self.encode(altered), self.artifacts, validate_change=True)
 
+    @unittest.skipUnless(importlib.util.find_spec("jsonschema") and importlib.util.find_spec("rfc3339_validator") and importlib.util.find_spec("rfc3986_validator"),
+                         "optional change validation dependencies are unavailable")
+    def test_validated_change_rejects_duplicate_entity_ids(self):
+        change = json.loads((Path(__file__).parent.parent / "v1" / "examples" / "markdown-change.json").read_text())
+        # All states are inline and valid so content checks reach the ambiguity.
+        for index, entry in enumerate(change["entries"]):
+            for field in ("before", "after"):
+                if field in entry:
+                    content = f"example {index} {field}"
+                    entry[field].pop("file", None)
+                    entry[field]["inline"] = content
+                    entry[field]["sha256"] = hashlib.sha256(content.encode()).hexdigest()
+        # JSON Schema alone does not express uniqueness by entity_id.
+        change["entries"][1]["entity_id"] = change["entries"][0]["entity_id"]
+        data = self.encode(change)
+        self.artifacts["change"].write_bytes(data)
+        receipt = copy.deepcopy(self.receipt)
+        receipt["decision_inputs"]["change"]["sha256"] = hashlib.sha256(data).hexdigest()
+        receipt["verdict"]["subject"] = {
+            "change_id": change["change_id"], "base": change["base"],
+            "entries": [{"entity_id": entry["entity_id"], "sha256": entry.get("after", {}).get("sha256")}
+                        for entry in change["entries"]],
+        }
+        encoded = self.encode(receipt)
+        # Legacy subject-only comparison remains compatible.
+        comparison.compare_receipts(encoded, encoded, self.artifacts, verify_change_subject=True)
+        for options in ({"validate_change": True}, {"verify_inline_content": True}, {"content_files": {}}):
+            with self.subTest(options=options), self.assertRaises(comparison.VerificationError):
+                comparison.compare_receipts(encoded, encoded, self.artifacts, **options)
+
     def test_inline_content_checks_every_present_state_and_rejects_references(self):
         try:
             import jsonschema  # noqa: F401
