@@ -5,6 +5,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tarfile
 import tomllib
 import unittest
 from pathlib import Path
@@ -84,6 +85,40 @@ class ReleaseGuardTests(unittest.TestCase):
         self.assert_refused(self.guard([run()], gh_exit=1), "could not determine")
         self.assert_refused(self.guard(gh_stdout="not json"), "could not determine")
         self.assert_refused(self.guard(gh_stdout="{}"), "could not determine")
+
+
+class SyntaxReleaseTests(unittest.TestCase):
+    def test_archive_contains_runnable_adapter_without_models(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "dist"
+            subprocess.run(["sh", str(ROOT / "scripts/build-syntax-release.sh"), str(output)], check=True, capture_output=True, text=True)
+            version = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]["version"]
+            archive = output / f"aexeo-syntax-adapter-v{version}.tar.gz"
+            with tarfile.open(archive, "r:gz") as bundle:
+                self.assertEqual(set(bundle.getnames()), {
+                    "LICENSE", "adapters/syntax/README.md", "adapters/syntax/example.toml",
+                    "adapters/syntax/example-parameters.json", "adapters/syntax/review.py",
+                    "adapters/syntax/test_review.py",
+                })
+                for member in bundle.getmembers():
+                    self.assertTrue(member.isfile())
+                    destination = root / member.name
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    source = bundle.extractfile(member)
+                    self.assertIsNotNone(source)
+                    destination.write_bytes(source.read())
+            result = subprocess.run(
+                [sys.executable, "-S", "-m", "unittest", "discover", "-s", str(root / "adapters/syntax"), "-v"],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertRegex(result.stderr, r"Ran [1-9][0-9]* tests?")
+
+    def test_release_workflow_includes_archive_in_checksum_manifest(self):
+        workflow = WORKFLOWS[1].read_text()
+        self.assertIn("sh scripts/build-syntax-release.sh release", workflow)
+        self.assertIn("shasum -a 256 aexeo-cli-* aexeo-syntax-adapter-v*.tar.gz > SHA256SUMS.txt", workflow)
 
 
 class PinTests(unittest.TestCase):

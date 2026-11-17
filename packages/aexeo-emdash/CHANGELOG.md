@@ -6,16 +6,19 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-- Support advisory checks of structured list item counts when a host explicitly attests complete Portable Text list coverage for a collection. Incomplete or unattested structure is `not_checked`.
-- Add optional English and French news and opinion style presets and advisory reviews of repeated sentence-opening transitions, punctuation and sentence rhythm. English content can also be reviewed for possible trailing `-ing` clauses; optional locale-specific inline enumeration heuristics are available separately. These checks are configurable, preserve the original content and do not establish AI authorship.
-- Skip recognized quoted sentences in the new sentence-level style checks and report an incomplete assessment for quotations left open at a paragraph boundary. Quotation and sentence detection remain heuristic.
+## [0.9.3]
 
-- Preserve body evaluation when only Portable Text block or span identity keys are malformed; normalized keys are not used to fabricate source locations.
+- Add advisory sentence length variance review with configurable fixed or seeded thresholds and a discoverable starter preset. Unobserved or insufficient text is not checked.
+- Add an advisory configurable sentence-opening window review. These heuristics do not infer authorship and should be reviewed in context.
 
-## [0.9.2] - Pending publication
+## [0.9.2] - 2026-11-17
 
 ### Added
 
+- Support advisory checks of structured list item counts when a host explicitly attests complete Portable Text list coverage for a collection. Incomplete or unattested structure is `not_checked`.
+- Add optional English and French news and opinion style presets and advisory reviews of repeated sentence-opening transitions, punctuation and sentence rhythm. English content can also be reviewed for possible trailing `-ing` clauses; optional locale-specific inline enumeration heuristics are available separately. These checks are configurable, preserve the original content and do not establish AI authorship.
+- Skip recognized quoted sentences in the new sentence-level style checks and report an incomplete assessment for quotations left open at a paragraph boundary. Quotation and sentence detection remain heuristic.
+- Preserve body evaluation when only Portable Text block or span identity keys are malformed; normalized keys are not used to fabricate source locations.
 - Supply the document route and locale to configured link observers and explain failed or unavailable observations in unchecked assessments without exposing provider errors.
 - Support the composable `metadata_length` gate for observed fields, with configurable Unicode scalar bounds and explicit unchecked results for missing or unobserved fields.
 - Select portable content presets per exact locale and collection, consistently in the configured plugin and crawl worker.

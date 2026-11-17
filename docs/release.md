@@ -76,6 +76,13 @@ as historical evidence.
 Rebuild the EmDash WASM bridge before publishing an npm package containing the
 new engine. The existing v0.0.22 tag must not be moved or reused.
 
+### Upgrading from 0.0.23 to 0.0.24
+
+Regenerate offline input and observed-link bound verdicts with the new engine;
+retain earlier verdicts as historical evidence. Rebuild the EmDash WASM bridge
+from the release commit. The optional syntax adapter is a separate release asset;
+the CLI and npm package do not include its Python files or language models.
+
 ## CLI Release Artifacts
 
 Package release assets:
@@ -137,7 +144,14 @@ release on its own:
 The release assets are:
 
 - `aexeo-cli-darwin-arm64` and `aexeo-cli-linux-x86_64`
-- `SHA256SUMS.txt`, with one `<hex>  <basename>` line per binary
+- `aexeo-syntax-adapter-v<version>.tar.gz`, with the optional Python adapter,
+  examples, README, offline tests and license; no spaCy models or environments
+- `SHA256SUMS.txt`, with one `<hex>  <basename>` line per binary and archive
+
+Extract the syntax archive into a working directory and follow
+`adapters/syntax/README.md` there. Model installation remains an explicit,
+separate step. The bundled mock-based tests check the adapter contract but do
+not establish parser accuracy.
 
 What still needs a human:
 
