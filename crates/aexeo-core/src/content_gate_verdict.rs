@@ -814,13 +814,20 @@ fn experimental_offline_binding(
     scope: HtmlContentScope,
 ) -> Result<String> {
     let artifacts = context.artifacts_with_html_scope(scope)?;
+    experimental_binding(&artifacts, None)
+}
+
+fn experimental_binding(
+    artifacts: &OfflineDecisionArtifacts,
+    evidence: Option<&[u8]>,
+) -> Result<String> {
     let digest = aexeo_contracts::content_gate_binding_v2::decision_binding(&[
         ("change", Some(&artifacts.change)),
         ("resolved_policy", Some(&artifacts.resolved_policy)),
         ("host_options", Some(&artifacts.host_options)),
         ("evaluator", Some(&artifacts.evaluator)),
         ("collection", artifacts.collection.as_deref()),
-        ("external_evidence", None),
+        ("external_evidence", evidence),
     ])
     .map_err(anyhow::Error::msg)?;
     Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
@@ -1177,6 +1184,57 @@ impl LinkSnapshotDecisionContext<'_> {
             };
         Ok(manifest)
     }
+}
+
+const EXPERIMENTAL_LINK_BOUND_VERDICT_SCHEMA: &str = "aexeo.experimental-link-bound-verdict/v1";
+
+/// Bind supplied observations to an offline evaluation. This does not establish
+/// the origin or freshness of the observations and does not access the network.
+pub fn evaluate_experimental_link_bound_verdict<P: ConfinedContentFiles>(
+    context: &LinkSnapshotDecisionContext<'_>,
+    provider: &mut P,
+    evaluated_at: &str,
+    scope: HtmlContentScope,
+) -> Result<ExperimentalBoundVerdict> {
+    let artifacts = context.artifacts_with_html_scope(scope)?;
+    let binding = experimental_binding(&artifacts.offline, Some(&artifacts.external_evidence))?;
+    let receipt =
+        evaluate_link_snapshot_receipt_with_html_scope(context, provider, evaluated_at, scope)?;
+    Ok(ExperimentalBoundVerdict {
+        schema: EXPERIMENTAL_LINK_BOUND_VERDICT_SCHEMA.into(),
+        binding,
+        receipt,
+    })
+}
+
+/// Compare independently supplied observations and re-evaluate the receipt.
+pub fn revalidate_experimental_link_bound_verdict<P: ConfinedContentFiles>(
+    previous: &ExperimentalBoundVerdict,
+    context: &LinkSnapshotDecisionContext<'_>,
+    provider: &mut P,
+    evaluated_at: &str,
+    scope: HtmlContentScope,
+) -> Result<ExperimentalBoundVerdict> {
+    if previous.schema != EXPERIMENTAL_LINK_BOUND_VERDICT_SCHEMA {
+        bail!("unsupported experimental link bound verdict schema");
+    }
+    let artifacts = context.artifacts_with_html_scope(scope)?;
+    let binding = experimental_binding(&artifacts.offline, Some(&artifacts.external_evidence))?;
+    if previous.binding != binding {
+        bail!("experimental decision inputs differ");
+    }
+    let receipt = revalidate_link_snapshot_receipt_with_html_scope(
+        &previous.receipt,
+        context,
+        provider,
+        evaluated_at,
+        scope,
+    )?;
+    Ok(ExperimentalBoundVerdict {
+        schema: EXPERIMENTAL_LINK_BOUND_VERDICT_SCHEMA.into(),
+        binding,
+        receipt,
+    })
 }
 
 fn evaluate_link_snapshot_context<P: ConfinedContentFiles>(

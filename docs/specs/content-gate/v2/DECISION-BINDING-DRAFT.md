@@ -37,7 +37,10 @@ exercise the candidate binding against Aexeo's existing offline receipt. The
 second API compares independently supplied current artifacts and re-evaluates
 the original receipt. Its distinct `aexeo.experimental-bound-verdict/v1`
 envelope is not a v2 verdict. The artifact encodings remain Aexeo-specific;
-external observations and custom extensions are unavailable in this mode.
+custom extensions are unavailable in this mode. A separate
+`aexeo.experimental-link-bound-verdict/v1` envelope binds explicitly supplied
+link snapshots, and its revalidator rejects the offline envelope and vice versa.
+No network access is performed; the host is responsible for evidence origin and freshness.
 The host must establish freshness, provenance, evaluator identity, complete
 inputs and publication safety. Hosts must bound and strictly parse untrusted
 serialized envelopes, including rejecting duplicate or discarded fields, before
@@ -47,7 +50,8 @@ For the CLI, add `--offline-receipt --experimental-bound-verdict
 --evaluator-identity BUILD_ID` to `content-change`. Revalidate a separately
 saved result with `--verify-offline-receipt PATH` and the same independently
 obtained current inputs. The prior file must differ from the output path. The
-mode rejects receipt bundles and external link observations and does not accept
-v1 receipts as bound verdicts. `--telemetry` reports only whether revalidation
+mode rejects receipt bundles and does not accept v1 receipts as bound verdicts.
+Use `--link-observations PATH` to bind supplied snapshots; revalidation requires
+the independently obtained current snapshot. `--telemetry` reports only whether revalidation
 matched; input values and paths are excluded. These checks do not authenticate
 inputs, establish freshness or authorize publication.

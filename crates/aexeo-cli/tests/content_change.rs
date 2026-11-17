@@ -2054,18 +2054,13 @@ fn experimental_bound_verdict_cli_revalidates_and_preserves_output_on_error() {
     assert_eq!(result.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&result.stderr).contains("invalid previous bound verdict"));
     assert_eq!(fs::read(&output).unwrap(), before);
-    for incompatible in ["--offline-receipt-bundle", "--link-observations"] {
-        let mut args = options.to_vec();
-        args.push(incompatible);
-        if incompatible == "--link-observations" {
-            args.push(prior_path);
-        }
-        assert_ne!(
-            run(dir.path(), &input(), policy, &args).status.code(),
-            Some(0)
-        );
-        assert_eq!(fs::read(&output).unwrap(), before);
-    }
+    let mut args = options.to_vec();
+    args.push("--offline-receipt-bundle");
+    assert_ne!(
+        run(dir.path(), &input(), policy, &args).status.code(),
+        Some(0)
+    );
+    assert_eq!(fs::read(&output).unwrap(), before);
 }
 
 #[test]
