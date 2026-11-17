@@ -50,6 +50,13 @@ must reject v1 and unknown major versions when v2 binding is required.
   observation current. Deployments must protect their trust boundary and define
   freshness and publication race handling independently.
 
+## Candidate byte encoding
+
+An [experimental, domain-separated byte encoding](DECISION-BINDING-DRAFT.md)
+has a shared Rust/Python test vector. It is not yet used by a producer or
+consumer and does not specify artifact semantics or a v2 verdict. Its
+presence does not satisfy any v2-required runner obligation.
+
 ## Work before this can be enabled
 
 1. Specify a versioned change/verdict wire format and byte-level binding scheme,
