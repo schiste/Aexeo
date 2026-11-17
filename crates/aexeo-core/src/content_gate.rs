@@ -1730,10 +1730,10 @@ impl ContentPreset {
                         {
                             let parsed = aexeo_contracts::content_gate_change_validation::parse_unique_json_value(snapshot.as_bytes());
                             let mut profile = profile.resolve()?;
-                            if input.source_text.is_none() {
-                                if let Some(separator) = projection_separator {
-                                    profile.separator.clone_from(separator);
-                                }
+                            if input.source_text.is_none()
+                                && let Some(separator) = projection_separator
+                            {
+                                profile.separator.clone_from(separator);
                             }
                             match parsed.ok().and_then(|value| {
                                 let issues = profile.assess(&value).ok()?;
