@@ -2693,15 +2693,19 @@ impl ContentPreset {
                         *value
                     } else {
                         use sha2::{Digest, Sha256};
-                        let lo = random_min_stddev_words.expect("validated variance range");
-                        let hi = random_max_stddev_words.expect("validated variance range");
-                        let seed = random_seed.expect("validated variance seed");
+                        let (Some(lo), Some(hi), Some(seed)) = (
+                            *random_min_stddev_words,
+                            *random_max_stddev_words,
+                            *random_seed,
+                        ) else {
+                            bail!("variance range and seed are required for {}", gate.id());
+                        };
                         let mut hash = Sha256::new();
                         hash.update(b"aexeo-sentence-variance-v1\0");
                         hash.update(seed.to_le_bytes());
                         hash.update(gate.id().as_bytes());
-                        let bytes: [u8; 8] =
-                            hash.finalize()[..8].try_into().expect("SHA-256 output");
+                        let mut bytes = [0u8; 8];
+                        bytes.copy_from_slice(&hash.finalize()[..8]);
                         lo + (u64::from_le_bytes(bytes) % ((hi - lo + 1) as u64)) as usize
                     };
                     measurements.insert("window_size".into(), *window_size);
