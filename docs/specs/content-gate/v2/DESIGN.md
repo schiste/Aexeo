@@ -53,8 +53,9 @@ must reject v1 and unknown major versions when v2 binding is required.
 ## Candidate byte encoding
 
 An [experimental, domain-separated byte encoding](DECISION-BINDING-DRAFT.md)
-has a shared Rust/Python test vector. It is not yet used by a producer or
-consumer and does not specify artifact semantics or a v2 verdict. Its
+has a shared Rust/Python test vector. An experimental offline Rust API uses it
+alongside the existing receipt; no CLI or portable consumer uses it. It does
+not specify interoperable artifact semantics or a v2 verdict. Its
 presence does not satisfy any v2-required runner obligation.
 
 ## Work before this can be enabled
