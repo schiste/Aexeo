@@ -201,6 +201,9 @@ Options:
       --offline-receipt
           Write an experimental offline receipt instead of a v1 verdict
 
+      --experimental-bound-verdict
+          Use an experimental input-bound offline envelope; not a portable v2 verdict
+
       --offline-receipt-bundle
           Include private decision input bytes in the experimental receipt output
 

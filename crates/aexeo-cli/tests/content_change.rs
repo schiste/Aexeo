@@ -1977,6 +1977,98 @@ fn offline_receipt_bundle_binds_collection_completeness() {
 }
 
 #[test]
+fn experimental_bound_verdict_cli_revalidates_and_preserves_output_on_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
+    let options = [
+        "--offline-receipt",
+        "--experimental-bound-verdict",
+        "--evaluator-identity",
+        "trusted-build",
+    ];
+    let first = run(dir.path(), &input(), policy, &options);
+    assert_eq!(
+        first.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let output = dir.path().join("verdict.json");
+    let produced: serde_json::Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert_eq!(produced["schema"], "aexeo.experimental-bound-verdict/v1");
+    assert_eq!(produced["receipt"]["verdict"]["status"], "pass");
+    let prior = dir.path().join("prior.json");
+    fs::copy(&output, &prior).unwrap();
+    let prior_path = prior.to_str().unwrap();
+    let verify = [
+        "--offline-receipt",
+        "--experimental-bound-verdict",
+        "--evaluator-identity",
+        "trusted-build",
+        "--verify-offline-receipt",
+        prior_path,
+        "--telemetry",
+    ];
+    let result = run(dir.path(), &input(), policy, &verify);
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let event: serde_json::Value = serde_json::from_slice(&result.stderr).unwrap();
+    assert_eq!(
+        event,
+        serde_json::json!({"event":"content_change_bound_verdict_revalidation", "version":1, "matched":true})
+    );
+    let before = fs::read(&output).unwrap();
+    let mut changed = input();
+    changed["entries"][0]["metadata"] = serde_json::json!({"title":"changed"});
+    let result = run(dir.path(), &changed, policy, &verify);
+    assert_eq!(result.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("previous bound verdict does not match")
+    );
+    assert_eq!(fs::read(&output).unwrap(), before);
+    assert!(String::from_utf8_lossy(&result.stderr).contains("\"matched\":false"));
+    let mut tampered = produced.clone();
+    tampered["binding"] = "00".repeat(32).into();
+    fs::write(&prior, serde_json::to_vec(&tampered).unwrap()).unwrap();
+    let result = run(dir.path(), &input(), policy, &verify);
+    assert_eq!(result.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("previous bound verdict does not match")
+    );
+    assert_eq!(fs::read(&output).unwrap(), before);
+    fs::write(&prior, serde_json::to_vec(&produced["receipt"]).unwrap()).unwrap();
+    let result = run(dir.path(), &input(), policy, &verify);
+    assert_eq!(result.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&result.stderr).contains("invalid previous bound verdict"));
+    assert_eq!(fs::read(&output).unwrap(), before);
+    fs::write(&prior, serde_json::to_vec(&produced).unwrap()).unwrap();
+    let duplicate = String::from_utf8(fs::read(&prior).unwrap())
+        .unwrap()
+        .replacen("{", "{\"schema\":\"duplicate\",", 1);
+    fs::write(&prior, duplicate).unwrap();
+    let result = run(dir.path(), &input(), policy, &verify);
+    assert_eq!(result.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&result.stderr).contains("invalid previous bound verdict"));
+    assert_eq!(fs::read(&output).unwrap(), before);
+    for incompatible in ["--offline-receipt-bundle", "--link-observations"] {
+        let mut args = options.to_vec();
+        args.push(incompatible);
+        if incompatible == "--link-observations" {
+            args.push(prior_path);
+        }
+        assert_ne!(
+            run(dir.path(), &input(), policy, &args).status.code(),
+            Some(0)
+        );
+        assert_eq!(fs::read(&output).unwrap(), before);
+    }
+}
+
+#[test]
 fn offline_receipt_is_explicit_bound_and_revalidated() {
     let dir = tempfile::tempdir().unwrap();
     let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
