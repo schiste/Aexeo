@@ -36,6 +36,7 @@ pub mod markdown_adapter;
 #[cfg(test)]
 mod page_kind_divergence;
 pub mod plain_text_adapter;
+pub mod quote_tracking;
 pub mod plugin;
 pub mod policy;
 pub mod quality;
