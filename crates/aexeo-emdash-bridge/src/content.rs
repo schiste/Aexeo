@@ -695,6 +695,32 @@ mod tests {
     };
 
     #[test]
+    fn pacing_checks_complete_projection_and_withholds_partial_projection() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/x","title":"Title","body":[{"children":[{"_type":"span","text":"four"}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='pacing'\nkind='editorial_pacing'\nsource='composition'\nprofile={version=1,name='test',fields=[{name='hook',max_characters=3}]}\n").unwrap();
+        let snapshots =
+            BTreeMap::from([("composition".to_string(), r#"{"hook":"four"}"#.to_string())]);
+        let complete = evaluate_content_with_body_capabilities(
+            &document,
+            &preset,
+            Some(snapshots.clone()),
+            [true; 4],
+        )
+        .unwrap();
+        assert_eq!(complete.gates[0].status, GateStatus::Failed);
+        assert_eq!(complete.gates[0].findings.len(), 1);
+        let partial = evaluate_content_with_body_capabilities(
+            &document,
+            &preset,
+            Some(snapshots),
+            [false, true, true, true],
+        )
+        .unwrap();
+        assert_eq!(partial.gates[0].status, GateStatus::NotChecked);
+        assert!(partial.gates[0].findings.is_empty());
+    }
+
+    #[test]
     fn metadata_length_respects_description_observation() {
         let mut document: EmdashDocument =
             serde_json::from_str(r#"{"route":"/t","title":"Title","body":[]}"#).unwrap();

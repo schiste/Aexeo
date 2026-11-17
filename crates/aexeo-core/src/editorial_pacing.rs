@@ -25,6 +25,29 @@ fn default_separator() -> String {
     "\n\n".to_string()
 }
 
+/// A built-in composition profile name or a complete custom profile.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum CompositionProfileRef {
+    Builtin(String),
+    Inline(CompositionProfile),
+}
+
+impl CompositionProfileRef {
+    pub fn resolve(&self) -> Result<CompositionProfile> {
+        match self {
+            Self::Builtin(name) => CompositionProfile::from_toml(
+                builtin_profile(name)
+                    .ok_or_else(|| anyhow::anyhow!("unknown composition profile"))?,
+            ),
+            Self::Inline(profile) => {
+                profile.validate()?;
+                Ok(profile.clone())
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CompositionField {
@@ -79,7 +102,10 @@ impl CompositionProfile {
         ensure!(self.separator.len() <= 1024, "separator is too long");
         let mut names = BTreeSet::new();
         for field in &self.fields {
-            ensure!(!field.name.trim().is_empty(), "field name is empty");
+            ensure!(
+                !field.name.trim().is_empty() && field.name.len() <= 1024,
+                "field name is empty or too long"
+            );
             ensure!(names.insert(&field.name), "duplicate field name");
             ensure!(
                 field.allowed_counts.len() <= 32,
@@ -145,6 +171,10 @@ impl CompositionProfile {
         let object = input
             .as_object()
             .ok_or_else(|| anyhow::anyhow!("composition must be a JSON object"))?;
+        ensure!(
+            object.len() <= MAX_FIELDS,
+            "composition object exceeds resource limit"
+        );
         let mut issues = Vec::new();
         for name in object.keys() {
             if !self.fields.iter().any(|field| &field.name == name) {
@@ -157,6 +187,7 @@ impl CompositionProfile {
             }
         }
         let mut total_bytes = 0usize;
+        let mut total_items = 0usize;
         for field in &self.fields {
             let Some(value) = object.get(&field.name) else {
                 issues.push(CompositionIssue {
@@ -205,6 +236,13 @@ impl CompositionProfile {
                         expected: None,
                     });
                 }
+                total_items = total_items
+                    .checked_add(array.len())
+                    .ok_or_else(|| anyhow::anyhow!("composition exceeds resource limit"))?;
+                ensure!(
+                    total_items <= MAX_ARRAY_ITEMS,
+                    "composition arrays exceed resource limit"
+                );
                 let mut texts = Vec::with_capacity(array.len());
                 for item in array {
                     if let Some(text) = item.as_str() {
@@ -258,6 +296,18 @@ impl CompositionProfile {
     pub fn assemble(&self, input: &Value) -> Result<String> {
         if !self.assess(input)?.is_empty() {
             bail!("composition does not satisfy the profile");
+        }
+        self.assemble_snapshot(input)
+    }
+
+    /// Reconstruct a well-formed snapshot even when advisory bounds fail.
+    pub fn assemble_snapshot(&self, input: &Value) -> Result<String> {
+        let issues = self.assess(input)?;
+        if issues
+            .iter()
+            .any(|issue| !matches!(issue.code, "too_short" | "too_long" | "disallowed_count"))
+        {
+            bail!("composition has invalid structure");
         }
         let object = input.as_object().expect("assess checked object");
         let mut parts = Vec::new();
@@ -313,6 +363,50 @@ mod tests {
             vec!["too_long", "disallowed_count"]
         );
         assert!(profile.assemble(&bad).is_err());
+        assert_eq!(
+            profile.assemble_snapshot(&bad).unwrap(),
+            "four\n\na\n\nb\n\nc"
+        );
+    }
+
+    #[test]
+    fn gate_only_reports_bound_document_findings() {
+        use crate::content_gate::{ContentGate, ContentInput, ContentPreset, GateStatus, Severity};
+        use std::collections::BTreeMap;
+        let profile = CompositionProfile::from_toml(PROFILE).unwrap();
+        let preset = ContentPreset {
+            version: 1,
+            name: "pacing".into(),
+            gates: vec![ContentGate::EditorialPacing {
+                id: "pacing".into(),
+                severity: Severity::Warning,
+                blocking: false,
+                source: "composition".into(),
+                profile: CompositionProfileRef::Inline(profile),
+            }],
+        };
+        let mut input = ContentInput {
+            id: "draft".into(),
+            source_text: Some("four\n\na\n\nb\n\nc".into()),
+            evidence_sources: Some(BTreeMap::from([(
+                "composition".into(),
+                r#"{"hook":"four","examples":["a","b","c"]}"#.into(),
+            )])),
+            ..Default::default()
+        };
+        let report = preset.evaluate(&input).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[0].findings.len(), 2);
+        assert!(!report.gates[0].blocking);
+        input.source_text = Some("edited text".into());
+        let stale = preset.evaluate(&input).unwrap();
+        assert_eq!(stale.gates[0].status, GateStatus::NotChecked);
+        assert!(stale.gates[0].findings.is_empty());
+        input.evidence_sources = None;
+        assert_eq!(
+            preset.evaluate(&input).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
     }
 
     #[test]

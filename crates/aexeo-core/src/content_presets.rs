@@ -201,6 +201,14 @@ fn merge_gate(
 pub fn builtin_content_presets() -> BTreeMap<String, String> {
     BTreeMap::from([
         (
+            "news-pacing".into(),
+            include_str!("../presets/news-pacing.toml").into(),
+        ),
+        (
+            "opinion-pacing".into(),
+            include_str!("../presets/opinion-pacing.toml").into(),
+        ),
+        (
             "sentence-openings-review".into(),
             include_str!("../presets/sentence-openings-review.toml").into(),
         ),

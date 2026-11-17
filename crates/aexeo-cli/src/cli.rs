@@ -6,6 +6,18 @@ pub fn build_cli() -> Command {
     Command::new("aexeo-cli")
         .about("SEO and GEO linting for static websites")
         .subcommand(
+            Command::new("composition")
+                .about("Inspect and assess a structured editorial composition")
+                .arg(Arg::new("profile").long("profile").required(true).help("Built-in profile (news or opinion) or TOML profile path"))
+                .arg(Arg::new("schema").long("schema").action(ArgAction::SetTrue).conflicts_with_all(["input", "document", "assemble", "emit-preset"]).help("Export the profile's JSON Schema"))
+                .arg(Arg::new("emit-preset").long("emit-preset").action(ArgAction::SetTrue).conflicts_with_all(["input", "document", "assemble"]).help("Export a composable TOML gate preset from this exact profile"))
+                .arg(Arg::new("input").long("input").help("Structured JSON composition to assess"))
+                .arg(Arg::new("document").long("document").requires("input").help("Compare the assembled snapshot with this exact UTF-8 document"))
+                .arg(Arg::new("assemble").long("assemble").requires("input").conflicts_with("document").action(ArgAction::SetTrue).help("Print validated assembled text"))
+                .arg(Arg::new("allow-advisory-violations").long("allow-advisory-violations").requires("assemble").action(ArgAction::SetTrue).help("Assemble well-formed input even if profile bounds fail"))
+                .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate local telemetry to stderr")),
+        )
+        .subcommand(
             Command::new("link-reachability")
                 .about("Explicitly check external HTTP(S) destinations; results are advisory")
                 .arg(Arg::new("input").required(true).help("Markdown file or JSON array of destinations"))

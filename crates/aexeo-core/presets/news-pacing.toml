@@ -1,0 +1,10 @@
+version = 1
+name = "News composition pacing"
+
+[[gates]]
+id = "editorial.pacing"
+kind = "editorial_pacing"
+source = "composition"
+profile = "news"
+severity = "warning"
+blocking = false

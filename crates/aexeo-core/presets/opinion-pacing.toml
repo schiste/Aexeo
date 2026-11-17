@@ -1,0 +1,10 @@
+version = 1
+name = "Opinion composition pacing"
+
+[[gates]]
+id = "editorial.pacing"
+kind = "editorial_pacing"
+source = "composition"
+profile = "opinion"
+severity = "warning"
+blocking = false

@@ -3,6 +3,7 @@ use anyhow::{Result, bail};
 
 use crate::commands::{
     common::required_arg,
+    composition::command_composition,
     config::command_config,
     content::command_content,
     content_change::command_content_change,
@@ -45,6 +46,7 @@ pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
     match matches.subcommand() {
         Some(("link-graph", submatches)) => command_link_graph(submatches),
         Some(("link-reachability", submatches)) => command_link_reachability(submatches),
+        Some(("composition", submatches)) => command_composition(submatches),
         Some(("content", submatches)) => command_content(submatches),
         Some(("content-change", submatches)) => command_content_change(submatches),
         Some(("feedback-capture", submatches)) => command_feedback(submatches),
