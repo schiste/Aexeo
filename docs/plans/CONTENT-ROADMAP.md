@@ -357,7 +357,9 @@ The latest published version observed on 2026-11-16 was 0.9.1.
   exact blocking check IDs to have passed; this does not establish evaluator
   authenticity, complete required coverage or publication authorization.
   An opt-in comparison mode also checks v1 verdict schema, timestamps, summary
-  counts and status consistency. It does not produce a fresh evaluation,
+  counts and status consistency. It rejects duplicate check IDs and dangling
+  explicit finding references, while preserving optional v1 `check_id`.
+  It does not produce a fresh evaluation,
   establish artifact freshness or authenticity, or authorize publication.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
   The conservative HTML source mapper supports explicitly nested and closed

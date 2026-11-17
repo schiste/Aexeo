@@ -169,6 +169,33 @@ class CompareOfflineReceipts(unittest.TestCase):
 
     @unittest.skipUnless(importlib.util.find_spec("jsonschema") and importlib.util.find_spec("rfc3339_validator"),
                          "optional verdict validation dependencies are unavailable")
+    def test_validated_verdict_rejects_ambiguous_or_dangling_check_references(self):
+        receipt = copy.deepcopy(self.receipt)
+        verdict = json.loads((Path(__file__).parent.parent / "v1" / "examples" / "verdict-fail.json").read_text())
+        receipt["verdict"] = verdict
+        original = self.encode(receipt)
+        comparison.compare_receipts(original, original, self.artifacts, validate=True)
+        # check_id is optional under v1; findings without it remain valid.
+        without_reference = copy.deepcopy(receipt)
+        del without_reference["verdict"]["findings"][0]["check_id"]
+        encoded = self.encode(without_reference)
+        comparison.compare_receipts(encoded, encoded, self.artifacts, validate=True)
+        for mutate in (
+            lambda v: v["checks"][1].update(id=v["checks"][0]["id"]),
+            lambda v: v["findings"][0].update(check_id="missing.check"),
+        ):
+            bad = copy.deepcopy(receipt)
+            mutate(bad["verdict"])
+            encoded = self.encode(bad)
+            # Compatibility: the old comparison-only mode remains unchanged.
+            comparison.compare_receipts(encoded, encoded, self.artifacts)
+            with self.assertRaises(comparison.VerificationError):
+                comparison.compare_receipts(encoded, encoded, self.artifacts, validate=True)
+            with self.assertRaises(comparison.VerificationError):
+                comparison.compare_receipts(original, encoded, self.artifacts, validate=True)
+
+    @unittest.skipUnless(importlib.util.find_spec("jsonschema") and importlib.util.find_spec("rfc3339_validator"),
+                         "optional verdict validation dependencies are unavailable")
     def test_required_checks_need_a_valid_passing_verdict_and_exact_unique_ids(self):
         receipt = copy.deepcopy(self.receipt)
         verdict = json.loads((Path(__file__).parent.parent / "v1" / "examples" / "verdict-fail.json").read_text())
