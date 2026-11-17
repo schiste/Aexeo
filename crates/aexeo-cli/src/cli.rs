@@ -6,6 +6,17 @@ pub fn build_cli() -> Command {
     Command::new("aexeo-cli")
         .about("SEO and GEO linting for static websites")
         .subcommand(
+            Command::new("editorial-patch")
+                .about("Propose, review, or explicitly apply source-bound editorial edits")
+                .arg(Arg::new("operation").required(true).value_parser(["propose", "review", "apply"]))
+                .arg(Arg::new("source").long("source").required(true))
+                .arg(Arg::new("edits").long("edits").required_if_eq("operation", "propose").conflicts_with("patch"))
+                .arg(Arg::new("patch").long("patch").required_if_eq_any([("operation", "review"), ("operation", "apply")]))
+                .arg(Arg::new("output").long("output").required_if_eq("operation", "apply").help("Create a new output file; existing files are never overwritten"))
+                .arg(Arg::new("confirm").long("confirm").required_if_eq("operation", "apply").help("SHA-256 of the exact reviewed proposal file"))
+                .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate counts without document content")),
+        )
+        .subcommand(
             Command::new("composition")
                 .about("Inspect and assess a structured editorial composition")
                 .arg(Arg::new("profile").long("profile").required(true).help("Built-in profile (news or opinion) or TOML profile path"))

@@ -8,6 +8,7 @@ use crate::commands::{
     content::command_content,
     content_change::command_content_change,
     docs::{command_diff, command_docs, command_quality, command_report_render, command_trend},
+    editorial_patch::command_editorial_patch,
     facts::command_facts,
     feedback::{command_feedback, command_feedback_export},
     integrations::{
@@ -46,6 +47,7 @@ pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
     match matches.subcommand() {
         Some(("link-graph", submatches)) => command_link_graph(submatches),
         Some(("link-reachability", submatches)) => command_link_reachability(submatches),
+        Some(("editorial-patch", submatches)) => command_editorial_patch(submatches),
         Some(("composition", submatches)) => command_composition(submatches),
         Some(("content", submatches)) => command_content(submatches),
         Some(("content-change", submatches)) => command_content_change(submatches),
