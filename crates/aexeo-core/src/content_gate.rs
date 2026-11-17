@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
+use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 /// The smallest common input shared by content adapters. The identifier is
 /// opaque: it may be a file name, a URL, or a CMS document identifier.
@@ -71,6 +72,21 @@ const MAX_DUPLICATE_PARAGRAPHS: usize = 100_000;
 const MAX_DUPLICATE_PARAGRAPH_BYTES: usize = 16 * 1024;
 const MAX_DUPLICATE_PARAGRAPH_KEYS: usize = 10_000;
 const MAX_DUPLICATE_PARAGRAPH_KEY_BYTES: usize = 4 * 1024 * 1024;
+
+// Preserve accents while ignoring outer punctuation. Canonically equivalent
+// Unicode spellings must have the same key; ASCII avoids normalization overhead.
+fn opening_word_key(word: &str) -> String {
+    let word = word.trim_matches(|ch: char| {
+        !ch.is_alphanumeric() && (ch.is_ascii() || !is_combining_mark(ch))
+    });
+    if word.is_ascii() {
+        word.to_ascii_lowercase()
+    } else if word.chars().all(is_combining_mark) {
+        String::new()
+    } else {
+        word.nfc().flat_map(char::to_lowercase).nfc().collect()
+    }
+}
 
 // Visit exactly the same heuristic sentence boundaries for every sentence gate.
 // Positions refer to the projected adapter text, not necessarily the source file.
@@ -2124,10 +2140,7 @@ impl ContentPreset {
                                     if bytes > MAX_PARAGRAPH_OPENING_BYTES {
                                         break;
                                     }
-                                    words.push(
-                                        word.trim_matches(|ch: char| !ch.is_alphanumeric())
-                                            .to_lowercase(),
-                                    );
+                                    words.push(opening_word_key(word));
                                 }
                                 if bytes > MAX_PARAGRAPH_OPENING_BYTES {
                                     reason = Some(
@@ -2235,10 +2248,7 @@ impl ContentPreset {
                                         if bytes > MAX_PARAGRAPH_OPENING_BYTES {
                                             break;
                                         }
-                                        words.push(
-                                            word.trim_matches(|ch: char| !ch.is_alphanumeric())
-                                                .to_lowercase(),
-                                        );
+                                        words.push(opening_word_key(word));
                                     }
                                     // A short sentence in the supported Latin subset cannot
                                     // contain a complete opening. Other scripts may not use
@@ -4726,6 +4736,42 @@ terms = ["bad"]
         ]));
         assert_eq!(partial.status, GateStatus::NotChecked);
         assert_eq!(partial.findings.len(), 1);
+    }
+
+    #[test]
+    fn repeated_openings_preserve_accents_and_match_canonical_unicode() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='paragraph'\nkind='repeated_paragraph_openings'\nopening_words=1\nmax_occurrences=1\n[[gates]]\nid='sentence'\nkind='repeated_sentence_openings'\nopening_words=1\nmax_consecutive=1\n").unwrap();
+        let input = ContentInput {
+            text: Some(String::new()),
+            ..Default::default()
+        };
+        let check = |paragraphs: &[&str]| {
+            let context = ContentContext {
+                paragraphs: Some(
+                    paragraphs
+                        .iter()
+                        .map(|text| ContentParagraph {
+                            text: (*text).into(),
+                            line: 1,
+                            column: 1,
+                        })
+                        .collect(),
+                ),
+                ..Default::default()
+            };
+            preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+        };
+        let same = check(&["Café arrive. CAFE\u{301} repart.", "cafe\u{301} revient."]);
+        assert_eq!(same.gates[0].status, GateStatus::Failed);
+        assert_eq!(same.gates[1].status, GateStatus::Failed);
+        let different = check(&[
+            "cafe\u{301} arrive. cafe\u{300} repart.",
+            "cafe\u{300} revient.",
+        ]);
+        assert_eq!(different.gates[0].status, GateStatus::Passed);
+        assert_eq!(different.gates[1].status, GateStatus::Passed);
     }
 
     #[test]

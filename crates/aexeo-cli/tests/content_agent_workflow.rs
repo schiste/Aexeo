@@ -96,6 +96,21 @@ fn repeated_paragraph_openings_are_advisory_and_located() {
 }
 
 #[test]
+fn unicode_opening_findings_can_drive_an_agent_revision() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("review.toml");
+    let draft = dir.path().join("draft.md");
+    fs::write(&preset, "version=1\nname='Review'\n[[gates]]\nid='openings'\nkind='repeated_paragraph_openings'\nopening_words=1\nmax_occurrences=1\nblocking=false\n").unwrap();
+    let source = format!("review={}", preset.display());
+    fs::write(&draft, "Café arrive.\n\ncafe\u{301} repart.\n").unwrap();
+    let before = evaluate(&draft, &source);
+    assert_eq!(status(&before, "openings"), "failed");
+    assert_eq!(before["source_locations"][0]["line"], 3);
+    fs::write(&draft, "Café arrive.\n\nLe café repart.\n").unwrap();
+    assert_eq!(status(&evaluate(&draft, &source), "openings"), "passed");
+}
+
+#[test]
 fn duplicate_paragraphs_locate_the_second_markdown_paragraph() {
     let dir = tempfile::tempdir().unwrap();
     let preset = dir.path().join("review.toml");
