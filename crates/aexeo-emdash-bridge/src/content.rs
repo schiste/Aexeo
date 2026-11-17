@@ -690,6 +690,30 @@ pub fn evaluate_content_with_reachability(
     extensions: Option<&dyn aexeo_core::content_gate::ContentGateExtensions>,
     observations: Option<&[aexeo_core::content_gate::LinkReachabilityObservation]>,
 ) -> anyhow::Result<ContentReport> {
+    evaluate_content_with_list_completeness(
+        document,
+        preset,
+        evidence_sources,
+        capabilities,
+        extensions,
+        observations,
+        false,
+    )
+}
+
+/// Evaluate with an explicit assertion that every Portable Text list block in
+/// the source snapshot is represented, in order. The host must account for
+/// unknown custom components before setting `list_structure_complete`.
+pub fn evaluate_content_with_list_completeness(
+    document: &EmdashDocument,
+    preset: &ContentPreset,
+    evidence_sources: Option<BTreeMap<String, String>>,
+    capabilities: [bool; 4],
+    extensions: Option<&dyn aexeo_core::content_gate::ContentGateExtensions>,
+    observations: Option<&[aexeo_core::content_gate::LinkReachabilityObservation]>,
+    list_structure_complete: bool,
+) -> anyhow::Result<ContentReport> {
+    let lists = portable_text_structured_lists(document, list_structure_complete);
     let [text, headings, paragraphs, links] = capabilities;
     let (mut input, mut context, link_count) = content_input_with_context(document);
     input.evidence_sources = evidence_sources;
@@ -717,7 +741,7 @@ pub fn evaluate_content_with_reachability(
             .filter_map(|block| heading_level(&block.style))
             .collect()
     });
-    preset.evaluate_with_heading_levels(
+    preset.evaluate_with_structured_lists(
         &input,
         &ContentEvaluationContext {
             adapter: Some(&context),
@@ -730,6 +754,7 @@ pub fn evaluate_content_with_reachability(
         heading_levels.as_deref(),
         true,
         None,
+        lists.as_deref(),
     )
 }
 
@@ -759,6 +784,22 @@ mod tests {
         )
         .unwrap();
         assert_eq!(portable_text_structured_lists(&invalid, true), None);
+        let preset = ContentPreset::from_toml("version=1\nname='lists'\n[[gates]]\nid='review'\nkind='list_item_count'\nflagged_counts=[2]\n").unwrap();
+        let unknown = evaluate_content_with_list_completeness(
+            &document, &preset, None, [true; 4], None, None, false,
+        )
+        .unwrap();
+        assert_eq!(unknown.gates[0].status, GateStatus::NotChecked);
+        let complete = evaluate_content_with_list_completeness(
+            &document, &preset, None, [true; 4], None, None, true,
+        )
+        .unwrap();
+        assert_eq!(complete.gates[0].status, GateStatus::Failed);
+        let malformed = evaluate_content_with_list_completeness(
+            &invalid, &preset, None, [true; 4], None, None, true,
+        )
+        .unwrap();
+        assert_eq!(malformed.gates[0].status, GateStatus::NotChecked);
     }
 
     #[test]
