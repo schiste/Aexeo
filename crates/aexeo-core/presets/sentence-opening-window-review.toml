@@ -1,0 +1,10 @@
+version = 1
+name = "Sentence opening window review"
+
+[[gates]]
+id = "editorial.sentence_opening_window"
+kind = "sentence_opening_window"
+opening_words = 1
+window_size = 6
+max_occurrences = 2
+blocking = false

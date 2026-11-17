@@ -1282,6 +1282,24 @@ not prove collection completeness, input authenticity, build identity or
 freshness at publication. Coordinate concurrent changes at the host boundary.
 `--telemetry` reports an aggregate receipt-revalidation match boolean; with main scope it also reports the scope and eligible HTML entry count.
 
+### Windowed sentence opening review
+
+The optional `sentence-opening-window-review` preset provides an advisory window of six sentences with a maximum of two occurrences and no ignored words. The `sentence_opening_window` gate finds repeated literal openings in a bounded sliding window, including when other sentences intervene. It is advisory by default and independent of `repeated_sentence_openings`; compose both when useful.
+
+```toml
+[[gates]]
+id = "editorial.opening_window"
+kind = "sentence_opening_window"
+opening_words = 1
+window_size = 6
+max_occurrences = 2
+ignored_words = ["the", "le", "la"]
+window_across_paragraphs = true
+blocking = false
+```
+
+The window contains 2–64 sentences; `max_occurrences` must be positive and smaller than the window. It resets at paragraph boundaries unless `window_across_paragraphs` is true. Consecutive leading words listed in `ignored_words` are removed before selecting the opening; comparison ignores case, surrounding punctuation and Unicode normalization differences while preserving accents. The gate checks shorter windows at the start of a paragraph or document as well. Short, ignored-only and quoted sentences still occupy a window slot; unclosed quotations produce `not_checked`. Delimiters and abbreviation exceptions can be configured as for sentence-length checks. Unavailable paragraphs, unsupported openings and resource limits remain `not_checked`; findings already observed are retained. Findings are suggestions for editorial review, not evidence of authorship.
+
 ### Repeated sentence openings
 
 The optional `sentence-openings-review` preset flags the third and subsequent consecutive sentences in a paragraph that begin with the same two words. It is advisory and can be composed or overridden in a TOML preset:

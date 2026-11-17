@@ -3086,6 +3086,7 @@ impl ContentPreset {
                     {
                         let mut evaluated = 0usize;
                         let mut skipped = 0usize;
+                        let mut quoted = 0usize;
                         let mut too_short = 0usize;
                         let mut exceeding = 0usize;
                         let mut bytes_seen = 0usize;
@@ -3100,6 +3101,8 @@ impl ContentPreset {
                                     Some("paragraph text exceeds the supported byte limit".into());
                                 break;
                             }
+                            let mut quotes =
+                                crate::quote_tracking::QuoteTracker::new(&paragraph.text);
                             for_each_sentence(
                                 &paragraph.text,
                                 paragraph.line,
@@ -3109,6 +3112,24 @@ impl ContentPreset {
                                 abbreviations,
                                 |segment, line, column| {
                                     if segment.trim().is_empty() {
+                                        return;
+                                    }
+                                    if sentence_is_quoted(&mut quotes, &paragraph.text, segment) {
+                                        quoted += 1;
+                                        window.push_back(None);
+                                        if window.len() > *window_size {
+                                            window.pop_front();
+                                        }
+                                        return;
+                                    }
+                                    if !is_simple_latin_sentence(segment)
+                                        && !is_simple_latin_sentence(&segment.replace('’', "'"))
+                                    {
+                                        skipped += 1;
+                                        window.push_back(None);
+                                        if window.len() > *window_size {
+                                            window.pop_front();
+                                        }
                                         return;
                                     }
                                     let mut bytes = 0usize;
@@ -3169,7 +3190,7 @@ impl ContentPreset {
                                         exceeding += 1;
                                         emit(
                                             format!(
-                                                "Sentence opening occurs {count} times in the last {window_size} sentences; maximum is {max_occurrences}; review repetition in context"
+                                                "Sentence opening occurs {count} times in a window of up to {window_size} sentences; maximum is {max_occurrences}; review repetition in context"
                                             ),
                                             line,
                                             column,
@@ -3177,6 +3198,12 @@ impl ContentPreset {
                                     }
                                 },
                             );
+                            if !quotes.finish() {
+                                reason = Some(
+                                    "a quotation continues beyond the observed paragraph".into(),
+                                );
+                                break;
+                            }
                         }
                         if reason.is_none() && paragraphs.len() > MAX_PARAGRAPH_OPENINGS {
                             reason = Some("too many paragraphs to assess completely".into());
@@ -3184,6 +3211,7 @@ impl ContentPreset {
                         measurements.insert("paragraph_count".into(), paragraphs.len());
                         measurements.insert("sentences_evaluated".into(), evaluated);
                         measurements.insert("sentences_skipped".into(), skipped);
+                        measurements.insert("sentences_quoted".into(), quoted);
                         measurements.insert("sentences_too_short".into(), too_short);
                         measurements.insert("sentences_exceeding_limit".into(), exceeding);
                         if reason.is_none() && skipped > 0 {
@@ -5884,6 +5912,14 @@ terms = ["bad"]
             "Team acts. Team plans. Team checks. {}.",
             "x".repeat(MAX_PARAGRAPH_OPENING_BYTES + 1)
         );
+        let chinese = run(&["这是一个句子。"]);
+        assert_eq!(chinese.status, GateStatus::NotChecked);
+        assert_eq!(chinese.measurements["sentences_skipped"], 1);
+        let quoted = run(&["Team acts. « Team plans. Team checks. » Other works."]);
+        assert_eq!(quoted.status, GateStatus::Passed);
+        assert_eq!(quoted.measurements["sentences_quoted"], 2);
+        let unclosed = run(&["Team acts. « Team plans. Team checks."]);
+        assert_eq!(unclosed.status, GateStatus::NotChecked);
         let unknown = run(&[&long]);
         assert_eq!(unknown.status, GateStatus::NotChecked);
         assert_eq!(unknown.findings.len(), 1);
