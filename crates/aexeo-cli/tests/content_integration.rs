@@ -808,6 +808,58 @@ fn sentence_character_gate_runs_from_stdin_with_a_portable_preset() {
 }
 
 #[test]
+fn windowed_openings_report_cli_positions_and_missing_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    std::fs::write(&preset, "version=1\nname='window'\n[[gates]]\nid='opening'\nkind='sentence_opening_window'\nopening_words=1\nwindow_size=4\nmax_occurrences=2\nignored_words=['the']\n").unwrap();
+    let source = format!("custom={}", preset.display());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "-",
+            "--input-format",
+            "paragraph-text",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &source,
+            "--format",
+            "json",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"The team plans. Other works. Team acts. The team checks.")
+        .unwrap();
+    let result = child.wait_with_output().unwrap();
+    assert!(result.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "failed");
+    assert_eq!(report["gates"][0]["findings"][0]["line"], 1);
+    assert_eq!(report["gates"][0]["findings"][0]["column"], 41);
+    let missing = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            "--no-text",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &source,
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&missing.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "not_checked");
+}
+
+#[test]
 fn sentence_length_gate_uses_configured_delimiters_and_reports_position() {
     let dir = tempfile::tempdir().unwrap();
     let preset = dir.path().join("preset.toml");
