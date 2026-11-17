@@ -2,6 +2,8 @@ use crate::commands::common::required_arg;
 use aexeo_core::editorial_patch::{self, EditorialEdit, EditorialPatch, MAX_PATCH_BYTES};
 use anyhow::{Context, Result, ensure};
 use clap::ArgMatches;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
@@ -59,9 +61,11 @@ pub fn command_editorial_patch(matches: &ArgMatches) -> Result<i32> {
                     read_bounded(source_path)? == source.as_bytes(),
                     "source changed during application"
                 );
-                let mut file = OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
+                let mut options = OpenOptions::new();
+                options.write(true).create_new(true);
+                #[cfg(unix)]
+                options.mode(0o600);
+                let mut file = options
                     .open(output)
                     .context("cannot create output; existing files are never overwritten")?;
                 file.write_all(result.as_bytes())?;

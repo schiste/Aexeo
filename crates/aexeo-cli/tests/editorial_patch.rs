@@ -10,6 +10,18 @@ fn run(args: &[&str]) -> Output {
         .unwrap()
 }
 
+#[cfg(unix)]
+fn run_with_permissive_umask(args: &[&str]) -> Output {
+    Command::new("sh")
+        .arg("-c")
+        .arg("umask 022; exec \"$@\"")
+        .arg("sh")
+        .arg(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args(args)
+        .output()
+        .unwrap()
+}
+
 #[test]
 fn review_and_explicit_application_are_bound_to_source_and_proposal() {
     let dir = tempfile::tempdir().unwrap();
@@ -76,8 +88,20 @@ fn review_and_explicit_application_are_bound_to_source_and_proposal() {
         "--confirm",
         hash,
     ];
+    #[cfg(unix)]
+    assert!(run_with_permissive_umask(&args).status.success());
+    #[cfg(not(unix))]
     assert!(run(&args).status.success());
     assert_eq!(fs::read_to_string(output).unwrap(), "A sentence.\n");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(output).unwrap().permissions().mode() & 0o077,
+            0,
+            "candidate must not be readable by other users"
+        );
+    }
     assert!(!run(&args).status.success());
     fs::remove_file(output).unwrap();
     let original_patch = fs::read(patch).unwrap();
