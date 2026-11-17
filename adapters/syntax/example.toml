@@ -1,0 +1,16 @@
+version = 1
+name = "Optional syntax similarity review"
+
+[[gates]]
+id = "editorial.syntax_similarity"
+kind = "custom"
+extension = "syntax.similarity"
+severity = "warning"
+blocking = false
+[gates.parameters]
+model = "en_core_web_sm"
+model_version = "3.8.0"
+language = "en"
+max_distance = "0.2"
+min_sentences = "3"
+max_tokens = "80"

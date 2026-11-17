@@ -100,7 +100,7 @@ fn is_simple_latin_sentence(text: &str) -> bool {
     text.chars().all(|ch| {
         ch.is_ascii()
             || ch.is_whitespace()
-            || matches!(ch, '«' | '»' | '“' | '”' | '‘' | '–' | '—')
+            || matches!(ch, '«' | '»' | '“' | '”' | '‘' | '’' | '…' | '–' | '—')
             || (ch.is_alphabetic()
                 && matches!(ch, '\u{00c0}'..='\u{024f}' | '\u{1e00}'..='\u{1eff}'))
             || matches!(ch, '\u{0300}'..='\u{036f}')
@@ -398,6 +398,27 @@ pub enum ContentGate {
         blocking: bool,
         run_length: usize,
         tolerance_words: usize,
+        #[serde(default = "default_sentence_delimiters")]
+        delimiters: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        abbreviations: Vec<String>,
+    },
+    /// Reviews low population standard deviation in rolling sentence windows.
+    SentenceLengthVariance {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default)]
+        blocking: bool,
+        window_size: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        min_stddev_words: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        random_min_stddev_words: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        random_max_stddev_words: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        random_seed: Option<u64>,
         #[serde(default = "default_sentence_delimiters")]
         delimiters: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -715,6 +736,7 @@ impl ContentGate {
             | Self::RepeatedPunctuation { severity, .. }
             | Self::TrailingIngClause { severity, .. }
             | Self::SimilarSentenceLengths { severity, .. }
+            | Self::SentenceLengthVariance { severity, .. }
             | Self::InlineTripleCandidates { severity, .. }
             | Self::DuplicateParagraphs { severity, .. }
             | Self::ParagraphCharacterLength { severity, .. }
@@ -756,6 +778,7 @@ impl ContentGate {
             | Self::RepeatedPunctuation { blocking, .. }
             | Self::TrailingIngClause { blocking, .. }
             | Self::SimilarSentenceLengths { blocking, .. }
+            | Self::SentenceLengthVariance { blocking, .. }
             | Self::InlineTripleCandidates { blocking, .. }
             | Self::DuplicateParagraphs { blocking, .. }
             | Self::ParagraphCharacterLength { blocking, .. }
@@ -809,6 +832,7 @@ impl ContentGate {
             | Self::RepeatedPunctuation { .. }
             | Self::TrailingIngClause { .. }
             | Self::SimilarSentenceLengths { .. }
+            | Self::SentenceLengthVariance { .. }
             | Self::InlineTripleCandidates { .. }
             | Self::DuplicateParagraphs { .. } => "paragraphs",
             Self::HeadingHierarchy { .. } => "heading_levels",
@@ -846,6 +870,7 @@ impl ContentGate {
             | Self::RepeatedPunctuation { id, .. }
             | Self::TrailingIngClause { id, .. }
             | Self::SimilarSentenceLengths { id, .. }
+            | Self::SentenceLengthVariance { id, .. }
             | Self::InlineTripleCandidates { id, .. }
             | Self::DuplicateParagraphs { id, .. }
             | Self::ParagraphCharacterLength { id, .. }
@@ -1556,6 +1581,33 @@ impl ContentPreset {
                         gate.id()
                     );
                 }
+                ContentGate::SentenceLengthVariance {
+                    window_size,
+                    min_stddev_words,
+                    random_min_stddev_words,
+                    random_max_stddev_words,
+                    random_seed,
+                    delimiters,
+                    ..
+                } if !(2..=64).contains(window_size)
+                    || delimiters.is_empty()
+                    || !matches!(
+                        (
+                            min_stddev_words,
+                            random_min_stddev_words,
+                            random_max_stddev_words,
+                            random_seed
+                        ),
+                        (Some(1..=1000), None, None, None)
+                            | (None, Some(1..=1000), Some(1..=1000), Some(_))
+                    )
+                    || matches!((random_min_stddev_words, random_max_stddev_words), (Some(lo), Some(hi)) if lo > hi) =>
+                {
+                    bail!(
+                        "sentence variance needs a window of 2 to 64, delimiters, and either a fixed threshold or a seeded range (1 to 1000) for {}",
+                        gate.id()
+                    );
+                }
                 ContentGate::SimilarSentenceLengths {
                     run_length,
                     delimiters,
@@ -1635,6 +1687,7 @@ impl ContentPreset {
                 | ContentGate::SentenceOpeningTerms { abbreviations, .. }
                 | ContentGate::TrailingIngClause { abbreviations, .. }
                 | ContentGate::SimilarSentenceLengths { abbreviations, .. }
+                | ContentGate::SentenceLengthVariance { abbreviations, .. }
                 | ContentGate::InlineTripleCandidates { abbreviations, .. }
                     if abbreviations.iter().any(|abbr| {
                         abbr.strip_suffix('.').is_none_or(|word| {
@@ -2682,6 +2735,137 @@ impl ContentPreset {
                         measurements.insert("candidate_enumerations".into(), candidates);
                         if paragraphs.len() > MAX_PARAGRAPH_OPENINGS {
                             reason = Some("too many paragraphs to assess completely".into());
+                        }
+                    } else {
+                        reason = Some("paragraphs are unavailable from this adapter".into());
+                    }
+                }
+                ContentGate::SentenceLengthVariance {
+                    window_size,
+                    min_stddev_words,
+                    random_min_stddev_words,
+                    random_max_stddev_words,
+                    random_seed,
+                    delimiters,
+                    abbreviations,
+                    ..
+                } => {
+                    let threshold = if let Some(value) = min_stddev_words {
+                        *value
+                    } else {
+                        use sha2::{Digest, Sha256};
+                        let (Some(lo), Some(hi), Some(seed)) = (
+                            *random_min_stddev_words,
+                            *random_max_stddev_words,
+                            *random_seed,
+                        ) else {
+                            bail!("variance range and seed are required for {}", gate.id());
+                        };
+                        let mut hash = Sha256::new();
+                        hash.update(b"aexeo-sentence-variance-v1\0");
+                        hash.update(seed.to_le_bytes());
+                        hash.update(gate.id().as_bytes());
+                        let mut bytes = [0u8; 8];
+                        bytes.copy_from_slice(&hash.finalize()[..8]);
+                        lo + (u64::from_le_bytes(bytes) % ((hi - lo + 1) as u64)) as usize
+                    };
+                    measurements.insert("window_size".into(), *window_size);
+                    measurements.insert("effective_min_stddev_words".into(), threshold);
+                    if let Some(paragraphs) =
+                        context.and_then(|context| context.paragraphs.as_ref())
+                    {
+                        let mut bytes_seen = 0usize;
+                        let mut flagged = 0usize;
+                        let mut windows = 0usize;
+                        let mut uncertain = 0usize;
+                        let mut lengths = std::collections::VecDeque::new();
+                        for paragraph in paragraphs.iter().take(MAX_PARAGRAPH_OPENINGS) {
+                            bytes_seen = bytes_seen.saturating_add(paragraph.text.len());
+                            if bytes_seen > MAX_CONTENT_INPUT_BYTES {
+                                reason =
+                                    Some("paragraph text exceeds the supported byte limit".into());
+                                break;
+                            }
+                            let mut quotes =
+                                crate::quote_tracking::QuoteTracker::new(&paragraph.text);
+                            for_each_sentence(
+                                &paragraph.text,
+                                paragraph.line,
+                                paragraph.column,
+                                &[],
+                                delimiters,
+                                abbreviations,
+                                |segment, line, column| {
+                                    if sentence_is_quoted(&mut quotes, &paragraph.text, segment) {
+                                        lengths.clear();
+                                        return;
+                                    }
+                                    if segment.trim().is_empty() {
+                                        return;
+                                    }
+                                    if !is_simple_latin_sentence(segment) {
+                                        lengths.clear();
+                                        uncertain += 1;
+                                        return;
+                                    }
+                                    lengths.push_back((
+                                        segment.split_whitespace().count(),
+                                        line,
+                                        column,
+                                    ));
+                                    if lengths.len() > *window_size {
+                                        lengths.pop_front();
+                                    }
+                                    if lengths.len() == *window_size {
+                                        windows += 1;
+                                        let n = *window_size as u128;
+                                        let sum: u128 =
+                                            lengths.iter().map(|(v, _, _)| *v as u128).sum();
+                                        let sum_squares: u128 = lengths
+                                            .iter()
+                                            .map(|(v, _, _)| (*v as u128).pow(2))
+                                            .sum();
+                                        let numerator = n * sum_squares - sum * sum;
+                                        if numerator < (threshold as u128).pow(2) * n * n {
+                                            flagged += 1;
+                                            let deviation = (numerator as f64).sqrt() / n as f64;
+                                            let (minimum, maximum) = lengths.iter().fold(
+                                                (usize::MAX, 0),
+                                                |(lo, hi), (value, _, _)| {
+                                                    (lo.min(*value), hi.max(*value))
+                                                },
+                                            );
+                                            let (_, start_line, start_column) = lengths[0];
+                                            emit(
+                                                format!(
+                                                    "In {window_size} sentences, lengths range from {minimum} to {maximum} words (standard deviation {deviation:.2}, threshold {threshold}); review the rhythm in context"
+                                                ),
+                                                start_line,
+                                                start_column,
+                                            );
+                                        }
+                                    }
+                                },
+                            );
+                            if !quotes.finish() {
+                                reason = Some(
+                                    "a quotation continues beyond the observed paragraph".into(),
+                                );
+                                break;
+                            }
+                        }
+                        measurements.insert("paragraph_count".into(), paragraphs.len());
+                        measurements.insert("windows_checked".into(), windows);
+                        measurements.insert("low_variance_windows".into(), flagged);
+                        if paragraphs.len() > MAX_PARAGRAPH_OPENINGS {
+                            reason = Some("too many paragraphs to assess completely".into());
+                        }
+                        if reason.is_none() && uncertain > 0 {
+                            reason = Some("some sentences use unsupported word boundaries".into());
+                        }
+                        if reason.is_none() && windows == 0 {
+                            reason =
+                                Some("not enough eligible sentences to assess variance".into());
                         }
                     } else {
                         reason = Some("paragraphs are unavailable from this adapter".into());
@@ -6048,6 +6232,108 @@ terms = ["bad"]
             GateStatus::NotChecked
         );
         assert!(ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='x'\nkind='inline_triple_candidates'\nconjunction='and or'\n").is_err());
+    }
+
+    #[test]
+    fn sentence_variance_windows_are_reproducible_and_partial_inputs_are_unchecked() {
+        let fixed = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='v'\nkind='sentence_length_variance'\nwindow_size=4\nmin_stddev_words=2\n").unwrap();
+        let input = ContentInput {
+            text: Some(String::new()),
+            ..Default::default()
+        };
+        let mut context = ContentContext {
+            paragraphs: Some(vec![
+                ContentParagraph {
+                    text: "One two three. Four five six.".into(),
+                    line: 1,
+                    column: 1,
+                },
+                ContentParagraph {
+                    text: "Seven eight nine. Ten eleven twelve.".into(),
+                    line: 3,
+                    column: 1,
+                },
+            ]),
+            ..Default::default()
+        };
+        let report = fixed
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert!(!report.gates[0].blocking);
+        assert_eq!(report.gates[0].measurements["windows_checked"], 1);
+        assert_eq!(
+            report.gates[0].measurements["effective_min_stddev_words"],
+            2
+        );
+        assert_eq!(report.gates[0].findings[0].line, 1);
+        context.paragraphs.as_mut().unwrap().pop();
+        assert_eq!(
+            fixed
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::NotChecked
+        );
+        context.paragraphs.as_mut().unwrap()[0].text = "你好世界。".into();
+        assert_eq!(
+            fixed
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::NotChecked
+        );
+        assert_eq!(
+            fixed.evaluate(&input).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+
+        let random = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='v'\nkind='sentence_length_variance'\nwindow_size=4\nrandom_min_stddev_words=6\nrandom_max_stddev_words=10\nrandom_seed=42\n").unwrap();
+        let a = random.evaluate(&input).unwrap();
+        let b = random
+            .evaluate(&ContentInput {
+                id: "another-adapter-id".into(),
+                text: Some("rewritten".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        let threshold = a.gates[0].measurements["effective_min_stddev_words"];
+        assert!((6..=10).contains(&threshold));
+        assert_eq!(
+            threshold,
+            b.gates[0].measurements["effective_min_stddev_words"]
+        );
+        let roundtrip: ContentPreset = toml::from_str(&toml::to_string(&random).unwrap()).unwrap();
+        assert_eq!(
+            serde_json::to_value(random).unwrap(),
+            serde_json::to_value(roundtrip).unwrap()
+        );
+    }
+
+    #[test]
+    fn sentence_variance_validates_thresholds_and_detects_diverse_lengths() {
+        let prefix = "version=1\nname='t'\n[[gates]]\nid='v'\nkind='sentence_length_variance'\nwindow_size=4\n";
+        for invalid in [
+            "",
+            "min_stddev_words=0",
+            "random_min_stddev_words=6\nrandom_max_stddev_words=10",
+            "random_min_stddev_words=10\nrandom_max_stddev_words=6\nrandom_seed=1",
+            "min_stddev_words=6\nrandom_min_stddev_words=6\nrandom_max_stddev_words=10\nrandom_seed=1",
+        ] {
+            assert!(
+                ContentPreset::from_toml(&format!("{prefix}{invalid}\n")).is_err(),
+                "accepted {invalid}"
+            );
+        }
+        let preset = ContentPreset::from_toml(&format!("{prefix}min_stddev_words=2\n")).unwrap();
+        let context = ContentContext { paragraphs: Some(vec![ContentParagraph { text: "One. Two three four five six seven. Eight. Nine ten eleven twelve thirteen fourteen.".into(), line: 1, column: 1 }]), ..Default::default() };
+        let report = preset
+            .evaluate_with_context(&ContentInput::default(), None, None, Some(&context))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Passed);
+        assert_eq!(report.gates[0].measurements["windows_checked"], 1);
     }
 
     #[test]

@@ -73,6 +73,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For whole-word literal gates, test decomposed combining marks and lowercase
   expansions, both whole-word and substring modes, and confirm later match
   positions across CLI adapters and the rebuilt EmDash WASM bridge.
+- For sentence segmentation and opening gates, test whitespace-delimited and
+  no-space scripts with every configured opening length, including one word,
+  on both consecutive and windowed paths. Assert unsupported boundaries yield
+  `not_checked` rather than a pass or finding; exercise the shared CLI and
+  EmDash projections where applicable.
 - For rules with overlapping triggers, isolate the trigger under test in the
   regression fixture and confirm the test fails before the fix; another
   matching trigger can otherwise hide the defect.

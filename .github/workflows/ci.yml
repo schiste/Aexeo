@@ -170,6 +170,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Test optional adapter without network
         run: python3 -m unittest discover -s adapters/jev -v
+      - name: Run optional syntax adapter offline tests
+        run: python3 -m unittest discover -s adapters/syntax -v
 
   # `rust-version` in Cargo.toml is a promise nothing else checks: every other
   # job builds with the newer pin from rust-toolchain.toml. If a dependency bump
