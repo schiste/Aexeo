@@ -551,15 +551,19 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             serde_json::json!({"event": "content_change_external_gates", "version": 1, "configured_custom_gates": custom_gates})
         );
     }
-    let code = match verdict.status {
+    let code = verdict_exit_code(verdict.status);
+    let json = serde_json::to_vec_pretty(&verdict)?;
+    write_atomic(Path::new(&verdict_path), &json).user_context("writing verdict")?;
+    Ok(code)
+}
+
+fn verdict_exit_code(status: VerdictStatus) -> i32 {
+    match status {
         VerdictStatus::Pass => EXIT_SUCCESS,
         VerdictStatus::Fail => EXIT_FINDINGS,
         VerdictStatus::NotChecked => EXIT_UNSUPPORTED,
         VerdictStatus::Error => EXIT_INTERNAL_ERROR,
-    };
-    let json = serde_json::to_vec_pretty(&verdict)?;
-    write_atomic(Path::new(&verdict_path), &json).user_context("writing verdict")?;
-    Ok(code)
+    }
 }
 
 fn report_html_scope(
@@ -723,6 +727,9 @@ fn command_offline_receipt(
         }),
         evaluator_identity: identity.as_bytes(),
     };
+    if args.get_flag("experimental-bound-verdict") {
+        return command_experimental_bound_verdict(args, &context, provider, output, html_scope);
+    }
     let link_context = snapshots.map(|snapshots| LinkSnapshotDecisionContext {
         offline: &context,
         snapshots,
@@ -776,12 +783,7 @@ fn command_offline_receipt(
         }
         .user_context("offline receipt evaluation failed")?
     };
-    let code = match receipt.verdict.status {
-        VerdictStatus::Pass => EXIT_SUCCESS,
-        VerdictStatus::Fail => EXIT_FINDINGS,
-        VerdictStatus::NotChecked => EXIT_UNSUPPORTED,
-        VerdictStatus::Error => EXIT_INTERNAL_ERROR,
-    };
+    let code = verdict_exit_code(receipt.verdict.status);
     let bytes = if args.get_flag("offline-receipt-bundle") {
         let mut artifacts = OfflineReceiptArtifacts::from_context(&context, html_scope)
             .user_context("preparing offline receipt artifacts")?;
@@ -820,6 +822,59 @@ fn command_offline_receipt(
             })
         );
     }
+    Ok(code)
+}
+
+fn command_experimental_bound_verdict(
+    args: &ArgMatches,
+    context: &aexeo_core::content_gate_verdict::OfflineDecisionContext<'_>,
+    provider: &mut HostFiles,
+    output: &Path,
+    html_scope: HtmlContentScope,
+) -> Result<i32> {
+    use aexeo_core::content_gate_verdict::{
+        ExperimentalBoundVerdict, evaluate_experimental_bound_verdict,
+        revalidate_experimental_bound_verdict,
+    };
+    let verdict = if let Some(path) = args.get_one::<String>("verify-offline-receipt") {
+        protect_input(Path::new(path), output, "previous bound verdict")?;
+        let mut data = Vec::new();
+        File::open(path)
+            .user_context("opening previous bound verdict")?
+            .take(MAX_CHANGE_BYTES + 1)
+            .read_to_end(&mut data)
+            .user_context("reading previous bound verdict")?;
+        if data.len() as u64 > MAX_CHANGE_BYTES {
+            user_bail!("previous bound verdict exceeds the size limit");
+        }
+        let previous: ExperimentalBoundVerdict =
+            parse_lossless_json(&data).user_context("invalid previous bound verdict")?;
+        let result = revalidate_experimental_bound_verdict(
+            &previous,
+            context,
+            provider,
+            &iso_now(),
+            html_scope,
+        );
+        if args.get_flag("telemetry") {
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "event":"content_change_bound_verdict_revalidation", "version":1, "matched":result.is_ok()
+                })
+            );
+        }
+        result.user_context("previous bound verdict does not match current inputs or evaluation")?
+    } else {
+        evaluate_experimental_bound_verdict(context, provider, &iso_now(), html_scope)
+            .user_context("experimental bound verdict evaluation failed")?
+    };
+    let code = verdict_exit_code(verdict.receipt.verdict.status);
+    let bytes = serde_json::to_vec_pretty(&verdict)?;
+    if bytes.len() as u64 >= MAX_CHANGE_BYTES {
+        user_bail!("bound verdict exceeds the size limit");
+    }
+    write_atomic(output, &bytes).user_context("writing experimental bound verdict")?;
     Ok(code)
 }
 

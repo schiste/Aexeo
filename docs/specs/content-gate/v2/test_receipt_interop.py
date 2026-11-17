@@ -11,6 +11,8 @@ import sys
 import tempfile
 import unittest
 
+from test_decision_binding_vector import binding
+
 ROOT = Path(__file__).resolve().parents[4]
 VERIFIER = Path(__file__).with_name("verify_decision_inputs.py")
 COMPARATOR = Path(__file__).with_name("compare_offline_receipts.py")
@@ -39,6 +41,20 @@ class ReceiptInterop(unittest.TestCase):
             self.assertEqual(run.returncode, 0, run.stderr)
             bundle = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(bundle["schema"], "aexeo.offline-receipt-bundle/v1")
+            # Independently recompute the new binding from the exact artifacts
+            # of a separate evaluation of the same synthetic current inputs.
+            bound_path = directory / "bound.json"
+            bound_env = dict(env, CONTENT_GATE_VERDICT_FILE=str(bound_path))
+            bound_command = ["--experimental-bound-verdict" if arg == "--offline-receipt-bundle" else arg for arg in command]
+            bound_run = subprocess.run(bound_command, cwd=ROOT, env=bound_env, capture_output=True, text=True)
+            self.assertEqual(bound_run.returncode, 0, bound_run.stderr)
+            bound = json.loads(bound_path.read_text(encoding="utf-8"))
+            artifacts = {role: None if value is None else value.encode("utf-8")
+                         for role, value in bundle["artifacts"].items()}
+            self.assertEqual(bound["schema"], "aexeo.experimental-bound-verdict/v1")
+            self.assertEqual(binding(artifacts), bound["binding"])
+            artifacts["change"] += b" "
+            self.assertNotEqual(binding(artifacts), bound["binding"])
             manifest = directory / "manifest.json"
             manifest.write_text(json.dumps(bundle["receipt"]["decision_inputs"]), encoding="utf-8")
             args = [sys.executable, str(VERIFIER), str(manifest)]

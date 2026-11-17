@@ -1,8 +1,8 @@
 # Experimental decision-input binding encoding
 
 This is a draft primitive, not a version 2 verdict, a verifier, or an
-interoperable policy format. It is not integrated into a CLI or consumer and
-must not be used to authorize publication. The v2 roadmap remains open until artifact semantics, the wire contract, production, independent
+interoperable policy format. The CLI provides only an opt-in experimental mode;
+this must not be used to authorize publication. The v2 roadmap remains open until artifact semantics, the wire contract, production, independent
 verification and consumers are implemented and tested together.
 
 For independent implementations, the candidate SHA-256 preimage is the exact
@@ -41,4 +41,13 @@ external observations and custom extensions are unavailable in this mode.
 The host must establish freshness, provenance, evaluator identity, complete
 inputs and publication safety. Hosts must bound and strictly parse untrusted
 serialized envelopes, including rejecting duplicate or discarded fields, before
-calling this typed API. No CLI or EmDash consumer uses this envelope.
+calling this typed API. EmDash does not use this envelope.
+
+For the CLI, add `--offline-receipt --experimental-bound-verdict
+--evaluator-identity BUILD_ID` to `content-change`. Revalidate a separately
+saved result with `--verify-offline-receipt PATH` and the same independently
+obtained current inputs. The prior file must differ from the output path. The
+mode rejects receipt bundles and external link observations and does not accept
+v1 receipts as bound verdicts. `--telemetry` reports only whether revalidation
+matched; input values and paths are excluded. These checks do not authenticate
+inputs, establish freshness or authorize publication.

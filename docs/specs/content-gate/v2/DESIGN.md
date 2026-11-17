@@ -54,8 +54,9 @@ must reject v1 and unknown major versions when v2 binding is required.
 
 An [experimental, domain-separated byte encoding](DECISION-BINDING-DRAFT.md)
 has a shared Rust/Python test vector. An experimental offline Rust API uses it
-alongside the existing receipt; no CLI or portable consumer uses it. It does
-not specify interoperable artifact semantics or a v2 verdict. Its
+alongside the existing receipt, and the CLI exposes that offline experiment.
+No portable consumer uses it. It does not specify interoperable artifact
+semantics or a v2 verdict. Its
 presence does not satisfy any v2-required runner obligation.
 
 ## Work before this can be enabled
