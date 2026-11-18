@@ -1,6 +1,5 @@
 """Cross-language and adversarial tests for candidate input comparison."""
 import copy
-import hashlib
 import json
 from pathlib import Path
 import tempfile
