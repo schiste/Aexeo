@@ -91,7 +91,7 @@ fn validate_item(item: &CandidateItem) -> Result<(), &'static str> {
     Ok(())
 }
 
-fn validate_inventory(items: &[CandidateItem]) -> Result<(), &'static str> {
+pub(crate) fn validate_inventory(items: &[CandidateItem]) -> Result<(), &'static str> {
     const MAX_ITEMS: usize = 100_000;
     const MAX_LINKS: usize = 1_000_000;
     const MAX_SOURCE_BYTES: usize = 64 * 1024 * 1024;

@@ -11,6 +11,7 @@ pub mod content_extensions;
 pub mod content_gate;
 pub mod content_gate_sources;
 pub mod content_gate_verdict;
+pub mod content_incremental;
 pub mod content_presets;
 pub mod content_rules;
 pub mod docs;
