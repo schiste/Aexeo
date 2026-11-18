@@ -53,6 +53,10 @@ fn incomplete_or_inconsistent_inputs_are_not_checked() {
     assert_eq!(output.status.code(), Some(2));
     let result: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(result["status"], "not_checked");
+    assert_eq!(
+        result["candidate_revision_sha256"].as_str().unwrap().len(),
+        64
+    );
     let mut bad = query(true);
     bad["snapshot"]["base"]["revision"] = "stale".into();
     let output = run(&bad, &[]);
@@ -60,4 +64,5 @@ fn incomplete_or_inconsistent_inputs_are_not_checked() {
     let result: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(result["status"], "not_checked");
     assert!(result["impact"].is_null());
+    assert!(result.get("candidate_revision_sha256").is_none());
 }
