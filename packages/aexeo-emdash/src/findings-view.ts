@@ -519,8 +519,9 @@ export async function renderDocumentPanel(
       ...(bodyNotice ? [{ type: "context", text: bodyNotice }] : []),
       ...(incomplete ? [{ type: "context", text: "Sitewide and cross-document checks are unavailable; refresh after resolving the CMS input error." }] : []),
       ...(record && assessment === undefined ? [{ type: "context", text: "No content preset assessment was recorded for this document; absence of findings is not an editorial quality assessment." }] : []),
+      ...(assessment?.status === "not_configured" ? [{ type: "context", text: assessment.reason === "collection_excluded" ? "Content preset is not enabled for this collection." : "No content preset is configured; editorial checks are not enabled." }] : []),
       ...(assessment?.status === "error" ? [{ type: "context", text: `Evaluation failed: ${assessment.reason}. Findings are unavailable for this revision.` }] : []),
-      ...(assessment?.status === "evaluated" ? [{ type: "context", text: `Content preset: ${assessment.preset}. ${summarizeGates(assessment.gates)}. Results cover only these configured checks.` }, { type: "context", text: describeSourceMapping(assessment.source_mapping) }, ...assessment.gates.map((gate) => ({ type: "context", text: describeGate(gate) }))] : []),
+      ...(assessment?.status === "evaluated" ? [{ type: "context", text: `Content preset: ${assessment.preset}${assessment.selection_source ? ` (selected by ${assessment.selection_source.replaceAll("_", " ")})` : ""}. ${summarizeGates(assessment.gates)}. Results cover only these configured checks; they do not establish factual accuracy or whether the content is current.` }, { type: "context", text: describeSourceMapping(assessment.source_mapping) }, ...assessment.gates.map((gate) => ({ type: "context", text: describeGate(gate) }))] : []),
       ...(findings.length === 0
         ? []
         : [{ type: "divider" }, documentFindingsTable(sorted)]),
