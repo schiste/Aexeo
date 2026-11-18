@@ -131,6 +131,114 @@ fn pair_by_key<K: Ord>(
     });
 }
 
+/// A host-provided association between observed audit paths and stable IDs.
+/// These fields are claims by the host; they do not establish provenance,
+/// completeness, snapshot identity, or policy equivalence.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SiteEntityManifest {
+    pub schema: String,
+    pub namespace: String,
+    pub scope: String,
+    pub entries: Vec<SiteEntityEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SiteEntityEntry {
+    pub path: String,
+    pub entity_id: String,
+}
+
+impl SiteEntityManifest {
+    fn validated_paths(&self) -> Result<BTreeMap<&str, &str>> {
+        use std::collections::BTreeSet;
+        anyhow::ensure!(
+            self.schema == "aexeo.site-entity-map/v1",
+            "unsupported site entity manifest schema"
+        );
+        let valid = |s: &str| !s.is_empty() && !s.chars().any(char::is_control);
+        anyhow::ensure!(
+            valid(&self.namespace) && valid(&self.scope),
+            "invalid namespace or scope"
+        );
+        let mut paths = BTreeMap::new();
+        let mut ids = BTreeSet::new();
+        for entry in &self.entries {
+            anyhow::ensure!(
+                valid(&entry.path) && valid(&entry.entity_id),
+                "invalid path or entity ID"
+            );
+            anyhow::ensure!(
+                paths
+                    .insert(entry.path.as_str(), entry.entity_id.as_str())
+                    .is_none(),
+                "duplicate path in entity manifest: {}",
+                entry.path
+            );
+            anyhow::ensure!(
+                ids.insert(&entry.entity_id),
+                "duplicate entity ID in manifest: {}",
+                entry.entity_id
+            );
+        }
+        Ok(paths)
+    }
+}
+
+/// Advisory comparison using host-supplied path mappings. Findings with a mapping
+/// use entity IDs; unmapped findings use their historical paths. A mapped finding
+/// never matches an unmapped finding, including at the same path. IDs must be
+/// unique within each manifest, and both manifests must declare the same scope
+/// and namespace. This does not verify the host's identity or scope claims.
+pub fn diff_site_entity_findings(
+    baseline: &[Finding],
+    current: &[Finding],
+    old: &SiteEntityManifest,
+    new: &SiteEntityManifest,
+) -> Result<DiffResult> {
+    let old_paths = old.validated_paths()?;
+    let new_paths = new.validated_paths()?;
+    anyhow::ensure!(
+        old.namespace == new.namespace && old.scope == new.scope,
+        "entity manifest namespace or scope differs"
+    );
+    fn project(
+        findings: &[Finding],
+        paths: &BTreeMap<&str, &str>,
+    ) -> (Vec<Finding>, BTreeMap<String, String>) {
+        let mut original = BTreeMap::new();
+        let projected = findings
+            .iter()
+            .map(|finding| {
+                let mut value = finding.clone();
+                let key = match paths.get(finding.path.as_str()) {
+                    Some(id) => format!("entity:{id}"),
+                    None => format!("path:{}", finding.path),
+                };
+                original.insert(key.clone(), finding.path.clone());
+                value.path = key;
+                value
+            })
+            .collect();
+        (projected, original)
+    }
+    fn restore(findings: &mut [Finding], original: &BTreeMap<String, String>) {
+        for finding in findings {
+            if let Some(path) = original.get(&finding.path) {
+                finding.path = path.clone();
+            }
+        }
+    }
+    let (old_findings, old_original) = project(baseline, &old_paths);
+    let (new_findings, new_original) = project(current, &new_paths);
+    let mut diff = diff_finding_sets(&old_findings, &new_findings);
+    restore(&mut diff.resolved_findings, &old_original);
+    restore(&mut diff.new_findings, &new_original);
+    restore(&mut diff.unchanged_findings, &new_original);
+    Ok(diff)
+}
+
 /// A comparison of content-gate findings using the host's stable entity IDs.
 /// Findings without an entity ID remain new/resolved: they cannot safely be
 /// associated across runs. This API does not establish that either evaluation
@@ -250,6 +358,90 @@ pub fn render_diff_text(diff: &DiffResult) -> String {
         }
     }
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod site_entity_baseline_tests {
+    use super::{SiteEntityEntry, SiteEntityManifest, diff_site_entity_findings};
+    use aexeo_contracts::{Finding, FindingScope};
+
+    fn finding(path: &str) -> Finding {
+        Finding {
+            rule_id: "rule".into(),
+            message: "message".into(),
+            path: path.into(),
+            line: 1,
+            column: 1,
+            severity: "warning".into(),
+            suggestion: None,
+            scope: FindingScope::Page,
+            subject: None,
+        }
+    }
+    fn manifest(entries: &[(&str, &str)]) -> SiteEntityManifest {
+        SiteEntityManifest {
+            schema: "aexeo.site-entity-map/v1".into(),
+            namespace: "cms".into(),
+            scope: "live".into(),
+            entries: entries
+                .iter()
+                .map(|(path, id)| SiteEntityEntry {
+                    path: (*path).into(),
+                    entity_id: (*id).into(),
+                })
+                .collect(),
+        }
+    }
+    #[test]
+    fn replacing_entity_at_same_path_is_not_unchanged() {
+        let first = manifest(&[("page.html", "one")]);
+        let second = manifest(&[("page.html", "two")]);
+        let result = diff_site_entity_findings(
+            &[finding("page.html")],
+            &[finding("page.html")],
+            &first,
+            &second,
+        )
+        .unwrap();
+        assert_eq!(
+            (result.new_findings.len(), result.resolved_findings.len()),
+            (1, 1)
+        );
+        assert!(result.unchanged_findings.is_empty());
+    }
+    #[test]
+    fn missing_identity_on_both_sides_retains_path_matching() {
+        let map = manifest(&[]);
+        let result =
+            diff_site_entity_findings(&[finding("page.html")], &[finding("page.html")], &map, &map)
+                .unwrap();
+        assert_eq!(result.unchanged_findings.len(), 1);
+    }
+    #[test]
+    fn missing_identity_on_one_side_does_not_match_the_same_path() {
+        let known = manifest(&[("page.html", "one")]);
+        let unknown = manifest(&[]);
+        let result = diff_site_entity_findings(
+            &[finding("page.html")],
+            &[finding("page.html")],
+            &known,
+            &unknown,
+        )
+        .unwrap();
+        assert_eq!(
+            (result.new_findings.len(), result.resolved_findings.len()),
+            (1, 1)
+        );
+    }
+    #[test]
+    fn duplicate_paths_and_namespaces_are_rejected() {
+        let duplicate = manifest(&[("same", "one"), ("same", "two")]);
+        let good = manifest(&[]);
+        assert!(diff_site_entity_findings(&[], &[], &duplicate, &good).is_err());
+        let mut different = good.clone();
+        different.namespace = "other".into();
+        assert!(diff_site_entity_findings(&[], &[], &good, &different).is_err());
+    }
 }
 
 #[cfg(test)]

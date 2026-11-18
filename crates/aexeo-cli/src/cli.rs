@@ -1168,6 +1168,8 @@ pub fn build_cli() -> Command {
                 .about("Compare two audit artifacts and report regressions")
                 .arg(Arg::new("baseline").required(true))
                 .arg(Arg::new("current").required(true))
+                .arg(Arg::new("baseline-entities").long("baseline-entities").requires("current-entities").help("Host-supplied old path-to-entity manifest for advisory comparison"))
+                .arg(Arg::new("current-entities").long("current-entities").requires("baseline-entities").help("Host-supplied current path-to-entity manifest for advisory comparison"))
                 .arg(
                     Arg::new("format")
                         .long("format")
