@@ -314,6 +314,12 @@ Options:
       --experimental-bound-verdict
           Use an experimental input-bound offline envelope; not a portable v2 verdict
 
+      --candidate-base <candidate-base>
+          Experimental host-supplied base candidate snapshot JSON
+
+      --candidate-after <candidate-after>
+          Experimental JSON array of projected changed items
+
       --offline-receipt-bundle
           Include private decision input bytes in the experimental receipt output
 

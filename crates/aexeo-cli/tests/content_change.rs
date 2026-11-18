@@ -1977,6 +1977,66 @@ fn offline_receipt_bundle_binds_collection_completeness() {
 }
 
 #[test]
+fn candidate_bound_verdict_rebuilds_and_revalidates_inputs() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().join("base.json");
+    let after = dir.path().join("after.json");
+    let prior = dir.path().join("previous.json");
+    fs::write(&base, serde_json::to_vec(&serde_json::json!({"scope":"site", "site_id":"site", "site_base_url":null, "base":{"kind":"opaque","revision":"r1"}, "complete":true, "items":[]})).unwrap()).unwrap();
+    fs::write(&after, serde_json::to_vec(&serde_json::json!([{"entity_id":"article", "public_path":"/article", "media_type":"text/plain", "revision":null, "sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "source":"abc", "links":null}])).unwrap()).unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
+    let opts = [
+        "--offline-receipt",
+        "--experimental-bound-verdict",
+        "--evaluator-identity",
+        "build",
+        "--candidate-base",
+        base.to_str().unwrap(),
+        "--candidate-after",
+        after.to_str().unwrap(),
+    ];
+    let first = run(dir.path(), &input(), policy, &opts);
+    assert_eq!(
+        first.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let output = dir.path().join("verdict.json");
+    let verdict: serde_json::Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert_eq!(
+        verdict["schema"],
+        "aexeo.experimental-candidate-bound-verdict/v1"
+    );
+    fs::copy(&output, &prior).unwrap();
+    let mut verify = opts.to_vec();
+    verify.extend(["--verify-offline-receipt", prior.to_str().unwrap()]);
+    let result = run(dir.path(), &input(), policy, &verify);
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let saved = fs::read(&output).unwrap();
+    let mut snapshot: serde_json::Value =
+        serde_json::from_slice(&fs::read(&base).unwrap()).unwrap();
+    snapshot["scope"] = "changed".into();
+    fs::write(&base, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    assert_eq!(
+        run(dir.path(), &input(), policy, &verify).status.code(),
+        Some(2)
+    );
+    assert_eq!(fs::read(&output).unwrap(), saved);
+    let mut conflict = opts.to_vec();
+    conflict.push("--offline-receipt-bundle");
+    assert_eq!(
+        run(dir.path(), &input(), policy, &conflict).status.code(),
+        Some(2)
+    );
+}
+
+#[test]
 fn experimental_bound_verdict_cli_revalidates_and_preserves_output_on_error() {
     let dir = tempfile::tempdir().unwrap();
     let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
