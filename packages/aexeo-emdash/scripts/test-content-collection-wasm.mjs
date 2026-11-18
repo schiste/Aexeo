@@ -322,3 +322,22 @@ assert.equal(varianceReport.gates[0].measurements.effective_min_stddev_words, va
 assert.equal(varianceReport.gates[0].measurements.windows_checked, 1);
 assert.equal(varianceReport.source_locations[0].utf16_offset, 0);
 console.log("Seeded variance is reproducible across CLI and WASM");
+
+// Numeric reference markers following a year must not be parsed as decimals
+// joining adjacent sentences. The original Portable Text remains unchanged.
+const citationChildren = [];
+for (let index = 0; index < 31; index++) {
+  citationChildren.push({ _type: "span", text: "In 2025.", marks: [] });
+  if (index % 5 === 0) citationChildren.push({ _type: "span", text: "1", marks: ["ref"] });
+  citationChildren.push({ _type: "span", text: " ", marks: [] });
+}
+const citedDocument = { route: "/citations", title: "Citations", body: [{
+  markDefs: [{ _key: "ref", _type: "link", href: "#reference-source" }], children: citationChildren,
+}] };
+const originalCitations = JSON.stringify(citedDocument);
+const sentencePreset = "version=1\nname='citation-test'\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\n";
+const citedReport = await evaluateContent(citedDocument, "citation-test", { "citation-test": sentencePreset });
+assert.equal(citedReport.gates[0].measurements.sentence_count, 31);
+assert.equal(citedReport.source_locations.length, 31);
+assert.equal(JSON.stringify(citedDocument), originalCitations);
+console.log("WASM sentence analysis preserves reference markers and source locations");
