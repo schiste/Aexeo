@@ -1551,3 +1551,34 @@ extension to suppress findings or authorize publication. The extension records
 both statuses, omitted-finding counts and any available policy hashes so a host
 can inspect the underlying limitations. `--baseline-verdict` cannot be combined
 with experimental offline receipts or observation export.
+
+### Advisory identity comparison for site audit baselines
+
+Site audits do not currently carry a host's stable content entity IDs. To compare
+existing site audit or baseline artifacts across a path change, provide one
+host-produced manifest for each artifact:
+
+```json
+{
+  "schema": "aexeo.site-entity-map/v1",
+  "namespace": "cms:example",
+  "scope": "published-en",
+  "entries": [{ "path": "articles/example.html", "entity_id": "post:123" }]
+}
+```
+
+Run `aexeo-cli diff before.json after.json --baseline-entities before-map.json
+--current-entities after-map.json --format json`. Paths must exactly match the
+finding paths in the corresponding artifact. Namespace and scope are explicit
+host claims and must match between manifests. Each path and entity ID must be
+unique within its manifest. Mapped findings use the stable ID, rule ID and
+subject for comparison; unmapped findings use their original paths. A mapped
+finding never matches an unmapped one. Existing baseline files remain readable.
+
+The additional `entity_comparison` is advisory. The normal path-based result and
+exit status remain unchanged, as do `check --regressions-only` and runtime
+verification. Aexeo does not verify the host's manifest provenance, scope,
+completeness, policy or binding to either artifact; a reported resolution can
+therefore reflect an incomplete audit. The host must establish these facts
+independently before using any comparison in a publication decision. In
+particular, these manifests do not attest freshness or ownership of an identity.

@@ -1055,6 +1055,12 @@ Arguments:
 
 
 Options:
+      --baseline-entities <baseline-entities>
+          Host-supplied old path-to-entity manifest for advisory comparison
+
+      --current-entities <current-entities>
+          Host-supplied current path-to-entity manifest for advisory comparison
+
       --format <format>
           [default: text]
           [possible values: text, json]
