@@ -66,6 +66,21 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
             .filter(|def| def.mark_type == "link")
             .map(|def| def.key.as_str())
             .collect();
+        // A numeric link to a reference is an annotation, not prose. Mask it
+        // with ASCII spaces so all source byte and UTF-16 offsets remain stable.
+        let citation_keys: std::collections::BTreeSet<_> = block
+            .mark_defs
+            .iter()
+            .filter(|def| {
+                def.mark_type == "link"
+                    && def
+                        .data
+                        .get("href")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|href| href.starts_with("#reference-"))
+            })
+            .map(|def| def.key.as_str())
+            .collect();
         let mut previous = std::collections::BTreeSet::new();
         for child in &block.children {
             let PortableTextChild::Span(span) = child;
@@ -82,7 +97,22 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
             .children
             .iter()
             .map(|child| match child {
-                PortableTextChild::Span(span) => span.text.as_str(),
+                PortableTextChild::Span(span) => {
+                    let numeric_marker = span.text.bytes().any(|byte| byte.is_ascii_digit())
+                        && span.text.bytes().all(|byte| {
+                            byte.is_ascii_digit()
+                                || matches!(byte, b'[' | b']' | b',' | b'-' | b' ')
+                        })
+                        && span
+                            .marks
+                            .iter()
+                            .any(|mark| citation_keys.contains(mark.as_str()));
+                    if numeric_marker {
+                        " ".repeat(span.text.len())
+                    } else {
+                        span.text.clone()
+                    }
+                }
             })
             .collect::<String>();
         text.push_str(&block_text);
@@ -1521,6 +1551,39 @@ field = "slug"
         let report = evaluate_content(&document, &preset).unwrap();
         assert_eq!(report.gates[0].scope, "collection");
         assert_eq!(report.gates[0].status, GateStatus::NotChecked);
+    }
+
+    #[test]
+    fn numeric_reference_markers_do_not_merge_sentences_or_move_sources() {
+        let mut children = Vec::new();
+        for index in 0..31 {
+            children.push(serde_json::json!({"_type":"span", "text": "In 2025."}));
+            if index % 5 == 0 {
+                children.push(serde_json::json!({"_type":"span", "text": "1", "marks":["ref"]}));
+            }
+            children.push(serde_json::json!({"_type":"span", "text": " "}));
+        }
+        let raw = serde_json::json!({"route":"/test", "title":"Test", "body":[{
+            "markDefs":[{"_key":"ref", "_type":"link", "href":"#reference-source"}],
+            "children":children
+        }]});
+        let document: EmdashDocument = serde_json::from_value(raw).unwrap();
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\n",
+        )
+        .unwrap();
+        let report = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(report.gates[0].measurements["sentence_count"], 31);
+        let locations = source_locations(&document, &preset, &report);
+        assert_eq!(locations.len(), 31);
+        assert_eq!((locations[1].span_index, locations[1].utf16_offset), (3, 0));
+        assert_eq!(document.body[0].children.len(), 69);
+    }
+
+    #[test]
+    fn ordinary_numeric_links_remain_prose() {
+        let document: EmdashDocument = serde_json::from_str(r##"{"route":"/test","title":"Test","body":[{"markDefs":[{"_key":"a","_type":"link","href":"#section"}],"children":[{"_type":"span","text":"42","marks":["a"]}]}]}"##).unwrap();
+        assert_eq!(content_input(&document).text.as_deref(), Some("42"));
     }
 
     #[test]
