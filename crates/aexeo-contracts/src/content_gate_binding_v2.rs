@@ -76,9 +76,116 @@ pub fn decision_binding(artifacts: &[(&str, Option<&[u8]>)]) -> Result<[u8; 32],
     Ok(hash.finalize().into())
 }
 
+/// Profile identifier for the documented CandidateSnapshot field encoding.
+pub const CANDIDATE_REVISION_PROFILE: &str = "content-gate.candidate-revision/v1";
+
+/// Bind an independently computed candidate revision digest to the explicit
+/// decision artifact bytes. This is an experimental composition, not a v2
+/// verdict or publication authorization. The digest must be independently
+/// computed from the current snapshot; a digest copied from a prior verdict
+/// does not establish freshness, authenticity or completeness.
+///
+/// Both profile and digest must be present. The two artifact names are reserved
+/// and must not appear in `artifacts`. Unknown profiles and invalid digest
+/// lengths fail closed, as do all violations of `decision_binding`.
+pub fn candidate_snapshot_binding(
+    artifacts: &[(&str, Option<&[u8]>)],
+    profile: Option<&str>,
+    digest: Option<&[u8]>,
+) -> Result<[u8; 32], &'static str> {
+    if profile != Some(CANDIDATE_REVISION_PROFILE) {
+        return Err("missing or unsupported candidate revision profile");
+    }
+    let digest = digest.ok_or("missing candidate revision digest")?;
+    if digest.len() != 32 {
+        return Err("candidate revision digest must be 32 bytes");
+    }
+    if artifacts.iter().any(|(name, _)| {
+        matches!(
+            *name,
+            "candidate_revision_profile" | "candidate_revision_sha256"
+        )
+    }) {
+        return Err("candidate revision artifact names are reserved");
+    }
+    let mut bound = artifacts.to_vec();
+    bound.push((
+        "candidate_revision_profile",
+        Some(CANDIDATE_REVISION_PROFILE.as_bytes()),
+    ));
+    bound.push(("candidate_revision_sha256", Some(digest)));
+    decision_binding(&bound)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn candidate_binding_refuses_missing_unknown_and_shadowed_inputs() {
+        let artifacts: [(&str, Option<&[u8]>); 6] = [
+            ("change", Some(b"change")),
+            ("resolved_policy", Some(b"policy")),
+            ("host_options", Some(b"options")),
+            ("evaluator", Some(b"build")),
+            ("collection", None),
+            ("external_evidence", None),
+        ];
+        let digest = [1u8; 32];
+        let valid =
+            candidate_snapshot_binding(&artifacts, Some(CANDIDATE_REVISION_PROFILE), Some(&digest))
+                .unwrap();
+        assert!(candidate_snapshot_binding(&artifacts, None, Some(&digest)).is_err());
+        assert!(
+            candidate_snapshot_binding(&artifacts, Some("unsupported/v2"), Some(&digest)).is_err()
+        );
+        assert!(
+            candidate_snapshot_binding(&artifacts, Some(CANDIDATE_REVISION_PROFILE), None).is_err()
+        );
+        assert!(
+            candidate_snapshot_binding(
+                &artifacts,
+                Some(CANDIDATE_REVISION_PROFILE),
+                Some(&digest[..31])
+            )
+            .is_err()
+        );
+        let mut shadow = artifacts.to_vec();
+        shadow.push(("candidate_revision_profile", Some(b"other")));
+        assert!(
+            candidate_snapshot_binding(&shadow, Some(CANDIDATE_REVISION_PROFILE), Some(&digest))
+                .is_err()
+        );
+        shadow.pop();
+        shadow.push(("candidate_revision_sha256", Some(&digest)));
+        assert!(
+            candidate_snapshot_binding(&shadow, Some(CANDIDATE_REVISION_PROFILE), Some(&digest))
+                .is_err()
+        );
+        let changed = [2u8; 32];
+        assert_ne!(
+            valid,
+            candidate_snapshot_binding(
+                &artifacts,
+                Some(CANDIDATE_REVISION_PROFILE),
+                Some(&changed)
+            )
+            .unwrap()
+        );
+        for index in 0..artifacts.len() {
+            let mut modified = artifacts;
+            modified[index].1 = Some(b"changed");
+            assert_ne!(
+                valid,
+                candidate_snapshot_binding(
+                    &modified,
+                    Some(CANDIDATE_REVISION_PROFILE),
+                    Some(&digest)
+                )
+                .unwrap()
+            );
+        }
+    }
 
     #[test]
     fn bindings_are_stable_and_track_every_artifact() {

@@ -1,0 +1,13 @@
+{
+  "schema": "aexeo.experimental-candidate-binding-vector/v1",
+  "candidate_revision_sha256": "6c680c3639cadece9b12ec70f52603eee5a98d6f05106fd241e4327e4dba4b73",
+  "artifacts_hex": {
+    "change": "61727469636c653a20636166c3a9",
+    "resolved_policy": "706f6c6963792d7631",
+    "host_options": "7b7d",
+    "evaluator": "656e67696e652d6964",
+    "collection": null,
+    "external_evidence": ""
+  },
+  "sha256": "999b8fc473c9667b41ccf665e5170174cd4d0508622afcf231c8498a6564d2dc"
+}

@@ -111,6 +111,23 @@ pub fn candidate_revision_digest(snapshot: &CandidateSnapshot) -> Result<[u8; 32
     revision_set_digest(&scope, &descriptor, &entries)
 }
 
+/// Bind explicit decision inputs to the exact candidate snapshot, recomputing
+/// its revision digest rather than accepting a digest from a previous verdict.
+/// The caller must independently obtain the current snapshot and complete
+/// decision inputs. This API does not authenticate the snapshot or authorize
+/// publication and does not imply a complete or fresh inventory.
+pub fn candidate_decision_binding(
+    snapshot: &CandidateSnapshot,
+    artifacts: &[(&str, Option<&[u8]>)],
+) -> Result<[u8; 32], &'static str> {
+    let digest = candidate_revision_digest(snapshot)?;
+    aexeo_contracts::content_gate_binding_v2::candidate_snapshot_binding(
+        artifacts,
+        Some(aexeo_contracts::content_gate_binding_v2::CANDIDATE_REVISION_PROFILE),
+        Some(&digest),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,6 +143,100 @@ mod tests {
             value["sha256"].as_str().unwrap().into(),
         )
     }
+    #[test]
+    fn binding_matches_vector_and_changes_with_snapshot_and_decision_inputs() {
+        let (snapshot, _) = fixture();
+        let vector: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/candidate-binding-vector.json"
+        ))
+        .unwrap();
+        let artifacts: [(&str, Option<&[u8]>); 6] = [
+            ("change", Some("article: café".as_bytes())),
+            ("resolved_policy", Some(b"policy-v1")),
+            ("host_options", Some(b"{}")),
+            ("evaluator", Some(b"engine-id")),
+            ("collection", None),
+            ("external_evidence", Some(b"")),
+        ];
+        let first = candidate_decision_binding(&snapshot, &artifacts).unwrap();
+        assert_eq!(
+            format!("{:x}", sha2::digest::Output::<sha2::Sha256>::from(first)),
+            vector["sha256"].as_str().unwrap()
+        );
+        let mut scope = snapshot.clone();
+        scope.scope.push('x');
+        assert_ne!(
+            first,
+            candidate_decision_binding(&scope, &artifacts).unwrap()
+        );
+        let mut item = snapshot.clone();
+        item.items[0].source.push('x');
+        assert_ne!(
+            first,
+            candidate_decision_binding(&item, &artifacts).unwrap()
+        );
+        let mut removed = snapshot.clone();
+        removed.items.pop();
+        assert_ne!(
+            first,
+            candidate_decision_binding(&removed, &artifacts).unwrap()
+        );
+        let mut reordered = snapshot.clone();
+        reordered.items.reverse();
+        assert_eq!(
+            first,
+            candidate_decision_binding(&reordered, &artifacts).unwrap()
+        );
+        for index in 0..artifacts.len() {
+            let mut changed = artifacts;
+            changed[index].1 = Some(b"changed");
+            assert_ne!(
+                first,
+                candidate_decision_binding(&snapshot, &changed).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn overlay_candidate_can_be_bound_and_recomputed_independently() {
+        let (mut base, _) = fixture();
+        let item = base.items[0].clone();
+        base.items.clear();
+        let change: aexeo_contracts::content_gate_protocol::Change = serde_json::from_value(serde_json::json!({
+            "schema":"content-gate.change/v1", "change_id":"new",
+            "created_at":"2026-01-01T00:00:00Z", "origin":{"kind":"manual"},
+            "base":base.base, "site":{"id":base.site_id},
+            "entries":[{"entity_id":item.entity_id, "operation":"create", "media_type":item.media_type,
+                "public_path":item.public_path, "after":{"sha256":item.sha256, "inline":item.source}}]
+        })).unwrap();
+        let overlay = crate::content_candidate::overlay_candidate(
+            &base,
+            &change,
+            std::slice::from_ref(&item),
+        )
+        .unwrap();
+        let artifacts: [(&str, Option<&[u8]>); 6] = [
+            ("change", Some(b"change")),
+            ("resolved_policy", Some(b"policy")),
+            ("host_options", Some(b"options")),
+            ("evaluator", Some(b"build")),
+            ("collection", None),
+            ("external_evidence", None),
+        ];
+        let actual = candidate_decision_binding(&overlay.candidate, &artifacts).unwrap();
+        let mut independently_built = base.clone();
+        independently_built.items.push(item);
+        assert_eq!(
+            actual,
+            candidate_decision_binding(&independently_built, &artifacts).unwrap()
+        );
+        independently_built.complete = !independently_built.complete;
+        assert_ne!(
+            actual,
+            candidate_decision_binding(&independently_built, &artifacts).unwrap()
+        );
+    }
+
     #[test]
     fn candidate_profile_matches_independent_vector_and_binds_every_field() {
         let (snapshot, expected) = fixture();
