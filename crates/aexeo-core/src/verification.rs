@@ -198,27 +198,25 @@ pub fn diff_entity_findings(
     let mut new_findings = Vec::new();
     let mut unchanged_findings = Vec::new();
     for finding in current {
-        if let Some(key) = current_key(finding) {
-            if let Some(count) = counts.get_mut(&key) {
-                if *count > 0 {
-                    *count -= 1;
-                    *matched.entry(key).or_default() += 1;
-                    unchanged_findings.push(finding.clone());
-                    continue;
-                }
-            }
+        if let Some(key) = current_key(finding)
+            && let Some(count) = counts.get_mut(&key)
+            && *count > 0
+        {
+            *count -= 1;
+            *matched.entry(key).or_default() += 1;
+            unchanged_findings.push(finding.clone());
+            continue;
         }
         new_findings.push(finding.clone());
     }
     let mut resolved_findings = Vec::new();
     for finding in baseline {
-        if let Some(key) = baseline_key(finding) {
-            if let Some(count) = matched.get_mut(&key) {
-                if *count > 0 {
-                    *count -= 1;
-                    continue;
-                }
-            }
+        if let Some(key) = baseline_key(finding)
+            && let Some(count) = matched.get_mut(&key)
+            && *count > 0
+        {
+            *count -= 1;
+            continue;
         }
         resolved_findings.push(finding.clone());
     }
