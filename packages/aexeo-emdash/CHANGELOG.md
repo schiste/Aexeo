@@ -6,6 +6,13 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-11-18
+
+- Preserve sentence boundaries around recognized numeric Portable Text reference markers in the analysis projection, without changing source citations.
+- Show whether editorial presets are configured or excluded and state that style checks do not establish factual accuracy or currency.
+- Expose opt-in, permissioned MCP audits of exact CMS revisions and retrieval of stored reports, with explicit coverage and revision-currentness limits.
+- Support explained editorial review decisions scoped to one audit finding in the findings page and MCP; reviews annotate rather than suppress findings.
+
 ## [0.9.3]
 
 - Add advisory sentence length variance review with configurable fixed or seeded thresholds and a discoverable starter preset. Unobserved or insufficient text is not checked.
