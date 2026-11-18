@@ -9,3 +9,9 @@ The v1 runner contract remains in force. A matching digest alone does not establ
 - [ ] Audit and implement entity-based baseline semantics with explicit rename handling and regression coverage.
 
 Track each deliverable with its actual evidence and remaining integration limits. Experimental formats and host declarations are not publication authorization.
+
+## Evidence and remaining work
+
+- Aexeo #520 delivered an experimental exact-byte revision-set identity and shared Rust/Python vector. #522 delivered a host-provided candidate overlay and experimental one-hop link-impact CLI. These do not establish snapshot freshness, full metadata coverage, complete site impact, or a publication verdict.
+- This branch defines an experimental candidate snapshot byte profile, emits its digest from the impact query, and tests it independently. A portable bound verdict, all decision artifacts and a safe publication boundary remain open.
+- Aethyme runner enforcement, adversarial interoperability, general incremental evaluation and publication-capable entity baselines must be verified independently before these items can be marked complete.
