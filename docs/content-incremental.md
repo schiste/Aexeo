@@ -9,7 +9,10 @@ surviving entities and reuses the remaining reports. It reports counts of
 re-evaluated and reused items; these are work counts, not timing benchmarks.
 
 The current supported scope is **only** `text/plain` records and a preset made
-exclusively of `WordCount` and `CharacterCount` gates, with inline change states. Their exact input is the
+exclusively of `WordCount`, `CharacterCount`, `SentenceLength` and
+`SentenceCharacterLength` (only with `paragraphs_only = false`),
+`RepeatedTerms`, `RequiredTerms`, and `ForbiddenTerms`, with inline change
+states. Their exact input is the
 entity ID and unchanged UTF-8 source as `ContentInput.text`; no metadata,
 paragraph projection, external observations, host extensions, site or
 collection state are supplied. An unsupported gate or format, invalid or stale
@@ -30,3 +33,15 @@ restarts, other engines, policy changes and a newly published base require a
 new full preparation. The API offers no claim of latency improvement until
 measured on a representative workload. This is not the finalized C4 wire
 protocol or general incremental evaluation of arbitrary presets.
+
+## Host integration
+
+A long-running Rust host can prepare one baseline for a trusted snapshot and
+resolved preset, then call `evaluate(&change, &after_items)` on that value for
+each proposed change against that same base. Match `IncrementalEvaluation`:
+`Evaluated` contains the complete per-item reports and the `evaluated` and
+`reused` counters, while `NotChecked` means no incremental result may be used.
+Inspect gate findings separately; an evaluated report is not a pass. After a
+publication or change of snapshot, preset, or engine, discard the baseline and
+prepare a new one. Preparing a baseline for each command-line invocation would
+repeat the full evaluation, so no cross-process CLI cache is claimed.
