@@ -11,6 +11,7 @@ import json
 import os
 import re
 import stat
+import struct
 import sys
 import time
 
@@ -20,6 +21,7 @@ MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 MAX_BUNDLE_BYTES = 64 * 1024 * 1024
 BUNDLE_SCHEMA = "aexeo.offline-receipt-bundle/v1"
 LINK_BUNDLE_SCHEMA = "aexeo.link-snapshot-receipt-bundle/v1"
+BOUND_BUNDLE_SCHEMA = "aexeo.experimental-bound-verdict-bundle/v1"
 RECEIPT_SCHEMAS = {BUNDLE_SCHEMA: "aexeo.offline-decision-receipt/v1",
                    LINK_BUNDLE_SCHEMA: "aexeo.link-snapshot-decision-receipt/v1"}
 REQUIRED = ("change", "resolved_policy", "host_options", "evaluator")
@@ -132,19 +134,38 @@ def parse_bundle(data):
                             parse_constant=_reject_constant)
     except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
         raise VerificationError("invalid bundle JSON") from error
-    if (not isinstance(bundle, dict) or set(bundle) != {"schema", "receipt", "artifacts"}
-            or not isinstance(bundle["schema"], str) or bundle["schema"] not in RECEIPT_SCHEMAS
-            or not isinstance(bundle["receipt"], dict)
-            or not isinstance(bundle["artifacts"], dict)
-            or set(bundle["artifacts"]) != set(REQUIRED + OPTIONAL)):
+    if not isinstance(bundle, dict) or not isinstance(bundle.get("artifacts"), dict):
         raise VerificationError("invalid bundle fields")
-    if bundle["receipt"].get("schema") != RECEIPT_SCHEMAS[bundle["schema"]]:
+    if set(bundle["artifacts"]) != set(REQUIRED + OPTIONAL):
+        raise VerificationError("invalid bundle artifacts")
+    bound = bundle.get("schema") == BOUND_BUNDLE_SCHEMA
+    if bound:
+        if set(bundle) != {"schema", "verdict", "artifacts"} or not isinstance(bundle["verdict"], dict):
+            raise VerificationError("invalid bound bundle fields")
+        envelope = bundle["verdict"]
+        if set(envelope) != {"schema", "binding", "receipt"}:
+            raise VerificationError("invalid bound envelope")
+        schemas = {"aexeo.experimental-bound-verdict/v1": "aexeo.offline-decision-receipt/v1",
+                   "aexeo.experimental-link-bound-verdict/v1": "aexeo.link-snapshot-decision-receipt/v1"}
+        envelope_schema = envelope.get("schema")
+        if not isinstance(envelope_schema, str):
+            raise VerificationError("invalid bound envelope schema")
+        expected_receipt = schemas.get(envelope_schema)
+        if expected_receipt is None or not isinstance(envelope.get("binding"), str) or re.fullmatch(r"[0-9a-f]{64}", envelope["binding"]) is None:
+            raise VerificationError("invalid bound envelope schema or binding")
+        receipt = envelope["receipt"]
+    else:
+        if set(bundle) != {"schema", "receipt", "artifacts"} or not isinstance(bundle.get("schema"), str) or bundle["schema"] not in RECEIPT_SCHEMAS:
+            raise VerificationError("invalid bundle fields")
+        expected_receipt = RECEIPT_SCHEMAS[bundle["schema"]]
+        receipt = bundle["receipt"]
+    if not isinstance(receipt, dict) or receipt.get("schema") != expected_receipt:
         raise VerificationError("bundle and receipt schemas differ")
     evidence = bundle["artifacts"]["external_evidence"]
-    if (bundle["schema"] == BUNDLE_SCHEMA) != (evidence is None):
+    if (expected_receipt == "aexeo.offline-decision-receipt/v1") != (evidence is None):
         raise VerificationError("bundle external evidence does not match schema")
     try:
-        manifest_data = json.dumps(bundle["receipt"]["decision_inputs"], separators=(",", ":")).encode("utf-8")
+        manifest_data = json.dumps(receipt["decision_inputs"], separators=(",", ":")).encode("utf-8")
     except (KeyError, UnicodeEncodeError, ValueError, RecursionError) as error:
         raise VerificationError("invalid bundle manifest") from error
     manifest = parse_manifest(manifest_data)
@@ -163,7 +184,22 @@ def parse_bundle(data):
                 raise VerificationError("bundle artifacts differ")
         else:
             raise VerificationError("bundle artifacts differ")
-    return bundle["receipt"], manifest_data
+    if bound:
+        digest = hashlib.sha256(b"content-gate:decision-inputs:v2\0")
+        digest.update(struct.pack(">I", len(REQUIRED + OPTIONAL)))
+        for role in sorted(REQUIRED + OPTIONAL):
+            name = role.encode("ascii")
+            digest.update(struct.pack(">I", len(name)))
+            digest.update(name)
+            value = bundle["artifacts"][role]
+            digest.update(bytes([value is not None]))
+            if value is not None:
+                data = value.encode("utf-8")
+                digest.update(struct.pack(">Q", len(data)))
+                digest.update(data)
+        if not hmac.compare_digest(envelope["binding"], digest.hexdigest()):
+            raise VerificationError("bound bundle binding differs")
+    return receipt, manifest_data
 
 
 def verify_bundle(data, artifacts, max_bytes=MAX_ARTIFACT_BYTES):
