@@ -610,10 +610,10 @@ mod tests {
             let mut reverse = [true, false, false];
             loop {
                 let mut next = reverse;
-                for source in 0..3 {
-                    for target in 0..3 {
-                        if reverse[target] && mask & (1 << (source * 3 + target)) != 0 {
-                            next[source] = true;
+                for (source, result) in next.iter_mut().enumerate() {
+                    for (target, reachable) in reverse.iter().enumerate() {
+                        if *reachable && mask & (1 << (source * 3 + target)) != 0 {
+                            *result = true;
                         }
                     }
                 }
@@ -622,9 +622,9 @@ mod tests {
                 }
                 reverse = next;
             }
-            for target in 0..3 {
+            for (target, reachable) in reverse.iter_mut().enumerate() {
                 if mask & (1 << target) != 0 {
-                    reverse[target] = true;
+                    *reachable = true;
                 }
             }
             let expected: Vec<String> = (0..3)
