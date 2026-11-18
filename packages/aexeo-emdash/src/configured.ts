@@ -55,6 +55,8 @@ import type { Finding, SiteIntelligenceScore } from "./types.js";
 // peer dep is optional in package.json so consumers without emdash
 // installed still get a buildable package).
 import { definePlugin } from "emdash";
+import { z } from "zod";
+import { auditRevision, getRevisionAudit } from "./revision-audit.js";
 
 // Resolve the final collection list from the user's three knobs.
 // Exposed at module scope so its precedence rules can be unit-tested
@@ -170,6 +172,8 @@ export interface ConfiguredPluginOptions {
   descriptionFieldsByCollection?: Record<string, readonly string[]>;
   /** Optional portable preset evaluated in addition to the existing site checks. */
   contentPreset?: ContentPresetOptions;
+  /** Opt in to historical revision access on hosts supporting content:revisions:read. */
+  revisionAudits?: boolean;
   /**
    * Full override of the swept collections. See `aexeoPlugin` in
    * src/index.ts for the full precedence story.
@@ -246,7 +250,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
     // The entity-presence route fetches its public sources directly (see
     // presence-check.ts). rdap.org then redirects to the registry for the
     // domain's TLD; those registries cannot be listed here.
-    capabilities: ["content:read", "network:request"],
+    capabilities: ["content:read", "network:request", ...(options.revisionAudits ? ["content:revisions:read" as const] : [])],
     allowedHosts: [...PRESENCE_HOSTS],
     hooks: {
       // afterSave processes one saved document at a time — collections
@@ -268,7 +272,23 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
     // emdash requires plugins:manage (admin) on a route that declares no
     // permission. Reading findings only needs plugins:read (editor); anything
     // that writes stays admin, stated explicitly so the split is visible.
+    mcp: { tools: {
+      audit_revision: { description: "Evaluate the content fields of a specific CMS revision using the configured editorial preset.", route: "audit-revision", input: z.strictObject({ collection: z.string().min(1).max(128), id: z.string().min(1).max(128), revision: z.string().min(1).max(128) }) },
+      get_audit: { description: "Retrieve an editorial audit and check whether its revision is still current.", route: "get-revision-audit", input: z.strictObject({ audit_id: z.uuid() }) },
+    } },
     routes: {
+      "audit-revision": {
+        permission: "plugins:read",
+        request: { body: "json" },
+        input: z.strictObject({ collection: z.string().min(1).max(128), id: z.string().min(1).max(128), revision: z.string().min(1).max(128) }),
+        handler: (ctx: SandboxCtx & { input: { collection: string; id: string; revision: string } }) => auditRevision(ctx as never, ctx.input, { preset: options.contentPreset, blockMappings: options.blockMappings, contentFieldsByCollection: options.contentFieldsByCollection, descriptionFieldsByCollection: options.descriptionFieldsByCollection, evidenceProviderConfigured: runtime.evidenceSources !== undefined, evaluate: evaluateContent }),
+      },
+      "get-revision-audit": {
+        permission: "plugins:read",
+        request: { body: "json" },
+        input: z.strictObject({ audit_id: z.uuid() }),
+        handler: (ctx: SandboxCtx & { input: { audit_id: string } }) => getRevisionAudit(ctx as never, ctx.input.audit_id),
+      },
       // The Refresh sweep (handleAdminRoute → handleRefresh) is the
       // one consumer of `collections`. Bind the resolved list here so
       // every request handles the same set without re-reading options.

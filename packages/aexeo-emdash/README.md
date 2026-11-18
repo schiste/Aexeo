@@ -216,3 +216,22 @@ collection and projected destinations so it can select document-specific policy.
 A failed observation or unavailable projection remains unchecked with a distinct,
 content-free reason; provider errors are not exposed. The host owns its network
 policy and request limits.
+
+### Auditing an exact CMS revision over MCP
+
+Configured-mode plugins expose `audit_revision` (`collection`, `id`, `revision`)
+and `get_audit` (`audit_id`) through EmDash's plugin MCP integration. A host
+must enable and consent to these tools, and callers need `plugins:read`. An
+editorial `contentPreset` must be configured for the collection. Set
+`revisionAudits: true` to request `content:revisions:read` on a compatible
+EmDash host; this capability requires host approval. Revision access
+requires a host that implements `content.getRevision`; otherwise the result is
+`not_checked`. The first tool evaluates the requested immutable revision and
+stores a report in plugin KV; the second retrieves it and checks whether the
+revision is still the current draft or publication. A stale or unknown status
+is not evidence of current content. Source paths refer only to the revision
+snapshot. Historical rendered HTML and SEO-panel fields are unavailable, and
+runtime evidence, link and external-gate providers are not invoked. Inspect
+each gate's `not_checked` status. These checks do not establish factual accuracy
+or currency. Reports contain editorial findings and require the same access
+controls and retention care as the source content.
