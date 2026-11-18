@@ -32,6 +32,16 @@ fn returns_bounded_impact_without_private_content_by_default() {
     let result: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(result["status"], "complete");
     assert_eq!(result["impact"]["affected"], json!(["a"]));
+    let revision = result["candidate_revision_sha256"].as_str().unwrap();
+    assert_eq!(revision.len(), 64);
+    let mut changed = query(true);
+    changed["after"][0]["links"] = json!(["/other"]);
+    let other = run(&changed, &[]);
+    let other: Value = serde_json::from_slice(&other.stdout).unwrap();
+    assert_ne!(
+        revision,
+        other["candidate_revision_sha256"].as_str().unwrap()
+    );
     assert!(result.get("candidate").is_none());
     let output = run(&query(true), &["--include-candidate"]);
     let result: Value = serde_json::from_slice(&output.stdout).unwrap();

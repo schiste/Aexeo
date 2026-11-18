@@ -5,6 +5,7 @@ use aexeo_contracts::{
     content_gate_protocol::Change,
 };
 use aexeo_core::content_candidate::{CandidateItem, CandidateSnapshot, overlay_candidate};
+use aexeo_core::content_candidate_profile::candidate_revision_digest;
 use anyhow::{Result, bail};
 use clap::ArgMatches;
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,8 @@ struct Response {
     reason: Option<String>,
     change_id: Option<String>,
     impact: Option<aexeo_core::content_candidate::CandidateImpact>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    candidate_revision_sha256: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     candidate: Option<CandidateSnapshot>,
 }
@@ -52,9 +55,13 @@ pub fn command_content_impact(args: &ArgMatches) -> Result<i32> {
     if query.schema != "aexeo.content-impact-query/v1-experimental" {
         bail!("unsupported impact query schema");
     }
-    let result = overlay_candidate(&query.snapshot, &query.change, &query.after);
+    let result =
+        overlay_candidate(&query.snapshot, &query.change, &query.after).and_then(|result| {
+            let revision = candidate_revision_digest(&result.candidate)?;
+            Ok((result, revision))
+        });
     let response = match result {
-        Ok(result) => {
+        Ok((result, revision)) => {
             let status = if result.impact.link_impact_complete {
                 "complete"
             } else {
@@ -66,6 +73,9 @@ pub fn command_content_impact(args: &ArgMatches) -> Result<i32> {
                 reason: None,
                 change_id: Some(result.change_id),
                 impact: Some(result.impact),
+                candidate_revision_sha256: Some(
+                    revision.iter().map(|b| format!("{b:02x}")).collect(),
+                ),
                 candidate: args
                     .get_flag("include-candidate")
                     .then_some(result.candidate),
@@ -77,6 +87,7 @@ pub fn command_content_impact(args: &ArgMatches) -> Result<i32> {
             reason: Some(reason.into()),
             change_id: Some(query.change.change_id),
             impact: None,
+            candidate_revision_sha256: None,
             candidate: None,
         },
     };
