@@ -3,6 +3,7 @@ pub mod composition;
 pub mod config;
 pub mod content;
 pub mod content_change;
+pub mod content_impact;
 pub mod docs;
 pub mod editorial_patch;
 pub mod exit_code;
