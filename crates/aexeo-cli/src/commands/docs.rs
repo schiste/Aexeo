@@ -107,18 +107,70 @@ pub fn command_docs(action: &str, path: &str, output_format: &str) -> Result<i32
     Ok(if success { 0 } else { 1 })
 }
 
-pub fn command_diff(baseline: &str, current: &str, output_format: &str) -> Result<i32> {
+pub fn command_diff(
+    baseline: &str,
+    current: &str,
+    output_format: &str,
+    baseline_entities: Option<&str>,
+    current_entities: Option<&str>,
+) -> Result<i32> {
     let baseline_findings = load_findings_from_audit(Path::new(baseline))?;
     let current_findings = load_findings_from_audit(Path::new(current))?;
     let diff = aexeo_core::diff_finding_sets(&baseline_findings, &current_findings);
-    match output_format {
-        "json" => println!(
-            "{}",
-            render_diff_command_json("diff", &diff, diff.new_findings.is_empty(), Vec::new())?
+    let advisory = match (baseline_entities, current_entities) {
+        (Some(old), Some(new)) => Some(
+            aexeo_core::verification::diff_site_entity_findings(
+                &baseline_findings,
+                &current_findings,
+                &read_site_entity_manifest(old)?,
+                &read_site_entity_manifest(new)?,
+            )
+            .map_err(aexeo_core::error::into_user_error)?,
         ),
-        _ => println!("{}", render_diff_text(&diff)),
+        (None, None) => None,
+        _ => anyhow::bail!("both entity manifests are required"),
+    };
+    let warning = "Advisory only: host-supplied identities, scope, policy, provenance and completeness are not verified. The exit code uses the path-based comparison.";
+    match output_format {
+        "json" => {
+            let raw =
+                render_diff_command_json("diff", &diff, diff.new_findings.is_empty(), Vec::new())?;
+            if let Some(advisory) = advisory {
+                let mut output: serde_json::Value = serde_json::from_str(&raw)?;
+                output["entity_comparison"] = serde_json::json!({"status":"advisory", "limitations":warning, "diff":advisory});
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            } else {
+                println!("{raw}");
+            }
+        }
+        _ => {
+            println!("{}", render_diff_text(&diff));
+            if let Some(advisory) = advisory {
+                println!(
+                    "\nEntity comparison — {warning}\n{}",
+                    render_diff_text(&advisory)
+                );
+            }
+        }
     }
     Ok(if diff.new_findings.is_empty() { 0 } else { 1 })
+}
+
+fn read_site_entity_manifest(path: &str) -> Result<aexeo_core::verification::SiteEntityManifest> {
+    use std::io::Read;
+    const LIMIT: u64 = 4 * 1024 * 1024;
+    let mut bytes = Vec::new();
+    fs::File::open(path)
+        .user_context("opening site entity manifest")?
+        .take(LIMIT + 1)
+        .read_to_end(&mut bytes)
+        .user_context("reading site entity manifest")?;
+    if bytes.len() as u64 > LIMIT {
+        anyhow::bail!("site entity manifest exceeds size limit");
+    }
+    let value = aexeo_contracts::content_gate_change_validation::parse_unique_json_value(&bytes)
+        .user_context("invalid site entity manifest JSON")?;
+    serde_json::from_value(value).user_context("invalid site entity manifest")
 }
 
 pub fn command_trend(command_name: &str, path: &str, output_format: &str) -> Result<i32> {

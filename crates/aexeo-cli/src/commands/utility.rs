@@ -72,6 +72,12 @@ pub fn dispatch(matches: clap::ArgMatches) -> Result<i32> {
             required_arg(submatches, "baseline")?,
             required_arg(submatches, "current")?,
             required_arg(submatches, "format")?,
+            submatches
+                .get_one::<String>("baseline-entities")
+                .map(String::as_str),
+            submatches
+                .get_one::<String>("current-entities")
+                .map(String::as_str),
         ),
         Some(("report", submatches)) => match submatches.subcommand() {
             Some(("render", render_matches)) => command_report_render(
