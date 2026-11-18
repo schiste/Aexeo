@@ -188,7 +188,11 @@ pub fn overlay_candidate(
         changed.insert(old_id.to_string());
         let old = items.remove(old_id).ok_or("base identity unavailable")?;
         let before = entry.before.as_ref().ok_or("before state unavailable")?;
-        if before.sha256 != old.sha256
+        if before
+            .inline
+            .as_ref()
+            .is_some_and(|source| source != &old.source)
+            || before.sha256 != old.sha256
             || before
                 .revision
                 .as_ref()
@@ -206,7 +210,11 @@ pub fn overlay_candidate(
             .remove(entry.entity_id.as_str())
             .ok_or("after projection unavailable")?;
         let state = entry.after.as_ref().ok_or("after state unavailable")?;
-        if next.sha256 != state.sha256
+        if state
+            .inline
+            .as_ref()
+            .is_some_and(|source| source != &next.source)
+            || next.sha256 != state.sha256
             || next.media_type != entry.media_type
             || state
                 .revision
@@ -448,6 +456,12 @@ mod tests {
             overlay_candidate(&other, &change, &[after.clone()]).unwrap_err(),
             "invalid candidate item"
         );
+        change.entries[0].after.as_mut().unwrap().inline = Some("different".into());
+        assert_eq!(
+            overlay_candidate(&snapshot, &change, &[after.clone()]).unwrap_err(),
+            "after projection mismatch"
+        );
+        change.entries[0].after.as_mut().unwrap().inline = Some(after.source.clone());
         change.entries[0].before = None;
         assert_eq!(
             overlay_candidate(&snapshot, &change, &[after]).unwrap_err(),
