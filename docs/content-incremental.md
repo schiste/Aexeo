@@ -45,3 +45,17 @@ Inspect gate findings separately; an evaluated report is not a pass. After a
 publication or change of snapshot, preset, or engine, discard the baseline and
 prepare a new one. Preparing a baseline for each command-line invocation would
 repeat the full evaluation, so no cross-process CLI cache is claimed.
+
+## Optional transitive link impact
+
+`content_candidate::overlay_candidate_with_transitive_link_impact` returns the
+ordinary overlay plus a conservative set of surviving entities reached by
+following incoming links transitively in the union of the base and candidate
+graphs. The set also contains the ordinary direct neighbours; explicit
+renames connect the old and new identities. Cycles terminate. This analysis
+covers projected resolved route links only, and its completeness flag relies
+on exactly the host assertions required for the direct result. Unknown links
+or an incomplete inventory make the result incomplete. It does not establish
+source freshness, transitive dependencies for arbitrary gates, redirects, or
+a publication verdict. The incremental evaluator above still uses direct
+impact because its supported gates depend only on each entity's own text.
