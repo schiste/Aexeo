@@ -38,3 +38,31 @@ revision, evaluator authenticity, inventory coverage, and publication atomicity.
 A declared complete snapshot does not prove any of these properties, and does
 not mean that every item or rendered page has been assessed. A non-passing or
 `not_checked` underlying verdict stays non-passing.
+
+## Independent input comparison
+
+`verify_candidate_inputs.py` independently reconstructs the overlay from a
+current base, after projection and the exact change artifact bytes, then checks
+the candidate and base digests, combined binding and receipt input manifest.
+Its JSON parser rejects duplicate keys. It reads bounded regular files and
+rejects file replacement or observable metadata changes during an individual
+read. This is not an atomic read of all files: the host must obtain a coherent
+set and protect the publication boundary against concurrent updates.
+
+Run it with `--envelope PREVIOUS.json --base BASE.json --after AFTER.json
+--change CHANGE-BYTES --resolved-policy POLICY-BYTES --host-options
+OPTIONS-BYTES --evaluator BUILD-BYTES`. These four files must contain the exact
+independently obtained artifact bytes, not guessed equivalents of their JSON
+representations. Rust currently materializes its policy and options as
+Aexeo-specific serialized bytes; there is no portable policy/options wire
+format or candidate-mode artifact bundle. A bundle produced by the same
+untrusted evaluation is not an independent source of current inputs. Treat
+inputs as private where appropriate.
+
+The tool reports only whether these input bindings match. It does not validate
+the embedded verdict, rerun rules, authenticate the producer or the inputs,
+prove completeness or freshness, or authorize publication. A successful
+comparison does not stop an attacker from modifying the verdict field itself;
+independent trusted re-evaluation and a protected publication boundary remain
+necessary. The shared vector is consumed by the Python tests and revalidated
+by Rust; it is illustrative, not an authority for the host's current state.
