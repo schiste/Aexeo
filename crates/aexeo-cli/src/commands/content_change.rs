@@ -169,6 +169,27 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             serde_json::from_value(value).user_context("invalid previous verdict")
         })
         .transpose()?;
+    let baseline_verdict = args
+        .get_one::<String>("baseline-verdict")
+        .map(|path| -> Result<Verdict> {
+            protect_input(
+                Path::new(path),
+                Path::new(&verdict_path),
+                "baseline verdict",
+            )?;
+            let mut data = Vec::new();
+            File::open(path)
+                .user_context("opening baseline verdict")?
+                .take(MAX_CHANGE_BYTES + 1)
+                .read_to_end(&mut data)
+                .user_context("reading baseline verdict")?;
+            if data.len() as u64 > MAX_CHANGE_BYTES {
+                user_bail!("baseline verdict exceeds the size limit");
+            }
+            let value = parse_unique_json_value(&data).user_context("invalid baseline verdict")?;
+            serde_json::from_value(value).user_context("invalid baseline verdict")
+        })
+        .transpose()?;
     let mut bytes = Vec::new();
     File::open(change_path)
         .user_context("opening change document")?
@@ -513,6 +534,44 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
         report_revalidation(comparison.is_ok());
         comparison
             .user_context("previous verdict does not match the current inputs or evaluation")?;
+    }
+    if let Some(baseline) = baseline_verdict {
+        let mut renames = std::collections::BTreeMap::new();
+        for entry in &change.entries {
+            if entry.operation == Operation::Rename {
+                let old = entry
+                    .previous_entity_id
+                    .as_ref()
+                    .user_context("rename lacks previous identity")?;
+                if renames
+                    .insert(old.clone(), entry.entity_id.clone())
+                    .is_some()
+                {
+                    user_bail!("multiple renames use the same previous entity identity");
+                }
+            }
+        }
+        let comparison = aexeo_core::verification::diff_entity_findings(
+            &baseline.findings,
+            &verdict.findings,
+            &renames,
+        )
+        .user_context("invalid baseline identity mapping")?;
+        let annotation = serde_json::json!({
+            "status": "advisory",
+            "baseline_status": baseline.status,
+            "current_status": verdict.status,
+            "baseline_findings_omitted": baseline.findings_omitted,
+            "current_findings_omitted": verdict.findings_omitted,
+            "baseline_profile_sha256": baseline.validator.profile_sha256,
+            "current_profile_sha256": verdict.validator.profile_sha256,
+            "limitations": "Not a publication decision: provenance, policy equivalence, scope, and completeness are not verified; resolved findings may reflect missing checks.",
+            "comparison": comparison,
+        });
+        verdict
+            .extensions
+            .get_or_insert_with(Default::default)
+            .insert("aexeo.advisory-entity-baseline.v1".into(), annotation);
     }
     if telemetry {
         report_html_scope(&change, html_scope);

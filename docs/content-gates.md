@@ -1533,3 +1533,21 @@ can miss or misclassify examples, does not inspect structured list boundaries,
 and cannot establish whether an enumeration is repetitive or inappropriate.
 It never deletes or splits an item. Select the correct language explicitly and
 review candidates in context; unavailable paragraphs are `not_checked`.
+
+### Advisory comparison of content-gate findings
+
+`content-change --baseline-verdict OLD.json` adds an
+`aexeo.advisory-entity-baseline.v1` extension to the new verdict. Findings are
+matched by entity ID, rule ID and subject, one occurrence at a time. Explicit
+`previous_entity_id` rename entries map old identities to new; ambiguous mappings
+are refused. Findings without an entity ID cannot match. Existing site-audit
+baselines retain their historical path-based behavior.
+
+This comparison is informational only: it never changes the verdict or exit code.
+It does not authenticate the old verdict or verify policy equivalence, source
+freshness, scope, or completeness. In particular, a finding reported as
+resolved can instead reflect a missing or unchecked evaluation. Do not use this
+extension to suppress findings or authorize publication. The extension records
+both statuses, omitted-finding counts and any available policy hashes so a host
+can inspect the underlying limitations. `--baseline-verdict` cannot be combined
+with experimental offline receipts or observation export.

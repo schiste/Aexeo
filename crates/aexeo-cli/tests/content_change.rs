@@ -2288,3 +2288,58 @@ fn offline_receipt_rejects_duplicate_collection_fields() {
         assert_eq!(fs::read(dir.path().join("verdict.json")).unwrap(), before);
     }
 }
+
+#[test]
+fn baseline_verdict_compares_renamed_entities_without_changing_gate_outcome() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy =
+        "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['abc']\n";
+    let mut change = input();
+    let first = run(dir.path(), &change, policy, &[]);
+    assert_eq!(
+        first.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let baseline = dir.path().join("baseline.json");
+    fs::copy(dir.path().join("verdict.json"), &baseline).unwrap();
+    change["entries"][0]["entity_id"] = "renamed".into();
+    change["entries"][0]["operation"] = "rename".into();
+    change["entries"][0]["previous_entity_id"] = "article".into();
+    let next = run(
+        dir.path(),
+        &change,
+        policy,
+        &["--baseline-verdict", baseline.to_str().unwrap()],
+    );
+    // Rename impact is not yet checked, so the normal verdict may be not_checked.
+    assert!(
+        matches!(next.status.code(), Some(1 | 2)),
+        "{}",
+        String::from_utf8_lossy(&next.stderr)
+    );
+    let value: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+    let annotation = &value["extensions"]["aexeo.advisory-entity-baseline.v1"];
+    assert_eq!(annotation["status"], "advisory");
+    assert_eq!(
+        annotation["comparison"]["unchanged_findings"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(
+        annotation["comparison"]["new_findings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        annotation["limitations"]
+            .as_str()
+            .unwrap()
+            .contains("Not a publication decision")
+    );
+}
