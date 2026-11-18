@@ -42,3 +42,23 @@ By default the result omits source content. `--include-candidate` includes the
 full private source and link records; protect and handle this output as content.
 This experimental format is not the finalized C4 wire contract and does not
 specify a shared canonical serialization for revision-set identity.
+
+## Optional transitive incoming-link impact
+
+Pass `--transitive` to add `transitive_link_impact` to the experimental
+result. The existing `impact` field remains the direct result. The additional
+field contains `affected`, `link_impact_complete`, and `reasons`: its set
+includes direct neighbours and surviving entities reachable by repeatedly
+following incoming links in the union of the base and candidate graphs.
+Explicit renames connect old and new identities. With incomplete inventory or
+missing links, status remains `not_checked` (exit 2), and neither partial set
+may be used to skip checks. Invalid overlays return `not_checked` without the
+additional field. `--telemetry` adds only `transitive_affected_count`, not
+source content, when this option is selected.
+
+This analysis depends on host-attested link coverage and route resolution. It
+does not establish freshness, account for arbitrary non-link dependencies,
+or authorize publication. It holds additional reverse-link indexes in memory
+and traverses the supplied graphs; larger inputs require more CPU and memory.
+The existing query, item and link limits apply. This option computes an impact
+set; it does not itself run incremental gate evaluation.

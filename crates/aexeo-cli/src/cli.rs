@@ -84,6 +84,7 @@ pub fn build_cli() -> Command {
                 .about("Compute experimental direct link impact from a host-provided candidate snapshot")
                 .arg(Arg::new("input").long("input").required(true).help("Versioned JSON query file (may contain private content)"))
                 .arg(Arg::new("include-candidate").long("include-candidate").action(ArgAction::SetTrue).help("Include the complete private candidate source records in output"))
+                .arg(Arg::new("transitive").long("transitive").action(ArgAction::SetTrue).help("Also report experimental transitive incoming-link impact"))
                 .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate timing and counts to stderr")),
         )
         .subcommand(

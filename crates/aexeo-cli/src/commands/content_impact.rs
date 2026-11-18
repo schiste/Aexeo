@@ -4,7 +4,10 @@ use aexeo_contracts::{
     content_gate_change_validation::{parse_strict_validated_change, parse_unique_json_value},
     content_gate_protocol::Change,
 };
-use aexeo_core::content_candidate::{CandidateItem, CandidateSnapshot, overlay_candidate};
+use aexeo_core::content_candidate::{
+    CandidateItem, CandidateSnapshot, TransitiveLinkImpact, overlay_candidate,
+    overlay_candidate_with_transitive_link_impact,
+};
 use aexeo_core::content_candidate_profile::candidate_revision_digest;
 use anyhow::{Result, bail};
 use clap::ArgMatches;
@@ -27,6 +30,8 @@ struct Response {
     reason: Option<String>,
     change_id: Option<String>,
     impact: Option<aexeo_core::content_candidate::CandidateImpact>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transitive_link_impact: Option<TransitiveLinkImpact>,
     #[serde(skip_serializing_if = "Option::is_none")]
     candidate_revision_sha256: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -55,13 +60,20 @@ pub fn command_content_impact(args: &ArgMatches) -> Result<i32> {
     if query.schema != "aexeo.content-impact-query/v1-experimental" {
         bail!("unsupported impact query schema");
     }
-    let result =
-        overlay_candidate(&query.snapshot, &query.change, &query.after).and_then(|result| {
-            let revision = candidate_revision_digest(&result.candidate)?;
-            Ok((result, revision))
-        });
+    let transitive = args.get_flag("transitive");
+    let result = if transitive {
+        overlay_candidate_with_transitive_link_impact(&query.snapshot, &query.change, &query.after)
+            .map(|(overlay, impact)| (overlay, Some(impact)))
+    } else {
+        overlay_candidate(&query.snapshot, &query.change, &query.after)
+            .map(|overlay| (overlay, None))
+    }
+    .and_then(|(overlay, impact)| {
+        let revision = candidate_revision_digest(&overlay.candidate)?;
+        Ok((overlay, impact, revision))
+    });
     let response = match result {
-        Ok((result, revision)) => {
+        Ok((result, transitive_link_impact, revision)) => {
             let status = if result.impact.link_impact_complete {
                 "complete"
             } else {
@@ -73,6 +85,7 @@ pub fn command_content_impact(args: &ArgMatches) -> Result<i32> {
                 reason: None,
                 change_id: Some(result.change_id),
                 impact: Some(result.impact),
+                transitive_link_impact,
                 candidate_revision_sha256: Some(
                     revision.iter().map(|b| format!("{b:02x}")).collect(),
                 ),
@@ -87,16 +100,23 @@ pub fn command_content_impact(args: &ArgMatches) -> Result<i32> {
             reason: Some(reason.into()),
             change_id: Some(query.change.change_id),
             impact: None,
+            transitive_link_impact: None,
             candidate_revision_sha256: None,
             candidate: None,
         },
     };
     let code = if response.status == "complete" { 0 } else { 2 };
     if args.get_flag("telemetry") {
-        eprintln!(
-            "{}",
-            serde_json::json!({"schema":"aexeo.content-impact-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "query_bytes":data.len(), "status":response.status, "affected_count":response.impact.as_ref().map(|i| i.affected.len())})
-        );
+        let mut telemetry = serde_json::json!({"schema":"aexeo.content-impact-telemetry/v1", "duration_ms":started.elapsed().as_millis(), "query_bytes":data.len(), "status":response.status, "affected_count":response.impact.as_ref().map(|i| i.affected.len())});
+        if transitive {
+            telemetry["transitive_affected_count"] = serde_json::json!(
+                response
+                    .transitive_link_impact
+                    .as_ref()
+                    .map(|i| i.affected.len())
+            );
+        }
+        eprintln!("{telemetry}");
     }
     emit(&response)?;
     Ok(code)
