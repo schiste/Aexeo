@@ -55,3 +55,9 @@ Use `--link-observations PATH` to bind supplied snapshots; revalidation requires
 the independently obtained current snapshot. `--telemetry` reports only whether revalidation
 matched; input values and paths are excluded. These checks do not authenticate
 inputs, establish freshness or authorize publication.
+
+## Experimental bound bundle
+
+The bundle has exactly `schema`, `verdict`, and `artifacts`. Its `verdict` is the experimental bound envelope above; `artifacts` has the exact UTF-8 strings `change`, `resolved_policy`, `host_options`, and `evaluator`, plus nullable `collection` and `external_evidence`. An absent optional artifact differs from an empty string. Implementations must reject duplicate keys, unsupported schemas, malformed digests and missing or extra bundle, envelope and artifact fields, verify the embedded receipt manifest against these exact bytes, and recompute `binding` using the byte encoding above. The independent Python tool checks those bindings but does not validate the embedded verdict or all receipt fields. The same checks apply before accepting a previous bundle for revalidation. The revalidator must independently acquire current inputs; bundled artifacts are historical, untrusted evidence and never substitute for them.
+
+A matching bundle establishes only internal byte consistency under SHA-256 assumptions. It is not a v2 verdict, a portable semantic artifact profile, evidence of evaluator authenticity, completeness, freshness or authorization to publish. An attacker can replace both bytes and their hashes. Hosts must independently validate all inputs, policy and evaluator, provide immutable evaluation snapshots, and synchronize final verification with publication.
