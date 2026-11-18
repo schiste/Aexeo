@@ -42,6 +42,8 @@ describe("plugin configuration", () => {
   it("passes the opt-in revision capability through JSON host configuration", () => {
     expect(JSON.parse(JSON.stringify(aexeoPlugin({ revisionAudits: true }).options))).toMatchObject({ revisionAudits: true });
     expect(aexeoPlugin().options).not.toHaveProperty("revisionAudits");
+    expect(aexeoPlugin({ revisionAudits: true }).capabilities).toContain("content:revisions:read");
+    expect(aexeoPlugin().capabilities).not.toContain("content:revisions:read");
   });
   it("exposes and copies evidence sources through the public plugin descriptor", () => {
     const evidenceSources = { study: "source snapshot" };
