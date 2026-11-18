@@ -441,24 +441,24 @@ mod tests {
             Some(&after),
         ));
         assert_eq!(
-            overlay_candidate(&snapshot, &change, &[after.clone()]).unwrap_err(),
+            overlay_candidate(&snapshot, &change, std::slice::from_ref(&after)).unwrap_err(),
             "duplicate identity or public path"
         );
         let mut other = snapshot.clone();
         other.base.revision = "stale".into();
         assert_eq!(
-            overlay_candidate(&other, &change, &[after.clone()]).unwrap_err(),
+            overlay_candidate(&other, &change, std::slice::from_ref(&after)).unwrap_err(),
             "snapshot scope or base revision mismatch"
         );
         other = snapshot.clone();
         other.items[0].source = "tampered".into();
         assert_eq!(
-            overlay_candidate(&other, &change, &[after.clone()]).unwrap_err(),
+            overlay_candidate(&other, &change, std::slice::from_ref(&after)).unwrap_err(),
             "invalid candidate item"
         );
         change.entries[0].after.as_mut().unwrap().inline = Some("different".into());
         assert_eq!(
-            overlay_candidate(&snapshot, &change, &[after.clone()]).unwrap_err(),
+            overlay_candidate(&snapshot, &change, std::slice::from_ref(&after)).unwrap_err(),
             "after projection mismatch"
         );
         change.entries[0].after.as_mut().unwrap().inline = Some(after.source.clone());
