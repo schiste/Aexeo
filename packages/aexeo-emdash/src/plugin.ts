@@ -386,7 +386,8 @@ function recordAssessmentCoverage(ctx: SandboxCtx, result: EvaluationOutcome, do
     const assessment = result.assessments?.[document.route];
     if (assessment === undefined) missingDocuments++;
     else if (assessment.status === "error") errorDocuments++;
-    else assessedDocuments++;
+    else if (assessment.status === "evaluated") assessedDocuments++;
+    else missingDocuments++;
   }
   const collidingFindings = result.ok ? result.findings.filter((finding) => finding.aexeo_origin === "content_preset" &&
     (SITE_GRAPH_RULE_IDS.has(finding.rule_id) || !isLegacyCmsObservableFinding(finding))).length : 0;
@@ -718,7 +719,8 @@ export interface RefreshSummary {
 // failure. The `reason` discriminator is opaque to evaluateAndPersistAll;
 // it just gets surfaced in the RefreshSummary.errors list.
 export type DocumentAssessment =
-  | { status: "evaluated"; preset: string; gates: Pick<import("./content.js").ContentGateResult, "gate_id" | "status" | "blocking" | "scope" | "required_capability" | "reason" | "measurements">[]; source_mapping?: { eligible: number; mapped: number; unmapped: number } }
+  | { status: "not_configured"; reason: "preset_not_configured" | "collection_excluded" }
+  | { status: "evaluated"; preset: string; selection_source?: import("./preset-selection.js").PresetSelectionSource; gates: Pick<import("./content.js").ContentGateResult, "gate_id" | "status" | "blocking" | "scope" | "required_capability" | "reason" | "measurements">[]; source_mapping?: { eligible: number; mapped: number; unmapped: number } }
   | { status: "error"; reason: string; detail: string };
 
 export type EvaluationOutcome =

@@ -50,7 +50,8 @@ export function findingRouteCount(payload: { totals: { routesWithFindings?: numb
 export function ContentAssessmentDetails({ assessment }: { assessment: Extract<DocumentAssessment, { status: "evaluated" }> }): React.JSX.Element {
   return <details>
     <summary>Content preset: {assessment.preset} — {summarizeGates(assessment.gates)}</summary>
-    <p>Results cover only these configured checks.</p>
+    {assessment.selection_source && <p>Preset selected by: {assessment.selection_source.replaceAll("_", " ")}.</p>}
+    <p>Results cover only these configured checks. They do not establish factual accuracy or whether the content is current.</p>
     <p>{describeSourceMapping(assessment.source_mapping)}</p>
     <ul>{assessment.gates.map((gate) => <li key={gate.gate_id}>{describeGate(gate)}</li>)}</ul>
   </details>;
@@ -218,6 +219,7 @@ export function Findings(): React.JSX.Element {
           <strong>{route.route}</strong>
           {route.assessment?.status !== "error" && cmsBodyCoverageNotice(route.body_coverage) && <p>{cmsBodyCoverageNotice(route.body_coverage)}</p>}
           {route.assessment === undefined && <p>No content preset assessment is available for this document.</p>}
+          {route.assessment?.status === "not_configured" && <p>{route.assessment.reason === "collection_excluded" ? "Content preset is not enabled for this collection." : "No content preset is configured; editorial checks are not enabled."}</p>}
           {route.assessment?.status === "error" ? <p>Evaluation failed: {route.assessment.reason}. Findings are unavailable for this revision.</p> :
             route.assessment?.status === "evaluated" ? <ContentAssessmentDetails assessment={route.assessment} /> : null}
         </section>
