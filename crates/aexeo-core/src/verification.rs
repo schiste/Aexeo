@@ -131,6 +131,102 @@ fn pair_by_key<K: Ord>(
     });
 }
 
+/// A comparison of content-gate findings using the host's stable entity IDs.
+/// Findings without an entity ID remain new/resolved: they cannot safely be
+/// associated across runs. This API does not establish that either evaluation
+/// was complete, used the same policy, or was bound to a trusted revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EntityFindingDiff {
+    pub new_findings: Vec<aexeo_contracts::content_gate_protocol::Finding>,
+    pub resolved_findings: Vec<aexeo_contracts::content_gate_protocol::Finding>,
+    pub unchanged_findings: Vec<aexeo_contracts::content_gate_protocol::Finding>,
+}
+
+/// Compare findings by `(entity_id, rule_id, subject)`, preserving duplicates.
+/// `renames` maps old IDs to new IDs and must come from a verified change.
+/// Ambiguous mappings are rejected instead of hiding a newly introduced finding.
+/// Callers must verify the provenance, policy and completeness of both finding
+/// sets before using the result for a publication decision.
+pub fn diff_entity_findings(
+    baseline: &[aexeo_contracts::content_gate_protocol::Finding],
+    current: &[aexeo_contracts::content_gate_protocol::Finding],
+    renames: &BTreeMap<String, String>,
+) -> Result<EntityFindingDiff> {
+    use std::collections::BTreeSet;
+    let existing: BTreeSet<&str> = baseline
+        .iter()
+        .filter_map(|f| f.entity_id.as_deref())
+        .collect();
+    let mut destinations = BTreeSet::new();
+    for (old, new) in renames {
+        anyhow::ensure!(
+            !old.is_empty() && !new.is_empty(),
+            "empty entity ID in rename"
+        );
+        anyhow::ensure!(
+            destinations.insert(new),
+            "duplicate rename destination: {new}"
+        );
+        anyhow::ensure!(
+            old == new || !existing.contains(new.as_str()),
+            "rename destination already exists in baseline: {new}"
+        );
+    }
+    type Key = (String, String, Option<String>);
+    let baseline_key = |f: &aexeo_contracts::content_gate_protocol::Finding| -> Option<Key> {
+        f.entity_id.as_ref().filter(|id| !id.is_empty()).map(|id| {
+            (
+                renames.get(id).unwrap_or(id).clone(),
+                f.rule_id.clone(),
+                f.subject.clone(),
+            )
+        })
+    };
+    let current_key = |f: &aexeo_contracts::content_gate_protocol::Finding| -> Option<Key> {
+        f.entity_id
+            .as_ref()
+            .filter(|id| !id.is_empty())
+            .map(|id| (id.clone(), f.rule_id.clone(), f.subject.clone()))
+    };
+    let mut counts: BTreeMap<Key, usize> = BTreeMap::new();
+    for finding in baseline {
+        if let Some(key) = baseline_key(finding) {
+            *counts.entry(key).or_default() += 1;
+        }
+    }
+    let mut matched: BTreeMap<Key, usize> = BTreeMap::new();
+    let mut new_findings = Vec::new();
+    let mut unchanged_findings = Vec::new();
+    for finding in current {
+        if let Some(key) = current_key(finding)
+            && let Some(count) = counts.get_mut(&key)
+            && *count > 0
+        {
+            *count -= 1;
+            *matched.entry(key).or_default() += 1;
+            unchanged_findings.push(finding.clone());
+            continue;
+        }
+        new_findings.push(finding.clone());
+    }
+    let mut resolved_findings = Vec::new();
+    for finding in baseline {
+        if let Some(key) = baseline_key(finding)
+            && let Some(count) = matched.get_mut(&key)
+            && *count > 0
+        {
+            *count -= 1;
+            continue;
+        }
+        resolved_findings.push(finding.clone());
+    }
+    Ok(EntityFindingDiff {
+        new_findings,
+        resolved_findings,
+        unchanged_findings,
+    })
+}
+
 pub fn render_diff_text(diff: &DiffResult) -> String {
     let mut lines = vec![
         "Diff Report".to_string(),
@@ -154,6 +250,98 @@ pub fn render_diff_text(diff: &DiffResult) -> String {
         }
     }
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod entity_baseline_tests {
+    use super::diff_entity_findings;
+    use aexeo_contracts::content_gate_protocol::{Finding, Severity};
+    use std::collections::BTreeMap;
+
+    fn finding(entity: Option<&str>, subject: Option<&str>) -> Finding {
+        Finding {
+            rule_id: "rule".into(),
+            severity: Severity::Warning,
+            message: "message".into(),
+            entity_id: entity.map(str::to_owned),
+            check_id: None,
+            location: None,
+            subject: subject.map(str::to_owned),
+            suggestion: None,
+        }
+    }
+
+    #[test]
+    fn stable_id_survives_changed_message_and_location() {
+        let first = finding(Some("cms:123"), Some("target"));
+        let mut second = first.clone();
+        second.message = "new wording".into();
+        second.location =
+            Some(aexeo_contracts::content_gate_protocol::Location { line: 9, column: 3 });
+        let result = diff_entity_findings(&[first], &[second], &BTreeMap::new()).unwrap();
+        assert_eq!(result.unchanged_findings.len(), 1);
+        assert!(result.new_findings.is_empty());
+    }
+
+    #[test]
+    fn rename_requires_explicit_mapping_and_subject_remains_distinct() {
+        let old = finding(Some("old"), Some("a"));
+        let new = finding(Some("new"), Some("a"));
+        let distinct = finding(Some("new"), Some("b"));
+        let no_mapping = diff_entity_findings(
+            std::slice::from_ref(&old),
+            std::slice::from_ref(&new),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                no_mapping.new_findings.len(),
+                no_mapping.resolved_findings.len()
+            ),
+            (1, 1)
+        );
+        let mapping = BTreeMap::from([("old".into(), "new".into())]);
+        let mapped = diff_entity_findings(&[old], &[new, distinct], &mapping).unwrap();
+        assert_eq!(
+            (mapped.unchanged_findings.len(), mapped.new_findings.len()),
+            (1, 1)
+        );
+    }
+
+    #[test]
+    fn ambiguous_renames_are_rejected_and_unknown_ids_do_not_match() {
+        let old = finding(Some("old"), None);
+        let other = finding(Some("target"), None);
+        let mapping = BTreeMap::from([("old".into(), "target".into())]);
+        assert!(diff_entity_findings(&[old, other], &[], &mapping).is_err());
+        let unknown = finding(None, None);
+        let result = diff_entity_findings(
+            std::slice::from_ref(&unknown),
+            &[unknown.clone(), unknown.clone()],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            (result.new_findings.len(), result.resolved_findings.len()),
+            (2, 1)
+        );
+    }
+
+    #[test]
+    fn duplicates_are_matched_one_to_one() {
+        let entry = finding(Some("id"), None);
+        let result =
+            diff_entity_findings(&[entry.clone(), entry.clone()], &[entry], &BTreeMap::new())
+                .unwrap();
+        assert_eq!(
+            (
+                result.unchanged_findings.len(),
+                result.resolved_findings.len()
+            ),
+            (1, 1)
+        );
+    }
 }
 
 #[cfg(test)]

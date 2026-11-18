@@ -305,6 +305,9 @@ Options:
       --verify-verdict <verify-verdict>
           Re-evaluate and compare a previous verdict before writing a fresh verdict
 
+      --baseline-verdict <baseline-verdict>
+          Add an advisory entity-based finding comparison with a previous v1 verdict; does not change the verdict status
+
       --offline-receipt
           Write an experimental offline receipt instead of a v1 verdict
 
