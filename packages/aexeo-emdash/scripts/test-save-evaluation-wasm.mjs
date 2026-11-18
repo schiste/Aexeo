@@ -919,3 +919,22 @@ profile={version=1,name="test",fields=[{name="hook",max_characters=3},{name="con
   assert.deepEqual(host.logged, []);
   console.log("WASM editorial pacing binds the complete CMS projection");
 }
+
+// Exercise the public revision-audit and review handlers against the real WASM.
+// The host is simulated and no CMS content is modified.
+const reviewStore = new Map();
+const reviewCurrent = { id: "review-one", type: "posts", slug: "article", status: "draft", locale: "en", draftRevisionId: "rev1", liveRevisionId: null, data: { body: "current" } };
+const reviewRevision = { id: "rev1", collection: "posts", entryId: "review-one", data: { body: [block("review", "A historical sentence.")] } };
+const reviewContext = { kv: { get: async key => reviewStore.get(key), set: async (key, value) => { reviewStore.set(key, value); } }, content: { get: async () => reviewCurrent, getRevision: async () => reviewRevision } };
+const reviewPreset = "version=1\nname='revision-review'\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\n";
+const reviewPlugin = createPlugin({ revisionAudits: true, contentPreset: { name: "revision-review", sources: { "revision-review": reviewPreset } } });
+const revisionAudit = await reviewPlugin.routes["audit-revision"].handler({ ...reviewContext, input: { collection: "posts", id: "review-one", revision: "rev1" } });
+assert.equal(revisionAudit.status, "evaluated");
+assert.equal(revisionAudit.revision_status, "draft");
+assert.ok(revisionAudit.report.gates[0].findings.length);
+const reviewInput = { audit_id: revisionAudit.audit_id, gate_id: "length", finding_index: 0, decision: "retain_with_explanation", explanation: "Reviewed in context" };
+assert.equal((await reviewPlugin.routes["set-revision-review"].handler({ ...reviewContext, input: reviewInput })).status, "recorded");
+assert.equal((await reviewPlugin.routes["get-revision-review"].handler({ ...reviewContext, input: reviewInput })).review.revision, "rev1");
+reviewCurrent.draftRevisionId = "rev2";
+assert.equal((await reviewPlugin.routes["get-revision-audit"].handler({ ...reviewContext, input: { audit_id: revisionAudit.audit_id } })).revision_status, "stale");
+console.log("WASM revision audit and review remain bound when the CMS revision changes");
