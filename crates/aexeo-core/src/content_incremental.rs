@@ -164,6 +164,12 @@ impl IncrementalBaseline {
         }
         validate_scope(&overlay.candidate)?;
         let affected: BTreeSet<&str> = overlay.impact.affected.iter().map(String::as_str).collect();
+        let baseline_items: BTreeMap<&str, &CandidateItem> = self
+            .snapshot
+            .items
+            .iter()
+            .map(|item| (item.entity_id.as_str(), item))
+            .collect();
         let mut reports = BTreeMap::new();
         let mut evaluated = 0;
         let mut reused = 0;
@@ -172,6 +178,11 @@ impl IncrementalBaseline {
                 evaluated += 1;
                 evaluate_item(&self.preset, item)?
             } else {
+                if baseline_items.get(item.entity_id.as_str()).copied() != Some(item) {
+                    return Err(unavailable(
+                        "baseline item differs from candidate outside the impact set",
+                    ));
+                }
                 reused += 1;
                 self.reports
                     .get(&item.entity_id)
