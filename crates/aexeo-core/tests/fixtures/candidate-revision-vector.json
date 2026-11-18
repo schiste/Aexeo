@@ -1,0 +1,36 @@
+{
+  "snapshot": {
+    "scope": "public/fr",
+    "site_id": "site-1",
+    "site_base_url": "https://example.org",
+    "base": {
+      "kind": "opaque",
+      "revision": "r1"
+    },
+    "complete": true,
+    "items": [
+      {
+        "entity_id": "post:café",
+        "public_path": "/fr/article",
+        "media_type": "text/plain",
+        "revision": null,
+        "source": "Bonjour",
+        "sha256": "9172e8eec99f144f72eca9a568759580edadb2cfd154857f07e657569493bc44",
+        "links": [
+          "/fr",
+          "/fr/a"
+        ]
+      },
+      {
+        "entity_id": "home",
+        "public_path": "/fr",
+        "media_type": "text/html",
+        "revision": "r2",
+        "source": "Salut",
+        "sha256": "75c4ec0328d2ec2e8cc1cfecda70808ab55a68645a100cd7b88b18ed9d44fd5d",
+        "links": null
+      }
+    ]
+  },
+  "sha256": "6c680c3639cadece9b12ec70f52603eee5a98d6f05106fd241e4327e4dba4b73"
+}

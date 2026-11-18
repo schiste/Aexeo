@@ -21,3 +21,5 @@ Use SHA-256 over the following concatenation; integers are unsigned big-endian, 
 The shared fixture `crates/aexeo-contracts/tests/fixtures/revision-set-vector.json` has UTF-8 inputs and a hexadecimal digest. The Python test in this directory implements the framing independently of the Rust code. Every changed descriptor, entity ID, or record changes the framed input; changing record order does not. SHA-256's usual collision-resistance assumptions apply.
 
 Before using this as a publication binding, a future protocol must specify an interoperable record profile, bind it and the revision-set digest into the verdict with all other decision inputs, ensure complete/authoritative snapshots, and define how the host detects races at publication. Until then v1 runner requirements remain in force.
+
+The experimental [candidate snapshot profile](CANDIDATE-REVISION.md) fixes encodings for the fields of Aexeo's candidate overlay and is emitted by the impact query. It does not specify a portable bound verdict or cover every input affecting a publication decision.
