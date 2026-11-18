@@ -68,14 +68,14 @@ fn collisions_and_scope_changes_are_rejected() {
     let new = manifest("published", serde_json::json!([]));
     let out = run(dir.path(), collision, new);
     assert_ne!(out.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("duplicate entity ID"));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("duplicate entity ID"));
     let out = run(
         dir.path(),
         manifest("published", serde_json::json!([])),
         manifest("preview", serde_json::json!([])),
     );
     assert_ne!(out.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("scope differs"));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("scope differs"));
 }
 
 #[test]
