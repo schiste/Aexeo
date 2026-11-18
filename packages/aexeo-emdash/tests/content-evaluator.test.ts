@@ -38,9 +38,16 @@ describe("configured content preset", () => {
     const result = await withContentPreset(base, { name: "custom" }, async () => measured)([doc]);
     expect(result.ok && result.assessments?.["/test"]).toMatchObject({ gates: [{ measurements: { word_count: 0, min_words: 1 } }] });
   });
-  it("keeps the old evaluator when no preset is configured", () => {
-    expect(withContentPreset(base, undefined, async () => report)).toBe(base);
+  it("reports that editorial checks are not configured", async () => {
+    const result = await withContentPreset(base, undefined, async () => report)([doc]);
+    expect(result.ok && result.assessments?.["/test"]).toEqual({ status: "not_configured", reason: "preset_not_configured" });
+    expect(result.ok && result.findings).toEqual([]);
   });
+});
+
+it("reports a collection excluded from the configured preset", async () => {
+  const result = await withContentPreset(base, { name: "article", collections: ["posts"] }, async () => report)([doc], { collections: ["pages"] });
+  expect(result.ok && result.assessments?.["/test"]).toEqual({ status: "not_configured", reason: "collection_excluded" });
 });
 
 it("forwards the selected preset through the plugin descriptor", async () => {
