@@ -39,6 +39,10 @@ function body(text: string): Array<Record<string, unknown>> {
 }
 
 describe("plugin configuration", () => {
+  it("passes the opt-in revision capability through JSON host configuration", () => {
+    expect(JSON.parse(JSON.stringify(aexeoPlugin({ revisionAudits: true }).options))).toMatchObject({ revisionAudits: true });
+    expect(aexeoPlugin().options).not.toHaveProperty("revisionAudits");
+  });
   it("exposes and copies evidence sources through the public plugin descriptor", () => {
     const evidenceSources = { study: "source snapshot" };
     const plugin = aexeoPlugin({ contentPreset: { name: "article", evidenceSources } });

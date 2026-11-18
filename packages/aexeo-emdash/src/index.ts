@@ -63,6 +63,8 @@ export interface AexeoPluginOptions {
   blockMappings?: CustomBlockMappings;
   contentFieldsByCollection?: Record<string, readonly string[]>;
   descriptionFieldsByCollection?: Record<string, readonly string[]>;
+  /** Request historical revision access on a compatible EmDash host. */
+  revisionAudits?: boolean;
   /** Add a portable content preset to configured-mode evaluation. */
   contentPreset?: { name: string; sources?: Record<string, string>; evidenceSources?: Record<string, string>; byCollection?: Record<string, string>; byLocale?: Record<string, string>; byCollectionLocale?: Record<string, Record<string, string>>; collections?: readonly string[]; listStructureCompleteByCollection?: readonly string[] };
   /**
@@ -180,6 +182,7 @@ export function aexeoPlugin(
     // receives. Spread to a plain object so readonly arrays survive
     // the structured-clone semantics of that codegen.
     options: {
+      ...(options.revisionAudits === undefined ? {} : { revisionAudits: options.revisionAudits }),
       ...(options.blockMappings === undefined ? {} : { blockMappings: options.blockMappings }),
       ...(options.contentFieldsByCollection === undefined ? {} : { contentFieldsByCollection: options.contentFieldsByCollection }),
       ...(options.descriptionFieldsByCollection === undefined ? {} : { descriptionFieldsByCollection: options.descriptionFieldsByCollection }),
