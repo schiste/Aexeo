@@ -152,6 +152,13 @@ impl IncrementalBaseline {
         if change
             .entries
             .iter()
+            .any(|entry| entry.media_type != "text/plain")
+        {
+            return Err(unavailable("only text/plain change entries are supported"));
+        }
+        if change
+            .entries
+            .iter()
             .flat_map(|entry| [entry.before.as_ref(), entry.after.as_ref()])
             .flatten()
             .any(|state| state.inline.is_none())
@@ -377,7 +384,19 @@ mod tests {
             Some(&snapshot.items[0]),
             Some(&next),
         ));
-        let baseline = IncrementalBaseline::prepare(snapshot, preset).unwrap();
+        let baseline = IncrementalBaseline::prepare(snapshot.clone(), preset).unwrap();
+        let mut deletion = change.clone();
+        deletion.entries = vec![entry(
+            "b",
+            Operation::Delete,
+            Some(&snapshot.items[1]),
+            None,
+        )];
+        deletion.entries[0].media_type = "text/html".into();
+        assert!(matches!(
+            baseline.evaluate(&deletion, &[]),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
         assert!(matches!(
             baseline.evaluate(&change, std::slice::from_ref(&next)),
             IncrementalEvaluation::NotChecked { .. }
