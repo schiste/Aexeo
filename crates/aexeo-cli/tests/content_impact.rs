@@ -66,3 +66,82 @@ fn incomplete_or_inconsistent_inputs_are_not_checked() {
     assert!(result["impact"].is_null());
     assert!(result.get("candidate_revision_sha256").is_none());
 }
+
+#[test]
+fn transitive_option_extends_direct_impact_and_preserves_coverage() {
+    let mut input = query(true);
+    let template = input["after"][0].clone();
+    for (id, path, links) in [("b", "/b", vec!["/a"]), ("c", "/c", vec!["/b"])] {
+        let mut item = template.clone();
+        item["entity_id"] = json!(id);
+        item["public_path"] = json!(path);
+        item["links"] = json!(links);
+        input["snapshot"]["items"]
+            .as_array_mut()
+            .unwrap()
+            .push(item);
+    }
+    let direct = run(&input, &[]);
+    let direct: Value = serde_json::from_slice(&direct.stdout).unwrap();
+    assert_eq!(direct["impact"]["affected"], json!(["a", "b"]));
+    assert!(direct.get("transitive_link_impact").is_none());
+
+    let output = run(&input, &["--transitive", "--telemetry"]);
+    assert_eq!(output.status.code(), Some(0));
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["impact"], direct["impact"]);
+    assert_eq!(
+        result["candidate_revision_sha256"],
+        direct["candidate_revision_sha256"]
+    );
+    assert_eq!(
+        result["transitive_link_impact"]["affected"],
+        json!(["a", "b", "c"])
+    );
+    assert_eq!(
+        result["transitive_link_impact"]["link_impact_complete"],
+        true
+    );
+    let telemetry: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["affected_count"], 2);
+    assert_eq!(telemetry["transitive_affected_count"], 3);
+    assert!(result.get("candidate").is_none());
+
+    input["snapshot"]["items"][1]["links"] = Value::Null;
+    let output = run(&input, &["--transitive"]);
+    assert_eq!(output.status.code(), Some(2));
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["status"], "not_checked");
+    assert_eq!(
+        result["transitive_link_impact"]["link_impact_complete"],
+        false
+    );
+    assert!(
+        !result["transitive_link_impact"]["reasons"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    input["snapshot"]["items"][1]["links"] = json!(["/b"]);
+    input["snapshot"]["complete"] = json!(false);
+    let output = run(&input, &["--transitive"]);
+    assert_eq!(output.status.code(), Some(2));
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        result["transitive_link_impact"]["link_impact_complete"],
+        false
+    );
+    assert!(
+        !result["transitive_link_impact"]["reasons"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    input["snapshot"]["base"]["revision"] = json!("stale");
+    let output = run(&input, &["--transitive"]);
+    assert_eq!(output.status.code(), Some(2));
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(result.get("transitive_link_impact").is_none());
+}
