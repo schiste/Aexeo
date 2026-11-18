@@ -57,6 +57,10 @@ import type { Finding, SiteIntelligenceScore } from "./types.js";
 import { definePlugin } from "emdash";
 import { z } from "zod";
 import { auditRevision, getRevisionAudit } from "./revision-audit.js";
+import { getReviewDisposition, setReviewDisposition, type ReviewRequest } from "./review-dispositions.js";
+
+const reviewKeySchema = z.strictObject({ audit_id: z.uuid(), gate_id: z.string().min(1).max(128), finding_index: z.number().int().min(0) });
+const reviewSchema = reviewKeySchema.extend({ decision: z.enum(["retain_with_explanation", "needs_revision", "not_applicable"]), explanation: z.string().trim().min(1).max(2000) });
 
 // Resolve the final collection list from the user's three knobs.
 // Exposed at module scope so its precedence rules can be unit-tested
@@ -275,19 +279,41 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
     mcp: { tools: {
       audit_revision: { description: "Evaluate the content fields of a specific CMS revision using the configured editorial preset.", route: "audit-revision", input: z.strictObject({ collection: z.string().min(1).max(128), id: z.string().min(1).max(128), revision: z.string().min(1).max(128) }) },
       get_audit: { description: "Retrieve an editorial audit and check whether its revision is still current.", route: "get-revision-audit", input: z.strictObject({ audit_id: z.uuid() }) },
+      set_review: { description: "Record an explained decision for one finding in an exact audit.", route: "set-revision-review", input: reviewSchema },
+      get_review: { description: "Retrieve the decision for one finding in an exact audit.", route: "get-revision-review", input: reviewKeySchema },
     } },
     routes: {
       "audit-revision": {
         permission: "plugins:manage",
         request: { body: "json" },
         input: z.strictObject({ collection: z.string().min(1).max(128), id: z.string().min(1).max(128), revision: z.string().min(1).max(128) }),
-        handler: (ctx: SandboxCtx & { input: { collection: string; id: string; revision: string } }) => auditRevision(ctx as never, ctx.input, { preset: options.contentPreset, blockMappings: options.blockMappings, contentFieldsByCollection: options.contentFieldsByCollection, descriptionFieldsByCollection: options.descriptionFieldsByCollection, evidenceProviderConfigured: runtime.evidenceSources !== undefined, evaluate: evaluateContent }),
+        handler: async (ctx: SandboxCtx & { input: { collection: string; id: string; revision: string } }) => {
+          const result = await auditRevision(ctx as never, ctx.input, { preset: options.contentPreset, blockMappings: options.blockMappings, contentFieldsByCollection: options.contentFieldsByCollection, descriptionFieldsByCollection: options.descriptionFieldsByCollection, evidenceProviderConfigured: runtime.evidenceSources !== undefined, evaluate: evaluateContent });
+          try { ctx.log?.info("aexeo.revision_audit", { status: result.status, gates: result.status === "evaluated" ? result.report.gates.length : 0 }); } catch { /* telemetry is advisory */ }
+          return result;
+        },
       },
       "get-revision-audit": {
         permission: "plugins:read",
         request: { body: "json" },
         input: z.strictObject({ audit_id: z.uuid() }),
         handler: (ctx: SandboxCtx & { input: { audit_id: string } }) => getRevisionAudit(ctx as never, ctx.input.audit_id),
+      },
+      "set-revision-review": {
+        permission: "plugins:manage",
+        request: { body: "json" },
+        input: reviewSchema,
+        handler: async (ctx: SandboxCtx & { input: ReviewRequest }) => {
+          const result = await setReviewDisposition(ctx.kv, ctx.input);
+          try { ctx.log?.info("aexeo.review_disposition", { status: result.status }); } catch { /* telemetry is advisory */ }
+          return result;
+        },
+      },
+      "get-revision-review": {
+        permission: "plugins:read",
+        request: { body: "json" },
+        input: reviewKeySchema,
+        handler: (ctx: SandboxCtx & { input: Pick<ReviewRequest, "audit_id" | "gate_id" | "finding_index"> }) => getReviewDisposition(ctx.kv, ctx.input),
       },
       // The Refresh sweep (handleAdminRoute → handleRefresh) is the
       // one consumer of `collections`. Bind the resolved list here so

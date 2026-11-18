@@ -26,6 +26,7 @@
 // appended in future versions, never renamed or removed.
 
 import * as React from "react";
+import { RevisionReviews } from "./RevisionReviews.js";
 import { useCallback, useEffect, useState } from "react";
 import { cmsBodyCoverageNotice } from "../cms-coverage.js";
 import { describeGate, describeSourceMapping, summarizeGates } from "../assessment-display.js";
@@ -214,6 +215,7 @@ export function Findings(): React.JSX.Element {
         </section>
       )}
 
+      <RevisionReviews />
       {payload.routes.filter((route) => route.assessment !== undefined || route.body_coverage !== "complete").map((route) => (
         <section key={route.route} className="rounded border border-kumo-line p-3 text-sm">
           <strong>{route.route}</strong>
