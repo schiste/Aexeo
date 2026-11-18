@@ -2054,11 +2054,136 @@ fn experimental_bound_verdict_cli_revalidates_and_preserves_output_on_error() {
     assert_eq!(result.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&result.stderr).contains("invalid previous bound verdict"));
     assert_eq!(fs::read(&output).unwrap(), before);
-    let mut args = options.to_vec();
-    args.push("--offline-receipt-bundle");
-    assert_ne!(
-        run(dir.path(), &input(), policy, &args).status.code(),
+}
+
+#[test]
+fn bound_bundle_preserves_and_rechecks_link_observations() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut change = input();
+    change["entries"][0]["media_type"] = "text/markdown".into();
+    change["entries"][0]["after"] = serde_json::json!({"inline":"[first](https://example.org/a)", "sha256":"9b109ca77f8b3af5b0f54a9ae1aeb8d01f5ed6fbd1d350ffe84289bf42000e09"});
+    let policy = "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\n";
+    let snapshot = dir.path().join("links.json");
+    let mut data = serde_json::json!({"version":1,"change_id":"example","entries":{"article":{"version":1,"source_sha256":"9b109ca77f8b3af5b0f54a9ae1aeb8d01f5ed6fbd1d350ffe84289bf42000e09","destinations":["https://example.org/a"],"observations":["reachable"]}}});
+    fs::write(&snapshot, serde_json::to_vec(&data).unwrap()).unwrap();
+    let args = [
+        "--offline-receipt",
+        "--experimental-bound-verdict",
+        "--offline-receipt-bundle",
+        "--evaluator-identity",
+        "trusted",
+        "--link-observations",
+        snapshot.to_str().unwrap(),
+    ];
+    let first = run(dir.path(), &change, policy, &args);
+    assert_eq!(
+        first.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let output = dir.path().join("verdict.json");
+    let bundle: serde_json::Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert!(
+        bundle["artifacts"]["external_evidence"]
+            .as_str()
+            .unwrap()
+            .contains("example.org")
+    );
+    let previous = dir.path().join("previous.json");
+    fs::copy(&output, &previous).unwrap();
+    let mut verify = args.to_vec();
+    verify.extend(["--verify-offline-receipt", previous.to_str().unwrap()]);
+    assert_eq!(
+        run(dir.path(), &change, policy, &verify).status.code(),
         Some(0)
+    );
+    let before = fs::read(&output).unwrap();
+    data["entries"]["article"]["observations"][0] = "not_found".into();
+    fs::write(&snapshot, serde_json::to_vec(&data).unwrap()).unwrap();
+    assert_eq!(
+        run(dir.path(), &change, policy, &verify).status.code(),
+        Some(2)
+    );
+    assert_eq!(fs::read(&output).unwrap(), before);
+}
+
+#[test]
+fn experimental_bound_bundle_exports_and_revalidates_independent_inputs() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
+    let args = [
+        "--offline-receipt",
+        "--experimental-bound-verdict",
+        "--offline-receipt-bundle",
+        "--evaluator-identity",
+        "trusted-build",
+        "--telemetry",
+    ];
+    let first = run(dir.path(), &input(), policy, &args);
+    assert_eq!(
+        first.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let telemetry: serde_json::Value = serde_json::from_slice(&first.stderr).unwrap();
+    assert_eq!(telemetry["event"], "content_change_bound_bundle");
+    assert_eq!(telemetry["artifact_count"], 4);
+    assert!(!String::from_utf8_lossy(&first.stderr).contains("trusted-build"));
+    let output = dir.path().join("verdict.json");
+    let bundle: serde_json::Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert_eq!(
+        bundle["schema"],
+        "aexeo.experimental-bound-verdict-bundle/v1"
+    );
+    assert_eq!(bundle["verdict"]["receipt"]["verdict"]["status"], "pass");
+    assert!(
+        bundle["artifacts"]["change"]
+            .as_str()
+            .unwrap()
+            .contains("example")
+    );
+    let prior = dir.path().join("bound-bundle.json");
+    fs::copy(&output, &prior).unwrap();
+    let verify = [
+        "--offline-receipt",
+        "--experimental-bound-verdict",
+        "--offline-receipt-bundle",
+        "--evaluator-identity",
+        "trusted-build",
+        "--verify-offline-receipt",
+        prior.to_str().unwrap(),
+    ];
+    assert_eq!(
+        run(dir.path(), &input(), policy, &verify).status.code(),
+        Some(0)
+    );
+    let before = fs::read(&output).unwrap();
+    let mut tampered = bundle.clone();
+    tampered["artifacts"]["resolved_policy"] = "changed".into();
+    fs::write(&prior, serde_json::to_vec(&tampered).unwrap()).unwrap();
+    assert_eq!(
+        run(dir.path(), &input(), policy, &verify).status.code(),
+        Some(2)
+    );
+    assert_eq!(fs::read(&output).unwrap(), before);
+    fs::write(&prior, serde_json::to_vec(&bundle).unwrap()).unwrap();
+    let changed_policy = policy.replace("min=1", "min=2");
+    assert_eq!(
+        run(dir.path(), &input(), &changed_policy, &verify)
+            .status
+            .code(),
+        Some(2)
+    );
+    assert_eq!(fs::read(&output).unwrap(), before);
+    let duplicate = String::from_utf8(fs::read(&prior).unwrap())
+        .unwrap()
+        .replacen("{", "{\"schema\":\"duplicate\",", 1);
+    fs::write(&prior, duplicate).unwrap();
+    assert_eq!(
+        run(dir.path(), &input(), policy, &verify).status.code(),
+        Some(2)
     );
     assert_eq!(fs::read(&output).unwrap(), before);
 }

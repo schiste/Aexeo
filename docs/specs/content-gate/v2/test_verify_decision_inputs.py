@@ -10,6 +10,7 @@ import tempfile
 import unittest
 
 import verify_decision_inputs as verifier
+from test_decision_binding_vector import binding
 
 ROOT = Path(__file__).resolve().parent
 EXAMPLE = (ROOT / "decision-inputs-example.json").read_bytes()
@@ -107,6 +108,30 @@ class DecisionInputTests(unittest.TestCase):
         for data in cases:
             with self.subTest(data=data[:80]), self.assertRaises(verifier.VerificationError):
                 verifier.verify_bundle(data, self.artifacts)
+        self.artifacts["change"].write_bytes(b"different")
+        with self.assertRaises(verifier.VerificationError):
+            verifier.verify_bundle(valid, self.artifacts)
+
+    def test_bound_bundle_checks_exact_binding_and_current_inputs(self):
+        manifest = json.loads(EXAMPLE)
+        values = {role: (None if path is None else path.read_text(encoding="utf-8"))
+                  for role, path in self.artifacts.items()}
+        raw = {role: None if value is None else value.encode("utf-8") for role, value in values.items()}
+        receipt = {"schema": "aexeo.link-snapshot-decision-receipt/v1", "decision_inputs": manifest}
+        bundle = {"schema": verifier.BOUND_BUNDLE_SCHEMA, "artifacts": values,
+                  "verdict": {"schema": "aexeo.experimental-link-bound-verdict/v1", "binding": binding(raw), "receipt": receipt}}
+        valid = json.dumps(bundle, ensure_ascii=False).encode()
+        self.assertEqual(verifier.verify_bundle(valid, self.artifacts)["files"], 5)
+        for mutation in ("binding", "artifact", "schema", "schema_type", "receipt", "extra"):
+            changed = copy.deepcopy(bundle)
+            if mutation == "binding": changed["verdict"]["binding"] = "0" * 64
+            elif mutation == "artifact": changed["artifacts"]["change"] = "altered"
+            elif mutation == "schema": changed["verdict"]["schema"] = "unknown"
+            elif mutation == "schema_type": changed["verdict"]["schema"] = []
+            elif mutation == "receipt": changed["verdict"]["receipt"]["schema"] = "other"
+            else: changed["verdict"]["extra"] = True
+            with self.subTest(mutation=mutation), self.assertRaises(verifier.VerificationError):
+                verifier.verify_bundle(json.dumps(changed).encode(), self.artifacts)
         self.artifacts["change"].write_bytes(b"different")
         with self.assertRaises(verifier.VerificationError):
             verifier.verify_bundle(valid, self.artifacts)

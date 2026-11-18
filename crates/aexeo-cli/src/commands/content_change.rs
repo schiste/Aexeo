@@ -701,6 +701,50 @@ impl OfflineReceiptArtifacts {
     }
 }
 
+const BOUND_BUNDLE_SCHEMA: &str = "aexeo.experimental-bound-verdict-bundle/v1";
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BoundVerdictBundle {
+    schema: String,
+    verdict: aexeo_core::content_gate_verdict::ExperimentalBoundVerdict,
+    artifacts: OfflineReceiptArtifacts,
+}
+
+impl BoundVerdictBundle {
+    fn verify(&self) -> Result<()> {
+        if self.schema != BOUND_BUNDLE_SCHEMA {
+            user_bail!("unsupported experimental bound bundle schema");
+        }
+        self.artifacts.verify(&self.verdict.receipt)?;
+        let a = &self.artifacts;
+        let binding = aexeo_contracts::content_gate_binding_v2::decision_binding(&[
+            ("change", Some(a.change.as_bytes())),
+            ("resolved_policy", Some(a.resolved_policy.as_bytes())),
+            ("host_options", Some(a.host_options.as_bytes())),
+            ("evaluator", Some(a.evaluator.as_bytes())),
+            ("collection", a.collection.as_deref().map(str::as_bytes)),
+            (
+                "external_evidence",
+                a.external_evidence.as_deref().map(str::as_bytes),
+            ),
+        ])
+        .map_err(anyhow::Error::msg)?;
+        let expected: String = binding.iter().map(|byte| format!("{byte:02x}")).collect();
+        if expected != self.verdict.binding {
+            user_bail!("bound bundle artifacts differ from binding");
+        }
+        Ok(())
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+enum PreviousBoundVerdict {
+    Bundle(BoundVerdictBundle),
+    Verdict(aexeo_core::content_gate_verdict::ExperimentalBoundVerdict),
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OfflineReceiptBundle {
@@ -900,9 +944,8 @@ fn command_experimental_bound_verdict(
     html_scope: HtmlContentScope,
 ) -> Result<i32> {
     use aexeo_core::content_gate_verdict::{
-        ExperimentalBoundVerdict, evaluate_experimental_bound_verdict,
-        evaluate_experimental_link_bound_verdict, revalidate_experimental_bound_verdict,
-        revalidate_experimental_link_bound_verdict,
+        evaluate_experimental_bound_verdict, evaluate_experimental_link_bound_verdict,
+        revalidate_experimental_bound_verdict, revalidate_experimental_link_bound_verdict,
     };
     let verdict = if let Some(path) = args.get_one::<String>("verify-offline-receipt") {
         protect_input(Path::new(path), output, "previous bound verdict")?;
@@ -915,8 +958,16 @@ fn command_experimental_bound_verdict(
         if data.len() as u64 > MAX_CHANGE_BYTES {
             user_bail!("previous bound verdict exceeds the size limit");
         }
-        let previous: ExperimentalBoundVerdict =
-            parse_lossless_json(&data).user_context("invalid previous bound verdict")?;
+        let previous =
+            match parse_lossless_json(&data).user_context("invalid previous bound verdict")? {
+                PreviousBoundVerdict::Verdict(verdict) => verdict,
+                PreviousBoundVerdict::Bundle(bundle) => {
+                    bundle
+                        .verify()
+                        .user_context("invalid previous bound bundle")?;
+                    bundle.verdict
+                }
+            };
         let result = if let Some(links) = links {
             revalidate_experimental_link_bound_verdict(
                 &previous,
@@ -952,11 +1003,41 @@ fn command_experimental_bound_verdict(
         .user_context("experimental bound verdict evaluation failed")?
     };
     let code = verdict_exit_code(verdict.receipt.verdict.status);
-    let bytes = serde_json::to_vec_pretty(&verdict)?;
+    let bytes = if args.get_flag("offline-receipt-bundle") {
+        let mut artifacts = OfflineReceiptArtifacts::from_context(context, html_scope)
+            .user_context("preparing bound verdict artifacts")?;
+        if let Some(links) = links {
+            artifacts.external_evidence = Some(serde_json::to_string(links.snapshots)?);
+        }
+        let bundle = BoundVerdictBundle {
+            schema: BOUND_BUNDLE_SCHEMA.into(),
+            verdict,
+            artifacts,
+        };
+        bundle
+            .verify()
+            .user_context("bound verdict artifacts differ")?;
+        serde_json::to_vec_pretty(&bundle)?
+    } else {
+        serde_json::to_vec_pretty(&verdict)?
+    };
     if bytes.len() as u64 >= MAX_CHANGE_BYTES {
         user_bail!("bound verdict exceeds the size limit");
     }
     write_atomic(output, &bytes).user_context("writing experimental bound verdict")?;
+    if args.get_flag("offline-receipt-bundle")
+        && args.get_flag("telemetry")
+        && !args.contains_id("verify-offline-receipt")
+    {
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "event":"content_change_bound_bundle", "version":1,
+                "artifact_count":4 + usize::from(context.collection.is_some()) + usize::from(links.is_some()),
+                "bundle_bytes":bytes.len() + 1
+            })
+        );
+    }
     Ok(code)
 }
 
