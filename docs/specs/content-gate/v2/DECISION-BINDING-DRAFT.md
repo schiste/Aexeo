@@ -1,7 +1,7 @@
 # Experimental decision-input binding encoding
 
-This is a draft primitive, not a version 2 verdict, a verifier, or an
-interoperable policy format. The CLI provides only an opt-in experimental mode;
+This is a draft primitive, not a version 2 verdict, a complete verdict verifier,
+or an interoperable policy format. The CLI provides only an opt-in experimental mode;
 this must not be used to authorize publication. The v2 roadmap remains open until artifact semantics, the wire contract, production, independent
 verification and consumers are implemented and tested together.
 
@@ -50,7 +50,7 @@ For the CLI, add `--offline-receipt --experimental-bound-verdict
 --evaluator-identity BUILD_ID` to `content-change`. Revalidate a separately
 saved result with `--verify-offline-receipt PATH` and the same independently
 obtained current inputs. The prior file must differ from the output path. The
-mode rejects receipt bundles and does not accept v1 receipts as bound verdicts.
+mode supports the experimental bound bundle described below and does not accept v1 receipts as bound verdicts.
 Use `--link-observations PATH` to bind supplied snapshots; revalidation requires
 the independently obtained current snapshot. `--telemetry` reports only whether revalidation
 matched; input values and paths are excluded. These checks do not authenticate
