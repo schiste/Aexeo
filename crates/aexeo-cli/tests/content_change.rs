@@ -2469,3 +2469,54 @@ fn baseline_verdict_compares_renamed_entities_without_changing_gate_outcome() {
             .contains("Not a publication decision")
     );
 }
+
+#[test]
+fn baseline_does_not_claim_unobserved_findings_are_resolved() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy =
+        "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['abc']\n";
+    let change = input();
+    let initial = run(dir.path(), &change, policy, &[]);
+    assert_eq!(initial.status.code(), Some(1));
+    let mut baseline: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+    let mut missing = baseline["findings"][0].clone();
+    missing["rule_id"] = "unobserved-rule".into();
+    baseline["findings"].as_array_mut().unwrap().push(missing);
+    baseline["checks"][0]["status"] = "not_checked".into();
+    baseline["findings_omitted"] = 2.into();
+    let baseline_path = dir.path().join("baseline.json");
+    fs::write(&baseline_path, serde_json::to_vec(&baseline).unwrap()).unwrap();
+    let next = run(
+        dir.path(),
+        &change,
+        policy,
+        &["--baseline-verdict", baseline_path.to_str().unwrap()],
+    );
+    assert_eq!(
+        next.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&next.stderr)
+    );
+    let verdict: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+    let annotation = &verdict["extensions"]["aexeo.advisory-entity-baseline.v1"];
+    assert!(
+        annotation["comparison"]["resolved_findings"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        annotation["unconfirmed_resolutions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        annotation["unconfirmed_resolutions"][0]["rule_id"],
+        "unobserved-rule"
+    );
+}
