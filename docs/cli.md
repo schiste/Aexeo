@@ -245,6 +245,29 @@ Options:
           Print help
 ```
 
+## `content-impact`
+
+Compute experimental direct link impact from a host-provided candidate snapshot
+
+```text
+Compute experimental direct link impact from a host-provided candidate snapshot
+
+Usage: content-impact [OPTIONS] --input <input>
+
+Options:
+      --input <input>
+          Versioned JSON query file (may contain private content)
+
+      --include-candidate
+          Include the complete private candidate source records in output
+
+      --telemetry
+          Emit aggregate timing and counts to stderr
+
+  -h, --help
+          Print help
+```
+
 ## `content-change`
 
 Evaluate a content-gate change and write a bound verdict

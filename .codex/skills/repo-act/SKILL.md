@@ -63,6 +63,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 
 ## Validation Checklist
 
+- When adding or changing CLI commands or options, regenerate the reference with
+  `cargo run -p aexeo-cli -- docs generate .`, then run `cargo run -p aexeo-cli -- docs check .`.
+  After integrating another CLI change, regenerate and check the combined tree.
 - Run the fastest relevant test command first.
 - For filtered tests, verify the intended test names and nonzero executed test
   count. Rust `--exact` requires the full module-qualified test name; a zero-test

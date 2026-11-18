@@ -80,6 +80,13 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue)),
         )
         .subcommand(
+            Command::new("content-impact")
+                .about("Compute experimental direct link impact from a host-provided candidate snapshot")
+                .arg(Arg::new("input").long("input").required(true).help("Versioned JSON query file (may contain private content)"))
+                .arg(Arg::new("include-candidate").long("include-candidate").action(ArgAction::SetTrue).help("Include the complete private candidate source records in output"))
+                .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate timing and counts to stderr")),
+        )
+        .subcommand(
             Command::new("content-change")
                 .about("Evaluate a content-gate change and write a bound verdict")
                 .arg(Arg::new("preset").long("preset").required_unless_present("export-link-observations").help("Explicit content preset name"))
