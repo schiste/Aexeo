@@ -360,11 +360,16 @@ mod tests {
         snapshot.items[0].links = None;
         assert!(IncrementalBaseline::prepare(snapshot.clone(), preset.clone()).is_err());
         snapshot.items[0].links = Some(vec![]);
-        let unsupported = ContentPreset::from_toml(
-            "version=1\nname='external'\n[[gates]]\nid='title'\nkind='metadata_length'\nfield='title'\nmin=1\n",
-        )
-        .unwrap();
-        assert!(IncrementalBaseline::prepare(snapshot.clone(), unsupported).is_err());
+        for gate in [
+            "kind='metadata_length'\nfield='title'\nmin=1",
+            "kind='unique_collection_metadata'\nfield='title'",
+            "kind='site_audit'",
+            "kind='custom'\nextension='remote'",
+        ] {
+            let source = format!("version=1\nname='unsupported'\n[[gates]]\nid='other'\n{gate}\n");
+            let unsupported = ContentPreset::from_toml(&source).unwrap();
+            assert!(IncrementalBaseline::prepare(snapshot.clone(), unsupported).is_err());
+        }
         let mut next = item("a", "new text", None);
         change.entries.push(entry(
             "a",
