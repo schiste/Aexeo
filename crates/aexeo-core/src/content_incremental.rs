@@ -81,7 +81,19 @@ fn validate_preset(preset: &ContentPreset) -> Result<(), NotChecked> {
     if preset.gates.iter().any(|gate| {
         !matches!(
             gate,
-            ContentGate::WordCount { .. } | ContentGate::CharacterCount { .. }
+            ContentGate::WordCount { .. }
+                | ContentGate::CharacterCount { .. }
+                | ContentGate::SentenceLength {
+                    paragraphs_only: false,
+                    ..
+                }
+                | ContentGate::SentenceCharacterLength {
+                    paragraphs_only: false,
+                    ..
+                }
+                | ContentGate::RepeatedTerms { .. }
+                | ContentGate::RequiredTerms { .. }
+                | ContentGate::ForbiddenTerms { .. }
         )
     }) {
         return Err(unavailable(
@@ -359,6 +371,55 @@ mod tests {
         }
     }
     #[test]
+    fn text_only_gates_match_full_evaluation_for_each_gate() {
+        for gate in [
+            "kind='sentence_length'\nmax_words=2\nabbreviations=['Dr.']",
+            "kind='sentence_character_length'\nmax_chars=8\ndelimiters='.!?'",
+            "kind='repeated_terms'\nterms=['café']\nmax_occurrences=1\ncase_insensitive=true",
+            "kind='required_terms'\nterms=['café', 'absent']\ncase_insensitive=true",
+            "kind='forbidden_terms'\nterms=['café']\ncase_insensitive=true",
+        ] {
+            let (snapshot, _, mut change) = fixture();
+            let preset = ContentPreset::from_toml(&format!(
+                "version=1\nname='text'\n[[gates]]\nid='check'\n{gate}\n"
+            ))
+            .unwrap();
+            let updated = item(
+                "a",
+                "Dr. Café CAFÉ. Other words here!\r\nNext sentence.",
+                Some(vec![]),
+            );
+            change.entries.push(entry(
+                "a",
+                Operation::Update,
+                Some(&snapshot.items[0]),
+                Some(&updated),
+            ));
+            let after = [updated];
+            let candidate = overlay_candidate(&snapshot, &change, &after)
+                .unwrap()
+                .candidate;
+            let expected = full(&candidate, &preset);
+            let baseline = IncrementalBaseline::prepare(snapshot, preset).unwrap();
+            let IncrementalEvaluation::Evaluated {
+                reports,
+                evaluated,
+                reused,
+                ..
+            } = baseline.evaluate(&change, &after)
+            else {
+                panic!("gate did not evaluate: {gate}");
+            };
+            assert_eq!(
+                serde_json::to_value(&reports).unwrap(),
+                serde_json::to_value(&expected).unwrap(),
+                "{gate}"
+            );
+            assert_eq!(evaluated + reused, candidate.items.len());
+            assert!(evaluated > 0 && reused > 0, "{gate}");
+        }
+    }
+    #[test]
     fn incomplete_dependencies_and_unsupported_scope_are_never_passed() {
         let (mut snapshot, preset, mut change) = fixture();
         snapshot.complete = false;
@@ -368,6 +429,8 @@ mod tests {
         assert!(IncrementalBaseline::prepare(snapshot.clone(), preset.clone()).is_err());
         snapshot.items[0].links = Some(vec![]);
         for gate in [
+            "kind='sentence_length'\nmax_words=2\nparagraphs_only=true",
+            "kind='sentence_character_length'\nmax_chars=8\nparagraphs_only=true",
             "kind='metadata_length'\nfield='title'\nmin=1",
             "kind='unique_collection_metadata'\nfield='title'",
             "kind='site_audit'",
