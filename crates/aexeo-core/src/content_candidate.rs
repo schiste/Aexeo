@@ -4,7 +4,7 @@
 //! The host is responsible for the origin, freshness and completeness of the
 //! snapshot and for faithfully projecting all relevant rendered links. This
 //! module checks internal consistency; it cannot establish those assertions.
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use aexeo_contracts::{
     content_gate_change_validation::validate_change_structure,
@@ -303,6 +303,102 @@ pub fn overlay_candidate(
     })
 }
 
+/// An optional conservative expansion of direct impact through incoming links.
+/// Completeness has exactly the same host-attested limits as `CandidateImpact`;
+/// it does not cover dependencies other than projected route links.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TransitiveLinkImpact {
+    /// Surviving direct neighbours plus all surviving reverse-reachable sources.
+    pub affected: Vec<String>,
+    pub link_impact_complete: bool,
+    pub reasons: Vec<String>,
+}
+
+/// Build the candidate and expand its link impact through reverse dependencies
+/// in the union of the old and candidate graphs. Old identities are bridged to
+/// new identities for explicit renames only. Cycles terminate and missing links
+/// retain the same incomplete status as direct impact. This is a conservative
+/// route-link analysis, not a proof of other gate dependencies or freshness.
+pub fn overlay_candidate_with_transitive_link_impact(
+    base: &CandidateSnapshot,
+    change: &Change,
+    after: &[CandidateItem],
+) -> Result<(CandidateOverlay, TransitiveLinkImpact), &'static str> {
+    let overlay = overlay_candidate(base, change, after)?;
+    let renames: BTreeMap<&str, &str> = change
+        .entries
+        .iter()
+        .filter_map(|entry| {
+            if matches!(entry.operation, Operation::Rename) {
+                entry
+                    .previous_entity_id
+                    .as_deref()
+                    .map(|old| (old, entry.entity_id.as_str()))
+            } else {
+                None
+            }
+        })
+        .collect();
+    fn canonical<'a>(id: &'a str, old: bool, renames: &BTreeMap<&'a str, &'a str>) -> &'a str {
+        if old {
+            renames.get(id).copied().unwrap_or(id)
+        } else {
+            id
+        }
+    }
+    let mut incoming: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for (inventory, old) in [(&base.items, true), (&overlay.candidate.items, false)] {
+        let paths: BTreeMap<&str, &str> = inventory
+            .iter()
+            .map(|item| {
+                (
+                    item.public_path.as_str(),
+                    canonical(&item.entity_id, old, &renames),
+                )
+            })
+            .collect();
+        for item in inventory {
+            if let Some(links) = &item.links {
+                let source = canonical(&item.entity_id, old, &renames);
+                for link in links {
+                    if let Some(target) = paths.get(link.as_str()) {
+                        incoming.entry(target).or_default().insert(source);
+                    }
+                }
+            }
+        }
+    }
+    let mut reached: BTreeSet<&str> = BTreeSet::new();
+    let mut pending = VecDeque::new();
+    for entry in &change.entries {
+        if reached.insert(entry.entity_id.as_str()) {
+            pending.push_back(entry.entity_id.as_str());
+        }
+    }
+    while let Some(target) = pending.pop_front() {
+        if let Some(sources) = incoming.get(target) {
+            for source in sources {
+                if reached.insert(source) {
+                    pending.push_back(source);
+                }
+            }
+        }
+    }
+    let mut affected: BTreeSet<String> = overlay.impact.affected.iter().cloned().collect();
+    for item in &overlay.candidate.items {
+        if reached.contains(item.entity_id.as_str()) {
+            affected.insert(item.entity_id.clone());
+        }
+    }
+    let impact = TransitiveLinkImpact {
+        affected: affected.into_iter().collect(),
+        link_impact_complete: overlay.impact.link_impact_complete,
+        reasons: overlay.impact.reasons.clone(),
+    };
+    Ok((overlay, impact))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -428,6 +524,133 @@ mod tests {
         assert_eq!(result.impact.affected, ["b", "c", "d"]);
         assert!(!result.impact.link_impact_complete);
         assert_eq!(result.impact.reasons.len(), 1);
+    }
+
+    #[test]
+    fn transitive_impact_walks_old_and_new_incoming_graphs_with_cycles() {
+        let (mut snapshot, mut change) = setup();
+        snapshot.items.push(item("d", "/d", "D", Some(vec!["/c"])));
+        snapshot.items.push(item("e", "/e", "E", Some(vec!["/d"])));
+        snapshot.items[2].links = Some(vec!["/a".into(), "/e".into()]);
+        let replacement = item("renamed", "/new", "new", Some(vec![]));
+        let mut rename = entry(
+            "renamed",
+            Operation::Rename,
+            Some(&snapshot.items[0]),
+            Some(&replacement),
+        );
+        rename.previous_entity_id = Some("a".into());
+        change.entries.push(rename);
+        let (overlay, impact) =
+            overlay_candidate_with_transitive_link_impact(&snapshot, &change, &[replacement])
+                .unwrap();
+        assert_eq!(overlay.impact.affected, ["b", "c", "renamed"]);
+        assert_eq!(impact.affected, ["b", "c", "d", "e", "renamed"]);
+        assert!(impact.link_impact_complete);
+    }
+
+    #[test]
+    fn transitive_impact_includes_candidate_only_edges() {
+        let (mut snapshot, mut change) = setup();
+        snapshot.items[2].links = Some(vec!["/b".into()]);
+        let a = item("a", "/a", "new A", Some(vec![]));
+        let b = item("b", "/b", "new B", Some(vec!["/a"]));
+        change.entries.push(entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&a),
+        ));
+        change.entries.push(entry(
+            "b",
+            Operation::Update,
+            Some(&snapshot.items[1]),
+            Some(&b),
+        ));
+        let (_, impact) =
+            overlay_candidate_with_transitive_link_impact(&snapshot, &change, &[a, b]).unwrap();
+        assert_eq!(impact.affected, ["a", "b", "c"]);
+        assert!(impact.link_impact_complete);
+    }
+
+    #[test]
+    fn transitive_impact_matches_exhaustive_three_node_graphs() {
+        let names = ["a", "b", "c"];
+        let paths = ["/a", "/b", "/c"];
+        for mask in 0usize..(1 << 9) {
+            let (mut snapshot, mut change) = setup();
+            for source in 0..3 {
+                snapshot.items[source].links = Some(
+                    (0..3)
+                        .filter(|target| mask & (1 << (source * 3 + target)) != 0)
+                        .map(|target| paths[target].to_string())
+                        .collect(),
+                );
+            }
+            let replacement = item(
+                "a",
+                "/a",
+                "new",
+                Some(
+                    (0..3)
+                        .filter(|target| mask & (1 << target) != 0)
+                        .map(|target| paths[target])
+                        .collect(),
+                ),
+            );
+            change.entries.push(entry(
+                "a",
+                Operation::Update,
+                Some(&snapshot.items[0]),
+                Some(&replacement),
+            ));
+            let (_, impact) =
+                overlay_candidate_with_transitive_link_impact(&snapshot, &change, &[replacement])
+                    .unwrap();
+            let mut reverse = [true, false, false];
+            loop {
+                let mut next = reverse;
+                for (source, result) in next.iter_mut().enumerate() {
+                    for (target, reachable) in reverse.iter().enumerate() {
+                        if *reachable && mask & (1 << (source * 3 + target)) != 0 {
+                            *result = true;
+                        }
+                    }
+                }
+                if next == reverse {
+                    break;
+                }
+                reverse = next;
+            }
+            for (target, reachable) in reverse.iter_mut().enumerate() {
+                if mask & (1 << target) != 0 {
+                    *reachable = true;
+                }
+            }
+            let expected: Vec<String> = (0..3)
+                .filter(|i| reverse[*i])
+                .map(|i| names[i].to_string())
+                .collect();
+            assert_eq!(impact.affected, expected, "graph mask {mask}");
+            assert!(impact.link_impact_complete);
+        }
+    }
+
+    #[test]
+    fn transitive_impact_is_incomplete_when_link_coverage_is_unknown() {
+        let (mut snapshot, mut change) = setup();
+        snapshot.items[1].links = None;
+        change.entries.push(entry(
+            "a",
+            Operation::Delete,
+            Some(&snapshot.items[0]),
+            None,
+        ));
+        let (_, impact) =
+            overlay_candidate_with_transitive_link_impact(&snapshot, &change, &[]).unwrap();
+        assert!(!impact.link_impact_complete);
+        assert!(!impact.reasons.is_empty());
+        assert_eq!(impact.affected, ["b", "c"]);
     }
 
     #[test]

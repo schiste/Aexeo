@@ -551,12 +551,15 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
                 }
             }
         }
-        let comparison = aexeo_core::verification::diff_entity_findings(
+        let mut comparison = aexeo_core::verification::diff_entity_findings(
             &baseline.findings,
             &verdict.findings,
             &renames,
         )
         .user_context("invalid baseline identity mapping")?;
+        // An unmatched old finding is not proof of resolution: the two verdicts
+        // need not cover the same entities, checks, policy, or source revisions.
+        let unconfirmed_resolutions = std::mem::take(&mut comparison.resolved_findings);
         let annotation = serde_json::json!({
             "status": "advisory",
             "baseline_status": baseline.status,
@@ -565,7 +568,8 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             "current_findings_omitted": verdict.findings_omitted,
             "baseline_profile_sha256": baseline.validator.profile_sha256,
             "current_profile_sha256": verdict.validator.profile_sha256,
-            "limitations": "Not a publication decision: provenance, policy equivalence, scope, and completeness are not verified; resolved findings may reflect missing checks.",
+            "limitations": "Not a publication decision: provenance, policy equivalence, scope, and completeness are not verified; absent prior findings are unconfirmed, not resolved.",
+            "unconfirmed_resolutions": unconfirmed_resolutions,
             "comparison": comparison,
         });
         verdict
