@@ -261,6 +261,9 @@ Options:
       --include-candidate
           Include the complete private candidate source records in output
 
+      --transitive
+          Also report experimental transitive incoming-link impact
+
       --telemetry
           Emit aggregate timing and counts to stderr
 
