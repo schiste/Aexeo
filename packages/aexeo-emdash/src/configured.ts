@@ -278,7 +278,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
     } },
     routes: {
       "audit-revision": {
-        permission: "plugins:read",
+        permission: "plugins:manage",
         request: { body: "json" },
         input: z.strictObject({ collection: z.string().min(1).max(128), id: z.string().min(1).max(128), revision: z.string().min(1).max(128) }),
         handler: (ctx: SandboxCtx & { input: { collection: string; id: string; revision: string } }) => auditRevision(ctx as never, ctx.input, { preset: options.contentPreset, blockMappings: options.blockMappings, contentFieldsByCollection: options.contentFieldsByCollection, descriptionFieldsByCollection: options.descriptionFieldsByCollection, evidenceProviderConfigured: runtime.evidenceSources !== undefined, evaluate: evaluateContent }),

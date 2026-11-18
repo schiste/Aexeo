@@ -50,7 +50,7 @@ describe("revision audits", () => {
     expect((createPlugin({}) as { capabilities: string[] }).capabilities).not.toContain("content:revisions:read");
     expect(plugin.mcp?.tools.audit_revision?.route).toBe("audit-revision");
     expect(plugin.mcp?.tools.get_audit?.route).toBe("get-revision-audit");
-    expect(plugin.routes["audit-revision"]?.permission).toBe("plugins:read");
+    expect(plugin.routes["audit-revision"]?.permission).toBe("plugins:manage");
     expect(plugin.routes["audit-revision"]?.request?.body).toBe("json");
     expect(plugin.mcp?.tools.audit_revision?.input.safeParse({ collection: "posts", id: "one" }).success).toBe(false);
   });

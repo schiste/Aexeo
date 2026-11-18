@@ -221,7 +221,8 @@ policy and request limits.
 
 Configured-mode plugins expose `audit_revision` (`collection`, `id`, `revision`)
 and `get_audit` (`audit_id`) through EmDash's plugin MCP integration. A host
-must enable and consent to these tools, and callers need `plugins:read`. An
+must enable and consent to these tools. Creating a report requires
+`plugins:manage`; reading it requires `plugins:read`. An
 editorial `contentPreset` must be configured for the collection. Set
 `revisionAudits: true` to request `content:revisions:read` on a compatible
 EmDash host; this capability requires host approval. Revision access
