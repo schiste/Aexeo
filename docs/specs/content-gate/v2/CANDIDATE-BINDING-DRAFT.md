@@ -26,8 +26,8 @@ of scope, records, policy and options.
 
 The Rust `candidate_decision_binding` function hashes a supplied
 `CandidateSnapshot` and binds the resulting digest with the caller's explicit
-decision artifacts. It can be used with the `candidate` returned by
-`overlay_candidate`; it does not alter the current verdict producer. A verifier
+decision artifacts. It is used with the `candidate` returned by
+`overlay_candidate` in the separate [experimental candidate verdict](CANDIDATE-VERDICT.md). A verifier
 must independently construct the current candidate and decision inputs, compute
 its own binding, and compare against a trusted expected binding. Merely copying
 the digest from a prior verdict proves nothing about current inputs.
