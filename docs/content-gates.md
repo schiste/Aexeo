@@ -1545,9 +1545,10 @@ baselines retain their historical path-based behavior.
 
 This comparison is informational only: it never changes the verdict or exit code.
 It does not authenticate the old verdict or verify policy equivalence, source
-freshness, scope, or completeness. In particular, a finding reported as
-resolved can instead reflect a missing or unchecked evaluation. Do not use this
-extension to suppress findings or authorize publication. The extension records
+freshness, scope, or completeness. Unmatched old findings appear in
+`unconfirmed_resolutions`; they may reflect missing or unchecked evaluations,
+so `comparison.resolved_findings` is empty. Do not use this extension to
+suppress findings or authorize publication. The extension records
 both statuses, omitted-finding counts and any available policy hashes so a host
 can inspect the underlying limitations. `--baseline-verdict` cannot be combined
 with experimental offline receipts or observation export.
