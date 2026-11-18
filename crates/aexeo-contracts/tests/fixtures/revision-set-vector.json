@@ -1,0 +1,15 @@
+{
+  "scope": "site=aeptus;surface=preview",
+  "snapshot": "revision=2026-11-18",
+  "records": [
+    {
+      "entity_id": "post:café",
+      "record": "title=café\npath=/fr"
+    },
+    {
+      "entity_id": "page:home",
+      "record": "title=Home\npath=/"
+    }
+  ],
+  "sha256": "06c93b7230bbc5a8d60eb0d307b8d182cd9f50cd4613c0b84e99a3faab056eaa"
+}
