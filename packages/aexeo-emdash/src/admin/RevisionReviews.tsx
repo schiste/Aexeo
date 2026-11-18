@@ -60,7 +60,7 @@ export function RevisionReviews(): React.JSX.Element {
     <div className="flex gap-2"><label>Audit ID <input value={auditId} onChange={e => setAuditId(e.target.value)} /></label><button type="button" disabled={!auditId} onClick={() => void load()}>Load audit</button></div>
     {message && <p role="status">{message}</p>}
     {audit && <div>
-      <p>Revision {audit.revision} — {audit.revision_status}. Preset: {audit.preset}. Audit ID: {audit.audit_id}</p>
+      <p>Revision {audit.revision} — {audit.revision_status} at last load. Preset: {audit.preset}. Audit ID: {audit.audit_id}</p>
       <p>{audit.limitation}</p>
       <ul>{audit.report.gates.map(g => <li key={g.gate_id}>{g.gate_id}: {g.status}{g.reason ? ` — ${g.reason}` : ""}</li>)}</ul>
       {choices.length > 0 && <div>

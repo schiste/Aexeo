@@ -236,3 +236,12 @@ runtime evidence, link and external-gate providers are not invoked. Inspect
 each gate's `not_checked` status. These checks do not establish factual accuracy
 or currency. Reports contain editorial findings and require the same access
 controls and retention care as the source content.
+
+The findings page can create or retrieve an audit by revision and record a
+review against an individual finding. `set_review` and `get_review` expose the
+same operations to consented MCP clients. Saving requires `plugins:manage` and
+reading requires `plugins:read`. An explanation is required; reviews annotate
+rather than suppress findings and belong only to that audit. Re-auditing or
+changing the revision never automatically transfers a decision. One record is
+kept per finding (concurrent updates are last-write-wins); it is not an
+authenticated review history.
