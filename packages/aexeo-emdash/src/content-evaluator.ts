@@ -76,7 +76,15 @@ export function withContentPreset(
   onEvidenceSourceTelemetry?: (event: EvidenceSourceTelemetry) => void,
   onPresetSelectionTelemetry?: (event: PresetSelectionTelemetry) => void,
 ): EvaluatorFn {
-  if (!preset) return base;
+  if (!preset) return async (documents, context) => {
+    const result = await base(documents, context);
+    if (!result.ok) return result;
+    const assessments = { ...result.assessments };
+    for (const document of documents) {
+      assessments[document.route] ??= { status: "not_configured", reason: "preset_not_configured" };
+    }
+    return { ...result, assessments };
+  };
   return async (documents, context) => {
     const result = await base(documents, context);
     if (!result.ok) return result;
@@ -91,7 +99,10 @@ export function withContentPreset(
         const document = attested ? { ...originalDocument, list_structure_complete: true } : originalDocument;
         if (preset.collections !== undefined) {
           if (collection === undefined) throw new Error("collection is required for a scoped content preset");
-          if (!preset.collections.includes(collection)) continue;
+          if (!preset.collections.includes(collection)) {
+            assessments[document.route] = { status: "not_configured", reason: "collection_excluded" };
+            continue;
+          }
         }
         const selected = selectContentPreset(preset, collection, document.lang);
         if (selectionCounts) selectionCounts[selected.source]++;
@@ -190,6 +201,7 @@ export function withContentPreset(
         assessments[document.route] = {
           status: "evaluated",
           preset: name,
+          selection_source: selected.source,
           ...(report.source_mapping === undefined ? {} : { source_mapping: report.source_mapping }),
           gates: report.gates.map(({ gate_id, status, blocking, scope, required_capability, reason, measurements }) =>
             ({ gate_id, status, blocking, scope, required_capability, reason, ...(measurements === undefined ? {} : { measurements }) })),

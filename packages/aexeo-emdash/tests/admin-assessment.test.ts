@@ -15,6 +15,7 @@ describe("React content assessment", () => {
       status: "evaluated", preset: "article", gates: [],
       source_mapping: { eligible: 2, mapped: 1, unmapped: 1 },
     };
+    expect(JSON.stringify(ContentAssessmentDetails({ assessment }))).toContain("do not establish factual accuracy");
     expect(JSON.stringify(ContentAssessmentDetails({ assessment }))).toContain("Source locations: 1 of 2 emitted findings mapped; 1 unmapped.");
     const withGate = { ...assessment, gates: [{ gate_id: "words", status: "not_checked" as const, blocking: true, scope: "document" as const, required_capability: "text" as const, reason: "unavailable" }] };
     expect(JSON.stringify(ContentAssessmentDetails({ assessment: withGate }))).toContain("scope: document; requires: text");
