@@ -320,7 +320,7 @@ mod entity_baseline_tests {
         let unknown = finding(None, None);
         let result = diff_entity_findings(
             std::slice::from_ref(&unknown),
-            &[unknown.clone(), unknown],
+            &[unknown.clone(), unknown.clone()],
             &BTreeMap::new(),
         )
         .unwrap();

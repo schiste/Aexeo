@@ -2307,15 +2307,16 @@ fn baseline_verdict_compares_renamed_entities_without_changing_gate_outcome() {
     change["entries"][0]["entity_id"] = "renamed".into();
     change["entries"][0]["operation"] = "rename".into();
     change["entries"][0]["previous_entity_id"] = "article".into();
+    let without_baseline = run(dir.path(), &change, policy, &[]);
     let next = run(
         dir.path(),
         &change,
         policy,
         &["--baseline-verdict", baseline.to_str().unwrap()],
     );
-    // Rename impact is not yet checked, so the normal verdict may be not_checked.
-    assert!(
-        matches!(next.status.code(), Some(1 | 2)),
+    assert_eq!(
+        next.status.code(),
+        without_baseline.status.code(),
         "{}",
         String::from_utf8_lossy(&next.stderr)
     );
