@@ -880,6 +880,125 @@ pub fn revalidate_experimental_bound_verdict<P: ConfinedContentFiles>(
     })
 }
 
+/// Experimental candidate-bound receipt. This is not a portable v2 verdict or
+/// an authorization to publish. Only changed content is evaluated.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExperimentalCandidateVerdict {
+    pub schema: String,
+    pub candidate_profile: String,
+    pub binding: String,
+    pub receipt: OfflineDecisionReceipt,
+}
+
+const EXPERIMENTAL_CANDIDATE_SCHEMA: &str = "aexeo.experimental-candidate-bound-verdict/v1";
+
+/// Independently supplied base inventory and after projections for this change.
+/// `complete` is a host assertion, not a proof; collection checks are not
+/// supported because their relationship to the candidate is not established.
+#[derive(Clone, Copy)]
+pub struct CandidateDecisionContext<'a> {
+    pub decision: &'a OfflineDecisionContext<'a>,
+    pub base: &'a crate::content_candidate::CandidateSnapshot,
+    pub after: &'a [crate::content_candidate::CandidateItem],
+}
+
+fn candidate_binding(
+    context: &CandidateDecisionContext<'_>,
+    scope: HtmlContentScope,
+) -> Result<String> {
+    use crate::content_candidate::overlay_candidate;
+    use crate::content_candidate_profile::{candidate_decision_binding, candidate_revision_digest};
+    if !context.base.complete {
+        bail!("candidate base inventory is not declared complete");
+    }
+    if context.decision.collection.is_some() {
+        bail!("candidate-bound collection evaluation is not supported");
+    }
+    // Exact byte equality between the evaluated changes and projections must
+    // be checked even for deleted and renamed entities, which are not evaluated.
+    for entry in &context.decision.change.entries {
+        for state in [entry.before.as_ref(), entry.after.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            if state.inline.is_none() || state.file.is_some() || state.uri.is_some() {
+                bail!("candidate-bound changes require inline content states");
+            }
+        }
+    }
+    let overlay = overlay_candidate(context.base, context.decision.change, context.after)
+        .map_err(anyhow::Error::msg)?;
+    let base_digest = candidate_revision_digest(context.base).map_err(anyhow::Error::msg)?;
+    let artifacts = context.decision.artifacts_with_html_scope(scope)?;
+    let binding = candidate_decision_binding(
+        &overlay.candidate,
+        &[
+            ("change", Some(&artifacts.change)),
+            ("resolved_policy", Some(&artifacts.resolved_policy)),
+            ("host_options", Some(&artifacts.host_options)),
+            ("evaluator", Some(&artifacts.evaluator)),
+            ("collection", None),
+            ("external_evidence", None),
+            ("candidate_base_revision_sha256", Some(&base_digest)),
+        ],
+    )
+    .map_err(anyhow::Error::msg)?;
+    Ok(binding.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+/// Evaluate changed content and bind the independently built candidate snapshot.
+pub fn evaluate_experimental_candidate_verdict<P: ConfinedContentFiles>(
+    context: &CandidateDecisionContext<'_>,
+    provider: &mut P,
+    evaluated_at: &str,
+    scope: HtmlContentScope,
+) -> Result<ExperimentalCandidateVerdict> {
+    let binding = candidate_binding(context, scope)?;
+    let receipt =
+        evaluate_offline_receipt_with_html_scope(context.decision, provider, evaluated_at, scope)?;
+    Ok(ExperimentalCandidateVerdict {
+        schema: EXPERIMENTAL_CANDIDATE_SCHEMA.into(),
+        candidate_profile: aexeo_contracts::content_gate_binding_v2::CANDIDATE_REVISION_PROFILE
+            .into(),
+        binding,
+        receipt,
+    })
+}
+
+/// Rebuild the candidate from independently supplied inputs and re-evaluate.
+pub fn revalidate_experimental_candidate_verdict<P: ConfinedContentFiles>(
+    previous: &ExperimentalCandidateVerdict,
+    context: &CandidateDecisionContext<'_>,
+    provider: &mut P,
+    evaluated_at: &str,
+    scope: HtmlContentScope,
+) -> Result<ExperimentalCandidateVerdict> {
+    if previous.schema != EXPERIMENTAL_CANDIDATE_SCHEMA
+        || previous.candidate_profile
+            != aexeo_contracts::content_gate_binding_v2::CANDIDATE_REVISION_PROFILE
+    {
+        bail!("unsupported experimental candidate verdict schema or profile");
+    }
+    let binding = candidate_binding(context, scope)?;
+    if previous.binding != binding {
+        bail!("experimental candidate decision inputs differ");
+    }
+    let receipt = revalidate_offline_receipt_with_html_scope(
+        &previous.receipt,
+        context.decision,
+        provider,
+        evaluated_at,
+        scope,
+    )?;
+    Ok(ExperimentalCandidateVerdict {
+        schema: EXPERIMENTAL_CANDIDATE_SCHEMA.into(),
+        candidate_profile: previous.candidate_profile.clone(),
+        binding,
+        receipt,
+    })
+}
+
 /// Inputs selected by the host for an offline evaluation. `evaluator_identity`
 /// must identify a trusted build; an engine version string is not sufficient.
 pub struct OfflineDecisionContext<'a> {
@@ -1997,6 +2116,327 @@ mod tests {
             "entries":[{"entity_id":"article", "operation":"create", "media_type":"text/plain",
                 "after":{"inline":"abc", "sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}}]
         })).unwrap()
+    }
+
+    #[test]
+    fn candidate_verdict_binds_independent_overlay_and_replays() {
+        use crate::content_candidate::{CandidateItem, CandidateSnapshot};
+        let input = change();
+        let policy = preset(1);
+        let decision = OfflineDecisionContext {
+            change: &input,
+            preset: &policy,
+            max_entry_bytes: 1024,
+            max_total_bytes: 1024,
+            plain_text_paragraphs: false,
+            collection: None,
+            evaluator_identity: b"build",
+        };
+        let base = CandidateSnapshot {
+            scope: "site".into(),
+            site_id: "s".into(),
+            site_base_url: None,
+            base: input.base.clone(),
+            complete: true,
+            items: vec![],
+        };
+        let item = CandidateItem {
+            entity_id: "article".into(),
+            public_path: "/article".into(),
+            media_type: "text/plain".into(),
+            revision: None,
+            sha256: input.entries[0].after.as_ref().unwrap().sha256.clone(),
+            source: "abc".into(),
+            links: None,
+        };
+        let after = vec![item.clone()];
+        let ctx = CandidateDecisionContext {
+            decision: &decision,
+            base: &base,
+            after: &after,
+        };
+        let verdict = evaluate_experimental_candidate_verdict(
+            &ctx,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        assert!(
+            revalidate_experimental_candidate_verdict(
+                &verdict,
+                &ctx,
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_ok()
+        );
+        let encoded = serde_json::to_vec(&verdict).unwrap();
+        let _: ExperimentalCandidateVerdict =
+            aexeo_contracts::content_gate_change_validation::parse_lossless_json(&encoded).unwrap();
+        assert!(
+            aexeo_contracts::content_gate_change_validation::parse_lossless_json::<
+                ExperimentalBoundVerdict,
+            >(&encoded)
+            .is_err()
+        );
+        let mut invalid = verdict.clone();
+        invalid.candidate_profile.push('x');
+        assert!(
+            revalidate_experimental_candidate_verdict(
+                &invalid,
+                &ctx,
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
+        let mut scoped = base.clone();
+        scoped.scope.push('x');
+        assert!(
+            revalidate_experimental_candidate_verdict(
+                &verdict,
+                &CandidateDecisionContext {
+                    base: &scoped,
+                    ..ctx
+                },
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
+        let mut incomplete = base.clone();
+        incomplete.complete = false;
+        assert!(
+            evaluate_experimental_candidate_verdict(
+                &CandidateDecisionContext {
+                    base: &incomplete,
+                    ..ctx
+                },
+                &mut NoFiles,
+                "2026-01-01T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
+        let mut mutated = after.clone();
+        mutated[0].source.push('x');
+        assert!(
+            evaluate_experimental_candidate_verdict(
+                &CandidateDecisionContext {
+                    after: &mutated,
+                    ..ctx
+                },
+                &mut NoFiles,
+                "2026-01-01T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
+        assert!(
+            revalidate_experimental_candidate_verdict(
+                &verdict,
+                &ctx,
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Main
+            )
+            .is_err()
+        );
+        let changed_policy = preset(2);
+        let changed_decision = OfflineDecisionContext {
+            change: &input,
+            preset: &changed_policy,
+            max_entry_bytes: 1024,
+            max_total_bytes: 1024,
+            plain_text_paragraphs: false,
+            collection: None,
+            evaluator_identity: b"build",
+        };
+        assert!(
+            revalidate_experimental_candidate_verdict(
+                &verdict,
+                &CandidateDecisionContext {
+                    decision: &changed_decision,
+                    ..ctx
+                },
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn candidate_deletion_binds_removed_base_and_requires_inline_before() {
+        use crate::content_candidate::{CandidateItem, CandidateSnapshot};
+        let mut input = change();
+        let entry = &mut input.entries[0];
+        entry.operation = Operation::Delete;
+        entry.before = entry.after.take();
+        let policy = preset(1);
+        let decision = OfflineDecisionContext {
+            change: &input,
+            preset: &policy,
+            max_entry_bytes: 1024,
+            max_total_bytes: 1024,
+            plain_text_paragraphs: false,
+            collection: None,
+            evaluator_identity: b"build",
+        };
+        let base = CandidateSnapshot {
+            scope: "site".into(),
+            site_id: "s".into(),
+            site_base_url: None,
+            base: input.base.clone(),
+            complete: true,
+            items: vec![CandidateItem {
+                entity_id: "article".into(),
+                public_path: "/article".into(),
+                media_type: "text/plain".into(),
+                revision: None,
+                sha256: input.entries[0].before.as_ref().unwrap().sha256.clone(),
+                source: "abc".into(),
+                links: None,
+            }],
+        };
+        let ctx = CandidateDecisionContext {
+            decision: &decision,
+            base: &base,
+            after: &[],
+        };
+        let verdict = evaluate_experimental_candidate_verdict(
+            &ctx,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        let mut altered = base.clone();
+        altered.items[0].public_path = "/elsewhere".into();
+        assert!(
+            revalidate_experimental_candidate_verdict(
+                &verdict,
+                &CandidateDecisionContext {
+                    base: &altered,
+                    ..ctx
+                },
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
+        let mut external = input.clone();
+        let state = external.entries[0].before.as_mut().unwrap();
+        state.inline = None;
+        state.file = Some("article.txt".into());
+        let external_decision = OfflineDecisionContext {
+            change: &external,
+            preset: &policy,
+            max_entry_bytes: 1024,
+            max_total_bytes: 1024,
+            plain_text_paragraphs: false,
+            collection: None,
+            evaluator_identity: b"build",
+        };
+        assert!(
+            evaluate_experimental_candidate_verdict(
+                &CandidateDecisionContext {
+                    decision: &external_decision,
+                    ..ctx
+                },
+                &mut NoFiles,
+                "2026-01-01T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn candidate_rename_requires_matching_old_identity_and_bytes() {
+        use crate::content_candidate::{CandidateItem, CandidateSnapshot};
+        let mut input = change();
+        input.entries[0].operation = Operation::Rename;
+        input.entries[0].previous_entity_id = Some("old".into());
+        input.entries[0].before = input.entries[0].after.clone();
+        let policy = preset(1);
+        let decision = OfflineDecisionContext {
+            change: &input,
+            preset: &policy,
+            max_entry_bytes: 1024,
+            max_total_bytes: 1024,
+            plain_text_paragraphs: false,
+            collection: None,
+            evaluator_identity: b"build",
+        };
+        let item = CandidateItem {
+            entity_id: "old".into(),
+            public_path: "/old".into(),
+            media_type: "text/plain".into(),
+            revision: None,
+            sha256: input.entries[0].before.as_ref().unwrap().sha256.clone(),
+            source: "abc".into(),
+            links: None,
+        };
+        let base = CandidateSnapshot {
+            scope: "site".into(),
+            site_id: "s".into(),
+            site_base_url: None,
+            base: input.base.clone(),
+            complete: true,
+            items: vec![item.clone()],
+        };
+        let mut next = item;
+        next.entity_id = "article".into();
+        next.public_path = "/new".into();
+        let after = vec![next];
+        let ctx = CandidateDecisionContext {
+            decision: &decision,
+            base: &base,
+            after: &after,
+        };
+        let verdict = evaluate_experimental_candidate_verdict(
+            &ctx,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        assert_ne!(verdict.receipt.verdict.status, VerdictStatus::Pass);
+        let mut changed = base.clone();
+        changed.items[0].entity_id = "wrong".into();
+        assert!(
+            evaluate_experimental_candidate_verdict(
+                &CandidateDecisionContext {
+                    base: &changed,
+                    ..ctx
+                },
+                &mut NoFiles,
+                "2026-01-01T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
+        let mut changed = base.clone();
+        changed.items[0].source = "different".into();
+        assert!(
+            evaluate_experimental_candidate_verdict(
+                &CandidateDecisionContext {
+                    base: &changed,
+                    ..ctx
+                },
+                &mut NoFiles,
+                "2026-01-01T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
     }
 
     #[test]

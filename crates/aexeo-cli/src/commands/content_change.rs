@@ -551,12 +551,15 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
                 }
             }
         }
-        let comparison = aexeo_core::verification::diff_entity_findings(
+        let mut comparison = aexeo_core::verification::diff_entity_findings(
             &baseline.findings,
             &verdict.findings,
             &renames,
         )
         .user_context("invalid baseline identity mapping")?;
+        // An unmatched old finding is not proof of resolution: the two verdicts
+        // need not cover the same entities, checks, policy, or source revisions.
+        let unconfirmed_resolutions = std::mem::take(&mut comparison.resolved_findings);
         let annotation = serde_json::json!({
             "status": "advisory",
             "baseline_status": baseline.status,
@@ -565,7 +568,8 @@ pub fn command_content_change(args: &ArgMatches) -> Result<i32> {
             "current_findings_omitted": verdict.findings_omitted,
             "baseline_profile_sha256": baseline.validator.profile_sha256,
             "current_profile_sha256": verdict.validator.profile_sha256,
-            "limitations": "Not a publication decision: provenance, policy equivalence, scope, and completeness are not verified; resolved findings may reflect missing checks.",
+            "limitations": "Not a publication decision: provenance, policy equivalence, scope, and completeness are not verified; absent prior findings are unconfirmed, not resolved.",
+            "unconfirmed_resolutions": unconfirmed_resolutions,
             "comparison": comparison,
         });
         verdict
@@ -834,6 +838,9 @@ fn command_offline_receipt(
         offline: &context,
         snapshots,
     });
+    if args.contains_id("candidate-base") {
+        return command_candidate_bound_verdict(args, &context, provider, output, html_scope);
+    }
     if args.get_flag("experimental-bound-verdict") {
         return command_experimental_bound_verdict(
             args,
@@ -930,6 +937,76 @@ fn command_offline_receipt(
                 "event":"content_change_offline_bundle", "version":1,
                 "artifact_count":4 + usize::from(collection.is_some()) + usize::from(snapshots.is_some()), "bundle_bytes":bytes.len() + 1
             })
+        );
+    }
+    Ok(code)
+}
+
+fn read_candidate_input<T: serde::de::DeserializeOwned + serde::Serialize>(
+    path: &str,
+    output: &Path,
+    label: &str,
+) -> Result<T> {
+    protect_input(Path::new(path), output, label)?;
+    let mut data = Vec::new();
+    File::open(path)
+        .user_context("opening candidate input")?
+        .take(MAX_CHANGE_BYTES + 1)
+        .read_to_end(&mut data)
+        .user_context("reading candidate input")?;
+    if data.len() as u64 > MAX_CHANGE_BYTES {
+        user_bail!("candidate input exceeds the size limit");
+    }
+    parse_lossless_json(&data).user_context("invalid candidate input")
+}
+
+fn command_candidate_bound_verdict(
+    args: &ArgMatches,
+    decision: &aexeo_core::content_gate_verdict::OfflineDecisionContext<'_>,
+    provider: &mut HostFiles,
+    output: &Path,
+    scope: HtmlContentScope,
+) -> Result<i32> {
+    use aexeo_core::content_gate_verdict::{
+        CandidateDecisionContext, ExperimentalCandidateVerdict,
+        evaluate_experimental_candidate_verdict, revalidate_experimental_candidate_verdict,
+    };
+    let base = read_candidate_input(
+        args.get_one::<String>("candidate-base")
+            .user_context("candidate base required")?,
+        output,
+        "candidate base",
+    )?;
+    let after: Vec<aexeo_core::content_candidate::CandidateItem> = read_candidate_input(
+        args.get_one::<String>("candidate-after")
+            .user_context("candidate after required")?,
+        output,
+        "candidate after",
+    )?;
+    let context = CandidateDecisionContext {
+        decision,
+        base: &base,
+        after: &after,
+    };
+    let verdict = if let Some(path) = args.get_one::<String>("verify-offline-receipt") {
+        let previous: ExperimentalCandidateVerdict =
+            read_candidate_input(path, output, "previous candidate verdict")?;
+        revalidate_experimental_candidate_verdict(&previous, &context, provider, &iso_now(), scope)
+            .user_context("candidate verdict does not match current inputs or evaluation")?
+    } else {
+        evaluate_experimental_candidate_verdict(&context, provider, &iso_now(), scope)
+            .user_context("candidate verdict evaluation failed")?
+    };
+    let code = verdict_exit_code(verdict.receipt.verdict.status);
+    let bytes = serde_json::to_vec_pretty(&verdict)?;
+    if bytes.len() as u64 >= MAX_CHANGE_BYTES {
+        user_bail!("candidate verdict exceeds the size limit");
+    }
+    write_atomic(output, &bytes).user_context("writing candidate verdict")?;
+    if args.get_flag("telemetry") {
+        eprintln!(
+            "{}",
+            serde_json::json!({"event":"content_change_candidate_bound", "version":1, "revalidation":args.contains_id("verify-offline-receipt"), "status": verdict.receipt.verdict.status})
         );
     }
     Ok(code)
