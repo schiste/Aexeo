@@ -73,6 +73,9 @@ untrusted evaluation is not an independent source of current inputs. Treat
 inputs as private where appropriate.
 
 In its default mode, the tool reports only whether these input bindings match.
+It rejects empty change identifiers and timestamps, unknown origins, Git origins
+with non-Git bases, and Git base revisions other than full lowercase 40- or
+64-character object IDs. These checks are not full change-schema validation.
 It does not validate the embedded verdict, rerun rules, authenticate the producer or the inputs,
 prove completeness or freshness, or authorize publication. A successful
 comparison does not stop an attacker from modifying the verdict field itself;
