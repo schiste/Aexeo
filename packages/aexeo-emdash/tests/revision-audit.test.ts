@@ -68,6 +68,27 @@ describe("revision audits", () => {
     await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, { preset: { name: "article", evidenceSources: { source: "wrong document" } }, evidenceProviderConfigured: true, evaluate });
     expect(evaluate.mock.calls[0]?.[3]).toBeUndefined();
   });
+  it("audits only the explicitly configured historical fragment with its preset", async () => {
+    const { ctx, revision } = host();
+    const data = revision.data as Record<string, unknown>;
+    data.intro = "Historical intro.";
+    data.extra = "Other fragment.";
+    const evaluate = vi.fn(async () => report);
+    const preset = { name: "article", fragmentFieldsByCollection: { posts: { intro: "fragment-readable", extra: "other-preset", missing: "fragment-readable" } } };
+    const run = (field: string) => auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1", field }, { preset, evaluate });
+    const result = await run("intro");
+    expect(result).toMatchObject({ status: "evaluated", scope: "fragment", field: "intro", preset: "fragment-readable", selection_source: "fragment_field", input_coverage: { body: { configured_fields: ["intro"] } } });
+    expect(JSON.stringify(evaluate.mock.calls[0])).toContain("Historical intro.");
+    expect(JSON.stringify(evaluate.mock.calls[0])).not.toContain("Historical sentence.");
+    expect(JSON.stringify(evaluate.mock.calls[0])).not.toContain("Other fragment.");
+    if (result.status !== "evaluated") throw new Error("expected report");
+    expect(await getRevisionAudit(ctx as never, result.audit_id)).toMatchObject({ field: "intro", scope: "fragment" });
+    expect(await run("extra")).toMatchObject({ preset: "other-preset" });
+    expect(await run("missing")).toMatchObject({ status: "not_checked", reason: "fragment_field_unavailable" });
+    expect(await run("content")).toMatchObject({ status: "not_checked", reason: "fragment_preset_not_configured" });
+    data.missing = null;
+    expect(await run("missing")).toMatchObject({ status: "evaluated", input_coverage: { body: { coverage: "complete" } } });
+  });
   it("registers private MCP tools with schemas and explicit permissions", () => {
     const plugin = createPlugin({ revisionAudits: true }) as { capabilities: string[]; mcp?: { tools: Record<string, { route: string; input: { safeParse(value: unknown): { success: boolean } } }> }; routes: Record<string, { permission?: string; request?: { body?: string } }> };
     expect(plugin.capabilities).toContain("content:revisions:read");
@@ -77,5 +98,7 @@ describe("revision audits", () => {
     expect(plugin.routes["audit-revision"]?.permission).toBe("plugins:manage");
     expect(plugin.routes["audit-revision"]?.request?.body).toBe("json");
     expect(plugin.mcp?.tools.audit_revision?.input.safeParse({ collection: "posts", id: "one" }).success).toBe(false);
+    expect(plugin.mcp?.tools.audit_revision?.input.safeParse({ collection: "posts", id: "one", revision: "rev1", field: "intro" }).success).toBe(true);
+    expect(plugin.mcp?.tools.audit_revision?.input.safeParse({ collection: "posts", id: "one", revision: "rev1", field: "x".repeat(129) }).success).toBe(false);
   });
 });

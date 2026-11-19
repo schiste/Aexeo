@@ -717,3 +717,7 @@ may not contain measurements; missing measurements are not shown as zero. A
 pass covers only the configured checks and is not an overall quality score. A failed evaluation clears findings for that revision and records an
 error; it must not be interpreted as a clean assessment. `aexeo.preset_coverage`
 logs aggregate counts without routes, gate identifiers, reasons or content.
+
+### Audit a CMS fragment
+
+Enable revision audits and explicitly map each field to its preset in `contentPreset.fragmentFieldsByCollection`, for example `{ posts: { intro: "fragment-readable" } }`. Call `audit_revision` with `collection`, `id`, `revision` and `field: "intro"`. The saved report identifies fragment scope, field and preset. An unconfigured or unavailable field returns `not_checked`; omit `field` for the existing whole-content audit. The host must expose the MCP tool with its revision access and permissions. This review does not establish factual accuracy or authorize publication.

@@ -66,7 +66,7 @@ export interface AexeoPluginOptions {
   /** Request historical revision access on a compatible EmDash host. */
   revisionAudits?: boolean;
   /** Add a portable content preset to configured-mode evaluation. */
-  contentPreset?: { name: string; sources?: Record<string, string>; evidenceSources?: Record<string, string>; byCollection?: Record<string, string>; byLocale?: Record<string, string>; byCollectionLocale?: Record<string, Record<string, string>>; collections?: readonly string[]; listStructureCompleteByCollection?: readonly string[] };
+  contentPreset?: { name: string; sources?: Record<string, string>; evidenceSources?: Record<string, string>; byCollection?: Record<string, string>; byLocale?: Record<string, string>; byCollectionLocale?: Record<string, Record<string, string>>; fragmentFieldsByCollection?: Record<string, Record<string, string>>; collections?: readonly string[]; listStructureCompleteByCollection?: readonly string[] };
   /**
    * emdash collections the plugin sweeps when an admin clicks
    * Refresh on the findings page. Order doesn't matter; the sweep
@@ -205,6 +205,9 @@ export function aexeoPlugin(
               ...(options.contentPreset.byLocale === undefined
                 ? {}
                 : { byLocale: { ...options.contentPreset.byLocale } }),
+              ...(options.contentPreset.fragmentFieldsByCollection === undefined
+                ? {}
+                : { fragmentFieldsByCollection: Object.fromEntries(Object.entries(options.contentPreset.fragmentFieldsByCollection).map(([collection, fields]) => [collection, { ...fields }])) }),
               ...(options.contentPreset.byCollectionLocale === undefined
                 ? {}
                 : { byCollectionLocale: Object.fromEntries(Object.entries(options.contentPreset.byCollectionLocale).map(([collection, locales]) => [collection, { ...locales }])) }),
