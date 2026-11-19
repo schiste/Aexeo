@@ -456,8 +456,10 @@ registry before considering the release delivered.
   audits, with aggregate projection telemetry. The host must refresh the
   reference date and identify a substantive review field. This is a scheduling
   signal only: it does not verify sources or establish factual currentness.
-- [ ] Extend metadata mappings to the sandboxed EmDash adapter and validate
-  real host configuration and permissions before relying on it.
+- [x] Forward explicitly mapped metadata and unavailable source fields from
+  sandboxed EmDash saves and refreshes to the sidecar.
+- [ ] Validate sandbox sidecar preset configuration, real host permissions and
+  representative records before relying on the deployed workflow.
 - [ ] Source and factuality evaluation after the basic gates are validated.
   EmDash trusted hosts can opt into per-document evidence snapshots; failures remain unchecked and never fall back to a shared snapshot. This supplies inputs only and is not factuality validation.
 

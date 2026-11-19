@@ -9,9 +9,11 @@ import {
   SETTINGS_BLOCK_MAPPINGS_KEY,
   SETTINGS_CONTENT_FIELDS_KEY,
   SETTINGS_DESCRIPTION_FIELDS_KEY,
+  SETTINGS_METADATA_FIELDS_KEY,
   SETTINGS_TOKEN_KEY,
   handleAfterSave,
   readSandboxBlockMappings,
+  readSandboxMetadataFields,
   documentKey,
   evaluateAndPersistAll,
   type EvaluatorFn,
@@ -419,12 +421,13 @@ describe("custom block mappings", () => {
     const content = item("mapped-sandbox", NEW);
     content.data.blocks = [{ _type: "hero", _key: "one", _version: 1, headline: "Mapped" }];
     content.data.introduction = [{ _type: "block", children: [{ _type: "span", text: "Intro", marks: [] }] }];
+    content.data.reviewed = "2024-02-28";
     content.data.seo_description = "";
     content.data.excerpt = "Private fallback";
     const { ctx } = host([content]);
     await ctx.kv.set(CONFIG_URL_KEY, "https://example.org");
     ctx.settings = {
-      get: async <T>(key: string) => (key === SETTINGS_TOKEN_KEY ? "token" : key === SETTINGS_BLOCK_MAPPINGS_KEY ? JSON.stringify({ hero: [{ kind: "heading", field: "headline" }] }) : key === SETTINGS_CONTENT_FIELDS_KEY ? JSON.stringify({ pages: ["introduction", "blocks"] }) : key === SETTINGS_DESCRIPTION_FIELDS_KEY ? JSON.stringify({ pages: ["seo_description", "excerpt"] }) : null) as T | null,
+      get: async <T>(key: string) => (key === SETTINGS_TOKEN_KEY ? "token" : key === SETTINGS_BLOCK_MAPPINGS_KEY ? JSON.stringify({ hero: [{ kind: "heading", field: "headline" }] }) : key === SETTINGS_CONTENT_FIELDS_KEY ? JSON.stringify({ pages: ["introduction", "blocks"] }) : key === SETTINGS_DESCRIPTION_FIELDS_KEY ? JSON.stringify({ pages: ["seo_description", "excerpt"] }) : key === SETTINGS_METADATA_FIELDS_KEY ? JSON.stringify({ pages: { last_reviewed: "reviewed", missing: "not_loaded" } }) : null) as T | null,
       set: async () => {},
     };
     let captured: unknown;
@@ -435,9 +438,33 @@ describe("custom block mappings", () => {
       return { status: 200, ok: true, text: async () => "[]" };
     } };
     await handleAfterSave({ content, collection: "pages", isNew: false }, ctx);
-    expect(captured).toMatchObject({ documents: [{ description: "Private fallback", description_source_observed: true, body: [{ children: [{ text: "Intro" }] }, { style: "h2", children: [{ text: "Mapped" }] }] }] });
+    expect(captured).toMatchObject({ documents: [{ description: "Private fallback", description_source_observed: true, meta: { last_reviewed: "2024-02-28" }, unavailable_metadata_fields: ["missing"], body: [{ children: [{ text: "Intro" }] }, { style: "h2", children: [{ text: "Mapped" }] }] }] });
     expect(coverage).toEqual([{ documents: 1, observed: 1, with_value: 1, unverified: 0 }]);
     expect(JSON.stringify(coverage)).not.toContain("Private fallback");
+  });
+
+  it("rejects malformed or reserved sandbox metadata settings without logging their values", async () => {
+    const { ctx } = host([]);
+    const warnings: string[] = [];
+    ctx.log = { info: () => {}, warn: (message) => warnings.push(message), error: () => {} };
+    for (const value of ["{private", JSON.stringify({ pages: { title: "private" } }), "null"]) {
+      ctx.settings = { get: async <T>() => value as T, set: async () => {} };
+      expect(await readSandboxMetadataFields(ctx)).toEqual({ fields: undefined, unavailable: true });
+    }
+    expect(warnings).toHaveLength(3);
+    expect(JSON.stringify(warnings)).not.toContain("private");
+  });
+
+  it("records an error instead of evaluating when sandbox metadata settings are invalid", async () => {
+    const content = item("invalid-metadata-settings", NEW);
+    const { ctx, store } = host([content]);
+    await ctx.kv.set(CONFIG_URL_KEY, "https://example.org");
+    ctx.settings = { get: async <T>(key: string) => (key === SETTINGS_TOKEN_KEY ? "token" : key === SETTINGS_METADATA_FIELDS_KEY ? "{" : null) as T | null, set: async () => {} };
+    let calls = 0;
+    ctx.http = { fetch: async () => { calls++; return { status: 200, ok: true, text: async () => "[]" }; } };
+    await handleAfterSave({ content, collection: "pages", isNew: false }, ctx);
+    expect(calls).toBe(0);
+    expect(store.get("findings:/invalid-metadata-settings")).toMatchObject({ findings: [], assessment: { status: "error", reason: "metadata_config_unavailable" } });
   });
 
   it("keeps observed prose but withholds body coverage when sandbox field settings fail", async () => {

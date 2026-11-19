@@ -15,6 +15,7 @@ import {
   readSandboxBlockMappings,
   readSandboxContentFieldState,
   readSandboxDescriptionFields,
+  readSandboxMetadataFields,
   writeSidecarConfig,
 } from "./plugin.js";
 import { validateSidecarUrl } from "./sidecar-url.js";
@@ -193,7 +194,9 @@ async function handleBlockAction(
 async function handleRefresh(ctx: DispatchCtx): Promise<BlockResponse> {
   // The route handler runs in a live request context. Refresh remains
   // the full-site evaluation path; afterSave updates the changed entry.
+  const metadata = await readSandboxMetadataFields(ctx.ctx);
   const sandboxEvaluator: EvaluatorFn = async (documents, context) => {
+    if (metadata.unavailable) return { ok: false, reason: "metadata_config_unavailable", detail: "metadata field settings are unavailable or invalid" };
     const runtime = await readSidecarConfig(ctx.ctx);
     if (runtime === null) {
       return {
@@ -222,6 +225,7 @@ async function handleRefresh(ctx: DispatchCtx): Promise<BlockResponse> {
     contentFieldsByCollection: contentFields.fields,
     contentFieldsUnavailable: contentFields.unavailable,
     descriptionFieldsByCollection: await readSandboxDescriptionFields(ctx.ctx),
+    metadataFieldsByCollection: metadata.fields,
     tuning: adminViewTuning,
   });
 }

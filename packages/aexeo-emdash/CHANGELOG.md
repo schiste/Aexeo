@@ -9,7 +9,7 @@ and the project follows [Semantic Versioning](https://semver.org/).
 ## [0.9.5] - 2026-11-19
 
 - Add an opt-in advisory metadata review-age gate with an explicit reference date; this schedules review and does not verify facts or source freshness.
-- Allow configured hosts to map editorial metadata per collection into save, refresh and revision audits, distinguishing unavailable fields from observed absence. Revision coverage and aggregate telemetry expose the projection without logging values.
+- Allow configured hosts to map editorial metadata per collection into save, refresh and revision audits, distinguishing unavailable fields from observed absence. Revision coverage and aggregate telemetry expose the projection without logging values. Sandboxed saves and refreshes forward the same explicit mappings to the sidecar; its content preset is configured separately. Invalid mapping settings yield an evaluation error.
 
 
 - Include explicit two-bracket Markdown reference candidates in the advisory Portable Text link review, even when their definitions are elsewhere or unavailable. Adjacent bracketed text can also match.

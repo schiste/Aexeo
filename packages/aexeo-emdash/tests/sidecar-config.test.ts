@@ -8,6 +8,7 @@ import {
   SETTINGS_BLOCK_MAPPINGS_KEY,
   SETTINGS_CONTENT_FIELDS_KEY,
   SETTINGS_DESCRIPTION_FIELDS_KEY,
+  SETTINGS_METADATA_FIELDS_KEY,
   readSandboxDescriptionFields,
   readSandboxContentFields,
   readSandboxBlockMappings,
@@ -221,7 +222,7 @@ describe("aexeoPluginSandboxed", () => {
     // `ctx.settings.set()` with have to be the same string, or the host
     // will not encrypt the write. Pin both sides.
     const descriptor = aexeoPluginSandboxed({ evaluatorHost: "evaluator.test" });
-    expect(Object.keys(descriptor.settingsSchema).sort()).toEqual([SETTINGS_BLOCK_MAPPINGS_KEY, SETTINGS_CONTENT_FIELDS_KEY, SETTINGS_DESCRIPTION_FIELDS_KEY, SETTINGS_TOKEN_KEY].sort());
+    expect(Object.keys(descriptor.settingsSchema).sort()).toEqual([SETTINGS_BLOCK_MAPPINGS_KEY, SETTINGS_CONTENT_FIELDS_KEY, SETTINGS_DESCRIPTION_FIELDS_KEY, SETTINGS_METADATA_FIELDS_KEY, SETTINGS_TOKEN_KEY].sort());
     expect(PLUGIN_SETTINGS_SCHEMA[SETTINGS_TOKEN_KEY]?.type).toBe("secret");
   });
 });
