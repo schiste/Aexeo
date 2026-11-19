@@ -159,6 +159,57 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
     )
 }
 
+/// Observe explicit Markdown links in complete rich text. Code-marked spans
+/// are masked by byte length, preserving coordinates into the original text.
+fn literal_markdown_links(document: &EmdashDocument) -> Option<Vec<(usize, usize)>> {
+    if document.body.len() > 10_000 {
+        return None;
+    }
+    let mut original = String::new();
+    let mut offsets = Vec::new();
+    for (index, block) in document.body.iter().enumerate() {
+        if index > 0 {
+            original.push('\n');
+        }
+        let block_start = original.len();
+        let mut candidate = String::new();
+        for child in &block.children {
+            let PortableTextChild::Span(span) = child;
+            original.push_str(&span.text);
+            if span.marks.iter().any(|mark| mark == "code") {
+                for ch in span.text.chars() {
+                    if ch == '\n' {
+                        candidate.push('\n');
+                    } else {
+                        candidate.extend(std::iter::repeat_n(' ', ch.len_utf8()));
+                    }
+                }
+            } else {
+                candidate.push_str(&span.text);
+            }
+        }
+        if original.len() > aexeo_core::content_gate::MAX_CONTENT_INPUT_BYTES {
+            return None;
+        }
+        if !candidate.contains('[') {
+            continue;
+        }
+        for offset in
+            aexeo_core::markdown_adapter::literal_markdown_link_offsets(&candidate).ok()?
+        {
+            offsets.push(block_start + offset);
+            if offsets.len() > 100_000 {
+                return None;
+            }
+        }
+    }
+    let index = aexeo_core::text_index::LineIndex::new(&original);
+    offsets
+        .into_iter()
+        .map(|offset| index.position(&original, offset))
+        .collect()
+}
+
 /// Observe complete Portable Text list structure. Returns `None` when the host
 /// cannot guarantee the body includes every list item, or when nesting is
 /// malformed. Positions refer to the projected plain-text snapshot.
@@ -746,6 +797,14 @@ pub fn evaluate_content_with_list_completeness(
     let lists = portable_text_structured_lists(document, list_structure_complete);
     let [text, headings, paragraphs, links] = capabilities;
     let (mut input, mut context, link_count) = content_input_with_context(document);
+    if text
+        && preset
+            .gates
+            .iter()
+            .any(|gate| matches!(gate, ContentGate::LiteralMarkdownLinks { .. }))
+    {
+        context.literal_markdown_links = literal_markdown_links(document);
+    }
     input.evidence_sources = evidence_sources;
     if !text {
         input.text = None;
@@ -796,6 +855,37 @@ mod tests {
         content_presets::{builtin_content_presets, resolve_content_preset},
         markdown_adapter::markdown_input_with_links,
     };
+
+    #[test]
+    fn literal_markdown_review_uses_rich_text_and_preserves_positions() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/x","title":"T","body":[{"children":[{"_type":"span","text":"é "},{"_type":"span","text":"[Help]("},{"_type":"span","text":"https://example.com)"},{"_type":"span","text":" and `code [ignore](https://example.com)`"},{"_type":"span","text":" [also ignore](https://example.com)","marks":["code"]}]},{"children":[{"_type":"span","text":"native link","marks":["link"]}],"markDefs":[{"_key":"link","_type":"link","href":"https://example.com"}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='links'\n[[gates]]\nid='literal'\nkind='literal_markdown_links'\n",
+        )
+        .unwrap();
+        let report =
+            evaluate_content_with_body_capabilities(&document, &preset, None, [true; 4]).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert!(!report.gates[0].blocking);
+        assert_eq!(report.gates[0].findings.len(), 1);
+        let locations = source_locations(&document, &preset, &report);
+        assert_eq!(
+            (
+                locations[0].block_index,
+                locations[0].span_index,
+                locations[0].utf16_offset
+            ),
+            (0, 1, 0)
+        );
+        let unavailable = evaluate_content_with_body_capabilities(
+            &document,
+            &preset,
+            None,
+            [false, true, true, true],
+        )
+        .unwrap();
+        assert_eq!(unavailable.gates[0].status, GateStatus::NotChecked);
+    }
 
     #[test]
     fn structured_lists_require_complete_valid_body_and_count_nested_items() {

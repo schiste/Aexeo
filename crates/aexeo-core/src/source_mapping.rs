@@ -7,6 +7,7 @@ pub fn prose_gate_has_positions(gate: &crate::content_gate::ContentGate) -> bool
     matches!(
         gate,
         ContentGate::Custom { .. }
+            | ContentGate::LiteralMarkdownLinks { .. }
             | ContentGate::ForbiddenTerms { .. }
             | ContentGate::RepeatedTerms { .. }
             | ContentGate::SentenceLength { .. }

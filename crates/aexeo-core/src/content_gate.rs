@@ -38,6 +38,8 @@ pub struct ContentParagraph {
 #[derive(Debug, Clone, Default)]
 pub struct ContentContext {
     pub paragraphs: Option<Vec<ContentParagraph>>,
+    /// Explicit literal-Markdown link observations in the projected text, if available.
+    pub literal_markdown_links: Option<Vec<(usize, usize)>>,
     /// Sorted byte offsets in the projected text where a block ends: a heading,
     /// paragraph, list item or table cell. A sentence ends there and a literal
     /// term does not match across it. Word counts treat it as a separator.
@@ -248,6 +250,14 @@ pub enum ContentGate {
         profile: crate::editorial_pacing::CompositionProfileRef,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         projection_separator: Option<String>,
+    },
+    /// Advisory review of explicit Markdown links embedded as literal rich text.
+    LiteralMarkdownLinks {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default)]
+        blocking: bool,
     },
     /// Advisory review of structured lists with configured item counts.
     ListItemCount {
@@ -719,6 +729,7 @@ impl ContentGate {
         match self {
             Self::EditorialPacing { severity, .. }
             | Self::ListItemCount { severity, .. }
+            | Self::LiteralMarkdownLinks { severity, .. }
             | Self::WordCount { severity, .. }
             | Self::CharacterCount { severity, .. }
             | Self::MetadataLength { severity, .. }
@@ -761,6 +772,7 @@ impl ContentGate {
         match self {
             Self::EditorialPacing { blocking, .. }
             | Self::ListItemCount { blocking, .. }
+            | Self::LiteralMarkdownLinks { blocking, .. }
             | Self::WordCount { blocking, .. }
             | Self::CharacterCount { blocking, .. }
             | Self::MetadataLength { blocking, .. }
@@ -818,6 +830,7 @@ impl ContentGate {
             | Self::RequiredTerms { .. }
             | Self::ForbiddenTerms { .. } => "text",
             Self::ListItemCount { .. } => "structured_lists",
+            Self::LiteralMarkdownLinks { .. } => "literal_markdown_links",
             Self::LinkCount { .. } => "links",
             Self::LinkDestinations { .. } => "link_destinations",
             Self::LinkReachability { .. } => "link_reachability",
@@ -853,6 +866,7 @@ impl ContentGate {
         match self {
             Self::EditorialPacing { id, .. }
             | Self::ListItemCount { id, .. }
+            | Self::LiteralMarkdownLinks { id, .. }
             | Self::WordCount { id, .. }
             | Self::CharacterCount { id, .. }
             | Self::MetadataLength { id, .. }
@@ -897,6 +911,9 @@ impl ContentGate {
 // Guidance is advisory: thresholds and literal matches do not establish editorial quality.
 fn editorial_suggestion(gate: &ContentGate) -> Option<&'static str> {
     match gate {
+        ContentGate::LiteralMarkdownLinks { .. } => Some(
+            "Check the host rendering; if the markup displays literally, use a native rich-text link without changing its destination.",
+        ),
         ContentGate::ListItemCount { .. } => Some(
             "Review the list in context; preserve every necessary item and change the structure only when it improves the content.",
         ),
@@ -2047,6 +2064,33 @@ impl ContentPreset {
                 })
             };
             match gate {
+                ContentGate::LiteralMarkdownLinks { .. } => {
+                    match context.and_then(|context| context.literal_markdown_links.as_ref()) {
+                        Some(positions)
+                            if positions.len() <= MAX_COLLECTION_ITEMS
+                                && positions
+                                    .iter()
+                                    .all(|(line, column)| *line > 0 && *column > 0) =>
+                        {
+                            measurements.insert("candidates".into(), positions.len());
+                            for &(line, column) in positions {
+                                emit("Possible literal Markdown link in rich text; check how the host renders it".into(), line, column);
+                            }
+                        }
+                        Some(_) => {
+                            reason = Some(
+                                "literal Markdown observations are invalid or exceed the limit"
+                                    .into(),
+                            )
+                        }
+                        None => {
+                            reason = Some(
+                                "literal rich-text structure is unavailable from this adapter"
+                                    .into(),
+                            )
+                        }
+                    }
+                }
                 ContentGate::ListItemCount { flagged_counts, .. } => match lists {
                     Some(lists)
                         if lists.len() <= MAX_COLLECTION_ITEMS
