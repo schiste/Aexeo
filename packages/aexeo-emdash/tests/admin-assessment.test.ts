@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ContentAssessmentDetails, findingRouteCount } from "../src/admin/Findings.js";
+import { BodyCoverageDetails, ContentAssessmentDetails, findingRouteCount } from "../src/admin/Findings.js";
 import type { DocumentAssessment } from "../src/plugin.js";
 
 describe("React content assessment", () => {
@@ -21,5 +21,18 @@ describe("React content assessment", () => {
     expect(JSON.stringify(ContentAssessmentDetails({ assessment: withGate }))).toContain("scope: document; requires: text");
     const { source_mapping: _mapping, ...legacy } = assessment;
     expect(JSON.stringify(ContentAssessmentDetails({ assessment: legacy }))).toContain("Source location coverage is unavailable for this assessment.");
+  });
+});
+
+
+describe("component coverage presentation", () => {
+  it("shows observed unmapped types without implying complete coverage", () => {
+    const view = JSON.stringify(BodyCoverageDetails({ route: { body_coverage: "unavailable", body_unmapped_components: {
+      entries: [{ kind: "block", type: "askYourAi", occurrences: 2 }], truncated: true,
+    } } }));
+    expect(view).toContain("Body coverage is unavailable");
+    expect(view).toContain("askYourAi (block, 2)");
+    expect(view).toContain("additional types omitted");
+    expect(view).toContain("verifying the host renderer");
   });
 });

@@ -80,6 +80,12 @@ export interface EmdashContentItem {
   };
 }
 
+/** Bounded component types observed without a host mapping; not telemetry. */
+export interface UnmappedComponents {
+  entries: Array<{ kind: "block" | "inline"; type: string; occurrences: number }>;
+  truncated: boolean;
+}
+
 export interface EmdashContentMeta {
   id: string;
   collection: string;
@@ -94,6 +100,8 @@ export interface EmdashContentMeta {
   bodySourcePaths?: Array<Array<string | number> | null>;
   /** Original text paths for unchanged spans within projected blocks. */
   bodySourceSpanPaths?: Array<Array<Array<string | number> | null> | null>;
+  /** Unmapped types seen during this projection, never component contents. */
+  unmappedComponents?: UnmappedComponents;
   /** The host's `updatedAt` for the row this entry was adapted from. */
   updatedAt?: string;
 }
@@ -267,9 +275,10 @@ function adaptContentItemInternal(content: EmdashContentItem, options: AdaptCont
   if (document.canonical !== undefined) observedMetadata.push("canonical");
   if (document.lang !== undefined) observedMetadata.push("lang");
   document.observed_metadata_fields = observedMetadata;
+  const unmappedComponents: UnmappedComponents = { entries: [], truncated: false };
   const body = options.contentFields === undefined
-    ? extractPortableText(content.data, options.blockMappings)
-    : extractSelectedContent(content.data, options.contentFields, options.blockMappings);
+    ? extractPortableText(content.data, options.blockMappings, unmappedComponents)
+    : extractSelectedContent(content.data, options.contentFields, options.blockMappings, unmappedComponents);
   if (body !== null) {
     document.body = body.blocks;
     const capabilities = body.capabilities ?? BODY_CAPABILITIES;
@@ -290,6 +299,7 @@ function adaptContentItemInternal(content: EmdashContentItem, options: AdaptCont
       status: content.status,
       title,
       publicUrl: options.publicUrl ?? null,
+      ...(unmappedComponents.entries.length || unmappedComponents.truncated ? { unmappedComponents } : {}),
       ...(bodySourcePaths === undefined ? {} : { bodySourcePaths }),
       ...(bodySourceSpanPaths === undefined ? {} : { bodySourceSpanPaths }),
       ...(content.updatedAt === undefined ? {} : { updatedAt: content.updatedAt }),
@@ -354,6 +364,18 @@ function portableTextSourcePaths(data: Record<string, unknown>, blocks: readonly
 
 type ExtractedBody = { blocks: PortableTextBlock[]; capabilities?: BodyCapability[] };
 const BODY_CAPABILITIES: readonly BodyCapability[] = ["text", "headings", "paragraphs", "links"];
+
+function recordUnmapped(coverage: UnmappedComponents, type: unknown, kind: "block" | "inline"): void {
+  // Host data can be arbitrary. Limit report size and do not echo free text.
+  if (typeof type !== "string" || !/^[A-Za-z_][A-Za-z0-9_-]{0,63}$/.test(type)) {
+    coverage.truncated = true;
+    return;
+  }
+  const existing = coverage.entries.find((entry) => entry.kind === kind && entry.type === type);
+  if (existing) { existing.occurrences++; return; }
+  if (coverage.entries.length >= 32) { coverage.truncated = true; return; }
+  coverage.entries.push({ kind, type, occurrences: 1 });
+}
 const PORTABLE_DECORATIONS = new Set(["strong", "em", "code", "underline", "strike-through"]);
 
 // The bridge understands link marks and these decorations. A used custom or
@@ -441,7 +463,7 @@ function portableTextSourceSpanPaths(
   return mapped ? result : undefined;
 }
 
-function extractSelectedContent(data: Record<string, unknown>, fields: readonly string[], mappings?: CustomBlockMappings): ExtractedBody | null {
+function extractSelectedContent(data: Record<string, unknown>, fields: readonly string[], mappings: CustomBlockMappings | undefined, coverage: UnmappedComponents): ExtractedBody | null {
   if (fields.length === 0 || new Set(fields).size !== fields.length || fields.some((field) => typeof field !== "string" || field.length === 0)) return null;
   const all = ["text", "headings", "paragraphs", "links"] as const;
   let capabilities: readonly (typeof all)[number][] = all;
@@ -457,7 +479,7 @@ function extractSelectedContent(data: Record<string, unknown>, fields: readonly 
     observed = true;
     // A present null explicitly represents an empty field.
     if (value === null) continue;
-    const part = extractFirstPortableText({ content: value }, mappings);
+    const part = extractFirstPortableText({ content: value }, mappings, coverage);
     if (part === null) {
       // An unrecognized field cannot establish coverage, but later selected
       // fields may still contain useful prose and must not be discarded.
@@ -473,9 +495,10 @@ function extractSelectedContent(data: Record<string, unknown>, fields: readonly 
 
 function extractPortableText(
   data: Record<string, unknown>,
-  mappings?: CustomBlockMappings,
+  mappings: CustomBlockMappings | undefined,
+  coverage: UnmappedComponents,
 ): ExtractedBody | null {
-  const result = extractFirstPortableText(data, mappings);
+  const result = extractFirstPortableText(data, mappings, coverage);
   if (result === null) return null;
   const candidates = Object.entries(data).filter(([field, value]) =>
     isPortableTextArray(value) || isMixedPortableTextArray(value) || isEmdashBlocksArray(value, field) ||
@@ -498,7 +521,8 @@ function extractPortableText(
 
 function extractFirstPortableText(
   data: Record<string, unknown>,
-  mappings?: CustomBlockMappings,
+  mappings: CustomBlockMappings | undefined,
+  coverage: UnmappedComponents,
 ): ExtractedBody | null {
   // Prefer established rich-text fields. EmDash's typed `blocks` field is a
   // separate composition format: its _type/_version/_key envelope does not
@@ -508,8 +532,8 @@ function extractFirstPortableText(
     const value = data[slug];
     if ((Array.isArray(value) && value.length === 0) || (typeof value === "string" && value.trim().length === 0)) foundEmptyBody = true;
     if (isPortableTextArray(value)) return { blocks: value };
-    if (isMixedPortableTextArray(value)) return mapMixedPortableText(value, mappings);
-    if (isEmdashBlocksArray(value, slug)) return mapMixedPortableText(value, mappings);
+    if (isMixedPortableTextArray(value)) return mapMixedPortableText(value, mappings, coverage);
+    if (isEmdashBlocksArray(value, slug)) return mapMixedPortableText(value, mappings, coverage);
     if (typeof value === "string" && value.trim().length > 0) {
       return { blocks: [portableTextBlock(value.trim(), `${slug}-text`)], capabilities: ["text"] };
     }
@@ -518,14 +542,14 @@ function extractFirstPortableText(
   const blocks = data["blocks"];
   if (Array.isArray(blocks) && blocks.length === 0) foundEmptyBody = true;
   if (isPortableTextArray(blocks)) return { blocks };
-  if (isMixedPortableTextArray(blocks)) return mapMixedPortableText(blocks, mappings);
-  if (isEmdashBlocksArray(blocks, "blocks")) return mapMixedPortableText(blocks, mappings);
+  if (isMixedPortableTextArray(blocks)) return mapMixedPortableText(blocks, mappings, coverage);
+  if (isEmdashBlocksArray(blocks, "blocks")) return mapMixedPortableText(blocks, mappings, coverage);
 
   for (const [field, value] of Object.entries(data)) {
     if (field === "body" || field === "content" || field === "blocks") continue;
     if (isPortableTextArray(value)) return { blocks: value };
-    if (isMixedPortableTextArray(value)) return mapMixedPortableText(value, mappings);
-    if (isEmdashBlocksArray(value, field)) return mapMixedPortableText(value, mappings);
+    if (isMixedPortableTextArray(value)) return mapMixedPortableText(value, mappings, coverage);
+    if (isEmdashBlocksArray(value, field)) return mapMixedPortableText(value, mappings, coverage);
   }
   return foundEmptyBody ? { blocks: [] } : null;
 }
@@ -605,8 +629,8 @@ function isMixedPortableTextArray(value: unknown): value is unknown[] {
   return Array.isArray(value) && value.some(isPortableTextBlockCandidate);
 }
 
-function mapMixedPortableText(blocks: unknown[], mappings?: CustomBlockMappings, depth = 0): ExtractedBody {
-  if (depth > 8) return { blocks: [], capabilities: [] };
+function mapMixedPortableText(blocks: unknown[], mappings: CustomBlockMappings | undefined, coverage: UnmappedComponents, depth = 0): ExtractedBody {
+  if (depth > 8) { coverage.truncated = true; return { blocks: [], capabilities: [] }; }
   const result: PortableTextBlock[] = [];
   let capabilities = [...BODY_CAPABILITIES];
   for (const block of blocks) {
@@ -616,7 +640,7 @@ function mapMixedPortableText(blocks: unknown[], mappings?: CustomBlockMappings,
     }
     if (isPortableTextBlockCandidate(block)) {
       const normalized = normalizePortableBlock(block);
-      const projected = projectInlineBlock(normalized.block, mappings);
+      const projected = projectInlineBlock(normalized.block, mappings, coverage);
       result.push(projected.block);
       capabilities = normalized.incomplete ? [] : intersectCapabilities(capabilities, projected.capabilities);
       if (normalized.linksIncomplete) capabilities = capabilities.filter((capability) => capability !== "links");
@@ -626,7 +650,7 @@ function mapMixedPortableText(blocks: unknown[], mappings?: CustomBlockMappings,
       capabilities = [];
       continue;
     }
-    const mapped = mapCustomBlocks([block], mappings, depth + 1);
+    const mapped = mapCustomBlocks([block], mappings, coverage, depth + 1);
     result.push(...mapped.blocks);
     capabilities = intersectCapabilities(capabilities, mapped.capabilities);
   }
@@ -635,7 +659,7 @@ function mapMixedPortableText(blocks: unknown[], mappings?: CustomBlockMappings,
 
 /** An inline declaration asserts that its fields represent the host renderer.
  * Failure leaves known spans intact and withholds body coverage. */
-function projectInlineBlock(block: Record<string, unknown>, mappings?: CustomBlockMappings): { block: PortableTextBlock; capabilities: BodyCapability[] } {
+function projectInlineBlock(block: Record<string, unknown>, mappings: CustomBlockMappings | undefined, coverage: UnmappedComponents): { block: PortableTextBlock; capabilities: BodyCapability[] } {
   const children: PortableTextSpan[] = [];
   const defs = Array.isArray(block["markDefs"]) ? [...block["markDefs"]] : [];
   const keys = new Set(defs.flatMap((def) => isRecord(def) && typeof def["_key"] === "string" ? [def["_key"]] : []));
@@ -654,6 +678,7 @@ function projectInlineBlock(block: Record<string, unknown>, mappings?: CustomBlo
     const type = isRecord(child) ? child["_type"] : undefined;
     const mapping: unknown = typeof type === "string" && mappings && Object.hasOwn(mappings, type) ? mappings[type] : undefined;
     if (!isRecord(child) || !isRecord(mapping) || !Array.isArray(mapping["inline"])) {
+      if (mapping === undefined && type !== "span") recordUnmapped(coverage, type, "inline");
       capabilities = [];
       continue;
     }
@@ -707,14 +732,16 @@ function isEmdashBlocksArray(
 function mapCustomBlocks(
   blocks: Array<Record<string, unknown>>,
   mappings: CustomBlockMappings | undefined,
+  coverage: UnmappedComponents,
   depth = 0,
 ): ExtractedBody {
-  if (depth > 8) return { blocks: [], capabilities: [] };
+  if (depth > 8) { coverage.truncated = true; return { blocks: [], capabilities: [] }; }
   const unavailable = () => ({ blocks: blocksToPortableText(blocks), capabilities: [] as [] });
   const result: PortableTextBlock[] = [];
   let capabilities = [...BODY_CAPABILITIES];
   const mapFields = (record: Record<string, unknown>, fields: readonly CustomBlockField[], depth: number): boolean => {
-    if (depth > 8 || fields.length === 0) return false;
+    if (depth > 8) { coverage.truncated = true; return false; }
+    if (fields.length === 0) return false;
     for (const entry of fields) {
       if (!entry || typeof entry.field !== "string" || !entry.field ||
         !["heading", "paragraph", "richText", "link", "repeat"].includes(entry.kind) ||
@@ -733,7 +760,7 @@ function mapCustomBlocks(
         if (value.length === 0 || isPortableTextArray(value)) {
           result.push(...value);
         } else if (isMixedPortableTextArray(value) || isEmdashBlocksArray(value, "blocks")) {
-          const nested = mapMixedPortableText(value, mappings, depth + 1);
+          const nested = mapMixedPortableText(value, mappings, coverage, depth + 1);
           result.push(...nested.blocks);
           capabilities = intersectCapabilities(capabilities, nested.capabilities);
         } else {
@@ -773,7 +800,10 @@ function mapCustomBlocks(
           new Set(declared).size !== declared.length) return unavailable();
       fields = mapping["fields"] as CustomBlockField[];
       capabilities = intersectCapabilities(capabilities, declared as BodyCapability[]);
-    } else return unavailable();
+    } else {
+      if (mapping === undefined) recordUnmapped(coverage, type, "block");
+      return unavailable();
+    }
     // An empty legacy mapping declares the component irrelevant to the body.
     if (fields.length === 0) continue;
     if (!mapFields(block, fields, depth)) return unavailable();

@@ -442,7 +442,14 @@ quote="Quote"
   assert.deepEqual(document.body.filter((entry) => ["a", "b", "c"].includes(entry._key)).map((entry) => entry.children[0].text), ["Before", "Between", "After"]);
   assert.deepEqual(document.body_capabilities, []);
   assert.equal(host.store.get("findings:/mixed")?.body_coverage, "unavailable");
+  const expectedComponents = { entries: [
+    { kind: "block", type: "askYourAi", occurrences: 1 },
+    { kind: "block", type: "unknown", occurrences: 1 },
+  ], truncated: false };
+  assert.deepEqual(host.store.get("findings:/mixed")?.body_unmapped_components, expectedComponents);
   for (const rule of ["CNT001", "GEO008", "GEO010"]) assert.equal(has(host, "/mixed", rule), false);
+  await refresh(host);
+  assert.deepEqual(host.store.get("findings:/mixed")?.body_unmapped_components, expectedComponents);
 }
 
 // An unrecognized conventional body field cannot certify another field as complete.

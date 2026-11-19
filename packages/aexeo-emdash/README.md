@@ -250,6 +250,13 @@ value can coexist with an unobserved source. An observed empty description is
 not the same as an unavailable mapping. `rendered_page: not_observed` remains
 true regardless of body coverage. Older stored reports may lack this field.
 
+Revision audit `input_coverage.body.unmapped_components` lists the block and
+inline component types encountered without a host mapping, with occurrence
+counts. It is limited to the projection actually inspected; an empty list
+does not establish complete coverage, a valid mapping, or rendered-page
+equivalence. Names are bounded and the list reports `truncated` when entries
+are omitted. These report details are not included in aggregate telemetry.
+
 The findings page can create or retrieve an audit by revision and record a
 review against an individual finding. `set_review` and `get_review` expose the
 same operations to consented MCP clients. Saving requires `plugins:manage` and

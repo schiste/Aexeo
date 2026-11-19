@@ -794,6 +794,32 @@ describe("assessment persistence", () => {
     const page = JSON.stringify(await renderFindingsPage(ctx.kv, { emptyFindingsText: "empty", emptyScoreText: "empty", refreshFailureVariant: "error", score: async () => null, truthLabel: () => "" }));
     expect(page).toContain("coverage is unknown for 1 older or failed evaluations");
   });
+  it("persists unmapped component diagnostics with save and refresh results", async () => {
+    const page = item("components", NEW);
+    page.data.body = [{ _type: "block", children: [{ _type: "span", text: "Known." }] }, { _type: "askYourAi", prompt: "Private prompt" }];
+    const { ctx, store } = host([page]);
+    const events: unknown[] = [];
+    ctx.log = { info: (name, data) => { events.push([name, data]); }, warn: () => {}, error: () => {} };
+    const expected = { entries: [{ kind: "block", type: "askYourAi", occurrences: 1 }], truncated: false };
+    const check = async () => {
+      expect(store.get(findingsKey("/components"))).toMatchObject({ body_unmapped_components: expected });
+      const panel = JSON.stringify(await renderDocumentPanel(ctx.kv, "/components"));
+      expect(panel).toContain("askYourAi");
+      expect(panel).not.toContain("Private prompt");
+      const { payload } = await handleDataRoute(ctx, { refresh: false, collections: ["pages"], evaluator: returning() });
+      expect(payload.routes.find((route) => route.route === "/components")).toMatchObject({ body_unmapped_components: expected });
+    };
+    await save(ctx, page, returning());
+    await check();
+    await evaluateAndPersistAll(ctx, { collections: ["pages"], evaluator: returning() });
+    await check();
+    const updated = item("components", "2030-01-03T00:00:00.000Z");
+    updated.data.body = [];
+    await save(ctx, updated, returning());
+    expect(store.get(findingsKey("/components"))).not.toHaveProperty("body_unmapped_components");
+    expect(JSON.stringify(events)).not.toContain("askYourAi");
+    expect(JSON.stringify(events)).not.toContain("Private prompt");
+  });
   it("records body coverage during refresh even without a preset", async () => {
     const empty = item("empty", NEW);
     empty.data.body = [];
