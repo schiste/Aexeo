@@ -241,6 +241,15 @@ independently enforce a publication gate or prevent a change after an audit.
 Reports contain editorial findings and require the same access controls and
 retention care as the source content.
 
+New revision reports include `input_coverage`: body coverage and capabilities,
+field-selection mode and configured fields, and whether a description source
+was observed or a value supplied. Configure `contentFieldsByCollection` and
+`descriptionFieldsByCollection` to match the host renderer; automatic field
+selection does not establish that the renderer uses those fields. A supplied
+value can coexist with an unobserved source. An observed empty description is
+not the same as an unavailable mapping. `rendered_page: not_observed` remains
+true regardless of body coverage. Older stored reports may lack this field.
+
 The findings page can create or retrieve an audit by revision and record a
 review against an individual finding. `set_review` and `get_review` expose the
 same operations to consented MCP clients. Saving requires `plugins:manage` and

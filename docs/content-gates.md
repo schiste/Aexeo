@@ -75,6 +75,18 @@ group = "html"
 
 Use `aexeo-cli content --list-site-groups` for supported group names. The existing site configuration's group switches, suppressions, and severity overrides apply. A group disabled by that configuration is `not_checked`. The `seo-website` preset remains a single site audit gate, preserving its existing complete findings, including deployment diagnostics.
 
+The opt-in `portable-text-link-review` preset detects explicit Markdown links
+such as `[source](https://example.org)` embedded in observed Portable Text.
+It is advisory: verify the host rendering before changing content or links.
+It ignores code-marked spans and Markdown code, and can map a finding to its
+original span. It requires complete text projection; unsupported adapters or
+incomplete projection report `not_checked`. It does not validate link targets,
+rendered HTML, bare citation markers, or unresolved reference definitions.
+Compose it with another preset using `extends`, and enable it only where the
+host renders Portable Text as rich text rather than interpreting Markdown.
+
+The opt-in `fragment-readable` preset is intended for an individual introduction, example, prerequisite, or other fragment. It composes only the advisory shared sentence-length check; it does not require article length or page metadata. Select it explicitly for fragments, and configure other checks according to the field and language. A clean result does not establish completeness or factual accuracy.
+
 The built-in `article` preset requires at least one whitespace-separated word. `glossary` inherits it and sets a maximum of 500 words. These deliberately minimal examples are starting points, not comprehensive editorial standards. `article-editorial` and `glossary-editorial` extend them with advisory word-count ranges and title/description metadata checks. Their thresholds are examples to override for your audience, language and content type; missing metadata is explicitly `not_checked`.
 
 The [built-in TOML files](../crates/aexeo-core/presets) are embedded in native and WASM builds and can also be copied into another project as a starting point.

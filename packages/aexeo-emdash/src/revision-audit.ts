@@ -4,6 +4,7 @@ import { selectContentPreset } from "./preset-selection.js";
 import type { ContentReport } from "./content.js";
 import type { SandboxCtx } from "./plugin.js";
 import type { EmdashDocument } from "./types.js";
+import { cmsBodyCoverage } from "./cms-coverage.js";
 
 export interface RevisionAuditRequest { collection: string; id: string; revision: string }
 interface Revision { id: string; collection: string; entryId: string; data: Record<string, unknown> }
@@ -56,6 +57,22 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
       source_freshness: "not_checked" as const,
       runtime_providers: "not_invoked" as const,
       locale_source: "current_record" as const,
+    },
+    input_coverage: {
+      body: {
+        coverage: cmsBodyCoverage(adapted.document),
+        capabilities: adapted.document.body === undefined ? [] :
+          adapted.document.body_capabilities ?? ["text", "headings", "paragraphs", "links"],
+        field_selection: options.contentFieldsByCollection?.[collection] === undefined ? "automatic" as const : "configured" as const,
+        configured_fields: options.contentFieldsByCollection?.[collection] ?? null,
+      },
+      description: {
+        field_selection: options.descriptionFieldsByCollection?.[collection] === undefined ? "automatic" as const : "configured" as const,
+        configured_fields: options.descriptionFieldsByCollection?.[collection] ?? null,
+        source_observed: adapted.document.description_source_observed === true,
+        value_supplied: adapted.document.description !== undefined,
+      },
+      rendered_page: "not_observed" as const,
     },
     source_paths: { blocks: adapted.meta.bodySourcePaths ?? null, spans: adapted.meta.bodySourceSpanPaths ?? null }, report };
   await ctx.kv.set(reportKey(auditId), result);
