@@ -996,6 +996,96 @@ mod tests {
     }
 
     #[test]
+    fn projected_rename_swap_integrates_with_candidate_verdict() {
+        use crate::content_gate_sources::ConfinedContentFiles;
+        use crate::content_gate_verdict::{
+            CandidateDecisionContext, OfflineDecisionContext,
+            evaluate_experimental_candidate_verdict, revalidate_experimental_candidate_verdict,
+        };
+        use crate::html_content_adapter::HtmlContentScope;
+        use std::{
+            io::{self, Cursor},
+            path::Path,
+        };
+        struct NoFiles;
+        impl ConfinedContentFiles for NoFiles {
+            type Reader = Cursor<Vec<u8>>;
+            fn open(&mut self, _: &Path, _: &Path) -> io::Result<Self::Reader> {
+                panic!("unexpected file access")
+            }
+        }
+        let (snapshot, _, mut change) = fixture();
+        let preset = ContentPreset::from_toml("version=1\nname='collection'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\nblocking=true\n").unwrap();
+        let metadata = snapshot
+            .items
+            .iter()
+            .map(|i| {
+                (
+                    i.entity_id.clone(),
+                    Some(BTreeMap::from([("slug".into(), i.entity_id.clone())])),
+                )
+            })
+            .collect();
+        let a = item("a", "new a", Some(vec![]));
+        let b = item("b", "new b", Some(vec![]));
+        let mut to_a = entry("a", Operation::Rename, Some(&snapshot.items[1]), Some(&a));
+        to_a.previous_entity_id = Some("b".into());
+        to_a.metadata = Some(BTreeMap::from([("slug".into(), "a".into())]));
+        let mut to_b = entry("b", Operation::Rename, Some(&snapshot.items[0]), Some(&b));
+        to_b.previous_entity_id = Some("a".into());
+        to_b.metadata = Some(BTreeMap::from([("slug".into(), "b".into())]));
+        change.entries = vec![to_a, to_b];
+        let after = [a, b];
+        let baseline =
+            CollectionBaseline::prepare(snapshot.clone(), metadata, preset.clone()).unwrap();
+        let projected = baseline.project_candidate(&change, &after).unwrap();
+        let decision = OfflineDecisionContext {
+            change: &change,
+            preset: &preset,
+            max_entry_bytes: 1024,
+            max_total_bytes: 4096,
+            plain_text_paragraphs: true,
+            collection: Some(projected.as_change_collection()),
+            evaluator_identity: b"test-build",
+        };
+        let ctx = CandidateDecisionContext {
+            decision: &decision,
+            base: &snapshot,
+            after: &after,
+        };
+        let verdict = evaluate_experimental_candidate_verdict(
+            &ctx,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        assert_eq!(
+            verdict.receipt.verdict.status,
+            aexeo_contracts::content_gate_protocol::VerdictStatus::NotChecked
+        );
+        assert!(
+            verdict
+                .receipt
+                .verdict
+                .checks
+                .iter()
+                .any(|check| check.id == "collection:0::unique"
+                    && check.status == aexeo_contracts::content_gate_protocol::CheckStatus::Passed)
+        );
+        assert!(
+            revalidate_experimental_candidate_verdict(
+                &verdict,
+                &ctx,
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document,
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn composed_candidate_rejects_unsupported_or_missing_scope() {
         let (snapshot, item_only, _) = fixture();
         let metadata = snapshot
