@@ -83,6 +83,21 @@ def _validate_schema(value, filename):
         raise VerificationError("invalid document schema") from error
 
 
+def validate_change_semantics(change):
+    """Validate v1 schema and selected invariants not expressed by the schema."""
+    _validate_schema(change, "change.schema.json")
+    entity_ids = [entry["entity_id"] for entry in change["entries"]]
+    if len(set(entity_ids)) != len(entity_ids):
+        raise VerificationError("duplicate entity ID")
+    if change["origin"]["kind"] == "git" and change["base"]["kind"] != "git":
+        raise VerificationError("git origin requires a git base")
+    has_files = any("file" in entry[field]
+                    for entry in change["entries"] for field in ("before", "after")
+                    if field in entry)
+    if has_files and ("content_root" not in change or not Path(change["content_root"]).is_absolute()):
+        raise VerificationError("content file requires an absolute content root")
+
+
 def validate_verdict(verdict):
     """Validate the public v1 verdict schema and counts."""
     _validate_schema(verdict, "verdict.schema.json")
@@ -238,12 +253,7 @@ def verify_subject(change_path, expected_digest, verdict, validate_change=False,
                 or not isinstance(change.get("entries"), list)):
             raise VerificationError("invalid change subject fields")
         if validate_change or verify_inline_content or content_files is not None:
-            _validate_schema(change, "change.schema.json")
-            # The v1 protocol requires entity IDs to be unique, which its
-            # JSON Schema cannot express for a property of array objects.
-            entity_ids = [entry["entity_id"] for entry in change["entries"]]
-            if len(set(entity_ids)) != len(entity_ids):
-                raise VerificationError("duplicate entity ID")
+            validate_change_semantics(change)
         if verify_inline_content or content_files is not None:
             verify_content_states(change, {} if content_files is None else content_files)
         entries = []

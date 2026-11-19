@@ -1,5 +1,6 @@
 """Cross-language and adversarial tests for candidate input comparison."""
 import copy
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -8,7 +9,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from verify_candidate_inputs import VerificationError, compare_fresh, overlay, read_stable, verify
+from verify_candidate_inputs import (VerificationError, binding, compare_fresh, overlay,
+                                     read_stable, revision_digest, verify)
 
 VECTOR = Path(__file__).with_name('candidate-verdict-vector.json')
 
@@ -147,6 +149,26 @@ class CandidateVerification(unittest.TestCase):
             self.assertNotEqual(subprocess.run(args + policy[:-2], capture_output=True).returncode, 0)
             missing_dependency = [sys.executable, '-S', *args[1:], *policy]
             self.assertNotEqual(subprocess.run(missing_dependency, capture_output=True).returncode, 0)
+
+    @unittest.skipUnless(schema_formats_available(), 'requires schema validator and format checkers')
+    def test_fresh_comparison_rejects_git_origin_with_opaque_base(self):
+        change = json.loads(self.artifacts['change'])
+        change['origin']['kind'] = 'git'
+        self.artifacts['change'] = self.encoded(change)
+        self.envelope['receipt']['decision_inputs']['change']['sha256'] = hashlib.sha256(self.artifacts['change']).hexdigest()
+        candidate = overlay(self.base, change, self.after)
+        inputs = dict(self.artifacts, collection=None, external_evidence=None,
+                      candidate_base_revision_sha256=revision_digest(self.base),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        self.envelope['binding'] = binding(inputs)
+        # Binding alone can match: the stronger comparison must also reject
+        # this v1 semantic mismatch even if both verdicts are identical.
+        self.assertEqual(self.check()['input_binding'], 'match')
+        with self.assertRaises(VerificationError):
+            compare_fresh(self.encoded(self.envelope), self.encoded(self.envelope),
+                          self.encoded(self.base), self.encoded(self.after), self.artifacts,
+                          ['gate:7:article:words'], ('aexeo', '0.0.24'))
 
     def test_overflowing_json_number_is_rejected(self):
         data = self.encoded(self.envelope).replace(b'"candidate_profile":', b'"unexpected":1e999, "candidate_profile":', 1)

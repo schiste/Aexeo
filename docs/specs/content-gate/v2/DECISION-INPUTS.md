@@ -292,7 +292,10 @@ The caller must independently provide and protect the intended change bytes.
 The independent comparator also accepts `--validate-change`. It validates the
 independently supplied, manifest-bound change bytes against the public v1 change
 schema, with RFC 3339 and URI format checking, and also verifies the verdict
-subject. Missing schema-validation or format-checking dependencies fail closed.
+subject. It also rejects duplicate entity IDs, a Git origin with an opaque base,
+and file states without a content root absolute on the verifier host. Checking
+the root spelling does not resolve or confine files. Missing schema-validation
+or format-checking dependencies fail closed.
 This is opt-in and does not change `--verify-subject` alone. The v1 schema allows
 extension fields and schema validation does not check whether referenced content
 bytes match their hashes, establish completeness or freshness, authenticate the
