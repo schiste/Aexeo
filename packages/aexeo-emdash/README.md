@@ -234,8 +234,12 @@ is not evidence of current content. Source paths refer only to the revision
 snapshot. Historical rendered HTML and SEO-panel fields are unavailable, and
 runtime evidence, link and external-gate providers are not invoked. Inspect
 each gate's `not_checked` status. These checks do not establish factual accuracy
-or currency. Reports contain editorial findings and require the same access
-controls and retention care as the source content.
+or currency. New reports include `assurance.publication_authorization` set to
+`not_granted` and structured coverage limitations; an absent `assurance` on an
+older stored report is not permission to publish. These indicators do not
+independently enforce a publication gate or prevent a change after an audit.
+Reports contain editorial findings and require the same access controls and
+retention care as the source content.
 
 The findings page can create or retrieve an audit by revision and record a
 review against an individual finding. `set_review` and `get_review` expose the
