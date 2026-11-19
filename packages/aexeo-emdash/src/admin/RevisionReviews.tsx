@@ -1,10 +1,21 @@
 import * as React from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ContentReport } from "../content.js";
 import type { ReviewDecision } from "../review-dispositions.js";
 
 interface Audit { status: "evaluated"; audit_id: string; revision: string; revision_status: string; preset: string; limitation: string; report: ContentReport }
 type Response = Audit | { status: "not_checked"; reason: string };
+interface HistoryEvent { event_id: string; recorded_at: string; decision: ReviewDecision; explanation: string; actor: { kind: "authenticated_account"; id: string } | { kind: "unattributed" } }
+type HistoryResponse = { status: "available"; completeness: "not_guaranteed"; events: HistoryEvent[] } | { status: "not_available"; reason: string };
+
+export function ReviewHistory({ events }: { events: HistoryEvent[] }): React.JSX.Element {
+  return <div><p>History may be incomplete. Entries are advisory submissions, not publication approvals; a saved submission may not have updated the current review.</p>
+    {events.length === 0 ? <p>No recorded submissions.</p> : <ol>{events.map(event => <li key={event.event_id}>
+      <p>{event.recorded_at} — {event.actor.kind === "authenticated_account" ? `Account: ${event.actor.id}` : "Unattributed"} — {event.decision}</p>
+      <p>{event.explanation}</p>
+    </li>)}</ol>}
+  </div>;
+}
 
 async function call<T>(route: string, input: unknown): Promise<T> {
   const response = await fetch(`/_emdash/api/plugins/aexeo-emdash/${route}`, {
@@ -31,10 +42,15 @@ export function RevisionReviews(): React.JSX.Element {
   const [decision, setDecision] = useState<ReviewDecision>("retain_with_explanation");
   const [explanation, setExplanation] = useState("");
   const [message, setMessage] = useState("");
+  const [history, setHistory] = useState<HistoryEvent[] | null>(null);
+  const [historyMessage, setHistoryMessage] = useState("");
+  const historyVersion = useRef(0);
+  const selectionVersion = useRef(0);
+  const clearHistory = () => { selectionVersion.current++; historyVersion.current++; setHistory(null); setHistoryMessage(""); };
   const choices = audit?.report.gates.flatMap(g => g.findings.map((f, index) => ({ gate: g.gate_id, index, text: f.message }))) ?? [];
   const choice = selected === "" ? undefined : choices[Number(selected)];
   const show = (result: Response) => {
-    setSelected(""); setExplanation("");
+    clearHistory(); setSelected(""); setExplanation("");
     if (result.status === "evaluated") { setAudit(result); setAuditId(result.audit_id); setMessage(""); }
     else { setAudit(null); setMessage(`Not checked: ${result.reason}`); }
   };
@@ -43,11 +59,25 @@ export function RevisionReviews(): React.JSX.Element {
   const review = async (save: boolean) => {
     if (!audit || !choice) return;
     const input = { audit_id: audit.audit_id, gate_id: choice.gate, finding_index: choice.index };
+    const version = selectionVersion.current;
     try {
       const result = await call<{ status: string; reason?: string; review?: { decision: ReviewDecision; explanation: string } }>(save ? "set-revision-review" : "get-revision-review", save ? { ...input, decision, explanation } : input);
+      if (version !== selectionVersion.current) return;
+      if (save && result.status === "recorded") clearHistory();
       if (result.review) { setDecision(result.review.decision); setExplanation(result.review.explanation); }
       setMessage(result.status === "recorded" ? (save ? "Review saved for this audit only." : "Review loaded for this audit.") : `Review not recorded${result.reason ? `: ${result.reason}` : "."}`);
-    } catch (error) { setMessage(String(error)); }
+    } catch (error) { if (version === selectionVersion.current) setMessage(String(error)); }
+  };
+  const loadHistory = async () => {
+    if (!audit || !choice) return;
+    const version = ++historyVersion.current;
+    setHistory(null); setHistoryMessage("Loading history…");
+    try {
+      const result = await call<HistoryResponse>("get-revision-review-history", { audit_id: audit.audit_id, gate_id: choice.gate, finding_index: choice.index });
+      if (version !== historyVersion.current) return;
+      if (result.status === "available") { setHistory(result.events); setHistoryMessage(""); }
+      else setHistoryMessage(`History unavailable: ${result.reason}`);
+    } catch (error) { if (version === historyVersion.current) setHistoryMessage(String(error)); }
   };
   return <section className="rounded border border-kumo-line p-3 text-sm">
     <RevisionReviewInstructions />
@@ -64,12 +94,15 @@ export function RevisionReviews(): React.JSX.Element {
       <p>{audit.limitation}</p>
       <ul>{audit.report.gates.map(g => <li key={g.gate_id}>{g.gate_id}: {g.status}{g.reason ? ` — ${g.reason}` : ""}</li>)}</ul>
       {choices.length > 0 && <div>
-        <label>Finding <select value={selected} onChange={e => { setSelected(e.target.value); setExplanation(""); }}><option value="">Select a finding</option>{choices.map((item, index) => <option key={`${item.gate}:${item.index}`} value={index}>{item.gate}: {item.text}</option>)}</select></label>
+        <label>Finding <select value={selected} onChange={e => { clearHistory(); setMessage(""); setSelected(e.target.value); setExplanation(""); }}><option value="">Select a finding</option>{choices.map((item, index) => <option key={`${item.gate}:${item.index}`} value={index}>{item.gate}: {item.text}</option>)}</select></label>
         {choice && <div>
           <label>Decision <select value={decision} onChange={e => setDecision(e.target.value as ReviewDecision)}><option value="retain_with_explanation">Retain with explanation</option><option value="needs_revision">Needs revision</option><option value="not_applicable">Not applicable</option></select></label>
           <label>Explanation <textarea value={explanation} maxLength={2000} onChange={e => setExplanation(e.target.value)} /></label>
           <button type="button" onClick={() => void review(false)}>Load review</button>
           <button type="button" disabled={!explanation.trim()} onClick={() => void review(true)}>Save review</button>
+          <button type="button" onClick={() => void loadHistory()}>Load review history</button>
+          {historyMessage && <p role="status">{historyMessage}</p>}
+          {history && <ReviewHistory events={history} />}
         </div>}
       </div>}
     </div>}
