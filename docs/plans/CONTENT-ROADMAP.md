@@ -378,6 +378,10 @@ registry before considering the release delivered.
   artifact bytes and compares their verdicts except the evaluation timestamp.
   It rejects different decision manifests before reading artifacts and hashes
   each supplied artifact once; the host still must ensure stable, trusted inputs.
+  Candidate-envelope comparison can optionally validate both verdicts against
+  a separately supplied fresh evaluation, the change subject and host-selected
+  required checks and validator labels. It does not establish trust, freshness
+  or publication atomicity; this remains experimental.
   The independent comparator can compare either a receipt or an explicit
   transport bundle on each side. It checks each bundle's embedded artifacts,
   then compares independently supplied current artifacts once per manifest check.

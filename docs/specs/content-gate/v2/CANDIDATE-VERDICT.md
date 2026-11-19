@@ -59,10 +59,33 @@ format or candidate-mode artifact bundle. A bundle produced by the same
 untrusted evaluation is not an independent source of current inputs. Treat
 inputs as private where appropriate.
 
-The tool reports only whether these input bindings match. It does not validate
-the embedded verdict, rerun rules, authenticate the producer or the inputs,
+In its default mode, the tool reports only whether these input bindings match.
+It does not validate the embedded verdict, rerun rules, authenticate the producer or the inputs,
 prove completeness or freshness, or authorize publication. A successful
 comparison does not stop an attacker from modifying the verdict field itself;
 independent trusted re-evaluation and a protected publication boundary remain
 necessary. The shared vector is consumed by the Python tests and revalidated
 by Rust; it is illustrative, not an authority for the host's current state.
+
+### Compare with a fresh verdict
+
+The verifier optionally accepts `--fresh-envelope FRESH.json`, a repeatable
+`--require-check CHECK-ID`, and both `--validator-name NAME` and
+`--validator-version VERSION`. All three policy requirements are mandatory in
+this mode. The host must obtain the fresh envelope from an independently trusted
+re-evaluation of the same current inputs. The verifier reconstructs both input
+bindings, validates the v1 change and verdict schemas and inline content hashes,
+compares each verdict subject with the supplied change, requires the selected
+checks to be blocking and passed, and compares the full verdicts except their
+evaluation timestamps. Matching tampered verdicts with an incorrect subject or
+validator label are rejected. Missing schema dependencies fail closed. The JSON
+result reports the number of required checks, not their identities. Opt-in
+`--telemetry` emits aggregate status, duration, mode and check count to stderr;
+it contains no paths, content, validator labels or check IDs.
+
+This comparison does not run the evaluator or authenticate either envelope,
+validator label or supplied data. The host must independently establish the
+fresh evaluator and inputs, their currency and completeness, and an atomic
+publication boundary. A matching result is not a publication authorization or
+a portable v2 verdict. The original input-only mode remains available and
+continues to report that the verdict was not validated.

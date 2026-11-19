@@ -1,4 +1,4 @@
-"""Compare candidate-bound verdict input bytes; never validate or authorize a verdict.
+"""Compare candidate-bound input bytes and optionally independently supplied verdicts.
 
 Inputs must be independently obtained. This does not establish source origin,
 freshness, inventory completeness, rule results, or atomicity across files or
@@ -8,10 +8,12 @@ import argparse
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import struct
 import sys
+import time
 import unicodedata
 
 from verify_decision_inputs import VerificationError, _open_regular, _reject_constant, _unique_object, parse_manifest
@@ -42,11 +44,18 @@ def read_stable(path):
     return data
 
 
+def _finite_float(value):
+    result = float(value)
+    if not math.isfinite(result):
+        raise VerificationError('invalid JSON number')
+    return result
+
+
 def parse(data):
     if len(data) > LIMIT:
         raise VerificationError('JSON input exceeds size limit')
     try:
-        return json.loads(data.decode('utf-8'), object_pairs_hook=_unique_object, parse_constant=_reject_constant)
+        return json.loads(data.decode('utf-8'), object_pairs_hook=_unique_object, parse_constant=_reject_constant, parse_float=_finite_float)
     except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
         raise VerificationError('invalid JSON') from error
 
@@ -243,17 +252,79 @@ def verify(envelope_bytes, base_bytes, after_bytes, artifacts):
     return {'input_binding': 'match', 'verdict_validated': False, 'publication_authorized': False}
 
 
+def compare_fresh(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts, required_checks, expected_validator):
+    """Compare a trusted fresh evaluation; this never authorizes publication."""
+    from compare_offline_receipts import (
+        _typed_equal, _validate_schema, require_passed_checks,
+        require_validator_identity, validate_verdict, verify_content_states,
+    )
+    # Both bindings are reconstructed against the same host-supplied bytes.
+    verify(previous_bytes, base_bytes, after_bytes, artifacts)
+    verify(fresh_bytes, base_bytes, after_bytes, artifacts)
+    previous, fresh = parse(previous_bytes), parse(fresh_bytes)
+    change = parse(artifacts['change'])
+    _validate_schema(change, 'change.schema.json')
+    verify_content_states(change, {})  # Candidate mode requires inline bytes.
+    entries = change['entries']
+    if len({entry['entity_id'] for entry in entries}) != len(entries):
+        raise VerificationError('duplicate entity ID')
+    subject = {'change_id': change['change_id'], 'base': change['base'],
+               'entries': [{'entity_id': entry['entity_id'],
+                            'sha256': entry['after']['sha256'] if entry.get('after') is not None else None}
+                           for entry in entries]}
+    verdicts = [envelope['receipt']['verdict'] for envelope in (previous, fresh)]
+    for verdict in verdicts:
+        validate_verdict(verdict)
+        require_passed_checks(verdict, required_checks)
+        require_validator_identity(verdict, expected_validator)
+        if not _typed_equal(verdict['subject'], subject):
+            raise VerificationError('verdict subject differs from change')
+    old, new = (dict(verdict) for verdict in verdicts)
+    del old['evaluated_at']
+    del new['evaluated_at']
+    if not _typed_equal(old, new):
+        raise VerificationError('verdicts differ')
+    return {'input_binding': 'match', 'verdict_validated': True,
+            'required_check_count': len(required_checks), 'publication_authorized': False}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('envelope', 'base', 'after', *REQUIRED):
         parser.add_argument('--' + name.replace('_', '-'), required=True)
+    parser.add_argument('--fresh-envelope', help='independently obtained fresh evaluation')
+    parser.add_argument('--require-check', action='append', help='required blocking passed check ID; repeatable')
+    parser.add_argument('--validator-name')
+    parser.add_argument('--validator-version')
+    parser.add_argument('--telemetry', action='store_true', help='emit aggregate-only telemetry on stderr')
     args = parser.parse_args()
+    started = time.perf_counter() if args.telemetry else 0
+    def telemetry(status):
+        if args.telemetry:
+            event = {'event': 'candidate_comparison', 'status': status,
+                     'duration_ms': round((time.perf_counter() - started) * 1000, 3),
+                     'fresh_verdict_requested': args.fresh_envelope is not None,
+                     'required_check_count': len(args.require_check or [])}
+            try:
+                print(json.dumps(event), file=sys.stderr)
+            except (OSError, ValueError):
+                pass
     try:
-        result = verify(read_stable(args.envelope), read_stable(args.base), read_stable(args.after),
-                        {name: read_stable(getattr(args, name)) for name in REQUIRED})
+        inputs = (read_stable(args.envelope), read_stable(args.base), read_stable(args.after),
+                  {name: read_stable(getattr(args, name)) for name in REQUIRED})
+        requirements = (args.require_check, args.validator_name, args.validator_version)
+        if args.fresh_envelope is not None:
+            result = compare_fresh(inputs[0], read_stable(args.fresh_envelope), *inputs[1:],
+                                   args.require_check, (args.validator_name, args.validator_version))
+        else:
+            if any(value is not None for value in requirements):
+                raise VerificationError('verdict requirements need a fresh envelope')
+            result = verify(*inputs)
     except (VerificationError, KeyError, TypeError, ValueError, OverflowError, RecursionError) as error:
+        telemetry('error')
         print('input verification failed: ' + str(error), file=sys.stderr)
         return 2
+    telemetry('matched')
     print(json.dumps(result, separators=(',', ':')))
     return 0
 
