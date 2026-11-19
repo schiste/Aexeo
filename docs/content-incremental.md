@@ -8,7 +8,7 @@ owned base, recomputes the overlay and direct link impact, re-evaluates affected
 surviving entities and reuses the remaining reports. It reports counts of
 re-evaluated and reused items; these are work counts, not timing benchmarks.
 
-The current supported scope is **only** `text/plain` records and a preset made
+The default `prepare` mode supports only `text/plain` records and a preset made
 exclusively of `WordCount`, `CharacterCount`, `SentenceLength` and
 `SentenceCharacterLength` (only with `paragraphs_only = false`),
 `RepeatedTerms`, `RequiredTerms`, and `ForbiddenTerms`, with inline change
@@ -33,6 +33,27 @@ restarts, other engines, policy changes and a newly published base require a
 new full preparation. The API offers no claim of latency improvement until
 measured on a representative workload. This is not the finalized C4 wire
 protocol or general incremental evaluation of arbitrary presets.
+
+## Adapted Markdown and HTML items
+
+`prepare_adapted` explicitly enables mixed `text/plain`, `text/markdown` and
+`text/html` snapshots. Plain text uses the paragraph-text mode; Markdown and
+static HTML use their shared content adapters, with document scope for HTML.
+The supported independent item gates include the text and paragraph gates of
+`prepare_paragraph_text`, plus `LinkCount`, `RequiredHeadings`, `HeadingLength`
+and `DuplicateHeadings`. A gate whose required capability is unavailable for
+any item causes `not_checked`, including link or heading checks on plain text.
+Other formats, destination or reachability checks, heading hierarchy, metadata,
+site, collection and external gates remain unsupported. Inline before/after
+content and the same complete, host-supplied inventory and link projections are
+still required.
+
+Reports contain positions in each adapter's projected text, not source-mapped
+positions. Static HTML projection does not prove browser visibility or that the
+markup is the rendered page. This API does not provide a publication verdict,
+a persistent cache, source freshness, or general site impact evaluation. The
+`evaluated` and `reused` counts remain aggregate work counters rather than a
+performance guarantee; no input text or identifiers are added to telemetry.
 
 ## Host integration
 
