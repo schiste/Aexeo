@@ -189,6 +189,19 @@ describe("EmDash content adaptation", () => {
     expect(JSON.parse(JSON.stringify(aexeoPlugin({ descriptionFieldsByCollection: { posts: options.descriptionFields } }).options)).descriptionFieldsByCollection.posts).toEqual(options.descriptionFields);
   });
 
+  it("projects explicit nested data and SEO paths without assuming unavailable fields", () => {
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", seo: { description: "Native SEO" }, data: { page_data: { seo: { description: "Nested" } }, excerpt: "Fallback" } };
+    const options = { descriptionFields: [{ source: "data", path: ["page_data", "seo", "description"] }, { source: "seo", path: ["description"] }, "excerpt"] as const };
+    expect(adaptContentItem(item, options).document).toMatchObject({ description: "Nested", description_source_observed: true });
+    expect(adaptContentItem({ ...item, data: { page_data: null, excerpt: "Fallback" } }, options).document).toMatchObject({ description: "Native SEO", description_source_observed: true });
+    expect(adaptContentItem({ ...item, seo: { description: null }, data: { page_data: { seo: { description: "" } }, excerpt: "Fallback" } }, options).document).toMatchObject({ description: "Fallback", description_source_observed: true });
+    expect(adaptContentItem({ ...item, data: { excerpt: "Fallback" } }, options).document).toMatchObject({ description_source_observed: false });
+    expect(adaptContentItem({ ...item, data: { page_data: { seo: { description: 3 } }, excerpt: "Fallback" } }, options).document).toMatchObject({ description_source_observed: false });
+    const inherited = Object.create({ description: "Inherited" }) as Record<string, unknown>;
+    expect(adaptContentItem({ ...item, data: { page_data: { seo: inherited } } }, options).document.description_source_observed).toBe(false);
+    expect(JSON.parse(JSON.stringify(aexeoPlugin({ descriptionFieldsByCollection: { posts: options.descriptionFields } }).options)).descriptionFieldsByCollection.posts).toEqual(options.descriptionFields);
+  });
+
   it("maps unchanged spans through inline projection and rejects ambiguous aliases", () => {
     const before = { _type: "span", text: "Before ", marks: [] };
     const after = { _type: "span", text: "after", marks: [] };

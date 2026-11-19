@@ -68,6 +68,17 @@ describe("revision audits", () => {
     await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, { preset: { name: "article", evidenceSources: { source: "wrong document" } }, evidenceProviderConfigured: true, evaluate });
     expect(evaluate.mock.calls[0]?.[3]).toBeUndefined();
   });
+  it("projects nested revision data without substituting the current SEO panel", async () => {
+    const { ctx, current, revision } = host();
+    (revision.data as Record<string, unknown>).page_data = { description: "Historical description" };
+    const evaluate = vi.fn(async (_document: unknown, _preset: string) => report);
+    await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, { preset: { name: "article" }, descriptionFieldsByCollection: { posts: [{ source: "data", path: ["page_data", "description"] }] }, evaluate });
+    expect(evaluate.mock.calls[0]?.[0]).toMatchObject({ description: "Historical description", description_source_observed: true });
+    (current as typeof current & { seo?: { description: string } }).seo = { description: "Current SEO" };
+    await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, { preset: { name: "article" }, descriptionFieldsByCollection: { posts: [{ source: "seo", path: ["description"] }] }, evaluate });
+    expect(evaluate.mock.calls[1]?.[0]).toMatchObject({ description_source_observed: false });
+    expect(JSON.stringify(evaluate.mock.calls[1])).not.toContain("Current SEO");
+  });
   it("registers private MCP tools with schemas and explicit permissions", () => {
     const plugin = createPlugin({ revisionAudits: true }) as { capabilities: string[]; mcp?: { tools: Record<string, { route: string; input: { safeParse(value: unknown): { success: boolean } } }> }; routes: Record<string, { permission?: string; request?: { body?: string } }> };
     expect(plugin.capabilities).toContain("content:revisions:read");

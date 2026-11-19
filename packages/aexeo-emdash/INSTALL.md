@@ -695,6 +695,26 @@ aexeoPlugin({
 })
 ```
 
+For nested values or the native SEO panel, use explicit rooted paths in the
+same ordered list. Flat strings continue to mean fields directly under `data`:
+
+```ts
+aexeoPlugin({
+  descriptionFieldsByCollection: {
+    blog_posts: [
+      { source: "data", path: ["page_data", "seo", "description"] },
+      { source: "seo", path: ["description"] },
+      "excerpt",
+    ],
+  },
+})
+```
+
+A historical revision does not include the current record's SEO panel. A path
+rooted at `seo` therefore remains unverified during revision audits; it is never
+silently replaced by the current record's metadata. Paths are explicit arrays,
+so field names containing dots are not interpreted as nested paths.
+
 In sandboxed mode, enter the equivalent JSON object, for example
 `{"blog_posts":["seo_description","excerpt"]}`, in the plugin setting
 `Description fields by collection (JSON)`. It applies to saves and Refresh.

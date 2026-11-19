@@ -423,6 +423,11 @@ describe("sandbox custom block mappings", () => {
     expect(await readSandboxContentFields(ctx(JSON.stringify({ pages: ["content", "sections"] })))).toEqual({ pages: ["content", "sections"] });
     expect(await readSandboxContentFields(ctx(JSON.stringify({ pages: [] })))).toBeUndefined();
     expect(await readSandboxDescriptionFields(ctx(JSON.stringify({ pages: ["seo_description", "excerpt"] })))).toEqual({ pages: ["seo_description", "excerpt"] });
+    const nested = { pages: [{ source: "data", path: ["page_data", "description"] }, { source: "seo", path: ["description"] }, "excerpt"] };
+    expect(await readSandboxDescriptionFields(ctx(JSON.stringify(nested)))).toEqual(nested);
+    for (const invalid of [{ source: "unknown", path: ["description"] }, { source: "data", path: [] }, { source: "data", path: ["x"], extra: true }, { source: "data", path: ["x".repeat(257)] }]) {
+      expect(await readSandboxDescriptionFields(ctx(JSON.stringify({ pages: [invalid] })))).toBeUndefined();
+    }
     for (const value of ["{", "[]", JSON.stringify({ pages: [] }), JSON.stringify({ pages: [null] })]) {
       expect(await readSandboxDescriptionFields(ctx(value))).toBeUndefined();
     }

@@ -1,5 +1,5 @@
 import { cmsBodyCoverage, hasCompleteBody, isCmsObservableFinding, isLegacyCmsObservableFinding } from "./cms-coverage.js";
-import type { CustomBlockMappings } from "./adapter.js";
+import { isDescriptionField, type CustomBlockMappings, type DescriptionField } from "./adapter.js";
 import type { SuppressionFilter } from "./suppressions.js";
 import type { EmdashDocument, Finding } from "./types.js";
 import {
@@ -462,7 +462,7 @@ export async function readSandboxBlockMappings(ctx: SandboxCtx): Promise<CustomB
 /** Read an optional JSON mapping from collection names to ordered field names. */
 type SandboxFieldsState = { fields: Record<string, readonly string[]> | undefined; unavailable: boolean };
 
-async function readSandboxFields(ctx: SandboxCtx, key: string, warning: string): Promise<SandboxFieldsState> {
+async function readSandboxFields<T>(ctx: SandboxCtx, key: string, warning: string, validField: (value: unknown) => value is T): Promise<{ fields: Record<string, readonly T[]> | undefined; unavailable: boolean }> {
   if (!ctx.settings) return { fields: undefined, unavailable: false };
   try {
     const raw = await ctx.settings.get<unknown>(key);
@@ -470,8 +470,8 @@ async function readSandboxFields(ctx: SandboxCtx, key: string, warning: string):
     if (typeof raw !== "string" || raw.length > 65536) throw new Error("invalid selection size or type");
     const value: unknown = JSON.parse(raw);
     if (value === null || typeof value !== "object" || Array.isArray(value) ||
-      !Object.values(value).every((fields) => Array.isArray(fields) && fields.length > 0 && fields.every((field) => typeof field === "string" && field.length > 0))) throw new Error("invalid selection");
-    return { fields: value as Record<string, readonly string[]>, unavailable: false };
+      !Object.values(value).every((fields) => Array.isArray(fields) && fields.length > 0 && fields.every(validField))) throw new Error("invalid selection");
+    return { fields: value as Record<string, readonly T[]>, unavailable: false };
   } catch {
     ctx.log?.warn?.(warning);
     return { fields: undefined, unavailable: true };
@@ -479,15 +479,15 @@ async function readSandboxFields(ctx: SandboxCtx, key: string, warning: string):
 }
 
 export function readSandboxContentFieldState(ctx: SandboxCtx): Promise<SandboxFieldsState> {
-  return readSandboxFields(ctx, SETTINGS_CONTENT_FIELDS_KEY, "Aexeo content field selection unavailable; body coverage remains unverified");
+  return readSandboxFields(ctx, SETTINGS_CONTENT_FIELDS_KEY, "Aexeo content field selection unavailable; body coverage remains unverified", (field): field is string => typeof field === "string" && field.length > 0);
 }
 
 export async function readSandboxContentFields(ctx: SandboxCtx): Promise<Record<string, readonly string[]> | undefined> {
   return (await readSandboxContentFieldState(ctx)).fields;
 }
 
-export async function readSandboxDescriptionFields(ctx: SandboxCtx): Promise<Record<string, readonly string[]> | undefined> {
-  return (await readSandboxFields(ctx, SETTINGS_DESCRIPTION_FIELDS_KEY, "Aexeo description field selection unavailable; description remains unverified")).fields;
+export async function readSandboxDescriptionFields(ctx: SandboxCtx): Promise<Record<string, readonly DescriptionField[]> | undefined> {
+  return (await readSandboxFields(ctx, SETTINGS_DESCRIPTION_FIELDS_KEY, "Aexeo description field selection unavailable; description remains unverified", isDescriptionField)).fields;
 }
 
 // EmDash 0.41 keeps the sandbox bridge available for afterSave work.
@@ -595,7 +595,7 @@ export async function handleAfterSaveConfigured(
   suppressionFilter?: SuppressionFilter,
   blockMappings?: CustomBlockMappings,
   contentFields?: readonly string[],
-  descriptionFields?: readonly string[],
+  descriptionFields?: readonly DescriptionField[],
   contentFieldsUnavailable = false,
 ): Promise<void> {
   // Capture the prior identity before host calls: a later save or delete must
@@ -800,7 +800,7 @@ export async function evaluateAndPersistAll(
     blockMappings?: CustomBlockMappings | undefined;
     contentFieldsByCollection?: Record<string, readonly string[]> | undefined;
     contentFieldsUnavailable?: boolean | undefined;
-    descriptionFieldsByCollection?: Record<string, readonly string[]> | undefined;
+    descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]> | undefined;
   },
 ): Promise<RefreshSummary> {
   const collections = options.collections ?? DEFAULT_COLLECTIONS;
