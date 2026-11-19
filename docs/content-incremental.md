@@ -123,3 +123,15 @@ and must protect the publication boundary. This experimental composition
 currently owns two base copies, shares one validated candidate overlay across
 both scopes, and scans the whole candidate collection. It is
 not a latency guarantee or a general incremental site evaluator.
+
+### Supplying a projected collection to a verdict
+
+A Rust host using `CollectionBaseline` or `ComposedBaseline` can call
+`project_candidate(change, after)` and pass the result's
+`as_change_collection()` to `OfflineDecisionContext.collection` or the
+existing change-verdict API. The projection owns the metadata derived from the
+base and the change; it serializes in the CLI `--collection-snapshot` shape.
+Treat the serialized snapshot as potentially private data. Reconstruct and
+independently verify current inputs at revalidation: this helper does not
+establish provenance, prevent changes between verification and publication, or
+make the experimental candidate verdict a publication authorization.
