@@ -57,7 +57,7 @@ import type { Finding, SiteIntelligenceScore } from "./types.js";
 import { definePlugin } from "emdash";
 import { z } from "zod";
 import { auditRevision, getRevisionAudit } from "./revision-audit.js";
-import { getReviewDisposition, setReviewDisposition, type ReviewRequest } from "./review-dispositions.js";
+import { getReviewDisposition, getReviewHistory, setReviewDisposition, type ReviewRequest } from "./review-dispositions.js";
 
 const reviewKeySchema = z.strictObject({ audit_id: z.uuid(), gate_id: z.string().min(1).max(128), finding_index: z.number().int().min(0) });
 const reviewSchema = reviewKeySchema.extend({ decision: z.enum(["retain_with_explanation", "needs_revision", "not_applicable"]), explanation: z.string().trim().min(1).max(2000) });
@@ -280,6 +280,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
       audit_revision: { description: "Evaluate the content fields of a specific CMS revision using the configured editorial preset.", route: "audit-revision", input: z.strictObject({ collection: z.string().min(1).max(128), id: z.string().min(1).max(128), revision: z.string().min(1).max(128) }) },
       get_audit: { description: "Retrieve an editorial audit and check whether its revision is still current.", route: "get-revision-audit", input: z.strictObject({ audit_id: z.uuid() }) },
       set_review: { description: "Record an explained decision for one finding in an exact audit.", route: "set-revision-review", input: reviewSchema },
+      get_review_history: { description: "Retrieve advisory review submissions for one finding; history completeness is not guaranteed.", route: "get-revision-review-history", input: reviewKeySchema },
       get_review: { description: "Retrieve the decision for one finding in an exact audit.", route: "get-revision-review", input: reviewKeySchema },
     } },
     routes: {
@@ -303,8 +304,8 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
         permission: "plugins:manage",
         request: { body: "json" },
         input: reviewSchema,
-        handler: async (ctx: SandboxCtx & { input: ReviewRequest }) => {
-          const result = await setReviewDisposition(ctx.kv, ctx.input);
+        handler: async (ctx: SandboxCtx & { input: ReviewRequest; user?: { id?: unknown } }) => {
+          const result = await setReviewDisposition(ctx.kv, ctx.input, ctx.user);
           try { ctx.log?.info("aexeo.review_disposition", { status: result.status }); } catch { /* telemetry is advisory */ }
           return result;
         },
@@ -314,6 +315,12 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
         request: { body: "json" },
         input: reviewKeySchema,
         handler: (ctx: SandboxCtx & { input: Pick<ReviewRequest, "audit_id" | "gate_id" | "finding_index"> }) => getReviewDisposition(ctx.kv, ctx.input),
+      },
+      "get-revision-review-history": {
+        permission: "plugins:read",
+        request: { body: "json" },
+        input: reviewKeySchema,
+        handler: (ctx: SandboxCtx & { input: Pick<ReviewRequest, "audit_id" | "gate_id" | "finding_index"> }) => getReviewHistory(ctx.kv, ctx.input),
       },
       // The Refresh sweep (handleAdminRoute → handleRefresh) is the
       // one consumer of `collections`. Bind the resolved list here so
