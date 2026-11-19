@@ -218,11 +218,11 @@ export function adaptContentItem(content: EmdashContentItem, options: AdaptConte
 
 function adaptContentItemInternal(content: EmdashContentItem, options: AdaptContentOptions, includeSourcePaths: boolean): AdaptedContent {
   const route = options.route ?? deriveRoute(content);
-  const title = stringOrEmpty(
-    content.seo?.title ?? content.data["title"] ?? content.slug ?? content.id,
-  );
+  const sourceTitle = content.seo?.title ?? content.data["title"];
+  const title = stringOrEmpty(sourceTitle ?? content.slug ?? content.id);
   const document: EmdashDocument = { route, title, description_source_observed: false };
-  const observedMetadata = ["title"];
+  // Slug and ID are useful display labels, but they are not observed titles.
+  const observedMetadata = typeof sourceTitle === "string" ? ["title"] : [];
   // Only host-declared fields are projected. Missing or malformed sources are
   // explicitly unavailable, not evidence that a value is absent.
   if (isRecord(options.metadataFields)) {

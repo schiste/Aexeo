@@ -85,6 +85,7 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
       },
       metadata: {
         configured_fields: Object.keys(options.metadataFieldsByCollection?.[collection] ?? {}),
+        observed_fields: adapted.document.observed_metadata_fields ?? [],
         supplied_fields: Object.keys(adapted.document.meta ?? {}),
         unavailable_fields: adapted.document.unavailable_metadata_fields ?? [],
       },

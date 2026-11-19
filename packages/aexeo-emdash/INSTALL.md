@@ -750,9 +750,12 @@ metadata gates report it as `not_checked`; they do not treat it as an observed
 absence. Direct `EmdashDocument` consumers may set `observed_metadata_fields`
 to declare this open-world coverage; omitting it retains the legacy assumption
 that metadata keys outside `unavailable_metadata_fields` were observed. The built-in destinations `title`, `description`,
-`canonical` and `lang` cannot be overridden by these mappings. Revision
-audits use the selected revision's data and never substitute the current SEO
-panel. Their input coverage lists configured, supplied and unavailable field
+`canonical` and `lang` cannot be overridden by these mappings. A string title
+from the CMS SEO or data field is observed, including an explicitly empty
+string. When neither supplies a string, the adapter may use a slug or ID as a
+display label, but title gates report `not_checked`; that label is not evidence
+of the CMS title. Revision audits use the selected revision's data and never substitute the current SEO
+panel. Their input coverage lists configured, observed, supplied and unavailable field
 names, and the `aexeo.metadata_projection` event logs aggregate counts without
 field names or values. Sandboxed hosts can enter the same JSON object in the
 `Editorial metadata fields by collection (JSON)` setting; save and Refresh
