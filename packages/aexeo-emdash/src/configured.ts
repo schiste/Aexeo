@@ -45,7 +45,7 @@ import { evaluateContent, projectContentInput, projectLinkDestinations } from ".
 import { withContentPreset } from "./content-evaluator.js";
 import type { ContentPresetOptions, ExternalGateProvider, ExternalGateTelemetry, LinkObservationProvider, LinkProviderTelemetry, EvidenceSourceProvider, EvidenceSourceTelemetry, PresetSelectionTelemetry } from "./content-evaluator.js";
 export type { ExternalGateProvider, ExternalGateTelemetry, LinkObservationProvider, LinkProviderTelemetry, EvidenceSourceProvider, EvidenceSourceTelemetry, PresetSelectionTelemetry } from "./content-evaluator.js";
-import type { CustomBlockMappings, EmdashContentItem } from "./adapter.js";
+import type { CustomBlockMappings, DescriptionField, EmdashContentItem } from "./adapter.js";
 import type { Finding, SiteIntelligenceScore } from "./types.js";
 
 // emdash's definePlugin normalizes hook configs and validates the
@@ -173,7 +173,7 @@ const inProcessEvaluator: EvaluatorFn = async (documents) => {
 export interface ConfiguredPluginOptions {
   blockMappings?: CustomBlockMappings;
   contentFieldsByCollection?: Record<string, readonly string[]>;
-  descriptionFieldsByCollection?: Record<string, readonly string[]>;
+  descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]>;
   /** Optional portable preset evaluated in addition to the existing site checks. */
   contentPreset?: ContentPresetOptions;
   /** Opt in to historical revision access on hosts supporting content:revisions:read. */
@@ -463,7 +463,7 @@ async function handleAdminRoute(
   evaluator: EvaluatorFn,
   blockMappings?: CustomBlockMappings,
   contentFieldsByCollection?: Record<string, readonly string[]>,
-  descriptionFieldsByCollection?: Record<string, readonly string[]>,
+  descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]>,
 ): Promise<BlockResponse> {
   const body = normalizeInteraction(ctx.input);
   if (body.type === "page_load") {

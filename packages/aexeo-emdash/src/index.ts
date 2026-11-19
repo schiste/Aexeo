@@ -55,14 +55,14 @@ export interface ConfiguredPluginDescriptor {
   adminWidgets: readonly { id: string; size?: string; title?: string }[];
 }
 
-import type { CustomBlockMappings } from "./adapter.js";
-export type { BodyCapability, CustomBlockMapping, CustomBlockMappings, CustomBlockField, InlineComponentField } from "./adapter.js";
+import type { CustomBlockMappings, DescriptionField } from "./adapter.js";
+export type { DescriptionField, BodyCapability, CustomBlockMapping, CustomBlockMappings, CustomBlockField, InlineComponentField } from "./adapter.js";
 
 export interface AexeoPluginOptions {
   /** Ordered field mappings for project-specific blocks. */
   blockMappings?: CustomBlockMappings;
   contentFieldsByCollection?: Record<string, readonly string[]>;
-  descriptionFieldsByCollection?: Record<string, readonly string[]>;
+  descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]>;
   /** Request historical revision access on a compatible EmDash host. */
   revisionAudits?: boolean;
   /** Add a portable content preset to configured-mode evaluation. */
