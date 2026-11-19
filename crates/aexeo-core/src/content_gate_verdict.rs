@@ -908,6 +908,7 @@ pub struct CandidateDecisionContext<'a> {
 fn candidate_binding(
     context: &CandidateDecisionContext<'_>,
     scope: HtmlContentScope,
+    external_evidence: Option<&[u8]>,
 ) -> Result<String> {
     use crate::content_candidate::overlay_candidate;
     use crate::content_candidate_profile::{candidate_decision_binding, candidate_revision_digest};
@@ -957,7 +958,7 @@ fn candidate_binding(
             ("host_options", Some(&artifacts.host_options)),
             ("evaluator", Some(&artifacts.evaluator)),
             ("collection", artifacts.collection.as_deref()),
-            ("external_evidence", None),
+            ("external_evidence", external_evidence),
             ("candidate_base_revision_sha256", Some(&base_digest)),
         ],
     )
@@ -972,7 +973,7 @@ pub fn evaluate_experimental_candidate_verdict<P: ConfinedContentFiles>(
     evaluated_at: &str,
     scope: HtmlContentScope,
 ) -> Result<ExperimentalCandidateVerdict> {
-    let binding = candidate_binding(context, scope)?;
+    let binding = candidate_binding(context, scope, None)?;
     let receipt =
         evaluate_offline_receipt_with_html_scope(context.decision, provider, evaluated_at, scope)?;
     Ok(ExperimentalCandidateVerdict {
@@ -998,7 +999,7 @@ pub fn revalidate_experimental_candidate_verdict<P: ConfinedContentFiles>(
     {
         bail!("unsupported experimental candidate verdict schema or profile");
     }
-    let binding = candidate_binding(context, scope)?;
+    let binding = candidate_binding(context, scope, None)?;
     if previous.binding != binding {
         bail!("experimental candidate decision inputs differ");
     }
@@ -1011,6 +1012,78 @@ pub fn revalidate_experimental_candidate_verdict<P: ConfinedContentFiles>(
     )?;
     Ok(ExperimentalCandidateVerdict {
         schema: EXPERIMENTAL_CANDIDATE_SCHEMA.into(),
+        candidate_profile: previous.candidate_profile.clone(),
+        binding,
+        receipt,
+    })
+}
+
+/// Candidate-bound evaluation with independently supplied link observations.
+/// Neither the candidate nor the observations are authenticated by this binding.
+pub struct CandidateLinkDecisionContext<'a> {
+    pub candidate: &'a CandidateDecisionContext<'a>,
+    pub snapshots: &'a ChangeLinkSnapshots,
+}
+
+const EXPERIMENTAL_CANDIDATE_LINK_SCHEMA: &str =
+    "aexeo.experimental-candidate-link-bound-verdict/v1";
+
+/// Evaluate a candidate and bind the exact link observations used by the gates.
+pub fn evaluate_experimental_candidate_link_verdict<P: ConfinedContentFiles>(
+    context: &CandidateLinkDecisionContext<'_>,
+    provider: &mut P,
+    evaluated_at: &str,
+    scope: HtmlContentScope,
+) -> Result<ExperimentalCandidateVerdict> {
+    let links = LinkSnapshotDecisionContext {
+        offline: context.candidate.decision,
+        snapshots: context.snapshots,
+    };
+    let evidence = links.artifacts_with_html_scope(scope)?.external_evidence;
+    let binding = candidate_binding(context.candidate, scope, Some(&evidence))?;
+    let receipt =
+        evaluate_link_snapshot_receipt_with_html_scope(&links, provider, evaluated_at, scope)?;
+    Ok(ExperimentalCandidateVerdict {
+        schema: EXPERIMENTAL_CANDIDATE_LINK_SCHEMA.into(),
+        candidate_profile: aexeo_contracts::content_gate_binding_v2::CANDIDATE_REVISION_PROFILE
+            .into(),
+        binding,
+        receipt,
+    })
+}
+
+/// Rebuild both independently supplied candidate and observations, then re-evaluate.
+pub fn revalidate_experimental_candidate_link_verdict<P: ConfinedContentFiles>(
+    previous: &ExperimentalCandidateVerdict,
+    context: &CandidateLinkDecisionContext<'_>,
+    provider: &mut P,
+    evaluated_at: &str,
+    scope: HtmlContentScope,
+) -> Result<ExperimentalCandidateVerdict> {
+    if previous.schema != EXPERIMENTAL_CANDIDATE_LINK_SCHEMA
+        || previous.candidate_profile
+            != aexeo_contracts::content_gate_binding_v2::CANDIDATE_REVISION_PROFILE
+    {
+        bail!("unsupported experimental candidate link verdict schema or profile");
+    }
+    let links = LinkSnapshotDecisionContext {
+        offline: context.candidate.decision,
+        snapshots: context.snapshots,
+    };
+    let evidence = links.artifacts_with_html_scope(scope)?.external_evidence;
+    let binding = candidate_binding(context.candidate, scope, Some(&evidence))?;
+    if previous.binding != binding {
+        bail!("experimental candidate decision inputs differ");
+    }
+    let receipt = revalidate_link_snapshot_receipt_with_html_scope(
+        &previous.receipt,
+        &links,
+        provider,
+        evaluated_at,
+        scope,
+    )?;
+    Ok(ExperimentalCandidateVerdict {
+        schema: EXPERIMENTAL_CANDIDATE_LINK_SCHEMA.into(),
         candidate_profile: previous.candidate_profile.clone(),
         binding,
         receipt,
@@ -4241,6 +4314,119 @@ mod tests {
             .map(|(offset, _)| (offset + 1) as u64)
             .collect();
         assert_eq!(positions, [Some((1, anchors[0])), Some((1, anchors[2]))]);
+    }
+
+    #[test]
+    fn candidate_link_verdict_binds_observations_and_rejects_downgrades() {
+        use crate::content_candidate::{CandidateItem, CandidateSnapshot};
+        use crate::content_gate::LinkReachabilityObservation as Observation;
+        use sha2::{Digest, Sha256};
+        let mut change = change();
+        change.entries[0].media_type = "text/markdown".into();
+        let source = "[link](https://example.org/private)";
+        let state = change.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let policy = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\n",
+        )
+        .unwrap();
+        let base = CandidateSnapshot {
+            scope: "site".into(),
+            site_id: "site".into(),
+            site_base_url: None,
+            base: change.base.clone(),
+            complete: true,
+            items: vec![],
+        };
+        let after = vec![CandidateItem {
+            entity_id: "article".into(),
+            public_path: "/article".into(),
+            media_type: "text/markdown".into(),
+            revision: None,
+            sha256: state_sha(&change),
+            source: source.into(),
+            links: None,
+        }];
+        let mut snapshots = ChangeLinkSnapshots {
+            version: 1,
+            change_id: change.change_id.clone(),
+            entries: [(
+                "article".into(),
+                LinkObservationSnapshot {
+                    version: 1,
+                    source_sha256: state_sha(&change),
+                    destinations: vec!["https://example.org/private".into()],
+                    observations: vec![Observation::Reachable],
+                },
+            )]
+            .into(),
+        };
+        let decision = OfflineDecisionContext {
+            change: &change,
+            preset: &policy,
+            max_entry_bytes: 1024,
+            max_total_bytes: 1024,
+            plain_text_paragraphs: false,
+            collection: None,
+            evaluator_identity: b"build-id",
+        };
+        let candidate = CandidateDecisionContext {
+            decision: &decision,
+            base: &base,
+            after: &after,
+        };
+        let scope = HtmlContentScope::Document;
+        let context = CandidateLinkDecisionContext {
+            candidate: &candidate,
+            snapshots: &snapshots,
+        };
+        let verdict = evaluate_experimental_candidate_link_verdict(
+            &context,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            scope,
+        )
+        .unwrap();
+        assert_eq!(verdict.receipt.verdict.status, VerdictStatus::Pass);
+        assert!(
+            revalidate_experimental_candidate_link_verdict(
+                &verdict,
+                &context,
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                scope
+            )
+            .is_ok()
+        );
+        assert!(
+            revalidate_experimental_candidate_verdict(
+                &verdict,
+                &candidate,
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                scope
+            )
+            .is_err()
+        );
+        snapshots.entries.get_mut("article").unwrap().observations[0] = Observation::NotFound;
+        let changed = CandidateLinkDecisionContext {
+            candidate: &candidate,
+            snapshots: &snapshots,
+        };
+        assert!(
+            revalidate_experimental_candidate_link_verdict(
+                &verdict,
+                &changed,
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                scope
+            )
+            .is_err()
+        );
+        fn state_sha(change: &Change) -> String {
+            change.entries[0].after.as_ref().unwrap().sha256.clone()
+        }
     }
 
     #[test]
