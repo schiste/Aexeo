@@ -204,6 +204,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - When revalidating JSON artifacts, test duplicate keys inside nested extension
   maps as well as typed fields, and verify rejection preserves prior output;
   ordinary map decoding can silently retain only one value.
+- For structured evidence and review inputs, test duplicate JSON keys at
+  multiple depths, including review provenance; ambiguous input must remain
+  `not_checked` and must not produce a passing blocking gate.
 - For JSON contracts, test omitted fields and explicit `null` separately when
   the schema distinguishes them: Serde `Option` normally collapses both.
 - Test unknown fields inside every tagged enum variant, including unit variants:
