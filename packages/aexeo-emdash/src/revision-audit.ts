@@ -95,10 +95,13 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
 }
 
 function revisionStatus(current: Current | null, revision: string): "draft" | "published" | "stale" | "unknown" {
-  if (!current || (current.draftRevisionId === undefined && current.liveRevisionId === undefined)) return "unknown";
+  if (!current) return "unknown";
   if (current.draftRevisionId === revision) return "draft";
   if (current.liveRevisionId === revision) return "published";
-  return "stale";
+  // A missing or malformed pointer may still identify this revision. Only
+  // conclude it is stale when both pointers were observed and are valid.
+  const observed = (value: unknown) => value === null || (typeof value === "string" && value.trim().length > 0);
+  return observed(current.draftRevisionId) && observed(current.liveRevisionId) ? "stale" : "unknown";
 }
 
 /** Re-check status at read time; a stored report does not prove currentness. */

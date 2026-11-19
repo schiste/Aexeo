@@ -28,6 +28,25 @@ describe("revision audits", () => {
     expect(await getRevisionAudit(ctx as never, result.audit_id)).toMatchObject({ revision: "rev1", revision_status: "stale", assurance: { publication_authorization: "not_granted" } });
     expect(result.limitation).toContain("does not establish factual accuracy");
   });
+  it.each([
+    { draft: undefined, live: "other", expected: "unknown" },
+    { draft: "other", live: undefined, expected: "unknown" },
+    { draft: null, live: undefined, expected: "unknown" },
+    { draft: undefined, live: null, expected: "unknown" },
+    { draft: "", live: "other", expected: "unknown" },
+    { draft: "other", live: 42, expected: "unknown" },
+    { draft: "rev1", live: undefined, expected: "draft" },
+    { draft: undefined, live: "rev1", expected: "published" },
+    { draft: null, live: null, expected: "stale" },
+    { draft: "other", live: "another", expected: "stale" },
+  ])("reports $expected with draft=$draft and live=$live", async ({ draft, live, expected }) => {
+    const { ctx, current } = host();
+    ctx.content.get.mockResolvedValue({ ...current, draftRevisionId: draft, liveRevisionId: live } as never);
+    const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, { preset: { name: "article" }, evaluate: async () => report });
+    expect(result).toMatchObject({ status: "evaluated", revision_status: expected });
+    if (result.status !== "evaluated") throw new Error("expected report");
+    expect(await getRevisionAudit(ctx as never, result.audit_id)).toMatchObject({ revision_status: expected });
+  });
   it("reports projection coverage separately from rendered metadata", async () => {
     const { ctx, revision } = host();
     const data = revision.data as Record<string, unknown>;
