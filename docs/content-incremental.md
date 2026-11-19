@@ -4,8 +4,8 @@
 for checking several proposals against the same host-provided base snapshot.
 `prepare` evaluates every base item and owns the complete snapshot, preset and
 reports in an opaque in-memory value. `evaluate` applies each proposal to that
-owned base, recomputes the overlay and direct link impact, re-evaluates affected
-surviving entities and reuses the remaining reports. It reports counts of
+owned base, recomputes the overlay and direct link impact, re-evaluates changed surviving entities and reuses reports for completely
+unchanged items, including directly affected link neighbours. It reports counts of
 re-evaluated and reused items; these are work counts, not timing benchmarks.
 
 The default `prepare` mode supports only `text/plain` records and a preset made
