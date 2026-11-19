@@ -59,6 +59,33 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   builds. Style checks do not establish factual accuracy, currency or translation
   quality; source verification and independent evaluation remain separate work.
 
+### Preview rendered-page spot check, 2026-11-19
+
+Read-only comparison of the current CMS record for the evidence-room article
+(`01KPTR098CK5JAGXXG08VX75V9`, published revision
+`01M59ZV24D25M3AW25QC4SEQ8G`, locale `en-gb`) against its HTML at
+`aeptus-preview.pages.dev`: the record contained 18 Portable Text blocks and
+2 `askYourAi` components. All 23 text spans longer than 30 characters appeared
+in the response HTML, as did the 10 body mark-definition URLs and 3 reference
+URLs. The CMS `seo_description` appeared in the description meta tag; the HTML
+also contained a canonical link, an H1 and a main landmark. These are substring
+and element-presence checks, not proof of visible rendering, source support,
+component fidelity or equivalence of the complete CMS and rendered snapshots.
+
+The [2026-11-18 deployment run](https://github.com/Aeptus/website-and-content/actions/runs/44270994656)
+reported five SEO004 missing-canonical findings on glossary category paths. On
+2026-11-19, GET requests to those five paths at `aeptus-preview.pages.dev`
+returned 200 HTML with `robots=noindex` and no canonical or meta refresh; the
+`accounts-access` response advertised build revision
+`9597807a32e8ed63387aab97ae681fe27e364710`, the same source commit as the run.
+The source route contains a *conditional* redirect, so source inspection alone
+cannot establish that these five responses redirect. The run uploaded its built
+`dist` after the audit, but a matching source commit alone does not bind the
+served bytes or CMS snapshot to the audited files. Retain the open rendered
+build validation above until the exact audit artifact and deployment are bound;
+do not classify these findings as confirmed false positives or automatically
+alter site content.
+
 ## Delivery tracker
 
 - [x] Exclude format-unbound reviews and runs from policy-bound reviewed metrics,
