@@ -265,32 +265,32 @@ impl HtmlSourceMap {
 
 // Accept ordinary HTML attributes while rejecting malformed syntax and the
 // hidden attribute, which changes which subtrees the adapter projects.
-fn safe_mapping_attributes(mut rest: &str, void: bool) -> bool {
+fn mapping_attributes(mut rest: &str, void: bool, image: bool) -> Option<Option<(usize, usize)>> {
+    let original_len = rest.len();
+    let mut alt = None;
     loop {
         rest = rest.trim_start_matches(|ch: char| ch.is_ascii_whitespace());
-        if rest.is_empty() {
-            return true;
-        }
-        if rest == "/" {
-            return void;
+        if rest.is_empty() || (rest == "/" && void) {
+            return Some(alt);
         }
         let size = rest
             .bytes()
             .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b':' | b'.'))
             .count();
         if size == 0 || rest[..size].eq_ignore_ascii_case("hidden") {
-            return false;
+            return None;
         }
+        let is_alt = image && rest[..size].eq_ignore_ascii_case("alt");
         rest = rest[size..].trim_start_matches(|ch: char| ch.is_ascii_whitespace());
+        let mut value_start = original_len - rest.len();
+        let mut value_end = value_start;
         if let Some(after_equals) = rest.strip_prefix('=') {
             rest = after_equals.trim_start_matches(|ch: char| ch.is_ascii_whitespace());
-            let Some(quote) = rest.as_bytes().first().copied() else {
-                return false;
-            };
+            let quote = rest.as_bytes().first().copied()?;
             if matches!(quote, b'\'' | b'"') {
-                let Some(end) = rest[1..].find(quote as char) else {
-                    return false;
-                };
+                let end = rest[1..].find(quote as char)?;
+                value_start = original_len - rest.len() + 1;
+                value_end = value_start + end;
                 rest = &rest[end + 2..];
             } else {
                 let size = rest
@@ -300,12 +300,21 @@ fn safe_mapping_attributes(mut rest: &str, void: bool) -> bool {
                     })
                     .count();
                 if size == 0 {
-                    return false;
+                    return None;
                 }
+                value_start = original_len - rest.len();
+                value_end = value_start + size;
                 rest = &rest[size..];
             }
         }
+        if is_alt && alt.replace((value_start, value_end)).is_some() {
+            return None;
+        }
     }
+}
+
+fn safe_mapping_attributes(rest: &str, void: bool) -> bool {
+    mapping_attributes(rest, void, false).is_some()
 }
 
 // Only semicolon-terminated entities are accepted. Reconstruct with the same
@@ -497,6 +506,7 @@ pub fn html_source_map_with_scope(
                 | "mark"
                 | "a"
                 | "br"
+                | "img"
         ) {
             return None;
         }
@@ -652,10 +662,33 @@ pub fn html_source_map_with_scope(
             let selected = scope == HtmlContentScope::Document || selected_depth.is_some();
             // Restrict attributes to a form that cannot affect projection or
             // hide a subtree. Other valid HTML is still evaluated without a map.
-            if !safe_mapping_attributes(rest, matches!(tag.as_str(), "br" | "meta" | "link"))
-                || stack.len() >= 256
-            {
+            let image_alt = mapping_attributes(
+                rest,
+                matches!(tag.as_str(), "br" | "img" | "meta" | "link"),
+                tag == "img",
+            )?;
+            if stack.len() >= 256 {
                 return None;
+            }
+            if selected && let Some((start, end)) = image_alt {
+                let value = &rest[start..end];
+                // Entity decoding and CR normalization need additional source mapping.
+                if value.contains(['&', '\r']) {
+                    return None;
+                }
+                if !value.is_empty() {
+                    if spans.len() >= MAX_HTML_SOURCE_MAP_SPANS {
+                        return None;
+                    }
+                    let output_start = output.len();
+                    output.push_str(value);
+                    spans.push((
+                        output_start,
+                        output.len(),
+                        cursor + 1 + name_len + start,
+                        false,
+                    ));
+                }
             }
             if selected && matches!(tag.as_str(), "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
                 heading_starts.push(cursor);
@@ -701,7 +734,7 @@ pub fn html_source_map_with_scope(
                 if selected {
                     output.push('\n');
                 }
-            } else if !matches!(tag.as_str(), "meta" | "link") {
+            } else if !matches!(tag.as_str(), "img" | "meta" | "link") {
                 if selected && block && !output.is_empty() && !output.ends_with('\n') {
                     output.push('\n');
                 }
@@ -1027,6 +1060,59 @@ mod tests {
             "<p>world",
             "<script>world</script>",
             "<p>world</p><!-- comment -->",
+        ] {
+            let adapted = html_content("x", html).unwrap();
+            assert!(
+                html_source_map(html, adapted.input.text.as_deref().unwrap()).is_none(),
+                "{html}"
+            );
+        }
+    }
+
+    #[test]
+    fn maps_literal_image_alt_and_adjacent_prose() {
+        let html = "<main>\n<p>Before <img src='image.png' alt='Schéma clair'> after <a href='/next'>link</a>.</p>\n</main>";
+        for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+            let adapted = html_content_with_scope("x", html, scope).unwrap();
+            let projected = adapted.input.text.as_deref().unwrap();
+            let map = html_source_map_with_scope(html, projected, scope).unwrap();
+            let source_index = crate::text_index::LineIndex::new(html);
+            let projected_index = crate::text_index::LineIndex::new(projected);
+            for needle in ["Before", "Schéma", "clair", "after", "link"] {
+                let (line, column) = projected_index
+                    .position(projected, projected.find(needle).unwrap())
+                    .unwrap();
+                assert_eq!(
+                    map.source_position(html, projected, line, column),
+                    source_index.position(html, html.find(needle).unwrap()),
+                    "{needle}"
+                );
+            }
+            assert_eq!(map.link_starts.len(), 1);
+        }
+    }
+
+    #[test]
+    fn maps_only_unambiguous_image_attributes() {
+        for html in [
+            "<p>Before <img> after</p>",
+            "<p>Before <img alt> after</p>",
+            "<p>Before <img alt=plain /> after</p>",
+            "<p>Before <IMG ALT=plain> after</p>",
+            "<p>Before <img alt=''> after</p>",
+        ] {
+            let adapted = html_content("x", html).unwrap();
+            assert!(
+                html_source_map(html, adapted.input.text.as_deref().unwrap()).is_some(),
+                "{html}"
+            );
+        }
+        for html in [
+            "<p>Before <img alt='A &amp; B'> after</p>",
+            "<p>Before <img alt='one' ALT='two'> after</p>",
+            "<p>Before <img hidden alt='secret'> after</p>",
+            "<p>Before <img-widget alt='fake'> after</img-widget></p>",
+            "<p>Before <img alt='line\r\nbreak'> after</p>",
         ] {
             let adapted = html_content("x", html).unwrap();
             assert!(

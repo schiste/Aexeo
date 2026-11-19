@@ -44,6 +44,36 @@ fn html_change(source: &str, digest: &str) -> serde_json::Value {
 }
 
 #[test]
+fn html_image_alt_finding_has_a_source_position_in_change_verdict() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = "<main>\n<p>Before <img alt='bad'> after bad</p>\n</main>";
+    let change = html_change(
+        source,
+        "93e665c7a752a034ff6af1de60acd9c4aeb6f14d6e7fea2099d2dc09a4ff854c",
+    );
+    let policy =
+        "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['bad']\n";
+    let result = run(dir.path(), &change, policy, &[]);
+    assert_eq!(
+        result.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let verdict: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+    assert_eq!(verdict["findings"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        verdict["findings"][0]["location"],
+        serde_json::json!({"line": 2, "column": 21})
+    );
+    assert_eq!(
+        verdict["findings"][1]["location"],
+        serde_json::json!({"line": 2, "column": 33})
+    );
+}
+
+#[test]
 fn html_main_scope_excludes_navigation_and_revalidates_only_the_same_scope() {
     let dir = tempfile::tempdir().unwrap();
     let change = html_change(
