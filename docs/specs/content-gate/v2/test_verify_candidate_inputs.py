@@ -41,6 +41,32 @@ class CandidateVerification(unittest.TestCase):
     def test_rust_producer_vector(self):
         self.assertEqual(self.check(), {'input_binding': 'match', 'verdict_validated': False, 'publication_authorized': False})
 
+    def test_link_evidence_is_required_and_bound_to_distinct_schema(self):
+        evidence = b'{"example":"independent observations"}'
+        self.artifacts['external_evidence'] = evidence
+        self.envelope['schema'] = 'aexeo.experimental-candidate-link-bound-verdict/v1'
+        receipt = self.envelope['receipt']
+        receipt['schema'] = 'aexeo.link-snapshot-decision-receipt/v1'
+        receipt['decision_inputs']['external_evidence'] = {
+            'state': 'present', 'sha256': hashlib.sha256(evidence).hexdigest()}
+        candidate = overlay(self.base, json.loads(self.artifacts['change']), self.after)
+        values = dict(self.artifacts, collection=None,
+                      candidate_base_revision_sha256=revision_digest(self.base),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        self.envelope['binding'] = binding(values)
+        self.assertEqual(self.check()['input_binding'], 'match')
+        self.artifacts['external_evidence'] += b' '
+        with self.assertRaises(VerificationError): self.check()
+        del self.artifacts['external_evidence']
+        with self.assertRaises(VerificationError): self.check()
+        self.artifacts['external_evidence'] = evidence
+        receipt['schema'] = 'aexeo.offline-decision-receipt/v1'
+        with self.assertRaises(VerificationError): self.check()
+        receipt['schema'] = 'aexeo.link-snapshot-decision-receipt/v1'
+        self.envelope['schema'] = 'aexeo.experimental-candidate-bound-verdict/v1'
+        with self.assertRaises(VerificationError): self.check()
+
     def test_changed_artifacts_fail_closed(self):
         for name in self.artifacts:
             with self.subTest(name=name):

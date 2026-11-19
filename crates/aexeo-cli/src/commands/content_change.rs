@@ -839,7 +839,9 @@ fn command_offline_receipt(
         snapshots,
     });
     if args.contains_id("candidate-base") {
-        return command_candidate_bound_verdict(args, &context, provider, output, html_scope);
+        return command_candidate_bound_verdict(
+            args, &context, snapshots, provider, output, html_scope,
+        );
     }
     if args.get_flag("experimental-bound-verdict") {
         return command_experimental_bound_verdict(
@@ -963,13 +965,15 @@ fn read_candidate_input<T: serde::de::DeserializeOwned + serde::Serialize>(
 fn command_candidate_bound_verdict(
     args: &ArgMatches,
     decision: &aexeo_core::content_gate_verdict::OfflineDecisionContext<'_>,
+    snapshots: Option<&aexeo_core::content_gate_verdict::ChangeLinkSnapshots>,
     provider: &mut HostFiles,
     output: &Path,
     scope: HtmlContentScope,
 ) -> Result<i32> {
     use aexeo_core::content_gate_verdict::{
-        CandidateDecisionContext, ExperimentalCandidateVerdict,
-        evaluate_experimental_candidate_verdict, revalidate_experimental_candidate_verdict,
+        CandidateDecisionContext, CandidateLinkDecisionContext, ExperimentalCandidateVerdict,
+        evaluate_experimental_candidate_link_verdict, evaluate_experimental_candidate_verdict,
+        revalidate_experimental_candidate_link_verdict, revalidate_experimental_candidate_verdict,
     };
     let base = read_candidate_input(
         args.get_one::<String>("candidate-base")
@@ -991,11 +995,39 @@ fn command_candidate_bound_verdict(
     let verdict = if let Some(path) = args.get_one::<String>("verify-offline-receipt") {
         let previous: ExperimentalCandidateVerdict =
             read_candidate_input(path, output, "previous candidate verdict")?;
-        revalidate_experimental_candidate_verdict(&previous, &context, provider, &iso_now(), scope)
-            .user_context("candidate verdict does not match current inputs or evaluation")?
+        let result = if let Some(snapshots) = snapshots {
+            let links = CandidateLinkDecisionContext {
+                candidate: &context,
+                snapshots,
+            };
+            revalidate_experimental_candidate_link_verdict(
+                &previous,
+                &links,
+                provider,
+                &iso_now(),
+                scope,
+            )
+        } else {
+            revalidate_experimental_candidate_verdict(
+                &previous,
+                &context,
+                provider,
+                &iso_now(),
+                scope,
+            )
+        };
+        result.user_context("candidate verdict does not match current inputs or evaluation")?
     } else {
-        evaluate_experimental_candidate_verdict(&context, provider, &iso_now(), scope)
-            .user_context("candidate verdict evaluation failed")?
+        let result = if let Some(snapshots) = snapshots {
+            let links = CandidateLinkDecisionContext {
+                candidate: &context,
+                snapshots,
+            };
+            evaluate_experimental_candidate_link_verdict(&links, provider, &iso_now(), scope)
+        } else {
+            evaluate_experimental_candidate_verdict(&context, provider, &iso_now(), scope)
+        };
+        result.user_context("candidate verdict evaluation failed")?
     };
     let code = verdict_exit_code(verdict.receipt.verdict.status);
     let bytes = serde_json::to_vec_pretty(&verdict)?;
