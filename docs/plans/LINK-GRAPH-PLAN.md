@@ -280,9 +280,13 @@ the original records for reconciliation and emits aggregate-only counts. These
 checks do not establish matching site snapshots or confirm orphans.
 
 The graph reports the inventory locale and root HTML language when present. A
-conflicting primary language makes inventory comparison ineligible for orphan
-conclusions. Matching languages do not prove a locale, region or surface match;
-missing and unspecified languages are not treated as an observed mismatch.
+conflicting primary language, or explicitly conflicting script or region subtags,
+makes inventory comparison ineligible for orphan conclusions. A missing script or
+region is not treated as a conflict. Matching observations do not prove locale or
+surface equivalence. A valid primary language is still compared when later
+subtags are malformed, but those suffixes do not establish script or region
+conflicts. Missing and unspecified languages are not treated as an observed
+mismatch. This comparison is not a complete BCP 47 validator.
 
 - [ ] Validate the EmDash inventory exporter with an explicit publication, route,
   locale, status and surface mapping on a real matching site; do not infer
