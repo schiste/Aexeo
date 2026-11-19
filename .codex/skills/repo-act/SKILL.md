@@ -189,7 +189,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   preserve the corpus and rubric, and never treat placeholder labels as reviews.
 - For protected site comparisons, verify the HTTP method and final response URL:
   a successful login page after a redirect is not an observed site page, and
-  CMS access alone does not establish a matching rendered snapshot.
+  CMS access alone does not establish a matching rendered snapshot. Compare
+  specific content fields and rendered elements in memory, and emit only the
+  necessary counts and match results: CMS status responses may include a large
+  inventory or private content. A matching source commit does not bind the
+  rendered bytes or CMS snapshot; retain that uncertainty in the result.
 - For content file confinement, test symlinks, non-files and root replacement.
   Lexical checks and per-component no-follow opens alone do not prevent a
   concurrent directory rename from escaping the root; use an atomic platform
