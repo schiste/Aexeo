@@ -151,7 +151,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For partially observed metadata in core tests, put
   `unavailable_metadata_fields` in a `ContentContext` and pass it through
   `ContentEvaluationContext.adapter`; assert unknown fields stay distinct
-  from observed missing fields and retain `not_checked`.
+  from observed missing fields and retain `not_checked`. For CMS projections,
+  test that fallback display labels are not counted as observed metadata; cover
+  real, empty, malformed and unavailable values through the actual evaluator.
 - For collection gate changes, test the public Rust API as well as CLI and
   EmDash adapters: blank or repeated item IDs must not produce ambiguous
   findings. Exercise the scan limit separately and keep unexamined items
