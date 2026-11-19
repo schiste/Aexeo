@@ -163,6 +163,7 @@ struct LanguageParts<'a> {
     primary: &'a str,
     script: Option<&'a str>,
     region: Option<&'a str>,
+    suffix_valid: bool,
 }
 
 fn language_parts(value: &str) -> Option<LanguageParts<'_>> {
@@ -191,17 +192,21 @@ fn language_parts(value: &str) -> Option<LanguageParts<'_>> {
             primary,
             script: None,
             region: None,
+            suffix_valid: false,
         });
     }
     Some(LanguageParts {
         primary,
         script,
         region,
+        suffix_valid: true,
     })
 }
 
-fn locale_conflict(inventory: &str, document: &str) -> Option<&'static str> {
-    let (inventory, document) = (language_parts(inventory)?, language_parts(document)?);
+fn locale_conflict(
+    inventory: &LanguageParts<'_>,
+    document: &LanguageParts<'_>,
+) -> Option<&'static str> {
     if !inventory.primary.eq_ignore_ascii_case(document.primary) {
         return Some("inventory_document_language_mismatch");
     }
@@ -211,6 +216,32 @@ fn locale_conflict(inventory: &str, document: &str) -> Option<&'static str> {
     };
     if differs(inventory.script, document.script) || differs(inventory.region, document.region) {
         return Some("inventory_document_locale_mismatch");
+    }
+    None
+}
+
+// When either side declares a locale, missing or less specific evidence must
+// not be treated as confirmation. Two entirely absent values preserve the
+// legacy locale-neutral path; hosts still have to establish surface identity.
+fn locale_evidence_issue(inventory: Option<&str>, document: Option<&str>) -> Option<&'static str> {
+    let (inventory, document) = match (inventory, document) {
+        (None, None) => return None,
+        (Some(inventory), Some(document)) => (inventory, document),
+        _ => return Some("inventory_document_locale_unverified"),
+    };
+    let (Some(inventory), Some(document)) = (language_parts(inventory), language_parts(document))
+    else {
+        return Some("inventory_document_locale_unverified");
+    };
+    if let Some(issue) = locale_conflict(&inventory, &document) {
+        return Some(issue);
+    }
+    if !inventory.suffix_valid
+        || !document.suffix_valid
+        || inventory.script.is_some() != document.script.is_some()
+        || inventory.region.is_some() != document.region.is_some()
+    {
+        return Some("inventory_document_locale_unverified");
     }
     None
 }
@@ -1144,10 +1175,10 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
         );
         evidence.extend(links);
         if inventory_dispositions.get(page.url.as_str()) == Some(&InventoryDisposition::Published)
-            && let Some(issue) = inventory_locales
-                .get(page.url.as_str())
-                .zip(metadata.document_language.as_deref())
-                .and_then(|(inventory, document)| locale_conflict(inventory, document))
+            && let Some(issue) = locale_evidence_issue(
+                inventory_locales.get(page.url.as_str()).copied(),
+                metadata.document_language.as_deref(),
+            )
         {
             coverage_issues.insert(issue);
         }
@@ -1843,10 +1874,13 @@ mod tests {
         assert_eq!(page.inventory_locale.as_deref(), Some("fr-FR"));
         assert_eq!(page.document_language.as_deref(), Some("en-US"));
         assert_eq!(
-            locale_conflict("fr-%%%", "en"),
+            locale_evidence_issue(Some("fr-%%%"), Some("en")),
             Some("inventory_document_language_mismatch")
         );
-        assert_eq!(locale_conflict("fr-CA-%%%", "fr-FR"), None);
+        assert_eq!(
+            locale_evidence_issue(Some("fr-CA-%%%"), Some("fr-FR")),
+            Some("inventory_document_locale_unverified")
+        );
     }
 
     #[test]
@@ -1878,16 +1912,46 @@ mod tests {
     }
 
     #[test]
-    fn language_matching_does_not_claim_locale_equivalence() {
+    fn incomplete_locale_observation_withholds_inventory_eligibility() {
         for (locale, language) in [
-            ("en-US", "EN"),
-            ("en", "EN-gb"),
+            (Some("fr-FR"), None),
+            (Some("fr-FR"), Some("")),
+            (Some("fr-FR"), Some("und")),
+            (Some("fr-FR"), Some("fr")),
+            (Some("fr"), Some("fr-FR")),
+            (Some("sr-Latn"), Some("sr-RS")),
+            (Some("fr-%%%"), Some("fr-CA")),
+            (Some("invalid!"), Some("en")),
+            (None, Some("en")),
+        ] {
+            let (mut artifact, mut context) = attested_audit();
+            context.inventory.as_mut().unwrap().pages[2].locale = locale.map(str::to_string);
+            artifact["site"]["pages"][2]["raw_html"] = match language {
+                Some(language) => format!("<html lang='{language}'><main>Orphan</main></html>"),
+                None => "<html><main>Orphan</main></html>".into(),
+            }
+            .into();
+            let report = attested_report(&artifact, &context);
+            let reconciliation = report.reconciliation.unwrap();
+            assert!(!reconciliation.comparable, "{locale:?} / {language:?}");
+            assert!(reconciliation.eligible_pages.is_empty());
+            assert!(
+                reconciliation
+                    .issues
+                    .iter()
+                    .any(|issue| issue == "inventory_document_locale_unverified"),
+                "{locale:?} / {language:?}: {:?}",
+                reconciliation.issues
+            );
+        }
+    }
+
+    #[test]
+    fn matching_locale_observations_do_not_prove_equivalence() {
+        for (locale, language) in [
+            ("en", "EN"),
             ("EN-latn-us", "en-Latn-US-u-nu-latn"),
-            ("sr-Latn", "sr-RS"),
-            ("fr-%%%", "fr-CA"),
-            ("fr-FR", ""),
-            ("fr-FR", "und"),
-            ("invalid!", "en"),
+            ("fr-FR", "fr-FR"),
         ] {
             let (mut artifact, mut context) = attested_audit();
             context.inventory.as_mut().unwrap().pages[2].locale = Some(locale.into());
