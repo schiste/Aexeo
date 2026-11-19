@@ -486,6 +486,8 @@ pub fn html_source_map_with_scope(
                 | "strong"
                 | "i"
                 | "em"
+                | "sup"
+                | "sub"
                 | "a"
                 | "br"
         ) {
@@ -1016,6 +1018,32 @@ mod tests {
                 "{html}"
             );
         }
+    }
+
+    #[test]
+    fn maps_superscript_citations_and_subscripts_to_original_positions() {
+        let html = "<main>\n<p>Élan <sup><a href='#ref'>[1]</a></sup> H<sub>2</sub>O continues.</p>\n</main>";
+        for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+            let adapted = html_content_with_scope("x", html, scope).unwrap();
+            let projected = adapted.input.text.as_deref().unwrap();
+            let map = html_source_map_with_scope(html, projected, scope).unwrap();
+            let projected_index = crate::text_index::LineIndex::new(projected);
+            let source_index = crate::text_index::LineIndex::new(html);
+            for needle in ["Élan", "[1]", "2", "continues"] {
+                let (line, column) = projected_index
+                    .position(projected, projected.find(needle).unwrap())
+                    .unwrap();
+                let expected = source_index.position(html, html.find(needle).unwrap());
+                assert_eq!(
+                    map.source_position(html, projected, line, column),
+                    expected,
+                    "{needle}"
+                );
+            }
+        }
+        let malformed = "<p>Text <sup>reference</p></sup>";
+        let adapted = html_content("x", malformed).unwrap();
+        assert!(html_source_map(malformed, adapted.input.text.as_deref().unwrap()).is_none());
     }
 
     #[test]
