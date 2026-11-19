@@ -191,6 +191,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - Keep real-content review packets awaiting people in a durable private directory,
   outside Git and temporary cleanup locations; verify restrictive permissions,
   preserve the corpus and rubric, and never treat placeholder labels as reviews.
+- For link graph locale coverage, test inventory and rendered language as
+  matching, conflicting, missing, malformed and differently specific values.
+  Include a seeded HTTP crawl and assert both the reconciliation reason and
+  orphan conclusion. An empty HTML `lang` is projected as absent, not as an
+  empty string; inspect the actual report shape before writing assertions.
 - For protected site comparisons, verify the HTTP method and final response URL:
   a successful login page after a redirect is not an observed site page, and
   CMS access alone does not establish a matching rendered snapshot. Compare
