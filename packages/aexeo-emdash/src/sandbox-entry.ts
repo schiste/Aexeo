@@ -15,6 +15,7 @@ import {
   readSandboxBlockMappings,
   readSandboxContentFieldState,
   readSandboxDescriptionFields,
+  readSandboxMetadataFields,
   writeSidecarConfig,
 } from "./plugin.js";
 import { validateSidecarUrl } from "./sidecar-url.js";
@@ -222,6 +223,7 @@ async function handleRefresh(ctx: DispatchCtx): Promise<BlockResponse> {
     contentFieldsByCollection: contentFields.fields,
     contentFieldsUnavailable: contentFields.unavailable,
     descriptionFieldsByCollection: await readSandboxDescriptionFields(ctx.ctx),
+    metadataFieldsByCollection: await readSandboxMetadataFields(ctx.ctx),
     tuning: adminViewTuning,
   });
 }

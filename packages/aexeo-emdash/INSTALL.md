@@ -750,9 +750,13 @@ field is observed as absent. The built-in destinations `title`, `description`,
 audits use the selected revision's data and never substitute the current SEO
 panel. Their input coverage lists configured, supplied and unavailable field
 names, and the `aexeo.metadata_projection` event logs aggregate counts without
-field names or values. This setting is currently supported in configured mode;
-it is not a sandbox setting. Map a substantive review date deliberately: an
-ordinary modification timestamp does not establish that the content was reviewed.
+field names or values. Sandboxed hosts can enter the same JSON object in the
+`Editorial metadata fields by collection (JSON)` setting; save and Refresh
+forward projected values to the sidecar. Sandbox mode does not run configured
+content presets, so supplying this mapping alone does not activate the
+`metadata_age` gate. Invalid sandbox settings are ignored with a warning.
+Map a substantive review date deliberately: an ordinary modification timestamp
+does not establish that the content was reviewed.
 
 Content preset gate outcomes, including `not_checked` and their reasons, are
 stored with the current route findings and exposed in CMS views and the data

@@ -1,5 +1,5 @@
 import { cmsBodyCoverage, hasCompleteBody, isCmsObservableFinding, isLegacyCmsObservableFinding } from "./cms-coverage.js";
-import { isDescriptionField, type CustomBlockMappings, type DescriptionField, type MetadataFields } from "./adapter.js";
+import { isDescriptionField, validateMetadataFieldsByCollection, type CustomBlockMappings, type DescriptionField, type MetadataFields } from "./adapter.js";
 import type { SuppressionFilter } from "./suppressions.js";
 import type { EmdashDocument, Finding } from "./types.js";
 import {
@@ -129,6 +129,7 @@ export const SETTINGS_TOKEN_KEY = "eval_token";
 export const SETTINGS_BLOCK_MAPPINGS_KEY = "block_mappings";
 export const SETTINGS_CONTENT_FIELDS_KEY = "content_fields_by_collection";
 export const SETTINGS_DESCRIPTION_FIELDS_KEY = "description_fields_by_collection";
+export const SETTINGS_METADATA_FIELDS_KEY = "metadata_fields_by_collection";
 
 // Local mirror of the host's `SecretSettingField` variant of `SettingField`
 // (emdash 0.41). Kept local so this package still typechecks without the
@@ -157,6 +158,12 @@ export const PLUGIN_SETTINGS_SCHEMA: Record<string, PluginSettingField> = {
     type: "string",
     label: "Description fields by collection (JSON)",
     description: "Ordered renderer description fallback fields per collection.",
+    multiline: true,
+  },
+  [SETTINGS_METADATA_FIELDS_KEY]: {
+    type: "string",
+    label: "Editorial metadata fields by collection (JSON)",
+    description: "Explicit metadata source fields per collection.",
     multiline: true,
   },
   [SETTINGS_BLOCK_MAPPINGS_KEY]: {
@@ -495,6 +502,22 @@ export async function readSandboxDescriptionFields(ctx: SandboxCtx): Promise<Rec
   return (await readSandboxFields(ctx, SETTINGS_DESCRIPTION_FIELDS_KEY, "Aexeo description field selection unavailable; description remains unverified", isDescriptionField)).fields;
 }
 
+/** Read the same explicit metadata mappings used by configured hosts. */
+export async function readSandboxMetadataFields(ctx: SandboxCtx): Promise<Record<string, MetadataFields> | undefined> {
+  if (!ctx.settings) return undefined;
+  try {
+    const raw = await ctx.settings.get<unknown>(SETTINGS_METADATA_FIELDS_KEY);
+    if (raw === null || raw === "") return undefined;
+    if (typeof raw !== "string" || raw.length > 65536) throw new Error("invalid selection size or type");
+    const value: unknown = JSON.parse(raw);
+    validateMetadataFieldsByCollection(value);
+    return value as Record<string, MetadataFields>;
+  } catch {
+    ctx.log?.warn?.("Aexeo metadata field selection unavailable; metadata projection remains unverified");
+    return undefined;
+  }
+}
+
 // EmDash 0.41 keeps the sandbox bridge available for afterSave work.
 // Use the same persistence path as configured mode and evaluate through
 // the sidecar that keeps WASM out of the isolate.
@@ -509,7 +532,7 @@ export async function handleAfterSave(
     );
     return;
   }
-  const [blockMappings, fields, descriptions] = await Promise.all([readSandboxBlockMappings(ctx), readSandboxContentFieldState(ctx), readSandboxDescriptionFields(ctx)]);
+  const [blockMappings, fields, descriptions, metadata] = await Promise.all([readSandboxBlockMappings(ctx), readSandboxContentFieldState(ctx), readSandboxDescriptionFields(ctx), readSandboxMetadataFields(ctx)]);
   await handleAfterSaveConfigured(event, ctx, (documents, context) =>
     evaluateViaSidecar(
       ctx.http,
@@ -522,6 +545,7 @@ export async function handleAfterSave(
     fields.fields?.[event.content.type],
     descriptions?.[event.content.type],
     fields.unavailable,
+    metadata?.[event.content.type],
   );
 }
 
