@@ -1,7 +1,6 @@
 """Cross-language and adversarial tests for candidate input comparison."""
 import copy
 import json
-import importlib.util
 from pathlib import Path
 import subprocess
 import sys
@@ -12,6 +11,14 @@ from unittest.mock import patch
 from verify_candidate_inputs import VerificationError, compare_fresh, overlay, read_stable, verify
 
 VECTOR = Path(__file__).with_name('candidate-verdict-vector.json')
+
+
+def schema_formats_available():
+    try:
+        from jsonschema import FormatChecker
+    except ImportError:
+        return False
+    return {'date-time', 'uri'}.issubset(FormatChecker().checkers)
 
 
 class CandidateVerification(unittest.TestCase):
@@ -69,7 +76,7 @@ class CandidateVerification(unittest.TestCase):
         self.envelope['receipt']['verdict']['status'] = 'tampered'
         self.assertFalse(self.check()['verdict_validated'])
 
-    @unittest.skipUnless(importlib.util.find_spec('jsonschema'), 'requires schema validator')
+    @unittest.skipUnless(schema_formats_available(), 'requires schema validator and format checkers')
     def test_fresh_verdict_comparison_fails_closed(self):
         required = ['gate:7:article:words']
         identity = ('aexeo', '0.0.24')
@@ -81,6 +88,9 @@ class CandidateVerification(unittest.TestCase):
                                  self.artifacts, required, identity)
         self.assertEqual(compare(), {'input_binding': 'match', 'verdict_validated': True,
                                      'required_check_count': 1, 'publication_authorized': False})
+        with patch('jsonschema.FormatChecker') as checker:
+            checker.return_value.checkers = {}
+            with self.assertRaises(VerificationError): compare()
         for mutate in [
             lambda v: v.update(status='fail'),
             lambda v: v['subject'].update(change_id='other'),
@@ -112,7 +122,7 @@ class CandidateVerification(unittest.TestCase):
         fresh['binding'] = '0' * 64
         with self.assertRaises(VerificationError): compare()
 
-    @unittest.skipUnless(importlib.util.find_spec('jsonschema'), 'requires schema validator')
+    @unittest.skipUnless(schema_formats_available(), 'requires schema validator and format checkers')
     def test_cli_requires_complete_comparison_policy(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

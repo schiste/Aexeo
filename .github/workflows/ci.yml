@@ -36,7 +36,6 @@ jobs:
           "$RUNNER_TEMP/aexeo-schema-venv/bin/python" docs/specs/content-gate/v2/test_decision_binding_vector.py
           python3 docs/specs/content-gate/v2/test_revision_set_vector.py
           python3 docs/specs/content-gate/v2/test_candidate_revision_vector.py
-          python3 docs/specs/content-gate/v2/test_verify_candidate_inputs.py
           python3 docs/specs/content-gate/v2/test_verify_decision_inputs.py
           "$RUNNER_TEMP/aexeo-schema-venv/bin/python" docs/specs/content-gate/v2/test_compare_offline_receipts.py
           "$RUNNER_TEMP/aexeo-schema-venv/bin/python" docs/specs/content-gate/v2/test_verify_candidate_inputs.py
