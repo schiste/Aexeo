@@ -119,6 +119,7 @@ mod tests {
             lang: Some("en".to_string()),
             alternates: Vec::new(),
             meta: Default::default(),
+            unavailable_metadata_fields: Default::default(),
             schema: Vec::new(),
             body: Vec::new(),
         }
@@ -221,6 +222,7 @@ mod tests {
             lang: None,
             alternates: Vec::new(),
             meta: Default::default(),
+            unavailable_metadata_fields: Default::default(),
             schema: Vec::new(),
             body: Vec::new(),
         };
@@ -239,6 +241,7 @@ mod tests {
             lang: None,
             alternates: Vec::new(),
             meta: Default::default(),
+            unavailable_metadata_fields: Default::default(),
             schema: Vec::new(),
             body: Vec::new(),
         };

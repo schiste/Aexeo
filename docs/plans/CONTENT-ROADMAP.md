@@ -74,10 +74,10 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] Keep EmDash content reports available when an optional synchronous
   telemetry callback throws; telemetry does not change the gate result.
 
-The `@aeptus/aexeo-emdash` 0.9.2 package remains unpublished. Rebuild the
-package and its WASM from the exact release commit, then publish and independently
-check that exact artifact against the registry before considering it delivered.
-The latest published version observed on 2026-11-16 was 0.9.1.
+The latest `@aeptus/aexeo-emdash` version observed in the npm registry on
+2026-11-19 is 0.9.3. Rebuild the next package and WASM from the exact release
+commit, publish it, and independently check that exact artifact against the
+registry before considering the release delivered.
 
 - [x] Reject duplicate JSON keys at any depth in supplied external gate results
   before evaluation and snapshot fingerprinting in both content CLI paths.
@@ -450,6 +450,14 @@ The latest published version observed on 2026-11-16 was 0.9.1.
   logs can aggregate historical overrides without storing draft text ([PR #45](https://github.com/schiste/Aexeo/pull/45)).
 - [x] Shared article/glossary readability preset delivered in
   [PR #34](https://github.com/schiste/Aexeo/pull/34).
+- [x] Opt-in advisory metadata review-age gate with an explicit reference date;
+  absent, malformed, unobserved and future dates are not assessed. Configured
+  EmDash hosts can map fields per collection for save, refresh and revision
+  audits, with aggregate projection telemetry. The host must refresh the
+  reference date and identify a substantive review field. This is a scheduling
+  signal only: it does not verify sources or establish factual currentness.
+- [ ] Extend metadata mappings to the sandboxed EmDash adapter and validate
+  real host configuration and permissions before relying on it.
 - [ ] Source and factuality evaluation after the basic gates are validated.
   EmDash trusted hosts can opt into per-document evidence snapshots; failures remain unchecked and never fall back to a shared snapshot. This supplies inputs only and is not factuality validation.
 

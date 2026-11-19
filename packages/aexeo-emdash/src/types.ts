@@ -56,6 +56,8 @@ export interface EmdashDocument {
   lang?: string;
   alternates?: HreflangAlternate[];
   meta?: Record<string, string>;
+  /** Declared metadata whose source was not observed in this snapshot. */
+  unavailable_metadata_fields?: string[];
   schema?: unknown[];
   body?: PortableTextBlock[];
   /** Body features faithfully represented by an adapter; omitted means all. */

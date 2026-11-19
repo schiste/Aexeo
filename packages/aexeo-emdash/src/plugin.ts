@@ -1,5 +1,5 @@
 import { cmsBodyCoverage, hasCompleteBody, isCmsObservableFinding, isLegacyCmsObservableFinding } from "./cms-coverage.js";
-import { isDescriptionField, type CustomBlockMappings, type DescriptionField } from "./adapter.js";
+import { isDescriptionField, type CustomBlockMappings, type DescriptionField, type MetadataFields } from "./adapter.js";
 import type { SuppressionFilter } from "./suppressions.js";
 import type { EmdashDocument, Finding } from "./types.js";
 import {
@@ -357,6 +357,11 @@ function recordContentCoverage(ctx: SandboxCtx, documents: readonly EmdashDocume
     const observed = documents.filter((document) => document.description_source_observed === true).length;
     const withValue = documents.filter((document) => document.description_source_observed === true && !!document.description).length;
     ctx.log?.info?.("aexeo.description_coverage", { documents: documents.length, observed, with_value: withValue, unverified: documents.length - observed });
+    ctx.log?.info?.("aexeo.metadata_projection", {
+      documents: documents.length,
+      supplied_fields: documents.reduce((n, document) => n + Object.keys(document.meta ?? {}).length, 0),
+      unavailable_fields: documents.reduce((n, document) => n + (document.unavailable_metadata_fields?.length ?? 0), 0),
+    });
   } catch {
     // Optional diagnostics must never break an editor workflow.
   }
@@ -597,6 +602,7 @@ export async function handleAfterSaveConfigured(
   contentFields?: readonly string[],
   descriptionFields?: readonly DescriptionField[],
   contentFieldsUnavailable = false,
+  metadataFields?: MetadataFields,
 ): Promise<void> {
   // Capture the prior identity before host calls: a later save or delete must
   // not be overwritten if adaptation fails while it is in progress.
@@ -612,6 +618,7 @@ export async function handleAfterSaveConfigured(
       blockMappings,
       contentFields,
       descriptionFields,
+      metadataFields,
     );
   } catch {
     // No reliable route exists for a new item or an ambiguous prior identity.
@@ -801,6 +808,7 @@ export async function evaluateAndPersistAll(
     contentFieldsByCollection?: Record<string, readonly string[]> | undefined;
     contentFieldsUnavailable?: boolean | undefined;
     descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]> | undefined;
+    metadataFieldsByCollection?: Record<string, MetadataFields> | undefined;
   },
 ): Promise<RefreshSummary> {
   const collections = options.collections ?? DEFAULT_COLLECTIONS;
@@ -857,6 +865,7 @@ export async function evaluateAndPersistAll(
               options.blockMappings,
               options.contentFieldsByCollection?.[collection],
               options.descriptionFieldsByCollection?.[collection],
+              options.metadataFieldsByCollection?.[collection],
             );
             if (options.contentFieldsUnavailable && adapted.document.body !== undefined) adapted.document.body_capabilities = [];
             documents.push(adapted.document);

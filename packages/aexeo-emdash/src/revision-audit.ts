@@ -1,4 +1,4 @@
-import { adaptContentItem, type CustomBlockMappings, type DescriptionField, type EmdashContentItem } from "./adapter.js";
+import { adaptContentItem, type CustomBlockMappings, type DescriptionField, type MetadataFields, type EmdashContentItem } from "./adapter.js";
 import type { ContentPresetOptions } from "./content-evaluator.js";
 import { selectFragmentPreset } from "./fragment-selection.js";
 import { selectContentPreset } from "./preset-selection.js";
@@ -19,6 +19,7 @@ export interface RevisionAuditOptions {
   blockMappings?: CustomBlockMappings | undefined;
   contentFieldsByCollection?: Record<string, readonly string[]> | undefined;
   descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]> | undefined;
+  metadataFieldsByCollection?: Record<string, MetadataFields> | undefined;
   evidenceProviderConfigured?: boolean;
   evaluate: (document: EmdashDocument, preset: string, sources?: Record<string, string>, evidence?: Record<string, string>) => Promise<ContentReport>;
 }
@@ -49,7 +50,8 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
     data: snapshot.data };
   const adapted = adaptContentItem(item, { route: `/revision/${encodeURIComponent(id)}`, blockMappings: options.blockMappings,
     ...(contentFields === undefined ? {} : { contentFields }),
-    ...(options.descriptionFieldsByCollection?.[collection] === undefined ? {} : { descriptionFields: options.descriptionFieldsByCollection[collection] }) });
+    ...(options.descriptionFieldsByCollection?.[collection] === undefined ? {} : { descriptionFields: options.descriptionFieldsByCollection[collection] }),
+    ...(options.metadataFieldsByCollection?.[collection] === undefined ? {} : { metadataFields: options.metadataFieldsByCollection[collection] }) });
   // A runtime provider replaces static evidence in the ordinary evaluator.
   // It cannot safely be called for a historical revision without a revision-aware contract.
   const evidence = options.evidenceProviderConfigured ? undefined : options.preset?.evidenceSources;
@@ -79,6 +81,11 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
         configured_fields: options.descriptionFieldsByCollection?.[collection] ?? null,
         source_observed: adapted.document.description_source_observed === true,
         value_supplied: adapted.document.description !== undefined,
+      },
+      metadata: {
+        configured_fields: Object.keys(options.metadataFieldsByCollection?.[collection] ?? {}),
+        supplied_fields: Object.keys(adapted.document.meta ?? {}),
+        unavailable_fields: adapted.document.unavailable_metadata_fields ?? [],
       },
       rendered_page: "not_observed" as const,
     },

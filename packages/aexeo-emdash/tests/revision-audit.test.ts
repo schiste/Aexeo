@@ -89,6 +89,23 @@ describe("revision audits", () => {
     data.missing = null;
     expect(await run("missing")).toMatchObject({ status: "evaluated", input_coverage: { body: { coverage: "complete" } } });
   });
+  it("rejects invalid and reserved configured metadata mappings", () => {
+    expect(() => createPlugin({ metadataFieldsByCollection: { posts: { title: "name" } } })).toThrow(/reserved metadata/);
+    expect(() => createPlugin({ metadataFieldsByCollection: { posts: { bad: { source: "data", path: [] } } } })).toThrow(/invalid/);
+    expect(() => createPlugin({ metadataFieldsByCollection: null } as never)).toThrow(/must be an object/);
+  });
+  it("uses historical mapped metadata and reports field coverage", async () => {
+    const { ctx, current, revision } = host();
+    (current.data as Record<string, unknown>).review = { date: "2025-01-01" };
+    (revision.data as Record<string, unknown>).review = { date: "2024-01-01" };
+    const evaluate = vi.fn(async (_document: unknown, _preset: string) => report);
+    const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, {
+      preset: { name: "article" }, metadataFieldsByCollection: { posts: { last_reviewed: { source: "data", path: ["review", "date"] }, missing: "not_loaded" } }, evaluate,
+    });
+    expect(evaluate.mock.calls[0]?.[0]).toMatchObject({ meta: { last_reviewed: "2024-01-01" }, unavailable_metadata_fields: ["missing"] });
+    expect(result).toMatchObject({ input_coverage: { metadata: { configured_fields: ["last_reviewed", "missing"], supplied_fields: ["last_reviewed"], unavailable_fields: ["missing"] } } });
+    expect(JSON.stringify(evaluate.mock.calls[0])).not.toContain("2025-01-01");
+  });
   it("projects nested revision data without substituting the current SEO panel", async () => {
     const { ctx, current, revision } = host();
     (revision.data as Record<string, unknown>).page_data = { description: "Historical description" };
