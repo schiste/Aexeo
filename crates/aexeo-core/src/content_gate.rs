@@ -52,6 +52,26 @@ pub struct ContentContext {
     pub unavailable_metadata_fields: Vec<String>,
 }
 
+// Accept only a complete calendar date; timestamps and implicit time zones are
+// deliberately excluded so the caller chooses and binds the evaluation date.
+fn parse_iso_calendar_date(value: &str) -> Option<time::Date> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || !bytes
+            .iter()
+            .enumerate()
+            .all(|(i, b)| i == 4 || i == 7 || b.is_ascii_digit())
+    {
+        return None;
+    }
+    let year = value.get(..4)?.parse().ok()?;
+    let month = time::Month::try_from(value.get(5..7)?.parse::<u8>().ok()?).ok()?;
+    let day = value.get(8..10)?.parse().ok()?;
+    time::Date::from_calendar_date(year, month, day).ok()
+}
+
 /// Largest input the CLI adapters read. Larger input is reported as `not_checked`.
 pub const MAX_CONTENT_INPUT_BYTES: usize = 16 * 1024 * 1024;
 
@@ -299,6 +319,17 @@ pub enum ContentGate {
         blocking: bool,
         min: Option<usize>,
         max: Option<usize>,
+    },
+    /// Advisory review when a supplied date is older than a fixed reference date.
+    MetadataAge {
+        id: String,
+        field: String,
+        as_of: String,
+        max_days: usize,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default)]
+        blocking: bool,
     },
     /// Bounds the number of adapter-supplied paragraphs.
     ParagraphCount {
@@ -733,6 +764,7 @@ impl ContentGate {
             | Self::WordCount { severity, .. }
             | Self::CharacterCount { severity, .. }
             | Self::MetadataLength { severity, .. }
+            | Self::MetadataAge { severity, .. }
             | Self::LinkCount { severity, .. }
             | Self::LinkDestinations { severity, .. }
             | Self::LinkReachability { severity, .. }
@@ -776,6 +808,7 @@ impl ContentGate {
             | Self::WordCount { blocking, .. }
             | Self::CharacterCount { blocking, .. }
             | Self::MetadataLength { blocking, .. }
+            | Self::MetadataAge { blocking, .. }
             | Self::LinkCount { blocking, .. }
             | Self::LinkDestinations { blocking, .. }
             | Self::LinkReachability { blocking, .. }
@@ -834,7 +867,9 @@ impl ContentGate {
             Self::LinkCount { .. } => "links",
             Self::LinkDestinations { .. } => "link_destinations",
             Self::LinkReachability { .. } => "link_reachability",
-            Self::RequiredMetadata { .. } | Self::MetadataLength { .. } => "metadata",
+            Self::RequiredMetadata { .. }
+            | Self::MetadataLength { .. }
+            | Self::MetadataAge { .. } => "metadata",
             Self::ParagraphCount { .. }
             | Self::ParagraphLength { .. }
             | Self::ParagraphCharacterLength { .. }
@@ -870,6 +905,7 @@ impl ContentGate {
             | Self::WordCount { id, .. }
             | Self::CharacterCount { id, .. }
             | Self::MetadataLength { id, .. }
+            | Self::MetadataAge { id, .. }
             | Self::LinkCount { id, .. }
             | Self::LinkDestinations { id, .. }
             | Self::LinkReachability { id, .. }
@@ -981,6 +1017,9 @@ fn editorial_suggestion(gate: &ContentGate) -> Option<&'static str> {
         ContentGate::MetadataLength { .. } => {
             Some("Review the metadata length against the configured limits without losing meaning.")
         }
+        ContentGate::MetadataAge { .. } => Some(
+            "Review the content and its sources; the supplied date alone does not establish accuracy or currency.",
+        ),
         ContentGate::FinalNewline { .. } => Some("Add a final newline to the source text."),
         _ => None,
     }
@@ -1480,6 +1519,14 @@ impl ContentPreset {
                         || matches!((min, max), (Some(a), Some(b)) if a > b) =>
                 {
                     bail!("invalid character count bounds for {}", gate.id())
+                }
+                ContentGate::MetadataAge { field, as_of, .. }
+                    if field.trim().is_empty() || parse_iso_calendar_date(as_of).is_none() =>
+                {
+                    bail!(
+                        "invalid metadata age field or reference date for {}",
+                        gate.id()
+                    )
                 }
                 ContentGate::MetadataLength {
                     field, min, max, ..
@@ -3956,6 +4003,55 @@ impl ContentPreset {
                     }
                     None => reason = Some("site is unavailable from this adapter".into()),
                 },
+                ContentGate::MetadataAge {
+                    field,
+                    as_of,
+                    max_days,
+                    ..
+                } => {
+                    measurements.insert("max_days".into(), *max_days);
+                    if let Ok(compact) = as_of.replace('-', "").parse::<usize>() {
+                        measurements.insert("as_of_yyyymmdd".into(), compact);
+                    }
+                    let unavailable =
+                        context.is_some_and(|ctx| ctx.unavailable_metadata_fields.contains(field));
+                    if unavailable || input.metadata.is_none() {
+                        reason = Some("metadata field is unavailable from this adapter".into());
+                    } else if let Some(value) = input
+                        .metadata
+                        .as_ref()
+                        .and_then(|metadata| metadata.get(field))
+                    {
+                        match (
+                            parse_iso_calendar_date(value),
+                            parse_iso_calendar_date(as_of),
+                        ) {
+                            (Some(date), Some(reference)) if date <= reference => {
+                                let age = (reference - date).whole_days() as usize;
+                                measurements.insert("age_days".into(), age);
+                                if age > *max_days {
+                                    emit(
+                                        format!(
+                                            "Metadata date {field:?} is {age} days before {as_of}; review the content and sources"
+                                        ),
+                                        1,
+                                        1,
+                                    );
+                                }
+                            }
+                            (Some(_), Some(_)) => {
+                                reason = Some("metadata date is after the reference date".into())
+                            }
+                            _ => {
+                                reason = Some(
+                                    "metadata date is not a valid YYYY-MM-DD calendar date".into(),
+                                )
+                            }
+                        }
+                    } else {
+                        reason = Some("metadata date is absent; its age cannot be assessed".into());
+                    }
+                }
                 ContentGate::MetadataLength {
                     field, min, max, ..
                 } => {
@@ -4037,6 +4133,7 @@ impl ContentPreset {
                     gate,
                     ContentGate::RequiredMetadata { .. }
                         | ContentGate::MetadataLength { .. }
+                        | ContentGate::MetadataAge { .. }
                         | ContentGate::UniqueCollectionMetadata { .. }
                         | ContentGate::Custom { .. }
                         | ContentGate::SiteGroup { .. }
@@ -4163,6 +4260,86 @@ mod tests {
             )
             .unwrap();
         assert_eq!(report.gates[0].status, GateStatus::NotChecked);
+    }
+
+    #[test]
+    fn metadata_age_is_advisory_reproducible_and_handles_unknown_dates() {
+        let config = "version=1\nname='review'\n[[gates]]\nid='age'\nkind='metadata_age'\nfield='last_reviewed'\nas_of='2024-03-01'\nmax_days=1\n";
+        let preset = ContentPreset::from_toml(config).unwrap();
+        for invalid in [
+            config.replace("2024-03-01", "2023-02-29"),
+            config.replace("field='last_reviewed'", "field=' '"),
+        ] {
+            assert!(ContentPreset::from_toml(&invalid).is_err());
+        }
+        let mut input = ContentInput {
+            id: "article".into(),
+            metadata: Some(BTreeMap::new()),
+            ..Default::default()
+        };
+        assert_eq!(
+            preset.evaluate(&input).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
+        let metadata = input.metadata.as_mut().unwrap();
+        metadata.insert("last_reviewed".into(), "2024-02-29".into());
+        let pass = preset.evaluate(&input).unwrap();
+        assert_eq!(pass.gates[0].status, GateStatus::Passed);
+        assert!(!pass.gates[0].blocking);
+        assert_eq!(pass.gates[0].measurements["age_days"], 1);
+        assert_eq!(pass.gates[0].measurements["as_of_yyyymmdd"], 20240301);
+        input
+            .metadata
+            .as_mut()
+            .unwrap()
+            .insert("last_reviewed".into(), "2024-02-28".into());
+        let failed = preset.evaluate(&input).unwrap();
+        assert_eq!(failed.gates[0].status, GateStatus::Failed);
+        assert_eq!(failed.gates[0].measurements["age_days"], 2);
+        assert!(
+            failed.gates[0].findings[0]
+                .message
+                .contains("review the content and sources")
+        );
+        let adapter = ContentContext {
+            unavailable_metadata_fields: vec!["last_reviewed".into()],
+            ..Default::default()
+        };
+        assert_eq!(
+            preset
+                .evaluate_with_capabilities(
+                    &input,
+                    &ContentEvaluationContext {
+                        adapter: Some(&adapter),
+                        ..Default::default()
+                    }
+                )
+                .unwrap()
+                .gates[0]
+                .status,
+            GateStatus::NotChecked
+        );
+        for value in [
+            "2024-03-02",
+            "2023-02-29",
+            "2024-02-29T00:00:00Z",
+            "",
+            "not a date",
+        ] {
+            input
+                .metadata
+                .as_mut()
+                .unwrap()
+                .insert("last_reviewed".into(), value.into());
+            let result = preset.evaluate(&input).unwrap();
+            assert_eq!(result.gates[0].status, GateStatus::NotChecked, "{value}");
+            assert!(result.gates[0].findings.is_empty());
+        }
+        input.metadata = None;
+        assert_eq!(
+            preset.evaluate(&input).unwrap().gates[0].status,
+            GateStatus::NotChecked
+        );
     }
 
     #[test]
