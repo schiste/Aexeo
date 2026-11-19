@@ -8,7 +8,9 @@ use aexeo_contracts::content_gate_protocol::Change;
 use serde::Serialize;
 
 use crate::{
-    content_candidate::{CandidateItem, CandidateSnapshot, overlay_candidate, validate_inventory},
+    content_candidate::{
+        CandidateItem, CandidateOverlay, CandidateSnapshot, overlay_candidate, validate_inventory,
+    },
     content_gate::{ContentGate, ContentInput, ContentPreset, ContentReport, GateStatus},
 };
 
@@ -22,6 +24,23 @@ fn unavailable(reason: impl Into<String>) -> NotChecked {
     NotChecked {
         reason: reason.into(),
     }
+}
+
+fn checked_overlay(
+    snapshot: &CandidateSnapshot,
+    change: &Change,
+    after: &[CandidateItem],
+) -> Result<CandidateOverlay, NotChecked> {
+    if change
+        .entries
+        .iter()
+        .flat_map(|entry| [entry.before.as_ref(), entry.after.as_ref()])
+        .flatten()
+        .any(|state| state.inline.is_none())
+    {
+        return Err(unavailable("only inline change content is supported"));
+    }
+    overlay_candidate(snapshot, change, after).map_err(unavailable)
 }
 
 /// Reports evaluated by this binary from an owned base and owned preset.
@@ -266,6 +285,12 @@ impl IncrementalBaseline {
         change: &Change,
         after: &[CandidateItem],
     ) -> Result<IncrementalEvaluation, NotChecked> {
+        self.validate_change_media(change)?;
+        let overlay = checked_overlay(&self.snapshot, change, after)?;
+        self.evaluate_overlay(change, &overlay)
+    }
+
+    fn validate_change_media(&self, change: &Change) -> Result<(), NotChecked> {
         if change
             .entries
             .iter()
@@ -275,16 +300,14 @@ impl IncrementalBaseline {
                 "change media type is not supported by this projection mode",
             ));
         }
-        if change
-            .entries
-            .iter()
-            .flat_map(|entry| [entry.before.as_ref(), entry.after.as_ref()])
-            .flatten()
-            .any(|state| state.inline.is_none())
-        {
-            return Err(unavailable("only inline change content is supported"));
-        }
-        let overlay = overlay_candidate(&self.snapshot, change, after).map_err(unavailable)?;
+        Ok(())
+    }
+
+    fn evaluate_overlay(
+        &self,
+        change: &Change,
+        overlay: &CandidateOverlay,
+    ) -> Result<IncrementalEvaluation, NotChecked> {
         if !overlay.impact.link_impact_complete {
             return Err(unavailable("link impact coverage is incomplete"));
         }
@@ -414,16 +437,15 @@ impl CollectionBaseline {
         change: &Change,
         after: &[CandidateItem],
     ) -> Result<ContentReport, NotChecked> {
-        if change
-            .entries
-            .iter()
-            .flat_map(|entry| [entry.before.as_ref(), entry.after.as_ref()])
-            .flatten()
-            .any(|state| state.inline.is_none())
-        {
-            return Err(unavailable("only inline change content is supported"));
-        }
-        let overlay = overlay_candidate(&self.snapshot, change, after).map_err(unavailable)?;
+        let overlay = checked_overlay(&self.snapshot, change, after)?;
+        self.evaluate_overlay(change, &overlay)
+    }
+
+    fn evaluate_overlay(
+        &self,
+        change: &Change,
+        overlay: &CandidateOverlay,
+    ) -> Result<ContentReport, NotChecked> {
         let mut metadata = self.metadata.clone();
         for entry in &change.entries {
             let old_id = match entry.operation {
@@ -525,10 +547,33 @@ impl ComposedBaseline {
     /// Evaluate both scopes independently so a missing capability or incomplete
     /// collection cannot be hidden by a successful result in the other scope.
     pub fn evaluate(&self, change: &Change, after: &[CandidateItem]) -> ComposedEvaluation {
+        let overlay = checked_overlay(&self.items.snapshot, change, after);
+        let item_result = self
+            .items
+            .validate_change_media(change)
+            .and_then(|()| overlay.as_ref().map_err(Clone::clone))
+            .and_then(|overlay| self.items.evaluate_overlay(change, overlay));
+        let collection_result = overlay
+            .as_ref()
+            .map_err(Clone::clone)
+            .and_then(|overlay| self.collection.evaluate_overlay(change, overlay));
         ComposedEvaluation {
             change_id: change.change_id.clone(),
-            items: self.items.evaluate(change, after),
-            collection: self.collection.evaluate(change, after),
+            items: match item_result {
+                Ok(result) => result,
+                Err(error) => IncrementalEvaluation::NotChecked {
+                    reason: error.reason,
+                },
+            },
+            collection: match collection_result {
+                Ok(report) => CollectionEvaluation::Report {
+                    change_id: change.change_id.clone(),
+                    report,
+                },
+                Err(error) => CollectionEvaluation::NotChecked {
+                    reason: error.reason,
+                },
+            },
         }
     }
 }
@@ -692,6 +737,59 @@ mod tests {
         let mut invalid = preset.clone();
         invalid.gates.push(invalid.gates[0].clone());
         assert!(ComposedBaseline::prepare_adapted(snapshot, metadata, invalid).is_err());
+    }
+
+    #[test]
+    fn shared_overlay_matches_separate_scope_evaluations() {
+        let (snapshot, _, mut change) = fixture();
+        let preset = ContentPreset::from_toml("version=1\nname='mixed'\n[[gates]]\nid='words'\nkind='word_count'\nmin=2\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n").unwrap();
+        let metadata = snapshot
+            .items
+            .iter()
+            .map(|i| {
+                (
+                    i.entity_id.clone(),
+                    Some(BTreeMap::from([("slug".into(), i.entity_id.clone())])),
+                )
+            })
+            .collect();
+        let updated = item("a", "updated words", Some(vec!["/b"]));
+        let mut update = entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&updated),
+        );
+        update.metadata = Some(BTreeMap::from([("slug".into(), "b".into())]));
+        change.entries = vec![update];
+        let baseline = ComposedBaseline::prepare_adapted(snapshot, metadata, preset).unwrap();
+        let mut missing_links = updated.clone();
+        missing_links.links = None;
+        let mut stale = change.clone();
+        stale.base.revision = "stale".into();
+        let mut unsupported = change.clone();
+        unsupported.entries[0].media_type = "application/pdf".into();
+        let mut missing_inline = change.clone();
+        missing_inline.entries[0].after.as_mut().unwrap().inline = None;
+        for (proposal, after) in [
+            (&change, vec![updated.clone()]),
+            (&change, vec![missing_links]),
+            (&stale, vec![updated.clone()]),
+            (&unsupported, vec![updated.clone()]),
+            (&missing_inline, vec![updated]),
+        ] {
+            let expected_items = baseline.items.evaluate(proposal, &after);
+            let expected_collection = baseline.collection.evaluate(proposal, &after);
+            let actual = baseline.evaluate(proposal, &after);
+            assert_eq!(
+                serde_json::to_value(actual.items).unwrap(),
+                serde_json::to_value(expected_items).unwrap()
+            );
+            assert_eq!(
+                serde_json::to_value(actual.collection).unwrap(),
+                serde_json::to_value(expected_collection).unwrap()
+            );
+        }
     }
 
     #[test]
