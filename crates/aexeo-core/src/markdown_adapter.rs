@@ -290,7 +290,7 @@ pub fn literal_markdown_link_offsets(source: &str) -> Result<Vec<usize>> {
     Ok(offsets)
 }
 
-// Single-pass scan of the unambiguous two-bracket reference spelling. It is a
+// Single-pass scan of an explicit two-bracket reference spelling. It is a
 // candidate, not evidence that a reference definition exists or will render.
 fn explicit_reference_candidates(raw: &str, base: usize, offsets: &mut Vec<usize>) {
     let bytes = raw.as_bytes();
