@@ -453,9 +453,10 @@ registry before considering the release delivered.
   freshness independently; this does not add link evidence to offline receipts.
   Direct Rust collection uniqueness evaluation rejects ambiguous identities in
   the examined prefix, matching CLI and EmDash input validation.
-  Literal HTML image alt attributes and adjacent prose map to their exact source
-  positions when the complete projection matches; entity-encoded or ambiguous
-  alt attributes remain unmapped. This does not establish rendered visibility.
+  HTML image alt attributes and adjacent prose map to their source positions
+  when the complete projection matches, including supported semicolon-terminated
+  entities and CRLF normalization. Unsupported or ambiguous alternatives remain
+  unmapped. This does not establish rendered visibility.
   Literal Markdown image alt labels map to their exact original positions for
   inline and reference images; transformed labels remain unlocated.
   Exact HTML source mapping also covers inline technical and emphasis elements
