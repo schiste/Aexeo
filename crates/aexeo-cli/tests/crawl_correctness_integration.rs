@@ -20,7 +20,7 @@ fn html(body: &str) -> Route {
     (
         "200 OK",
         "text/html",
-        format!("<html><body>{body}</body></html>"),
+        format!("<html lang='en'><body>{body}</body></html>"),
     )
 }
 
@@ -1068,7 +1068,7 @@ fn inventory_context(site: &Site, paths: &[&str], extra: &[&str]) -> Value {
         .iter()
         .map(|path| format!("{}{path}", site.base_url))
         .chain(extra.iter().map(|url| url.to_string()))
-        .map(|url| serde_json::json!({"url": url, "disposition": "published", "target": null, "locale": null}))
+        .map(|url| serde_json::json!({"url": url, "disposition": "published", "target": null, "locale": "en"}))
         .collect::<Vec<_>>();
     serde_json::json!({"identity": identity, "snapshot_date": "2026-11-07",
         "inventory": {"identity": identity, "complete": true, "pages": pages}})
@@ -1783,7 +1783,7 @@ fn inventory_aliases_are_checked_against_what_the_seeded_crawl_observed() {
             .unwrap()
             .push(serde_json::json!({
             "url": format!("{base}{path}"), "disposition": disposition,
-            "target": format!("{base}{target}"), "locale": null}));
+            "target": format!("{base}{target}"), "locale": "en"}));
     }
     let (payload, audit) = seeded_crawl(&site, temp.path(), &context, &[]);
     assert_eq!(site.request_count("/new"), 3, "two redirects and the seed");
@@ -2033,6 +2033,48 @@ fn a_seeded_crawl_confirms_an_unlinked_published_page_in_one_command() {
 }
 
 #[test]
+fn a_seeded_crawl_without_any_locale_evidence_does_not_confirm_an_orphan() {
+    let site = Site::start(vec![
+        (
+            "/",
+            (
+                "200 OK",
+                "text/html",
+                "<html><main>Home</main></html>".to_owned(),
+            ),
+        ),
+        (
+            "/orphan",
+            (
+                "200 OK",
+                "text/html",
+                "<html><main>Orphan</main></html>".to_owned(),
+            ),
+        ),
+    ]);
+    let temp = tempfile::tempdir().unwrap();
+    let mut inventory = inventory_context(&site, &["/", "/orphan"], &[])["inventory"].clone();
+    for page in inventory["pages"].as_array_mut().unwrap() {
+        page["locale"] = Value::Null;
+    }
+    let (_, report) = seeded_crawl_with_report(&site, temp.path(), &inventory, &[]);
+    assert_eq!(report["crawl_complete"], true, "{report:#}");
+    assert_eq!(report["reconciliation"]["comparable"], false, "{report:#}");
+    assert!(
+        report["reconciliation"]["issues"]
+            .to_string()
+            .contains("inventory_document_locale_unverified"),
+        "{report:#}"
+    );
+    let orphan = format!("{}/orphan", site.base_url);
+    assert_eq!(
+        legacy_finding(&report, "LNK002", &orphan)["conclusion"],
+        "not_eligible",
+        "{report:#}"
+    );
+}
+
+#[test]
 fn inventory_metadata_changes_cannot_reuse_a_seed_attestation() {
     let site = orphan_site();
     site.serve_header("X-Release", "r1");
@@ -2057,7 +2099,7 @@ fn inventory_metadata_changes_cannot_reuse_a_seed_attestation() {
 
     // Same identity and URLs, but a different editorial classification.
     let mut changed = context.clone();
-    changed["inventory"]["pages"][2]["locale"] = "en".into();
+    changed["inventory"]["pages"][2]["locale"] = "fr".into();
     write(&temp.path().join("context.json"), &changed.to_string());
     let report = audit_link_report(temp.path(), &audit);
     assert!(

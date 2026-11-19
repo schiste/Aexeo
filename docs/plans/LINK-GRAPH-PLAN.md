@@ -285,11 +285,11 @@ makes inventory comparison ineligible for orphan conclusions. A missing script o
 region is not treated as a conflict. Matching observations do not prove locale or
 surface equivalence. A valid primary language is still compared when later
 subtags are malformed, but those suffixes do not establish script or region
-conflicts. When either side declares a language or locale, a missing,
-unspecified, malformed or less specific counterpart makes the comparison
-ineligible with a separate unverified reason. If both are absent, the existing
-locale-neutral behavior remains and surface identity must still be established
-by the host. This comparison is not a complete BCP 47 validator.
+conflicts. Missing, unspecified, malformed or differently specific locale evidence makes
+the comparison ineligible with a separate unverified reason, including when
+both values are absent. This conservative behavior can withhold orphan results
+for a language-neutral site; matching observations still do not prove surface
+identity. This comparison is not a complete BCP 47 validator.
 
 - [ ] Validate the EmDash inventory exporter with an explicit publication, route,
   locale, status and surface mapping on a real matching site; do not infer

@@ -220,12 +220,10 @@ fn locale_conflict(
     None
 }
 
-// When either side declares a locale, missing or less specific evidence must
-// not be treated as confirmation. Two entirely absent values preserve the
-// legacy locale-neutral path; hosts still have to establish surface identity.
+// Missing, invalid or less specific locale evidence cannot confirm that the
+// inventory and rendered page describe the same locale.
 fn locale_evidence_issue(inventory: Option<&str>, document: Option<&str>) -> Option<&'static str> {
     let (inventory, document) = match (inventory, document) {
-        (None, None) => return None,
         (Some(inventory), Some(document)) => (inventory, document),
         _ => return Some("inventory_document_locale_unverified"),
     };
@@ -1788,7 +1786,7 @@ mod tests {
     fn attested_audit() -> (serde_json::Value, AuditLinkContext) {
         let page = |route: &str, html: &str| {
             let url = format!("https://example.org/{route}");
-            serde_json::json!({"path":"", "relative_path":"", "route":route, "raw_html":html, "response_headers":{},
+            serde_json::json!({"path":"", "relative_path":"", "route":route, "raw_html":format!("<html lang='en'>{html}</html>"), "response_headers":{},
                 "crawl_response":{"requested_url":url, "observed_url":url, "status_code":200, "headers_observed":true}})
         };
         let artifact = serde_json::json!({"command":"crawl", "status":"complete",
@@ -1798,7 +1796,7 @@ mod tests {
                 "pages":[page("", "<main><a href='/a'>A</a></main>"), page("a", "<main>A</main>"), page("orphan", "<main>Orphan</main>")]},
             "crawl_attestation":{"seeded_from":{"inventory_identity":attested_identity(), "url_count":3}, "engine":"http"}});
         let inventory_pages = ["", "a", "orphan"].map(|route| {
-            serde_json::json!({"url":format!("https://example.org/{route}"), "disposition":"published", "target":null, "locale":null})
+            serde_json::json!({"url":format!("https://example.org/{route}"), "disposition":"published", "target":null, "locale":"en"})
         });
         let context = serde_json::from_value(serde_json::json!({"identity":attested_identity(), "snapshot_date":"2026-11-07",
             "inventory":{"identity":attested_identity(), "complete":true, "pages":inventory_pages}}))
@@ -1828,7 +1826,7 @@ mod tests {
         let valid = raw_report(&artifact, &context);
         assert!(valid.crawl_complete, "{:?}", valid.issues);
         let mut changed = context.clone();
-        changed.inventory.as_mut().unwrap().pages[2].locale = Some("en".into());
+        changed.inventory.as_mut().unwrap().pages[2].locale = Some("fr".into());
         let mismatch = raw_report(&artifact, &changed);
         assert!(
             mismatch
@@ -1914,6 +1912,7 @@ mod tests {
     #[test]
     fn incomplete_locale_observation_withholds_inventory_eligibility() {
         for (locale, language) in [
+            (None, None),
             (Some("fr-FR"), None),
             (Some("fr-FR"), Some("")),
             (Some("fr-FR"), Some("und")),
@@ -2398,7 +2397,7 @@ mod tests {
     fn redirect_report(chain: Vec<RedirectHop>) -> LinkReport {
         let page = |url: &str, html: &str| RenderedPage {
             url: url.into(),
-            html: html.into(),
+            html: format!("<html lang='en'>{html}</html>"),
             status_code: Some(200),
             response_headers: Some(Default::default()),
             requested_url: Some(url.into()),
@@ -2451,7 +2450,7 @@ mod tests {
                         url: format!("https://example.org/{path}"),
                         disposition: InventoryDisposition::Published,
                         target: None,
-                        locale: None,
+                        locale: Some("en".into()),
                     })
                     .to_vec(),
             }),
@@ -2528,7 +2527,7 @@ mod tests {
     fn served(url: &str, html: &str) -> RenderedPage {
         RenderedPage {
             url: url.into(),
-            html: html.into(),
+            html: format!("<html lang='en'>{html}</html>"),
             status_code: Some(200),
             response_headers: Some(Default::default()),
             requested_url: Some(url.into()),
@@ -2565,7 +2564,7 @@ mod tests {
                 url: url.into(),
                 disposition,
                 target: target.map(Into::into),
-                locale: None,
+                locale: Some("en".into()),
             };
         build_link_report(&LinkReportInput {
             version: 1,
