@@ -274,6 +274,46 @@ fn external_extension_results_are_bound_to_the_projected_input_and_parameters() 
 }
 
 #[test]
+fn metadata_age_uses_supplied_dates_without_requiring_a_clock() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("draft.md");
+    let preset = dir.path().join("preset.toml");
+    let metadata = dir.path().join("metadata.json");
+    fs::write(&draft, "# A draft\n").unwrap();
+    fs::write(&preset, "version=1\nname='test'\n[[gates]]\nid='review'\nkind='metadata_age'\nfield='last_reviewed'\nas_of='2024-03-01'\nmax_days=1\n").unwrap();
+    fs::write(&metadata, r#"{"last_reviewed":"2024-02-28"}"#).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            draft.to_str().unwrap(),
+            "--input-format",
+            "markdown",
+            "--preset",
+            "review",
+            "--preset-source",
+            &format!("review={}", preset.display()),
+            "--metadata",
+            metadata.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(status(&report, "review"), "failed");
+    assert_eq!(report["gates"][0]["measurements"]["age_days"], 2);
+    assert_eq!(
+        report["gates"][0]["measurements"]["as_of_yyyymmdd"],
+        20240301
+    );
+}
+
+#[test]
 fn metadata_length_gate_uses_supplied_metadata() {
     let dir = tempfile::tempdir().unwrap();
     let draft = dir.path().join("draft.md");
