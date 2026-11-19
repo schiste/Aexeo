@@ -202,6 +202,54 @@ fn html_image_alt_findings_and_telemetry_use_source_positions() {
 }
 
 #[test]
+fn html_encoded_image_alt_findings_map_to_entity_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("article.html");
+    let preset = dir.path().join("preset.toml");
+    let html = "<p>Before <img alt='&#98;ad'> after bad</p>";
+    fs::write(&input, html).unwrap();
+    fs::write(
+        &preset,
+        "version=1\nname='test'\n[[gates]]\nid='words'\nkind='forbidden_terms'\nterms=['bad']\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            input.to_str().unwrap(),
+            "--input-format",
+            "html",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--format",
+            "json",
+            "--telemetry",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["source_locations"],
+        serde_json::json!([
+            {"gate_id":"words", "finding_index":0, "line":1, "column":html.find("&#98;").unwrap()+1},
+            {"gate_id":"words", "finding_index":1, "line":1, "column":html.rfind("bad").unwrap()+1}
+        ])
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let event: serde_json::Value = stderr
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .find(|event: &serde_json::Value| event["event"] == "content_evaluation")
+        .unwrap();
+    assert_eq!(event["source_mapping"]["mapped"], 2);
+    assert_eq!(event["source_mapping"]["unmapped"], 0);
+    assert!(!stderr.contains("&#98;"));
+}
+
+#[test]
 fn html_entities_map_findings_to_their_source_spelling() {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("article.html");

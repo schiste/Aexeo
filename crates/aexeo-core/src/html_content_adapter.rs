@@ -341,6 +341,49 @@ pub(crate) fn mapping_entity(entity: &str) -> Option<(char, Option<char>)> {
     Some((first, second))
 }
 
+// Reconstruct text with source spans using the same conservative entity and
+// newline rules for text nodes and image alt attributes.
+fn append_mapping_text(
+    literal: &str,
+    source_start: usize,
+    output: &mut String,
+    spans: &mut Vec<(usize, usize, usize, bool)>,
+) -> Option<()> {
+    let mut within = 0;
+    while within < literal.len() {
+        if spans.len() >= MAX_HTML_SOURCE_MAP_SPANS {
+            return None;
+        }
+        let rest = &literal[within..];
+        if rest.starts_with('&') {
+            // HTML's longest named entity is 33 bytes including & and ;.
+            let semicolon = rest.bytes().take(33).position(|byte| byte == b';')?;
+            let (first, second) = mapping_entity(&rest[1..=semicolon])?;
+            let start = output.len();
+            output.push(first);
+            if let Some(second) = second {
+                output.push(second);
+            }
+            spans.push((start, output.len(), source_start + within, true));
+            within += semicolon + 1;
+        } else if rest.starts_with("\r\n") {
+            // HTML preprocessing normalizes CRLF to one LF. The
+            // projected newline points to the first source byte.
+            let start = output.len();
+            output.push('\n');
+            spans.push((start, output.len(), source_start + within, true));
+            within += 2;
+        } else {
+            let length = rest.find(['&', '\r']).unwrap_or(rest.len());
+            let start = output.len();
+            output.push_str(&rest[..length]);
+            spans.push((start, output.len(), source_start + within, false));
+            within += length;
+        }
+    }
+    Some(())
+}
+
 /// Build a mapping only when a conservative lexical reconstruction exactly
 /// matches the parser's projection. Unsupported entities, raw-text or hidden
 /// elements, malformed HTML, and browser-generated content remain unmapped.
@@ -391,38 +434,7 @@ pub fn html_source_map_with_scope(
                 cursor = end;
                 continue;
             }
-            let mut within = 0;
-            while within < literal.len() {
-                if spans.len() >= MAX_HTML_SOURCE_MAP_SPANS {
-                    return None;
-                }
-                let rest = &literal[within..];
-                if rest.starts_with('&') {
-                    // HTML's longest named entity is 33 bytes including & and ;.
-                    let semicolon = rest.bytes().take(33).position(|byte| byte == b';')?;
-                    let (first, second) = mapping_entity(&rest[1..=semicolon])?;
-                    let start = output.len();
-                    output.push(first);
-                    if let Some(second) = second {
-                        output.push(second);
-                    }
-                    spans.push((start, output.len(), cursor + within, true));
-                    within += semicolon + 1;
-                } else if rest.starts_with("\r\n") {
-                    // HTML preprocessing normalizes CRLF to one LF. The
-                    // projected newline points to the first source byte.
-                    let start = output.len();
-                    output.push('\n');
-                    spans.push((start, output.len(), cursor + within, true));
-                    within += 2;
-                } else {
-                    let length = rest.find(['&', '\r']).unwrap_or(rest.len());
-                    let start = output.len();
-                    output.push_str(&rest[..length]);
-                    spans.push((start, output.len(), cursor + within, false));
-                    within += length;
-                }
-            }
+            append_mapping_text(literal, cursor, &mut output, &mut spans)?;
             cursor = end;
             continue;
         }
@@ -671,24 +683,12 @@ pub fn html_source_map_with_scope(
                 return None;
             }
             if selected && let Some((start, end)) = image_alt {
-                let value = &rest[start..end];
-                // Entity decoding and CR normalization need additional source mapping.
-                if value.contains(['&', '\r']) {
-                    return None;
-                }
-                if !value.is_empty() {
-                    if spans.len() >= MAX_HTML_SOURCE_MAP_SPANS {
-                        return None;
-                    }
-                    let output_start = output.len();
-                    output.push_str(value);
-                    spans.push((
-                        output_start,
-                        output.len(),
-                        cursor + 1 + name_len + start,
-                        false,
-                    ));
-                }
+                append_mapping_text(
+                    &rest[start..end],
+                    cursor + 1 + name_len + start,
+                    &mut output,
+                    &mut spans,
+                )?;
             }
             if selected && matches!(tag.as_str(), "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
                 heading_starts.push(cursor);
@@ -1093,6 +1093,38 @@ mod tests {
     }
 
     #[test]
+    fn maps_image_alt_entities_and_crlf_to_original_source() {
+        let html = "<main>\n<p>Élan <img alt='A &amp; &#x1F600; &NotEqualTilde;\r\nfin'> après <a href='/next'>suite</a>.</p>\n</main>";
+        for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+            let adapted = html_content_with_scope("x", html, scope).unwrap();
+            let projected = adapted.input.text.as_deref().unwrap();
+            let map = html_source_map_with_scope(html, projected, scope).unwrap();
+            let source_index = crate::text_index::LineIndex::new(html);
+            let projected_index = crate::text_index::LineIndex::new(projected);
+            for (needle, original) in [
+                ("Élan", "Élan"),
+                ("&", "&amp;"),
+                ("😀", "&#x1F600;"),
+                ("≂", "&NotEqualTilde;"),
+                ("\u{338}", "&NotEqualTilde;"),
+                ("fin", "fin"),
+                ("après", "après"),
+                ("suite", "suite"),
+            ] {
+                let (line, column) = projected_index
+                    .position(projected, projected.find(needle).unwrap())
+                    .unwrap();
+                assert_eq!(
+                    map.source_position(html, projected, line, column),
+                    source_index.position(html, html.find(original).unwrap()),
+                    "{needle}"
+                );
+            }
+            assert_eq!(map.link_starts.len(), 1);
+        }
+    }
+
+    #[test]
     fn maps_only_unambiguous_image_attributes() {
         for html in [
             "<p>Before <img> after</p>",
@@ -1108,11 +1140,12 @@ mod tests {
             );
         }
         for html in [
-            "<p>Before <img alt='A &amp; B'> after</p>",
+            "<p>Before <img alt='&amp'> after</p>",
+            "<p>Before <img alt='&notanentity;'> after</p>",
+            "<p>Before <img alt='&#x80;'> after</p>",
             "<p>Before <img alt='one' ALT='two'> after</p>",
             "<p>Before <img hidden alt='secret'> after</p>",
             "<p>Before <img-widget alt='fake'> after</img-widget></p>",
-            "<p>Before <img alt='line\r\nbreak'> after</p>",
         ] {
             let adapted = html_content("x", html).unwrap();
             assert!(
