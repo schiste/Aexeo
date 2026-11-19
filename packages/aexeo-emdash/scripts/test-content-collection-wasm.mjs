@@ -341,3 +341,14 @@ assert.equal(citedReport.gates[0].measurements.sentence_count, 31);
 assert.equal(citedReport.source_locations.length, 31);
 assert.equal(JSON.stringify(citedDocument), originalCitations);
 console.log("WASM sentence analysis preserves reference markers and source locations");
+
+// An explicitly supplied review date is evaluated against a fixed reference,
+// without consulting the wall clock or inferring factual accuracy.
+const reviewAge = `version=1\nname="review-age"\n[[gates]]\nid="age"\nkind="metadata_age"\nfield="last_reviewed"\nas_of="2024-03-01"\nmax_days=1\n`;
+const aged = await evaluateContent({ route: "/review", title: "Review", meta: { last_reviewed: "2024-02-28" }, body: [] }, "review-age", { "review-age": reviewAge });
+assert.equal(aged.gates[0].status, "failed");
+assert.equal(aged.gates[0].blocking, false);
+assert.equal(aged.gates[0].measurements.age_days, 2);
+const noDate = await evaluateContent({ route: "/review", title: "Review", body: [] }, "review-age", { "review-age": reviewAge });
+assert.equal(noDate.gates[0].status, "not_checked");
+console.log("WASM metadata age review uses supplied calendar dates");

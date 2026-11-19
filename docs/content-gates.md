@@ -30,6 +30,30 @@ Literal matching for `forbidden_terms`, `required_terms`, `repeated_terms` and t
 
 `forbidden_terms`, `required_terms` and `repeated_terms` accept `whole_words` (default `true`; set `false` for substring matches) and `case_insensitive` (default `false`). Case-insensitive matching lowercases each character, without full Unicode case folding. Word boundaries use Unicode alphanumeric and identifier-continuation characters, including underscores and many combining marks; no Unicode normalization is performed. Adapter block boundaries also separate words even when no separator is inserted; a term never matches across a known block boundary. Thai, Lao, Myanmar, Khmer, CJK and Hangul characters do not act as word characters, because these scripts do not reliably separate words with spaces; a term in them matches inside surrounding text.
 
+### Review an explicit metadata date
+
+`metadata_age` compares a supplied `YYYY-MM-DD` metadata value with an explicit
+`as_of` calendar date. Configure both the date field and threshold deliberately:
+
+```toml
+version = 1
+name = "review-age"
+[[gates]]
+id = "editorial.review_age"
+kind = "metadata_age"
+field = "last_reviewed"
+as_of = "2024-03-01"
+max_days = 365
+```
+
+The gate is advisory by default. It reports the age, threshold, and reference
+date (`as_of_yyyymmdd`); missing, malformed, unavailable or future dates are
+`not_checked`. The reference is fixed in the resolved preset, not read from the
+clock: supply and refresh it for each evaluation or scheduled review. A recent
+date does not prove that the article or its sources are accurate or current. A
+CMS host must explicitly supply the chosen date in document metadata; an update
+timestamp is not automatically a substantive review date.
+
 ### Character count for multilingual content
 
 `character_count` bounds Unicode scalar values in the adapter-projected text,

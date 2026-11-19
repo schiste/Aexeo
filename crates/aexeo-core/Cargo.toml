@@ -26,6 +26,7 @@ serde_json.workspace = true
 sha2 = "0.10.9"
 tokio = { version = "1", default-features = false, features = ["rt"], optional = true }
 toml.workspace = true
+time = { version = "=0.3.47", default-features = false }
 unicode-ident = "1"
 unicode-normalization = "0.1"
 url.workspace = true
