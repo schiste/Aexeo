@@ -1,0 +1,3 @@
+version = 1
+name = "Fragment readability starter"
+extends = ["readability"]

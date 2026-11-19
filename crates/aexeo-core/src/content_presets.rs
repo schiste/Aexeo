@@ -325,6 +325,10 @@ pub fn builtin_content_presets() -> BTreeMap<String, String> {
             include_str!("../presets/article-readable.toml").into(),
         ),
         (
+            "fragment-readable".into(),
+            include_str!("../presets/fragment-readable.toml").into(),
+        ),
+        (
             "glossary-editorial".into(),
             include_str!("../presets/glossary-editorial.toml").into(),
         ),
@@ -514,6 +518,33 @@ mod tests {
             assert!(!report.gates[1].blocking);
             assert_eq!(report.gates[2].status, GateStatus::NotChecked);
             assert!(!report.gates[2].blocking);
+        }
+    }
+
+    #[test]
+    fn fragment_starter_checks_only_advisory_readability() {
+        use crate::content_gate::{ContentInput, GateStatus};
+        let preset =
+            resolve_content_preset("fragment-readable", &builtin_content_presets()).unwrap();
+        assert_eq!(preset.gates.len(), 1);
+        assert_eq!(preset.gates[0].id(), "editorial.sentence_length");
+        for (text, expected) in [
+            (Some("A short introduction.".to_owned()), GateStatus::Passed),
+            (
+                Some(format!("{}.", vec!["word"; 31].join(" "))),
+                GateStatus::Failed,
+            ),
+            (None, GateStatus::NotChecked),
+        ] {
+            let report = preset
+                .evaluate(&ContentInput {
+                    id: "fragment".into(),
+                    text,
+                    ..Default::default()
+                })
+                .unwrap();
+            assert_eq!(report.gates[0].status, expected);
+            assert!(!report.gates[0].blocking);
         }
     }
 
