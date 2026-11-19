@@ -257,6 +257,12 @@ does not establish complete coverage, a valid mapping, or rendered-page
 equivalence. Names are bounded and the list reports `truncated` when entries
 are omitted. These report details are not included in aggregate telemetry.
 
+New reports record `locale_at_audit` from the current CMS record, not the
+historical revision. `locale_status` compares it to the current locale when
+creating or retrieving the audit: `changed` calls for a new audit, and `unknown`
+means either locale was unavailable or the stored report predates this field.
+Even `unchanged` does not establish the historical revision's locale.
+
 The findings page can create or retrieve an audit by revision and record a
 review against an individual finding. `set_review` and `get_review` expose the
 same operations to consented MCP clients. Saving requires `plugins:manage` and
