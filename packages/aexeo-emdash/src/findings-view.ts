@@ -1,6 +1,6 @@
 import { describeGate, describeSourceMapping, summarizeGates } from "./assessment-display.js";
 import { cmsBodyCoverageNotice, isCmsObservableFinding, type CmsBodyCoverage } from "./cms-coverage.js";
-import type { CustomBlockMappings } from "./adapter.js";
+import type { CustomBlockMappings, DescriptionField } from "./adapter.js";
 // Shared Block Kit view layer for both plugin entrypoints.
 //
 // `configured.ts` (in-process, the production-hit path) and
@@ -177,7 +177,7 @@ export interface RefreshOptions {
   blockMappings?: CustomBlockMappings | undefined;
   contentFieldsByCollection?: Record<string, readonly string[]> | undefined;
   contentFieldsUnavailable?: boolean | undefined;
-  descriptionFieldsByCollection?: Record<string, readonly string[]> | undefined;
+  descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]> | undefined;
   /**
    * Host context. `evaluateAndPersistAll` needs kv/http/content/log, and
    * the follow-up `renderFindingsPage` needs kv.

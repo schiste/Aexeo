@@ -22,6 +22,30 @@ export type CustomBlockMapping = readonly CustomBlockField[] | {
 };
 export type CustomBlockMappings = Record<string, CustomBlockMapping>;
 
+/** A flat data field, or an explicit path rooted in the CMS data or SEO panel. */
+export type DescriptionField = string | { source: "data" | "seo"; path: readonly string[] };
+
+/** Reject malformed mappings instead of guessing a renderer's fallback. */
+export function isDescriptionField(value: unknown): value is DescriptionField {
+  if (typeof value === "string") return value.length > 0;
+  if (!isRecord(value) || (value.source !== "data" && value.source !== "seo") ||
+      !Array.isArray(value.path) || value.path.length === 0 || value.path.length > 16) return false;
+  return Object.keys(value).every((key) => key === "source" || key === "path") &&
+    value.path.every((part) => typeof part === "string" && part.length > 0 && part.length <= 256);
+}
+
+function descriptionFieldValue(content: EmdashContentItem, field: DescriptionField): { observed: boolean; value?: string | null } {
+  const path = typeof field === "string" ? [field] : field.path;
+  let value: unknown = typeof field === "string" || field.source === "data" ? content.data : content.seo;
+  for (const part of path) {
+    if (value === null) return { observed: true, value: null };
+    if (!isRecord(value) || !Object.hasOwn(value, part)) return { observed: false };
+    value = value[part];
+  }
+  return value === null || typeof value === "string" ? { observed: true, value } : { observed: false };
+}
+
+
 export interface EmdashContentItem {
   id: string;
   type: string;
@@ -90,7 +114,7 @@ export async function adaptContentItemWithContext(
   defaultLocale?: string,
   blockMappings?: CustomBlockMappings,
   contentFields?: readonly string[],
-  descriptionFields?: readonly string[],
+  descriptionFields?: readonly DescriptionField[],
 ): Promise<AdaptedContent> {
   const publicUrl =
     content.status === "published"
@@ -157,7 +181,7 @@ type AdaptContentOptions = {
   defaultLocale?: string;
   blockMappings?: CustomBlockMappings | undefined;
   contentFields?: readonly string[];
-  descriptionFields?: readonly string[];
+  descriptionFields?: readonly DescriptionField[];
 };
 
 export function adaptContentItem(content: EmdashContentItem, options: AdaptContentOptions = {}): AdaptedContent {
@@ -174,17 +198,17 @@ function adaptContentItemInternal(content: EmdashContentItem, options: AdaptCont
   if (fields === undefined) {
     const description = content.seo?.description ?? content.data["description"];
     if (typeof description === "string" && description.length > 0) document.description = description;
-  } else if (fields.length > 0 && fields.every((field) => typeof field === "string" && field.length > 0)) {
+  } else if (fields.length > 0 && fields.every(isDescriptionField)) {
     // Follow renderer fallback order: an absent earlier field makes a later
     // value uncertain, while a populated earlier field makes later fields irrelevant.
     let observed = true;
     for (const field of fields) {
-      if (!Object.hasOwn(content.data, field) || content.data[field] === undefined ||
-          (content.data[field] !== null && typeof content.data[field] !== "string")) {
+      const projected = descriptionFieldValue(content, field);
+      if (!projected.observed) {
         observed = false;
         break;
       }
-      const value = content.data[field];
+      const value = projected.value;
       if (typeof value === "string" && value.length > 0) {
         document.description = value;
         break;

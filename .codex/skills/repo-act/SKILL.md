@@ -73,6 +73,11 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - Before combining fixture setup with package tests, resolve paths relative to
   the command working directory and stop on setup failure (for example, use
   `&&`). A succeeding test command alone does not prove setup ran.
+- For EmDash WASM integration tests in a fresh worktree, build the WASM,
+  TypeScript and JavaScript bundle before `npm run test:wasm`: from
+  `packages/aexeo-emdash`, run `npm run build:wasm && npm run build:ts &&
+  npm run build:bundle && npm run test:wasm`. TypeScript alone does not create
+  `dist/content.js`, which the WASM tests import.
 - For whole-word literal gates, test decomposed combining marks and lowercase
   expansions, both whole-word and substring modes, and confirm later match
   positions across CLI adapters and the rebuilt EmDash WASM bridge.

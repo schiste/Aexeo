@@ -1,4 +1,4 @@
-import { adaptContentItem, type CustomBlockMappings, type EmdashContentItem } from "./adapter.js";
+import { adaptContentItem, type CustomBlockMappings, type DescriptionField, type EmdashContentItem } from "./adapter.js";
 import type { ContentPresetOptions } from "./content-evaluator.js";
 import { selectFragmentPreset } from "./fragment-selection.js";
 import { selectContentPreset } from "./preset-selection.js";
@@ -18,7 +18,7 @@ export interface RevisionAuditOptions {
   preset?: ContentPresetOptions | undefined;
   blockMappings?: CustomBlockMappings | undefined;
   contentFieldsByCollection?: Record<string, readonly string[]> | undefined;
-  descriptionFieldsByCollection?: Record<string, readonly string[]> | undefined;
+  descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]> | undefined;
   evidenceProviderConfigured?: boolean;
   evaluate: (document: EmdashDocument, preset: string, sources?: Record<string, string>, evidence?: Record<string, string>) => Promise<ContentReport>;
 }
