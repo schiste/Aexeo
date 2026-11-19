@@ -157,10 +157,17 @@ pub struct RedirectCredit {
     pub nonconditional_source_pages: Option<usize>,
 }
 
-// Compare only explicit, meaningful primary language subtags. A matching
-// language does not prove that region, locale or publication surface matches.
-fn primary_language(value: &str) -> Option<&str> {
-    let primary = value.trim().split(['-', '_']).next()?;
+// Compare observed language, script and region only; matching values do not
+// prove locale equivalence or that the same publication surface was crawled.
+struct LanguageParts<'a> {
+    primary: &'a str,
+    script: Option<&'a str>,
+    region: Option<&'a str>,
+}
+
+fn language_parts(value: &str) -> Option<LanguageParts<'_>> {
+    let mut parts = value.trim().split(['-', '_']).peekable();
+    let primary = parts.next()?;
     if !(2..=8).contains(&primary.len())
         || !primary.bytes().all(|byte| byte.is_ascii_alphabetic())
         || ["und", "mul", "zxx"]
@@ -169,7 +176,43 @@ fn primary_language(value: &str) -> Option<&str> {
     {
         return None;
     }
-    Some(primary)
+    let script = parts
+        .next_if(|part| part.len() == 4 && part.bytes().all(|byte| byte.is_ascii_alphabetic()));
+    let region = parts.next_if(|part| {
+        (part.len() == 2 && part.bytes().all(|byte| byte.is_ascii_alphabetic()))
+            || (part.len() == 3 && part.bytes().all(|byte| byte.is_ascii_digit()))
+    });
+    // Keep a valid primary language even when later subtags are malformed,
+    // but do not infer a script or region conflict from malformed suffixes.
+    if parts.any(|part| {
+        part.is_empty() || part.len() > 8 || !part.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    }) {
+        return Some(LanguageParts {
+            primary,
+            script: None,
+            region: None,
+        });
+    }
+    Some(LanguageParts {
+        primary,
+        script,
+        region,
+    })
+}
+
+fn locale_conflict(inventory: &str, document: &str) -> Option<&'static str> {
+    let (inventory, document) = (language_parts(inventory)?, language_parts(document)?);
+    if !inventory.primary.eq_ignore_ascii_case(document.primary) {
+        return Some("inventory_document_language_mismatch");
+    }
+    let differs = |left: Option<&str>, right: Option<&str>| {
+        left.zip(right)
+            .is_some_and(|(a, b)| !a.eq_ignore_ascii_case(b))
+    };
+    if differs(inventory.script, document.script) || differs(inventory.region, document.region) {
+        return Some("inventory_document_locale_mismatch");
+    }
+    None
 }
 
 fn has_noindex(value: &str) -> bool {
@@ -1101,18 +1144,12 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
         );
         evidence.extend(links);
         if inventory_dispositions.get(page.url.as_str()) == Some(&InventoryDisposition::Published)
-            && inventory_locales
+            && let Some(issue) = inventory_locales
                 .get(page.url.as_str())
-                .and_then(|value| primary_language(value))
-                .zip(
-                    metadata
-                        .document_language
-                        .as_deref()
-                        .and_then(primary_language),
-                )
-                .is_some_and(|(inventory, document)| !inventory.eq_ignore_ascii_case(document))
+                .zip(metadata.document_language.as_deref())
+                .and_then(|(inventory, document)| locale_conflict(inventory, document))
         {
-            coverage_issues.insert("inventory_document_language_mismatch");
+            coverage_issues.insert(issue);
         }
         let headers = page.response_headers.as_ref();
         // An unserved draft is the expected outcome; its headers cannot make
@@ -1805,12 +1842,49 @@ mod tests {
             .unwrap();
         assert_eq!(page.inventory_locale.as_deref(), Some("fr-FR"));
         assert_eq!(page.document_language.as_deref(), Some("en-US"));
+        assert_eq!(
+            locale_conflict("fr-%%%", "en"),
+            Some("inventory_document_language_mismatch")
+        );
+        assert_eq!(locale_conflict("fr-CA-%%%", "fr-FR"), None);
+    }
+
+    #[test]
+    fn conflicting_explicit_region_or_script_withholds_eligibility() {
+        for (locale, language) in [
+            ("en-US", "en-GB"),
+            ("pt_BR", "pt-PT"),
+            ("zh-Hant", "zh-Hans"),
+            ("sr-Cyrl-RS", "sr-Latn-RS"),
+            ("es-419", "es-ES"),
+        ] {
+            let (mut artifact, mut context) = attested_audit();
+            context.inventory.as_mut().unwrap().pages[2].locale = Some(locale.into());
+            artifact["site"]["pages"][2]["raw_html"] =
+                format!("<html lang='{language}'><main>Orphan</main></html>").into();
+            let report = attested_report(&artifact, &context);
+            let reconciliation = report.reconciliation.unwrap();
+            assert!(!reconciliation.comparable, "{locale} / {language}");
+            assert!(reconciliation.eligible_pages.is_empty());
+            assert!(
+                reconciliation
+                    .issues
+                    .iter()
+                    .any(|issue| issue == "inventory_document_locale_mismatch"),
+                "{locale} / {language}: {:?}",
+                reconciliation.issues
+            );
+        }
     }
 
     #[test]
     fn language_matching_does_not_claim_locale_equivalence() {
         for (locale, language) in [
-            ("en-US", "EN-gb"),
+            ("en-US", "EN"),
+            ("en", "EN-gb"),
+            ("EN-latn-us", "en-Latn-US-u-nu-latn"),
+            ("sr-Latn", "sr-RS"),
+            ("fr-%%%", "fr-CA"),
             ("fr-FR", ""),
             ("fr-FR", "und"),
             ("invalid!", "en"),

@@ -2075,7 +2075,11 @@ fn inventory_metadata_changes_cannot_reuse_a_seed_attestation() {
 
 #[test]
 fn a_multilingual_seeded_crawl_requires_consistent_observed_languages() {
-    for (french_html_language, comparable) in [("fr-FR", true), ("en-US", false)] {
+    for (french_html_language, comparable, expected_issue) in [
+        ("fr-FR", true, None),
+        ("en-US", false, Some("inventory_document_language_mismatch")),
+        ("fr-CA", false, Some("inventory_document_locale_mismatch")),
+    ] {
         let site = Site::start(vec![
             ("/", ("200 OK", "text/html", "<html lang='en'><body><main><a href='/en/article'>English</a></main></body></html>".to_owned())),
             ("/en/article", ("200 OK", "text/html", "<html lang='en'><body><main>English article.</main></body></html>".to_owned())),
@@ -2120,7 +2124,7 @@ fn a_multilingual_seeded_crawl_requires_consistent_observed_languages() {
             assert!(
                 report["issues"]
                     .to_string()
-                    .contains("inventory_document_language_mismatch"),
+                    .contains(expected_issue.unwrap()),
                 "{report:#}"
             );
         }
