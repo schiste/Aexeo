@@ -38,7 +38,10 @@ unavailable check may become a pass.
 - [#525](https://github.com/schiste/Aexeo/pull/525) and
   [#528](https://github.com/schiste/Aexeo/pull/528) provide bounded in-memory
   incremental evaluation for a subset of independent plain-text gates, with
-  comparison to full evaluation. Unsupported inputs fail closed. This is not
+  comparison to full evaluation. An explicit paragraph-text mode also supports
+  selected paragraph, rhythm and source-newline gates using the shared adapter;
+  it reuses reports only for unchanged items and withholds results if any item
+  is not assessed. Unsupported inputs fail closed. This is not
   a persistent cache or a general incremental site evaluator.
 - [#530](https://github.com/schiste/Aexeo/pull/530) extends link impact through
   reverse-reachable sources in the union of old and candidate graphs, with
