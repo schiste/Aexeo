@@ -79,12 +79,21 @@ returned 200 HTML with `robots=noindex` and no canonical or meta refresh; the
 `accounts-access` response advertised build revision
 `9597807a32e8ed63387aab97ae681fe27e364710`, the same source commit as the run.
 The source route contains a *conditional* redirect, so source inspection alone
-cannot establish that these five responses redirect. The run uploaded its built
+cannot establish that these five responses redirect. The run deployed its built
 `dist` after the audit, but a matching source commit alone does not bind the
 served bytes or CMS snapshot to the audited files. Retain the open rendered
 build validation above until the exact audit artifact and deployment are bound;
 do not classify these findings as confirmed false positives or automatically
 alter site content.
+
+On 2026-11-19, the run's deployment log identified the per-deployment URL
+`https://de5a021a.aeptus-preview.pages.dev`; unauthenticated GETs to all five
+category routes there returned 403. The run's only retained GitHub artifact was
+its deployment report, not the static files. The report records snapshot and
+static artifact SHA-256 values, but those aggregate digests cannot independently
+establish individual page bytes or their correspondence to the audit inputs.
+An authenticated read of the deployment or recovery of the exact audited build
+is still required to inspect those pages. No CMS content was changed.
 
 ## Delivery tracker
 
