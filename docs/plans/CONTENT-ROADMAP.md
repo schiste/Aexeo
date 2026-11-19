@@ -74,10 +74,10 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 - [x] Keep EmDash content reports available when an optional synchronous
   telemetry callback throws; telemetry does not change the gate result.
 
-The `@aeptus/aexeo-emdash` 0.9.2 package remains unpublished. Rebuild the
-package and its WASM from the exact release commit, then publish and independently
-check that exact artifact against the registry before considering it delivered.
-The latest published version observed on 2026-11-16 was 0.9.1.
+The latest `@aeptus/aexeo-emdash` version observed in the npm registry on
+2026-11-19 is 0.9.3. Rebuild the next package and WASM from the exact release
+commit, publish it, and independently check that exact artifact against the
+registry before considering the release delivered.
 
 - [x] Reject duplicate JSON keys at any depth in supplied external gate results
   before evaluation and snapshot fingerprinting in both content CLI paths.
