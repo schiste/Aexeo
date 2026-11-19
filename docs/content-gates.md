@@ -1033,8 +1033,12 @@ contract for independent implementations.
 
 Rust EmDash hosts can use `content::evaluate_collection` to adapt a complete
 slice of documents; document and site gates without their inputs remain
-`not_checked`. JavaScript hosts can use `evaluateContentCollection` from the
-EmDash content API. The CLI accepts a JSON array of content inputs with
+`not_checked`. Explicitly unavailable metadata fields are excluded from
+collection comparisons. JavaScript hosts can use `evaluateContentCollection`
+from the EmDash content API. When `observed_metadata_fields` is supplied,
+collection values and grouping keys outside that list are unavailable; known
+duplicates remain visible, but incomplete metadata prevents a complete pass.
+Omitting the list retains the legacy assumption that fields are observed. The CLI accepts a JSON array of content inputs with
 `--collection items.json --no-text`, for example `[{"id":"/a","metadata":{"slug":"a"}}]`.
 IDs must be unique and nonempty. If a collection is known to be partial, use
 `--collection-incomplete`, `evaluate_with_collection_completeness(..., false, ...)` in Rust,

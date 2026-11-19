@@ -180,9 +180,11 @@ pub fn evaluate_content_collection_js(
             complete: bool,
         },
     }
-    let request: CollectionRequest = serde_json::from_str(documents_json)
+    let raw: serde_json::Value = serde_json::from_str(documents_json)
         .map_err(|error| JsError::new(&format!("failed to parse documents: {error}")))?;
-    let (documents, complete) = match request {
+    let request: CollectionRequest = serde::Deserialize::deserialize(&raw)
+        .map_err(|error| JsError::new(&format!("failed to parse documents: {error}")))?;
+    let (mut documents, complete) = match request {
         CollectionRequest::Complete(documents) => (documents, true),
         CollectionRequest::Explicit {
             documents,
@@ -190,11 +192,51 @@ pub fn evaluate_content_collection_js(
         } => (documents, complete),
     };
     let preset = resolve_content_preset_js(preset_name, sources_json.as_deref())?;
+    let raw_documents = raw
+        .as_array()
+        .or_else(|| raw.get("documents").and_then(|v| v.as_array()))
+        .ok_or_else(|| JsError::new("documents must be an array"))?;
+    for (document, raw_document) in documents.iter_mut().zip(raw_documents) {
+        apply_observed_metadata(document, raw_document, &preset)?;
+    }
     let report =
         crate::content::evaluate_collection_with_completeness(&documents, &preset, complete)
             .map_err(|error| JsError::new(&format!("collection evaluation failed: {error:#}")))?;
     serde_json::to_string(&report)
         .map_err(|error| JsError::new(&format!("failed to serialize report: {error}")))
+}
+
+// Missing fields in an explicit open-world projection are not observed, even
+// if a display fallback happens to have the same key.
+fn apply_observed_metadata(
+    document: &mut EmdashDocument,
+    raw: &serde_json::Value,
+    preset: &aexeo_core::content_gate::ContentPreset,
+) -> Result<(), JsError> {
+    if let Some(coverage) = raw.get("observed_metadata_fields") {
+        let observed: std::collections::BTreeSet<String> = serde_json::from_value(coverage.clone())
+            .map_err(|_| JsError::new("observed_metadata_fields must be an array of strings"))?;
+        use aexeo_core::content_gate::ContentGate;
+        for gate in &preset.gates {
+            let fields: Vec<&String> = match gate {
+                ContentGate::MetadataAge { field, .. }
+                | ContentGate::MetadataLength { field, .. } => vec![field],
+                ContentGate::RequiredMetadata { fields, .. } => fields.iter().collect(),
+                ContentGate::UniqueCollectionMetadata {
+                    field, group_by, ..
+                } => std::iter::once(field).chain(group_by.iter()).collect(),
+                _ => Vec::new(),
+            };
+            for field in fields {
+                if !observed.contains(field)
+                    && !document.unavailable_metadata_fields.contains(field)
+                {
+                    document.unavailable_metadata_fields.push(field.clone());
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn parse_content_document(
@@ -280,26 +322,7 @@ pub fn evaluate_content_js(
     // CMS projections are open-world; older callers retain legacy semantics.
     let raw: serde_json::Value = serde_json::from_str(document_json)
         .map_err(|error| JsError::new(&format!("failed to parse document: {error}")))?;
-    if let Some(coverage) = raw.get("observed_metadata_fields") {
-        let observed: std::collections::BTreeSet<String> = serde_json::from_value(coverage.clone())
-            .map_err(|_| JsError::new("observed_metadata_fields must be an array of strings"))?;
-        use aexeo_core::content_gate::ContentGate;
-        for gate in &preset.gates {
-            let fields: Vec<&String> = match gate {
-                ContentGate::MetadataAge { field, .. }
-                | ContentGate::MetadataLength { field, .. } => vec![field],
-                ContentGate::RequiredMetadata { fields, .. } => fields.iter().collect(),
-                _ => Vec::new(),
-            };
-            for field in fields {
-                if !observed.contains(field)
-                    && !document.unavailable_metadata_fields.contains(field)
-                {
-                    document.unavailable_metadata_fields.push(field.clone());
-                }
-            }
-        }
-    }
+    apply_observed_metadata(&mut document, &raw, &preset)?;
     let evidence = evidence_json
         .as_deref()
         .filter(|value| !value.is_empty())

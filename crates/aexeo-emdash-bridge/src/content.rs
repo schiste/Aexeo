@@ -607,10 +607,16 @@ pub fn evaluate_collection_with_completeness(
     }
     let items: Vec<_> = documents
         .iter()
-        .map(|document| ContentInput {
-            id: document.route.clone(),
-            metadata: Some(content_metadata(document)),
-            ..Default::default()
+        .map(|document| {
+            let mut metadata = content_metadata(document);
+            for field in &document.unavailable_metadata_fields {
+                metadata.remove(field);
+            }
+            ContentInput {
+                id: document.route.clone(),
+                metadata: Some(metadata),
+                ..Default::default()
+            }
         })
         .collect();
     let root = ContentInput {
@@ -1632,6 +1638,17 @@ field = "title"
         assert_eq!(report.gates[0].status, GateStatus::Failed);
         assert_eq!(report.gates[0].measurements["collection_items"], 2);
         assert_eq!(report.gates[0].findings[0].path, "/b");
+    }
+
+    #[test]
+    fn collection_does_not_compare_explicitly_unavailable_metadata() {
+        let documents: Vec<EmdashDocument> = serde_json::from_str(
+            r#"[{"route":"/a","title":"Same"},{"route":"/b","title":"Same","unavailable_metadata_fields":["title"]}]"#,
+        ).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='title'\n").unwrap();
+        let report = evaluate_collection(&documents, &preset).unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::NotChecked);
+        assert!(report.gates[0].findings.is_empty());
     }
 
     #[test]

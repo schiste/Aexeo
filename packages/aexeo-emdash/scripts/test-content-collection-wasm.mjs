@@ -51,6 +51,29 @@ assert.equal(missingGroup.gates[0].measurements.items_missing_group, 1);
 const groupedDuplicate = await evaluateContentCollection([...groupedDocuments, { route: "/en2", title: "Same", lang: "en", body: [] }], "test", { test: groupedPreset });
 assert.equal(groupedDuplicate.gates[0].status, "failed");
 assert.equal(groupedDuplicate.gates[0].findings[0].path, "/en2");
+// Open-world projections must not treat display fallbacks or unobserved groups as facts.
+const unknownTitle = await evaluateContentCollection([
+  { route: "/a", title: "Fallback", observed_metadata_fields: ["title"] },
+  { route: "/b", title: "Fallback", observed_metadata_fields: [] },
+], "test", { test: preset });
+assert.equal(unknownTitle.gates[0].status, "not_checked");
+assert.equal(unknownTitle.gates[0].findings.length, 0);
+const knownDuplicateWithUnknown = await evaluateContentCollection([
+  { route: "/a", title: "Same", observed_metadata_fields: ["title"] },
+  { route: "/b", title: "Same", observed_metadata_fields: ["title"] },
+  { route: "/c", title: "Same", observed_metadata_fields: [] },
+], "test", { test: preset });
+assert.equal(knownDuplicateWithUnknown.gates[0].status, "not_checked");
+assert.deepEqual(knownDuplicateWithUnknown.gates[0].findings.map((finding) => finding.path), ["/b"]);
+const unknownGroup = await evaluateContentCollection([
+  { route: "/a", title: "Same", lang: "en", observed_metadata_fields: ["title", "lang"] },
+  { route: "/b", title: "Same", lang: "en", observed_metadata_fields: ["title"] },
+], "test", { test: groupedPreset });
+assert.equal(unknownGroup.gates[0].status, "not_checked");
+assert.equal(unknownGroup.gates[0].findings.length, 0);
+await assert.rejects(evaluateContentCollection([
+  { route: "/invalid", title: "Title", observed_metadata_fields: "title" },
+], "test", { test: preset }), /observed_metadata_fields/);
 console.log("WASM collection smoke test passed");
 
 const requiredPreset = `version=1
