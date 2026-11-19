@@ -289,8 +289,9 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
         request: { body: "json" },
         input: z.strictObject({ collection: z.string().min(1).max(128), id: z.string().min(1).max(128), revision: z.string().min(1).max(128), field: z.string().min(1).max(128).optional() }),
         handler: async (ctx: SandboxCtx & { input: { collection: string; id: string; revision: string; field?: string } }) => {
+          const startedAt = Date.now();
           const result = await auditRevision(ctx as never, ctx.input, { preset: options.contentPreset, blockMappings: options.blockMappings, contentFieldsByCollection: options.contentFieldsByCollection, descriptionFieldsByCollection: options.descriptionFieldsByCollection, evidenceProviderConfigured: runtime.evidenceSources !== undefined, evaluate: evaluateContent });
-          try { ctx.log?.info("aexeo.revision_audit", { status: result.status, gates: result.status === "evaluated" ? result.report.gates.length : 0 }); } catch { /* telemetry is advisory */ }
+          try { ctx.log?.info("aexeo.revision_audit", { status: result.status, scope: ctx.input.field === undefined ? "content" : "fragment", duration_ms: Date.now() - startedAt, gates: result.status === "evaluated" ? result.report.gates.length : 0 }); } catch { /* telemetry is advisory */ }
           return result;
         },
       },

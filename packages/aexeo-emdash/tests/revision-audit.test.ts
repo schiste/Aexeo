@@ -100,6 +100,13 @@ describe("revision audits", () => {
     expect(evaluate.mock.calls[1]?.[0]).toMatchObject({ description_source_observed: false });
     expect(JSON.stringify(evaluate.mock.calls[1])).not.toContain("Current SEO");
   });
+  it("logs fragment audit coverage without the field name or content", async () => {
+    const info = vi.fn();
+    const plugin = createPlugin({ revisionAudits: true }) as { routes: Record<string, { handler(ctx: unknown): Promise<unknown> }> };
+    await plugin.routes["audit-revision"]!.handler({ content: {}, kv: {}, log: { info }, input: { collection: "posts", id: "one", revision: "rev1", field: "private-field" } });
+    expect(info).toHaveBeenCalledWith("aexeo.revision_audit", expect.objectContaining({ status: "not_checked", scope: "fragment", duration_ms: expect.any(Number), gates: 0 }));
+    expect(JSON.stringify(info.mock.calls)).not.toContain("private-field");
+  });
   it("registers private MCP tools with schemas and explicit permissions", () => {
     const plugin = createPlugin({ revisionAudits: true }) as { capabilities: string[]; mcp?: { tools: Record<string, { route: string; input: { safeParse(value: unknown): { success: boolean } } }> }; routes: Record<string, { permission?: string; request?: { body?: string } }> };
     expect(plugin.capabilities).toContain("content:revisions:read");
