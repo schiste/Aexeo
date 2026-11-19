@@ -28,6 +28,28 @@ describe("revision audits", () => {
     expect(await getRevisionAudit(ctx as never, result.audit_id)).toMatchObject({ revision: "rev1", revision_status: "stale", assurance: { publication_authorization: "not_granted" } });
     expect(result.limitation).toContain("does not establish factual accuracy");
   });
+  it("reports projection coverage separately from rendered metadata", async () => {
+    const { ctx, revision } = host();
+    const data = revision.data as Record<string, unknown>;
+    data.seo_description = "";
+    data.excerpt = "A description";
+    const options = { preset: { name: "article" }, contentFieldsByCollection: { posts: ["content"] },
+      descriptionFieldsByCollection: { posts: ["seo_description", "excerpt"] }, evaluate: async () => report };
+    const evaluate = () => auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, options);
+    const result = await evaluate();
+    expect(result).toMatchObject({ input_coverage: {
+      body: { coverage: "complete", field_selection: "configured", configured_fields: ["content"], capabilities: ["text", "headings", "paragraphs", "links"] },
+      description: { field_selection: "configured", configured_fields: ["seo_description", "excerpt"], source_observed: true, value_supplied: true },
+      rendered_page: "not_observed",
+    } });
+    delete data.seo_description;
+    expect(await evaluate()).toMatchObject({ input_coverage: { description: { source_observed: false, value_supplied: false } } });
+    data.seo_description = null;
+    data.excerpt = null;
+    expect(await evaluate()).toMatchObject({ input_coverage: { description: { source_observed: true, value_supplied: false } } });
+    delete data.content;
+    expect(await evaluate()).toMatchObject({ input_coverage: { body: { coverage: "unavailable", capabilities: [] } } });
+  });
   it("does not silently use current content when revisions are unavailable or mismatched", async () => {
     const { ctx, revision } = host();
     revision.entryId = "another";
