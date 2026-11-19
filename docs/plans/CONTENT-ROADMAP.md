@@ -458,8 +458,8 @@ registry before considering the release delivered.
   signal only: it does not verify sources or establish factual currentness.
 - [x] Forward explicitly mapped metadata and unavailable source fields from
   sandboxed EmDash saves and refreshes to the sidecar.
-- [ ] Support configured content presets in the sandboxed sidecar workflow, and
-  validate real host configuration and permissions before relying on it.
+- [ ] Validate sandbox sidecar preset configuration, real host permissions and
+  representative records before relying on the deployed workflow.
 - [ ] Source and factuality evaluation after the basic gates are validated.
   EmDash trusted hosts can opt into per-document evidence snapshots; failures remain unchecked and never fall back to a shared snapshot. This supplies inputs only and is not factuality validation.
 

@@ -503,18 +503,18 @@ export async function readSandboxDescriptionFields(ctx: SandboxCtx): Promise<Rec
 }
 
 /** Read the same explicit metadata mappings used by configured hosts. */
-export async function readSandboxMetadataFields(ctx: SandboxCtx): Promise<Record<string, MetadataFields> | undefined> {
-  if (!ctx.settings) return undefined;
+export async function readSandboxMetadataFields(ctx: SandboxCtx): Promise<{ fields: Record<string, MetadataFields> | undefined; unavailable: boolean }> {
+  if (!ctx.settings) return { fields: undefined, unavailable: false };
   try {
     const raw = await ctx.settings.get<unknown>(SETTINGS_METADATA_FIELDS_KEY);
-    if (raw === null || raw === "") return undefined;
+    if (raw === null || raw === "") return { fields: undefined, unavailable: false };
     if (typeof raw !== "string" || raw.length > 65536) throw new Error("invalid selection size or type");
     const value: unknown = JSON.parse(raw);
     validateMetadataFieldsByCollection(value);
-    return value as Record<string, MetadataFields>;
+    return { fields: value as Record<string, MetadataFields>, unavailable: false };
   } catch {
     ctx.log?.warn?.("Aexeo metadata field selection unavailable; metadata projection remains unverified");
-    return undefined;
+    return { fields: undefined, unavailable: true };
   }
 }
 
@@ -534,7 +534,9 @@ export async function handleAfterSave(
   }
   const [blockMappings, fields, descriptions, metadata] = await Promise.all([readSandboxBlockMappings(ctx), readSandboxContentFieldState(ctx), readSandboxDescriptionFields(ctx), readSandboxMetadataFields(ctx)]);
   await handleAfterSaveConfigured(event, ctx, (documents, context) =>
-    evaluateViaSidecar(
+    metadata.unavailable
+      ? Promise.resolve({ ok: false, reason: "metadata_config_unavailable", detail: "metadata field settings are unavailable or invalid" })
+      : evaluateViaSidecar(
       ctx.http,
       { url: runtime.url, authToken: runtime.token, log: ctx.log },
       documents,
@@ -545,7 +547,7 @@ export async function handleAfterSave(
     fields.fields?.[event.content.type],
     descriptions?.[event.content.type],
     fields.unavailable,
-    metadata?.[event.content.type],
+    metadata.fields?.[event.content.type],
   );
 }
 

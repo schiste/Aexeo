@@ -449,10 +449,22 @@ describe("custom block mappings", () => {
     ctx.log = { info: () => {}, warn: (message) => warnings.push(message), error: () => {} };
     for (const value of ["{private", JSON.stringify({ pages: { title: "private" } }), "null"]) {
       ctx.settings = { get: async <T>() => value as T, set: async () => {} };
-      expect(await readSandboxMetadataFields(ctx)).toBeUndefined();
+      expect(await readSandboxMetadataFields(ctx)).toEqual({ fields: undefined, unavailable: true });
     }
     expect(warnings).toHaveLength(3);
     expect(JSON.stringify(warnings)).not.toContain("private");
+  });
+
+  it("records an error instead of evaluating when sandbox metadata settings are invalid", async () => {
+    const content = item("invalid-metadata-settings", NEW);
+    const { ctx, store } = host([content]);
+    await ctx.kv.set(CONFIG_URL_KEY, "https://example.org");
+    ctx.settings = { get: async <T>(key: string) => (key === SETTINGS_TOKEN_KEY ? "token" : key === SETTINGS_METADATA_FIELDS_KEY ? "{" : null) as T | null, set: async () => {} };
+    let calls = 0;
+    ctx.http = { fetch: async () => { calls++; return { status: 200, ok: true, text: async () => "[]" }; } };
+    await handleAfterSave({ content, collection: "pages", isNew: false }, ctx);
+    expect(calls).toBe(0);
+    expect(store.get("findings:/invalid-metadata-settings")).toMatchObject({ findings: [], assessment: { status: "error", reason: "metadata_config_unavailable" } });
   });
 
   it("keeps observed prose but withholds body coverage when sandbox field settings fail", async () => {

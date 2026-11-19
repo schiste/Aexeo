@@ -752,9 +752,10 @@ panel. Their input coverage lists configured, supplied and unavailable field
 names, and the `aexeo.metadata_projection` event logs aggregate counts without
 field names or values. Sandboxed hosts can enter the same JSON object in the
 `Editorial metadata fields by collection (JSON)` setting; save and Refresh
-forward projected values to the sidecar. Sandbox mode does not run configured
-content presets, so supplying this mapping alone does not activate the
-`metadata_age` gate. Invalid sandbox settings are ignored with a warning.
+forward projected values to the sidecar. Configure the sidecar's
+`CONTENT_PRESET` and related settings separately to run content gates; the
+mapping alone does not activate a gate. Invalid or unreadable metadata settings
+produce an evaluation error instead of treating unknown values as absent.
 Map a substantive review date deliberately: an ordinary modification timestamp
 does not establish that the content was reviewed.
 
