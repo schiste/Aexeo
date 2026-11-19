@@ -341,6 +341,37 @@ class CompareOfflineReceipts(unittest.TestCase):
             with self.subTest(options=options), self.assertRaises(comparison.VerificationError):
                 comparison.compare_receipts(encoded, encoded, self.artifacts, **options)
 
+    @unittest.skipUnless(importlib.util.find_spec("jsonschema") and importlib.util.find_spec("rfc3339_validator") and importlib.util.find_spec("rfc3986_validator"), "optional schema dependencies unavailable")
+    def test_validated_change_rejects_git_origin_with_opaque_base(self):
+        change = json.loads((Path(__file__).parent.parent / "v1" / "examples" / "markdown-change.json").read_text())
+        change["base"] = {"kind": "opaque", "revision": "r1"}
+        data = self.encode(change)
+        self.artifacts["change"].write_bytes(data)
+        receipt = copy.deepcopy(self.receipt)
+        receipt["decision_inputs"]["change"]["sha256"] = hashlib.sha256(data).hexdigest()
+        receipt["verdict"]["subject"] = {
+            "change_id": change["change_id"], "base": change["base"],
+            "entries": [{"entity_id": entry["entity_id"], "sha256": entry.get("after", {}).get("sha256")}
+                        for entry in change["entries"]],
+        }
+        encoded = self.encode(receipt)
+        comparison.compare_receipts(encoded, encoded, self.artifacts, verify_change_subject=True)
+        with self.assertRaises(comparison.VerificationError):
+            comparison.compare_receipts(encoded, encoded, self.artifacts, validate_change=True)
+
+    @unittest.skipUnless(importlib.util.find_spec("jsonschema") and importlib.util.find_spec("rfc3339_validator") and importlib.util.find_spec("rfc3986_validator"), "optional schema dependencies unavailable")
+    def test_validated_change_requires_absolute_root_for_file_states(self):
+        change = json.loads((Path(__file__).parent.parent / "v1" / "examples" / "markdown-change.json").read_text())
+        for root in (None, "relative/root"):
+            candidate = copy.deepcopy(change)
+            if root is None:
+                candidate.pop("content_root")
+            else:
+                candidate["content_root"] = root
+            with self.subTest(root=root), self.assertRaises(comparison.VerificationError):
+                comparison.validate_change_semantics(candidate)
+        comparison.validate_change_semantics(change)
+
     def test_inline_content_checks_every_present_state_and_rejects_references(self):
         try:
             import jsonschema  # noqa: F401
