@@ -11,6 +11,8 @@ export interface ContentPresetOptions {
   byCollection?: Record<string, string>;
   byLocale?: Record<string, string>;
   byCollectionLocale?: Record<string, Record<string, string>>;
+  /** Explicit field-to-preset mappings for revision fragment audits. */
+  fragmentFieldsByCollection?: Record<string, Record<string, string>>;
   /** Restrict preset evaluation to these collections; site checks still run for all. */
   collections?: readonly string[];
   /** Host attests complete list projection for these collections, including custom blocks. */
