@@ -516,6 +516,11 @@ pub fn html_source_map_with_scope(
                 | "samp"
                 | "small"
                 | "mark"
+                | "abbr"
+                | "time"
+                | "dfn"
+                | "var"
+                | "data"
                 | "a"
                 | "br"
                 | "img"
@@ -721,6 +726,11 @@ pub fn html_source_map_with_scope(
                             | "samp"
                             | "small"
                             | "mark"
+                            | "abbr"
+                            | "time"
+                            | "dfn"
+                            | "var"
+                            | "data"
                             | "a"
                     )
                 })
@@ -1258,6 +1268,51 @@ mod tests {
                     )
                     .is_none(),
                     "{tag}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn maps_semantic_inline_elements_without_guessing_recovered_markup() {
+        let html = "<main><p>Élan <abbr title='Application Programming Interface'>API</abbr> on <time datetime='2026-11-19'>19 Nov</time>: <dfn>term</dfn>, <var>x</var>, <data value='42'>42</data>.</p></main>";
+        for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+            let adapted = html_content_with_scope("x", html, scope).unwrap();
+            let projected = adapted.input.text.as_deref().unwrap();
+            let map = html_source_map_with_scope(html, projected, scope).unwrap();
+            let projected_index = crate::text_index::LineIndex::new(projected);
+            let source_index = crate::text_index::LineIndex::new(html);
+            for needle in ["API", "19 Nov", "term", "x", "42"] {
+                let (line, column) = projected_index
+                    .position(projected, projected.find(needle).unwrap())
+                    .unwrap();
+                let source_offset = match needle {
+                    "API" => html.find(">API<").unwrap() + 1,
+                    "x" => html.find(">x<").unwrap() + 1,
+                    "42" => html.find(">42<").unwrap() + 1,
+                    _ => html.find(needle).unwrap(),
+                };
+                assert_eq!(
+                    map.source_position(html, projected, line, column),
+                    source_index.position(html, source_offset),
+                    "{needle}"
+                );
+            }
+        }
+        for tag in ["abbr", "time", "dfn", "var", "data"] {
+            for html in [
+                format!("<main><{tag}>before<div>inside</div>after</{tag}></main>"),
+                format!("<main><{tag} hidden>hidden</{tag}><p>visible</p></main>"),
+            ] {
+                let adapted = html_content_with_scope("x", &html, HtmlContentScope::Main).unwrap();
+                assert!(
+                    html_source_map_with_scope(
+                        &html,
+                        adapted.input.text.as_deref().unwrap(),
+                        HtmlContentScope::Main
+                    )
+                    .is_none(),
+                    "{html}"
                 );
             }
         }
