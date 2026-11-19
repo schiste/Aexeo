@@ -92,6 +92,13 @@ fn validate_item(item: &CandidateItem) -> Result<(), &'static str> {
 }
 
 pub(crate) fn validate_inventory(items: &[CandidateItem]) -> Result<(), &'static str> {
+    validate_inventory_inner(items, true)
+}
+
+fn validate_inventory_inner(
+    items: &[CandidateItem],
+    validate_items: bool,
+) -> Result<(), &'static str> {
     const MAX_ITEMS: usize = 100_000;
     const MAX_LINKS: usize = 1_000_000;
     const MAX_SOURCE_BYTES: usize = 64 * 1024 * 1024;
@@ -114,7 +121,9 @@ pub(crate) fn validate_inventory(items: &[CandidateItem]) -> Result<(), &'static
     let mut ids = BTreeSet::new();
     let mut paths = BTreeSet::new();
     for item in items {
-        validate_item(item)?;
+        if validate_items {
+            validate_item(item)?;
+        }
         if !ids.insert(&item.entity_id) || !paths.insert(&item.public_path) {
             return Err("duplicate identity or public path");
         }
@@ -157,11 +166,10 @@ pub fn overlay_candidate(
     }
     validate_inventory(&base.items)?;
     validate_inventory(after)?;
-    let mut items: BTreeMap<String, CandidateItem> = base
+    let mut items: BTreeMap<&str, &CandidateItem> = base
         .items
         .iter()
-        .cloned()
-        .map(|item| (item.entity_id.clone(), item))
+        .map(|item| (item.entity_id.as_str(), item))
         .collect();
     let mut projected: BTreeMap<&str, &CandidateItem> = after
         .iter()
@@ -200,7 +208,7 @@ pub fn overlay_candidate(
         {
             return Err("before state mismatch");
         }
-        routes.insert(old.public_path);
+        routes.insert(old.public_path.clone());
     }
     for entry in &change.entries {
         if matches!(entry.operation, Operation::Delete) {
@@ -227,10 +235,7 @@ pub fn overlay_candidate(
         {
             return Err("after projection mismatch");
         }
-        if items
-            .insert(entry.entity_id.clone(), next.clone())
-            .is_some()
-        {
+        if items.insert(entry.entity_id.as_str(), next).is_some() {
             return Err("candidate identity conflict");
         }
         routes.insert(next.public_path.clone());
@@ -238,8 +243,11 @@ pub fn overlay_candidate(
     if !projected.is_empty() {
         return Err("unexpected after projection");
     }
-    let candidate_items: Vec<_> = items.into_values().collect();
-    validate_inventory(&candidate_items)?;
+    let candidate_items: Vec<_> = items.into_values().cloned().collect();
+    // Every candidate item is an unchanged clone of an already validated base
+    // or after item. Recheck combined resource limits and route uniqueness,
+    // but avoid hashing every source a second time.
+    validate_inventory_inner(&candidate_items, false)?;
     let mut affected = BTreeSet::new();
     let candidate_ids: BTreeSet<&str> = candidate_items
         .iter()
@@ -291,8 +299,12 @@ pub fn overlay_candidate(
     Ok(CandidateOverlay {
         change_id: change.change_id.clone(),
         candidate: CandidateSnapshot {
+            scope: base.scope.clone(),
+            site_id: base.site_id.clone(),
+            site_base_url: base.site_base_url.clone(),
+            base: base.base.clone(),
+            complete: base.complete,
             items: candidate_items,
-            ..base.clone()
         },
         impact: CandidateImpact {
             changed: changed.into_iter().collect(),
@@ -689,6 +701,30 @@ mod tests {
         assert_eq!(
             overlay_candidate(&snapshot, &change, &[after]).unwrap_err(),
             "before state unavailable"
+        );
+    }
+
+    #[test]
+    fn validates_even_removed_items_and_new_projections() {
+        let (mut snapshot, mut change) = setup();
+        let after = item("a", "/a", "replacement", Some(vec![]));
+        change.entries.push(entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&after),
+        ));
+        snapshot.items[0].source = "tampered old source".into();
+        assert_eq!(
+            overlay_candidate(&snapshot, &change, std::slice::from_ref(&after)).unwrap_err(),
+            "invalid candidate item"
+        );
+        snapshot.items[0].source = "A".into();
+        let mut tampered_after = after;
+        tampered_after.source = "tampered replacement".into();
+        assert_eq!(
+            overlay_candidate(&snapshot, &change, &[tampered_after]).unwrap_err(),
+            "invalid candidate item"
         );
     }
 
