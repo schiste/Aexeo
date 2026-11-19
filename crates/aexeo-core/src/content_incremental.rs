@@ -249,8 +249,8 @@ impl IncrementalBaseline {
 
     /// Evaluate a proposal against the *same* owned base and preset. The
     /// overlay and impact are recomputed, not accepted from the caller.
-    /// All surviving directly affected entities are re-evaluated; other
-    /// independent-item reports are reused. Site and collection gates are
+    /// Changed surviving entities are re-evaluated; reports for fully unchanged
+    /// items are reused, including link neighbours. Site and collection gates are
     /// never inferred from this result. Errors fail closed as `not_checked`.
     pub fn evaluate(&self, change: &Change, after: &[CandidateItem]) -> IncrementalEvaluation {
         match self.evaluate_checked(change, after) {
@@ -300,20 +300,20 @@ impl IncrementalBaseline {
         let mut evaluated = 0;
         let mut reused = 0;
         for item in &overlay.candidate.items {
-            let report = if affected.contains(item.entity_id.as_str()) {
-                evaluated += 1;
-                evaluate_item(&self.preset, item, self.mode)?
-            } else {
-                if baseline_items.get(item.entity_id.as_str()).copied() != Some(item) {
-                    return Err(unavailable(
-                        "baseline item differs from candidate outside the impact set",
-                    ));
-                }
+            let report = if baseline_items.get(item.entity_id.as_str()).copied() == Some(item) {
                 reused += 1;
                 self.reports
                     .get(&item.entity_id)
                     .ok_or_else(|| unavailable("baseline report is unavailable"))?
                     .clone()
+            } else {
+                if !affected.contains(item.entity_id.as_str()) {
+                    return Err(unavailable(
+                        "baseline item differs from candidate outside the impact set",
+                    ));
+                }
+                evaluated += 1;
+                evaluate_item(&self.preset, item, self.mode)?
             };
             reports.insert(item.entity_id.clone(), report);
         }
@@ -476,6 +476,37 @@ mod tests {
             assert_eq!(evaluated + reused, reports.len());
             assert!(reused > 0);
         }
+    }
+    #[test]
+    fn unchanged_link_neighbours_reuse_independent_item_reports() {
+        let (snapshot, preset, mut change) = fixture();
+        let updated = item("a", "new source words", Some(vec!["/c"]));
+        change.entries.push(entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&updated),
+        ));
+        let overlay =
+            overlay_candidate(&snapshot, &change, std::slice::from_ref(&updated)).unwrap();
+        assert!(overlay.impact.affected.iter().any(|id| id == "d"));
+        let expected = full(&overlay.candidate, &preset);
+        let baseline = IncrementalBaseline::prepare(snapshot, preset).unwrap();
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate(&change, &[updated])
+        else {
+            panic!("expected evaluation")
+        };
+        assert_eq!(
+            serde_json::to_value(reports).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        assert_eq!(evaluated, 1);
+        assert_eq!(reused, 4);
     }
     #[test]
     fn text_only_gates_match_full_evaluation_for_each_gate() {
