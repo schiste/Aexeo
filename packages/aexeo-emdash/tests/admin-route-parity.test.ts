@@ -470,16 +470,28 @@ describe("Refresh applies suppressions on every path", () => {
     const settings = new Map<string, unknown>([
       ["eval_token", "token"],
       ["description_fields_by_collection", JSON.stringify({ posts: ["seo_description", "excerpt"] })],
+      ["metadata_fields_by_collection", JSON.stringify({ posts: { last_reviewed: "reviewed" } })],
     ]);
     const ctx = fakeCtx(kv, settings);
-    ctx.content.list = async (collection) => ({ items: collection === "posts" ? [{ ...helloDoc, data: { title: "Hello", seo_description: "", excerpt: "Description from CMS" } }] as never : [], hasMore: false });
+    ctx.content.list = async (collection) => ({ items: collection === "posts" ? [{ ...helloDoc, data: { title: "Hello", seo_description: "", excerpt: "Description from CMS", reviewed: "2024-02-28" } }] as never : [], hasMore: false });
     let request: unknown;
     ctx.http.fetch = async (_url, init) => {
       request = JSON.parse(init?.body ?? "{}");
       return { ok: true, status: 200, text: async () => "[]" };
     };
     await sandboxAdmin()({ input: { type: "block_action", action_id: "refresh_findings" } }, ctx);
-    expect(request).toMatchObject({ documents: [{ description: "Description from CMS", description_source_observed: true }] });
+    expect(request).toMatchObject({ documents: [{ description: "Description from CMS", description_source_observed: true, meta: { last_reviewed: "2024-02-28" } }] });
+  });
+
+  it("records an error during sandbox refresh when metadata settings are invalid", async () => {
+    const kv = fakeKv({ "config:evaluator_url": "https://evaluator.test" });
+    const ctx = fakeCtx(kv, new Map([["eval_token", "token"], ["metadata_fields_by_collection", "{"]]));
+    ctx.content.list = async (collection) => ({ items: collection === "posts" ? [helloDoc] as never : [], hasMore: false });
+    let calls = 0;
+    ctx.http.fetch = async () => { calls++; return { ok: true, status: 200, text: async () => "[]" }; };
+    await sandboxAdmin()({ input: { type: "block_action", action_id: "refresh_findings" } }, ctx);
+    expect(calls).toBe(0);
+    expect(await kv.get("findings:/journal/hello/")).toMatchObject({ findings: [], assessment: { status: "error", reason: "metadata_config_unavailable" } });
   });
 
   it("withholds body coverage during sandbox refresh when content field settings are invalid", async () => {

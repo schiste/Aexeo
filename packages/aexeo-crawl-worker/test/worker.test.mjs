@@ -154,6 +154,50 @@ describe("worker", () => {
   });
 });
 
+describe("sandbox metadata projection", () => {
+  it("runs a review-age preset against mapped and unavailable metadata in workerd", async () => {
+    const preset = `version=1
+name="review"
+[[gates]]
+id="age"
+kind="metadata_age"
+field="last_reviewed"
+as_of="2024-03-01"
+max_days=1
+[[gates]]
+id="author"
+kind="required_metadata"
+fields=["author"]
+`;
+    const harness = createTestHarness({ workers: [
+      { config: { name: "aexeo-test", main: fileURLToPath(new URL("../src/worker.ts", import.meta.url)), compatibility_date: "2026-10-01",
+        vars: { SITE_URL, EVAL_TOKEN: TOKEN, CONTENT_PRESET: "review", CONTENT_PRESET_SOURCES_JSON: JSON.stringify({ review: preset }) } } },
+    ] });
+    try {
+      await harness.listen();
+      const response = await post(harness.getWorker("aexeo-test"), JSON.stringify({
+        responseFormat: 2,
+        documents: [
+          { route: "/reviewed", title: "Reviewed", meta: { last_reviewed: "2024-02-28", author: "Editor" } },
+          { route: "/unknown", title: "Unknown", unavailable_metadata_fields: ["author", "last_reviewed"] },
+        ],
+        collections: ["pages", "pages"],
+      }));
+      assert.equal(response.status, 200, await response.clone().text());
+      const payload = await response.json();
+      const reviewed = payload.assessments["/reviewed"].gates;
+      assert.equal(reviewed.find((gate) => gate.gate_id === "age").measurements.age_days, 2);
+      assert.equal(reviewed.find((gate) => gate.gate_id === "age").status, "failed");
+      assert.equal(reviewed.find((gate) => gate.gate_id === "author").status, "passed");
+      const unknown = payload.assessments["/unknown"].gates;
+      assert.equal(unknown.find((gate) => gate.gate_id === "age").status, "not_checked");
+      assert.equal(unknown.find((gate) => gate.gate_id === "author").status, "not_checked");
+    } finally {
+      await harness.close();
+    }
+  });
+});
+
 describe("external gate service binding", () => {
   it("does not send content when the resolved preset has no custom gate", async () => {
     // This provider rejects every preset except custom, so a successful article
