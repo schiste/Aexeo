@@ -223,9 +223,32 @@ def binding(artifacts):
     return digest.hexdigest()
 
 
+def validate_collection_projection(collection, candidate, change):
+    if (not isinstance(collection, dict) or set(collection) != {'change_id', 'items', 'complete'}
+            or collection['change_id'] != change['change_id'] or not isinstance(collection['complete'], bool)
+            or not isinstance(collection['items'], list)):
+        raise VerificationError('invalid collection projection')
+    by_id = {}
+    for item in collection['items']:
+        if not isinstance(item, dict) or not isinstance(item.get('id'), str) or not item['id'].strip() or item['id'] in by_id:
+            raise VerificationError('invalid collection identity')
+        metadata = item.get('metadata')
+        if metadata is not None and (not isinstance(metadata, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in metadata.items())):
+            raise VerificationError('invalid collection metadata')
+        by_id[item['id']] = item
+    candidate_ids = {item['entity_id'] for item in candidate['items']}
+    if not set(by_id).issubset(candidate_ids) or (collection['complete'] and set(by_id) != candidate_ids):
+        raise VerificationError('collection identities differ from candidate')
+    for entry in change['entries']:
+        if entry['operation'] != 'delete':
+            item = by_id.get(entry['entity_id'])
+            if item is None or item.get('metadata') != entry.get('metadata'):
+                raise VerificationError('collection changed metadata differs')
+
+
 def verify(envelope_bytes, base_bytes, after_bytes, artifacts):
-    if set(artifacts) != set(REQUIRED) or any(not isinstance(value, bytes) for value in artifacts.values()) or sum(map(len, artifacts.values())) > LIMIT:
-        raise VerificationError('four bounded independent artifact byte strings are required')
+    if not set(REQUIRED).issubset(artifacts) or set(artifacts) - set(REQUIRED) - {'collection'} or any(not isinstance(value, bytes) for value in artifacts.values()) or sum(map(len, artifacts.values())) > LIMIT:
+        raise VerificationError('bounded independent decision artifacts are required')
     if not artifacts['evaluator']:
         raise VerificationError('evaluator identity missing')
     envelope = parse(envelope_bytes)
@@ -240,11 +263,16 @@ def verify(envelope_bytes, base_bytes, after_bytes, artifacts):
     for name in REQUIRED:
         if not hmac.compare_digest(manifest[name]['sha256'], hashlib.sha256(artifacts[name]).hexdigest()):
             raise VerificationError('decision artifacts differ')
-    if any(manifest[name] != {'state': 'absent'} for name in ('collection', 'external_evidence')):
-        raise VerificationError('unsupported collection or external evidence')
+    collection = artifacts.get('collection')
+    expected_collection = ({'state': 'absent'} if collection is None else
+                           {'state': 'present', 'sha256': hashlib.sha256(collection).hexdigest()})
+    if manifest['collection'] != expected_collection or manifest['external_evidence'] != {'state': 'absent'}:
+        raise VerificationError('collection or external evidence differs')
     base, after, change = parse(base_bytes), parse(after_bytes), parse(artifacts['change'])
     candidate = overlay(base, change, after)
-    all_inputs = dict(artifacts, collection=None, external_evidence=None,
+    if collection is not None:
+        validate_collection_projection(parse(collection), candidate, change)
+    all_inputs = dict(artifacts, collection=collection, external_evidence=None,
                       candidate_base_revision_sha256=revision_digest(base),
                       candidate_revision_profile=PROFILE.encode('ascii'), candidate_revision_sha256=revision_digest(candidate))
     if not hmac.compare_digest(envelope['binding'], binding(all_inputs)):
@@ -290,6 +318,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('envelope', 'base', 'after', *REQUIRED):
         parser.add_argument('--' + name.replace('_', '-'), required=True)
+    parser.add_argument('--collection', help='independently obtained exact collection artifact bytes')
     parser.add_argument('--fresh-envelope', help='independently obtained fresh evaluation')
     parser.add_argument('--require-check', action='append', help='required blocking passed check ID; repeatable')
     parser.add_argument('--validator-name')
@@ -310,6 +339,8 @@ def main():
     try:
         inputs = (read_stable(args.envelope), read_stable(args.base), read_stable(args.after),
                   {name: read_stable(getattr(args, name)) for name in REQUIRED})
+        if args.collection is not None:
+            inputs[3]['collection'] = read_stable(args.collection)
         requirements = (args.require_check, args.validator_name, args.validator_version)
         if args.fresh_envelope is not None:
             result = compare_fresh(inputs[0], read_stable(args.fresh_envelope), *inputs[1:],

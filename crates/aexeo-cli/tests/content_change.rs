@@ -2037,6 +2037,83 @@ fn candidate_bound_verdict_rebuilds_and_revalidates_inputs() {
 }
 
 #[test]
+fn candidate_bound_verdict_accepts_bound_collection_and_rejects_mismatch() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().join("base.json");
+    let after = dir.path().join("after.json");
+    let collection = dir.path().join("collection.json");
+    let prior = dir.path().join("prior.json");
+    fs::write(&base, serde_json::to_vec(&serde_json::json!({"scope":"site", "site_id":"site", "site_base_url":null, "base":{"kind":"opaque","revision":"r1"}, "complete":true, "items":[]})).unwrap()).unwrap();
+    fs::write(&after, serde_json::to_vec(&serde_json::json!([{"entity_id":"article", "public_path":"/article", "media_type":"text/plain", "revision":null, "sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "source":"abc", "links":null}])).unwrap()).unwrap();
+    let mut snapshot = serde_json::json!({"change_id":"example", "complete":true, "items":[{"id":"article", "metadata":{"slug":"article"}}]});
+    fs::write(&collection, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    let mut change = input();
+    change["entries"][0]["metadata"] = serde_json::json!({"slug":"article"});
+    let policy = "version=1\nname='test'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n";
+    let opts = [
+        "--offline-receipt",
+        "--experimental-bound-verdict",
+        "--evaluator-identity",
+        "build",
+        "--candidate-base",
+        base.to_str().unwrap(),
+        "--candidate-after",
+        after.to_str().unwrap(),
+        "--collection-snapshot",
+        collection.to_str().unwrap(),
+        "--telemetry",
+    ];
+    let first = run(dir.path(), &change, policy, &opts);
+    assert_eq!(
+        first.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let diagnostics = String::from_utf8_lossy(&first.stderr);
+    let events: Vec<serde_json::Value> = diagnostics
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(
+        events
+            .iter()
+            .any(|event| event["event"] == "content_change_candidate_bound"
+                && event["collection_supplied"] == true
+                && event["collection_items"] == 1
+                && event["collection_complete"] == true)
+    );
+    assert!(!diagnostics.contains("article"));
+    let output = dir.path().join("verdict.json");
+    let saved = fs::read(&output).unwrap();
+    fs::write(&prior, &saved).unwrap();
+    let mut verify = opts.to_vec();
+    verify.extend(["--verify-offline-receipt", prior.to_str().unwrap()]);
+    assert_eq!(
+        run(dir.path(), &change, policy, &verify).status.code(),
+        Some(0)
+    );
+    let saved = fs::read(&output).unwrap();
+    snapshot["items"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({"id":"extra"}));
+    fs::write(&collection, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    assert_eq!(
+        run(dir.path(), &change, policy, &verify).status.code(),
+        Some(2)
+    );
+    assert_eq!(fs::read(&output).unwrap(), saved);
+    snapshot["items"].as_array_mut().unwrap().pop();
+    snapshot["complete"] = false.into();
+    fs::write(&collection, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    let incomplete = run(dir.path(), &change, policy, &opts);
+    assert_eq!(incomplete.status.code(), Some(2));
+    let verdict: serde_json::Value = serde_json::from_slice(&fs::read(output).unwrap()).unwrap();
+    assert_eq!(verdict["receipt"]["verdict"]["status"], "not_checked");
+}
+
+#[test]
 fn experimental_bound_verdict_cli_revalidates_and_preserves_output_on_error() {
     let dir = tempfile::tempdir().unwrap();
     let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";

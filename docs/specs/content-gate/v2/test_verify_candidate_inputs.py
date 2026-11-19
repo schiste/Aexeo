@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from verify_candidate_inputs import (VerificationError, binding, compare_fresh, overlay,
-                                     read_stable, revision_digest, verify)
+                                     read_stable, revision_digest, validate_collection_projection, verify)
 
 VECTOR = Path(__file__).with_name('candidate-verdict-vector.json')
 
@@ -50,6 +50,41 @@ class CandidateVerification(unittest.TestCase):
                 self.artifacts[name] = old
         del self.artifacts['evaluator']
         with self.assertRaises(VerificationError): self.check()
+
+    def test_collection_artifact_is_bound_and_matches_candidate(self):
+        collection = {'change_id': json.loads(self.artifacts['change'])['change_id'],
+                      'complete': True, 'items': [{'id': 'article', 'metadata': None}]}
+        def bind():
+            self.artifacts['collection'] = self.encoded(collection)
+            self.envelope['receipt']['decision_inputs']['collection'] = {
+                'state': 'present', 'sha256': hashlib.sha256(self.artifacts['collection']).hexdigest()}
+            candidate = overlay(self.base, json.loads(self.artifacts['change']), self.after)
+            values = dict(self.artifacts, external_evidence=None,
+                          candidate_base_revision_sha256=revision_digest(self.base),
+                          candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                          candidate_revision_sha256=revision_digest(candidate))
+            self.envelope['binding'] = binding(values)
+        bind()
+        self.assertEqual(self.check()['input_binding'], 'match')
+        self.artifacts['collection'] += b' '
+        with self.assertRaises(VerificationError): self.check()
+        for items in ([], [{'id': 'article'}, {'id': 'other'}],
+                      [{'id': 'article'}, {'id': 'article'}],
+                      [{'id': 'article', 'metadata': {'slug': 'changed'}}]):
+            collection['items'] = items
+            bind()
+            with self.assertRaises(VerificationError): self.check()
+
+    def test_partial_collection_may_omit_unchanged_candidate_items(self):
+        change = json.loads(self.artifacts['change'])
+        candidate = {'items': [{'entity_id': 'article'}, {'entity_id': 'existing'}]}
+        collection = {'change_id': change['change_id'], 'complete': False, 'items': [{'id': 'article'}]}
+        validate_collection_projection(collection, candidate, change)
+        collection['complete'] = True
+        with self.assertRaises(VerificationError): validate_collection_projection(collection, candidate, change)
+        collection['complete'] = False
+        collection['items'] = [{'id': 'existing'}]
+        with self.assertRaises(VerificationError): validate_collection_projection(collection, candidate, change)
 
     def test_snapshot_mutations_and_wrong_profile_fail(self):
         mutations = [lambda: self.base.update(scope='other'),
