@@ -5,7 +5,8 @@ use aexeo_contracts::{
     content_gate_protocol::Change,
 };
 use aexeo_core::content_candidate::{
-    CandidateItem, CandidateSnapshot, TransitiveLinkImpact, overlay_candidate,
+    CandidateItem, CandidateSnapshot, RemovedRouteReferences, TransitiveLinkImpact,
+    compare_removed_route_references, overlay_candidate,
     overlay_candidate_with_transitive_link_impact,
 };
 use aexeo_core::content_candidate_profile::candidate_revision_digest;
@@ -32,6 +33,8 @@ struct Response {
     impact: Option<aexeo_core::content_candidate::CandidateImpact>,
     #[serde(skip_serializing_if = "Option::is_none")]
     transitive_link_impact: Option<TransitiveLinkImpact>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    removed_route_references: Option<RemovedRouteReferences>,
     #[serde(skip_serializing_if = "Option::is_none")]
     candidate_revision_sha256: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -61,6 +64,7 @@ pub fn command_content_impact(args: &ArgMatches) -> Result<i32> {
         bail!("unsupported impact query schema");
     }
     let transitive = args.get_flag("transitive");
+    let removed_routes = args.get_flag("removed-route-references");
     let result = if transitive {
         overlay_candidate_with_transitive_link_impact(&query.snapshot, &query.change, &query.after)
             .map(|(overlay, impact)| (overlay, Some(impact)))
@@ -70,11 +74,23 @@ pub fn command_content_impact(args: &ArgMatches) -> Result<i32> {
     }
     .and_then(|(overlay, impact)| {
         let revision = candidate_revision_digest(&overlay.candidate)?;
-        Ok((overlay, impact, revision))
+        let references = if removed_routes {
+            Some(compare_removed_route_references(
+                &query.snapshot,
+                &overlay.candidate,
+            )?)
+        } else {
+            None
+        };
+        Ok((overlay, impact, references, revision))
     });
     let response = match result {
-        Ok((result, transitive_link_impact, revision)) => {
-            let status = if result.impact.link_impact_complete {
+        Ok((result, transitive_link_impact, removed_route_references, revision)) => {
+            let status = if result.impact.link_impact_complete
+                && removed_route_references
+                    .as_ref()
+                    .is_none_or(|report| report.complete)
+            {
                 "complete"
             } else {
                 "not_checked"
@@ -86,6 +102,7 @@ pub fn command_content_impact(args: &ArgMatches) -> Result<i32> {
                 change_id: Some(result.change_id),
                 impact: Some(result.impact),
                 transitive_link_impact,
+                removed_route_references,
                 candidate_revision_sha256: Some(
                     revision.iter().map(|b| format!("{b:02x}")).collect(),
                 ),
@@ -101,6 +118,7 @@ pub fn command_content_impact(args: &ArgMatches) -> Result<i32> {
             change_id: Some(query.change.change_id),
             impact: None,
             transitive_link_impact: None,
+            removed_route_references: None,
             candidate_revision_sha256: None,
             candidate: None,
         },
@@ -114,6 +132,20 @@ pub fn command_content_impact(args: &ArgMatches) -> Result<i32> {
                     .transitive_link_impact
                     .as_ref()
                     .map(|i| i.affected.len())
+            );
+        }
+        if removed_routes {
+            telemetry["removed_route_count"] = serde_json::json!(
+                response
+                    .removed_route_references
+                    .as_ref()
+                    .map(|r| r.removed_routes.len())
+            );
+            telemetry["removed_route_reference_count"] = serde_json::json!(
+                response
+                    .removed_route_references
+                    .as_ref()
+                    .map(|r| r.references.len())
             );
         }
         eprintln!("{telemetry}");

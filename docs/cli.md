@@ -264,6 +264,9 @@ Options:
       --transitive
           Also report experimental transitive incoming-link impact
 
+      --removed-route-references
+          Report projected links to routes absent from the candidate
+
       --telemetry
           Emit aggregate timing and counts to stderr
 

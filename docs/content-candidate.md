@@ -62,3 +62,23 @@ or authorize publication. It holds additional reverse-link indexes in memory
 and traverses the supplied graphs; larger inputs require more CPU and memory.
 The existing query, item and link limits apply. This option computes an impact
 set; it does not itself run incremental gate evaluation.
+
+## Optional references to removed routes
+
+Pass `--removed-route-references` to compare base and candidate route
+inventories and report candidate source entities linking to routes present in
+the base but absent from the candidate. Duplicate links from one source to one
+route are reported once. Routes recreated by the same change are not removed.
+The report can contain private entity IDs and paths; opt in only where that
+output is appropriate. Telemetry contains counts only.
+
+`complete` requires both inventory completeness assertions and a link
+projection for every candidate item. Missing projections preserve observed
+references but make the report incomplete. The reference list is limited to
+10,000 distinct pairs and 8 MiB of combined string content; truncation also
+makes the report incomplete and the CLI exits 2. A reported reference is an
+investigation lead, not proof of a broken link: redirects, aliases, locale
+fallbacks and rendered pages are not established by the snapshot. A complete
+comparison does not certify general site impact or authorize publication. The
+Rust API `compare_removed_route_references` compares supplied inventories;
+use `overlay_candidate` first to validate the candidate against a change.
