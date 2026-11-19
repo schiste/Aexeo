@@ -120,6 +120,6 @@ aggregate pass or publication verdict. A missing metadata field can leave a
 collection gate `not_checked` while item reports remain available. The host
 must establish metadata freshness, authenticity, and inventory completeness,
 and must protect the publication boundary. This experimental composition
-currently owns two base copies and reconstructs the overlay independently for
-each scope; collection evaluation scans the whole candidate collection. It is
+currently owns two base copies, shares one validated candidate overlay across
+both scopes, and scans the whole candidate collection. It is
 not a latency guarantee or a general incremental site evaluator.
