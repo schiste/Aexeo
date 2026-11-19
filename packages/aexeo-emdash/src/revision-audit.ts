@@ -35,18 +35,19 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
   if (!current || !snapshot || snapshot.id !== revision || snapshot.collection !== collection || snapshot.entryId !== id) {
     return { status: "not_checked", reason: "revision_unavailable" } as const;
   }
+  const localeAtAudit = observedLocale(current.locale);
   const field = input.field;
   const fragmentPreset = field === undefined ? undefined : selectFragmentPreset(options.preset, collection, field);
   if (field !== undefined && !fragmentPreset) return { status: "not_checked", reason: "fragment_preset_not_configured", revision, field } as const;
   if (field !== undefined && !Object.hasOwn(snapshot.data, field)) return { status: "not_checked", reason: "fragment_field_unavailable", revision, field } as const;
   const selected = field === undefined
     ? options.preset && (!options.preset.collections || options.preset.collections.includes(collection))
-      ? selectContentPreset(options.preset, collection, current.locale ?? undefined) : undefined
+      ? selectContentPreset(options.preset, collection, localeAtAudit ?? undefined) : undefined
     : { name: fragmentPreset!, source: "fragment_field" as const };
   if (!selected?.name) return { status: "not_checked", reason: "preset_not_configured", revision } as const;
   const contentFields = field === undefined ? options.contentFieldsByCollection?.[collection] : [field];
   // A revision stores field data, not the historical SEO panel or rendered HTML.
-  const item: EmdashContentItem = { id, type: collection, slug: null, status: "draft", locale: current.locale,
+  const item: EmdashContentItem = { id, type: collection, slug: null, status: "draft", locale: localeAtAudit,
     data: snapshot.data };
   const adapted = adaptContentItem(item, { route: `/revision/${encodeURIComponent(id)}`, blockMappings: options.blockMappings,
     ...(contentFields === undefined ? {} : { contentFields }),
@@ -59,7 +60,7 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
   const latest = await ctx.content.get(collection, id);
   const auditId = crypto.randomUUID();
   const result = { status: "evaluated" as const, audit_id: auditId, collection, id, revision,
-    preset: selected.name, selection_source: selected.source, scope: field === undefined ? "content" as const : "fragment" as const, ...(field === undefined ? {} : { field }), limitation: LIMITATION,
+    preset: selected.name, selection_source: selected.source, locale_at_audit: localeAtAudit, scope: field === undefined ? "content" as const : "fragment" as const, ...(field === undefined ? {} : { field }), limitation: LIMITATION,
     assurance: {
       purpose: "editorial_review" as const,
       publication_authorization: "not_granted" as const,
@@ -93,7 +94,7 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
     },
     source_paths: { blocks: adapted.meta.bodySourcePaths ?? null, spans: adapted.meta.bodySourceSpanPaths ?? null }, report };
   await ctx.kv.set(reportKey(auditId), result);
-  return { ...result, revision_status: revisionStatus(latest, revision) };
+  return { ...result, revision_status: revisionStatus(latest, revision), locale_status: localeStatus(result.locale_at_audit, latest) };
 }
 
 function revisionStatus(current: Current | null, revision: string): "draft" | "published" | "stale" | "unknown" {
@@ -106,10 +107,20 @@ function revisionStatus(current: Current | null, revision: string): "draft" | "p
   return observed(current.draftRevisionId) && observed(current.liveRevisionId) ? "stale" : "unknown";
 }
 
+function observedLocale(locale: unknown): string | null {
+  return typeof locale === "string" && locale.trim().length > 0 ? locale : null;
+}
+
+function localeStatus(audited: unknown, current: Current | null): "unchanged" | "changed" | "unknown" {
+  const prior = observedLocale(audited);
+  const now = observedLocale(current?.locale);
+  return prior === null || now === null ? "unknown" : prior === now ? "unchanged" : "changed";
+}
+
 /** Re-check status at read time; a stored report does not prove currentness. */
 export async function getRevisionAudit(ctx: RevisionContext, auditId: string) {
-  const stored = await ctx.kv.get<{ collection: string; id: string; revision: string }>(reportKey(auditId));
+  const stored = await ctx.kv.get<{ collection: string; id: string; revision: string; locale_at_audit?: string | null }>(reportKey(auditId));
   if (!stored) return { status: "not_checked", reason: "audit_unavailable" } as const;
   const current = ctx.content.get ? await ctx.content.get(stored.collection, stored.id) : null;
-  return { ...stored, revision_status: revisionStatus(current, stored.revision) };
+  return { ...stored, revision_status: revisionStatus(current, stored.revision), locale_status: localeStatus(stored.locale_at_audit, current) };
 }

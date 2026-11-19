@@ -86,6 +86,34 @@ describe("revision audits", () => {
     expect(components.truncated).toBe(true);
     expect(JSON.stringify(components)).not.toContain("private content");
   });
+  it("records the locale used and checks it again when reading an audit", async () => {
+    const { ctx, current } = host();
+    const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, { preset: { name: "article", byLocale: { en: "news", fr: "opinion" } }, evaluate: async () => report });
+    if (result.status !== "evaluated") throw new Error("expected report");
+    expect(result).toMatchObject({ preset: "news", locale_at_audit: "en", locale_status: "unchanged" });
+    current.locale = "fr";
+    expect(await getRevisionAudit(ctx as never, result.audit_id)).toMatchObject({ preset: "news", locale_at_audit: "en", locale_status: "changed" });
+    current.locale = null as never;
+    expect(await getRevisionAudit(ctx as never, result.audit_id)).toMatchObject({ locale_status: "unknown" });
+  });
+
+  it("detects a locale change during evaluation", async () => {
+    const { ctx, current } = host();
+    const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, {
+      preset: { name: "article", byLocale: { en: "news", fr: "opinion" } },
+      evaluate: async () => { current.locale = "fr"; return report; },
+    });
+    expect(result).toMatchObject({ status: "evaluated", preset: "news", locale_at_audit: "en", locale_status: "changed" });
+  });
+
+  it("reports an unknown locale status for older audits and missing current records", async () => {
+    const { ctx } = host();
+    await ctx.kv.set("revision-audit:old", { collection: "posts", id: "one", revision: "rev1" });
+    expect(await getRevisionAudit(ctx as never, "old")).toMatchObject({ locale_status: "unknown" });
+    const unavailable = { ...ctx, content: { ...ctx.content, get: async () => null } };
+    expect(await getRevisionAudit(unavailable as never, "old")).toMatchObject({ locale_status: "unknown" });
+  });
+
   it("reports whether the historical title was observed", async () => {
     const { ctx, revision } = host();
     const evaluate = vi.fn(async (_document: { title: string }) => report);
