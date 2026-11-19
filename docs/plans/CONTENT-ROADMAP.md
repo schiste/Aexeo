@@ -472,6 +472,8 @@ registry before considering the release delivered.
 - [ ] Validate sandbox sidecar preset configuration, real host permissions and
   representative records before relying on the deployed workflow.
 - [ ] Source and factuality evaluation after the basic gates are validated.
+  Structured evidence and external review records reject JSON with duplicate
+  keys at any depth; ambiguous inputs are not checked, not treated as a pass.
   EmDash trusted hosts can opt into per-document evidence snapshots; failures remain unchecked and never fall back to a shared snapshot. This supplies inputs only and is not factuality validation.
 
 An open PR is not yet delivered. Update this tracker when each change lands and

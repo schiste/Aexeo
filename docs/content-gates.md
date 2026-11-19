@@ -735,7 +735,7 @@ pointer = "/sample/count"
 expected = 14
 ```
 
-Supply the source using the same evidence snapshot interfaces described above. A missing source, invalid JSON or missing pointer is `not_checked`; a different value or absent claim is a failure. Comparison is typed JSON equality, not numerical inference. The preset author is responsible for mapping the claim to the correct field and value; the engine does not understand the claim, assess source reliability, or verify reality. Version and review both the preset and source.
+Supply the source using the same evidence snapshot interfaces described above. A missing source, invalid JSON, duplicate object keys at any depth or missing pointer is `not_checked`; a different value or absent claim is a failure. Comparison is typed JSON equality, not numerical inference. The preset author is responsible for mapping the claim to the correct field and value; the engine does not understand the claim, assess source reliability, or verify reality. Version and review both the preset and source.
 
 ## External source reviews
 
@@ -754,7 +754,7 @@ claim = "The count is 14."
 {"claim":"The count is 14.","source_text":"Study observed 14 participants.","support":"supported","reliability":"reliable","reviewer":"editor-123"}
 ```
 
-Supply both named snapshots, for example `--evidence-source study=source.txt --evidence-source study-review=review.json`. `support` accepts `supported`, `contradicted` or `uncertain`; `reliability` accepts `reliable`, `unreliable` or `uncertain`. Only supported plus reliable passes. Contradiction or unreliable source fails; uncertainty, missing inputs, malformed records and reviews of a different claim or source yield `not_checked`. The reviewer identifier must be nonempty. An optional `provenance` object can hold string metadata; it is informational and does not authenticate the review. A changed source requires a new review.
+Supply both named snapshots, for example `--evidence-source study=source.txt --evidence-source study-review=review.json`. `support` accepts `supported`, `contradicted` or `uncertain`; `reliability` accepts `reliable`, `unreliable` or `uncertain`. Only supported plus reliable passes. Contradiction or unreliable source fails; uncertainty, missing inputs, malformed records, duplicate object keys at any depth and reviews of a different claim or source yield `not_checked`. The reviewer identifier must be nonempty. An optional `provenance` object can hold string metadata; it is informational and does not authenticate the review. A changed source requires a new review.
 
 The [source review process](source-review-process.md) describes how an application can record a claim-specific human assessment and when to reassess it.
 
