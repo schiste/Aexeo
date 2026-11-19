@@ -69,10 +69,13 @@ unavailable check may become a pass.
 - [#532](https://github.com/schiste/Aexeo/pull/532) adds a separate experimental
   candidate-bound verdict and replay: it reconstructs the overlay and binds
   both base and candidate identities along with decision inputs. It requires a
-  base declared complete and inline before/after states; it rejects collection
-  snapshots, external observations and bundles in this mode. Unchanged content
-  is bound but not evaluated, and unsupported deletion/rename impact remains
-  `not_checked`. The host assertion of completeness is not proof.
+  base declared complete and inline before/after states. It can bind an optional
+  host-projected collection and ordered link observations under distinct schemas;
+  candidate artifact bundles remain unsupported. The independent Python verifier
+  compares exact independently supplied observation bytes. Unchanged content is
+  bound but not evaluated, and unsupported deletion/rename impact remains
+  `not_checked`. The host must establish provenance, freshness, completeness
+  and a protected publication boundary; hashes do not establish them.
 - [#534](https://github.com/schiste/Aexeo/pull/534) adds an independent Python
   comparison of candidate inputs, with a Rust/Python shared producer vector,
   mutation tests, duplicate-JSON rejection and observable per-file replacement

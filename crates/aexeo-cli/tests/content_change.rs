@@ -2097,6 +2097,140 @@ fn candidate_bound_verdict_rebuilds_and_revalidates_inputs() {
 }
 
 #[test]
+fn candidate_link_verdict_revalidates_and_refuses_changed_observations() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().join("base.json");
+    let after = dir.path().join("after.json");
+    let snapshot = dir.path().join("links.json");
+    let prior = dir.path().join("prior.json");
+    let source = "[first](https://example.org/a)";
+    let sha = "9b109ca77f8b3af5b0f54a9ae1aeb8d01f5ed6fbd1d350ffe84289bf42000e09";
+    let mut change = input();
+    change["entries"][0]["media_type"] = "text/markdown".into();
+    change["entries"][0]["after"] = serde_json::json!({"inline":source, "sha256":sha});
+    fs::write(&base, serde_json::to_vec(&serde_json::json!({"scope":"site", "site_id":"site", "site_base_url":null, "base":{"kind":"opaque","revision":"r1"}, "complete":true, "items":[]})).unwrap()).unwrap();
+    fs::write(&after, serde_json::to_vec(&serde_json::json!([{"entity_id":"article", "public_path":"/article", "media_type":"text/markdown", "revision":null, "sha256":sha, "source":source, "links":null}])).unwrap()).unwrap();
+    let mut data = serde_json::json!({"version":1,"change_id":"example","entries":{"article":{"version":1,"source_sha256":sha,"destinations":["https://example.org/a"],"observations":["reachable"]}}});
+    fs::write(&snapshot, serde_json::to_vec(&data).unwrap()).unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\n";
+    let opts = [
+        "--offline-receipt",
+        "--experimental-bound-verdict",
+        "--evaluator-identity",
+        "build",
+        "--candidate-base",
+        base.to_str().unwrap(),
+        "--candidate-after",
+        after.to_str().unwrap(),
+        "--link-observations",
+        snapshot.to_str().unwrap(),
+    ];
+    let first = run(dir.path(), &change, policy, &opts);
+    assert_eq!(
+        first.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let output = dir.path().join("verdict.json");
+    let initial = fs::read(&output).unwrap();
+    let envelope: serde_json::Value = serde_json::from_slice(&initial).unwrap();
+    assert_eq!(
+        envelope["schema"],
+        "aexeo.experimental-candidate-link-bound-verdict/v1"
+    );
+    // Compare a real Rust-produced envelope using independently supplied bytes in Python.
+    let typed_change = serde_json::from_value(change.clone()).unwrap();
+    let preset = aexeo_core::content_gate::ContentPreset::from_toml(policy).unwrap();
+    let decision = aexeo_core::content_gate_verdict::OfflineDecisionContext {
+        change: &typed_change,
+        preset: &preset,
+        max_entry_bytes: aexeo_core::content_gate::MAX_CONTENT_INPUT_BYTES,
+        max_total_bytes: 64 * 1024 * 1024,
+        plain_text_paragraphs: false,
+        collection: None,
+        evaluator_identity: b"build",
+    };
+    let typed_links = serde_json::from_value(data.clone()).unwrap();
+    let link_context = aexeo_core::content_gate_verdict::LinkSnapshotDecisionContext {
+        offline: &decision,
+        snapshots: &typed_links,
+    };
+    let artifacts = link_context
+        .artifacts_with_html_scope(aexeo_core::html_content_adapter::HtmlContentScope::Document)
+        .unwrap();
+    let files = [
+        ("change", &artifacts.offline.change),
+        ("resolved-policy", &artifacts.offline.resolved_policy),
+        ("host-options", &artifacts.offline.host_options),
+        ("evaluator", &artifacts.offline.evaluator),
+        ("external-evidence", &artifacts.external_evidence),
+    ];
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../docs/specs/content-gate/v2/verify_candidate_inputs.py");
+    let mut python = std::process::Command::new("python3");
+    python
+        .arg(script)
+        .arg("--envelope")
+        .arg(&output)
+        .arg("--base")
+        .arg(&base)
+        .arg("--after")
+        .arg(&after);
+    for (name, bytes) in files {
+        let path = dir.path().join(format!("artifact-{name}"));
+        fs::write(&path, bytes).unwrap();
+        python.arg(format!("--{name}")).arg(path);
+    }
+    let checked = python.output().unwrap();
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    let comparison: serde_json::Value = serde_json::from_slice(&checked.stdout).unwrap();
+    assert_eq!(comparison["input_binding"], "match");
+    assert_eq!(comparison["publication_authorized"], false);
+    fs::write(&prior, &initial).unwrap();
+    let mut verify = opts.to_vec();
+    verify.extend(["--verify-offline-receipt", prior.to_str().unwrap()]);
+    let result = run(dir.path(), &change, policy, &verify);
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let saved = fs::read(&output).unwrap();
+    data["entries"]["article"]["observations"][0] = "not_found".into();
+    fs::write(&snapshot, serde_json::to_vec(&data).unwrap()).unwrap();
+    assert_eq!(
+        run(dir.path(), &change, policy, &verify).status.code(),
+        Some(2)
+    );
+    assert_eq!(fs::read(&output).unwrap(), saved);
+    let without_links = [
+        "--offline-receipt",
+        "--experimental-bound-verdict",
+        "--evaluator-identity",
+        "build",
+        "--candidate-base",
+        base.to_str().unwrap(),
+        "--candidate-after",
+        after.to_str().unwrap(),
+        "--verify-offline-receipt",
+        prior.to_str().unwrap(),
+    ];
+    assert_eq!(
+        run(dir.path(), &change, policy, &without_links)
+            .status
+            .code(),
+        Some(2)
+    );
+    assert_eq!(fs::read(&output).unwrap(), saved);
+}
+
+#[test]
 fn candidate_bound_verdict_accepts_bound_collection_and_rejects_mismatch() {
     let dir = tempfile::tempdir().unwrap();
     let base = dir.path().join("base.json");

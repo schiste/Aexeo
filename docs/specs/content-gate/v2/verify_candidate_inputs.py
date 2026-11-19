@@ -21,6 +21,7 @@ from verify_decision_inputs import VerificationError, _open_regular, _reject_con
 LIMIT = 64 * 1024 * 1024
 PROFILE = 'content-gate.candidate-revision/v1'
 ENVELOPE = 'aexeo.experimental-candidate-bound-verdict/v1'
+LINK_ENVELOPE = 'aexeo.experimental-candidate-link-bound-verdict/v1'
 REQUIRED = ('change', 'resolved_policy', 'host_options', 'evaluator')
 
 
@@ -256,17 +257,22 @@ def validate_collection_projection(collection, candidate, change):
 
 
 def verify(envelope_bytes, base_bytes, after_bytes, artifacts):
-    if not set(REQUIRED).issubset(artifacts) or set(artifacts) - set(REQUIRED) - {'collection'} or any(not isinstance(value, bytes) for value in artifacts.values()) or sum(map(len, artifacts.values())) > LIMIT:
+    if not set(REQUIRED).issubset(artifacts) or set(artifacts) - set(REQUIRED) - {'collection', 'external_evidence'} or any(not isinstance(value, bytes) for value in artifacts.values()) or sum(map(len, artifacts.values())) > LIMIT:
         raise VerificationError('bounded independent decision artifacts are required')
     if not artifacts['evaluator']:
         raise VerificationError('evaluator identity missing')
     envelope = parse(envelope_bytes)
-    if not isinstance(envelope, dict) or set(envelope) != {'schema', 'candidate_profile', 'binding', 'receipt'} or envelope['schema'] != ENVELOPE or envelope['candidate_profile'] != PROFILE:
+    if not isinstance(envelope, dict) or set(envelope) != {'schema', 'candidate_profile', 'binding', 'receipt'} or envelope['schema'] not in (ENVELOPE, LINK_ENVELOPE) or envelope['candidate_profile'] != PROFILE:
         raise VerificationError('unsupported envelope schema or profile')
     if not isinstance(envelope['binding'], str) or re.fullmatch('[0-9a-f]{64}', envelope['binding']) is None:
         raise VerificationError('invalid binding')
+    evidence = artifacts.get('external_evidence')
+    links = envelope['schema'] == LINK_ENVELOPE
+    if links != (evidence is not None):
+        raise VerificationError('external evidence required only for candidate link envelope')
     receipt = envelope['receipt']
-    if not isinstance(receipt, dict) or set(receipt) != {'schema', 'decision_inputs', 'verdict'} or receipt['schema'] != 'aexeo.offline-decision-receipt/v1':
+    expected_receipt = 'aexeo.link-snapshot-decision-receipt/v1' if links else 'aexeo.offline-decision-receipt/v1'
+    if not isinstance(receipt, dict) or set(receipt) != {'schema', 'decision_inputs', 'verdict'} or receipt['schema'] != expected_receipt:
         raise VerificationError('invalid receipt')
     manifest = parse_manifest(json.dumps(receipt['decision_inputs'], separators=(',', ':')).encode('utf-8'))
     for name in REQUIRED:
@@ -275,13 +281,15 @@ def verify(envelope_bytes, base_bytes, after_bytes, artifacts):
     collection = artifacts.get('collection')
     expected_collection = ({'state': 'absent'} if collection is None else
                            {'state': 'present', 'sha256': hashlib.sha256(collection).hexdigest()})
-    if manifest['collection'] != expected_collection or manifest['external_evidence'] != {'state': 'absent'}:
+    expected_evidence = ({'state': 'absent'} if evidence is None else
+                         {'state': 'present', 'sha256': hashlib.sha256(evidence).hexdigest()})
+    if manifest['collection'] != expected_collection or manifest['external_evidence'] != expected_evidence:
         raise VerificationError('collection or external evidence differs')
     base, after, change = parse(base_bytes), parse(after_bytes), parse(artifacts['change'])
     candidate = overlay(base, change, after)
     if collection is not None:
         validate_collection_projection(parse(collection), candidate, change)
-    all_inputs = dict(artifacts, collection=collection, external_evidence=None,
+    all_inputs = dict(artifacts, collection=collection, external_evidence=evidence,
                       candidate_base_revision_sha256=revision_digest(base),
                       candidate_revision_profile=PROFILE.encode('ascii'), candidate_revision_sha256=revision_digest(candidate))
     if not hmac.compare_digest(envelope['binding'], binding(all_inputs)):
@@ -328,6 +336,7 @@ def main():
     for name in ('envelope', 'base', 'after', *REQUIRED):
         parser.add_argument('--' + name.replace('_', '-'), required=True)
     parser.add_argument('--collection', help='independently obtained exact collection artifact bytes')
+    parser.add_argument('--external-evidence', help='independently obtained exact link observation artifact bytes')
     parser.add_argument('--fresh-envelope', help='independently obtained fresh evaluation')
     parser.add_argument('--require-check', action='append', help='required blocking passed check ID; repeatable')
     parser.add_argument('--validator-name')
@@ -350,6 +359,8 @@ def main():
                   {name: read_stable(getattr(args, name)) for name in REQUIRED})
         if args.collection is not None:
             inputs[3]['collection'] = read_stable(args.collection)
+        if args.external_evidence is not None:
+            inputs[3]['external_evidence'] = read_stable(args.external_evidence)
         requirements = (args.require_check, args.validator_name, args.validator_version)
         if args.fresh_envelope is not None:
             result = compare_fresh(inputs[0], read_stable(args.fresh_envelope), *inputs[1:],

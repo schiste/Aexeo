@@ -25,7 +25,13 @@ incomplete collection remains `not_checked` for blocking collection checks.
 The exact collection artifact is bound and revalidated. With `--telemetry`, the
 local candidate event reports only whether a collection was supplied, its item
 count and completeness declaration, plus status; it omits identities and
-metadata. Link observations and artifact bundles are not supported in this mode.
+metadata. Artifact bundles are not supported in this mode. An optional `--link-observations` file
+supplies source-bound observations without network access. With it, Aexeo emits
+`aexeo.experimental-candidate-link-bound-verdict/v1`, a distinct envelope with a
+link-snapshot receipt. Both the candidate binding and receipt bind the serialized
+observations; revalidation requires independently supplied observations and
+rejects changed or omitted evidence. Older candidate verifiers reject this
+schema. The host remains responsible for observation authenticity and freshness.
 
 The overlay is rebuilt from the base, the validated change and after projections.
 The binding includes the exact decision artifacts, the independently calculated
@@ -63,7 +69,10 @@ Run it with `--envelope PREVIOUS.json --base BASE.json --after AFTER.json
 OPTIONS-BYTES --evaluator BUILD-BYTES`. These four files must contain the exact
 independently obtained artifact bytes, not guessed equivalents of their JSON
 representations. If a collection was used, also provide its independently
-obtained exact serialized artifact via `--collection`. The verifier checks its
+obtained exact serialized artifact via `--collection`. For the candidate-link
+schema, provide the independently obtained exact serialized observation artifact
+via `--external-evidence`; it is required for this schema and rejected for the
+original candidate schema. The verifier checks its
 manifest digest, candidate identity set and changed-entry metadata; it cannot
 establish the origin, freshness or correctness of projected metadata. Rust
 currently materializes its policy and options as
