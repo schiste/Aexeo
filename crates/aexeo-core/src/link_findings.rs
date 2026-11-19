@@ -329,7 +329,7 @@ mod tests {
         } else {
             format!("{route}/index.html")
         };
-        serde_json::json!({"path":format!("crawl/{relative}"), "relative_path":relative, "route":route, "raw_html":html, "response_headers":{},
+        serde_json::json!({"path":format!("crawl/{relative}"), "relative_path":relative, "route":route, "raw_html":format!("<html lang='en'>{html}</html>"), "response_headers":{},
             "crawl_response":{"requested_url":url, "observed_url":url, "status_code":200, "headers_observed":true}})
     }
 
@@ -353,7 +353,7 @@ mod tests {
             .iter()
             .map(|(route, disposition, target)| {
                 serde_json::json!({"url":format!("https://example.org/{route}"), "disposition":disposition,
-                    "target":target.map(|route| format!("https://example.org/{route}")), "locale":null})
+                    "target":target.map(|route| format!("https://example.org/{route}")), "locale":"en"})
             })
             .collect::<Vec<_>>();
         serde_json::from_value(
