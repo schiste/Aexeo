@@ -6,6 +6,12 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-11-19
+
+- Keep advisory review submissions for individual audit findings, with the authenticated host account when available or an explicit unattributed marker. History can be incomplete and is not tamper-proof or a publication approval.
+- Allow editors to inspect review history in the revision review interface, and discard stale responses when the selected finding changes.
+- Expose structured revision-audit limits, including that publication is not authorized, rendered pages and source freshness were not checked, and locale comes from the current record.
+
 ## [0.9.4] - 2026-11-18
 
 - Preserve sentence boundaries around recognized numeric Portable Text reference markers in the analysis projection, without changing source citations.
