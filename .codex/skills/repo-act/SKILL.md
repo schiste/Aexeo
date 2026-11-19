@@ -201,6 +201,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For Python JSON Schema format checks, verify each required format checker is
   registered: optional dependencies can otherwise make validation silently skip
   it. Test malformed format values and fail closed when a checker is missing.
+  Inspect test summaries for skipped cases, not just a successful exit; install
+  the repository's pinned test requirements in an isolated environment and rerun
+  affected schema-dependent tests without skips before claiming coverage.
 - When revalidating JSON artifacts, test duplicate keys inside nested extension
   maps as well as typed fields, and verify rejection preserves prior output;
   ordinary map decoding can silently retain only one value.
