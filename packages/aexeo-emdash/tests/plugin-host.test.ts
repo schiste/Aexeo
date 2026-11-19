@@ -54,6 +54,24 @@ describe("plugin configuration", () => {
 });
 
 describe("EmDash content adaptation", () => {
+  it("does not claim slug or ID fallback is an observed title", () => {
+    const item: EmdashContentItem = { id: "id", type: "posts", slug: "slug", status: "draft", locale: "en", data: {} };
+    const fallback = adaptContentItem(item).document;
+    expect(fallback.title).toBe("slug");
+    expect(fallback.observed_metadata_fields).not.toContain("title");
+    const idFallback = adaptContentItem({ ...item, slug: "" }).document;
+    expect(idFallback.observed_metadata_fields).not.toContain("title");
+    const malformed = adaptContentItem({ ...item, data: { title: 42 } }).document;
+    expect(malformed.observed_metadata_fields).not.toContain("title");
+    const seo = adaptContentItem({ ...item, seo: { title: "SEO title" } }).document;
+    expect(seo.observed_metadata_fields).toContain("title");
+    const actual = adaptContentItem({ ...item, data: { title: "Actual" } }).document;
+    expect(actual.title).toBe("Actual");
+    expect(actual.observed_metadata_fields).toContain("title");
+    const blank = adaptContentItem({ ...item, data: { title: "" } }).document;
+    expect(blank.title).toBe("");
+    expect(blank.observed_metadata_fields).toContain("title");
+  });
   it("preserves body capabilities when only source keys are malformed", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: { content: [{
       _type: "block", _key: 42, style: "normal", children: [{ _type: "span", _key: false, text: "Readable prose", marks: ["ref"] }],

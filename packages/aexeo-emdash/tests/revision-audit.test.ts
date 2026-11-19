@@ -86,6 +86,21 @@ describe("revision audits", () => {
     expect(components.truncated).toBe(true);
     expect(JSON.stringify(components)).not.toContain("private content");
   });
+  it("reports whether the historical title was observed", async () => {
+    const { ctx, revision } = host();
+    const evaluate = vi.fn(async (_document: { title: string }) => report);
+    const run = () => auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, { preset: { name: "article" }, evaluate });
+    const unknown = await run();
+    if (unknown.status !== "evaluated") throw new Error("expected report");
+    expect(unknown.input_coverage.metadata.observed_fields).not.toContain("title");
+    expect(evaluate.mock.calls[0]?.[0].title).toBe("one");
+    expect(await getRevisionAudit(ctx as never, unknown.audit_id)).toMatchObject({ input_coverage: unknown.input_coverage });
+    (revision.data as Record<string, unknown>).title = "Historical title";
+    const observed = await run();
+    if (observed.status !== "evaluated") throw new Error("expected report");
+    expect(observed.input_coverage.metadata.observed_fields).toContain("title");
+    expect(evaluate.mock.calls[1]?.[0].title).toBe("Historical title");
+  });
   it("reports projection coverage separately from rendered metadata", async () => {
     const { ctx, revision } = host();
     const data = revision.data as Record<string, unknown>;

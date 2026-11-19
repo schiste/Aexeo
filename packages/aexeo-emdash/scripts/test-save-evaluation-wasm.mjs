@@ -709,6 +709,30 @@ blocking=false
   assert.equal(host.store.get("document:/mapped").document.description, "Fallback");
 }
 
+// Title fallbacks are useful display labels, not observed CMS title metadata.
+{
+  const preset = `version=1
+name="title-test"
+[[gates]]
+id="title"
+kind="required_metadata"
+fields=["title"]
+`;
+  const configured = createPlugin({ contentPreset: { name: "title-test", sources: { "title-test": preset } } });
+  for (const [slug, title, status] of [
+    ["unknown-title", undefined, "not_checked"],
+    ["empty-title", "", "failed"],
+    ["present-title", "Observed title", "passed"],
+  ]) {
+    const page = item(slug, { seo: undefined, data: { ...(title === undefined ? {} : { title }), body: [block("p", "Content")] } });
+    const host = fakeHost([page]);
+    await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+    const result = host.store.get(`findings:/${slug}`);
+    assert.equal(result.assessment.gates.find((gate) => gate.gate_id === "title").status, status);
+    assert.deepEqual(host.logged, []);
+  }
+}
+
 // Required metadata never treats an unobserved description as missing.
 {
   const preset = `version=1
