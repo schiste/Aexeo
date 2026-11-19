@@ -85,6 +85,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("input").long("input").required(true).help("Versioned JSON query file (may contain private content)"))
                 .arg(Arg::new("include-candidate").long("include-candidate").action(ArgAction::SetTrue).help("Include the complete private candidate source records in output"))
                 .arg(Arg::new("transitive").long("transitive").action(ArgAction::SetTrue).help("Also report experimental transitive incoming-link impact"))
+                .arg(Arg::new("removed-route-references").long("removed-route-references").action(ArgAction::SetTrue).help("Report projected links to routes absent from the candidate"))
                 .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate timing and counts to stderr")),
         )
         .subcommand(

@@ -145,3 +145,94 @@ fn transitive_option_extends_direct_impact_and_preserves_coverage() {
     let result: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert!(result.get("transitive_link_impact").is_none());
 }
+
+#[test]
+fn removed_route_option_reports_surviving_references_and_coverage() {
+    let mut input = query(true);
+    let mut target = input["after"][0].clone();
+    target["entity_id"] = json!("old");
+    target["public_path"] = json!("/old");
+    let mut source = target.clone();
+    source["entity_id"] = json!("source");
+    source["public_path"] = json!("/source");
+    source["links"] = json!(["/old", "/old", "/unknown"]);
+    input["snapshot"]["items"] = json!([target.clone(), source]);
+    input["change"]["entries"] = json!([{
+        "entity_id":"old", "operation":"delete", "media_type":"text/plain",
+        "before":{"sha256":target["sha256"],"inline":"abc"}
+    }]);
+    input["after"] = json!([]);
+    let plain = run(&input, &[]);
+    let plain: Value = serde_json::from_slice(&plain.stdout).unwrap();
+    assert!(plain.get("removed_route_references").is_none());
+    let output = run(&input, &["--removed-route-references", "--telemetry"]);
+    assert_eq!(output.status.code(), Some(0));
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        result["removed_route_references"]["removed_routes"],
+        json!(["/old"])
+    );
+    assert_eq!(
+        result["removed_route_references"]["references"],
+        json!([{
+            "source_entity_id":"source", "source_path":"/source", "destination_path":"/old"
+        }])
+    );
+    assert_eq!(result["removed_route_references"]["complete"], true);
+    let telemetry: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["removed_route_reference_count"], 1);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("/old"));
+
+    input["snapshot"]["items"][1]["links"] = Value::Null;
+    let output = run(&input, &["--removed-route-references"]);
+    assert_eq!(output.status.code(), Some(2));
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["removed_route_references"]["complete"], false);
+
+    input["snapshot"]["base"]["revision"] = json!("stale");
+    let output = run(&input, &["--removed-route-references"]);
+    assert_eq!(output.status.code(), Some(2));
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(result.get("removed_route_references").is_none());
+}
+
+#[test]
+fn removed_route_reference_limit_fails_closed() {
+    let mut input = query(true);
+    let mut target = input["after"][0].clone();
+    target["entity_id"] = json!("old");
+    target["public_path"] = json!("/old");
+    let mut items = vec![target.clone()];
+    for index in 0..10_001 {
+        let mut source = target.clone();
+        source["entity_id"] = json!(format!("source-{index:05}"));
+        source["public_path"] = json!(format!("/source-{index:05}"));
+        source["links"] = json!(["/old"]);
+        items.push(source);
+    }
+    input["snapshot"]["items"] = json!(items);
+    input["change"]["entries"] = json!([{
+        "entity_id":"old", "operation":"delete", "media_type":"text/plain",
+        "before":{"sha256":target["sha256"],"inline":"abc"}
+    }]);
+    input["after"] = json!([]);
+    let output = run(&input, &["--removed-route-references"]);
+    assert_eq!(output.status.code(), Some(2));
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["status"], "not_checked");
+    assert_eq!(result["removed_route_references"]["complete"], false);
+    assert_eq!(
+        result["removed_route_references"]["references"]
+            .as_array()
+            .unwrap()
+            .len(),
+        10_000
+    );
+    assert!(
+        result["removed_route_references"]["reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason.as_str().unwrap().contains("output limit"))
+    );
+}

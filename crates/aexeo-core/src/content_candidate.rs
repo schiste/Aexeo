@@ -411,6 +411,109 @@ pub fn overlay_candidate_with_transitive_link_impact(
     Ok((overlay, impact))
 }
 
+/// A projected link to a route present in the base but absent from the candidate.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemovedRouteReference {
+    pub source_entity_id: String,
+    pub source_path: String,
+    pub destination_path: String,
+}
+
+/// Bounded comparison of two host-supplied inventories, not a broken-link verdict.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemovedRouteReferences {
+    pub removed_routes: Vec<String>,
+    /// Distinct source entity and destination pairs, in deterministic order.
+    pub references: Vec<RemovedRouteReference>,
+    pub complete: bool,
+    pub reasons: Vec<String>,
+}
+
+/// Compare projected routes and links. This does not establish that the candidate
+/// derives from any change; callers should first use `overlay_candidate`.
+/// Completeness relies on host assertions and does not cover redirects, aliases,
+/// rendered output, locale fallbacks or other dependencies.
+pub fn compare_removed_route_references(
+    base: &CandidateSnapshot,
+    candidate: &CandidateSnapshot,
+) -> Result<RemovedRouteReferences, &'static str> {
+    if base.scope.is_empty()
+        || base.site_id.is_empty()
+        || base.base.revision.is_empty()
+        || base.scope != candidate.scope
+        || base.site_id != candidate.site_id
+        || base.site_base_url != candidate.site_base_url
+        || base.base != candidate.base
+    {
+        return Err("snapshot scope or base revision mismatch");
+    }
+    validate_inventory(&base.items)?;
+    validate_inventory(&candidate.items)?;
+    let candidate_routes: BTreeSet<&str> = candidate
+        .items
+        .iter()
+        .map(|item| item.public_path.as_str())
+        .collect();
+    let removed: BTreeSet<&str> = base
+        .items
+        .iter()
+        .map(|item| item.public_path.as_str())
+        .filter(|path| !candidate_routes.contains(path))
+        .collect();
+    let mut references = BTreeSet::new();
+    for item in &candidate.items {
+        if let Some(links) = &item.links {
+            for destination in links {
+                if removed.contains(destination.as_str()) {
+                    references.insert((
+                        item.entity_id.as_str(),
+                        item.public_path.as_str(),
+                        destination.as_str(),
+                    ));
+                }
+            }
+        }
+    }
+    let mut reasons = Vec::new();
+    if !base.complete || !candidate.complete {
+        reasons.push("inventory completeness is not attested".into());
+    }
+    if candidate.items.iter().any(|item| item.links.is_none()) {
+        reasons.push("one or more candidate link projections are unavailable".into());
+    }
+    // Borrow while deduplicating to avoid multiplying large path strings in memory.
+    // Bound the owned result as well: truncation can never certify completeness.
+    const MAX_REFERENCES: usize = 10_000;
+    const MAX_REFERENCE_BYTES: usize = 8 * 1024 * 1024;
+    let mut output = Vec::new();
+    let mut output_bytes = 0usize;
+    for (source_entity_id, source_path, destination_path) in references {
+        let size = source_entity_id
+            .len()
+            .saturating_add(source_path.len())
+            .saturating_add(destination_path.len());
+        if output.len() == MAX_REFERENCES || size > MAX_REFERENCE_BYTES.saturating_sub(output_bytes)
+        {
+            reasons.push("removed-route reference output limit exceeded".into());
+            break;
+        }
+        output_bytes += size;
+        output.push(RemovedRouteReference {
+            source_entity_id: source_entity_id.into(),
+            source_path: source_path.into(),
+            destination_path: destination_path.into(),
+        });
+    }
+    Ok(RemovedRouteReferences {
+        removed_routes: removed.into_iter().map(str::to_owned).collect(),
+        references: output,
+        complete: reasons.is_empty(),
+        reasons,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -489,6 +592,74 @@ mod tests {
             before: before.map(state),
             after: after.map(state),
         }
+    }
+
+    #[test]
+    fn removed_route_references_cover_changes_and_uncertainty() {
+        let (mut base, mut change) = setup();
+        base.items[2].links = Some(vec!["/a".into(), "/a".into(), "/missing".into()]);
+        let renamed = item("renamed", "/new", "new", Some(vec![]));
+        let mut rename = entry(
+            "renamed",
+            Operation::Rename,
+            Some(&base.items[0]),
+            Some(&renamed),
+        );
+        rename.previous_entity_id = Some("a".into());
+        change.entries.push(rename);
+        let overlay = overlay_candidate(&base, &change, &[renamed]).unwrap();
+        let report = compare_removed_route_references(&base, &overlay.candidate).unwrap();
+        assert!(report.complete);
+        assert_eq!(report.removed_routes, ["/a"]);
+        assert_eq!(
+            report.references,
+            [RemovedRouteReference {
+                source_entity_id: "c".into(),
+                source_path: "/c".into(),
+                destination_path: "/a".into()
+            }]
+        );
+
+        let mut incomplete = overlay.candidate.clone();
+        incomplete
+            .items
+            .iter_mut()
+            .find(|item| item.entity_id == "b")
+            .unwrap()
+            .links = None;
+        let report = compare_removed_route_references(&base, &incomplete).unwrap();
+        assert!(!report.complete);
+        assert_eq!(report.references.len(), 1);
+        assert!(!report.reasons.is_empty());
+
+        incomplete.complete = false;
+        assert!(
+            !compare_removed_route_references(&base, &incomplete)
+                .unwrap()
+                .complete
+        );
+        incomplete.base.revision = "other".into();
+        assert!(compare_removed_route_references(&base, &incomplete).is_err());
+    }
+
+    #[test]
+    fn reused_route_is_not_reported_as_removed() {
+        let (base, mut change) = setup();
+        let replacement = item("replacement", "/a", "new", Some(vec![]));
+        change
+            .entries
+            .push(entry("a", Operation::Delete, Some(&base.items[0]), None));
+        change.entries.push(entry(
+            "replacement",
+            Operation::Create,
+            None,
+            Some(&replacement),
+        ));
+        let overlay = overlay_candidate(&base, &change, &[replacement]).unwrap();
+        let report = compare_removed_route_references(&base, &overlay.candidate).unwrap();
+        assert!(report.complete);
+        assert!(report.removed_routes.is_empty());
+        assert!(report.references.is_empty());
     }
 
     #[test]
