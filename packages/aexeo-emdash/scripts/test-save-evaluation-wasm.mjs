@@ -947,26 +947,36 @@ name="mapped"
 id="author"
 kind="required_metadata"
 fields=["author"]
+[[gates]]
+id="review-age"
+kind="metadata_age"
+field="last_reviewed"
+as_of="2024-03-01"
+max_days=1
 `;
   const configured = createPlugin({
     contentPreset: { name: "mapped", sources: { mapped: preset } },
-    metadataFieldsByCollection: { pages: { author: { source: "data", path: ["editorial", "author"] } } },
+    metadataFieldsByCollection: { pages: { author: { source: "data", path: ["editorial", "author"] }, last_reviewed: { source: "data", path: ["editorial", "reviewed"] } } },
   });
-  const page = item("mapped-metadata", { data: { body: [block("p", "Text")], editorial: { author: "Author" } } });
+  const page = item("mapped-metadata", { data: { body: [block("p", "Text")], editorial: { author: "Author", reviewed: "2024-02-28" } } });
   const host = fakeHost([page]);
   const events = [];
   host.ctx.log.info = (name, data) => events.push({ name, data });
   const status = () => host.store.get("findings:/mapped-metadata").assessment.gates[0].status;
   await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
   assert.equal(status(), "passed");
+  const age = () => host.store.get("findings:/mapped-metadata").assessment.gates[1];
+  assert.equal(age().status, "failed");
+  assert.equal(age().measurements.age_days, 2);
   page.data.editorial = {};
   await configured.routes.refresh.handler(host.ctx);
   assert.equal(status(), "not_checked");
+  assert.equal(age().status, "not_checked");
   page.data.editorial.author = null;
   await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
   assert.equal(status(), "failed");
-  assert.ok(events.some((event) => event.name === "aexeo.metadata_projection" && event.data.supplied_fields === 1));
-  assert.ok(events.some((event) => event.name === "aexeo.metadata_projection" && event.data.unavailable_fields === 1));
+  assert.ok(events.some((event) => event.name === "aexeo.metadata_projection" && event.data.supplied_fields === 2));
+  assert.ok(events.some((event) => event.name === "aexeo.metadata_projection" && event.data.unavailable_fields === 2));
   assert.ok(!JSON.stringify(events).includes("Author"));
   console.log("WASM configured metadata distinguishes supplied, unavailable and absent");
 }
