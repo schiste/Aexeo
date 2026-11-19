@@ -367,6 +367,8 @@ function recordContentCoverage(ctx: SandboxCtx, documents: readonly EmdashDocume
     ctx.log?.info?.("aexeo.metadata_projection", {
       documents: documents.length,
       supplied_fields: documents.reduce((n, document) => n + Object.keys(document.meta ?? {}).length, 0),
+      coverage_documents: documents.filter((document) => document.observed_metadata_fields !== undefined).length,
+      observed_fields: documents.reduce((n, document) => n + (document.observed_metadata_fields?.length ?? 0), 0),
       unavailable_fields: documents.reduce((n, document) => n + (document.unavailable_metadata_fields?.length ?? 0), 0),
     });
   } catch {

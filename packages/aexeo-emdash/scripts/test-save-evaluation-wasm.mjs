@@ -981,7 +981,7 @@ fields=["unmapped"]
   page.data.editorial.author = null;
   await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
   assert.equal(status(), "failed");
-  assert.ok(events.some((event) => event.name === "aexeo.metadata_projection" && event.data.supplied_fields === 2));
+  assert.ok(events.some((event) => event.name === "aexeo.metadata_projection" && event.data.supplied_fields === 2 && event.data.coverage_documents === 1 && event.data.observed_fields >= 3));
   assert.ok(events.some((event) => event.name === "aexeo.metadata_projection" && event.data.unavailable_fields === 2));
   assert.ok(!JSON.stringify(events).includes("Author"));
   console.log("WASM configured metadata distinguishes supplied, unavailable and absent");
