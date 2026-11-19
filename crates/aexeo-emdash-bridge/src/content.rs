@@ -181,7 +181,7 @@ fn literal_markdown_links(document: &EmdashDocument) -> Option<Vec<(usize, usize
                     if ch == '\n' {
                         candidate.push('\n');
                     } else {
-                        candidate.push_str(&" ".repeat(ch.len_utf8()));
+                        candidate.extend(std::iter::repeat_n(' ', ch.len_utf8()));
                     }
                 }
             } else {
