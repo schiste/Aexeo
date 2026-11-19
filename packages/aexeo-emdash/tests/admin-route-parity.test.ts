@@ -483,6 +483,17 @@ describe("Refresh applies suppressions on every path", () => {
     expect(request).toMatchObject({ documents: [{ description: "Description from CMS", description_source_observed: true, meta: { last_reviewed: "2024-02-28" } }] });
   });
 
+  it("records an error during sandbox refresh when metadata settings are invalid", async () => {
+    const kv = fakeKv({ "config:evaluator_url": "https://evaluator.test" });
+    const ctx = fakeCtx(kv, new Map([["eval_token", "token"], ["metadata_fields_by_collection", "{"]]));
+    ctx.content.list = async (collection) => ({ items: collection === "posts" ? [helloDoc] as never : [], hasMore: false });
+    let calls = 0;
+    ctx.http.fetch = async () => { calls++; return { ok: true, status: 200, text: async () => "[]" }; };
+    await sandboxAdmin()({ input: { type: "block_action", action_id: "refresh_findings" } }, ctx);
+    expect(calls).toBe(0);
+    expect(await kv.get("findings:/journal/hello/")).toMatchObject({ findings: [], assessment: { status: "error", reason: "metadata_config_unavailable" } });
+  });
+
   it("withholds body coverage during sandbox refresh when content field settings are invalid", async () => {
     const kv = fakeKv({ "config:evaluator_url": "https://evaluator.test" });
     const ctx = fakeCtx(kv, new Map([["eval_token", "token"], ["content_fields_by_collection", "{"]]));
