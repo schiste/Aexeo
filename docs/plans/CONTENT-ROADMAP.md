@@ -376,6 +376,11 @@ registry before considering the release delivered.
   binds content digests and base only; runners must independently retain and
   compare the other inputs or fail closed. Do not claim an optional extension
   protects legacy runners that ignore it.
+  Experimental candidate-bound verdicts can also evaluate a host-projected
+  collection whose identities match the candidate (a subset is allowed when
+  explicitly incomplete). The collection bytes
+  are bound and independently revalidated; matching identities do not establish
+  metadata correctness, provenance or completeness.
   The experimental candidate binding also supports host-supplied ordered link
   snapshots, with a distinct envelope and offline revalidation. Independent
   Rust/Python byte-binding checks do not establish source authenticity,

@@ -1006,7 +1006,7 @@ fn command_candidate_bound_verdict(
     if args.get_flag("telemetry") {
         eprintln!(
             "{}",
-            serde_json::json!({"event":"content_change_candidate_bound", "version":1, "revalidation":args.contains_id("verify-offline-receipt"), "status": verdict.receipt.verdict.status})
+            serde_json::json!({"event":"content_change_candidate_bound", "version":1, "revalidation":args.contains_id("verify-offline-receipt"), "status": verdict.receipt.verdict.status, "collection_supplied": decision.collection.is_some(), "collection_items": decision.collection.as_ref().map(|collection| collection.items.len()), "collection_complete": decision.collection.as_ref().map(|collection| collection.complete)})
         );
     }
     Ok(code)

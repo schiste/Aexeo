@@ -881,7 +881,8 @@ pub fn revalidate_experimental_bound_verdict<P: ConfinedContentFiles>(
 }
 
 /// Experimental candidate-bound receipt. This is not a portable v2 verdict or
-/// an authorization to publish. Only changed content is evaluated.
+/// an authorization to publish. Item checks cover changed content; when supplied,
+/// a host-projected collection can also be evaluated.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExperimentalCandidateVerdict {
@@ -894,8 +895,9 @@ pub struct ExperimentalCandidateVerdict {
 const EXPERIMENTAL_CANDIDATE_SCHEMA: &str = "aexeo.experimental-candidate-bound-verdict/v1";
 
 /// Independently supplied base inventory and after projections for this change.
-/// `complete` is a host assertion, not a proof; collection checks are not
-/// supported because their relationship to the candidate is not established.
+/// `complete` is a host assertion, not a proof. A complete collection must
+/// contain exactly the candidate identities; a partial one must be a subset.
+/// Collection metadata remains host-projected.
 #[derive(Clone, Copy)]
 pub struct CandidateDecisionContext<'a> {
     pub decision: &'a OfflineDecisionContext<'a>,
@@ -912,9 +914,6 @@ fn candidate_binding(
     if !context.base.complete {
         bail!("candidate base inventory is not declared complete");
     }
-    if context.decision.collection.is_some() {
-        bail!("candidate-bound collection evaluation is not supported");
-    }
     // Exact byte equality between the evaluated changes and projections must
     // be checked even for deleted and renamed entities, which are not evaluated.
     for entry in &context.decision.change.entries {
@@ -929,6 +928,25 @@ fn candidate_binding(
     }
     let overlay = overlay_candidate(context.base, context.decision.change, context.after)
         .map_err(anyhow::Error::msg)?;
+    if let Some(collection) = &context.decision.collection {
+        validate_collection(context.decision.change, collection)?;
+        let candidate_ids: std::collections::BTreeSet<&str> = overlay
+            .candidate
+            .items
+            .iter()
+            .map(|item| item.entity_id.as_str())
+            .collect();
+        let collection_ids: std::collections::BTreeSet<&str> = collection
+            .items
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect();
+        if (collection.complete && candidate_ids != collection_ids)
+            || !collection_ids.is_subset(&candidate_ids)
+        {
+            bail!("collection identities do not match candidate inventory");
+        }
+    }
     let base_digest = candidate_revision_digest(context.base).map_err(anyhow::Error::msg)?;
     let artifacts = context.decision.artifacts_with_html_scope(scope)?;
     let binding = candidate_decision_binding(
@@ -938,7 +956,7 @@ fn candidate_binding(
             ("resolved_policy", Some(&artifacts.resolved_policy)),
             ("host_options", Some(&artifacts.host_options)),
             ("evaluator", Some(&artifacts.evaluator)),
-            ("collection", None),
+            ("collection", artifacts.collection.as_deref()),
             ("external_evidence", None),
             ("candidate_base_revision_sha256", Some(&base_digest)),
         ],
@@ -2116,6 +2134,194 @@ mod tests {
             "entries":[{"entity_id":"article", "operation":"create", "media_type":"text/plain",
                 "after":{"inline":"abc", "sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}}]
         })).unwrap()
+    }
+
+    #[test]
+    fn candidate_collection_requires_exact_identities_and_binds_metadata() {
+        use crate::content_candidate::{CandidateItem, CandidateSnapshot};
+        let mut change = change();
+        let metadata = Some(std::collections::BTreeMap::from([(
+            "slug".into(),
+            "article".into(),
+        )]));
+        change.entries[0].metadata = metadata.clone();
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n").unwrap();
+        let base = CandidateSnapshot {
+            scope: "site".into(),
+            site_id: "site".into(),
+            site_base_url: None,
+            base: change.base.clone(),
+            complete: true,
+            items: vec![CandidateItem {
+                entity_id: "existing".into(),
+                public_path: "/existing".into(),
+                media_type: "text/plain".into(),
+                revision: None,
+                sha256: change.entries[0].after.as_ref().unwrap().sha256.clone(),
+                source: "abc".into(),
+                links: None,
+            }],
+        };
+        let after = vec![CandidateItem {
+            entity_id: "article".into(),
+            public_path: "/article".into(),
+            media_type: "text/plain".into(),
+            revision: None,
+            sha256: change.entries[0].after.as_ref().unwrap().sha256.clone(),
+            source: "abc".into(),
+            links: None,
+        }];
+        let items = vec![
+            ContentInput {
+                id: "article".into(),
+                metadata,
+                ..Default::default()
+            },
+            ContentInput {
+                id: "existing".into(),
+                metadata: Some(std::collections::BTreeMap::from([(
+                    "slug".into(),
+                    "existing".into(),
+                )])),
+                ..Default::default()
+            },
+        ];
+        fn make_decision<'a>(
+            change: &'a Change,
+            policy: &'a ContentPreset,
+            items: &'a [ContentInput],
+            complete: bool,
+        ) -> OfflineDecisionContext<'a> {
+            OfflineDecisionContext {
+                change,
+                preset: policy,
+                max_entry_bytes: 1024,
+                max_total_bytes: 1024,
+                plain_text_paragraphs: false,
+                collection: Some(ChangeCollection {
+                    change_id: &change.change_id,
+                    items,
+                    complete,
+                }),
+                evaluator_identity: b"build",
+            }
+        }
+        let decision = make_decision(&change, &policy, &items, true);
+        let ctx = CandidateDecisionContext {
+            decision: &decision,
+            base: &base,
+            after: &after,
+        };
+        let verdict = evaluate_experimental_candidate_verdict(
+            &ctx,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        assert_eq!(verdict.receipt.verdict.status, VerdictStatus::Pass);
+        assert!(
+            revalidate_experimental_candidate_verdict(
+                &verdict,
+                &ctx,
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_ok()
+        );
+        let mut changed_metadata = items.clone();
+        changed_metadata[1]
+            .metadata
+            .as_mut()
+            .unwrap()
+            .insert("slug".into(), "different".into());
+        let changed_projection = make_decision(&change, &policy, &changed_metadata, true);
+        assert!(
+            revalidate_experimental_candidate_verdict(
+                &verdict,
+                &CandidateDecisionContext {
+                    decision: &changed_projection,
+                    ..ctx
+                },
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
+        let empty = make_decision(&change, &policy, &[], true);
+        assert!(
+            evaluate_experimental_candidate_verdict(
+                &CandidateDecisionContext {
+                    decision: &empty,
+                    ..ctx
+                },
+                &mut NoFiles,
+                "2026-01-01T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
+        let mut extra = items.clone();
+        extra.push(ContentInput {
+            id: "extra".into(),
+            ..Default::default()
+        });
+        let changed = make_decision(&change, &policy, &extra, true);
+        assert!(
+            evaluate_experimental_candidate_verdict(
+                &CandidateDecisionContext {
+                    decision: &changed,
+                    ..ctx
+                },
+                &mut NoFiles,
+                "2026-01-01T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
+        let partial_items = &items[..1];
+        let partial = make_decision(&change, &policy, partial_items, false);
+        let partial_result = evaluate_experimental_candidate_verdict(
+            &CandidateDecisionContext {
+                decision: &partial,
+                ..ctx
+            },
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        assert_eq!(
+            partial_result.receipt.verdict.status,
+            VerdictStatus::NotChecked
+        );
+        let incomplete = make_decision(&change, &policy, &items, false);
+        let result = evaluate_experimental_candidate_verdict(
+            &CandidateDecisionContext {
+                decision: &incomplete,
+                ..ctx
+            },
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        assert_eq!(result.receipt.verdict.status, VerdictStatus::NotChecked);
+        assert!(
+            revalidate_experimental_candidate_verdict(
+                &verdict,
+                &CandidateDecisionContext {
+                    decision: &incomplete,
+                    ..ctx
+                },
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
     }
 
     #[test]

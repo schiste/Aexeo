@@ -3,7 +3,8 @@
 This Aexeo-specific envelope is experimental. It is not the portable v2
 protocol, a trusted publication authorization, or evidence that the whole
 site has been evaluated. The offline evaluator evaluates the change entries;
-unchanged candidate items are included in the identity, not evaluated by it.
+unchanged candidate items are included in the identity; an optional collection
+projection can also be evaluated for collection-scoped checks.
 Delete and rename impact checks retain their normal `not_checked` behavior.
 
 Use `content-change --offline-receipt --experimental-bound-verdict` with
@@ -15,8 +16,16 @@ including explicit nulls for optional fields. Inputs can contain private text.
 Every supplied before and after content state must contain inline content.
 The base must declare `complete: true`; this declaration is an unverified host
 assertion. Missing or inconsistent identity, revisions, content, routes, digest,
-extra projections and duplicate entities are rejected. Collection snapshots,
-link observations and artifact bundles are not supported in this mode.
+extra projections and duplicate entities are rejected. An optional
+`--collection-snapshot` must identify exactly the candidate entities when
+complete; a partial collection may contain a subset, including every changed
+non-delete entry. It must also match changed-entry metadata. Its complete flag and metadata are host assertions;
+unobserved omissions or incorrect metadata cannot be inferred from IDs. An
+incomplete collection remains `not_checked` for blocking collection checks.
+The exact collection artifact is bound and revalidated. With `--telemetry`, the
+local candidate event reports only whether a collection was supplied, its item
+count and completeness declaration, plus status; it omits identities and
+metadata. Link observations and artifact bundles are not supported in this mode.
 
 The overlay is rebuilt from the base, the validated change and after projections.
 The binding includes the exact decision artifacts, the independently calculated
@@ -53,7 +62,11 @@ Run it with `--envelope PREVIOUS.json --base BASE.json --after AFTER.json
 --change CHANGE-BYTES --resolved-policy POLICY-BYTES --host-options
 OPTIONS-BYTES --evaluator BUILD-BYTES`. These four files must contain the exact
 independently obtained artifact bytes, not guessed equivalents of their JSON
-representations. Rust currently materializes its policy and options as
+representations. If a collection was used, also provide its independently
+obtained exact serialized artifact via `--collection`. The verifier checks its
+manifest digest, candidate identity set and changed-entry metadata; it cannot
+establish the origin, freshness or correctness of projected metadata. Rust
+currently materializes its policy and options as
 Aexeo-specific serialized bytes; there is no portable policy/options wire
 format or candidate-mode artifact bundle. A bundle produced by the same
 untrusted evaluation is not an independent source of current inputs. Treat

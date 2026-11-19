@@ -966,6 +966,12 @@ The snapshot
 must represent one common collection scope. The host asserts completeness and
 revision consistency; Aexeo cannot detect omitted unchanged records. A partial
 snapshot preserves observed duplicates while keeping the check `not_checked`.
+Experimental candidate-bound verdicts also accept this snapshot. Its identity
+set must equal the overlaid candidate's when complete, or be a subset when
+incomplete. Changed non-delete entries must be present. The collection bytes are bound into
+the verdict and checked on revalidation. The host still must establish metadata
+provenance and completeness; matching identities do not verify metadata values.
+
 The collection gate runs once for the change, including delete-only changes;
 site impact of deletion and rename remains separately `not_checked`. Optional
 telemetry reports only item count and the supplied completeness flag. Rust hosts

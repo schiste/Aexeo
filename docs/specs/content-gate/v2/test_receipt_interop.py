@@ -105,6 +105,49 @@ class ReceiptInterop(unittest.TestCase):
             self.assertNotEqual(subprocess.run(bundle_args, capture_output=True).returncode, 0)
             self.assertNotEqual(subprocess.run(compare_bundles, capture_output=True).returncode, 0)
 
+    def test_candidate_collection_rust_python_interop(self):
+        with tempfile.TemporaryDirectory(prefix="aexeo candidate collection ") as temp:
+            directory = Path(temp)
+            source = "abc"
+            digest = hashlib.sha256(source.encode()).hexdigest()
+            change = {"schema": "content-gate.change/v1", "change_id": "example",
+                      "created_at": "2026-01-01T00:00:00Z", "origin": {"kind": "manual"},
+                      "base": {"kind": "opaque", "revision": "r1"},
+                      "entries": [{"entity_id": "article", "operation": "create", "media_type": "text/plain",
+                                   "metadata": {"slug": "article"}, "after": {"inline": source, "sha256": digest}}]}
+            base = {"scope": "site", "site_id": "site", "site_base_url": None,
+                    "base": change["base"], "complete": True, "items": []}
+            after = [{"entity_id": "article", "public_path": "/article", "media_type": "text/plain",
+                      "revision": None, "sha256": digest, "source": source, "links": None}]
+            collection = {"change_id": "example", "complete": True,
+                          "items": [{"id": "article", "metadata": {"slug": "article"}}]}
+            for name, value in (("change", change), ("base", base), ("after", after), ("collection", collection)):
+                (directory / (name + ".json")).write_text(json.dumps(value), encoding="utf-8")
+            policy = directory / "policy.toml"
+            policy.write_text("version=1\nname='test'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n", encoding="utf-8")
+            output = directory / "out.json"
+            env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(directory / "change.json"), CONTENT_GATE_VERDICT_FILE=str(output))
+            command = ["cargo", "run", "--quiet", "-p", "aexeo-cli", "--", "content-change", "--preset", "test",
+                       "--preset-source", "test=" + str(policy), "--offline-receipt", "--evaluator-identity", "build",
+                       "--collection-snapshot", str(directory / "collection.json")]
+            bundle = subprocess.run(command + ["--offline-receipt-bundle"], cwd=ROOT, env=env, capture_output=True, text=True)
+            self.assertEqual(bundle.returncode, 0, bundle.stderr)
+            artifacts = json.loads(output.read_text())["artifacts"]
+            result = subprocess.run(command + ["--experimental-bound-verdict", "--candidate-base", str(directory / "base.json"),
+                                               "--candidate-after", str(directory / "after.json")], cwd=ROOT, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            verifier = [sys.executable, str(Path(__file__).with_name("verify_candidate_inputs.py")), "--envelope", str(output),
+                        "--base", str(directory / "base.json"), "--after", str(directory / "after.json")]
+            for name in ("change", "resolved_policy", "host_options", "evaluator", "collection"):
+                path = directory / (name + ".bytes")
+                path.write_text(artifacts[name], encoding="utf-8")
+                verifier.extend(["--" + name.replace("_", "-"), str(path)])
+            checked = subprocess.run(verifier, capture_output=True, text=True)
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+            self.assertEqual(json.loads(checked.stdout)["input_binding"], "match")
+            (directory / "collection.bytes").write_text(artifacts["collection"] + " ", encoding="utf-8")
+            self.assertEqual(subprocess.run(verifier, capture_output=True).returncode, 2)
+
     def test_link_snapshot_bundle_against_independent_inputs(self):
         with tempfile.TemporaryDirectory(prefix="aexeo links interop ") as temp:
             directory = Path(temp)
