@@ -329,6 +329,10 @@ pub fn builtin_content_presets() -> BTreeMap<String, String> {
             include_str!("../presets/fragment-readable.toml").into(),
         ),
         (
+            "portable-text-link-review".into(),
+            include_str!("../presets/portable-text-link-review.toml").into(),
+        ),
+        (
             "glossary-editorial".into(),
             include_str!("../presets/glossary-editorial.toml").into(),
         ),
@@ -519,6 +523,23 @@ mod tests {
             assert_eq!(report.gates[2].status, GateStatus::NotChecked);
             assert!(!report.gates[2].blocking);
         }
+    }
+
+    #[test]
+    fn literal_rich_text_link_review_requires_observation() {
+        use crate::content_gate::{ContentInput, GateStatus};
+        let preset =
+            resolve_content_preset("portable-text-link-review", &builtin_content_presets())
+                .unwrap();
+        let result = preset
+            .evaluate(&ContentInput {
+                id: "x".into(),
+                text: Some("[x](https://example.org)".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(result.gates[0].status, GateStatus::NotChecked);
+        assert!(!result.gates[0].blocking);
     }
 
     #[test]

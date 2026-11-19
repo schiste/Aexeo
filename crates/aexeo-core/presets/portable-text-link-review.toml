@@ -1,0 +1,7 @@
+version = 1
+name = "Portable Text literal link review"
+
+[[gates]]
+id = "structure.literal_markdown_links"
+kind = "literal_markdown_links"
+blocking = false

@@ -254,6 +254,33 @@ pub fn markdown_link_destinations(source: &str) -> Result<Option<Vec<String>>> {
     )
 }
 
+/// Byte offsets of explicit Markdown links, excluding autolinks and code.
+/// Intended for text that a host projects as literal rich text, not Markdown.
+pub fn literal_markdown_link_offsets(source: &str) -> Result<Vec<usize>> {
+    fn visit(node: &Node, source: &str, offsets: &mut Vec<usize>) {
+        let position = match node {
+            Node::Link(link) => link.position.as_ref(),
+            Node::LinkReference(link) => link.position.as_ref(),
+            _ => None,
+        };
+        if let Some(position) = position {
+            let offset = position.start.offset;
+            if source.as_bytes().get(offset) == Some(&b'[') {
+                offsets.push(offset);
+            }
+        }
+        if let Some(children) = node.children() {
+            for child in children {
+                visit(child, source, offsets);
+            }
+        }
+    }
+    let root = parse_markdown(source)?;
+    let mut offsets = Vec::new();
+    visit(&root, source, &mut offsets);
+    Ok(offsets)
+}
+
 fn parse_markdown(source: &str) -> Result<Node> {
     if let Some(reason) = markdown_limit_reason(source) {
         bail!(reason);
