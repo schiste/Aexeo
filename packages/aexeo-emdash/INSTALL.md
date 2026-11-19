@@ -745,14 +745,20 @@ aexeoPlugin({
 
 Only declared string values are supplied to content gates. A missing, invalid
 or unavailable mapped field is reported as unavailable; an explicitly null
-field is observed as absent. The built-in destinations `title`, `description`,
+field is observed as absent. A field with no mapping is not observed and
+metadata gates report it as `not_checked`; they do not treat it as an observed
+absence. Direct `EmdashDocument` consumers may set `observed_metadata_fields`
+to declare this open-world coverage; omitting it retains the legacy assumption
+that metadata keys outside `unavailable_metadata_fields` were observed. The built-in destinations `title`, `description`,
 `canonical` and `lang` cannot be overridden by these mappings. Revision
 audits use the selected revision's data and never substitute the current SEO
 panel. Their input coverage lists configured, supplied and unavailable field
 names, and the `aexeo.metadata_projection` event logs aggregate counts without
 field names or values. Sandboxed hosts can enter the same JSON object in the
 `Editorial metadata fields by collection (JSON)` setting; save and Refresh
-forward projected values to the sidecar. Configure the sidecar's
+forward projected values to the sidecar. Deploy the matching worker build as
+well: older workers do not understand observed-field coverage. The plugin
+rejects their responses for CMS projections with explicit coverage. Configure the sidecar's
 `CONTENT_PRESET` and related settings separately to run content gates; the
 mapping alone does not activate a gate. Invalid or unreadable metadata settings
 produce an evaluation error instead of treating unknown values as absent.

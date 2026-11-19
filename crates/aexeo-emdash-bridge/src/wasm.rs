@@ -275,8 +275,31 @@ pub fn evaluate_content_js(
     link_observations_json: Option<String>,
 ) -> Result<String, JsError> {
     install_panic_hook();
-    let (document, capabilities, lists_complete) = parse_content_document(document_json)?;
+    let (mut document, capabilities, lists_complete) = parse_content_document(document_json)?;
     let preset = resolve_content_preset_js(preset_name, sources_json.as_deref())?;
+    // CMS projections are open-world; older callers retain legacy semantics.
+    let raw: serde_json::Value = serde_json::from_str(document_json)
+        .map_err(|error| JsError::new(&format!("failed to parse document: {error}")))?;
+    if let Some(coverage) = raw.get("observed_metadata_fields") {
+        let observed: std::collections::BTreeSet<String> = serde_json::from_value(coverage.clone())
+            .map_err(|_| JsError::new("observed_metadata_fields must be an array of strings"))?;
+        use aexeo_core::content_gate::ContentGate;
+        for gate in &preset.gates {
+            let fields: Vec<&String> = match gate {
+                ContentGate::MetadataAge { field, .. }
+                | ContentGate::MetadataLength { field, .. } => vec![field],
+                ContentGate::RequiredMetadata { fields, .. } => fields.iter().collect(),
+                _ => Vec::new(),
+            };
+            for field in fields {
+                if !observed.contains(field)
+                    && !document.unavailable_metadata_fields.contains(field)
+                {
+                    document.unavailable_metadata_fields.push(field.clone());
+                }
+            }
+        }
+    }
     let evidence = evidence_json
         .as_deref()
         .filter(|value| !value.is_empty())

@@ -214,6 +214,7 @@ function adaptContentItemInternal(content: EmdashContentItem, options: AdaptCont
     content.seo?.title ?? content.data["title"] ?? content.slug ?? content.id,
   );
   const document: EmdashDocument = { route, title, description_source_observed: false };
+  const observedMetadata = ["title"];
   // Only host-declared fields are projected. Missing or malformed sources are
   // explicitly unavailable, not evidence that a value is absent.
   if (isRecord(options.metadataFields)) {
@@ -224,7 +225,10 @@ function adaptContentItemInternal(content: EmdashContentItem, options: AdaptCont
       if (!isDescriptionField(field)) { unavailable.push(key); continue; }
       const projected = descriptionFieldValue(content, field);
       if (!projected.observed) unavailable.push(key);
-      else if (typeof projected.value === "string") metadata[key] = projected.value;
+      else {
+        observedMetadata.push(key);
+        if (typeof projected.value === "string") metadata[key] = projected.value;
+      }
     }
     if (Object.keys(metadata).length) document.meta = metadata;
     if (unavailable.length) document.unavailable_metadata_fields = unavailable;
@@ -259,6 +263,10 @@ function adaptContentItemInternal(content: EmdashContentItem, options: AdaptCont
   if (typeof locale === "string" && locale.length > 0) {
     document.lang = locale;
   }
+  if (document.description_source_observed === true) observedMetadata.push("description");
+  if (document.canonical !== undefined) observedMetadata.push("canonical");
+  if (document.lang !== undefined) observedMetadata.push("lang");
+  document.observed_metadata_fields = observedMetadata;
   const body = options.contentFields === undefined
     ? extractPortableText(content.data, options.blockMappings)
     : extractSelectedContent(content.data, options.contentFields, options.blockMappings);

@@ -640,7 +640,7 @@ describe("sandbox afterSave", () => {
     await host.fixtures.plugin.kv("config:eval_token", "test-token");
     await host.http.respond(
       "https://evaluator.test/evaluate",
-      new Response("[]", { status: 200 }),
+      new Response(JSON.stringify({ findings: [], assessments: {}, capabilities: ["observed_metadata_fields_v1"] }), { status: 200 }),
     );
 
     const update = await host.actions.content.update("posts", english.id, {
@@ -753,7 +753,7 @@ describe("sandbox afterSave", () => {
     };
     await host.http.respond(
       "https://evaluator.test/evaluate",
-      new Response(JSON.stringify([movedFinding]), { status: 200 }),
+      new Response(JSON.stringify({ findings: [movedFinding], assessments: {}, capabilities: ["observed_metadata_fields_v1"] }), { status: 200 }),
     );
     const moved = await host.actions.content.update("posts", english.id, {
       data: { title: "Hello moved", body: body("Hello moved") },

@@ -352,3 +352,31 @@ assert.equal(aged.gates[0].measurements.age_days, 2);
 const noDate = await evaluateContent({ route: "/review", title: "Review", body: [] }, "review-age", { "review-age": reviewAge });
 assert.equal(noDate.gates[0].status, "not_checked");
 console.log("WASM metadata age review uses supplied calendar dates");
+
+// Open-world coverage is opt-in for CMS snapshots; legacy direct documents
+// retain their existing missing-field behavior.
+const metadataCoveragePreset = `version=1
+name="metadata-coverage"
+[[gates]]
+id="author"
+kind="required_metadata"
+fields=["author"]
+[[gates]]
+id="length"
+kind="metadata_length"
+field="author"
+min=2
+`;
+const coverageSources = { "metadata-coverage": metadataCoveragePreset };
+const coverageDoc = { route: "/coverage", title: "Coverage", body: [] };
+const evaluateCoverage = (doc) => evaluateContent(doc, "metadata-coverage", coverageSources);
+const unobservedMetadata = await evaluateCoverage({ ...coverageDoc, observed_metadata_fields: ["title"] });
+assert.equal(unobservedMetadata.gates[0].status, "not_checked");
+assert.equal(unobservedMetadata.gates[0].findings.length, 0);
+assert.equal(unobservedMetadata.gates[1].status, "not_checked");
+const observedAbsent = await evaluateCoverage({ ...coverageDoc, observed_metadata_fields: ["title", "author"] });
+assert.equal(observedAbsent.gates[0].status, "failed");
+const legacyMetadata = await evaluateCoverage(coverageDoc);
+assert.equal(legacyMetadata.gates[0].status, "failed");
+await assert.rejects(evaluateCoverage({ ...coverageDoc, observed_metadata_fields: null }), /observed_metadata_fields/);
+console.log("WASM metadata coverage distinguishes unknown, absent and legacy input");

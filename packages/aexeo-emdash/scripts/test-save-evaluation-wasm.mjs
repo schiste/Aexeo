@@ -953,6 +953,10 @@ kind="metadata_age"
 field="last_reviewed"
 as_of="2024-03-01"
 max_days=1
+[[gates]]
+id="unmapped"
+kind="required_metadata"
+fields=["unmapped"]
 `;
   const configured = createPlugin({
     contentPreset: { name: "mapped", sources: { mapped: preset } },
@@ -968,6 +972,8 @@ max_days=1
   const age = () => host.store.get("findings:/mapped-metadata").assessment.gates[1];
   assert.equal(age().status, "failed");
   assert.equal(age().measurements.age_days, 2);
+  assert.equal(host.store.get("findings:/mapped-metadata").assessment.gates[2].status, "not_checked");
+  assert.equal(host.store.get("findings:/mapped-metadata").findings.filter((finding) => finding.rule_id === "unmapped").length, 0);
   page.data.editorial = {};
   await configured.routes.refresh.handler(host.ctx);
   assert.equal(status(), "not_checked");
@@ -975,7 +981,7 @@ max_days=1
   page.data.editorial.author = null;
   await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
   assert.equal(status(), "failed");
-  assert.ok(events.some((event) => event.name === "aexeo.metadata_projection" && event.data.supplied_fields === 2));
+  assert.ok(events.some((event) => event.name === "aexeo.metadata_projection" && event.data.supplied_fields === 2 && event.data.coverage_documents === 1 && event.data.observed_fields >= 3));
   assert.ok(events.some((event) => event.name === "aexeo.metadata_projection" && event.data.unavailable_fields === 2));
   assert.ok(!JSON.stringify(events).includes("Author"));
   console.log("WASM configured metadata distinguishes supplied, unavailable and absent");

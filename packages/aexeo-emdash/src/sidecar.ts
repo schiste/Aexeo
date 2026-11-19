@@ -119,10 +119,17 @@ export async function evaluateViaSidecar(
   // per-document gate status so an incomplete evaluation cannot look complete.
   try {
     const value: unknown = JSON.parse(raw);
-    if (Array.isArray(value)) return { ok: true, findings: value as Finding[] };
+    const needsMetadataCoverage = documents.some((document) => document.observed_metadata_fields !== undefined);
+    if (Array.isArray(value)) {
+      if (needsMetadataCoverage) return { ok: false, reason: "invalid_response", detail: "sidecar does not advertise metadata coverage support; upgrade the worker" };
+      return { ok: true, findings: value as Finding[] };
+    }
     if (!value || typeof value !== "object" || !("findings" in value) || !Array.isArray(value.findings) ||
         !("assessments" in value) || !value.assessments || typeof value.assessments !== "object" || Array.isArray(value.assessments)) {
       return { ok: false, reason: "invalid_response", detail: "sidecar returned invalid assessment envelope" };
+    }
+    if (needsMetadataCoverage && !("capabilities" in value && Array.isArray(value.capabilities) && value.capabilities.includes("observed_metadata_fields_v1"))) {
+      return { ok: false, reason: "invalid_response", detail: "sidecar does not advertise metadata coverage support; upgrade the worker" };
     }
     for (const finding of value.findings) {
       if (finding && typeof finding === "object" && "aexeo_source_location" in finding &&

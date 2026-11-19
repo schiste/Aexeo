@@ -58,6 +58,8 @@ export interface EmdashDocument {
   meta?: Record<string, string>;
   /** Declared metadata whose source was not observed in this snapshot. */
   unavailable_metadata_fields?: string[];
+  /** If present, other metadata fields were not observed by the adapter. */
+  observed_metadata_fields?: string[];
   schema?: unknown[];
   body?: PortableTextBlock[];
   /** Body features faithfully represented by an adapter; omitted means all. */
