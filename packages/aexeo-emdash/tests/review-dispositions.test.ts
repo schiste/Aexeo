@@ -67,7 +67,7 @@ describe("review route and MCP contract", () => {
     expect(await plugin.routes["get-revision-review-history"]!.handler({ kv, input: request })).toMatchObject({ status: "available", events: [expect.objectContaining({ actor: { kind: "authenticated_account", id: "host-account" } })] });
     const info = vi.fn();
     expect(await plugin.routes["audit-revision"]!.handler({ kv, content: {}, input: { collection: "secret", id: "private", revision: "hidden" }, log: { info } })).toMatchObject({ status: "not_checked" });
-    expect(info).toHaveBeenCalledWith("aexeo.revision_audit", { status: "not_checked", gates: 0 });
+    expect(info).toHaveBeenCalledWith("aexeo.revision_audit", { status: "not_checked", scope: "content", duration_ms: expect.any(Number), gates: 0 });
     expect(JSON.stringify(info.mock.calls)).not.toContain("private");
   });
 });
