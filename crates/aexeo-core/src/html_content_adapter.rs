@@ -488,6 +488,11 @@ pub fn html_source_map_with_scope(
                 | "em"
                 | "sup"
                 | "sub"
+                | "code"
+                | "kbd"
+                | "samp"
+                | "small"
+                | "mark"
                 | "a"
                 | "br"
         ) {
@@ -672,6 +677,13 @@ pub fn html_source_map_with_scope(
                             | "strong"
                             | "i"
                             | "em"
+                            | "sup"
+                            | "sub"
+                            | "code"
+                            | "kbd"
+                            | "samp"
+                            | "small"
+                            | "mark"
                             | "a"
                     )
                 })
@@ -1044,6 +1056,43 @@ mod tests {
         let malformed = "<p>Text <sup>reference</p></sup>";
         let adapted = html_content("x", malformed).unwrap();
         assert!(html_source_map(malformed, adapted.input.text.as_deref().unwrap()).is_none());
+    }
+
+    #[test]
+    fn maps_inline_technical_markup_and_rejects_block_children() {
+        let html = "<main><p>Élan <code>cargo test</code>, <kbd>Enter</kbd>, <samp>ok</samp>, <small>note</small>, <mark>highlight</mark>.</p></main>";
+        for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+            let adapted = html_content_with_scope("x", html, scope).unwrap();
+            let projected = adapted.input.text.as_deref().unwrap();
+            let map = html_source_map_with_scope(html, projected, scope).unwrap();
+            let projected_index = crate::text_index::LineIndex::new(projected);
+            let source_index = crate::text_index::LineIndex::new(html);
+            for needle in ["cargo test", "Enter", "ok", "note", "highlight"] {
+                let (line, column) = projected_index
+                    .position(projected, projected.find(needle).unwrap())
+                    .unwrap();
+                assert_eq!(
+                    map.source_position(html, projected, line, column),
+                    source_index.position(html, html.find(needle).unwrap()),
+                    "{needle}"
+                );
+            }
+        }
+        for tag in ["sup", "sub", "code", "kbd", "samp", "small", "mark"] {
+            let html = format!("<main><{tag}>before<div>inside</div>after</{tag}></main>");
+            for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+                let adapted = html_content_with_scope("x", &html, scope).unwrap();
+                assert!(
+                    html_source_map_with_scope(
+                        &html,
+                        adapted.input.text.as_deref().unwrap(),
+                        scope
+                    )
+                    .is_none(),
+                    "{tag}"
+                );
+            }
+        }
     }
 
     #[test]
