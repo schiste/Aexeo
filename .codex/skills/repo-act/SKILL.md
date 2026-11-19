@@ -156,6 +156,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   EmDash adapters: blank or repeated item IDs must not produce ambiguous
   findings. Exercise the scan limit separately and keep unexamined items
   explicitly unchecked.
+- For EmDash revision-currentness checks, test each draft and published pointer
+  separately when omitted, null, malformed, matching or different. Check both
+  the initial audit and later retrieval: a missing pointer cannot prove that
+  the revision is stale.
 - For optional EmDash host APIs, inspect the host capability guard as well as
   the types; declare the capability deliberately and test enabled and unavailable
   cases. An optional method in the SDK does not mean the host exposes it.
