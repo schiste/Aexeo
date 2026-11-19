@@ -2079,10 +2079,12 @@ fn a_multilingual_seeded_crawl_requires_consistent_observed_languages() {
         ("fr-FR", true, None),
         ("en-US", false, Some("inventory_document_language_mismatch")),
         ("fr-CA", false, Some("inventory_document_locale_mismatch")),
+        ("fr", false, Some("inventory_document_locale_unverified")),
+        ("", false, Some("inventory_document_locale_unverified")),
     ] {
         let site = Site::start(vec![
             ("/", ("200 OK", "text/html", "<html lang='en'><body><main><a href='/en/article'>English</a></main></body></html>".to_owned())),
-            ("/en/article", ("200 OK", "text/html", "<html lang='en'><body><main>English article.</main></body></html>".to_owned())),
+            ("/en/article", ("200 OK", "text/html", "<html lang='en-US'><body><main>English article.</main></body></html>".to_owned())),
             ("/fr/article", ("200 OK", "text/html", format!("<html lang='{french_html_language}'><body><main>Article français.</main></body></html>"))),
         ]);
         site.serve_header("X-Release", "r1");
@@ -2114,7 +2116,11 @@ fn a_multilingual_seeded_crawl_requires_consistent_observed_languages() {
             .find(|page| page["url"] == format!("{}/fr/article", site.base_url))
             .unwrap();
         assert_eq!(page["inventory_locale"], "fr-FR");
-        assert_eq!(page["document_language"], french_html_language);
+        if french_html_language.is_empty() {
+            assert!(page["document_language"].is_null());
+        } else {
+            assert_eq!(page["document_language"], french_html_language);
+        }
         assert_eq!(page["distinct_source_pages"], 0);
         let finding = legacy_finding(&report, "LNK002", &format!("{}/fr/article", site.base_url));
         if comparable {
