@@ -383,6 +383,9 @@ registry before considering the release delivered.
   then compares independently supplied current artifacts once per manifest check.
   Optional subject and content checks can reread files. This does not
   make the bundle's contents fresh, authentic or a portable v2 verdict.
+  The independent comparator can require host-supplied exact validator name
+  and version labels, with schema validation and aggregate-only telemetry. The
+  labels are not authenticated and do not establish the evaluator's identity.
   The independent comparator can additionally require a host-supplied list of
   exact blocking check IDs to have passed; this does not establish evaluator
   authenticity, complete required coverage or publication authorization.

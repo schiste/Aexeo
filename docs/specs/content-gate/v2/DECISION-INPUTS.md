@@ -271,6 +271,15 @@ options and trusted inputs for those checks. Telemetry records only the number
 of required checks, never their IDs. A passing comparison is not authorization
 to publish.
 
+The paired `--validator-name NAME --validator-version VERSION` options require
+both verdicts to declare the exact host-selected name and version, and imply
+verdict schema and consistency validation. Supplying only one, a blank value,
+or a mismatch fails closed. Aggregate telemetry records whether the check was
+requested, never the identity. These are self-reported labels: equality does
+not authenticate the evaluator, prove which executable ran, or authorize
+publication. The host must independently select and protect its trusted
+implementation and evidence.
+
 The additional opt-in `--verify-subject` derives the v1 subject (change ID,
 base, and ordered entity IDs and after digests) from the independently supplied
 change artifact and compares it with both receipts. It rereads and hashes that

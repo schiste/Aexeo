@@ -504,6 +504,37 @@ class CompareOfflineReceipts(unittest.TestCase):
         self.assertNotEqual(missing.returncode, 0)
         self.assertEqual(json.loads(missing.stderr.splitlines()[0])["status"], "error")
 
+    @unittest.skipUnless(importlib.util.find_spec("jsonschema") and importlib.util.find_spec("rfc3339_validator"),
+                         "optional verdict validation dependencies are unavailable")
+    def test_validator_identity_is_host_selected_and_not_just_receipt_consistency(self):
+        receipt = copy.deepcopy(self.receipt)
+        verdict = json.loads((Path(__file__).parent.parent / "v1" / "examples" / "verdict-fail.json").read_text())
+        verdict["validator"] = {"name": "trusted-label", "version": "1.2.3"}
+        receipt["verdict"] = verdict
+        encoded = self.encode(receipt)
+        expected = ("trusted-label", "1.2.3")
+        comparison.compare_receipts(encoded, encoded, self.artifacts, expected_validator=expected)
+        for invalid in [("other", "1.2.3"), ("trusted-label", "wrong"), ("", "1.2.3"), ("trusted-label", None)]:
+            with self.subTest(invalid=invalid), self.assertRaises(comparison.VerificationError):
+                comparison.compare_receipts(encoded, encoded, self.artifacts, expected_validator=invalid)
+        previous = self.root / "identity-receipt.json"
+        previous.write_bytes(encoded)
+        args = [sys.executable, str(SCRIPT), str(previous), str(previous)]
+        for role in comparison.REQUIRED:
+            args.extend(["--" + role.replace("_", "-"), str(self.artifacts[role])])
+        for role in comparison.OPTIONAL:
+            args.append("--" + role.replace("_", "-") + "-absent")
+        result = subprocess.run(args + ["--validator-name", expected[0], "--validator-version", expected[1], "--telemetry"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        event = json.loads(result.stderr)
+        self.assertTrue(event["validator_identity_required"])
+        self.assertTrue(event["verdict_validation_requested"])
+        self.assertNotIn("trusted-label", result.stderr)
+        for flags in (["--validator-name", expected[0]], ["--validator-name", expected[0], "--validator-version", "wrong"]):
+            self.assertNotEqual(subprocess.run(args + flags, capture_output=True).returncode, 0)
+        unavailable = subprocess.run([sys.executable, "-S", *args[1:], "--validator-name", expected[0], "--validator-version", expected[1]], capture_output=True)
+        self.assertNotEqual(unavailable.returncode, 0)
+
     def test_cli_is_private_and_does_not_authorize_publication(self):
         previous = self.root / "previous.json"
         fresh = self.root / "fresh.json"
