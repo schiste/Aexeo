@@ -80,3 +80,27 @@ or an incomplete inventory make the result incomplete. It does not establish
 source freshness, transitive dependencies for arbitrary gates, redirects, or
 a publication verdict. The incremental evaluator above still uses direct
 impact because its supported gates depend only on each entity's own text.
+
+## Candidate collection metadata
+
+`CollectionBaseline` is a separate in-process API for presets composed solely
+of `unique_collection_metadata` gates. Prepare it with a complete candidate base
+and a metadata projection for every base entity ID. A projection of `None`
+means unavailable; it is not an empty metadata map. For each proposal, the
+API validates and overlays the change, takes the full replacement metadata for
+created, updated and renamed entities from the corresponding change entry,
+removes deleted or renamed old identities, and evaluates the complete candidate
+collection with the shared collection gate. A missing entry metadata map, field
+or grouping key yields a `not_checked` gate while preserving observed duplicate
+findings. No metadata is silently inherited from the old version of a changed
+entity. Unchanged entities retain their owned base projections.
+
+The result is a collection report, separate from item reports and not a
+publication verdict. Unlike item report reuse, collection checks currently scan
+the candidate collection again for each proposal; no collection performance
+improvement is claimed. The base projection and change entry metadata are host
+assertions: source hashes do not authenticate metadata or prove that it is fresh,
+complete, or from the same CMS revision. Hosts must bind and verify those inputs
+before relying on the report; a publication workflow additionally requires an
+atomic currentness check. Missing inventory or malformed changes return
+`not_checked`. The ordinary `IncrementalBaseline` still rejects collection gates.

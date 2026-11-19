@@ -326,6 +326,157 @@ impl IncrementalBaseline {
     }
 }
 
+/// An owned base for collection-only metadata gates. The host supplies one
+/// metadata projection per entity, including explicit unavailable projections.
+/// The projection and its relation to the base revision are host assertions.
+pub struct CollectionBaseline {
+    snapshot: CandidateSnapshot,
+    metadata: BTreeMap<String, Option<BTreeMap<String, String>>>,
+    preset: ContentPreset,
+}
+
+/// A collection report is not a publication decision. Individual gates can
+/// be not checked while still retaining findings from observed items.
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum CollectionEvaluation {
+    Report {
+        change_id: String,
+        report: ContentReport,
+    },
+    NotChecked {
+        reason: String,
+    },
+}
+
+impl CollectionBaseline {
+    /// Own the exact base, collection projections, and preset used for future
+    /// candidate evaluations. IDs must exactly match the base inventory.
+    pub fn prepare(
+        snapshot: CandidateSnapshot,
+        metadata: BTreeMap<String, Option<BTreeMap<String, String>>>,
+        preset: ContentPreset,
+    ) -> Result<Self, NotChecked> {
+        if snapshot.scope.is_empty()
+            || snapshot.site_id.is_empty()
+            || snapshot.base.revision.is_empty()
+            || !snapshot.complete
+        {
+            return Err(unavailable("complete snapshot scope and base are required"));
+        }
+        validate_inventory(&snapshot.items).map_err(unavailable)?;
+        if metadata.len() != snapshot.items.len()
+            || snapshot
+                .items
+                .iter()
+                .any(|item| !metadata.contains_key(&item.entity_id))
+        {
+            return Err(unavailable(
+                "metadata inventory does not match base identities",
+            ));
+        }
+        preset
+            .validate()
+            .map_err(|_| unavailable("invalid content preset"))?;
+        if preset.gates.is_empty()
+            || preset
+                .gates
+                .iter()
+                .any(|gate| !matches!(gate, ContentGate::UniqueCollectionMetadata { .. }))
+        {
+            return Err(unavailable(
+                "preset contains gates outside collection metadata scope",
+            ));
+        }
+        Ok(Self {
+            snapshot,
+            metadata,
+            preset,
+        })
+    }
+
+    /// Rebuild the candidate metadata collection from the owned base and the
+    /// metadata in each change entry, then run the shared collection evaluator.
+    pub fn evaluate(&self, change: &Change, after: &[CandidateItem]) -> CollectionEvaluation {
+        match self.evaluate_checked(change, after) {
+            Ok(report) => CollectionEvaluation::Report {
+                change_id: change.change_id.clone(),
+                report,
+            },
+            Err(error) => CollectionEvaluation::NotChecked {
+                reason: error.reason,
+            },
+        }
+    }
+
+    fn evaluate_checked(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+    ) -> Result<ContentReport, NotChecked> {
+        if change
+            .entries
+            .iter()
+            .flat_map(|entry| [entry.before.as_ref(), entry.after.as_ref()])
+            .flatten()
+            .any(|state| state.inline.is_none())
+        {
+            return Err(unavailable("only inline change content is supported"));
+        }
+        let overlay = overlay_candidate(&self.snapshot, change, after).map_err(unavailable)?;
+        let mut metadata = self.metadata.clone();
+        for entry in &change.entries {
+            let old_id = match entry.operation {
+                aexeo_contracts::content_gate_protocol::Operation::Create => continue,
+                aexeo_contracts::content_gate_protocol::Operation::Rename => entry
+                    .previous_entity_id
+                    .as_deref()
+                    .ok_or_else(|| unavailable("missing previous identity"))?,
+                _ => &entry.entity_id,
+            };
+            if metadata.remove(old_id).is_none() {
+                return Err(unavailable("base metadata identity unavailable"));
+            }
+        }
+        for entry in &change.entries {
+            if !matches!(
+                entry.operation,
+                aexeo_contracts::content_gate_protocol::Operation::Delete
+            ) {
+                metadata.insert(entry.entity_id.clone(), entry.metadata.clone());
+            }
+        }
+        let collection: Vec<ContentInput> = overlay
+            .candidate
+            .items
+            .iter()
+            .map(|item| ContentInput {
+                id: item.entity_id.clone(),
+                metadata: metadata.get(&item.entity_id).cloned().flatten(),
+                ..Default::default()
+            })
+            .collect();
+        if metadata.len() != collection.len()
+            || collection
+                .iter()
+                .any(|item| !metadata.contains_key(&item.id))
+        {
+            return Err(unavailable("candidate metadata inventory mismatch"));
+        }
+        let input = ContentInput {
+            id: self.snapshot.scope.clone(),
+            ..Default::default()
+        };
+        let context = crate::content_gate::ContentEvaluationContext {
+            collection: Some(&collection),
+            ..Default::default()
+        };
+        self.preset
+            .evaluate_with_collection_completeness(&input, &context, None, true, None)
+            .map_err(|_| unavailable("collection evaluation failed"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -425,6 +576,120 @@ mod tests {
                 (item.entity_id.clone(), preset.evaluate(&input).unwrap())
             })
             .collect()
+    }
+    #[test]
+    fn collection_candidate_matches_full_and_retains_partial_findings() {
+        let (snapshot, _, mut change) = fixture();
+        let preset = ContentPreset::from_toml("version=1\nname='collection'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\ngroup_by='lang'\n").unwrap();
+        let projection = |slug: &str| {
+            Some(BTreeMap::from([
+                ("slug".into(), slug.into()),
+                ("lang".into(), "en".into()),
+            ]))
+        };
+        let metadata: BTreeMap<_, _> = snapshot
+            .items
+            .iter()
+            .map(|i| (i.entity_id.clone(), projection(&i.entity_id)))
+            .collect();
+        let updated = item("a", "updated source", Some(vec![]));
+        let created = item("new", "created source", Some(vec![]));
+        let renamed = item("renamed", "renamed source", Some(vec![]));
+        let mut update = entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&updated),
+        );
+        update.metadata = projection("duplicate");
+        let mut create = entry("new", Operation::Create, None, Some(&created));
+        create.metadata = projection("duplicate");
+        let mut rename = entry(
+            "renamed",
+            Operation::Rename,
+            Some(&snapshot.items[2]),
+            Some(&renamed),
+        );
+        rename.previous_entity_id = Some("c".into());
+        rename.metadata = projection("renamed");
+        change.entries = vec![
+            update,
+            entry("b", Operation::Delete, Some(&snapshot.items[1]), None),
+            create,
+            rename,
+        ];
+        let after = [updated, created, renamed];
+        let baseline =
+            CollectionBaseline::prepare(snapshot.clone(), metadata.clone(), preset.clone())
+                .unwrap();
+        let CollectionEvaluation::Report { report, .. } = baseline.evaluate(&change, &after) else {
+            panic!("expected report")
+        };
+        let candidate = overlay_candidate(&snapshot, &change, &after)
+            .unwrap()
+            .candidate;
+        let collection: Vec<_> = candidate
+            .items
+            .iter()
+            .map(|item| ContentInput {
+                id: item.entity_id.clone(),
+                metadata: match item.entity_id.as_str() {
+                    "a" | "new" => projection("duplicate"),
+                    "renamed" => projection("renamed"),
+                    id => metadata[id].clone(),
+                },
+                ..Default::default()
+            })
+            .collect();
+        let input = ContentInput {
+            id: snapshot.scope.clone(),
+            ..Default::default()
+        };
+        let context = crate::content_gate::ContentEvaluationContext {
+            collection: Some(&collection),
+            ..Default::default()
+        };
+        let full = preset
+            .evaluate_with_collection_completeness(&input, &context, None, true, None)
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&report).unwrap(),
+            serde_json::to_value(full).unwrap()
+        );
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[0].findings.len(), 1);
+        change.entries[3].metadata = None;
+        let CollectionEvaluation::Report { report, .. } = baseline.evaluate(&change, &after) else {
+            panic!("expected partial report")
+        };
+        assert_eq!(report.gates[0].status, GateStatus::NotChecked);
+        assert_eq!(report.gates[0].findings.len(), 1);
+        change.base.revision = "stale".into();
+        assert!(matches!(
+            baseline.evaluate(&change, &after),
+            CollectionEvaluation::NotChecked { .. }
+        ));
+    }
+
+    #[test]
+    fn collection_baseline_rejects_incomplete_or_ambiguous_inventory_and_other_gates() {
+        let (snapshot, preset, _) = fixture();
+        let unique = ContentPreset::from_toml("version=1\nname='collection'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n").unwrap();
+        let metadata: BTreeMap<_, _> = snapshot
+            .items
+            .iter()
+            .map(|i| (i.entity_id.clone(), None))
+            .collect();
+        assert!(CollectionBaseline::prepare(snapshot.clone(), metadata.clone(), preset).is_err());
+        let mut missing = metadata.clone();
+        missing.remove("a");
+        assert!(CollectionBaseline::prepare(snapshot.clone(), missing, unique.clone()).is_err());
+        let mut incomplete = snapshot.clone();
+        incomplete.complete = false;
+        assert!(CollectionBaseline::prepare(incomplete, metadata.clone(), unique.clone()).is_err());
+        let mut duplicate = snapshot;
+        duplicate.items[1].entity_id = duplicate.items[0].entity_id.clone();
+        assert!(CollectionBaseline::prepare(duplicate, metadata, unique).is_err());
     }
     #[test]
     fn incremental_equals_full_after_update_delete_create_and_rename() {
