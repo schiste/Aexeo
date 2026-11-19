@@ -144,14 +144,16 @@ fn content_input_with_context(document: &EmdashDocument) -> (ContentInput, Conte
         ContentContext {
             paragraphs: Some(paragraphs),
             block_ends: Some(block_ends),
-            unavailable_metadata_fields: if document.description_source_observed == Some(false)
-                || (document.description_source_observed.is_none()
-                    && document.description.is_none()
-                    && !document.meta.contains_key("description"))
-            {
-                vec!["description".into()]
-            } else {
-                Vec::new()
+            unavailable_metadata_fields: {
+                let mut fields = document.unavailable_metadata_fields.clone();
+                if document.description_source_observed == Some(false)
+                    || (document.description_source_observed.is_none()
+                        && document.description.is_none()
+                        && !document.meta.contains_key("description"))
+                {
+                    fields.push("description".into());
+                }
+                fields
             },
             ..Default::default()
         },

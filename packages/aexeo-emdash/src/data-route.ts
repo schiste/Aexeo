@@ -1,5 +1,5 @@
 import { isCmsObservableFinding, type CmsBodyCoverage } from "./cms-coverage.js";
-import type { CustomBlockMappings, DescriptionField } from "./adapter.js";
+import type { CustomBlockMappings, DescriptionField, MetadataFields } from "./adapter.js";
 // Data route for the React admin findings page.
 //
 // Returns JSON (not Block Kit blocks) shaped for the
@@ -115,6 +115,7 @@ interface DataRouteOptions {
   blockMappings?: CustomBlockMappings | undefined;
   contentFieldsByCollection?: Record<string, readonly string[]> | undefined;
   descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]> | undefined;
+  metadataFieldsByCollection?: Record<string, MetadataFields> | undefined;
   collections: readonly string[];
   evaluator: EvaluatorFn;
   // Refresh: when true, the route runs evaluateAndPersistAll first
@@ -142,6 +143,7 @@ export async function handleDataRoute(
       blockMappings: options.blockMappings,
       contentFieldsByCollection: options.contentFieldsByCollection,
       descriptionFieldsByCollection: options.descriptionFieldsByCollection,
+      metadataFieldsByCollection: options.metadataFieldsByCollection,
       ...(options.suppressionFilter === undefined
         ? {}
         : { suppressionFilter: options.suppressionFilter }),

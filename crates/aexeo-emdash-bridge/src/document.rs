@@ -28,6 +28,9 @@ pub struct EmdashDocument {
     pub alternates: Vec<HreflangAlternate>,
     #[serde(default)]
     pub meta: BTreeMap<String, String>,
+    /// Explicit metadata fields whose source was unavailable.
+    #[serde(default)]
+    pub unavailable_metadata_fields: Vec<String>,
     #[serde(default)]
     pub schema: Vec<Value>,
     #[serde(default)]

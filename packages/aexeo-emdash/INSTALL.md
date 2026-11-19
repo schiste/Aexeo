@@ -729,6 +729,31 @@ can still produce findings. The `aexeo.description_coverage` log contains
 aggregate counts of observed and unverified source projections without content
 or identifiers.
 
+For the configured plugin, additional editorial metadata can be mapped
+explicitly for each collection:
+
+```ts
+aexeoPlugin({
+  metadataFieldsByCollection: {
+    blog_posts: {
+      last_reviewed: { source: "data", path: ["editorial", "last_reviewed"] },
+      author: "author",
+    },
+  },
+})
+```
+
+Only declared string values are supplied to content gates. A missing, invalid
+or unavailable mapped field is reported as unavailable; an explicitly null
+field is observed as absent. The built-in destinations `title`, `description`,
+`canonical` and `lang` cannot be overridden by these mappings. Revision
+audits use the selected revision's data and never substitute the current SEO
+panel. Their input coverage lists configured, supplied and unavailable field
+names, and the `aexeo.metadata_projection` event logs aggregate counts without
+field names or values. This setting is currently supported in configured mode;
+it is not a sandbox setting. Map a substantive review date deliberately: an
+ordinary modification timestamp does not establish that the content was reviewed.
+
 Content preset gate outcomes, including `not_checked` and their reasons, are
 stored with the current route findings and exposed in CMS views and the data
 route. The preset panel lists passed, failed and unchecked gates, whether they

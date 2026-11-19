@@ -55,14 +55,15 @@ export interface ConfiguredPluginDescriptor {
   adminWidgets: readonly { id: string; size?: string; title?: string }[];
 }
 
-import type { CustomBlockMappings, DescriptionField } from "./adapter.js";
-export type { DescriptionField, BodyCapability, CustomBlockMapping, CustomBlockMappings, CustomBlockField, InlineComponentField } from "./adapter.js";
+import type { CustomBlockMappings, DescriptionField, MetadataFields } from "./adapter.js";
+export type { DescriptionField, MetadataFields, BodyCapability, CustomBlockMapping, CustomBlockMappings, CustomBlockField, InlineComponentField } from "./adapter.js";
 
 export interface AexeoPluginOptions {
   /** Ordered field mappings for project-specific blocks. */
   blockMappings?: CustomBlockMappings;
   contentFieldsByCollection?: Record<string, readonly string[]>;
   descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]>;
+  metadataFieldsByCollection?: Record<string, MetadataFields>;
   /** Request historical revision access on a compatible EmDash host. */
   revisionAudits?: boolean;
   /** Add a portable content preset to configured-mode evaluation. */
@@ -186,6 +187,7 @@ export function aexeoPlugin(
       ...(options.blockMappings === undefined ? {} : { blockMappings: options.blockMappings }),
       ...(options.contentFieldsByCollection === undefined ? {} : { contentFieldsByCollection: options.contentFieldsByCollection }),
       ...(options.descriptionFieldsByCollection === undefined ? {} : { descriptionFieldsByCollection: options.descriptionFieldsByCollection }),
+      ...(options.metadataFieldsByCollection === undefined ? {} : { metadataFieldsByCollection: options.metadataFieldsByCollection }),
       ...(options.contentPreset === undefined
         ? {}
         : {

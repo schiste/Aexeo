@@ -938,3 +938,35 @@ assert.equal((await reviewPlugin.routes["get-revision-review"].handler({ ...revi
 reviewCurrent.draftRevisionId = "rev2";
 assert.equal((await reviewPlugin.routes["get-revision-audit"].handler({ ...reviewContext, input: { audit_id: revisionAudit.audit_id } })).revision_status, "stale");
 console.log("WASM revision audit and review remain bound when the CMS revision changes");
+
+// CMS-mapped metadata reaches real WASM on both save and refresh.
+{
+  const preset = `version=1
+name="mapped"
+[[gates]]
+id="author"
+kind="required_metadata"
+fields=["author"]
+`;
+  const configured = createPlugin({
+    contentPreset: { name: "mapped", sources: { mapped: preset } },
+    metadataFieldsByCollection: { pages: { author: { source: "data", path: ["editorial", "author"] } } },
+  });
+  const page = item("mapped-metadata", { data: { body: [block("p", "Text")], editorial: { author: "Author" } } });
+  const host = fakeHost([page]);
+  const events = [];
+  host.ctx.log.info = (name, data) => events.push({ name, data });
+  const status = () => host.store.get("findings:/mapped-metadata").assessment.gates[0].status;
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  assert.equal(status(), "passed");
+  page.data.editorial = {};
+  await configured.routes.refresh.handler(host.ctx);
+  assert.equal(status(), "not_checked");
+  page.data.editorial.author = null;
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  assert.equal(status(), "failed");
+  assert.ok(events.some((event) => event.name === "aexeo.metadata_projection" && event.data.supplied_fields === 1));
+  assert.ok(events.some((event) => event.name === "aexeo.metadata_projection" && event.data.unavailable_fields === 1));
+  assert.ok(!JSON.stringify(events).includes("Author"));
+  console.log("WASM configured metadata distinguishes supplied, unavailable and absent");
+}

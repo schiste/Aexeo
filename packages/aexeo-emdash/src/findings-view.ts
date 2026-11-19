@@ -1,6 +1,6 @@
 import { describeGate, describeSourceMapping, summarizeGates } from "./assessment-display.js";
 import { cmsBodyCoverageNotice, isCmsObservableFinding, type CmsBodyCoverage } from "./cms-coverage.js";
-import type { CustomBlockMappings, DescriptionField } from "./adapter.js";
+import type { CustomBlockMappings, DescriptionField, MetadataFields } from "./adapter.js";
 // Shared Block Kit view layer for both plugin entrypoints.
 //
 // `configured.ts` (in-process, the production-hit path) and
@@ -178,6 +178,7 @@ export interface RefreshOptions {
   contentFieldsByCollection?: Record<string, readonly string[]> | undefined;
   contentFieldsUnavailable?: boolean | undefined;
   descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]> | undefined;
+  metadataFieldsByCollection?: Record<string, MetadataFields> | undefined;
   /**
    * Host context. `evaluateAndPersistAll` needs kv/http/content/log, and
    * the follow-up `renderFindingsPage` needs kv.
@@ -225,6 +226,7 @@ export async function handleRefresh(
       contentFieldsByCollection: options.contentFieldsByCollection,
       contentFieldsUnavailable: options.contentFieldsUnavailable,
       descriptionFieldsByCollection: options.descriptionFieldsByCollection,
+      metadataFieldsByCollection: options.metadataFieldsByCollection,
       // Always forwarded. See RefreshOptions.suppressionFilter.
       suppressionFilter: options.suppressionFilter,
     });

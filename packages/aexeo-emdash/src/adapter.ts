@@ -24,6 +24,23 @@ export type CustomBlockMappings = Record<string, CustomBlockMapping>;
 
 /** A flat data field, or an explicit path rooted in the CMS data or SEO panel. */
 export type DescriptionField = string | { source: "data" | "seo"; path: readonly string[] };
+/** Explicit metadata destinations and their source fields for one collection. */
+export type MetadataFields = Readonly<Record<string, DescriptionField>>;
+const RESERVED_METADATA = new Set(["title", "description", "canonical", "lang", "__proto__", "constructor", "prototype"]);
+/** Validate runtime configuration before it can make missing data look observed. */
+export function validateMetadataFieldsByCollection(value: unknown): void {
+  if (value === undefined) return;
+  if (!isRecord(value)) throw new Error("metadataFieldsByCollection must be an object");
+  for (const [collection, fields] of Object.entries(value)) {
+    if (!collection.trim() || !isRecord(fields)) throw new Error("invalid metadata fields collection mapping");
+    for (const [key, field] of Object.entries(fields)) {
+      if (!key.trim() || key.length > 256 || RESERVED_METADATA.has(key) || !isDescriptionField(field)) {
+        throw new Error("invalid or reserved metadata field mapping");
+      }
+    }
+  }
+}
+
 
 /** Reject malformed mappings instead of guessing a renderer's fallback. */
 export function isDescriptionField(value: unknown): value is DescriptionField {
@@ -115,6 +132,7 @@ export async function adaptContentItemWithContext(
   blockMappings?: CustomBlockMappings,
   contentFields?: readonly string[],
   descriptionFields?: readonly DescriptionField[],
+  metadataFields?: MetadataFields,
 ): Promise<AdaptedContent> {
   const publicUrl =
     content.status === "published"
@@ -129,6 +147,7 @@ export async function adaptContentItemWithContext(
     ...(blockMappings === undefined ? {} : { blockMappings }),
     ...(contentFields === undefined ? {} : { contentFields }),
     ...(descriptionFields === undefined ? {} : { descriptionFields }),
+    ...(metadataFields === undefined ? {} : { metadataFields }),
   });
 
   const translationSet = await contentApi.getTranslations(
@@ -182,6 +201,7 @@ type AdaptContentOptions = {
   blockMappings?: CustomBlockMappings | undefined;
   contentFields?: readonly string[];
   descriptionFields?: readonly DescriptionField[];
+  metadataFields?: MetadataFields;
 };
 
 export function adaptContentItem(content: EmdashContentItem, options: AdaptContentOptions = {}): AdaptedContent {
@@ -194,6 +214,21 @@ function adaptContentItemInternal(content: EmdashContentItem, options: AdaptCont
     content.seo?.title ?? content.data["title"] ?? content.slug ?? content.id,
   );
   const document: EmdashDocument = { route, title, description_source_observed: false };
+  // Only host-declared fields are projected. Missing or malformed sources are
+  // explicitly unavailable, not evidence that a value is absent.
+  if (isRecord(options.metadataFields)) {
+    const metadata: Record<string, string> = Object.create(null) as Record<string, string>;
+    const unavailable: string[] = [];
+    for (const [key, field] of Object.entries(options.metadataFields)) {
+      if (!key || RESERVED_METADATA.has(key)) continue;
+      if (!isDescriptionField(field)) { unavailable.push(key); continue; }
+      const projected = descriptionFieldValue(content, field);
+      if (!projected.observed) unavailable.push(key);
+      else if (typeof projected.value === "string") metadata[key] = projected.value;
+    }
+    if (Object.keys(metadata).length) document.meta = metadata;
+    if (unavailable.length) document.unavailable_metadata_fields = unavailable;
+  }
   const fields = options.descriptionFields;
   if (fields === undefined) {
     const description = content.seo?.description ?? content.data["description"];

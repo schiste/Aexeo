@@ -170,6 +170,20 @@ describe("EmDash content adaptation", () => {
     expect(adaptContentItem({ ...item, data: {} }, { contentFields: ["sections"] }).document.body).toBeUndefined();
   });
 
+  it("projects only explicitly mapped metadata and preserves unavailable fields", () => {
+    const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en",
+      data: { review: { date: "2024-02-28" }, empty: null, ignored: "private" } };
+    const fields = { last_reviewed: { source: "data", path: ["review", "date"] }, absent: "empty", missing: "not_loaded", title: "ignored" } as const;
+    const result = adaptContentItem(item, { metadataFields: fields }).document;
+    expect(result.meta).toEqual({ last_reviewed: "2024-02-28" });
+    expect(result.unavailable_metadata_fields).toEqual(["missing"]);
+    expect(result.title).toBe("a");
+    expect(JSON.stringify(result)).not.toContain("private");
+    expect(JSON.parse(JSON.stringify(aexeoPlugin({ metadataFieldsByCollection: { posts: fields } }).options)).metadataFieldsByCollection.posts).toEqual(fields);
+    const invalid = adaptContentItem(item, { metadataFields: { date: { source: "data", path: [] } } }).document;
+    expect(invalid.unavailable_metadata_fields).toEqual(["date"]);
+  });
+
   it("projects explicit ordered description fields and distinguishes unknown mappings", () => {
     const item: EmdashContentItem = { id: "a", type: "posts", slug: "a", status: "draft", locale: "en", data: { seo_description: "SEO copy", excerpt: "Excerpt" } };
     const options = { descriptionFields: ["seo_description", "excerpt"] };

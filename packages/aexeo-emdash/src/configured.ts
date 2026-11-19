@@ -45,7 +45,8 @@ import { evaluateContent, projectContentInput, projectLinkDestinations } from ".
 import { withContentPreset } from "./content-evaluator.js";
 import type { ContentPresetOptions, ExternalGateProvider, ExternalGateTelemetry, LinkObservationProvider, LinkProviderTelemetry, EvidenceSourceProvider, EvidenceSourceTelemetry, PresetSelectionTelemetry } from "./content-evaluator.js";
 export type { ExternalGateProvider, ExternalGateTelemetry, LinkObservationProvider, LinkProviderTelemetry, EvidenceSourceProvider, EvidenceSourceTelemetry, PresetSelectionTelemetry } from "./content-evaluator.js";
-import type { CustomBlockMappings, DescriptionField, EmdashContentItem } from "./adapter.js";
+import type { CustomBlockMappings, DescriptionField, MetadataFields, EmdashContentItem } from "./adapter.js";
+import { validateMetadataFieldsByCollection } from "./adapter.js";
 import type { Finding, SiteIntelligenceScore } from "./types.js";
 
 // emdash's definePlugin normalizes hook configs and validates the
@@ -174,6 +175,7 @@ export interface ConfiguredPluginOptions {
   blockMappings?: CustomBlockMappings;
   contentFieldsByCollection?: Record<string, readonly string[]>;
   descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]>;
+  metadataFieldsByCollection?: Record<string, MetadataFields>;
   /** Optional portable preset evaluated in addition to the existing site checks. */
   contentPreset?: ContentPresetOptions;
   /** Opt in to historical revision access on hosts supporting content:revisions:read. */
@@ -217,6 +219,7 @@ export interface ConfiguredPluginRuntime {
 }
 
 export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: ConfiguredPluginRuntime = {}): unknown {
+  validateMetadataFieldsByCollection(options.metadataFieldsByCollection);
   // Resolve runtime config once at boot and capture it in the closures
   // attached to the route handler and hooks. The descriptor's
   // `options` field is JSON-cloned by emdash's astro integration
@@ -269,6 +272,8 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
           options.blockMappings,
           options.contentFieldsByCollection?.[event.content.type],
           options.descriptionFieldsByCollection?.[event.content.type],
+          false,
+          options.metadataFieldsByCollection?.[event.content.type],
         ),
       "content:afterDelete": (event: ContentAfterDeleteEvent, ctx: SandboxCtx) =>
         handleAfterDelete(event, ctx),
@@ -290,7 +295,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
         input: z.strictObject({ collection: z.string().min(1).max(128), id: z.string().min(1).max(128), revision: z.string().min(1).max(128), field: z.string().min(1).max(128).optional() }),
         handler: async (ctx: SandboxCtx & { input: { collection: string; id: string; revision: string; field?: string } }) => {
           const startedAt = Date.now();
-          const result = await auditRevision(ctx as never, ctx.input, { preset: options.contentPreset, blockMappings: options.blockMappings, contentFieldsByCollection: options.contentFieldsByCollection, descriptionFieldsByCollection: options.descriptionFieldsByCollection, evidenceProviderConfigured: runtime.evidenceSources !== undefined, evaluate: evaluateContent });
+          const result = await auditRevision(ctx as never, ctx.input, { preset: options.contentPreset, blockMappings: options.blockMappings, contentFieldsByCollection: options.contentFieldsByCollection, descriptionFieldsByCollection: options.descriptionFieldsByCollection, metadataFieldsByCollection: options.metadataFieldsByCollection, evidenceProviderConfigured: runtime.evidenceSources !== undefined, evaluate: evaluateContent });
           try { ctx.log?.info("aexeo.revision_audit", { status: result.status, scope: ctx.input.field === undefined ? "content" : "fragment", duration_ms: Date.now() - startedAt, gates: result.status === "evaluated" ? result.report.gates.length : 0 }); } catch { /* telemetry is advisory */ }
           return result;
         },
@@ -332,7 +337,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
       admin: {
         permission: "plugins:read",
         handler: (ctx: RouteContext) =>
-          handleAdminRoute(ctx, collections, suppressionFilter, evaluator, options.blockMappings, options.contentFieldsByCollection, options.descriptionFieldsByCollection),
+          handleAdminRoute(ctx, collections, suppressionFilter, evaluator, options.blockMappings, options.contentFieldsByCollection, options.descriptionFieldsByCollection, options.metadataFieldsByCollection),
       },
       // JSON data endpoint for the React adminEntry. Two routes:
       //   POST /_emdash/api/plugins/aexeo-emdash/data    — read current findings
@@ -352,6 +357,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
             blockMappings: options.blockMappings,
             contentFieldsByCollection: options.contentFieldsByCollection,
             descriptionFieldsByCollection: options.descriptionFieldsByCollection,
+            metadataFieldsByCollection: options.metadataFieldsByCollection,
           })).payload,
       },
       refresh: {
@@ -365,6 +371,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
             blockMappings: options.blockMappings,
             contentFieldsByCollection: options.contentFieldsByCollection,
             descriptionFieldsByCollection: options.descriptionFieldsByCollection,
+            metadataFieldsByCollection: options.metadataFieldsByCollection,
           }),
       },
       // /facts route serves the truth-manifest authoring UI. It
@@ -465,6 +472,7 @@ async function handleAdminRoute(
   blockMappings?: CustomBlockMappings,
   contentFieldsByCollection?: Record<string, readonly string[]>,
   descriptionFieldsByCollection?: Record<string, readonly DescriptionField[]>,
+  metadataFieldsByCollection?: Record<string, MetadataFields>,
 ): Promise<BlockResponse> {
   const body = normalizeInteraction(ctx.input);
   if (body.type === "page_load") {
@@ -501,6 +509,7 @@ async function handleAdminRoute(
         blockMappings,
         contentFieldsByCollection,
         descriptionFieldsByCollection,
+        metadataFieldsByCollection,
       });
     }
     if (body.action_id.startsWith("filter:")) {
