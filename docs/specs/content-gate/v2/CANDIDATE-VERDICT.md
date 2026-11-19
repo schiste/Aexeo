@@ -74,7 +74,8 @@ The verifier optionally accepts `--fresh-envelope FRESH.json`, a repeatable
 `--validator-version VERSION`. All three policy requirements are mandatory in
 this mode. The host must obtain the fresh envelope from an independently trusted
 re-evaluation of the same current inputs. The verifier reconstructs both input
-bindings, validates the v1 change and verdict schemas and inline content hashes,
+bindings, validates the v1 change and verdict schemas, unique entity identities, the Git
+origin/base relationship and inline content hashes,
 compares each verdict subject with the supplied change, requires the selected
 checks to be blocking and passed, and compares the full verdicts except their
 evaluation timestamps. Matching tampered verdicts with an incorrect subject or

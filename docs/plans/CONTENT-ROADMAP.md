@@ -378,6 +378,9 @@ registry before considering the release delivered.
   artifact bytes and compares their verdicts except the evaluation timestamp.
   It rejects different decision manifests before reading artifacts and hashes
   each supplied artifact once; the host still must ensure stable, trusted inputs.
+  Independent validated comparisons reject a Git origin paired with an opaque
+  base and require an absolute content root for file references, as required by
+  the v1 profile and the Rust evaluator.
   Candidate-envelope comparison can optionally validate both verdicts against
   a separately supplied fresh evaluation, the change subject and host-selected
   required checks and validator labels. It does not establish trust, freshness

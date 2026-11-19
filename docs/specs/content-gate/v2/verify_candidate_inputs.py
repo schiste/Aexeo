@@ -255,7 +255,7 @@ def verify(envelope_bytes, base_bytes, after_bytes, artifacts):
 def compare_fresh(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts, required_checks, expected_validator):
     """Compare a trusted fresh evaluation; this never authorizes publication."""
     from compare_offline_receipts import (
-        _typed_equal, _validate_schema, require_passed_checks,
+        _typed_equal, validate_change_semantics, require_passed_checks,
         require_validator_identity, validate_verdict, verify_content_states,
     )
     # Both bindings are reconstructed against the same host-supplied bytes.
@@ -263,11 +263,9 @@ def compare_fresh(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifact
     verify(fresh_bytes, base_bytes, after_bytes, artifacts)
     previous, fresh = parse(previous_bytes), parse(fresh_bytes)
     change = parse(artifacts['change'])
-    _validate_schema(change, 'change.schema.json')
+    validate_change_semantics(change)
     verify_content_states(change, {})  # Candidate mode requires inline bytes.
     entries = change['entries']
-    if len({entry['entity_id'] for entry in entries}) != len(entries):
-        raise VerificationError('duplicate entity ID')
     subject = {'change_id': change['change_id'], 'base': change['base'],
                'entries': [{'entity_id': entry['entity_id'],
                             'sha256': entry['after']['sha256'] if entry.get('after') is not None else None}
