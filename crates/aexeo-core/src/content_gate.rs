@@ -3880,9 +3880,9 @@ impl ContentPreset {
                         &input.text,
                         input.evidence_sources.as_ref().and_then(|s| s.get(source)),
                     ) {
-                        (Some(text), Some(snapshot)) => match serde_json::from_str::<
-                            serde_json::Value,
-                        >(snapshot)
+                        (Some(text), Some(snapshot)) => match aexeo_contracts::content_gate_change_validation::parse_unique_json_value(
+                            snapshot.as_bytes(),
+                        )
                         {
                             Ok(value) => match value.pointer(pointer) {
                                 Some(actual) => {
@@ -3907,7 +3907,7 @@ impl ContentPreset {
                             },
                             Err(_) => {
                                 reason =
-                                    Some(format!("evidence source is not valid JSON: {source}"))
+                                    Some(format!("evidence source has invalid or ambiguous JSON: {source}"))
                             }
                         },
                         _ => {
@@ -3926,8 +3926,11 @@ impl ContentPreset {
                     (Some(text), Some(sources)) => match (sources.get(source), sources.get(review))
                     {
                         (Some(snapshot), Some(record)) => {
-                            match serde_json::from_str::<EvidenceReviewRecord>(record) {
-                                Ok(record)
+                            match aexeo_contracts::content_gate_change_validation::parse_unique_json_value(record.as_bytes())
+                                .ok()
+                                .and_then(|value| serde_json::from_value::<EvidenceReviewRecord>(value).ok())
+                            {
+                                Some(record)
                                     if record.claim == *claim
                                         && record.source_text == *snapshot
                                         && !record.reviewer.trim().is_empty() =>
@@ -3942,12 +3945,12 @@ impl ContentPreset {
                                         _ => reason = Some("external review is uncertain".into()),
                                     }
                                 }
-                                Ok(_) => {
+                                Some(_) => {
                                     reason = Some(
                                         "external review is stale or missing a reviewer".into(),
                                     )
                                 }
-                                Err(_) => reason = Some("external review is invalid".into()),
+                                None => reason = Some("external review has invalid or ambiguous JSON".into()),
                             }
                         }
                         _ => reason = Some("evidence source or review is unavailable".into()),
@@ -6008,6 +6011,61 @@ group = "html"
             GateStatus::NotChecked
         );
     }
+    #[test]
+    fn structured_evidence_and_reviews_reject_duplicate_json_keys() {
+        let structured = ContentPreset::from_toml("version=1\nname='fact'\n[[gates]]\nid='fact'\nkind='structured_fact'\nsource='s'\nclaim='The count is 14.'\npointer='/data/count'\nexpected=14\n").unwrap();
+        let check = |preset: &ContentPreset, source: &str, review: Option<&str>| {
+            let mut evidence = BTreeMap::from([("s".into(), source.into())]);
+            if let Some(record) = review {
+                evidence.insert("r".into(), record.into());
+            }
+            let input = ContentInput {
+                text: Some("The count is 14.".into()),
+                evidence_sources: Some(evidence),
+                ..Default::default()
+            };
+            preset.evaluate(&input).unwrap().gates.remove(0)
+        };
+        assert_eq!(
+            check(&structured, r#"{"data":{"count":14}}"#, None).status,
+            GateStatus::Passed
+        );
+        for json in [
+            r#"{"data":{"count":0,"count":14}}"#,
+            r#"{"data":{"count":14},"data":{"count":14}}"#,
+        ] {
+            let result = check(&structured, json, None);
+            assert_eq!(result.status, GateStatus::NotChecked);
+            assert!(result.blocking);
+            assert!(
+                result
+                    .reason
+                    .as_deref()
+                    .unwrap()
+                    .contains("invalid or ambiguous JSON")
+            );
+            assert!(result.findings.is_empty());
+        }
+        let review = ContentPreset::from_toml("version=1\nname='review'\n[[gates]]\nid='review'\nkind='evidence_review'\nsource='s'\nreview='r'\nclaim='The count is 14.'\n").unwrap();
+        let valid = r#"{"claim":"The count is 14.","source_text":"source","support":"supported","reliability":"reliable","reviewer":"editor","provenance":{"version":"v1"}}"#;
+        assert_eq!(
+            check(&review, "source", Some(valid)).status,
+            GateStatus::Passed
+        );
+        let ambiguous = valid.replace(r#""version":"v1""#, r#""version":"old","version":"v1""#);
+        let result = check(&review, "source", Some(&ambiguous));
+        assert_eq!(result.status, GateStatus::NotChecked);
+        assert!(result.blocking);
+        assert!(
+            result
+                .reason
+                .as_deref()
+                .unwrap()
+                .contains("invalid or ambiguous JSON")
+        );
+        assert!(result.findings.is_empty());
+    }
+
     #[test]
     fn repeated_terms_keep_unicode_line_and_column_positions() {
         let preset = ContentPreset::from_toml(
