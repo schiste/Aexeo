@@ -26,6 +26,7 @@ describe("configured plugin declaration", () => {
       "get-revision-audit": "plugins:read",
       "set-revision-review": "plugins:manage",
       "get-revision-review": "plugins:read",
+      "get-revision-review-history": "plugins:read",
       admin: "plugins:read",
       data: "plugins:read",
       refresh: "plugins:manage",

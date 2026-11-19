@@ -242,6 +242,13 @@ review against an individual finding. `set_review` and `get_review` expose the
 same operations to consented MCP clients. Saving requires `plugins:manage` and
 reading requires `plugins:read`. An explanation is required; reviews annotate
 rather than suppress findings and belong only to that audit. Re-auditing or
-changing the revision never automatically transfers a decision. One record is
-kept per finding (concurrent updates are last-write-wins); it is not an
-authenticated review history.
+changing the revision never automatically transfers a decision. The current record per finding is last-write-wins. New submissions also have
+separate history entries, accessible through `get_review_history` with
+`plugins:read`. Entries identify the authenticated host account when available;
+machine tokens or hosts without an account are explicitly unattributed. An account
+is not proof of a human review. Existing overwritten decisions cannot be recovered,
+and host KV can be modified or deleted. History entries and the current record are
+separate, non-transactional writes: a history submission may exist even if updating
+the current record failed, and concurrent ordering is not guaranteed. These
+annotations are advisory and cannot authorize publication or provide a tamper-proof
+audit trail.
