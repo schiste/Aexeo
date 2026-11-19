@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 
 from test_decision_binding_vector import binding
@@ -242,6 +243,13 @@ class ReceiptInterop(unittest.TestCase):
                 else:
                     checked = subprocess.run(comparison_args + ["--validate-verdicts"], capture_output=True, text=True)
                     self.assertEqual(checked.returncode, 0, checked.stderr)
+                    with (ROOT / "Cargo.toml").open("rb") as cargo_manifest:
+                        expected_version = tomllib.load(cargo_manifest)["workspace"]["package"]["version"]
+                    identity = ["--validator-name", "aexeo", "--validator-version", expected_version]
+                    checked_identity = subprocess.run(comparison_args + identity, capture_output=True, text=True)
+                    self.assertEqual(checked_identity.returncode, 0, checked_identity.stderr)
+                    wrong_identity = ["--validator-name", "aexeo", "--validator-version", expected_version + "-wrong"]
+                    self.assertNotEqual(subprocess.run(comparison_args + wrong_identity, capture_output=True).returncode, 0)
                     try:
                         import rfc3986_validator  # noqa: F401
                     except ImportError:

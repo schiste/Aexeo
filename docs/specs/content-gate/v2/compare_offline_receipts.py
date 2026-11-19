@@ -131,6 +131,16 @@ def require_passed_checks(verdict, required_checks):
             raise VerificationError("required check did not pass as blocking")
 
 
+def require_validator_identity(verdict, expected):
+    """Compare host-supplied identity labels; this does not authenticate them."""
+    if (not isinstance(expected, tuple) or len(expected) != 2
+            or any(not isinstance(value, str) or not value.strip() for value in expected)):
+        raise VerificationError("invalid expected validator identity")
+    validator = verdict.get("validator")
+    if not isinstance(validator, dict) or (validator.get("name"), validator.get("version")) != expected:
+        raise VerificationError("validator identity differs from host requirement")
+
+
 def _typed_equal(left, right):
     # Python otherwise considers True == 1 and 1 == 1.0. Preserve JSON value
     # types and arrays; object order is irrelevant and all members are compared.
@@ -262,17 +272,20 @@ def _receipt_from_input(data, is_bundle):
     return parse_receipt(encoded)
 
 
-def compare_receipts(previous_bytes, fresh_bytes, artifacts, validate=False, verify_change_subject=False, validate_change=False, verify_inline_content=False, content_files=None, required_checks=None, previous_bundle=False, fresh_bundle=False):
+def compare_receipts(previous_bytes, fresh_bytes, artifacts, validate=False, verify_change_subject=False, validate_change=False, verify_inline_content=False, content_files=None, required_checks=None, previous_bundle=False, fresh_bundle=False, expected_validator=None):
     if verify_inline_content and content_files is not None:
         raise VerificationError("content verification modes are mutually exclusive")
     previous, old_manifest = _receipt_from_input(previous_bytes, previous_bundle)
     fresh, _ = _receipt_from_input(fresh_bytes, fresh_bundle)
-    if validate or required_checks is not None:
+    if validate or required_checks is not None or expected_validator is not None:
         validate_verdict(previous["verdict"])
         validate_verdict(fresh["verdict"])
     if required_checks is not None:
         require_passed_checks(previous["verdict"], required_checks)
         require_passed_checks(fresh["verdict"], required_checks)
+    if expected_validator is not None:
+        require_validator_identity(previous["verdict"], expected_validator)
+        require_validator_identity(fresh["verdict"], expected_validator)
     # Equal decisions must refer to the same input snapshot. Comparing the
     # manifests first also lets us read each supplied artifact just once.
     if previous["schema"] != fresh["schema"]:
@@ -312,6 +325,8 @@ def main(argv=None):
         group.add_argument("--" + role.replace("_", "-") + "-absent", action="store_true")
     parser.add_argument("--validate-verdicts", action="store_true", help="validate v1 schemas and check summary consistency (requires jsonschema and RFC 3339 support)")
     parser.add_argument("--require-check", action="append", help="require this exact check ID to be blocking and passed; implies verdict validation; repeatable")
+    parser.add_argument("--validator-name", help="require this exact validator name (also requires --validator-version)")
+    parser.add_argument("--validator-version", help="require this exact validator version (also requires --validator-name)")
     parser.add_argument("--verify-subject", action="store_true", help="compare both v1 subjects to the independently supplied change artifact")
     parser.add_argument("--validate-change", action="store_true", help="validate the bound change against its v1 schema and verify its verdict subject")
     content_mode = parser.add_mutually_exclusive_group()
@@ -326,7 +341,8 @@ def main(argv=None):
         event = {"event": "offline_receipt_comparison", "status": status,
                  "duration_ms": round((time.perf_counter() - started) * 1000, 3),
                  "previous_bundle": args.previous_bundle, "fresh_bundle": args.fresh_bundle,
-                 "verdict_validation_requested": args.validate_verdicts or args.require_check is not None,
+                 "verdict_validation_requested": args.validate_verdicts or args.require_check is not None or args.validator_name is not None or args.validator_version is not None,
+                 "validator_identity_required": args.validator_name is not None or args.validator_version is not None,
                  "required_check_count": len(args.require_check or []),
                  "subject_verification_requested": args.verify_subject or args.validate_change or args.verify_inline_content or args.content_files is not None,
                  "change_validation_requested": args.validate_change or args.verify_inline_content or args.content_files is not None,
@@ -344,12 +360,16 @@ def main(argv=None):
         with _open_regular(args.fresh) as source:
             fresh = source.read((MAX_BUNDLE_BYTES if args.fresh_bundle else MAX_RECEIPT_BYTES) + 1)
         artifacts = {role: getattr(args, role) for role in REQUIRED + OPTIONAL}
+        expected_validator = None
+        if args.validator_name is not None or args.validator_version is not None:
+            expected_validator = (args.validator_name, args.validator_version)
         stats = compare_receipts(previous, fresh, artifacts, validate=args.validate_verdicts,
                                  verify_change_subject=args.verify_subject, validate_change=args.validate_change,
                                  verify_inline_content=args.verify_inline_content,
                                  content_files=read_content_map(args.content_files) if args.content_files is not None else None,
                                  required_checks=args.require_check,
-                                 previous_bundle=args.previous_bundle, fresh_bundle=args.fresh_bundle)
+                                 previous_bundle=args.previous_bundle, fresh_bundle=args.fresh_bundle,
+                                 expected_validator=expected_validator)
     except (OSError, VerificationError):
         telemetry("error")
         print("Offline receipt comparison failed.", file=sys.stderr)
