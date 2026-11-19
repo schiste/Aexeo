@@ -43,6 +43,10 @@ unavailable check may become a pass.
   it reuses reports only for unchanged items and withholds results if any item
   is not assessed. Unsupported inputs fail closed. This is not
   a persistent cache or a general incremental site evaluator.
+  An explicit adapted mode also compares mixed Markdown, static HTML and
+  paragraph text for supported independent item gates, with reuse and full
+  evaluation regression tests. Missing capabilities remain not checked; this
+  is neither a rendered-page assessment nor a publication verdict.
 - [#530](https://github.com/schiste/Aexeo/pull/530) extends link impact through
   reverse-reachable sources in the union of old and candidate graphs, with
   explicit rename bridging; [#533](https://github.com/schiste/Aexeo/pull/533)
