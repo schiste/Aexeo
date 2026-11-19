@@ -2105,11 +2105,25 @@ fn candidate_bound_verdict_accepts_bound_collection_and_rejects_mismatch() {
     let prior = dir.path().join("prior.json");
     fs::write(&base, serde_json::to_vec(&serde_json::json!({"scope":"site", "site_id":"site", "site_base_url":null, "base":{"kind":"opaque","revision":"r1"}, "complete":true, "items":[]})).unwrap()).unwrap();
     fs::write(&after, serde_json::to_vec(&serde_json::json!([{"entity_id":"article", "public_path":"/article", "media_type":"text/plain", "revision":null, "sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "source":"abc", "links":null}])).unwrap()).unwrap();
-    let mut snapshot = serde_json::json!({"change_id":"example", "complete":true, "items":[{"id":"article", "metadata":{"slug":"article"}}]});
-    fs::write(&collection, serde_json::to_vec(&snapshot).unwrap()).unwrap();
     let mut change = input();
     change["entries"][0]["metadata"] = serde_json::json!({"slug":"article"});
     let policy = "version=1\nname='test'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n";
+    let candidate_base = serde_json::from_slice(&fs::read(&base).unwrap()).unwrap();
+    let candidate_after: Vec<aexeo_core::content_candidate::CandidateItem> =
+        serde_json::from_slice(&fs::read(&after).unwrap()).unwrap();
+    let candidate_change = serde_json::from_value(change.clone()).unwrap();
+    let preset = aexeo_core::content_gate::ContentPreset::from_toml(policy).unwrap();
+    let baseline = aexeo_core::content_incremental::CollectionBaseline::prepare(
+        candidate_base,
+        Default::default(),
+        preset,
+    )
+    .unwrap();
+    let projected = baseline
+        .project_candidate(&candidate_change, &candidate_after)
+        .unwrap();
+    let mut snapshot = serde_json::to_value(projected).unwrap();
+    fs::write(&collection, serde_json::to_vec(&snapshot).unwrap()).unwrap();
     let opts = [
         "--offline-receipt",
         "--experimental-bound-verdict",

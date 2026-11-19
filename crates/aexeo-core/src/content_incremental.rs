@@ -358,6 +358,26 @@ pub struct CollectionBaseline {
     preset: ContentPreset,
 }
 
+/// A host-projected candidate collection that can be borrowed by the existing
+/// change-verdict APIs. Completeness is inherited from the host's base claim;
+/// it is not independently established by this type.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectedCandidateCollection {
+    change_id: String,
+    complete: bool,
+    items: Vec<ContentInput>,
+}
+
+impl ProjectedCandidateCollection {
+    pub fn as_change_collection(&self) -> crate::content_gate_verdict::ChangeCollection<'_> {
+        crate::content_gate_verdict::ChangeCollection {
+            change_id: &self.change_id,
+            items: &self.items,
+            complete: self.complete,
+        }
+    }
+}
+
 /// A collection report is not a publication decision. Individual gates can
 /// be not checked while still retaining findings from observed items.
 #[derive(Debug, Serialize)]
@@ -418,6 +438,17 @@ impl CollectionBaseline {
         })
     }
 
+    /// Project the candidate metadata for the existing change-verdict APIs.
+    /// The host must verify freshness, authenticity and completeness separately.
+    pub fn project_candidate(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+    ) -> Result<ProjectedCandidateCollection, NotChecked> {
+        let overlay = checked_overlay(&self.snapshot, change, after)?;
+        self.project_overlay(change, &overlay)
+    }
+
     /// Rebuild the candidate metadata collection from the owned base and the
     /// metadata in each change entry, then run the shared collection evaluator.
     pub fn evaluate(&self, change: &Change, after: &[CandidateItem]) -> CollectionEvaluation {
@@ -441,11 +472,11 @@ impl CollectionBaseline {
         self.evaluate_overlay(change, &overlay)
     }
 
-    fn evaluate_overlay(
+    fn project_overlay(
         &self,
         change: &Change,
         overlay: &CandidateOverlay,
-    ) -> Result<ContentReport, NotChecked> {
+    ) -> Result<ProjectedCandidateCollection, NotChecked> {
         let mut metadata = self.metadata.clone();
         for entry in &change.entries {
             let old_id = match entry.operation {
@@ -485,12 +516,25 @@ impl CollectionBaseline {
         {
             return Err(unavailable("candidate metadata inventory mismatch"));
         }
+        Ok(ProjectedCandidateCollection {
+            change_id: change.change_id.clone(),
+            complete: true,
+            items: collection,
+        })
+    }
+
+    fn evaluate_overlay(
+        &self,
+        change: &Change,
+        overlay: &CandidateOverlay,
+    ) -> Result<ContentReport, NotChecked> {
+        let projected = self.project_overlay(change, overlay)?;
         let input = ContentInput {
             id: self.snapshot.scope.clone(),
             ..Default::default()
         };
         let context = crate::content_gate::ContentEvaluationContext {
-            collection: Some(&collection),
+            collection: Some(&projected.items),
             ..Default::default()
         };
         self.preset
@@ -542,6 +586,16 @@ impl ComposedBaseline {
         let items = IncrementalBaseline::prepare_adapted(snapshot.clone(), items)?;
         let collection = CollectionBaseline::prepare(snapshot, metadata, collection)?;
         Ok(Self { items, collection })
+    }
+
+    /// Project the same candidate collection for an independently executed
+    /// change verdict. This does not authenticate or lock the host's inputs.
+    pub fn project_candidate(
+        &self,
+        change: &Change,
+        after: &[CandidateItem],
+    ) -> Result<ProjectedCandidateCollection, NotChecked> {
+        self.collection.project_candidate(change, after)
     }
 
     /// Evaluate both scopes independently so a missing capability or incomplete
@@ -790,6 +844,155 @@ mod tests {
                 serde_json::to_value(expected_collection).unwrap()
             );
         }
+    }
+
+    #[test]
+    fn projected_collection_integrates_with_bound_candidate_verdict() {
+        use crate::content_gate_sources::ConfinedContentFiles;
+        use crate::content_gate_verdict::{
+            CandidateDecisionContext, OfflineDecisionContext,
+            evaluate_experimental_candidate_verdict, revalidate_experimental_candidate_verdict,
+        };
+        use crate::html_content_adapter::HtmlContentScope;
+        use std::{
+            io::{self, Cursor},
+            path::Path,
+        };
+        struct NoFiles;
+        impl ConfinedContentFiles for NoFiles {
+            type Reader = Cursor<Vec<u8>>;
+            fn open(&mut self, _: &Path, _: &Path) -> io::Result<Self::Reader> {
+                panic!("unexpected file access")
+            }
+        }
+        let (snapshot, _, mut change) = fixture();
+        let preset = ContentPreset::from_toml("version=1\nname='mixed'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\nblocking=true\n").unwrap();
+        let metadata = snapshot
+            .items
+            .iter()
+            .map(|i| {
+                (
+                    i.entity_id.clone(),
+                    Some(BTreeMap::from([("slug".into(), i.entity_id.clone())])),
+                )
+            })
+            .collect();
+        let updated = item("a", "updated words", Some(vec!["/b"]));
+        let mut update = entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&updated),
+        );
+        update.metadata = Some(BTreeMap::from([("slug".into(), "b".into())]));
+        change.entries = vec![update];
+        let baseline =
+            ComposedBaseline::prepare_adapted(snapshot.clone(), metadata, preset.clone()).unwrap();
+        let projected = baseline
+            .project_candidate(&change, std::slice::from_ref(&updated))
+            .unwrap();
+        let encoded = serde_json::to_value(&projected).unwrap();
+        assert_eq!(encoded["change_id"], change.change_id);
+        assert_eq!(encoded["complete"], true);
+        assert_eq!(
+            encoded["items"].as_array().unwrap().len(),
+            snapshot.items.len()
+        );
+        let decision = OfflineDecisionContext {
+            change: &change,
+            preset: &preset,
+            max_entry_bytes: 1024,
+            max_total_bytes: 4096,
+            plain_text_paragraphs: true,
+            collection: Some(projected.as_change_collection()),
+            evaluator_identity: b"test-build",
+        };
+        let after = [updated];
+        let ctx = CandidateDecisionContext {
+            decision: &decision,
+            base: &snapshot,
+            after: &after,
+        };
+        let verdict = evaluate_experimental_candidate_verdict(
+            &ctx,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        assert_eq!(
+            verdict.receipt.verdict.status,
+            aexeo_contracts::content_gate_protocol::VerdictStatus::Fail
+        );
+        assert!(
+            revalidate_experimental_candidate_verdict(
+                &verdict,
+                &ctx,
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_ok()
+        );
+        let mut changed_metadata = projected.clone();
+        changed_metadata
+            .items
+            .iter_mut()
+            .find(|item| item.id == "e")
+            .unwrap()
+            .metadata
+            .as_mut()
+            .unwrap()
+            .insert("slug".into(), "different".into());
+        let changed_decision = OfflineDecisionContext {
+            collection: Some(changed_metadata.as_change_collection()),
+            ..decision
+        };
+        let changed_ctx = CandidateDecisionContext {
+            decision: &changed_decision,
+            ..ctx
+        };
+        assert!(
+            revalidate_experimental_candidate_verdict(
+                &verdict,
+                &changed_ctx,
+                &mut NoFiles,
+                "2026-01-02T00:00:00Z",
+                HtmlContentScope::Document
+            )
+            .is_err()
+        );
+        let mut missing_change = change.clone();
+        missing_change.entries[0].metadata = None;
+        let missing_projection = baseline.project_candidate(&missing_change, &after).unwrap();
+        let missing_decision = OfflineDecisionContext {
+            change: &missing_change,
+            preset: &preset,
+            max_entry_bytes: 1024,
+            max_total_bytes: 4096,
+            plain_text_paragraphs: true,
+            collection: Some(missing_projection.as_change_collection()),
+            evaluator_identity: b"test-build",
+        };
+        let missing_ctx = CandidateDecisionContext {
+            decision: &missing_decision,
+            base: &snapshot,
+            after: &after,
+        };
+        let missing_verdict = evaluate_experimental_candidate_verdict(
+            &missing_ctx,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        assert_eq!(
+            missing_verdict.receipt.verdict.status,
+            aexeo_contracts::content_gate_protocol::VerdictStatus::NotChecked
+        );
+        let mut stale = change.clone();
+        stale.base.revision = "stale".into();
+        assert!(baseline.project_candidate(&stale, &after).is_err());
     }
 
     #[test]
