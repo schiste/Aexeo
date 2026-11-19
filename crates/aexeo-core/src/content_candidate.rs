@@ -643,6 +643,25 @@ mod tests {
     }
 
     #[test]
+    fn removed_route_reference_byte_limit_is_incomplete() {
+        let (mut base, mut change) = setup();
+        base.items[2].entity_id = "x".repeat(8 * 1024 * 1024);
+        change
+            .entries
+            .push(entry("a", Operation::Delete, Some(&base.items[0]), None));
+        let candidate = overlay_candidate(&base, &change, &[]).unwrap().candidate;
+        let report = compare_removed_route_references(&base, &candidate).unwrap();
+        assert!(!report.complete);
+        assert!(report.references.is_empty());
+        assert!(
+            report
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("output limit"))
+        );
+    }
+
+    #[test]
     fn reused_route_is_not_reported_as_removed() {
         let (base, mut change) = setup();
         let replacement = item("replacement", "/a", "new", Some(vec![]));
