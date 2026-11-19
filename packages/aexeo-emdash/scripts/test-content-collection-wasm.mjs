@@ -380,3 +380,23 @@ const legacyMetadata = await evaluateCoverage(coverageDoc);
 assert.equal(legacyMetadata.gates[0].status, "failed");
 await assert.rejects(evaluateCoverage({ ...coverageDoc, observed_metadata_fields: null }), /observed_metadata_fields/);
 console.log("WASM metadata coverage distinguishes unknown, absent and legacy input");
+
+const reviewAgePreset = `version=1
+name="review-age"
+[[gates]]
+id="age"
+kind="evidence_review_age"
+source="s"
+review="r"
+claim="Count is 14."
+as_of="2024-03-01"
+max_days=1
+`;
+const reviewAgeDocument = { route: "/review", title: "Review", body: [{ children: [{ _type: "span", text: "Count is 14." }] }] };
+const assessment = (date) => JSON.stringify({ claim: "Count is 14.", source_text: "source", support: "supported", reliability: "reliable", reviewer: "editor", provenance: { reviewed_at: date } });
+for (const [date, status] of [["2024-02-29", "passed"], ["2024-02-28", "failed"], ["2024-03-02", "not_checked"]]) {
+  const report = await evaluateContent(reviewAgeDocument, "test", { test: reviewAgePreset }, { s: "source", r: assessment(date) });
+  assert.equal(report.gates[0].status, status);
+  assert.equal(report.gates[0].blocking, false);
+}
+console.log("WASM source review age check passed");

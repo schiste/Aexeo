@@ -472,6 +472,9 @@ registry before considering the release delivered.
 - [ ] Validate sandbox sidecar preset configuration, real host permissions and
   representative records before relying on the deployed workflow.
 - [ ] Source and factuality evaluation after the basic gates are validated.
+  A composable, advisory source-review-age gate checks an explicit reference
+  date against a claim- and source-bound review record, with aggregate age
+  measurements. It does not establish that the review occurred or facts hold.
   Structured evidence and external review records reject JSON with duplicate
   keys at any depth; ambiguous inputs are not checked, not treated as a pass.
   EmDash trusted hosts can opt into per-document evidence snapshots; failures remain unchecked and never fall back to a shared snapshot. This supplies inputs only and is not factuality validation.

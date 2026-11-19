@@ -756,6 +756,39 @@ claim = "The count is 14."
 
 Supply both named snapshots, for example `--evidence-source study=source.txt --evidence-source study-review=review.json`. `support` accepts `supported`, `contradicted` or `uncertain`; `reliability` accepts `reliable`, `unreliable` or `uncertain`. Only supported plus reliable passes. Contradiction or unreliable source fails; uncertainty, missing inputs, malformed records, duplicate object keys at any depth and reviews of a different claim or source yield `not_checked`. The reviewer identifier must be nonempty. An optional `provenance` object can hold string metadata; it is informational and does not authenticate the review. A changed source requires a new review.
 
+### Source review age
+
+Compose `evidence_review_age` with `evidence_review` when reviews must be
+revisited periodically. The caller supplies a fixed reference date and the
+review record contains a `provenance.reviewed_at` calendar date:
+
+```toml
+[[gates]]
+id = "study.review_age"
+kind = "evidence_review_age"
+source = "study"
+review = "study-review"
+claim = "The count is 14."
+as_of = "2026-11-19"
+max_days = 180
+blocking = false
+```
+
+For example, add `"provenance":{"reviewed_at":"2026-09-01"}` to the review
+record. A review older than `max_days` produces an advisory finding by default.
+The claim must occur in observed text and the review must match the exact claim,
+source and a nonempty reviewer. A missing, invalid or future review date, an
+unavailable source or content, or an unmatched review is `not_checked`. Both
+`as_of` and `reviewed_at` use strict `YYYY-MM-DD` dates; update `as_of` for each
+run according to the host's policy. Reports contain aggregate age and threshold
+measurements when available. Set `blocking = true` only when your workflow
+intentionally requires a current review; unchecked blocking gates remain unchecked.
+
+This gate checks the supplied review date only. It does not assess source
+reliability, support, authorship, factual accuracy or whether a review was
+actually performed. Compose it with the source review gate and use trusted,
+independently protected records; the review date is a caller assertion.
+
 The [source review process](source-review-process.md) describes how an application can record a claim-specific human assessment and when to reassess it.
 
 The review itself is **trusted input**: Aexeo does not authenticate the reviewer, run an NLI model, calibrate its confidence, or independently verify the stated judgments. Applications must choose and evaluate their reviewer, protect the assessment's provenance, and decide when a human should review it. Exact text binding prevents accidental reuse against different input, but does not prevent a forged review.

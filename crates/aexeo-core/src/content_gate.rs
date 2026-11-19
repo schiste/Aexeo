@@ -687,6 +687,19 @@ pub enum ContentGate {
         #[serde(default = "default_blocking")]
         blocking: bool,
     },
+    /// Review the age of a claim-specific source assessment against a fixed date.
+    EvidenceReviewAge {
+        id: String,
+        source: String,
+        review: String,
+        claim: String,
+        as_of: String,
+        max_days: usize,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default)]
+        blocking: bool,
+    },
     /// Require a metadata field to be unique across a supplied collection.
     UniqueCollectionMetadata {
         id: String,
@@ -796,7 +809,8 @@ impl ContentGate {
             | Self::Custom { severity, .. }
             | Self::EvidenceAnchors { severity, .. }
             | Self::StructuredFact { severity, .. }
-            | Self::EvidenceReview { severity, .. } => *severity,
+            | Self::EvidenceReview { severity, .. }
+            | Self::EvidenceReviewAge { severity, .. } => *severity,
             Self::SiteAudit { .. } | Self::SiteGroup { .. } => Severity::Warning,
         }
     }
@@ -841,6 +855,7 @@ impl ContentGate {
             | Self::EvidenceAnchors { blocking, .. }
             | Self::StructuredFact { blocking, .. }
             | Self::EvidenceReview { blocking, .. }
+            | Self::EvidenceReviewAge { blocking, .. }
             | Self::SiteAudit { blocking, .. }
             | Self::SiteGroup { blocking, .. } => *blocking,
         }
@@ -893,7 +908,8 @@ impl ContentGate {
             Self::EditorialPacing { .. }
             | Self::EvidenceAnchors { .. }
             | Self::StructuredFact { .. }
-            | Self::EvidenceReview { .. } => "text_and_evidence",
+            | Self::EvidenceReview { .. }
+            | Self::EvidenceReviewAge { .. } => "text_and_evidence",
             Self::SiteAudit { .. } | Self::SiteGroup { .. } => "site",
         }
     }
@@ -938,6 +954,7 @@ impl ContentGate {
             | Self::EvidenceAnchors { id, .. }
             | Self::StructuredFact { id, .. }
             | Self::EvidenceReview { id, .. }
+            | Self::EvidenceReviewAge { id, .. }
             | Self::SiteAudit { id, .. }
             | Self::SiteGroup { id, .. } => id,
         }
@@ -1017,7 +1034,7 @@ fn editorial_suggestion(gate: &ContentGate) -> Option<&'static str> {
         ContentGate::MetadataLength { .. } => {
             Some("Review the metadata length against the configured limits without losing meaning.")
         }
-        ContentGate::MetadataAge { .. } => Some(
+        ContentGate::MetadataAge { .. } | ContentGate::EvidenceReviewAge { .. } => Some(
             "Review the content and its sources; the supplied date alone does not establish accuracy or currency.",
         ),
         ContentGate::FinalNewline { .. } => Some("Add a final newline to the source text."),
@@ -1328,7 +1345,19 @@ struct EvidenceReviewRecord {
     reliability: ReliabilityVerdict,
     reviewer: String,
     #[serde(default, rename = "provenance")]
-    _provenance: BTreeMap<String, String>,
+    provenance: BTreeMap<String, String>,
+}
+
+impl EvidenceReviewRecord {
+    fn parse(value: &str) -> Option<Self> {
+        aexeo_contracts::content_gate_change_validation::parse_unique_json_value(value.as_bytes())
+            .ok()
+            .and_then(|value| serde_json::from_value(value).ok())
+    }
+
+    fn matches(&self, claim: &str, source: &str) -> bool {
+        self.claim == claim && self.source_text == source && !self.reviewer.trim().is_empty()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1876,6 +1905,23 @@ impl ContentPreset {
                 {
                     bail!(
                         "evidence review requires distinct source and review names and a claim for {}",
+                        gate.id()
+                    )
+                }
+                ContentGate::EvidenceReviewAge {
+                    source,
+                    review,
+                    claim,
+                    as_of,
+                    ..
+                } if source.trim().is_empty()
+                    || review.trim().is_empty()
+                    || claim.trim().is_empty()
+                    || source == review
+                    || parse_iso_calendar_date(as_of).is_none() =>
+                {
+                    bail!(
+                        "evidence review age needs distinct sources, a claim and valid reference date for {}",
                         gate.id()
                     )
                 }
@@ -3926,15 +3972,8 @@ impl ContentPreset {
                     (Some(text), Some(sources)) => match (sources.get(source), sources.get(review))
                     {
                         (Some(snapshot), Some(record)) => {
-                            match aexeo_contracts::content_gate_change_validation::parse_unique_json_value(record.as_bytes())
-                                .ok()
-                                .and_then(|value| serde_json::from_value::<EvidenceReviewRecord>(value).ok())
-                            {
-                                Some(record)
-                                    if record.claim == *claim
-                                        && record.source_text == *snapshot
-                                        && !record.reviewer.trim().is_empty() =>
-                                {
+                            match EvidenceReviewRecord::parse(record) {
+                                Some(record) if record.matches(claim, snapshot) => {
                                     if !claim_is_present(text, claim, block_ends) {
                                         emit("Claim anchor is absent from content".into(), 1, 1);
                                     }
@@ -3950,13 +3989,69 @@ impl ContentPreset {
                                         "external review is stale or missing a reviewer".into(),
                                     )
                                 }
-                                None => reason = Some("external review has invalid or ambiguous JSON".into()),
+                                None => {
+                                    reason =
+                                        Some("external review has invalid or ambiguous JSON".into())
+                                }
                             }
                         }
                         _ => reason = Some("evidence source or review is unavailable".into()),
                     },
                     _ => reason = Some("content text or evidence sources are unavailable".into()),
                 },
+                ContentGate::EvidenceReviewAge {
+                    source,
+                    review,
+                    claim,
+                    as_of,
+                    max_days,
+                    ..
+                } => {
+                    measurements.insert("max_days".into(), *max_days);
+                    if let Ok(compact) = as_of.replace('-', "").parse::<usize>() {
+                        measurements.insert("as_of_yyyymmdd".into(), compact);
+                    }
+                    let sources = input.evidence_sources.as_ref();
+                    match (
+                        &input.text,
+                        sources.and_then(|s| s.get(source)),
+                        sources.and_then(|s| s.get(review)),
+                    ) {
+                        (Some(text), Some(snapshot), Some(record)) => {
+                            let parsed = EvidenceReviewRecord::parse(record);
+                            match parsed {
+                                Some(record)
+                                    if record.matches(claim, snapshot)
+                                        && claim_is_present(text, claim, block_ends) =>
+                                {
+                                    match (record.provenance.get("reviewed_at").and_then(|date| parse_iso_calendar_date(date)), parse_iso_calendar_date(as_of)) {
+                                        (Some(date), Some(reference)) if date <= reference => {
+                                            let age = (reference - date).whole_days() as usize;
+                                            measurements.insert("age_days".into(), age);
+                                            if age > *max_days {
+                                                emit(format!("Source review is {age} days old as of {as_of}; reassess the claim and source"), 1, 1);
+                                            }
+                                        }
+                                        (Some(_), Some(_)) => reason = Some("source review date is after the reference date".into()),
+                                        _ => reason = Some("source review date is missing or invalid; expected YYYY-MM-DD".into()),
+                                    }
+                                }
+                                Some(_) => reason = Some(
+                                    "source review is not bound to the current claim and source"
+                                        .into(),
+                                ),
+                                None => {
+                                    reason =
+                                        Some("external review has invalid or ambiguous JSON".into())
+                                }
+                            }
+                        }
+                        _ => {
+                            reason =
+                                Some("content, evidence source or review is unavailable".into())
+                        }
+                    }
+                }
                 ContentGate::Custom {
                     extension,
                     parameters,
@@ -6011,6 +6106,74 @@ group = "html"
             GateStatus::NotChecked
         );
     }
+    #[test]
+    fn evidence_review_age_is_reproducible_bound_and_advisory() {
+        let config = "version=1\nname='review-age'\n[[gates]]\nid='age'\nkind='evidence_review_age'\nsource='s'\nreview='r'\nclaim='Count is 14.'\nas_of='2024-03-01'\nmax_days=1\n";
+        let preset = ContentPreset::from_toml(config).unwrap();
+        for invalid in [
+            config.replace("2024-03-01", "2023-02-29"),
+            config.replace("review='r'", "review='s'"),
+            config.replace("claim='Count is 14.'", "claim=' '"),
+        ] {
+            assert!(ContentPreset::from_toml(&invalid).is_err());
+        }
+        let evaluate = |date: Option<&str>, source: &str, text: Option<&str>| {
+            let mut record = serde_json::json!({"claim":"Count is 14.", "source_text":"source", "support":"supported", "reliability":"reliable", "reviewer":"editor", "provenance":{}});
+            if let Some(date) = date {
+                record["provenance"]["reviewed_at"] = date.into();
+            }
+            let input = ContentInput {
+                text: text.map(str::to_owned),
+                evidence_sources: Some(BTreeMap::from([
+                    ("s".into(), source.into()),
+                    ("r".into(), record.to_string()),
+                ])),
+                ..Default::default()
+            };
+            preset.evaluate(&input).unwrap().gates.remove(0)
+        };
+        let fresh = evaluate(Some("2024-02-29"), "source", Some("Count is 14."));
+        assert_eq!(fresh.status, GateStatus::Passed);
+        assert!(!fresh.blocking);
+        assert_eq!(fresh.measurements["age_days"], 1);
+        assert_eq!(fresh.measurements["as_of_yyyymmdd"], 20240301);
+        let stale = evaluate(Some("2024-02-28"), "source", Some("Count is 14."));
+        assert_eq!(stale.status, GateStatus::Failed);
+        assert_eq!(stale.measurements["age_days"], 2);
+        assert!(stale.findings[0].message.contains("reassess"));
+        for (date, source, text) in [
+            (None, "source", Some("Count is 14.")),
+            (Some("2024-02-30"), "source", Some("Count is 14.")),
+            (Some("2024-03-02"), "source", Some("Count is 14.")),
+            (Some("2024-02-29"), "changed", Some("Count is 14.")),
+            (Some("2024-02-29"), "source", Some("different")),
+            (Some("2024-02-29"), "source", None),
+        ] {
+            let result = evaluate(date, source, text);
+            assert_eq!(result.status, GateStatus::NotChecked, "{date:?}");
+            assert!(result.findings.is_empty());
+        }
+        let ambiguous = ContentInput {
+            text: Some("Count is 14.".into()),
+            evidence_sources: Some(BTreeMap::from([
+                ("s".into(), "source".into()),
+                ("r".into(), r#"{"claim":"Count is 14.","source_text":"source","support":"supported","reliability":"reliable","reviewer":"editor","provenance":{"reviewed_at":"2024-02-28","reviewed_at":"2024-02-29"}}"#.into()),
+            ])),
+            ..Default::default()
+        };
+        let result = preset.evaluate(&ambiguous).unwrap().gates.remove(0);
+        assert_eq!(result.status, GateStatus::NotChecked);
+        assert!(result.findings.is_empty());
+        let blocking = ContentPreset::from_toml(&format!("{config}blocking=true\n")).unwrap();
+        let missing = ContentInput {
+            text: Some("Count is 14.".into()),
+            ..Default::default()
+        };
+        let result = blocking.evaluate(&missing).unwrap().gates.remove(0);
+        assert!(result.blocking);
+        assert_eq!(result.status, GateStatus::NotChecked);
+    }
+
     #[test]
     fn structured_evidence_and_reviews_reject_duplicate_json_keys() {
         let structured = ContentPreset::from_toml("version=1\nname='fact'\n[[gates]]\nid='fact'\nkind='structured_fact'\nsource='s'\nclaim='The count is 14.'\npointer='/data/count'\nexpected=14\n").unwrap();

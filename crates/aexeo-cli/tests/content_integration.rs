@@ -581,6 +581,53 @@ fn literal_evidence_checks_are_explicit_about_missing_and_mismatched_sources() {
 }
 
 #[test]
+fn source_review_age_cli_reports_stale_and_unavailable_reviews() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("review.toml");
+    let content = dir.path().join("article.txt");
+    let source = dir.path().join("source.txt");
+    let review = dir.path().join("review.json");
+    std::fs::write(&preset, "version=1\nname='review'\n[[gates]]\nid='age'\nkind='evidence_review_age'\nsource='s'\nreview='r'\nclaim='Count is 14.'\nas_of='2024-03-01'\nmax_days=1\nblocking=true\n").unwrap();
+    std::fs::write(&content, "Count is 14.").unwrap();
+    std::fs::write(&source, "source").unwrap();
+    let preset_arg = format!("custom={}", preset.display());
+    let source_arg = format!("s={}", source.display());
+    let review_arg = format!("r={}", review.display());
+    let run = |date: &str| {
+        let record = serde_json::json!({"claim":"Count is 14.", "source_text":"source", "support":"supported", "reliability":"reliable", "reviewer":"editor", "provenance":{"reviewed_at":date}});
+        std::fs::write(&review, record.to_string()).unwrap();
+        let out = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .arg("content")
+            .arg(&content)
+            .args([
+                "--preset",
+                "custom",
+                "--preset-source",
+                &preset_arg,
+                "--format",
+                "json",
+                "--evidence-source",
+                &source_arg,
+                "--evidence-source",
+                &review_arg,
+            ])
+            .output()
+            .unwrap();
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        (out.status.code().unwrap(), report)
+    };
+    let (code, fresh) = run("2024-02-29");
+    assert_eq!(code, 0);
+    assert_eq!(fresh["gates"][0]["measurements"]["age_days"], 1);
+    let (code, stale) = run("2024-02-28");
+    assert_eq!(code, 1);
+    assert_eq!(stale["gates"][0]["status"], "failed");
+    let (code, future) = run("2024-03-02");
+    assert_eq!(code, 2);
+    assert_eq!(future["gates"][0]["status"], "not_checked");
+}
+
+#[test]
 fn structured_facts_compare_values_and_report_missing_evidence() {
     let dir = tempfile::tempdir().unwrap();
     let preset = dir.path().join("facts.toml");
