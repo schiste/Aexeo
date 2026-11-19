@@ -744,13 +744,21 @@ fn exact_destinations_and_distinct_pages_are_not_near_variants() {
             "published",
             "<html lang='en'><main><a href='/a'>a</a><a href='/a/'>a slash</a><a href='/b?x=1'>query</a><a href='/missing'>none</a></main></html>",
         ),
-        ("https://example.org/a", "published", "<html lang='en'><main>a</main></html>"),
+        (
+            "https://example.org/a",
+            "published",
+            "<html lang='en'><main>a</main></html>",
+        ),
         (
             "https://example.org/a/",
             "published",
             "<html lang='en'><main>a slash</main></html>",
         ),
-        ("https://example.org/b", "published", "<html lang='en'><main>b</main></html>"),
+        (
+            "https://example.org/b",
+            "published",
+            "<html lang='en'><main>b</main></html>",
+        ),
     ]);
     let report = run_report(&input, false);
     assert!(!has_issue(
