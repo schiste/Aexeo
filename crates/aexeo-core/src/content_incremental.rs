@@ -477,6 +477,62 @@ impl CollectionBaseline {
     }
 }
 
+/// A single resolved preset composed of independent item gates and collection
+/// metadata gates, evaluated against the same owned base snapshot.
+pub struct ComposedBaseline {
+    items: IncrementalBaseline,
+    collection: CollectionBaseline,
+}
+
+/// Scope-specific reports, not an aggregate pass or publication decision.
+#[derive(Debug, Serialize)]
+pub struct ComposedEvaluation {
+    pub change_id: String,
+    pub items: IncrementalEvaluation,
+    pub collection: CollectionEvaluation,
+}
+
+impl ComposedBaseline {
+    /// Prepare a mixed preset using the Markdown, HTML and paragraph-text
+    /// adapters. Both item and collection gates must be present. Unsupported
+    /// gates, duplicate IDs, and invalid or incomplete inputs fail closed.
+    pub fn prepare_adapted(
+        snapshot: CandidateSnapshot,
+        metadata: BTreeMap<String, Option<BTreeMap<String, String>>>,
+        preset: ContentPreset,
+    ) -> Result<Self, NotChecked> {
+        preset
+            .validate()
+            .map_err(|_| unavailable("invalid content preset"))?;
+        let mut items = preset.clone();
+        let mut collection = preset;
+        items
+            .gates
+            .retain(|gate| !matches!(gate, ContentGate::UniqueCollectionMetadata { .. }));
+        collection
+            .gates
+            .retain(|gate| matches!(gate, ContentGate::UniqueCollectionMetadata { .. }));
+        if items.gates.is_empty() || collection.gates.is_empty() {
+            return Err(unavailable(
+                "mixed preset must contain item and collection gates",
+            ));
+        }
+        let items = IncrementalBaseline::prepare_adapted(snapshot.clone(), items)?;
+        let collection = CollectionBaseline::prepare(snapshot, metadata, collection)?;
+        Ok(Self { items, collection })
+    }
+
+    /// Evaluate both scopes independently so a missing capability or incomplete
+    /// collection cannot be hidden by a successful result in the other scope.
+    pub fn evaluate(&self, change: &Change, after: &[CandidateItem]) -> ComposedEvaluation {
+        ComposedEvaluation {
+            change_id: change.change_id.clone(),
+            items: self.items.evaluate(change, after),
+            collection: self.collection.evaluate(change, after),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -577,6 +633,85 @@ mod tests {
             })
             .collect()
     }
+    #[test]
+    fn composed_candidate_reports_both_scopes_and_preserves_unavailable_collection() {
+        let (snapshot, _, mut change) = fixture();
+        let preset = ContentPreset::from_toml("version=1\nname='mixed'\n[[gates]]\nid='words'\nkind='word_count'\nmin=2\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n").unwrap();
+        let metadata: BTreeMap<_, _> = snapshot
+            .items
+            .iter()
+            .map(|i| {
+                (
+                    i.entity_id.clone(),
+                    Some(BTreeMap::from([("slug".into(), i.entity_id.clone())])),
+                )
+            })
+            .collect();
+        let updated = item("a", "one", Some(vec!["/b"]));
+        let mut update = entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&updated),
+        );
+        update.metadata = Some(BTreeMap::from([("slug".into(), "b".into())]));
+        change.entries = vec![update];
+        let baseline =
+            ComposedBaseline::prepare_adapted(snapshot.clone(), metadata.clone(), preset.clone())
+                .unwrap();
+        let result = baseline.evaluate(&change, std::slice::from_ref(&updated));
+        let IncrementalEvaluation::Evaluated { reports, .. } = result.items else {
+            panic!("item evaluation unavailable")
+        };
+        assert_eq!(reports["a"].gates[0].status, GateStatus::Failed);
+        let CollectionEvaluation::Report { report, .. } = result.collection else {
+            panic!("collection unavailable")
+        };
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[0].findings.len(), 1);
+        change.entries[0].metadata = None;
+        let result = baseline.evaluate(&change, std::slice::from_ref(&updated));
+        assert!(matches!(
+            result.items,
+            IncrementalEvaluation::Evaluated { .. }
+        ));
+        let CollectionEvaluation::Report { report, .. } = result.collection else {
+            panic!("collection unavailable")
+        };
+        assert_eq!(report.gates[0].status, GateStatus::NotChecked);
+        change.base.revision = "stale".into();
+        let result = baseline.evaluate(&change, &[updated]);
+        assert!(matches!(
+            result.items,
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        assert!(matches!(
+            result.collection,
+            CollectionEvaluation::NotChecked { .. }
+        ));
+        let mut invalid = preset.clone();
+        invalid.gates.push(invalid.gates[0].clone());
+        assert!(ComposedBaseline::prepare_adapted(snapshot, metadata, invalid).is_err());
+    }
+
+    #[test]
+    fn composed_candidate_rejects_unsupported_or_missing_scope() {
+        let (snapshot, item_only, _) = fixture();
+        let metadata = snapshot
+            .items
+            .iter()
+            .map(|i| (i.entity_id.clone(), None))
+            .collect();
+        assert!(ComposedBaseline::prepare_adapted(snapshot.clone(), metadata, item_only).is_err());
+        let unsupported = ContentPreset::from_toml("version=1\nname='mixed'\n[[gates]]\nid='site'\nkind='site_group'\ngroup='links'\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n").unwrap();
+        let metadata = snapshot
+            .items
+            .iter()
+            .map(|i| (i.entity_id.clone(), None))
+            .collect();
+        assert!(ComposedBaseline::prepare_adapted(snapshot, metadata, unsupported).is_err());
+    }
+
     #[test]
     fn collection_candidate_matches_full_and_retains_partial_findings() {
         let (snapshot, _, mut change) = fixture();

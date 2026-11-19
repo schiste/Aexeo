@@ -104,3 +104,22 @@ complete, or from the same CMS revision. Hosts must bind and verify those inputs
 before relying on the report; a publication workflow additionally requires an
 atomic currentness check. Missing inventory or malformed changes return
 `not_checked`. The ordinary `IncrementalBaseline` still rejects collection gates.
+
+## Composed item and collection presets
+
+`ComposedBaseline::prepare_adapted` accepts one validated preset containing both
+supported independent item gates and `unique_collection_metadata` gates. It
+partitions the preset by scope, preserving order within each scope, and prepares
+both evaluators against the same owned base and metadata projection. Unsupported
+gates and presets missing either scope are rejected. Markdown, HTML and plain
+text use the same adapter and coverage requirements as `prepare_adapted`.
+
+`evaluate` returns separate item and collection results. Inspect both scopes
+and every gate status; neither an item result nor the enclosing object is an
+aggregate pass or publication verdict. A missing metadata field can leave a
+collection gate `not_checked` while item reports remain available. The host
+must establish metadata freshness, authenticity, and inventory completeness,
+and must protect the publication boundary. This experimental composition
+currently owns two base copies and reconstructs the overlay independently for
+each scope; collection evaluation scans the whole candidate collection. It is
+not a latency guarantee or a general incremental site evaluator.
