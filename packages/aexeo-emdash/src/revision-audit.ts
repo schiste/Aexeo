@@ -22,7 +22,7 @@ export interface RevisionAuditOptions {
 }
 
 const reportKey = (id: string) => `revision-audit:${id}`;
-const LIMITATION = "Only local configured content checks run; runtime providers are not invoked. Rendered page metadata and source freshness are not verified; the preset locale is taken from the current record; passing does not establish factual accuracy or currentness.";
+const LIMITATION = "Only local configured content checks run; runtime providers are not invoked. Rendered page metadata and source freshness are not verified; the preset locale is taken from the current record; passing does not establish factual accuracy or currentness and does not authorize publication.";
 
 /** Audit the exact host-provided historical data; never read or write article content. */
 export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRequest, options: RevisionAuditOptions) {
@@ -49,6 +49,14 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
   const auditId = crypto.randomUUID();
   const result = { status: "evaluated" as const, audit_id: auditId, collection, id, revision,
     preset: selected.name, selection_source: selected.source, limitation: LIMITATION,
+    assurance: {
+      purpose: "editorial_review" as const,
+      publication_authorization: "not_granted" as const,
+      rendered_page: "not_checked" as const,
+      source_freshness: "not_checked" as const,
+      runtime_providers: "not_invoked" as const,
+      locale_source: "current_record" as const,
+    },
     source_paths: { blocks: adapted.meta.bodySourcePaths ?? null, spans: adapted.meta.bodySourceSpanPaths ?? null }, report };
   await ctx.kv.set(reportKey(auditId), result);
   return { ...result, revision_status: revisionStatus(latest, revision) };

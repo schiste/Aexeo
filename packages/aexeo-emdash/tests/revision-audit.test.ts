@@ -20,10 +20,12 @@ describe("revision audits", () => {
     expect(result.status).toBe("evaluated");
     if (result.status !== "evaluated") throw new Error("expected report");
     expect(result.revision_status).toBe("published");
+    expect(result.assurance).toEqual({ purpose: "editorial_review", publication_authorization: "not_granted",
+      rendered_page: "not_checked", source_freshness: "not_checked", runtime_providers: "not_invoked", locale_source: "current_record" });
     expect(JSON.stringify(evaluate.mock.calls[0])).toContain("Historical sentence.");
     expect(JSON.stringify(evaluate.mock.calls[0])).not.toContain("current body");
     current.liveRevisionId = "rev3";
-    expect(await getRevisionAudit(ctx as never, result.audit_id)).toMatchObject({ revision: "rev1", revision_status: "stale" });
+    expect(await getRevisionAudit(ctx as never, result.audit_id)).toMatchObject({ revision: "rev1", revision_status: "stale", assurance: { publication_authorization: "not_granted" } });
     expect(result.limitation).toContain("does not establish factual accuracy");
   });
   it("does not silently use current content when revisions are unavailable or mismatched", async () => {
