@@ -154,6 +154,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   from observed missing fields and retain `not_checked`. For CMS projections,
   test that fallback display labels are not counted as observed metadata; cover
   real, empty, malformed and unavailable values through the actual evaluator.
+  For external providers, verify the projected input also excludes fallback
+  values, exposes coverage, and binds results to that coverage. Test that a
+  coverage-only change yields `not_checked` even when projected values match.
 - For collection gate changes, test the public Rust API as well as CLI and
   EmDash adapters: blank or repeated item IDs must not produce ambiguous
   findings. Exercise the scan limit separately and keep unexamined items
