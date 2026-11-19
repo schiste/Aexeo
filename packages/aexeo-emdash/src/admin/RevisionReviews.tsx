@@ -94,7 +94,7 @@ export function RevisionReviews(): React.JSX.Element {
       <p>{audit.limitation}</p>
       <ul>{audit.report.gates.map(g => <li key={g.gate_id}>{g.gate_id}: {g.status}{g.reason ? ` — ${g.reason}` : ""}</li>)}</ul>
       {choices.length > 0 && <div>
-        <label>Finding <select value={selected} onChange={e => { clearHistory(); setSelected(e.target.value); setExplanation(""); }}><option value="">Select a finding</option>{choices.map((item, index) => <option key={`${item.gate}:${item.index}`} value={index}>{item.gate}: {item.text}</option>)}</select></label>
+        <label>Finding <select value={selected} onChange={e => { clearHistory(); setMessage(""); setSelected(e.target.value); setExplanation(""); }}><option value="">Select a finding</option>{choices.map((item, index) => <option key={`${item.gate}:${item.index}`} value={index}>{item.gate}: {item.text}</option>)}</select></label>
         {choice && <div>
           <label>Decision <select value={decision} onChange={e => setDecision(e.target.value as ReviewDecision)}><option value="retain_with_explanation">Retain with explanation</option><option value="needs_revision">Needs revision</option><option value="not_applicable">Not applicable</option></select></label>
           <label>Explanation <textarea value={explanation} maxLength={2000} onChange={e => setExplanation(e.target.value)} /></label>
