@@ -8,6 +8,12 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [0.9.5] - 2026-11-19
 
+- Expose CMS input coverage in revision reports, distinguishing observed body and description sources from unobserved rendered pages.
+- Support explicit per-collection description mappings into nested CMS data or SEO fields, preserving historical revision boundaries.
+- Offer an advisory fragment-readable preset and allow revision audits of explicitly mapped fields with field-specific presets; unknown or unavailable fields are not checked.
+- Offer an opt-in advisory Portable Text Markdown-link review with source locations and explicit coverage limits.
+- Include aggregate audit scope and duration in revision audit telemetry without field names or content.
+
 - Keep advisory review submissions for individual audit findings, with the authenticated host account when available or an explicit unattributed marker. History can be incomplete and is not tamper-proof or a publication approval.
 - Allow editors to inspect review history in the revision review interface, and discard stale responses when the selected finding changes.
 - Expose structured revision-audit limits, including that publication is not authorized, rendered pages and source freshness were not checked, and locale comes from the current record.
