@@ -51,9 +51,9 @@
         "revision": { "type": "string", "minLength": 1 }
       },
       "if": { "properties": { "kind": { "const": "git" } } },
-      "then": { "properties": { "revision": { "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$" } } }
+      "then": { "properties": { "revision": { "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$", "anyOf": [{ "minLength": 40, "maxLength": 40 }, { "minLength": 64, "maxLength": 64 }] } } }
     },
-    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "minLength": 64, "maxLength": 64 },
     "content_state": {
       "type": "object",
       "required": ["sha256"],

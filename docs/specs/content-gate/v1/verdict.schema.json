@@ -30,7 +30,7 @@
               "entity_id": { "type": "string", "minLength": 1 },
               "sha256": {
                 "oneOf": [
-                  { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                  { "type": "string", "pattern": "^[0-9a-f]{64}$", "minLength": 64, "maxLength": 64 },
                   { "type": "null" }
                 ]
               }
@@ -46,7 +46,7 @@
         "name": { "type": "string", "minLength": 1 },
         "version": { "type": "string", "minLength": 1 },
         "profile": { "type": "string", "minLength": 1 },
-        "profile_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        "profile_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "minLength": 64, "maxLength": 64 }
       }
     },
     "evaluated_at": { "type": "string", "format": "date-time" },
