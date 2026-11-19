@@ -157,7 +157,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For collection gate changes, test the public Rust API as well as CLI and
   EmDash adapters: blank or repeated item IDs must not produce ambiguous
   findings. Exercise the scan limit separately and keep unexamined items
-  explicitly unchecked.
+  explicitly unchecked. For CMS collection metadata, test unavailable compared
+  values and grouping keys independently through Rust and WASM; preserve known
+  duplicate findings while incomplete coverage remains `not_checked`.
 - For EmDash revision-currentness checks, test each draft and published pointer
   separately when omitted, null, malformed, matching or different. Check both
   the initial audit and later retrieval: a missing pointer cannot prove that
