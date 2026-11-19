@@ -8,6 +8,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [0.9.5] - 2026-11-19
 
+- Include explicit two-bracket Markdown reference candidates in the advisory Portable Text link review, even when their definitions are elsewhere or unavailable. Adjacent bracketed text can also match.
+
 - Expose CMS input coverage in revision reports, distinguishing observed body and description sources from unobserved rendered pages.
 - Support explicit per-collection description mappings into nested CMS data or SEO fields, preserving historical revision boundaries.
 - Offer an advisory fragment-readable preset and allow revision audits of explicitly mapped fields with field-specific presets; unknown or unavailable fields are not checked.
