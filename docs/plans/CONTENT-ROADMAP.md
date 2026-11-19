@@ -412,8 +412,8 @@ registry before considering the release delivered.
   Literal Markdown image alt labels map to their exact original positions for
   inline and reference images; transformed labels remain unlocated.
   Exact HTML source mapping also covers inline technical and emphasis elements
-  (`code`, `kbd`, `samp`, `small`, `mark`); block children of those elements
-  and citation `sup`/`sub` remain unmapped.
+  (`code`, `kbd`, `samp`, `small`, `mark`) and citation markup (`sup`, `sub`,
+  `q`, `cite`); block children of those elements remain unmapped.
   HTML with CRLF line endings can retain exact source locations when lexical
   reconstruction succeeds; bare CR and source maps exceeding the span budget
   remain unlocated.

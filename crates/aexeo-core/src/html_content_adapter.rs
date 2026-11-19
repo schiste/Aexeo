@@ -488,6 +488,8 @@ pub fn html_source_map_with_scope(
                 | "em"
                 | "sup"
                 | "sub"
+                | "q"
+                | "cite"
                 | "code"
                 | "kbd"
                 | "samp"
@@ -679,6 +681,8 @@ pub fn html_source_map_with_scope(
                             | "em"
                             | "sup"
                             | "sub"
+                            | "q"
+                            | "cite"
                             | "code"
                             | "kbd"
                             | "samp"
@@ -1056,6 +1060,51 @@ mod tests {
         let malformed = "<p>Text <sup>reference</p></sup>";
         let adapted = html_content("x", malformed).unwrap();
         assert!(html_source_map(malformed, adapted.input.text.as_deref().unwrap()).is_none());
+    }
+
+    #[test]
+    fn maps_citation_elements_without_trusting_recovered_block_children() {
+        let html = "<main>\n<h2>Sources</h2><p>Élan <q>quoted <cite><a href='/ref'>author</a></cite></q> end <a href='/next'>next</a>.</p>\n</main>";
+        for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+            let adapted = html_content_with_scope("x", html, scope).unwrap();
+            let projected = adapted.input.text.as_deref().unwrap();
+            let map = html_source_map_with_scope(html, projected, scope).unwrap();
+            let projected_index = crate::text_index::LineIndex::new(projected);
+            let source_index = crate::text_index::LineIndex::new(html);
+            for needle in ["Sources", "Élan", "quoted", "author", "end", "next"] {
+                let (line, column) = projected_index
+                    .position(projected, projected.find(needle).unwrap())
+                    .unwrap();
+                assert_eq!(
+                    map.source_position(html, projected, line, column),
+                    source_index.position(html, html.rfind(needle).unwrap()),
+                    "{needle}"
+                );
+            }
+            assert_eq!(map.heading_starts, vec![html.find("<h2>").unwrap()]);
+            assert_eq!(
+                map.link_starts,
+                vec![
+                    html.find("<a href='/ref'>").unwrap(),
+                    html.find("<a href='/next'>").unwrap()
+                ]
+            );
+        }
+        for tag in ["q", "cite"] {
+            let html = format!("<main><{tag}>before<div>inside</div>after</{tag}></main>");
+            for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+                let adapted = html_content_with_scope("x", &html, scope).unwrap();
+                assert!(
+                    html_source_map_with_scope(
+                        &html,
+                        adapted.input.text.as_deref().unwrap(),
+                        scope
+                    )
+                    .is_none(),
+                    "{tag}"
+                );
+            }
+        }
     }
 
     #[test]

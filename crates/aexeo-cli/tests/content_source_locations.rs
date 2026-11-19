@@ -289,3 +289,50 @@ fn html_main_maps_to_article_body_in_a_complete_document() {
     assert_eq!(telemetry["source_mapping"]["unmapped"], 0);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("shared"));
 }
+
+#[test]
+fn html_citation_elements_preserve_editorial_finding_positions() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("citation.html");
+    let preset = dir.path().join("preset.toml");
+    let html = "<main>\n<p>Élan <q>quoted <cite><a href='/ref'>author</a></cite></q> continues.</p>\n</main>";
+    fs::write(&file, html).unwrap();
+    fs::write(
+        &preset,
+        "version=1\nname='test'\n[[gates]]\nid='terms'\nkind='forbidden_terms'\nterms=['author']\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            file.to_str().unwrap(),
+            "--input-format",
+            "html",
+            "--html-scope",
+            "main",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--format",
+            "json",
+            "--telemetry",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    let expected_column = html.lines().nth(1).unwrap().find("author").unwrap() + 1;
+    // The report uses Unicode scalar columns, not byte offsets.
+    let expected_column = html.lines().nth(1).unwrap()[..expected_column - 1]
+        .chars()
+        .count()
+        + 1;
+    assert_eq!(
+        report["source_locations"],
+        serde_json::json!([{ "gate_id":"terms", "finding_index":0, "line":2, "column":expected_column }])
+    );
+    assert_eq!(telemetry["source_mapping"]["mapped"], 1);
+    assert_eq!(telemetry["source_mapping"]["unmapped"], 0);
+}
