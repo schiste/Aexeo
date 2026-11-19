@@ -202,6 +202,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - For public Rust structs, check downstream struct-literal compatibility as well
   as serialized compatibility: adding a field can break callers even when
   Serde still accepts older JSON.
+- For JSON Schema identifier patterns ending in `$`, test a valid identifier
+  followed by a newline: common regex engines match before that newline. Enforce
+  exact lengths as well as the pattern and test both valid and invalid lengths.
 - For Python JSON Schema format checks, verify each required format checker is
   registered: optional dependencies can otherwise make validation silently skip
   it. Test malformed format values and fail closed when a checker is missing.
