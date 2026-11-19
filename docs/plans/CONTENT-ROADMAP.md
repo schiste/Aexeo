@@ -37,6 +37,27 @@ No CMS content was changed. These checks did not inspect rendered HTML, the host
 admin UI, translations, the deployed package, or every article; they do not prove
 rendered metadata, full editorial quality, or a matching site snapshot.
 
+## CMS review feedback — 2026-11-19
+
+- [x] Report observed revision input coverage separately for body, description
+  mapping and unobserved rendered pages; add an advisory fragment preset and
+  an opt-in, source-mapped Portable Text literal Markdown link review ([#546](https://github.com/schiste/Aexeo/pull/546)).
+- [x] Map description sources explicitly per collection, including nested
+  revision data and SEO panel paths; a historical revision never substitutes the
+  current SEO panel ([#548](https://github.com/schiste/Aexeo/pull/548)).
+- [x] Allow an explicitly configured CMS field to select its own revision audit
+  preset; missing or unmapped fields remain not checked. Exercise the actual
+  configured plugin and WASM, and log scope and duration without field names
+  ([#549](https://github.com/schiste/Aexeo/pull/549)).
+- [ ] Publish and install the tested npm package, enable the desired presets and
+  revision access on the target host, then verify its connected MCP actions and
+  permissions against a real revision. Repository support alone does not expose
+  an action through an already connected host.
+- [ ] Validate the host's historical metadata and component mappings, citations,
+  language-specific coverage and redirect HTML against representative rendered
+  builds. Style checks do not establish factual accuracy, currency or translation
+  quality; source verification and independent evaluation remain separate work.
+
 ## Delivery tracker
 
 - [x] Exclude format-unbound reviews and runs from policy-bound reviewed metrics,

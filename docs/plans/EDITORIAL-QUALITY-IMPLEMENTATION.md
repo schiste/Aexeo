@@ -20,6 +20,19 @@ Existing source and factuality work is outside this plan.
 - [ ] Run focused and workspace checks, update the roadmap, submit and deliver
   reviewed changes through the repository workflow.
 
+## CMS feedback progress
+
+Revision reports now distinguish supplied content and description coverage from
+unobserved rendered pages. Hosts can configure nested description mappings and
+select a fragment-specific preset for an exact CMS revision; unavailable fields
+are not checked. The optional literal Markdown link gate identifies source spans
+without changing content. The full EmDash suite (330 tests), real WASM checks and
+an installed-package smoke test with EmDash 1.4 passed for the combined change.
+These are implementation checks, not validation of a live CMS deployment,
+rendered citations, factual currency, translation quality or independent human
+accuracy. The package, target host configuration and connected MCP still require
+end-to-end deployment verification. See [the content roadmap](CONTENT-ROADMAP.md#cms-review-feedback--2026-11-19).
+
 ## Validation notes
 
 - Synthetic CLI regression covers a targeted edit, source location, recheck and
