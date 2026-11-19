@@ -121,10 +121,19 @@ def overlay(base, change, after):
     if not isinstance(revision, dict) or set(revision) != {'kind', 'revision'} or revision['kind'] not in ('git', 'opaque'):
         raise VerificationError('invalid base revision')
     text(revision['revision'], empty=False)
+    if revision['kind'] == 'git' and re.fullmatch(r'(?:[0-9a-f]{40}|[0-9a-f]{64})', revision['revision']) is None:
+        raise VerificationError('invalid git base revision')
     if base['complete'] is not True:
         raise VerificationError('base completeness was not declared')
     if not isinstance(change, dict) or change.get('schema') != 'content-gate.change/v1' or change.get('base') != revision:
         raise VerificationError('change and snapshot base differ')
+    text(change.get('change_id'), empty=False)
+    text(change.get('created_at'), empty=False)
+    origin = change.get('origin')
+    if not isinstance(origin, dict) or origin.get('kind') not in ('git', 'mcp', 'api', 'manual'):
+        raise VerificationError('invalid change origin')
+    if origin['kind'] == 'git' and revision['kind'] != 'git':
+        raise VerificationError('git origin requires a git base')
     site = change.get('site')
     if site is not None:
         if not isinstance(site, dict):

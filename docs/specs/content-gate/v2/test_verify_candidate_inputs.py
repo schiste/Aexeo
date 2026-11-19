@@ -86,6 +86,35 @@ class CandidateVerification(unittest.TestCase):
         collection['items'] = [{'id': 'existing'}]
         with self.assertRaises(VerificationError): validate_collection_projection(collection, candidate, change)
 
+    def test_overlay_rejects_invalid_git_origin_and_required_fields(self):
+        original = json.loads(self.artifacts['change'])
+        invalid = [dict(original, origin={'kind': 'git'}),
+                   dict(original, origin={'kind': 'unknown'}),
+                   dict(original, change_id=''),
+                   dict(original, created_at='')]
+        for change in invalid:
+            with self.subTest(change=change):
+                with self.assertRaises(VerificationError):
+                    overlay(self.base, change, self.after)
+        bad_base = copy.deepcopy(self.base)
+        bad_base['base'] = {'kind': 'git', 'revision': 'not-a-git-object'}
+        change = dict(original, base=bad_base['base'])
+        with self.assertRaises(VerificationError):
+            overlay(bad_base, change, self.after)
+
+    def test_git_revisions_accept_only_full_lowercase_object_ids(self):
+        original = json.loads(self.artifacts['change'])
+        for revision in ['a' * 40, 'a' * 64, 'a' * 39, 'a' * 41, 'A' * 40, 'a' * 40 + '\n']:
+            with self.subTest(revision=revision):
+                base = copy.deepcopy(self.base)
+                base['base'] = {'kind': 'git', 'revision': revision}
+                change = dict(original, base=base['base'], origin={'kind': 'git'})
+                if len(revision) in (40, 64) and revision.islower():
+                    overlay(base, change, self.after)
+                else:
+                    with self.assertRaises(VerificationError):
+                        overlay(base, change, self.after)
+
     def test_snapshot_mutations_and_wrong_profile_fail(self):
         mutations = [lambda: self.base.update(scope='other'),
                      lambda: self.base.update(complete=False),
@@ -188,18 +217,17 @@ class CandidateVerification(unittest.TestCase):
     @unittest.skipUnless(schema_formats_available(), 'requires schema validator and format checkers')
     def test_fresh_comparison_rejects_git_origin_with_opaque_base(self):
         change = json.loads(self.artifacts['change'])
+        candidate = overlay(self.base, change, self.after)
         change['origin']['kind'] = 'git'
         self.artifacts['change'] = self.encoded(change)
         self.envelope['receipt']['decision_inputs']['change']['sha256'] = hashlib.sha256(self.artifacts['change']).hexdigest()
-        candidate = overlay(self.base, change, self.after)
         inputs = dict(self.artifacts, collection=None, external_evidence=None,
                       candidate_base_revision_sha256=revision_digest(self.base),
                       candidate_revision_profile=b'content-gate.candidate-revision/v1',
                       candidate_revision_sha256=revision_digest(candidate))
         self.envelope['binding'] = binding(inputs)
-        # Binding alone can match: the stronger comparison must also reject
-        # this v1 semantic mismatch even if both verdicts are identical.
-        self.assertEqual(self.check()['input_binding'], 'match')
+        # The input-only mode rejects this Rust-invalid origin/base pair too.
+        with self.assertRaises(VerificationError): self.check()
         with self.assertRaises(VerificationError):
             compare_fresh(self.encoded(self.envelope), self.encoded(self.envelope),
                           self.encoded(self.base), self.encoded(self.after), self.artifacts,
