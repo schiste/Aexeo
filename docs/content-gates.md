@@ -81,7 +81,9 @@ It is advisory: verify the host rendering before changing content or links.
 It ignores code-marked spans and Markdown code, and can map a finding to its
 original span. It requires complete text projection; unsupported adapters or
 incomplete projection report `not_checked`. It does not validate link targets,
-rendered HTML, bare citation markers, or unresolved reference definitions.
+rendered HTML or bare citation markers. Explicit two-bracket reference syntax is
+reported as a candidate even when a definition is unavailable; adjacent bracketed
+text can also match, so editors must review the context.
 Compose it with another preset using `extends`, and enable it only where the
 host renders Portable Text as rich text rather than interpreting Markdown.
 

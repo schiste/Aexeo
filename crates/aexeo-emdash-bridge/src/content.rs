@@ -888,6 +888,27 @@ mod tests {
     }
 
     #[test]
+    fn literal_reference_candidates_preserve_cross_span_locations() {
+        let document: EmdashDocument = serde_json::from_str(r#"{"route":"/x","title":"T","body":[{"children":[{"_type":"span","text":"é "},{"_type":"span","text":"[Help]["},{"_type":"span","text":"source] [1]"},{"_type":"span","text":" [code][x]","marks":["code"]}]},{"children":[{"_type":"span","text":"[source]: https://example.org"}]}]}"#).unwrap();
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='links'\n[[gates]]\nid='literal'\nkind='literal_markdown_links'\n",
+        )
+        .unwrap();
+        let report =
+            evaluate_content_with_body_capabilities(&document, &preset, None, [true; 4]).unwrap();
+        assert_eq!(report.gates[0].findings.len(), 1);
+        let locations = source_locations(&document, &preset, &report);
+        assert_eq!(
+            (
+                locations[0].block_index,
+                locations[0].span_index,
+                locations[0].utf16_offset
+            ),
+            (0, 1, 0)
+        );
+    }
+
+    #[test]
     fn structured_lists_require_complete_valid_body_and_count_nested_items() {
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/x","title":"T","body":[{"listItem":"bullet","level":1,"children":[]},{"listItem":"bullet","level":2,"children":[]},{"listItem":"bullet","level":2,"children":[]},{"listItem":"bullet","level":1,"children":[]}]}"#).unwrap();
         assert_eq!(portable_text_structured_lists(&document, false), None);

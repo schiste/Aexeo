@@ -263,6 +263,15 @@ pub fn literal_markdown_link_offsets(source: &str) -> Result<Vec<usize>> {
             Node::LinkReference(link) => link.position.as_ref(),
             _ => None,
         };
+        // Unresolved explicit references are parsed as text. Flag their literal
+        // syntax as a review candidate without treating a citation marker alone
+        // as a link. Inspect source slices so escapes remain distinguishable.
+        if let Node::Text(text) = node
+            && let Some(position) = &text.position
+            && let Some(raw) = source.get(position.start.offset..position.end.offset)
+        {
+            explicit_reference_candidates(raw, position.start.offset, offsets);
+        }
         if let Some(position) = position {
             let offset = position.start.offset;
             if source.as_bytes().get(offset) == Some(&b'[') {
@@ -279,6 +288,51 @@ pub fn literal_markdown_link_offsets(source: &str) -> Result<Vec<usize>> {
     let mut offsets = Vec::new();
     visit(&root, source, &mut offsets);
     Ok(offsets)
+}
+
+// Single-pass scan of the unambiguous two-bracket reference spelling. It is a
+// candidate, not evidence that a reference definition exists or will render.
+fn explicit_reference_candidates(raw: &str, base: usize, offsets: &mut Vec<usize>) {
+    let bytes = raw.as_bytes();
+    let mut index = 0;
+    let mut start = None;
+    let mut state = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte == b'\\' {
+            index = (index + 2).min(bytes.len());
+            continue;
+        }
+        match (state, byte) {
+            (0, b'[') if index == 0 || bytes[index - 1] != b'!' => {
+                start = Some(index);
+                state = 1;
+            }
+            (1, b']') if start.is_some_and(|s| index > s + 1) => state = 2,
+            (1, b'[' | b'\n' | b'\r') => {
+                start = None;
+                state = 0;
+            }
+            (2, b'[') => state = 3,
+            (2, _) => {
+                start = None;
+                state = 0;
+            }
+            (3, b']') => {
+                if let Some(s) = start {
+                    offsets.push(base + s);
+                }
+                start = None;
+                state = 0;
+            }
+            (3, b'[' | b'\n' | b'\r') => {
+                start = None;
+                state = 0;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
 }
 
 fn parse_markdown(source: &str) -> Result<Node> {
@@ -1473,5 +1527,35 @@ min = 2
             assert_eq!(markdown_limit_reason(&source), None, "{source:.40}");
             assert!(parse_markdown(&source).is_ok());
         }
+    }
+}
+
+#[cfg(test)]
+mod explicit_reference_candidate_tests {
+    use super::literal_markdown_link_offsets;
+
+    #[test]
+    fn flags_explicit_unresolved_references_without_treating_citations_as_links() {
+        let source = "é [help][source] and [other][] and [1].";
+        let positions = literal_markdown_link_offsets(source).unwrap();
+        assert_eq!(
+            positions,
+            vec![
+                source.find("[help]").unwrap(),
+                source.find("[other]").unwrap()
+            ]
+        );
+    }
+
+    #[test]
+    fn ignores_code_images_escapes_and_bare_markers() {
+        let source = r"`[code][ref]` ![image][ref] \[escaped][ref] [12]";
+        assert!(literal_markdown_link_offsets(source).unwrap().is_empty());
+    }
+
+    #[test]
+    fn does_not_duplicate_resolved_references() {
+        let source = "[help][source]\n\n[source]: https://example.org";
+        assert_eq!(literal_markdown_link_offsets(source).unwrap(), vec![0]);
     }
 }
