@@ -39,6 +39,7 @@ rendered metadata, full editorial quality, or a matching site snapshot.
 
 ## CMS review feedback — 2026-11-19
 
+- [x] Preserve open-world CMS metadata coverage through the content gate and sandbox worker; unobserved fields do not produce missing-field findings and an incompatible worker is rejected. Older direct documents keep their prior semantics.
 - [x] Report observed revision input coverage separately for body, description
   mapping and unobserved rendered pages; add an advisory fragment preset and
   an opt-in, source-mapped Portable Text literal Markdown link review ([#546](https://github.com/schiste/Aexeo/pull/546)).

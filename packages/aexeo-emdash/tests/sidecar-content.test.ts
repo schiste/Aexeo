@@ -100,6 +100,17 @@ describe("sandbox content presets", () => {
       expect(JSON.stringify(event)).not.toContain("private");
     } finally { logger.mockRestore(); }
   });
+  it("fails closed when an older worker cannot honor observed metadata coverage", async () => {
+    const doc = { route: "/page", title: "Page", observed_metadata_fields: ["title"] };
+    const response = (value: unknown) => ({ fetch: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(value) }) });
+    const config = { url: "https://example.test", authToken: "secret" };
+    const old = await evaluateViaSidecar(response({ findings: [], assessments: {} }), config, [doc]);
+    expect(old).toMatchObject({ ok: false, reason: "invalid_response" });
+    const current = await evaluateViaSidecar(response({ findings: [], assessments: {}, capabilities: ["observed_metadata_fields_v1"] }), config, [doc]);
+    expect(current).toMatchObject({ ok: true });
+    const legacy = await evaluateViaSidecar(response([]), config, [{ route: "/legacy", title: "Legacy" }]);
+    expect(legacy).toMatchObject({ ok: true });
+  });
   it("passes collection context to the sidecar", async () => {
     const fetch = vi.fn(async () => ({ ok: true, status: 200, text: async () => "[]" }));
     await evaluateViaSidecar({ fetch }, { url: "https://example.test", authToken: "secret" }, [], ["posts"]);

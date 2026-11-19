@@ -953,6 +953,10 @@ kind="metadata_age"
 field="last_reviewed"
 as_of="2024-03-01"
 max_days=1
+[[gates]]
+id="unmapped"
+kind="required_metadata"
+fields=["unmapped"]
 `;
   const configured = createPlugin({
     contentPreset: { name: "mapped", sources: { mapped: preset } },
@@ -968,6 +972,8 @@ max_days=1
   const age = () => host.store.get("findings:/mapped-metadata").assessment.gates[1];
   assert.equal(age().status, "failed");
   assert.equal(age().measurements.age_days, 2);
+  assert.equal(host.store.get("findings:/mapped-metadata").assessment.gates[2].status, "not_checked");
+  assert.equal(host.store.get("findings:/mapped-metadata").findings.filter((finding) => finding.rule_id === "unmapped").length, 0);
   page.data.editorial = {};
   await configured.routes.refresh.handler(host.ctx);
   assert.equal(status(), "not_checked");

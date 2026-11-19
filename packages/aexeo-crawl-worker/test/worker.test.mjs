@@ -168,6 +168,10 @@ max_days=1
 id="author"
 kind="required_metadata"
 fields=["author"]
+[[gates]]
+id="unmapped"
+kind="required_metadata"
+fields=["unmapped"]
 `;
     const harness = createTestHarness({ workers: [
       { config: { name: "aexeo-test", main: fileURLToPath(new URL("../src/worker.ts", import.meta.url)), compatibility_date: "2026-10-01",
@@ -178,17 +182,19 @@ fields=["author"]
       const response = await post(harness.getWorker("aexeo-test"), JSON.stringify({
         responseFormat: 2,
         documents: [
-          { route: "/reviewed", title: "Reviewed", meta: { last_reviewed: "2024-02-28", author: "Editor" } },
+          { route: "/reviewed", title: "Reviewed", meta: { last_reviewed: "2024-02-28", author: "Editor" }, observed_metadata_fields: ["title", "last_reviewed", "author"] },
           { route: "/unknown", title: "Unknown", unavailable_metadata_fields: ["author", "last_reviewed"] },
         ],
         collections: ["pages", "pages"],
       }));
       assert.equal(response.status, 200, await response.clone().text());
       const payload = await response.json();
+      assert.ok(payload.capabilities.includes("observed_metadata_fields_v1"));
       const reviewed = payload.assessments["/reviewed"].gates;
       assert.equal(reviewed.find((gate) => gate.gate_id === "age").measurements.age_days, 2);
       assert.equal(reviewed.find((gate) => gate.gate_id === "age").status, "failed");
       assert.equal(reviewed.find((gate) => gate.gate_id === "author").status, "passed");
+      assert.equal(reviewed.find((gate) => gate.gate_id === "unmapped").status, "not_checked");
       const unknown = payload.assessments["/unknown"].gates;
       assert.equal(unknown.find((gate) => gate.gate_id === "age").status, "not_checked");
       assert.equal(unknown.find((gate) => gate.gate_id === "author").status, "not_checked");

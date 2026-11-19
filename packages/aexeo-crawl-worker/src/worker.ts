@@ -174,7 +174,7 @@ async function evaluateRoute(request: Request, env: Env): Promise<Response> {
     const assessments: Record<string, unknown> | undefined = body.responseFormat === 2 ? Object.create(null) : undefined;
     const additional = await contentPresetFindings(body.documents, body.collections, env, evaluateContent, projectContentInput, assessments);
     const findings = [...existing, ...additional];
-    raw = JSON.stringify(assessments === undefined ? findings : { findings, assessments });
+    raw = JSON.stringify(assessments === undefined ? findings : { findings, assessments, capabilities: ["observed_metadata_fields_v1"] });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return jsonResponse(env, { error: `evaluation failed: ${message}` }, 500);
