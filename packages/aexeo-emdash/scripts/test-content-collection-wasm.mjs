@@ -259,6 +259,23 @@ assert.equal(mappingEvents[0].source_locations_unmapped, 1);
 assert.equal(mappingEvents[0].source_locations_eligible, 1);
 const staleReport = await evaluateContent({ ...extensionDocument, title: "Changed" }, "custom", { custom: extensionPreset }, undefined, undefined, results);
 assert.equal(staleReport.gates[0].status, "not_checked");
+// An adapter fallback is a display label, not an observed CMS title.
+// The coverage must travel with the result, even if the projected values are identical.
+const cmsDocument = { ...extensionDocument, title: "fallback", observed_metadata_fields: [] };
+const cmsInput = await projectContentInput(cmsDocument);
+assert.equal(cmsInput.metadata.title, undefined);
+assert.deepEqual(cmsInput.metadata_coverage.observed_fields, []);
+const cmsResults = [{ ...results[0], input: cmsInput }];
+assert.equal((await evaluateContent(cmsDocument, "custom", { custom: extensionPreset }, undefined, undefined, cmsResults)).gates[0].status, "failed");
+const cmsObservedAbsent = { ...cmsDocument, observed_metadata_fields: ["description"] };
+assert.equal((await evaluateContent(cmsObservedAbsent, "custom", { custom: extensionPreset }, undefined, undefined, cmsResults)).gates[0].status, "not_checked");
+const { metadata_coverage: ignoredCoverage, ...oldInput } = cmsInput;
+assert.equal((await evaluateContent(cmsDocument, "custom", { custom: extensionPreset }, undefined, undefined, [{ ...cmsResults[0], input: oldInput }])).gates[0].status, "not_checked");
+const observedTitle = await projectContentInput({ ...cmsDocument, observed_metadata_fields: ["title"] });
+assert.equal(observedTitle.metadata.title, "fallback");
+const unavailableTitle = await projectContentInput({ ...cmsDocument, observed_metadata_fields: ["title"], unavailable_metadata_fields: ["title"] });
+assert.equal(unavailableTitle.metadata.title, undefined);
+await assert.rejects(() => projectContentInput({ ...cmsDocument, observed_metadata_fields: "title" }));
 console.log("WASM external extension smoke test passed");
 
 const reachabilityPreset = `version=1

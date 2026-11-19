@@ -261,9 +261,58 @@ fn parse_content_document(
         == Some(true)
         && raw.get("body").is_some()
         && capabilities.iter().all(|capability| *capability);
-    let document = serde_json::from_value(raw)
+    let mut document: EmdashDocument = serde_json::from_value(raw.clone())
         .map_err(|error| JsError::new(&format!("failed to parse document: {error}")))?;
+    if let Some(value) = raw.get("observed_metadata_fields") {
+        let observed: std::collections::BTreeSet<String> = serde_json::from_value(value.clone())
+            .map_err(|_| JsError::new("observed_metadata_fields must be an array of strings"))?;
+        let candidates = document.meta.keys().cloned().chain(
+            ["title", "description", "canonical", "lang"]
+                .into_iter()
+                .map(String::from),
+        );
+        for field in candidates {
+            if !observed.contains(&field) && !document.unavailable_metadata_fields.contains(&field)
+            {
+                document.unavailable_metadata_fields.push(field);
+            }
+        }
+    }
     Ok((document, capabilities, lists_complete))
+}
+
+// Coverage is part of the extension snapshot: a missing value can mean either
+// observed absence or an unavailable source. Normalize sets for stable binding.
+fn extension_metadata_coverage(
+    raw: &serde_json::Value,
+) -> Result<Option<serde_json::Value>, JsError> {
+    let observed = raw
+        .get("observed_metadata_fields")
+        .map(|value| {
+            serde_json::from_value::<std::collections::BTreeSet<String>>(value.clone())
+                .map_err(|_| JsError::new("observed_metadata_fields must be an array of strings"))
+        })
+        .transpose()?;
+    let unavailable = raw
+        .get("unavailable_metadata_fields")
+        .map(|value| {
+            serde_json::from_value::<std::collections::BTreeSet<String>>(value.clone()).map_err(
+                |_| JsError::new("unavailable_metadata_fields must be an array of strings"),
+            )
+        })
+        .transpose()?;
+    let description = raw.get("description_source_observed");
+    if observed.is_none()
+        && unavailable.as_ref().is_none_or(|fields| fields.is_empty())
+        && description.is_none()
+    {
+        return Ok(None);
+    }
+    Ok(Some(serde_json::json!({
+        "observed_fields": observed,
+        "unavailable_fields": unavailable.unwrap_or_default(),
+        "description_source_observed": description,
+    })))
 }
 
 /// Return the exact projected input that external extensions must bind to.
@@ -279,12 +328,19 @@ pub fn project_content_input_js(
         .map(serde_json::from_str)
         .transpose()
         .map_err(|error| JsError::new(&format!("failed to parse evidence sources: {error}")))?;
-    serde_json::to_string(&crate::content::extension_input(
+    let mut input = serde_json::to_value(crate::content::extension_input(
         &document,
         evidence,
         capabilities,
     ))
-    .map_err(|error| JsError::new(&format!("failed to serialize input: {error}")))
+    .map_err(|error| JsError::new(&format!("failed to serialize input: {error}")))?;
+    let raw: serde_json::Value = serde_json::from_str(document_json)
+        .map_err(|error| JsError::new(&format!("failed to parse document: {error}")))?;
+    if let Some(coverage) = extension_metadata_coverage(&raw)? {
+        input["metadata_coverage"] = coverage;
+    }
+    serde_json::to_string(&input)
+        .map_err(|error| JsError::new(&format!("failed to serialize input: {error}")))
 }
 
 /// Project the exact snapshot and ordered link occurrences for an external observer.
@@ -339,10 +395,36 @@ pub fn evaluate_content_js(
             if json.len() > 32 * 1024 * 1024 {
                 return Err(JsError::new("external gate results exceed the size limit"));
             }
-            let values = serde_json::from_str(json).map_err(|error| {
-                JsError::new(&format!("failed to parse extension results: {error}"))
-            })?;
-            aexeo_core::content_extensions::ExternalGateResults::new(values)
+            let mut values: Vec<serde_json::Value> =
+                serde_json::from_str(json).map_err(|error| {
+                    JsError::new(&format!("failed to parse extension results: {error}"))
+                })?;
+            let coverage = extension_metadata_coverage(&raw)?;
+            let matches: Vec<bool> = values
+                .iter_mut()
+                .map(|value| {
+                    let Some(input) = value
+                        .get_mut("input")
+                        .and_then(|input| input.as_object_mut())
+                    else {
+                        return true; // Let strict result validation report malformed records.
+                    };
+                    input.remove("metadata_coverage") == coverage
+                })
+                .collect();
+            let values: Vec<aexeo_core::content_extensions::ExternalGateResult> =
+                serde_json::from_value(serde_json::Value::Array(values)).map_err(|error| {
+                    JsError::new(&format!("failed to parse extension results: {error}"))
+                })?;
+            // Validate every record, even if its coverage is stale, before filtering.
+            aexeo_core::content_extensions::ExternalGateResults::new(values.clone())
+                .map_err(|error| JsError::new(&format!("invalid extension results: {error}")))?;
+            let matching = values
+                .into_iter()
+                .zip(matches)
+                .filter_map(|(value, matches)| matches.then_some(value))
+                .collect();
+            aexeo_core::content_extensions::ExternalGateResults::new(matching)
                 .map_err(|error| JsError::new(&format!("invalid extension results: {error}")))
         })
         .transpose()?;

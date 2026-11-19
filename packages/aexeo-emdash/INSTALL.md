@@ -780,3 +780,10 @@ logs aggregate counts without routes, gate identifiers, reasons or content.
 ### Audit a CMS fragment
 
 Enable revision audits and explicitly map each field to its preset in `contentPreset.fragmentFieldsByCollection`, for example `{ posts: { intro: "fragment-readable" } }`. Call `audit_revision` with `collection`, `id`, `revision` and `field: "intro"`. The saved report identifies fragment scope, field and preset. An unconfigured or unavailable field returns `not_checked`; omit `field` for the existing whole-content audit. The host must expose the MCP tool with its revision access and permissions. This review does not establish factual accuracy or authorize publication.
+
+External content providers receive `metadata_coverage` when the adapter supplies
+coverage information. `observed_fields` identifies fields whose values or
+absence were observed; `unavailable_fields` overrides it. Missing keys outside
+the observed set are unknown. Keep the entire input unchanged in each result:
+Aexeo marks the gate `not_checked` if the coverage or projected input changed.
+Providers must handle unknown values rather than treating them as absent.

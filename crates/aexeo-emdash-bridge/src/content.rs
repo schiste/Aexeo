@@ -37,6 +37,9 @@ fn content_metadata(document: &EmdashDocument) -> BTreeMap<String, String> {
     if let Some(value) = &document.lang {
         metadata.insert("lang".into(), value.clone());
     }
+    for field in &document.unavailable_metadata_fields {
+        metadata.remove(field);
+    }
     metadata
 }
 

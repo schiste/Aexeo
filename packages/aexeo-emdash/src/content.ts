@@ -56,6 +56,12 @@ export interface ExtensionInput {
   headings: string[] | null;
   metadata: Record<string, string> | null;
   evidence_sources: Record<string, string> | null;
+  /** Metadata source coverage; retain this unchanged in the result input. */
+  metadata_coverage?: {
+    observed_fields: string[] | null;
+    unavailable_fields: string[];
+    description_source_observed: boolean | null;
+  };
 }
 
 export interface ExternalGateResult {
