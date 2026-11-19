@@ -2081,6 +2081,14 @@ fn validate_collection(change: &Change, collection: &ChangeCollection<'_>) -> Re
             bail!("collection item IDs must be nonempty and unique");
         }
     }
+    // An old identity may legitimately be produced by another entry in the
+    // same change (for example, a swap or a rename followed by a create).
+    let produced: std::collections::BTreeSet<&str> = change
+        .entries
+        .iter()
+        .filter(|entry| entry.operation != Operation::Delete)
+        .map(|entry| entry.entity_id.as_str())
+        .collect();
     for entry in &change.entries {
         match entry.operation {
             Operation::Create | Operation::Update | Operation::Rename => {
@@ -2092,7 +2100,7 @@ fn validate_collection(change: &Change, collection: &ChangeCollection<'_>) -> Re
                     && entry
                         .previous_entity_id
                         .as_deref()
-                        .is_some_and(|id| items.contains_key(id))
+                        .is_some_and(|id| items.contains_key(id) && !produced.contains(id))
                 {
                     bail!("collection still contains renamed entry");
                 }
@@ -3456,6 +3464,48 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn collection_accepts_recreated_rename_identity_but_checks_metadata() {
+        let mut input = change();
+        input.entries[0].operation = Operation::Rename;
+        input.entries[0].previous_entity_id = Some("old".into());
+        let mut created = input.entries[0].clone();
+        created.entity_id = "old".into();
+        created.operation = Operation::Create;
+        created.previous_entity_id = None;
+        created.metadata = Some(std::collections::BTreeMap::from([(
+            "slug".into(),
+            "replacement".into(),
+        )]));
+        input.entries.push(created);
+        let mut items = vec![
+            ContentInput {
+                id: "article".into(),
+                ..Default::default()
+            },
+            ContentInput {
+                id: "old".into(),
+                metadata: input.entries[1].metadata.clone(),
+                ..Default::default()
+            },
+        ];
+        let validate = |items: &[ContentInput]| {
+            validate_collection(
+                &input,
+                &ChangeCollection {
+                    change_id: "x",
+                    items,
+                    complete: true,
+                },
+            )
+        };
+        assert!(validate(&items).is_ok());
+        items[1].metadata = None;
+        assert!(validate(&items).is_err());
+        items.pop();
+        assert!(validate(&items).is_err());
     }
 
     #[test]
