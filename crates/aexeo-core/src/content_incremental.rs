@@ -31,6 +31,7 @@ pub struct IncrementalBaseline {
     snapshot: CandidateSnapshot,
     preset: ContentPreset,
     reports: BTreeMap<String, ContentReport>,
+    paragraph_text: bool,
 }
 
 /// A complete report only for the narrowly specified independent item gates.
@@ -74,12 +75,12 @@ fn validate_scope(snapshot: &CandidateSnapshot) -> Result<(), NotChecked> {
     Ok(())
 }
 
-fn validate_preset(preset: &ContentPreset) -> Result<(), NotChecked> {
+fn validate_preset(preset: &ContentPreset, paragraph_text: bool) -> Result<(), NotChecked> {
     preset
         .validate()
         .map_err(|_| unavailable("invalid content preset"))?;
     if preset.gates.iter().any(|gate| {
-        !matches!(
+        let text_gate = matches!(
             gate,
             ContentGate::WordCount { .. }
                 | ContentGate::CharacterCount { .. }
@@ -94,7 +95,28 @@ fn validate_preset(preset: &ContentPreset) -> Result<(), NotChecked> {
                 | ContentGate::RepeatedTerms { .. }
                 | ContentGate::RequiredTerms { .. }
                 | ContentGate::ForbiddenTerms { .. }
-        )
+        );
+        let paragraph_gate = paragraph_text
+            && matches!(
+                gate,
+                ContentGate::ParagraphCount { .. }
+                    | ContentGate::ParagraphLength { .. }
+                    | ContentGate::ParagraphCharacterLength { .. }
+                    | ContentGate::RepeatedParagraphOpenings { .. }
+                    | ContentGate::RepeatedSentenceOpenings { .. }
+                    | ContentGate::SentenceOpeningWindow { .. }
+                    | ContentGate::SentenceOpeningTerms { .. }
+                    | ContentGate::RepeatedPunctuation { .. }
+                    | ContentGate::TrailingIngClause { .. }
+                    | ContentGate::SimilarSentenceLengths { .. }
+                    | ContentGate::SentenceLengthVariance { .. }
+                    | ContentGate::InlineTripleCandidates { .. }
+                    | ContentGate::DuplicateParagraphs { .. }
+                    | ContentGate::SentenceLength { .. }
+                    | ContentGate::SentenceCharacterLength { .. }
+                    | ContentGate::FinalNewline { .. }
+            );
+        !text_gate && !paragraph_gate
     }) {
         return Err(unavailable(
             "preset contains gates outside the supported independent item scope",
@@ -106,14 +128,21 @@ fn validate_preset(preset: &ContentPreset) -> Result<(), NotChecked> {
 fn evaluate_item(
     preset: &ContentPreset,
     item: &CandidateItem,
+    paragraph_text: bool,
 ) -> Result<ContentReport, NotChecked> {
     let input = ContentInput {
         id: item.entity_id.clone(),
         text: Some(item.source.clone()),
+        source_text: paragraph_text.then(|| item.source.clone()),
         ..Default::default()
     };
+    let context = if paragraph_text {
+        Some(crate::plain_text_adapter::paragraph_text_context(&item.source).map_err(unavailable)?)
+    } else {
+        None
+    };
     let report = preset
-        .evaluate(&input)
+        .evaluate_with_context(&input, None, None, context.as_ref())
         .map_err(|_| unavailable("content evaluation failed"))?;
     if report
         .gates
@@ -129,16 +158,38 @@ impl IncrementalBaseline {
     /// Evaluate all base entities once. A host's completeness and link
     /// projection claims are prerequisites, not independently proven facts.
     pub fn prepare(snapshot: CandidateSnapshot, preset: ContentPreset) -> Result<Self, NotChecked> {
+        Self::prepare_with_mode(snapshot, preset, false)
+    }
+
+    /// Interpret blank-line-separated plain text as paragraphs using the same
+    /// adapter as content-change. This explicit choice is retained in the
+    /// opaque baseline and applied identically to every candidate item.
+    pub fn prepare_paragraph_text(
+        snapshot: CandidateSnapshot,
+        preset: ContentPreset,
+    ) -> Result<Self, NotChecked> {
+        Self::prepare_with_mode(snapshot, preset, true)
+    }
+
+    fn prepare_with_mode(
+        snapshot: CandidateSnapshot,
+        preset: ContentPreset,
+        paragraph_text: bool,
+    ) -> Result<Self, NotChecked> {
         validate_scope(&snapshot)?;
-        validate_preset(&preset)?;
+        validate_preset(&preset, paragraph_text)?;
         let mut reports = BTreeMap::new();
         for item in &snapshot.items {
-            reports.insert(item.entity_id.clone(), evaluate_item(&preset, item)?);
+            reports.insert(
+                item.entity_id.clone(),
+                evaluate_item(&preset, item, paragraph_text)?,
+            );
         }
         Ok(Self {
             snapshot,
             preset,
             reports,
+            paragraph_text,
         })
     }
 
@@ -195,7 +246,7 @@ impl IncrementalBaseline {
         for item in &overlay.candidate.items {
             let report = if affected.contains(item.entity_id.as_str()) {
                 evaluated += 1;
-                evaluate_item(&self.preset, item)?
+                evaluate_item(&self.preset, item, self.paragraph_text)?
             } else {
                 if baseline_items.get(item.entity_id.as_str()).copied() != Some(item) {
                     return Err(unavailable(
@@ -419,6 +470,192 @@ mod tests {
             assert!(evaluated > 0 && reused > 0, "{gate}");
         }
     }
+    #[test]
+    fn paragraph_text_gates_match_fresh_evaluation_after_change() {
+        for gate in [
+            "kind='paragraph_count'\nmin=2",
+            "kind='paragraph_length'\nmax_words=3",
+            "kind='paragraph_character_length'\nmax_chars=12",
+            "kind='repeated_paragraph_openings'\nopening_words=1\nmax_occurrences=1",
+            "kind='repeated_sentence_openings'\nopening_words=1\nmax_consecutive=1",
+            "kind='sentence_opening_window'\nopening_words=1\nwindow_size=4\nmax_occurrences=1",
+            "kind='sentence_opening_terms'\nterms=['Moreover']\nmax_per_paragraph=0",
+            "kind='repeated_punctuation'\nmark='—'\nmax_per_paragraph=0",
+            "kind='trailing_ing_clause'",
+            "kind='similar_sentence_lengths'\nrun_length=3\ntolerance_words=1",
+            "kind='sentence_length_variance'\nwindow_size=4\nrandom_min_stddev_words=1\nrandom_max_stddev_words=3\nrandom_seed=42",
+            "kind='inline_triple_candidates'\nconjunction='and'",
+            "kind='duplicate_paragraphs'\nmax_occurrences=1\nmin_chars=4",
+            "kind='sentence_length'\nmax_words=2\nparagraphs_only=true",
+            "kind='sentence_character_length'\nmax_chars=8\nparagraphs_only=true",
+            "kind='final_newline'",
+        ] {
+            let (mut snapshot, _, mut change) = fixture();
+            for original in &mut snapshot.items {
+                *original = item(
+                    &original.entity_id,
+                    "The team works. The team plans. Another team acts. More people help.\n\nMoreover, ideas matter.\n",
+                    Some(vec![]),
+                );
+            }
+            let preset = ContentPreset::from_toml(&format!(
+                "version=1\nname='paragraphs'\n[[gates]]\nid='check'\n{gate}\n"
+            ))
+            .unwrap();
+            let updated = item(
+                "a",
+                "Café works. Café plans. Café acts. Café checks.\r\n\r\nMoreover, one, two, and three — help, making progress.",
+                Some(vec![]),
+            );
+            change.entries.push(entry(
+                "a",
+                Operation::Update,
+                Some(&snapshot.items[0]),
+                Some(&updated),
+            ));
+            let candidate = overlay_candidate(&snapshot, &change, std::slice::from_ref(&updated))
+                .unwrap()
+                .candidate;
+            let expected: BTreeMap<_, _> = candidate
+                .items
+                .iter()
+                .map(|item| {
+                    let input = ContentInput {
+                        id: item.entity_id.clone(),
+                        text: Some(item.source.clone()),
+                        source_text: Some(item.source.clone()),
+                        ..Default::default()
+                    };
+                    let context =
+                        crate::plain_text_adapter::paragraph_text_context(&item.source).unwrap();
+                    (
+                        item.entity_id.clone(),
+                        preset
+                            .evaluate_with_context(&input, None, None, Some(&context))
+                            .unwrap(),
+                    )
+                })
+                .collect();
+            let baseline = IncrementalBaseline::prepare_paragraph_text(snapshot, preset).unwrap();
+            let IncrementalEvaluation::Evaluated {
+                reports,
+                evaluated,
+                reused,
+                ..
+            } = baseline.evaluate(&change, &[updated])
+            else {
+                panic!("paragraph gate did not evaluate: {gate}");
+            };
+            assert_eq!(
+                serde_json::to_value(&reports).unwrap(),
+                serde_json::to_value(&expected).unwrap(),
+                "{gate}"
+            );
+            assert_eq!(evaluated + reused, candidate.items.len());
+            assert!(evaluated > 0 && reused > 0, "{gate}");
+        }
+    }
+
+    #[test]
+    fn paragraph_mode_reuses_only_unchanged_items_for_all_operations() {
+        let (snapshot, _, mut change) = fixture();
+        let preset = ContentPreset::from_toml("version=1\nname='paragraphs'\n[[gates]]\nid='p'\nkind='paragraph_count'\nmin=2\n[[gates]]\nid='n'\nkind='final_newline'\n").unwrap();
+        let updated = item("a", "Updated text.\n\nMore text.\n", Some(vec![]));
+        let created = item("new", "New.\n\nContent.\n", Some(vec![]));
+        let renamed = item("renamed", "Renamed.\n\nContent.\n", Some(vec![]));
+        change.entries.push(entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&updated),
+        ));
+        change.entries.push(entry(
+            "b",
+            Operation::Delete,
+            Some(&snapshot.items[1]),
+            None,
+        ));
+        change
+            .entries
+            .push(entry("new", Operation::Create, None, Some(&created)));
+        let mut rename = entry(
+            "renamed",
+            Operation::Rename,
+            Some(&snapshot.items[2]),
+            Some(&renamed),
+        );
+        rename.previous_entity_id = Some("c".into());
+        change.entries.push(rename);
+        let after = [updated, created, renamed];
+        let candidate = overlay_candidate(&snapshot, &change, &after)
+            .unwrap()
+            .candidate;
+        let expected: BTreeMap<_, _> = candidate
+            .items
+            .iter()
+            .map(|item| {
+                let input = ContentInput {
+                    id: item.entity_id.clone(),
+                    text: Some(item.source.clone()),
+                    source_text: Some(item.source.clone()),
+                    ..Default::default()
+                };
+                let context =
+                    crate::plain_text_adapter::paragraph_text_context(&item.source).unwrap();
+                (
+                    item.entity_id.clone(),
+                    preset
+                        .evaluate_with_context(&input, None, None, Some(&context))
+                        .unwrap(),
+                )
+            })
+            .collect();
+        let baseline = IncrementalBaseline::prepare_paragraph_text(snapshot, preset).unwrap();
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate(&change, &after)
+        else {
+            panic!("expected evaluated")
+        };
+        assert_eq!(
+            serde_json::to_value(&reports).unwrap(),
+            serde_json::to_value(&expected).unwrap()
+        );
+        assert_eq!(evaluated + reused, candidate.items.len());
+        assert!(reused > 0);
+    }
+
+    #[test]
+    fn paragraph_mode_rejects_unavailable_or_external_dependencies() {
+        let (mut snapshot, _, mut change) = fixture();
+        for original in &mut snapshot.items {
+            *original = item(&original.entity_id, "Team writes.", Some(vec![]));
+        }
+        let preset = ContentPreset::from_toml("version=1\nname='opening'\n[[gates]]\nid='x'\nkind='repeated_paragraph_openings'\nopening_words=2\nmax_occurrences=1\n").unwrap();
+        assert!(IncrementalBaseline::prepare(snapshot.clone(), preset.clone()).is_err());
+        let baseline =
+            IncrementalBaseline::prepare_paragraph_text(snapshot.clone(), preset).unwrap();
+        let next = item("a", "中文句子。下一句。", Some(vec![]));
+        change.entries.push(entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&next),
+        ));
+        assert!(matches!(
+            baseline.evaluate(&change, &[next]),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        let external = ContentPreset::from_toml(
+            "version=1\nname='external'\n[[gates]]\nid='x'\nkind='custom'\nextension='provider'\n",
+        )
+        .unwrap();
+        assert!(IncrementalBaseline::prepare_paragraph_text(snapshot, external).is_err());
+    }
+
     #[test]
     fn incomplete_dependencies_and_unsupported_scope_are_never_passed() {
         let (mut snapshot, preset, mut change) = fixture();
