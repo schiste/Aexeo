@@ -75,6 +75,7 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
           adapted.document.body_capabilities ?? ["text", "headings", "paragraphs", "links"],
         field_selection: contentFields === undefined ? "automatic" as const : "configured" as const,
         configured_fields: contentFields ?? null,
+        unmapped_components: adapted.meta.unmappedComponents ?? { entries: [], truncated: false },
       },
       description: {
         field_selection: options.descriptionFieldsByCollection?.[collection] === undefined ? "automatic" as const : "configured" as const,

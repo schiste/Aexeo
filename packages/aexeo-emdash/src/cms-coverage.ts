@@ -1,3 +1,4 @@
+import type { UnmappedComponents } from "./adapter.js";
 import type { EmdashDocument, Finding } from "./types.js";
 
 // CMS records are not rendered pages or site artifacts. Native Aexeo rule IDs
@@ -38,4 +39,11 @@ export function cmsBodyCoverageNotice(coverage: CmsBodyCoverage | undefined): st
   return coverage === undefined
     ? "Body coverage is unknown for this evaluation; save or refresh to reassess it."
     : `Body coverage is ${coverage}; content checks depending on missing capabilities cannot be evaluated reliably.`;
+}
+
+/** Observations concern only components actually encountered in the projection. */
+export function unmappedComponentsNotice(components: UnmappedComponents | undefined): string | undefined {
+  if (!components || (!components.entries.length && !components.truncated)) return undefined;
+  const items = components.entries.map((entry) => `${entry.type} (${entry.kind}, ${entry.occurrences})`).join(", ");
+  return `Unmapped components observed${items ? `: ${items}` : ""}${components.truncated ? "; additional types omitted" : ""}. Configure mappings after verifying the host renderer.`;
 }

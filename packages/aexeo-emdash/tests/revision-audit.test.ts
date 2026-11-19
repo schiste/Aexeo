@@ -47,6 +47,45 @@ describe("revision audits", () => {
     if (result.status !== "evaluated") throw new Error("expected report");
     expect(await getRevisionAudit(ctx as never, result.audit_id)).toMatchObject({ revision_status: expected });
   });
+  it("identifies unmapped block and inline components in the evaluated revision", async () => {
+    const { ctx, revision } = host();
+    const data = revision.data as Record<string, unknown>;
+    data.content = [
+      { _type: "block", children: [{ _type: "span", text: "Known." }, { _type: "badge", label: "Private label" }] },
+      { _type: "askYourAi", prompt: "Private prompt" },
+      { _type: "askYourAi", prompt: "Another prompt" },
+      { _type: "section", body: [{ _type: "block", children: [{ _type: "span", text: "Nested." }] }, { _type: "notice", text: "Private text" }] },
+    ];
+    const options = { preset: { name: "article" }, contentFieldsByCollection: { posts: ["content"] },
+      blockMappings: { section: [{ kind: "richText" as const, field: "body" }] }, evaluate: async () => report };
+    const run = () => auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, options);
+    const result = await run();
+    expect(result).toMatchObject({ input_coverage: { body: { capabilities: [], unmapped_components: {
+      entries: [{ kind: "inline", type: "badge", occurrences: 1 }, { kind: "block", type: "askYourAi", occurrences: 2 }, { kind: "block", type: "notice", occurrences: 1 }], truncated: false,
+    } } } });
+    if (result.status !== "evaluated") throw new Error("expected report");
+    expect(await getRevisionAudit(ctx as never, result.audit_id)).toMatchObject({ input_coverage: result.input_coverage });
+    expect(JSON.stringify(result.input_coverage)).not.toContain("Private");
+    const mapped = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, {
+      ...options, blockMappings: { ...options.blockMappings, askYourAi: [], notice: [], badge: { inline: [{ kind: "text", field: "label" }] } },
+    });
+    expect(mapped).toMatchObject({ input_coverage: { body: { coverage: "complete", unmapped_components: { entries: [], truncated: false } } } });
+  });
+  it("bounds component diagnostics and withholds invalid type strings", async () => {
+    const { ctx, revision } = host();
+    const data = revision.data as Record<string, unknown>;
+    data.content = [
+      { _type: "block", children: [{ _type: "span", text: "Known." }] },
+      ...Array.from({ length: 34 }, (_, i) => ({ _type: `component${i}` })),
+      { _type: "private content with spaces" },
+    ];
+    const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, { preset: { name: "article" }, contentFieldsByCollection: { posts: ["content"] }, evaluate: async () => report });
+    if (result.status !== "evaluated") throw new Error("expected report");
+    const components = result.input_coverage.body.unmapped_components;
+    expect(components.entries).toHaveLength(32);
+    expect(components.truncated).toBe(true);
+    expect(JSON.stringify(components)).not.toContain("private content");
+  });
   it("reports projection coverage separately from rendered metadata", async () => {
     const { ctx, revision } = host();
     const data = revision.data as Record<string, unknown>;

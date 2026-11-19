@@ -1,5 +1,5 @@
 import { isCmsObservableFinding, type CmsBodyCoverage } from "./cms-coverage.js";
-import type { CustomBlockMappings, DescriptionField, MetadataFields } from "./adapter.js";
+import type { CustomBlockMappings, DescriptionField, MetadataFields, UnmappedComponents } from "./adapter.js";
 // Data route for the React admin findings page.
 //
 // Returns JSON (not Block Kit blocks) shaped for the
@@ -88,6 +88,7 @@ export interface RouteSummary {
   warningCount: number;
   assessment?: DocumentAssessment;
   body_coverage?: CmsBodyCoverage;
+  body_unmapped_components?: UnmappedComponents;
 }
 
 export interface FindingRow {
@@ -170,7 +171,7 @@ async function buildFindingsPayload(
 
   // Walk the findings KV namespace once. Each entry is keyed by
   // findings:<route> and the value is { route, findings: Finding[] }.
-  const entries = await ctx.kv.list<{ route: string; findings: Finding[]; assessment?: DocumentAssessment; body_coverage?: CmsBodyCoverage }>(
+  const entries = await ctx.kv.list<{ route: string; findings: Finding[]; assessment?: DocumentAssessment; body_coverage?: CmsBodyCoverage; body_unmapped_components?: UnmappedComponents }>(
     "findings:",
   );
   const findings: FindingRow[] = [];
@@ -178,7 +179,7 @@ async function buildFindingsPayload(
   const sitewideAssessment = entries.find((entry) => entry.key === "findings:*")?.value?.assessment;
   const perRoute = new Map<
     string,
-    { findings: Finding[]; errors: number; warnings: number; assessment?: DocumentAssessment; body_coverage?: CmsBodyCoverage }
+    { findings: Finding[]; errors: number; warnings: number; assessment?: DocumentAssessment; body_coverage?: CmsBodyCoverage; body_unmapped_components?: UnmappedComponents }
   >();
   for (const entry of entries) {
     if (entry.value === null) continue;
@@ -190,7 +191,7 @@ async function buildFindingsPayload(
     }
     let bucket = perRoute.get(route);
     if (bucket === undefined) {
-      bucket = { findings: [], errors: 0, warnings: 0, ...(entry.value.body_coverage === undefined ? {} : { body_coverage: entry.value.body_coverage }), ...(entry.value.assessment === undefined ? {} : { assessment: entry.value.assessment }) };
+      bucket = { findings: [], errors: 0, warnings: 0, ...(entry.value.body_coverage === undefined ? {} : { body_coverage: entry.value.body_coverage }), ...(entry.value.body_unmapped_components === undefined ? {} : { body_unmapped_components: entry.value.body_unmapped_components }), ...(entry.value.assessment === undefined ? {} : { assessment: entry.value.assessment }) };
       perRoute.set(route, bucket);
     }
     for (const finding of entry.value.findings) {
@@ -228,6 +229,7 @@ async function buildFindingsPayload(
       warningCount: bucket.warnings,
       ...(bucket.assessment === undefined ? {} : { assessment: bucket.assessment }),
       ...(bucket.body_coverage === undefined ? {} : { body_coverage: bucket.body_coverage }),
+      ...(bucket.body_unmapped_components === undefined ? {} : { body_unmapped_components: bucket.body_unmapped_components }),
     });
   }
   routes.sort((a, b) => b.errorCount - a.errorCount || a.route.localeCompare(b.route));

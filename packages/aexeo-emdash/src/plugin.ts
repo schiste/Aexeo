@@ -734,6 +734,7 @@ export async function handleAfterSaveConfigured(
     route: document.route,
     findings: filtered,
     body_coverage: cmsBodyCoverage(document),
+    ...(adapted.meta.unmappedComponents === undefined ? {} : { body_unmapped_components: adapted.meta.unmappedComponents }),
     ...(result.assessments?.[document.route] === undefined ? {} : { assessment: result.assessments[document.route] }),
   });
 }
@@ -1133,6 +1134,7 @@ export async function evaluateAndPersistAll(
     await kv.set(findingsKey(route), {
       route, findings: filtered,
       ...(stored === undefined ? {} : { body_coverage: cmsBodyCoverage(stored.document) }),
+      ...(stored?.meta.unmappedComponents === undefined ? {} : { body_unmapped_components: stored.meta.unmappedComponents }),
       ...(route === "*" && globalAssessment !== undefined ? { assessment: globalAssessment } :
         result.assessments?.[route] === undefined ? {} : { assessment: result.assessments[route] }),
     });

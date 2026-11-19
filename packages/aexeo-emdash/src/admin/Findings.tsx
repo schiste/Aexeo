@@ -28,7 +28,7 @@
 import * as React from "react";
 import { RevisionReviews } from "./RevisionReviews.js";
 import { useCallback, useEffect, useState } from "react";
-import { cmsBodyCoverageNotice } from "../cms-coverage.js";
+import { cmsBodyCoverageNotice, unmappedComponentsNotice } from "../cms-coverage.js";
 import { describeGate, describeSourceMapping, summarizeGates } from "../assessment-display.js";
 import type { FindingsPayload, RouteSummary } from "../data-route.js";
 import type { DocumentAssessment } from "../plugin.js";
@@ -56,6 +56,12 @@ export function ContentAssessmentDetails({ assessment }: { assessment: Extract<D
     <p>{describeSourceMapping(assessment.source_mapping)}</p>
     <ul>{assessment.gates.map((gate) => <li key={gate.gate_id}>{describeGate(gate)}</li>)}</ul>
   </details>;
+}
+
+export function BodyCoverageDetails({ route }: { route: Pick<RouteSummary, "body_coverage" | "body_unmapped_components"> }): React.JSX.Element {
+  const bodyNotice = cmsBodyCoverageNotice(route.body_coverage);
+  const componentsNotice = unmappedComponentsNotice(route.body_unmapped_components);
+  return <>{bodyNotice && <p>{bodyNotice}</p>}{componentsNotice && <p>{componentsNotice}</p>}</>;
 }
 
 export function Findings(): React.JSX.Element {
@@ -219,7 +225,7 @@ export function Findings(): React.JSX.Element {
       {payload.routes.filter((route) => route.assessment !== undefined || route.body_coverage !== "complete").map((route) => (
         <section key={route.route} className="rounded border border-kumo-line p-3 text-sm">
           <strong>{route.route}</strong>
-          {route.assessment?.status !== "error" && cmsBodyCoverageNotice(route.body_coverage) && <p>{cmsBodyCoverageNotice(route.body_coverage)}</p>}
+          {route.assessment?.status !== "error" && <BodyCoverageDetails route={route} />}
           {route.assessment === undefined && <p>No content preset assessment is available for this document.</p>}
           {route.assessment?.status === "not_configured" && <p>{route.assessment.reason === "collection_excluded" ? "Content preset is not enabled for this collection." : "No content preset is configured; editorial checks are not enabled."}</p>}
           {route.assessment?.status === "error" ? <p>Evaluation failed: {route.assessment.reason}. Findings are unavailable for this revision.</p> :

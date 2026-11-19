@@ -1,6 +1,6 @@
 import { describeGate, describeSourceMapping, summarizeGates } from "./assessment-display.js";
-import { cmsBodyCoverageNotice, isCmsObservableFinding, type CmsBodyCoverage } from "./cms-coverage.js";
-import type { CustomBlockMappings, DescriptionField, MetadataFields } from "./adapter.js";
+import { cmsBodyCoverageNotice, unmappedComponentsNotice, isCmsObservableFinding, type CmsBodyCoverage } from "./cms-coverage.js";
+import type { CustomBlockMappings, DescriptionField, MetadataFields, UnmappedComponents } from "./adapter.js";
 // Shared Block Kit view layer for both plugin entrypoints.
 //
 // `configured.ts` (in-process, the production-hit path) and
@@ -494,10 +494,11 @@ export async function renderDocumentPanel(
     };
   }
   const incomplete = (await readAssessment(kv, "*"))?.status === "error";
-  const record = await kv.get<{ findings: Finding[]; assessment?: DocumentAssessment; body_coverage?: CmsBodyCoverage }>(findingsKey(route));
+  const record = await kv.get<{ findings: Finding[]; assessment?: DocumentAssessment; body_coverage?: CmsBodyCoverage; body_unmapped_components?: UnmappedComponents }>(findingsKey(route));
   const findings = (record?.findings ?? []).filter((finding) => isCmsObservableFinding(finding, record?.body_coverage === "complete") && (!incomplete || !isSiteGraphFinding(finding)));
   const assessment = record?.assessment;
   const bodyNotice = record && assessment?.status !== "error" ? cmsBodyCoverageNotice(record.body_coverage) : undefined;
+  const componentsNotice = record && assessment?.status !== "error" ? unmappedComponentsNotice(record.body_unmapped_components) : undefined;
   const errors = findings.filter((finding) => finding.severity === "error");
   const warnings = findings.filter(
     (finding) => finding.severity === "warning",
@@ -519,6 +520,7 @@ export async function renderDocumentPanel(
       },
       { type: "context", text: "Rendered page markup, semantic sections, generated metadata, duplicate pages and sitewide links are not checked here. Audit the built site for page-level and link findings." },
       ...(bodyNotice ? [{ type: "context", text: bodyNotice }] : []),
+      ...(componentsNotice ? [{ type: "context", text: componentsNotice }] : []),
       ...(incomplete ? [{ type: "context", text: "Sitewide and cross-document checks are unavailable; refresh after resolving the CMS input error." }] : []),
       ...(record && assessment === undefined ? [{ type: "context", text: "No content preset assessment was recorded for this document; absence of findings is not an editorial quality assessment." }] : []),
       ...(assessment?.status === "not_configured" ? [{ type: "context", text: assessment.reason === "collection_excluded" ? "Content preset is not enabled for this collection." : "No content preset is configured; editorial checks are not enabled." }] : []),
