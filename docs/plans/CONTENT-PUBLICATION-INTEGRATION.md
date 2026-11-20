@@ -1,6 +1,6 @@
 # Aexeo–Aethyme publication integration
 
-Status snapshot: 18 November 2026. This is an active integration plan, not a
+Status snapshot: 20 November 2026. This is an active integration plan, not a
 claim that the publication design is complete. The v1 runner contract remains
 in force: `0` means pass, `1` means fail, `2` means not checked or invalid
 input, and other codes indicate errors. The runner must cross-check the
@@ -86,16 +86,22 @@ unavailable check may become a pass.
 
 ## Aethyme status
 
-As observed on 18 November 2026,
-[Aethyme #1800](https://github.com/schiste/Aethyme/pull/1800) is an open draft
-for the v1 runner and [#1801](https://github.com/schiste/Aethyme/pull/1801) is
-an open draft of dependent integration tests, including actual CLI execution.
-CI has passed for their tested revisions, but neither is merged; #1800's submit
-was deferred by timeout and #1801 depends on its final base. Check their exact
-heads, submit results and current CI before treating them as delivered.
+As observed on 20 November 2026,
+[Aethyme #1800](https://github.com/schiste/Aethyme/pull/1800) implements a v1
+subject precheck, not the host-facing runner. Its CI is green and local
+validation is in progress; it is not merged.
+[Aethyme #1801](https://github.com/schiste/Aethyme/pull/1801) builds the
+native runner on that prerequisite. Its CI is green, but it remains a draft
+and must be resynchronized and validated after #1800 lands.
 
-[Aethyme #1802](https://github.com/schiste/Aethyme/pull/1802) is an open draft
-for test-selection policy; its CI is green and its submit is in progress as of
-this snapshot. The `fast-guards` filter failure on base `5881811809b9` (run
-`143021`) is distinct from the local empty-`netstat` failure. Neither incident
-establishes a content-runner failure or completion of publication integration.
+A reproducible interoperability script in #1801 was run locally using actual
+Aexeo 0.0.24 and Aethyme runner binaries: pass, fail, not-checked and changed
+candidate cases behaved as expected. A broker test also covers a surviving
+child process in the supervised group. These fixture results are not an
+atomic publication test, do not establish input provenance or freshness, and
+must be repeated against the final merged base. The runner requires a trusted
+validator and a host that inventories and protects all decision inputs.
+
+[Aethyme #1802](https://github.com/schiste/Aethyme/pull/1802) remains an open
+draft concerning test selection. It is distinct from the content-gate runner;
+its presence does not establish publication integration.
