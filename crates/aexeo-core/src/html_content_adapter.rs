@@ -33,6 +33,29 @@ pub enum HtmlContentScope {
     Main,
 }
 
+// Accept only a bounded chain of presentational wrappers around one text node.
+fn reference_label(node: &Handle) -> Option<String> {
+    let mut current = node.clone();
+    for _ in 0..8 {
+        let children = current.children.borrow();
+        let [child] = children.as_slice() else {
+            return None;
+        };
+        match &child.data {
+            NodeData::Text { contents } => return Some(contents.borrow().to_string()),
+            NodeData::Element { name, .. }
+                if matches!(name.local.as_ref(), "sup" | "em" | "strong") =>
+            {
+                let next = child.clone();
+                drop(children);
+                current = next;
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
 fn excluded_element(node: &Handle) -> bool {
     if let NodeData::Element { name, attrs, .. } = &node.data {
         matches!(
@@ -142,24 +165,17 @@ pub fn html_content_with_scope_and_heading_levels(
                         {
                             destinations.push(href.value.to_string());
                         }
-                        // Keep explicit numeric reference labels out of prose, as
-                        // the Portable Text adapter does. Only a single plain
-                        // text child is unambiguous; other markup stays intact.
+                        // Exclude only explicitly linked numeric references with
+                        // unambiguous, presentational-only label markup.
                         if tag == "a"
                             && let Some(href) =
                                 attrs.iter().find(|attr| attr.name.local.as_ref() == "href")
+                            && href.value.starts_with("#reference-")
+                            && let Some(label) = reference_label(&node)
+                            && crate::content_gate::numeric_reference_marker(&href.value, &label)
                         {
-                            let children = node.children.borrow();
-                            if let [child] = children.as_slice()
-                                && let NodeData::Text { contents } = &child.data
-                                && crate::content_gate::numeric_reference_marker(
-                                    &href.value,
-                                    &contents.borrow(),
-                                )
-                            {
-                                text.push_str(&" ".repeat(contents.borrow().len()));
-                                continue;
-                            }
+                            text.push_str(&" ".repeat(label.len()));
+                            continue;
                         }
                         if tag == "img"
                             && let Some(alt) =
@@ -899,6 +915,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn formatted_reference_labels_preserve_sentence_boundaries_and_source_positions() {
+        for tag in ["sup", "em", "strong"] {
+            let source = format!(
+                "<p>In 2025.<a href='#reference-source'><{tag}>1</{tag}></a> Next sentence.</p>"
+            );
+            let adapted = html_content("x", &source).unwrap();
+            let text = adapted.input.text.as_deref().unwrap();
+            assert!(text.contains("2025.  Next"), "{tag}: {text}");
+            let map = html_source_map(&source, text).unwrap();
+            let pos = crate::text_index::LineIndex::new(text)
+                .position(text, text.find("Next").unwrap())
+                .unwrap();
+            assert_eq!(
+                map.source_position(&source, text, pos.0, pos.1),
+                crate::text_index::LineIndex::new(&source)
+                    .position(&source, source.find("Next").unwrap())
+            );
+        }
+        for source in [
+            "<p>2025.<a href='/ordinary'><sup>1</sup></a> Next.</p>",
+            "<p>2025.<a href='#reference-source'><em>1</em> item</a> Next.</p>",
+        ] {
+            assert!(
+                html_content("x", source)
+                    .unwrap()
+                    .input
+                    .text
+                    .unwrap()
+                    .contains("2025.1")
+            );
+        }
+    }
+
+    #[test]
     fn reference_masks_preserve_source_positions_and_other_links() {
         let source = "<p>In 2025.<a href='#reference-source'>1</a> Next 2.5 words <a href='/other'>42</a>.</p>";
         let adapted = html_content("x", source).unwrap();
@@ -926,7 +976,7 @@ mod tests {
                 .input
                 .text
                 .unwrap()
-                .contains("2025.1 Next")
+                .contains("2025.  Next")
         );
     }
 
