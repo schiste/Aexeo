@@ -1,6 +1,6 @@
 {
-  "preset": "version=1\nname='cross'\n[[gates]]\nid='style'\nkind='forbidden_terms'\nterms=['generic phrase']\n[[gates]]\nid='paragraphs'\nkind='paragraph_count'\nmin=1\nmax=2\n[[gates]]\nid='links'\nkind='link_count'\nmin=1\n[[gates]]\nid='description'\nkind='required_metadata'\nfields=['description']\n[[gates]]\nid='heading'\nkind='heading_length'\nmax_chars=3\n",
-  "markdown": "# Élan\n\n😀 generic phrase and [source](https://example.org).\n",
+  "preset": "version=1\nname='cross'\n[[gates]]\nid='style'\nkind='forbidden_terms'\nterms=['generic phrase']\n[[gates]]\nid='paragraphs'\nkind='paragraph_count'\nmin=1\nmax=2\n[[gates]]\nid='links'\nkind='link_count'\nmin=1\n[[gates]]\nid='description'\nkind='required_metadata'\nfields=['description']\n[[gates]]\nid='heading'\nkind='heading_length'\nmax_chars=3\n[[gates]]\nid='hierarchy'\nkind='heading_hierarchy'\nblocking=false\n",
+  "markdown": "# Élan\n\n😀 generic phrase and [source](https://example.org).\n\n### X\n",
   "document": {
     "route": "/example",
     "title": "Élan",
@@ -44,6 +44,15 @@
             "href": "https://example.org"
           }
         ]
+      },
+      {
+        "style": "h3",
+        "children": [
+          {
+            "_type": "span",
+            "text": "X"
+          }
+        ]
       }
     ]
   },
@@ -53,6 +62,7 @@
       "passed",
       "passed",
       "not_checked",
+      "failed",
       "failed"
     ],
     "paragraph_count": 1,
@@ -71,8 +81,8 @@
       "utf16_offset": 0
     },
     "source_mapping": {
-      "eligible": 2,
-      "mapped": 2,
+      "eligible": 3,
+      "mapped": 3,
       "unmapped": 0
     },
     "html_location": {
@@ -99,6 +109,25 @@
       "block_index": 0,
       "span_index": 0,
       "utf16_offset": 0
+    },
+    "markdown_hierarchy_location": {
+      "gate_id": "hierarchy",
+      "finding_index": 0,
+      "line": 5,
+      "column": 1
+    },
+    "html_hierarchy_location": {
+      "gate_id": "hierarchy",
+      "finding_index": 0,
+      "line": 3,
+      "column": 1
+    },
+    "emdash_hierarchy_location": {
+      "gate_id": "hierarchy",
+      "finding_index": 0,
+      "block_index": 2,
+      "span_index": 0,
+      "utf16_offset": 0
     }
   },
   "empty_markdown": "",
@@ -113,8 +142,9 @@
     "failed",
     "failed",
     "not_checked",
+    "passed",
     "passed"
   ],
-  "html": "<h1>Élan</h1>\n<p>😀 generic phrase and <a href=\"https://example.org\">source</a>.</p>\n",
+  "html": "<h1>Élan</h1>\n<p>😀 generic phrase and <a href=\"https://example.org\">source</a>.</p>\n<h3>X</h3>\n",
   "empty_html": ""
 }
