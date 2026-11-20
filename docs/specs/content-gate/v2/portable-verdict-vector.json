@@ -1,0 +1,77 @@
+{
+  "base": {
+    "scope": "site",
+    "site_id": "site",
+    "site_base_url": null,
+    "base": {
+      "kind": "opaque",
+      "revision": "r1"
+    },
+    "complete": true,
+    "items": []
+  },
+  "after": [
+    {
+      "entity_id": "article",
+      "public_path": "/article",
+      "media_type": "text/plain",
+      "revision": null,
+      "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "source": "abc",
+      "links": null
+    }
+  ],
+  "artifacts": {
+    "change": "{\"schema\":\"content-gate.change/v1\",\"change_id\":\"example\",\"created_at\":\"2026-01-01T00:00:00Z\",\"origin\":{\"kind\":\"manual\"},\"base\":{\"kind\":\"opaque\",\"revision\":\"r1\"},\"entries\":[{\"entity_id\":\"article\",\"operation\":\"create\",\"media_type\":\"text/plain\",\"after\":{\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\"inline\":\"abc\"}}]}",
+    "resolved_policy": "{\"version\":1,\"name\":\"test\",\"gates\":[{\"kind\":\"word_count\",\"id\":\"words\",\"severity\":\"warning\",\"blocking\":true,\"min\":1,\"max\":null}]}",
+    "host_options": "{\"engine_version\":\"0.0.24\",\"max_entry_bytes\":16777216,\"max_total_bytes\":67108864,\"mode\":\"offline\",\"plain_text_paragraphs\":false}",
+    "evaluator": "build"
+  },
+  "portable": {
+    "schema": "content-gate.bound-verdict/v2",
+    "binding_profile": "content-gate.candidate-binding/v1",
+    "binding_sha256": "309c9cc6e7d9ef3462d64f0af10623f6e6d402266775d997e62b7f39f33d3f52",
+    "verdict": {
+      "schema": "content-gate.verdict/v1",
+      "status": "pass",
+      "subject": {
+        "change_id": "example",
+        "base": {
+          "kind": "opaque",
+          "revision": "r1"
+        },
+        "entries": [
+          {
+            "entity_id": "article",
+            "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+          }
+        ]
+      },
+      "validator": {
+        "name": "aexeo",
+        "version": "0.0.24",
+        "profile": "test"
+      },
+      "evaluated_at": "2026-11-18T10:37:59Z",
+      "summary": {
+        "checks": 1,
+        "passed": 1,
+        "failed": 0,
+        "not_checked": 0,
+        "blocking_failed": 0,
+        "blocking_not_checked": 0
+      },
+      "checks": [
+        {
+          "id": "gate:7:article:words",
+          "status": "passed",
+          "blocking": true
+        }
+      ],
+      "findings": [],
+      "extensions": {
+        "aexeo.offline-input-binding.v1": "4ce0a36c247abb5d4c336f8bd1a7d55767a733b373445f308e9fb5b00cf57cf5"
+      }
+    }
+  }
+}

@@ -86,5 +86,6 @@ boundary. Record which checks actually ran; no digest implies whole-site coverag
 The Rust API `evaluate_draft_portable_candidate_verdict` produces the draft
 envelope from an offline candidate using the existing overlay and evaluator.
 It is not exposed through the CLI or consumed by a publication runner. The
-independent wire schema, full verdict validation, interoperable artifact
-profiles and end-to-end host integration remain unfinished.
+[draft wire schema](bound-verdict.schema.json) and [shared vector](portable-verdict-vector.json)
+are exercised by Rust and Python tests. Full verdict validation, interoperable
+artifact profiles and end-to-end host integration remain unfinished.
