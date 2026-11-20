@@ -536,6 +536,9 @@ pub enum ContentGate {
         #[serde(default = "default_blocking")]
         blocking: bool,
         max_words: usize,
+        /// Withhold word counts outside the conservative Latin character subset.
+        #[serde(default, skip_serializing_if = "is_false")]
+        require_latin_word_boundaries: bool,
         #[serde(default = "default_sentence_delimiters")]
         delimiters: String,
         /// Exact whitespace-delimited abbreviations whose final period is not a boundary.
@@ -3580,6 +3583,14 @@ impl ContentPreset {
                         let mut sentence_count = 0;
                         let mut longest = 0;
                         let mut exceeding = 0;
+                        let mut unsupported_sentences = 0;
+                        let require_latin = matches!(
+                            gate,
+                            ContentGate::SentenceLength {
+                                require_latin_word_boundaries: true,
+                                ..
+                            }
+                        );
                         let segments = paragraphs
                             .filter(|_| *paragraphs_only)
                             .into_iter()
@@ -3608,6 +3619,10 @@ impl ContentPreset {
                                 delimiters,
                                 abbreviations,
                                 |segment, start_line, start_column| {
+                                    if require_latin && !is_simple_latin_sentence(segment) {
+                                        unsupported_sentences += 1;
+                                        return;
+                                    }
                                     let count = if chars {
                                         segment.trim().chars().count()
                                     } else {
@@ -3655,6 +3670,15 @@ impl ContentPreset {
                         measurements.insert("sentence_count".into(), sentence_count);
                         measurements.insert("sentences_exceeding_limit".into(), exceeding);
                         measurements.insert(longest_key.into(), longest);
+                        if require_latin {
+                            measurements.insert(
+                                "sentences_with_unverified_word_boundaries".into(),
+                                unsupported_sentences,
+                            );
+                            if unsupported_sentences > 0 {
+                                reason = Some("some sentences are outside the conservative Latin character subset; whitespace word boundaries are unverified".into());
+                            }
+                        }
                     } else {
                         reason = Some(
                             if *paragraphs_only {
@@ -4693,6 +4717,66 @@ mod tests {
         ));
         assert!(!claim_is_present("alpha  beta", "alpha beta", &[5]));
         assert!(claim_is_present("aaa", "aa", &[1]));
+    }
+
+    #[test]
+    fn guarded_sentence_word_counts_report_unsupported_scripts_without_losing_findings() {
+        let preset = |guard: bool| {
+            ContentPreset::from_toml(&format!(
+            "version=1\nname='t'\n[[gates]]\nid='g'\nkind='sentence_length'\nmax_words=2\nrequire_latin_word_boundaries={guard}\n"
+        )).unwrap()
+        };
+        let result = preset(true)
+            .evaluate(&literal_input("One long sentence. 这是中文。"))
+            .unwrap();
+        let gate = &result.gates[0];
+        assert_eq!(gate.status, GateStatus::NotChecked);
+        assert_eq!(gate.findings.len(), 1);
+        assert_eq!(gate.measurements["sentence_count"], 1);
+        assert_eq!(
+            gate.measurements["sentences_with_unverified_word_boundaries"],
+            1
+        );
+        assert!(gate.reason.as_deref().unwrap().contains("unverified"));
+
+        let all_latin = preset(true)
+            .evaluate(&literal_input("Une phrase française."))
+            .unwrap();
+        assert_eq!(all_latin.gates[0].status, GateStatus::Failed);
+        assert_eq!(
+            all_latin.gates[0].measurements["sentences_with_unverified_word_boundaries"],
+            0
+        );
+
+        let legacy = preset(false)
+            .evaluate(&literal_input("这是中文。"))
+            .unwrap();
+        assert_eq!(legacy.gates[0].status, GateStatus::Passed);
+        assert!(
+            !legacy.gates[0]
+                .measurements
+                .contains_key("sentences_with_unverified_word_boundaries")
+        );
+
+        let missing = preset(true)
+            .evaluate(&ContentInput {
+                id: "missing".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(missing.gates[0].status, GateStatus::NotChecked);
+    }
+
+    #[test]
+    fn readability_starter_exposes_unsupported_word_boundaries() {
+        let preset = ContentPreset::from_toml(include_str!("../presets/readability.toml")).unwrap();
+        let report = preset.evaluate(&literal_input("هذه جملة عربية.")).unwrap();
+        let gate = &report.gates[0];
+        assert_eq!(gate.status, GateStatus::NotChecked);
+        assert_eq!(
+            gate.measurements["sentences_with_unverified_word_boundaries"],
+            1
+        );
     }
 
     #[test]
