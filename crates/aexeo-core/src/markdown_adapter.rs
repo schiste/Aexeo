@@ -248,10 +248,10 @@ fn inline_code_value_offset(raw: &str, value: &str) -> Option<usize> {
 /// Extract complete Markdown link destinations without fetching them. Returns
 /// `None` when a reference cannot be resolved conservatively.
 pub fn markdown_link_destinations(source: &str) -> Result<Option<Vec<String>>> {
-    Ok(
-        link_destinations_from_root(&parse_markdown(source)?, source)
-            .map(|links| links.into_iter().map(|link| link.url).collect()),
-    )
+    let root = parse_markdown(source)?;
+    let definitions = reference_definitions(&root);
+    Ok(link_destinations_from_root(&root, source, &definitions)
+        .map(|links| links.into_iter().map(|link| link.url).collect()))
 }
 
 /// Byte offsets of explicit Markdown links, excluding autolinks and code.
@@ -396,28 +396,39 @@ struct ExtractedLink {
     start: Option<usize>,
 }
 
-fn link_destinations_from_root(root: &Node, source: &str) -> Option<Vec<ExtractedLink>> {
-    fn normalize(value: &str) -> Option<String> {
-        value.is_ascii().then(|| {
-            value
-                .split_ascii_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-                .to_ascii_lowercase()
-        })
-    }
-    fn collect_definitions(node: &Node, defs: &mut std::collections::BTreeMap<String, String>) {
+fn normalize_reference(value: &str) -> Option<String> {
+    value.is_ascii().then(|| {
+        value
+            .split_ascii_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_ascii_lowercase()
+    })
+}
+
+fn reference_definitions(node: &Node) -> std::collections::BTreeMap<String, String> {
+    fn collect(node: &Node, defs: &mut std::collections::BTreeMap<String, String>) {
         if let Node::Definition(def) = node
-            && let Some(key) = normalize(&def.identifier)
+            && let Some(key) = normalize_reference(&def.identifier)
         {
             defs.entry(key).or_insert_with(|| def.url.clone());
         }
         if let Some(children) = node.children() {
             for child in children {
-                collect_definitions(child, defs);
+                collect(child, defs);
             }
         }
     }
+    let mut defs = std::collections::BTreeMap::new();
+    collect(node, &mut defs);
+    defs
+}
+
+fn link_destinations_from_root(
+    root: &Node,
+    source: &str,
+    definitions: &std::collections::BTreeMap<String, String>,
+) -> Option<Vec<ExtractedLink>> {
     fn collect_links(
         node: &Node,
         defs: &std::collections::BTreeMap<String, String>,
@@ -431,7 +442,7 @@ fn link_destinations_from_root(root: &Node, source: &str) -> Option<Vec<Extracte
                 start: link.position.as_ref().map(|pos| pos.start.offset),
             }),
             Node::LinkReference(link) => links.push(ExtractedLink {
-                url: defs.get(&normalize(&link.identifier)?)?.clone(),
+                url: defs.get(&normalize_reference(&link.identifier)?)?.clone(),
                 start: link.position.as_ref().map(|pos| pos.start.offset),
             }),
             _ => {}
@@ -443,10 +454,8 @@ fn link_destinations_from_root(root: &Node, source: &str) -> Option<Vec<Extracte
         }
         Some(())
     }
-    let mut definitions = std::collections::BTreeMap::new();
-    collect_definitions(root, &mut definitions);
     let mut links = Vec::new();
-    collect_links(root, &definitions, &mut links, source).map(|_| links)
+    collect_links(root, definitions, &mut links, source).map(|_| links)
 }
 
 /// An observed structural list. `item_count` counts direct items only;
@@ -536,7 +545,8 @@ fn extract_markdown(
     map_source: bool,
 ) -> Result<(ContentInput, ContentContext, usize, MarkdownSourceMap)> {
     let root = parse_markdown(source)?;
-    extract_markdown_from_root(id, source, map_source, &root)
+    let definitions = reference_definitions(&root);
+    extract_markdown_from_root(id, source, map_source, &root, definitions)
 }
 
 /// The result of adapting Markdown and extracting link destinations together.
@@ -554,8 +564,10 @@ pub fn markdown_input_with_source_map_and_destinations(
     source: &str,
 ) -> Result<MarkdownContentWithDestinations> {
     let root = parse_markdown(source)?;
-    let links = link_destinations_from_root(&root, source);
-    let (input, context, count, mut map) = extract_markdown_from_root(id, source, true, &root)?;
+    let definitions = reference_definitions(&root);
+    let links = link_destinations_from_root(&root, source, &definitions);
+    let (input, context, count, mut map) =
+        extract_markdown_from_root(id, source, true, &root, definitions)?;
     let destinations = links.map(|links| {
         map.link_starts = links.iter().map(|link| link.start).collect();
         links.into_iter().map(|link| link.url).collect()
@@ -765,6 +777,7 @@ struct Projection {
     ranges: Vec<(usize, usize)>,
     block_ends: Vec<usize>,
     link_count: usize,
+    definitions: std::collections::BTreeMap<String, String>,
 }
 
 impl Projection {
@@ -846,6 +859,17 @@ impl Projection {
                     self.text.push_str(&" ".repeat(item.value.len()));
                 }
             }
+            Node::LinkReference(link)
+                if matches!(link.children.as_slice(), [Node::Text(item)]
+                    if normalize_reference(&link.identifier)
+                        .and_then(|key| self.definitions.get(&key))
+                        .is_some_and(|href| crate::content_gate::numeric_reference_marker(href, &item.value))) =>
+            {
+                self.link_count += 1;
+                if let [Node::Text(item)] = link.children.as_slice() {
+                    self.text.push_str(&" ".repeat(item.value.len()));
+                }
+            }
             Node::Break(_) => self.text.push('\n'),
             Node::Html(_) => source_map.heading_levels_complete = false,
             Node::Heading(heading) => {
@@ -893,13 +917,17 @@ fn extract_markdown_from_root(
     source: &str,
     map_source: bool,
     root: &Node,
+    definitions: std::collections::BTreeMap<String, String>,
 ) -> Result<(ContentInput, ContentContext, usize, MarkdownSourceMap)> {
     let mut source_map = MarkdownSourceMap {
         enabled: map_source,
         heading_levels_complete: map_source,
         ..Default::default()
     };
-    let mut projection = Projection::default();
+    let mut projection = Projection {
+        definitions,
+        ..Default::default()
+    };
     projection.visit(root, source, &mut source_map);
     let Projection {
         text,
@@ -907,6 +935,7 @@ fn extract_markdown_from_root(
         ranges,
         block_ends,
         link_count,
+        definitions: _,
     } = projection;
     if map_source {
         source_map.source_index = LineIndex::new(source);
@@ -1272,6 +1301,55 @@ mod tests {
             markdown_link_destinations("[two][é]\n\n[é]: /local")
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn resolved_numeric_references_preserve_source_positions_and_first_definition() {
+        let source = "In 2025.[1][Source] Next 2.5 words. [42][other].\n\n[source]: #reference-proof\n[SOURCE]: /ignored\n[other]: /other\n";
+        let adapted = markdown_input_with_source_map_and_destinations("x", source).unwrap();
+        let text = adapted.input.text.as_deref().unwrap();
+        assert!(text.contains("2025.  Next 2.5 words. 42."));
+        assert_eq!(adapted.link_count, 2);
+        let preset = crate::content_gate::ContentPreset::from_toml(
+            "version=1\nname='t'\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\n",
+        )
+        .unwrap();
+        let report = preset
+            .evaluate_with_context(&adapted.input, None, None, Some(&adapted.context))
+            .unwrap();
+        assert_eq!(report.gates[0].measurements["sentence_count"], 3);
+        assert_eq!(
+            adapted.destinations.unwrap(),
+            ["#reference-proof", "/other"]
+        );
+        let projected = LineIndex::new(text)
+            .position(text, text.find("Next").unwrap())
+            .unwrap();
+        let expected = LineIndex::new(source)
+            .position(source, source.find("Next").unwrap())
+            .unwrap();
+        assert_eq!(
+            adapted
+                .source_map
+                .source_position(source, text, projected.0, projected.1),
+            Some(expected)
+        );
+        let nested = "2025.[*1*][ref] Next.\n\n[ref]: #reference-proof\n";
+        assert!(
+            markdown_input("x", nested)
+                .unwrap()
+                .text
+                .unwrap()
+                .contains("2025.1 Next")
+        );
+        let ordinary = "2025.[1][ref] Next.\n\n[ref]: /ordinary\n";
+        assert!(
+            markdown_input("x", ordinary)
+                .unwrap()
+                .text
+                .unwrap()
+                .contains("2025.1 Next")
         );
     }
 
