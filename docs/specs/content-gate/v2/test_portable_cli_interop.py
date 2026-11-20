@@ -109,6 +109,20 @@ class PortableCliInterop(unittest.TestCase):
                 self.assertEqual(actual.returncode, 0, actual.stderr + actual.stdout)
                 self.assertEqual(json.loads(actual.stdout)['status'], 'match')
                 self.assertFalse(json.loads(actual.stdout)['publication_authorized'])
+                # The evaluator must use the same policy as the previous
+                # envelope, even when the host-supplied resolved-policy file
+                # and all candidate bytes still match that envelope.
+                preset = root / 'preset'
+                original_preset = preset.read_bytes()
+                preset.write_text("version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\nmax=2\n", encoding='utf-8')
+                changed_run = subprocess.run(command, cwd=ROOT, env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'changed-policy-verdict')),
+                                             capture_output=True, text=True, check=False)
+                self.assertEqual(changed_run.returncode, 0, changed_run.stderr)
+                changed_policy = subprocess.run(supervised_command, env=supervised_env, capture_output=True, text=True, check=False)
+                self.assertEqual(changed_policy.returncode, 2, changed_policy.stderr + changed_policy.stdout)
+                self.assertNotEqual(json.loads(changed_policy.stdout)['status'], 'match')
+                self.assertFalse(json.loads(changed_policy.stdout)['publication_authorized'])
+                preset.write_bytes(original_preset)
                 supervised_manifest['validator_sha256'] = '0' * 64
                 (root / 'supervised-manifest').write_text(json.dumps(supervised_manifest), encoding='utf-8')
                 rejected = subprocess.run(supervised_command, env=supervised_env, capture_output=True, text=True, check=False)
