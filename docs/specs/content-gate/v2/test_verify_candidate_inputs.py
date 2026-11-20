@@ -96,10 +96,42 @@ class CandidateVerification(unittest.TestCase):
         with self.assertRaises(VerificationError): self.check()
         for items in ([], [{'id': 'article'}, {'id': 'other'}],
                       [{'id': 'article'}, {'id': 'article'}],
-                      [{'id': 'article', 'metadata': {'slug': 'changed'}}]):
+                      [{'id': 'article', 'metadata': {'slug': 'changed'}}],
+                      [{'id': 'article', 'unknown': True}],
+                      [{'id': 'article', 'text': 42}],
+                      [{'id': 'article', 'headings': [42]}],
+                      [{'id': 'article', 'evidence_sources': {'ref': 42}}]):
             collection['items'] = items
             bind()
             with self.assertRaises(VerificationError): self.check()
+
+    def test_collection_rejects_unknown_and_invalid_content_fields(self):
+        change = json.loads(self.artifacts['change'])
+        candidate = overlay(self.base, change, self.after)
+        valid = {'id': 'article', 'text': 'texte', 'source_text': None,
+                 'headings': ['Élan'], 'metadata': None,
+                 'evidence_sources': {'source': 'document'}}
+        def check(item):
+            validate_collection_projection({'change_id': change['change_id'],
+                                            'complete': True, 'items': [item]},
+                                           candidate, change)
+        check(valid)
+        for field, value in [('unknown', True), ('text', 42), ('source_text', []),
+                             ('headings', [42]), ('headings', 'heading'),
+                             ('metadata', {'key': 42}),
+                             ('evidence_sources', {'source': 42})]:
+            with self.subTest(field=field, value=value):
+                item = dict(valid, **{field: value})
+                with self.assertRaises(VerificationError):
+                    check(item)
+
+    def test_collection_rejects_more_than_the_shared_item_limit(self):
+        change = json.loads(self.artifacts['change'])
+        candidate = overlay(self.base, change, self.after)
+        collection = {'change_id': change['change_id'], 'complete': True,
+                      'items': [{'id': 'article'}] * 100001}
+        with self.assertRaisesRegex(VerificationError, 'invalid collection projection'):
+            validate_collection_projection(collection, candidate, change)
 
     def test_partial_collection_may_omit_unchanged_candidate_items(self):
         change = json.loads(self.artifacts['change'])

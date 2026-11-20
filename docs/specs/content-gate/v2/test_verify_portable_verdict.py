@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from verify_candidate_inputs import VerificationError
+from verify_candidate_inputs import VerificationError, binding, overlay, revision_digest
 from verify_portable_verdict import compare, validate_schema
 
 
@@ -75,6 +75,30 @@ class PortableComparison(unittest.TestCase):
         self.fixture['base']['complete'] = False
         with self.assertRaises(VerificationError): self.check()
 
+    def test_rebound_collection_requires_valid_item_types(self):
+        change = json.loads(self.artifacts['change'])
+        candidate = overlay(self.fixture['base'], change, self.fixture['after'])
+        collection = {'change_id': change['change_id'], 'complete': True,
+                      'items': [{'id': 'article', 'text': 'texte', 'metadata': None}]}
+        def bind():
+            self.artifacts['collection'] = self.encoded(collection)
+            inputs = dict(self.artifacts, external_evidence=None,
+                          candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                          candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                          candidate_revision_sha256=revision_digest(candidate))
+            digest = binding(inputs)
+            self.previous['binding_sha256'] = digest
+            self.fresh['binding_sha256'] = digest
+        bind()
+        self.assertFalse(self.check()['publication_authorized'])
+        for field, value in [('unknown', True), ('text', 42), ('headings', [42]),
+                             ('evidence_sources', {'ref': 42})]:
+            with self.subTest(field=field):
+                collection['items'][0] = {'id': 'article', field: value}
+                bind()
+                with self.assertRaises(VerificationError):
+                    self.check()
+
     def test_tampered_or_unsupported_verdicts_fail(self):
         mutations = [
             lambda v: v.update(status='not_checked'),
@@ -127,6 +151,39 @@ class PortableComparison(unittest.TestCase):
             result = subprocess.run(command, capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(json.loads(result.stdout), {'matched': False, 'publication_authorized': False})
+            self.assertNotIn(str(root), result.stdout + result.stderr)
+
+    def test_cli_rejects_rebound_invalid_collection_without_leaking_content(self):
+        change = json.loads(self.artifacts['change'])
+        candidate = overlay(self.fixture['base'], change, self.fixture['after'])
+        secret = 'sensitive-invalid-item-marker'
+        collection = {'change_id': change['change_id'], 'complete': True,
+                      'items': [{'id': 'article', 'unknown': secret}]}
+        self.artifacts['collection'] = self.encoded(collection)
+        inputs = dict(self.artifacts, external_evidence=None,
+                      candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        self.previous['binding_sha256'] = self.fresh['binding_sha256'] = binding(inputs)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            objects = {'previous': self.previous, 'fresh': self.fresh,
+                       'base': self.fixture['base'], 'after': self.fixture['after']}
+            command = [sys.executable, str(Path(__file__).with_name('verify_portable_verdict.py'))]
+            for name, value in objects.items():
+                path = root / name
+                path.write_bytes(self.encoded(value))
+                command.extend(['--' + name, str(path)])
+            for name, value in self.artifacts.items():
+                path = root / name
+                path.write_bytes(value)
+                command.extend(['--' + name.replace('_', '-'), str(path)])
+            command.extend(['--require-check', self.required[0], '--validator-name', self.identity[0],
+                            '--validator-version', self.identity[1]])
+            result = subprocess.run(command, capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(json.loads(result.stdout), {'matched': False, 'publication_authorized': False})
+            self.assertNotIn(secret, result.stdout + result.stderr)
             self.assertNotIn(str(root), result.stdout + result.stderr)
 
     def test_unknown_change_fields_and_extensions_are_rejected(self):

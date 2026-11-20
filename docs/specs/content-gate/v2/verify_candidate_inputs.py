@@ -236,15 +236,31 @@ def binding(artifacts):
 def validate_collection_projection(collection, candidate, change):
     if (not isinstance(collection, dict) or set(collection) != {'change_id', 'items', 'complete'}
             or collection['change_id'] != change['change_id'] or not isinstance(collection['complete'], bool)
-            or not isinstance(collection['items'], list)):
+            or not isinstance(collection['items'], list) or len(collection['items']) > 100000):
         raise VerificationError('invalid collection projection')
     by_id = {}
     for item in collection['items']:
-        if not isinstance(item, dict) or not isinstance(item.get('id'), str) or not item['id'].strip() or item['id'] in by_id:
-            raise VerificationError('invalid collection identity')
-        metadata = item.get('metadata')
-        if metadata is not None and (not isinstance(metadata, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in metadata.items())):
-            raise VerificationError('invalid collection metadata')
+        if (not isinstance(item, dict) or set(item) - {'id', 'text', 'source_text', 'headings', 'metadata', 'evidence_sources'}
+                or not isinstance(item.get('id'), str) or not item['id'].strip() or item['id'] in by_id):
+            raise VerificationError('invalid collection item or identity')
+        text(item['id'], empty=False)
+        for name in ('text', 'source_text'):
+            if item.get(name) is not None:
+                text(item[name])
+        headings = item.get('headings')
+        if headings is not None:
+            if not isinstance(headings, list):
+                raise VerificationError('invalid collection headings')
+            for heading in headings:
+                text(heading)
+        for name in ('metadata', 'evidence_sources'):
+            value = item.get(name)
+            if value is not None:
+                if not isinstance(value, dict):
+                    raise VerificationError('invalid collection mapping')
+                for key, content in value.items():
+                    text(key)
+                    text(content)
         by_id[item['id']] = item
     candidate_ids = {item['entity_id'] for item in candidate['items']}
     if not set(by_id).issubset(candidate_ids) or (collection['complete'] and set(by_id) != candidate_ids):
