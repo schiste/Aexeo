@@ -491,6 +491,9 @@ registry before considering the release delivered.
   It does not produce a fresh evaluation,
   establish artifact freshness or authenticity, or authorize publication.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
+  The conservative HTML source mapper supports explicitly closed definition
+  lists with direct terms and descriptions, including links and Unicode.
+  Ambiguous structures and content outside an explicit item remain unmapped.
   Removed-route reference scans retain only the bounded sorted output prefix and
   one truncation sentinel, preserving deterministic results and incomplete status.
   Conservatively map explicitly nested HTML blockquotes and their text and links;
