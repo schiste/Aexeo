@@ -20,6 +20,10 @@ missing fields, unsupported profiles and algorithms, malformed digests and
 oversized inputs. JSON member order and whitespace do not change the binding.
 A future version that changes those rules requires an explicitly supported
 schema or profile; it must not be accepted by silently falling back to v1.
+The current v1 verdict schema permits additional properties, so validating
+against it alone is insufficient for this stricter profile. The eventual v2
+schema must close every nested object and define which, if any, extensions are
+supported; an implementation must reject unrecognized extensions.
 
 ## Independently acquired decision inputs
 
