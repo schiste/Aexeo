@@ -16,12 +16,14 @@ states. Their exact input is the
 entity ID and unchanged UTF-8 source as `ContentInput.text`; no metadata,
 paragraph projection, external observations, host extensions, site or
 collection state are supplied. An unsupported gate or format, invalid or stale
-change, missing before/after state, incomplete inventory or unavailable link
-projection returns `not_checked`, never a partial success. Gate failures remain
-findings in a completed evaluation; `evaluated` is not a publication verdict.
+change, missing before/after state or incomplete inventory returns
+`not_checked`, never a partial success. Route-link projections may be unavailable
+for these independent item gates; that does not establish link-graph coverage.
+Gate failures remain findings in a completed evaluation; `evaluated` is not a publication verdict.
 
-The host remains responsible for the snapshot's origin, freshness, complete
-inventory and faithful projection of links and routes. Neither the snapshot's
+The host remains responsible for the snapshot's origin, freshness and complete
+inventory. A host using link impact separately must faithfully project links and
+routes and inspect its completeness status. Neither the snapshot's
 digest nor this calculation proves these claims. The result must not authorize
 publication or skip other checks. Full collection, site, cross-item, external,
 rendered-page and transitive-dependency checks must run at their own scope.
@@ -45,8 +47,9 @@ and `DuplicateHeadings`. A gate whose required capability is unavailable for
 any item causes `not_checked`, including link or heading checks on plain text.
 Other formats, destination or reachability checks, heading hierarchy, metadata,
 site, collection and external gates remain unsupported. Inline before/after
-content and the same complete, host-supplied inventory and link projections are
-still required.
+content and the same complete, host-supplied inventory are still required.
+Route-link projections are not required for these item-local gates; any link
+count is extracted from that item's supplied source, not the host route graph.
 
 Reports contain positions in each adapter's projected text, not source-mapped
 positions. Static HTML projection does not prove browser visibility or that the
@@ -78,8 +81,9 @@ covers projected resolved route links only, and its completeness flag relies
 on exactly the host assertions required for the direct result. Unknown links
 or an incomplete inventory make the result incomplete. It does not establish
 source freshness, transitive dependencies for arbitrary gates, redirects, or
-a publication verdict. The incremental evaluator above still uses direct
-impact because its supported gates depend only on each entity's own text.
+a publication verdict. The incremental evaluator above uses validated changed
+identities rather than link neighbours because its supported gates depend only
+on each entity's own projected content.
 
 ## Candidate collection metadata
 
