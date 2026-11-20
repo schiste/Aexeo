@@ -73,6 +73,22 @@ class PortableCliInterop(unittest.TestCase):
                 self.assertEqual(native_result.returncode, 0, native_result.stderr + native_result.stdout)
                 self.assertEqual(json.loads(native_result.stdout)['status'], 'match')
                 self.assertFalse(json.loads(native_result.stdout)['publication_authorized'])
+                # Exercise the native boundary with independently changed site
+                # and candidate inputs, and an altered fresh verdict envelope.
+                for filename, mutate in (
+                    ('base', lambda value: value.update(complete=False)),
+                    ('after', lambda value: value[0].update(public_path='/changed')),
+                    ('fresh', lambda value: value.update(binding_sha256='0' * 64)),
+                ):
+                    path = root / filename
+                    original = path.read_bytes()
+                    value = json.loads(original)
+                    mutate(value)
+                    path.write_text(json.dumps(value), encoding='utf-8')
+                    native_rejected = subprocess.run(native_command, env=native_env, capture_output=True, text=True, check=False)
+                    self.assertEqual(native_rejected.returncode, 2, native_rejected.stderr + native_rejected.stdout)
+                    self.assertFalse(json.loads(native_rejected.stdout)['publication_authorized'])
+                    path.write_bytes(original)
             (root / 'resolved_policy').write_text('changed', encoding='utf-8')
             rejected = subprocess.run(verify, capture_output=True, text=True, check=False)
             self.assertEqual(rejected.returncode, 2, rejected.stderr)
