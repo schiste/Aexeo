@@ -76,9 +76,17 @@ output is appropriate. Telemetry contains counts only.
 projection for every candidate item. Missing projections preserve observed
 references but make the report incomplete. The reference list is limited to
 10,000 distinct pairs and 8 MiB of combined string content; truncation also
-makes the report incomplete and the CLI exits 2. A reported reference is an
+makes the report incomplete and the CLI exits 2. The comparison retains only the
+ordered output prefix and one truncation sentinel while scanning links. A reported reference is an
 investigation lead, not proof of a broken link: redirects, aliases, locale
 fallbacks and rendered pages are not established by the snapshot. A complete
 comparison does not certify general site impact or authorize publication. The
 Rust API `compare_removed_route_references` compares supplied inventories;
 use `overlay_candidate` first to validate the candidate against a change.
+
+For a repeatable synthetic workload, run `cargo run --release -p aexeo-core
+--example removed_route_bench -- 5`. It reports p50/p95 and a SHA-256 of the
+complete report for 20,000 sources and 800,000 links. One macOS comparison
+with five samples produced matching report hashes, p50 192 ms before and 48 ms
+after, and process peak RSS 128 MiB before and 45 MiB after. Those measurements
+describe this fixture and machine, not a general site performance guarantee.

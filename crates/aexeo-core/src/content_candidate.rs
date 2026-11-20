@@ -462,16 +462,28 @@ pub fn compare_removed_route_references(
         .map(|item| item.public_path.as_str())
         .filter(|path| !candidate_routes.contains(path))
         .collect();
+    const MAX_REFERENCES: usize = 10_000;
+    const MAX_REFERENCE_BYTES: usize = 8 * 1024 * 1024;
+    // Keep the sorted prefix plus one sentinel for truncation. A full set can
+    // otherwise grow to the million-link input limit before applying the cap.
     let mut references = BTreeSet::new();
     for item in &candidate.items {
         if let Some(links) = &item.links {
             for destination in links {
                 if removed.contains(destination.as_str()) {
-                    references.insert((
+                    let reference = (
                         item.entity_id.as_str(),
                         item.public_path.as_str(),
                         destination.as_str(),
-                    ));
+                    );
+                    if references.len() <= MAX_REFERENCES
+                        || references.last().is_some_and(|last| reference < *last)
+                    {
+                        references.insert(reference);
+                        if references.len() > MAX_REFERENCES + 1 {
+                            references.pop_last();
+                        }
+                    }
                 }
             }
         }
@@ -485,8 +497,6 @@ pub fn compare_removed_route_references(
     }
     // Borrow while deduplicating to avoid multiplying large path strings in memory.
     // Bound the owned result as well: truncation can never certify completeness.
-    const MAX_REFERENCES: usize = 10_000;
-    const MAX_REFERENCE_BYTES: usize = 8 * 1024 * 1024;
     let mut output = Vec::new();
     let mut output_bytes = 0usize;
     for (source_entity_id, source_path, destination_path) in references {
@@ -640,6 +650,44 @@ mod tests {
         );
         incomplete.base.revision = "other".into();
         assert!(compare_removed_route_references(&base, &incomplete).is_err());
+    }
+
+    #[test]
+    fn removed_route_reference_limit_keeps_the_sorted_prefix() {
+        let (mut base, _) = setup();
+        base.items = vec![item("removed", "/removed", "old", Some(vec![]))];
+        let mut candidate = base.clone();
+        candidate.items = (0..10_100)
+            .rev()
+            .map(|i| {
+                item(
+                    &format!("source-{i:05}"),
+                    &format!("/source-{i:05}"),
+                    "x",
+                    Some(vec!["/removed", "/removed"]),
+                )
+            })
+            .collect();
+        let report = compare_removed_route_references(&base, &candidate).unwrap();
+        assert!(!report.complete);
+        let expected: Vec<_> = (0..10_000)
+            .map(|i| RemovedRouteReference {
+                source_entity_id: format!("source-{i:05}"),
+                source_path: format!("/source-{i:05}"),
+                destination_path: "/removed".into(),
+            })
+            .collect();
+        assert_eq!(report.references, expected);
+        assert!(
+            report
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("output limit"))
+        );
+        candidate.items.truncate(10_000);
+        let report = compare_removed_route_references(&base, &candidate).unwrap();
+        assert!(report.complete);
+        assert_eq!(report.references.len(), 10_000);
     }
 
     #[test]
