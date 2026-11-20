@@ -530,6 +530,7 @@ pub fn html_source_map_with_scope(
                 | "data"
                 | "a"
                 | "br"
+                | "wbr"
                 | "img"
         ) {
             return None;
@@ -689,7 +690,7 @@ pub fn html_source_map_with_scope(
             // hide a subtree. Other valid HTML is still evaluated without a map.
             let image_alt = mapping_attributes(
                 rest,
-                matches!(tag.as_str(), "br" | "img" | "meta" | "link"),
+                matches!(tag.as_str(), "br" | "wbr" | "img" | "meta" | "link"),
                 tag == "img",
             )?;
             if stack.len() >= 256 {
@@ -756,7 +757,7 @@ pub fn html_source_map_with_scope(
                 if selected {
                     output.push('\n');
                 }
-            } else if !matches!(tag.as_str(), "img" | "meta" | "link") {
+            } else if !matches!(tag.as_str(), "wbr" | "img" | "meta" | "link") {
                 if selected && block && !output.is_empty() && !output.ends_with('\n') {
                     output.push('\n');
                 }
@@ -1463,6 +1464,45 @@ mod tests {
                     "{html}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn maps_text_around_optional_word_breaks_without_inventing_characters() {
+        for tag in ["<wbr>", "<wbr />", "<WBR class='break'>"] {
+            let html = format!("<main><p>co{tag}opération après</p></main>");
+            for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+                let adapted = html_content_with_scope("x", &html, scope).unwrap();
+                let projected = adapted.input.text.as_deref().unwrap();
+                assert!(projected.contains("coopération après"));
+                let map = html_source_map_with_scope(&html, projected, scope).unwrap();
+                let projected_index = crate::text_index::LineIndex::new(projected);
+                let source_index = crate::text_index::LineIndex::new(&html);
+                for needle in ["co", "opération", "après"] {
+                    let (line, column) = projected_index
+                        .position(projected, projected.find(needle).unwrap())
+                        .unwrap();
+                    assert_eq!(
+                        map.source_position(&html, projected, line, column),
+                        source_index.position(&html, html.find(needle).unwrap()),
+                        "{tag}: {needle}"
+                    );
+                }
+            }
+        }
+        for html in [
+            "<main><p>co<wbr hidden>op</p></main>",
+            "<main><p>co<wbr></wbr>op</p></main>",
+        ] {
+            let adapted = html_content_with_scope("x", html, HtmlContentScope::Main).unwrap();
+            assert!(
+                html_source_map_with_scope(
+                    html,
+                    adapted.input.text.as_deref().unwrap(),
+                    HtmlContentScope::Main
+                )
+                .is_none()
+            );
         }
     }
 
