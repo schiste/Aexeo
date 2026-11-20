@@ -508,6 +508,10 @@ pub fn html_source_map_with_scope(
                 | "span"
                 | "b"
                 | "strong"
+                | "del"
+                | "ins"
+                | "s"
+                | "u"
                 | "i"
                 | "em"
                 | "sup"
@@ -719,6 +723,10 @@ pub fn html_source_map_with_scope(
                             | "span"
                             | "b"
                             | "strong"
+                            | "del"
+                            | "ins"
+                            | "s"
+                            | "u"
                             | "i"
                             | "em"
                             | "sup"
@@ -1209,6 +1217,53 @@ mod tests {
                 html_source_map(html, adapted.input.text.as_deref().unwrap()).is_none(),
                 "{html}"
             );
+        }
+    }
+
+    #[test]
+    fn maps_explicit_inline_editing_markup_without_hiding_source_positions() {
+        let html = "<main><p>Début <del>ancien</del> <ins>nouveau &amp; précis</ins>, <s>périmé</s> <u>important</u> <a href='/suite'>suite</a>.</p></main>";
+        for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+            let adapted = html_content_with_scope("x", html, scope).unwrap();
+            let projected = adapted.input.text.as_deref().unwrap();
+            let map = html_source_map_with_scope(html, projected, scope).unwrap();
+            let projected_index = crate::text_index::LineIndex::new(projected);
+            let source_index = crate::text_index::LineIndex::new(html);
+            for (needle, original) in [
+                ("ancien", "ancien"),
+                ("nouveau", "nouveau"),
+                ("&", "&amp;"),
+                ("périmé", "périmé"),
+                ("important", "important"),
+                ("suite", "suite</a>"),
+            ] {
+                let (line, column) = projected_index
+                    .position(projected, projected.find(needle).unwrap())
+                    .unwrap();
+                assert_eq!(
+                    map.source_position(html, projected, line, column),
+                    source_index.position(html, html.find(original).unwrap()),
+                    "{needle}"
+                );
+            }
+            assert_eq!(
+                map.link_starts,
+                vec![html.find("<a href='/suite'>").unwrap()]
+            );
+        }
+        for html in [
+            "<main><p><del>unclosed</p></del></main>",
+            "<main><p><ins><p>reparented</p></ins></p></main>",
+            "<main><p><s hidden>secret</s></p></main>",
+        ] {
+            for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+                let adapted = html_content_with_scope("x", html, scope).unwrap();
+                assert!(
+                    html_source_map_with_scope(html, adapted.input.text.as_deref().unwrap(), scope)
+                        .is_none(),
+                    "{html}"
+                );
+            }
         }
     }
 
