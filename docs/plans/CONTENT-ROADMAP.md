@@ -97,6 +97,19 @@ is still required to inspect those pages. No CMS content was changed.
 
 ## Delivery tracker
 
+- [x] The built-in readability preset reports `not_checked` for sentences
+  outside its conservative Latin character subset, retains findings on assessed
+  sentences and measures skipped sentences ([#622](https://github.com/schiste/Aexeo/pull/622)).
+  Standalone custom gates retain their default; policies inheriting readability
+  pick up the guard. This does not
+  provide language detection or validated segmentation for other scripts; emoji
+  and other symbols can also cause a sentence to be skipped. Rust callers
+  constructing `ContentGate::SentenceLength` must supply the new field.
+- [x] Preserve exact HTML finding positions around recognized `<wbr>` void
+  tags when the conservative source reconstruction matches the projection
+  ([#621](https://github.com/schiste/Aexeo/pull/621)). Hidden or ambiguous
+  markup remains unmapped; the mapping does not establish browser visibility.
+
 - [x] Exclude format-unbound reviews and runs from policy-bound reviewed metrics,
   while retaining them in legacy aggregates and reporting their count. Format
   declarations are not authenticated.
