@@ -93,9 +93,6 @@ fn validate_scope(snapshot: &CandidateSnapshot, mode: ProjectionMode) -> Result<
         return Err(unavailable("snapshot completeness is not attested"));
     }
     validate_inventory(&snapshot.items).map_err(unavailable)?;
-    if snapshot.items.iter().any(|item| item.links.is_none()) {
-        return Err(unavailable("link projection is unavailable"));
-    }
     if snapshot
         .items
         .iter()
@@ -308,11 +305,10 @@ impl IncrementalBaseline {
         change: &Change,
         overlay: &CandidateOverlay,
     ) -> Result<IncrementalEvaluation, NotChecked> {
-        if !overlay.impact.link_impact_complete {
-            return Err(unavailable("link impact coverage is incomplete"));
-        }
         validate_scope(&overlay.candidate, self.mode)?;
-        let affected: BTreeSet<&str> = overlay.impact.affected.iter().map(String::as_str).collect();
+        // The accepted gates depend only on the item's own projected content.
+        // Changed identities come from the validated change, not link coverage.
+        let changed: BTreeSet<&str> = overlay.impact.changed.iter().map(String::as_str).collect();
         let baseline_items: BTreeMap<&str, &CandidateItem> = self
             .snapshot
             .items
@@ -330,9 +326,9 @@ impl IncrementalBaseline {
                     .ok_or_else(|| unavailable("baseline report is unavailable"))?
                     .clone()
             } else {
-                if !affected.contains(item.entity_id.as_str()) {
+                if !changed.contains(item.entity_id.as_str()) {
                     return Err(unavailable(
-                        "baseline item differs from candidate outside the impact set",
+                        "baseline item differs from candidate outside the change set",
                     ));
                 }
                 evaluated += 1;
@@ -1269,6 +1265,60 @@ mod tests {
         }
     }
     #[test]
+    fn independent_gates_match_full_evaluation_without_route_link_projections() {
+        let (mut snapshot, preset, mut change) = fixture();
+        for item in &mut snapshot.items {
+            item.links = None;
+        }
+        let updated = item("a", "updated article", None);
+        let created = item("new", "new article", None);
+        let renamed = item("renamed", "renamed article", None);
+        change.entries.push(entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&updated),
+        ));
+        change.entries.push(entry(
+            "b",
+            Operation::Delete,
+            Some(&snapshot.items[1]),
+            None,
+        ));
+        change
+            .entries
+            .push(entry("new", Operation::Create, None, Some(&created)));
+        let mut rename = entry(
+            "renamed",
+            Operation::Rename,
+            Some(&snapshot.items[2]),
+            Some(&renamed),
+        );
+        rename.previous_entity_id = Some("c".into());
+        change.entries.push(rename);
+        let after = [updated, created, renamed];
+        let overlay = overlay_candidate(&snapshot, &change, &after).unwrap();
+        assert!(!overlay.impact.link_impact_complete);
+        let expected = full(&overlay.candidate, &preset);
+        let baseline = IncrementalBaseline::prepare(snapshot, preset).unwrap();
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate(&change, &after)
+        else {
+            panic!("independent item evaluation should not require a route graph")
+        };
+        assert_eq!(
+            serde_json::to_value(reports).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        assert_eq!(evaluated, 3);
+        assert_eq!(reused, 2);
+    }
+
+    #[test]
     fn unchanged_link_neighbours_reuse_independent_item_reports() {
         let (snapshot, preset, mut change) = fixture();
         let updated = item("a", "new source words", Some(vec!["/c"]));
@@ -1523,10 +1573,11 @@ mod tests {
             }
             .into();
             item.sha256 = format!("{:x}", Sha256::digest(item.source.as_bytes()));
+            item.links = None;
         }
         let preset = ContentPreset::from_toml("version=1\nname='mixed'\n[[gates]]\nid='words'\nkind='word_count'\nmin=2\n[[gates]]\nid='paras'\nkind='paragraph_count'\nmin=1\n[[gates]]\nid='heads'\nkind='heading_length'\nmax_chars=5\n[[gates]]\nid='links'\nkind='link_count'\nmin=1\n[[gates]]\nid='newline'\nkind='final_newline'\n").unwrap();
         let adapted_item = |id: &str, media: &str, source: &str| {
-            let mut value = item(id, source, Some(vec![]));
+            let mut value = item(id, source, None);
             value.media_type = media.into();
             value
         };
@@ -1566,9 +1617,9 @@ mod tests {
         rename.previous_entity_id = Some("c".into());
         change.entries = vec![update, delete, create, rename];
         let after = [updated, created, renamed];
-        let candidate = overlay_candidate(&snapshot, &change, &after)
-            .unwrap()
-            .candidate;
+        let overlay = overlay_candidate(&snapshot, &change, &after).unwrap();
+        assert!(!overlay.impact.link_impact_complete);
+        let candidate = overlay.candidate;
         let expected: BTreeMap<_, _> = candidate
             .items
             .iter()
@@ -1884,7 +1935,7 @@ mod tests {
         assert!(IncrementalBaseline::prepare(snapshot.clone(), preset.clone()).is_err());
         snapshot.complete = true;
         snapshot.items[0].links = None;
-        assert!(IncrementalBaseline::prepare(snapshot.clone(), preset.clone()).is_err());
+        assert!(IncrementalBaseline::prepare(snapshot.clone(), preset.clone()).is_ok());
         snapshot.items[0].links = Some(vec![]);
         for gate in [
             "kind='sentence_length'\nmax_words=2\nparagraphs_only=true",
@@ -1920,7 +1971,7 @@ mod tests {
         ));
         assert!(matches!(
             baseline.evaluate(&change, std::slice::from_ref(&next)),
-            IncrementalEvaluation::NotChecked { .. }
+            IncrementalEvaluation::Evaluated { .. }
         ));
         next.links = Some(vec![]);
         next.media_type = "text/html".into();
