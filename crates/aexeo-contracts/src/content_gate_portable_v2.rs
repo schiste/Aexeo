@@ -4,11 +4,11 @@
 //! inventory completeness, dependency closure or publication atomicity.
 
 use crate::content_gate_binding_v2::{CANDIDATE_REVISION_PROFILE, candidate_snapshot_binding};
-use crate::content_gate_change_validation::parse_lossless_json;
+use crate::content_gate_change_validation::{parse_lossless_json, parse_strict_validated_change};
 use crate::content_gate_decision_inputs::DecisionInputBytes;
-use crate::content_gate_protocol::{CheckStatus, VERDICT_SCHEMA, Verdict, VerdictStatus};
+use crate::content_gate_protocol::{CheckStatus, Subject, VERDICT_SCHEMA, Verdict, VerdictStatus};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const SCHEMA: &str = "content-gate.bound-verdict/v2";
 pub const PROFILE: &str = "content-gate.candidate-binding/v1";
@@ -31,6 +31,15 @@ pub struct CurrentInputs<'a> {
     pub artifacts: DecisionInputBytes<'a>,
     pub base_revision_sha256: &'a [u8; 32],
     pub candidate_revision_sha256: &'a [u8; 32],
+}
+
+/// Independently supplied expectations for an experimental, passing result.
+/// Labels and exit status are caller assertions, not authenticated identity or execution proof.
+pub struct PassingRequirements<'a> {
+    pub validator_name: &'a str,
+    pub validator_version: &'a str,
+    pub required_checks: &'a [&'a str],
+    pub exit_code: i32,
 }
 
 fn binding(inputs: &CurrentInputs<'_>) -> Result<String, &'static str> {
@@ -214,6 +223,60 @@ impl BoundVerdict {
         Ok(())
     }
 
+    /// Check independently supplied inputs, the declared subject and explicit
+    /// passing requirements. This is not publication authorization: the caller
+    /// must establish trusted execution, content bytes, freshness, completeness,
+    /// dependency closure and atomicity with publication independently.
+    pub fn verify_passing(
+        &self,
+        inputs: &CurrentInputs<'_>,
+        required: &PassingRequirements<'_>,
+    ) -> Result<(), &'static str> {
+        self.verify_inputs(inputs)?;
+        if required.validator_name.is_empty()
+            || required.validator_version.is_empty()
+            || required.required_checks.is_empty()
+            || required.exit_code != 0
+        {
+            return Err("invalid or unsuccessful verification requirements");
+        }
+        let change = parse_strict_validated_change(inputs.artifacts.change)
+            .map_err(|_| "invalid current change")?;
+        if change.extensions.is_some() {
+            return Err("unsupported change extensions");
+        }
+        if self.verdict.subject != Subject::for_change(&change) {
+            return Err("verdict subject does not match current change");
+        }
+        if self.verdict.validator.name != required.validator_name
+            || self.verdict.validator.version != required.validator_version
+        {
+            return Err("validator labels do not match requirements");
+        }
+        if self.verdict.status != VerdictStatus::Pass {
+            return Err("verdict is not passing");
+        }
+        let checks: BTreeMap<_, _> = self
+            .verdict
+            .checks
+            .iter()
+            .map(|check| (check.id.as_str(), check))
+            .collect();
+        let mut ids = BTreeSet::new();
+        for id in required.required_checks {
+            if id.is_empty() || !ids.insert(*id) {
+                return Err("invalid required check IDs");
+            }
+            if !checks
+                .get(id)
+                .is_some_and(|check| check.blocking && check.status == CheckStatus::Passed)
+            {
+                return Err("required blocking check did not pass");
+            }
+        }
+        Ok(())
+    }
+
     /// Compare a binding recomputed solely from current caller-supplied inputs.
     /// A match does not establish a passing verdict or authorize publication.
     pub fn verify_inputs(&self, inputs: &CurrentInputs<'_>) -> Result<(), &'static str> {
@@ -346,6 +409,123 @@ mod tests {
         let parsed = BoundVerdict::parse(&serde_json::to_vec(&bound).unwrap()).unwrap();
         assert_eq!(parsed.verdict.status, VerdictStatus::NotChecked);
         assert!(parsed.verify_inputs(&inputs()).is_ok());
+    }
+
+    #[test]
+    fn passing_verification_checks_the_bound_change_and_host_requirements() {
+        let vector: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../docs/specs/content-gate/v2/candidate-verdict-vector.json"
+        ))
+        .unwrap();
+        let change = vector["artifacts"]["change"].as_str().unwrap().as_bytes();
+        let input = CurrentInputs {
+            artifacts: DecisionInputBytes {
+                change,
+                resolved_policy: b"policy",
+                host_options: b"options",
+                evaluator: b"build",
+                collection: None,
+                external_evidence: None,
+            },
+            base_revision_sha256: &[1; 32],
+            candidate_revision_sha256: &[2; 32],
+        };
+        let ids = ["gate:7:article:words"];
+        let requirements = PassingRequirements {
+            validator_name: "aexeo",
+            validator_version: "0.0.24",
+            required_checks: &ids,
+            exit_code: 0,
+        };
+        let original = verdict();
+        let envelope = BoundVerdict::new(original.clone(), &input).unwrap();
+        assert!(envelope.verify_passing(&input, &requirements).is_ok());
+        for mutate in [0, 1, 2, 3] {
+            let mut v = original.clone();
+            match mutate {
+                0 => v.subject.change_id = "other".into(),
+                1 => v.subject.base.revision = "other".into(),
+                2 => v.subject.entries[0].entity_id = "other".into(),
+                _ => v.subject.entries[0].sha256 = None,
+            }
+            let altered = BoundVerdict::new(v, &input).unwrap();
+            assert!(altered.verify_inputs(&input).is_ok());
+            assert!(altered.verify_passing(&input, &requirements).is_err());
+        }
+        for (name, version, checks, exit) in [
+            ("other", "0.0.24", &ids[..], 0),
+            ("aexeo", "other", &ids[..], 0),
+            ("aexeo", "0.0.24", &ids[..], 1),
+            ("aexeo", "0.0.24", &[][..], 0),
+            ("aexeo", "0.0.24", &["missing"][..], 0),
+            ("aexeo", "0.0.24", &["", ids[0]][..], 0),
+            ("aexeo", "0.0.24", &[ids[0], ids[0]][..], 0),
+        ] {
+            let req = PassingRequirements {
+                validator_name: name,
+                validator_version: version,
+                required_checks: checks,
+                exit_code: exit,
+            };
+            assert!(envelope.verify_passing(&input, &req).is_err());
+        }
+        let mut advisory = original.clone();
+        advisory.checks[0].blocking = false;
+        assert!(
+            BoundVerdict::new(advisory, &input)
+                .unwrap()
+                .verify_passing(&input, &requirements)
+                .is_err()
+        );
+        let mut unchecked = original;
+        unchecked.checks[0].status = CheckStatus::NotChecked;
+        unchecked.summary.passed = 0;
+        unchecked.summary.not_checked = 1;
+        unchecked.summary.blocking_not_checked = 1;
+        unchecked.status = VerdictStatus::NotChecked;
+        unchecked.reason = Some("unavailable".into());
+        assert!(
+            BoundVerdict::new(unchecked, &input)
+                .unwrap()
+                .verify_passing(&input, &requirements)
+                .is_err()
+        );
+        let mut with_extensions: serde_json::Value = serde_json::from_slice(change).unwrap();
+        with_extensions["extensions"] = serde_json::json!({"future.input": true});
+        let extended = serde_json::to_vec(&with_extensions).unwrap();
+        let duplicate = String::from_utf8(change.to_vec()).unwrap().replacen(
+            "{",
+            "{\"change_id\":\"duplicate\",",
+            1,
+        );
+        for bytes in [extended.as_slice(), duplicate.as_bytes()] {
+            let invalid = CurrentInputs {
+                artifacts: DecisionInputBytes {
+                    change: bytes,
+                    resolved_policy: b"policy",
+                    host_options: b"options",
+                    evaluator: b"build",
+                    collection: None,
+                    external_evidence: None,
+                },
+                base_revision_sha256: &[1; 32],
+                candidate_revision_sha256: &[2; 32],
+            };
+            let bound = BoundVerdict::new(verdict(), &invalid).unwrap();
+            assert!(bound.verify_inputs(&invalid).is_ok());
+            assert!(bound.verify_passing(&invalid, &requirements).is_err());
+        }
+        let changed = CurrentInputs {
+            artifacts: DecisionInputBytes {
+                change: b"{}",
+                ..input.artifacts
+            },
+            ..input
+        };
+        assert!(envelope.verify_passing(&changed, &requirements).is_err());
+        // Even an envelope freshly bound to malformed change bytes cannot pass.
+        let malformed = BoundVerdict::new(verdict(), &changed).unwrap();
+        assert!(malformed.verify_passing(&changed, &requirements).is_err());
     }
 
     #[test]

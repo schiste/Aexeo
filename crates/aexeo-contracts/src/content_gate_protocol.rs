@@ -161,6 +161,24 @@ pub struct Subject {
     pub entries: Vec<SubjectEntry>,
 }
 
+impl Subject {
+    /// Derive the v1 subject from a change. This does not validate the change or its content.
+    pub fn for_change(change: &Change) -> Self {
+        Self {
+            change_id: change.change_id.clone(),
+            base: change.base.clone(),
+            entries: change
+                .entries
+                .iter()
+                .map(|entry| SubjectEntry {
+                    entity_id: entry.entity_id.clone(),
+                    sha256: entry.after.as_ref().map(|state| state.sha256.clone()),
+                })
+                .collect(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubjectEntry {
     pub entity_id: String,

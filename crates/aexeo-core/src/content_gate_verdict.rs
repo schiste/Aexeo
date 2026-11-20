@@ -16,8 +16,8 @@ use crate::{
     },
 };
 use aexeo_contracts::content_gate_protocol::{
-    self as protocol, Change, Check, CheckStatus, Operation, Subject, SubjectEntry, Summary,
-    VERDICT_SCHEMA, Validator, Verdict, VerdictStatus,
+    self as protocol, Change, Check, CheckStatus, Operation, Subject, Summary, VERDICT_SCHEMA,
+    Validator, Verdict, VerdictStatus,
 };
 use anyhow::{Result, bail};
 
@@ -335,21 +335,6 @@ fn scoped_binding_digest(base: String, scope: HtmlContentScope) -> Result<String
     }
 }
 
-fn subject_for_change(change: &Change) -> Subject {
-    Subject {
-        change_id: change.change_id.clone(),
-        base: change.base.clone(),
-        entries: change
-            .entries
-            .iter()
-            .map(|entry| SubjectEntry {
-                entity_id: entry.entity_id.clone(),
-                sha256: entry.after.as_ref().map(|state| state.sha256.clone()),
-            })
-            .collect(),
-    }
-}
-
 /// Verify the opt-in offline fingerprint against the inputs the host intends to
 /// apply. This does not validate the verdict's status, authenticity, content
 /// sources, collection completeness, or freshness; callers must do that too.
@@ -383,7 +368,7 @@ fn verify_offline_binding_with_digest(
     if verdict.validator.name != "aexeo" || verdict.validator.version != env!("CARGO_PKG_VERSION") {
         bail!("offline binding requires the same Aexeo engine version");
     }
-    if verdict.schema != VERDICT_SCHEMA || verdict.subject != subject_for_change(change) {
+    if verdict.schema != VERDICT_SCHEMA || verdict.subject != Subject::for_change(change) {
         bail!("verdict subject does not match the change");
     }
     let actual = verdict
@@ -600,7 +585,7 @@ fn verify_observed_link_binding_with_digest(
     if verdict.validator.name != "aexeo"
         || verdict.validator.version != env!("CARGO_PKG_VERSION")
         || verdict.schema != VERDICT_SCHEMA
-        || verdict.subject != subject_for_change(change)
+        || verdict.subject != Subject::for_change(change)
     {
         bail!("observed link verdict requires the same engine and change");
     }
@@ -660,7 +645,7 @@ fn verify_external_binding_with_digest(
     if verdict.validator.name != "aexeo"
         || verdict.validator.version != env!("CARGO_PKG_VERSION")
         || verdict.schema != VERDICT_SCHEMA
-        || verdict.subject != subject_for_change(change)
+        || verdict.subject != Subject::for_change(change)
     {
         bail!("external verdict requires the same engine and change");
     }
@@ -2125,7 +2110,7 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
     let mut verdict = Verdict {
         schema: VERDICT_SCHEMA.into(),
         status,
-        subject: subject_for_change(change),
+        subject: Subject::for_change(change),
         validator: Validator {
             name: "aexeo".into(),
             version: env!("CARGO_PKG_VERSION").into(),
@@ -2505,6 +2490,32 @@ mod tests {
             aexeo_contracts::content_gate_portable_v2::BoundVerdict::parse(&portable_bytes)
                 .unwrap();
         assert_eq!(parsed, portable);
+        let (base_digest, candidate_digest) = candidate_revisions(&ctx).unwrap();
+        let artifacts = decision.artifacts().unwrap();
+        let current = aexeo_contracts::content_gate_portable_v2::CurrentInputs {
+            artifacts: artifacts.as_inputs(),
+            base_revision_sha256: &base_digest,
+            candidate_revision_sha256: &candidate_digest,
+        };
+        let required_check = portable
+            .verdict
+            .checks
+            .iter()
+            .find(|check| check.blocking && check.status == CheckStatus::Passed)
+            .unwrap()
+            .id
+            .as_str();
+        let requirements = aexeo_contracts::content_gate_portable_v2::PassingRequirements {
+            validator_name: "aexeo",
+            validator_version: env!("CARGO_PKG_VERSION"),
+            required_checks: &[required_check],
+            exit_code: 0,
+        };
+        assert!(portable.verify_passing(&current, &requirements).is_ok());
+        let mut forged = portable.clone();
+        forged.verdict.subject.entries[0].entity_id = "other".into();
+        assert!(forged.verify_inputs(&current).is_ok());
+        assert!(forged.verify_passing(&current, &requirements).is_err());
         let encoded = serde_json::to_vec(&verdict).unwrap();
         let _: ExperimentalCandidateVerdict =
             aexeo_contracts::content_gate_change_validation::parse_lossless_json(&encoded).unwrap();

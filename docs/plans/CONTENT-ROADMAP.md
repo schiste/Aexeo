@@ -379,6 +379,9 @@ registry before considering the release delivered.
   The draft v2 Rust envelope rejects inconsistent embedded verdict fields,
   summary counts and finding references before binding reuse. This validates
   internal structure, not the intended subject, required checks or authorization.
+  An opt-in Rust check also matches the bound change subject and requires named
+  passing blocking checks and caller-supplied validator labels and exit status;
+  those assertions do not authenticate execution or authorize publication.
   Experimental candidate-bound verdicts can also evaluate a host-projected
   collection whose identities match the candidate (a subset is allowed when
   explicitly incomplete). The collection bytes
