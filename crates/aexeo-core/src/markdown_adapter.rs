@@ -290,7 +290,7 @@ pub fn literal_markdown_link_offsets(source: &str) -> Result<Vec<usize>> {
     Ok(offsets)
 }
 
-// Scan unresolved explicit references and unfinished inline HTTP(S) links in
+// Scan unresolved explicit references and unfinished inline URL-like links in
 // one pass. These are review candidates, not evidence of host rendering.
 // Parsed links and Markdown code are excluded by the caller. The parser can
 // split text nodes, so this does not find every malformed link.
@@ -321,7 +321,13 @@ fn literal_link_candidates(raw: &str, base: usize, source: &str, offsets: &mut V
                 // the adjacent source token rather than treating that split as
                 // the end of the candidate; do not cross whitespace.
                 let tail = &source.as_bytes()[base + index + 1..];
-                if tail.starts_with(b"http://") || tail.starts_with(b"https://") {
+                if tail.starts_with(b"http://")
+                    || tail.starts_with(b"https://")
+                    || tail.starts_with(b"/")
+                    || tail.starts_with(b"./")
+                    || tail.starts_with(b"../")
+                    || tail.starts_with(b"#")
+                {
                     if index + 1 == bytes.len() {
                         if !tail
                             .iter()
@@ -1605,6 +1611,21 @@ mod explicit_reference_candidate_tests {
             ]
         );
         let safe = r"[ok](https://example.org) \[escaped](https://example.org ![image](https://example.org `[code](https://example.org` [12]";
+        assert_eq!(literal_markdown_link_offsets(safe).unwrap(), vec![0]);
+    }
+
+    #[test]
+    fn unfinished_relative_link_candidates_preserve_positions_and_ignore_code() {
+        let source = "é [help](/guide\n[section](#intro\n[local](../guide";
+        assert_eq!(
+            literal_markdown_link_offsets(source).unwrap(),
+            vec![
+                source.find("[help]").unwrap(),
+                source.find("[section]").unwrap(),
+                source.find("[local]").unwrap()
+            ]
+        );
+        let safe = r"[ok](/guide) \[escaped](/guide ![image](/guide `[code](/guide` [12]";
         assert_eq!(literal_markdown_link_offsets(safe).unwrap(), vec![0]);
     }
 
