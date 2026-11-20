@@ -1,4 +1,5 @@
 """Exercise the actual draft CLI and independent comparator, not publication."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -89,6 +90,30 @@ class PortableCliInterop(unittest.TestCase):
                     self.assertEqual(native_rejected.returncode, 2, native_rejected.stderr + native_rejected.stdout)
                     self.assertFalse(json.loads(native_rejected.stdout)['publication_authorized'])
                     path.write_bytes(original)
+            supervised = os.environ.get('AETHYME_SUPERVISED_BIN')
+            if supervised:
+                self.assertTrue(binary, 'AEXEO_CLI_BIN must select the actual evaluator')
+                validator = str(Path(binary).resolve(strict=True))
+                supervised_manifest = {name: str(root / name) for name in
+                    ('previous', 'base', 'after', 'change', 'resolved_policy', 'host_options')}
+                supervised_manifest.update(collection=None, evaluator_identity=str(root / 'evaluator'),
+                    validator_name='aexeo', validator_version='0.0.24',
+                    required_checks=['gate:7:article:words'], validator=[validator] + command[1:],
+                    validator_sha256=hashlib.sha256(Path(validator).read_bytes()).hexdigest(),
+                    env={}, timeout_seconds=30, additional={'preset': str(root / 'preset')})
+                (root / 'supervised-manifest').write_text(json.dumps(supervised_manifest), encoding='utf-8')
+                supervised_command = [supervised, 'content-gate', 'run-v2', str(root / 'supervised-manifest')]
+                supervised_env = dict(os.environ)
+                supervised_env.pop('AETHYME_GATE_WORKER_ID', None)
+                actual = subprocess.run(supervised_command, env=supervised_env, capture_output=True, text=True, check=False)
+                self.assertEqual(actual.returncode, 0, actual.stderr + actual.stdout)
+                self.assertEqual(json.loads(actual.stdout)['status'], 'match')
+                self.assertFalse(json.loads(actual.stdout)['publication_authorized'])
+                supervised_manifest['validator_sha256'] = '0' * 64
+                (root / 'supervised-manifest').write_text(json.dumps(supervised_manifest), encoding='utf-8')
+                rejected = subprocess.run(supervised_command, env=supervised_env, capture_output=True, text=True, check=False)
+                self.assertEqual(rejected.returncode, 2, rejected.stderr + rejected.stdout)
+                self.assertFalse(json.loads(rejected.stdout)['publication_authorized'])
             (root / 'resolved_policy').write_text('changed', encoding='utf-8')
             rejected = subprocess.run(verify, capture_output=True, text=True, check=False)
             self.assertEqual(rejected.returncode, 2, rejected.stderr)
