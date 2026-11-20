@@ -869,8 +869,9 @@ impl Projection {
                 }) =>
             {
                 self.link_count += 1;
-                self.text
-                    .push_str(&" ".repeat(reference_label(&link.children).unwrap().len()));
+                if let Some(label) = reference_label(&link.children) {
+                    self.text.push_str(&" ".repeat(label.len()));
+                }
             }
             Node::LinkReference(link)
                 if reference_label(&link.children).is_some_and(|label| {
@@ -882,8 +883,9 @@ impl Projection {
                 }) =>
             {
                 self.link_count += 1;
-                self.text
-                    .push_str(&" ".repeat(reference_label(&link.children).unwrap().len()));
+                if let Some(label) = reference_label(&link.children) {
+                    self.text.push_str(&" ".repeat(label.len()));
+                }
             }
             Node::Break(_) => self.text.push('\n'),
             Node::Html(_) => source_map.heading_levels_complete = false,
