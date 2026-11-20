@@ -531,6 +531,7 @@ pub fn html_source_map_with_scope(
                 | "a"
                 | "br"
                 | "wbr"
+                | "hr"
                 | "img"
         ) {
             return None;
@@ -690,7 +691,7 @@ pub fn html_source_map_with_scope(
             // hide a subtree. Other valid HTML is still evaluated without a map.
             let image_alt = mapping_attributes(
                 rest,
-                matches!(tag.as_str(), "br" | "wbr" | "img" | "meta" | "link"),
+                matches!(tag.as_str(), "br" | "wbr" | "hr" | "img" | "meta" | "link"),
                 tag == "img",
             )?;
             if stack.len() >= 256 {
@@ -755,6 +756,13 @@ pub fn html_source_map_with_scope(
             }
             if tag == "br" {
                 if selected {
+                    output.push('\n');
+                }
+            } else if tag == "hr" {
+                if selected {
+                    if !output.is_empty() && !output.ends_with('\n') {
+                        output.push('\n');
+                    }
                     output.push('\n');
                 }
             } else if !matches!(tag.as_str(), "wbr" | "img" | "meta" | "link") {
@@ -1132,6 +1140,37 @@ mod tests {
                 html_source_map(html, adapted.input.text.as_deref().unwrap()).is_none(),
                 "{html}"
             );
+        }
+    }
+
+    #[test]
+    fn maps_prose_around_horizontal_rules_without_guessing_invalid_html() {
+        let html = "<main>\n<p>Avant élan.</p><hr class='divider'/>\n<p>Après <a href='/next'>suite</a>.</p>\n</main>";
+        for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+            let adapted = html_content_with_scope("x", html, scope).unwrap();
+            let projected = adapted.input.text.as_deref().unwrap();
+            let map = html_source_map_with_scope(html, projected, scope).unwrap();
+            let source_index = crate::text_index::LineIndex::new(html);
+            let projected_index = crate::text_index::LineIndex::new(projected);
+            for needle in ["Avant", "élan", "Après", "suite"] {
+                let (line, column) = projected_index
+                    .position(projected, projected.find(needle).unwrap())
+                    .unwrap();
+                assert_eq!(
+                    map.source_position(html, projected, line, column),
+                    source_index.position(html, html.find(needle).unwrap()),
+                    "{needle}"
+                );
+            }
+            assert_eq!(map.link_starts.len(), 1);
+        }
+        for html in [
+            "<main><p>A<hr>B</p></main>",
+            "<main>A<hr></hr>B</main>",
+            "<main>A<hr hidden>B</main>",
+        ] {
+            let adapted = html_content("x", html).unwrap();
+            assert!(html_source_map(html, adapted.input.text.as_deref().unwrap()).is_none());
         }
     }
 
