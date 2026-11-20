@@ -989,7 +989,8 @@ pub fn verify_draft_passing_with_content<P: crate::content_gate_sources::Indepen
 }
 
 /// Produce a draft portable envelope for an offline candidate evaluation.
-/// This is not connected to the CLI and is not a publication authorization.
+/// The CLI exposes this through an experimental option. This is not a publication
+/// authorization.
 /// The host must independently establish input provenance, completeness,
 /// freshness, evaluator identity, dependency closure and publication atomicity.
 pub fn evaluate_draft_portable_candidate_verdict<P: ConfinedContentFiles>(
