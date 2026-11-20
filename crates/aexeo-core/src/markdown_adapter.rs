@@ -837,6 +837,15 @@ impl Projection {
                 source,
                 source_map,
             ),
+            Node::Link(link)
+                if matches!(link.children.as_slice(), [Node::Text(item)]
+                    if crate::content_gate::numeric_reference_marker(&link.url, &item.value)) =>
+            {
+                self.link_count += 1;
+                if let [Node::Text(item)] = link.children.as_slice() {
+                    self.text.push_str(&" ".repeat(item.value.len()));
+                }
+            }
             Node::Break(_) => self.text.push('\n'),
             Node::Html(_) => source_map.heading_levels_complete = false,
             Node::Heading(heading) => {
@@ -1263,6 +1272,39 @@ mod tests {
             markdown_link_destinations("[two][é]\n\n[é]: /local")
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn numeric_reference_masks_keep_links_and_following_source_positions() {
+        let source = "In 2025.[1](#reference-source) Next 2.5 words [42](/other).";
+        let adapted = markdown_input_with_source_map_and_destinations("x", source).unwrap();
+        let text = adapted.input.text.as_deref().unwrap();
+        assert!(text.contains("2025.  Next 2.5 words 42"));
+        assert_eq!(adapted.link_count, 2);
+        assert_eq!(
+            adapted.destinations.unwrap(),
+            ["#reference-source", "/other"]
+        );
+        let pos = LineIndex::new(text)
+            .position(text, text.find("Next").unwrap())
+            .unwrap();
+        let expected = LineIndex::new(source)
+            .position(source, source.find("Next").unwrap())
+            .unwrap();
+        assert_eq!(
+            adapted
+                .source_map
+                .source_position(source, text, pos.0, pos.1),
+            Some(expected)
+        );
+        let nested = "2025.[*1*](#reference-source) Next.";
+        assert!(
+            markdown_input("x", nested)
+                .unwrap()
+                .text
+                .unwrap()
+                .contains("2025.1 Next")
         );
     }
 
