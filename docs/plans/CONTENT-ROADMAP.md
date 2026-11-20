@@ -443,6 +443,9 @@ registry before considering the release delivered.
   It does not produce a fresh evaluation,
   establish artifact freshness or authenticity, or authorize publication.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
+  Conservatively map explicitly nested HTML blockquotes and their text and links;
+  malformed or hidden structures remain unmapped, and static markup does not
+  establish browser-rendered visibility.
   The conservative HTML source mapper supports explicitly nested and closed
   ordered and unordered lists, including links and Unicode; malformed list
   structures and hidden elements remain unmapped. An end-to-end change verdict

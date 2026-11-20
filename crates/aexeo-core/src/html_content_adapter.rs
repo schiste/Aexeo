@@ -490,6 +490,7 @@ pub fn html_source_map_with_scope(
                 | "nav"
                 | "footer"
                 | "article"
+                | "blockquote"
                 | "section"
                 | "ul"
                 | "ol"
@@ -891,6 +892,49 @@ mod tests {
             "<main><ul><li>one<li>two</li></ul></main>",
             "<main><div><li>one</li></div></main>",
             "<main><ul><li hidden>one</li></ul></main>",
+        ] {
+            let adapted = html_content("x", source).unwrap();
+            assert!(
+                html_source_map(source, adapted.input.text.as_deref().unwrap()).is_none(),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn maps_well_nested_blockquotes_and_rejects_ambiguous_structure() {
+        use crate::source_mapping::ContentSourceMap;
+        let source = "<main>\n<blockquote cite='/source'><p>Élan &amp; <a href='/source'>preuve</a>.</p></blockquote>\n<p>Après.</p></main>";
+        for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+            let adapted = html_content_with_scope("x", source, scope).unwrap();
+            let text = adapted.input.text.as_deref().unwrap();
+            let map = html_source_map_with_scope(source, text, scope).unwrap();
+            let input_index = crate::text_index::LineIndex::new(source);
+            let output_index = crate::text_index::LineIndex::new(text);
+            for (projected, original) in [
+                ("Élan", "Élan"),
+                ("&", "&amp;"),
+                ("preuve", "preuve"),
+                ("Après", "Après"),
+            ] {
+                let (line, column) = output_index
+                    .position(text, text.find(projected).unwrap())
+                    .unwrap();
+                assert_eq!(
+                    map.source_position(source, text, line, column),
+                    input_index.position(source, source.find(original).unwrap()),
+                    "{projected}"
+                );
+            }
+            assert_eq!(
+                map.link_position(source, 0),
+                input_index.position(source, source.find("<a ").unwrap())
+            );
+        }
+        for source in [
+            "<main><blockquote hidden><p>texte</p></blockquote></main>",
+            "<main><blockquote><p>texte</blockquote></p></main>",
+            "<main><p>texte<blockquote>suite</blockquote></p></main>",
         ] {
             let adapted = html_content("x", source).unwrap();
             assert!(
