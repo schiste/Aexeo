@@ -1,9 +1,10 @@
 # Content gate protocol v2: decision-input binding design
 
-Status: design in progress. This is not a wire protocol, an implementation, or
-an indication that a v1 runner is protected. Continue enforcing the v1 runner
-obligations until a v2 specification, implementation and interoperability tests
-are delivered.
+Status: design in progress. Experimental wire formats, implementations and
+offline interoperability tests exist; they are not a released publication
+protocol and do not protect a v1 runner. Continue enforcing the v1 runner
+obligations until the v2 publication protocol and its host integration are
+fully specified, implemented and verified.
 
 ## Problem and intended guarantee
 
@@ -53,11 +54,13 @@ must reject v1 and unknown major versions when v2 binding is required.
 ## Candidate byte encoding
 
 An [experimental, domain-separated byte encoding](DECISION-BINDING-DRAFT.md)
-has a shared Rust/Python test vector. An experimental offline Rust API uses it
-alongside the existing receipt, and the CLI exposes that offline experiment.
-No portable consumer uses it. It does not specify interoperable artifact
-semantics or a v2 verdict. Its
-presence does not satisfy any v2-required runner obligation.
+has shared Rust/Python vectors. The [portable draft](PORTABLE-DRAFT.md) describes
+the experimental bound-verdict envelope, Aexeo producer, Rust verification
+helpers and independent Python comparator, along with an optional Aethyme CLI
+interop test. Their existence does not complete interoperable artifact
+semantics, authenticate the evaluator or inputs, establish freshness or
+completeness, or protect the publication boundary. These offline experiments
+do not satisfy the obligations of a production v2-required runner.
 
 ## Work before this can be enabled
 
@@ -73,4 +76,5 @@ presence does not satisfy any v2-required runner obligation.
    never silently downgrade a v2 requirement to v1.
 
 Until these steps are complete the roadmap item remains open. This design does
-not change the v1 wire format, verdicts, CLI behavior or security guarantees.
+not change the v1 wire format or its runner obligations; experimental v2 CLI
+options do not grant publication authority.
