@@ -456,6 +456,8 @@ registry before considering the release delivered.
   freshness independently; this does not add link evidence to offline receipts.
   Direct Rust collection uniqueness evaluation rejects ambiguous identities in
   the examined prefix, matching CLI and EmDash input validation.
+  Explicitly nested HTML figures and direct captions can retain source positions,
+  including image alternatives and caption links; ambiguous markup remains unmapped.
   HTML image alt attributes and adjacent prose map to their source positions
   when the complete projection matches, including supported semicolon-terminated
   entities and CRLF normalization. Unsupported or ambiguous alternatives remain
