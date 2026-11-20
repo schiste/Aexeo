@@ -373,3 +373,21 @@ fn unicode_openings_match_across_markdown_and_html() {
         }
     }
 }
+
+#[test]
+fn numeric_citations_do_not_merge_sentences_across_markdown_and_html() {
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/cross-adapter-citations.json")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("example");
+    let preset = dir.path().join("workflow.toml");
+    fs::write(&preset, fixture["preset"].as_str().unwrap()).unwrap();
+    for format in ["html", "markdown"] {
+        fs::write(&draft, fixture[format].as_str().unwrap()).unwrap();
+        let (report, _) = evaluate(&draft, &preset, format);
+        assert_eq!(
+            report["gates"][0]["measurements"]["sentence_count"], fixture["expected_sentences"],
+            "{format}"
+        );
+    }
+}

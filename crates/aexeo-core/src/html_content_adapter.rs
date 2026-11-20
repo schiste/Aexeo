@@ -142,6 +142,25 @@ pub fn html_content_with_scope_and_heading_levels(
                         {
                             destinations.push(href.value.to_string());
                         }
+                        // Keep explicit numeric reference labels out of prose, as
+                        // the Portable Text adapter does. Only a single plain
+                        // text child is unambiguous; other markup stays intact.
+                        if tag == "a"
+                            && let Some(href) =
+                                attrs.iter().find(|attr| attr.name.local.as_ref() == "href")
+                        {
+                            let children = node.children.borrow();
+                            if let [child] = children.as_slice()
+                                && let NodeData::Text { contents } = &child.data
+                                && crate::content_gate::numeric_reference_marker(
+                                    &href.value,
+                                    &contents.borrow(),
+                                )
+                            {
+                                text.push_str(&" ".repeat(contents.borrow().len()));
+                                continue;
+                            }
+                        }
                         if tag == "img"
                             && let Some(alt) =
                                 attrs.iter().find(|attr| attr.name.local.as_ref() == "alt")
@@ -774,7 +793,19 @@ pub fn html_source_map_with_scope(
         }
         cursor = end + 1;
     }
-    if !stack.is_empty() || output != projected || (scope == HtmlContentScope::Main && !main_seen) {
+    // Numeric reference labels are masked in the DOM projection. Verify a
+    // second time before accepting the same-length substitution so recovered
+    // or ambiguous HTML cannot acquire guessed coordinates.
+    let reference_mask_matches = output.len() == projected.len()
+        && output.bytes().zip(projected.bytes()).all(|(a, b)| {
+            a == b || (b == b' ' && (a.is_ascii_digit() || matches!(a, b'[' | b']' | b',' | b'-')))
+        })
+        && html_content_with_scope("", source, scope)
+            .is_ok_and(|content| content.input.text.as_deref() == Some(projected));
+    if !stack.is_empty()
+        || (output != projected && !reference_mask_matches)
+        || (scope == HtmlContentScope::Main && !main_seen)
+    {
         return None;
     }
     Some(HtmlSourceMap {
@@ -866,6 +897,38 @@ pub fn gate_source_positions_with_links(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reference_masks_preserve_source_positions_and_other_links() {
+        let source = "<p>In 2025.<a href='#reference-source'>1</a> Next 2.5 words <a href='/other'>42</a>.</p>";
+        let adapted = html_content("x", source).unwrap();
+        let text = adapted.input.text.as_deref().unwrap();
+        assert!(text.contains("2025.  Next 2.5 words 42"));
+        assert_eq!(adapted.destinations, ["#reference-source", "/other"]);
+        let map = html_source_map(source, text).unwrap();
+        let projected = crate::text_index::LineIndex::new(text);
+        let pos = projected
+            .position(text, text.find("Next").unwrap())
+            .unwrap();
+        let expected = crate::text_index::LineIndex::new(source)
+            .position(source, source.find("Next").unwrap())
+            .unwrap();
+        assert_eq!(
+            map.source_position(source, text, pos.0, pos.1),
+            Some(expected)
+        );
+        let forged = text.replacen("2.5", "2 5", 1);
+        assert!(html_source_map(source, &forged).is_none());
+        let nested = "<p>2025.<a href='#reference-source'><em>1</em></a> Next.</p>";
+        assert!(
+            html_content("x", nested)
+                .unwrap()
+                .input
+                .text
+                .unwrap()
+                .contains("2025.1 Next")
+        );
+    }
 
     #[test]
     fn main_scope_excludes_surrounding_content_and_preserves_links() {

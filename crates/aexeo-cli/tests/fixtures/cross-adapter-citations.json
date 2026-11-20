@@ -1,0 +1,40 @@
+{
+  "preset": "version=1\nname='workflow'\n[[gates]]\nid='length'\nkind='sentence_length'\nmax_words=1\nblocking=false\n",
+  "markdown": "In 2025.[1](#reference-source) Next sentence.\n",
+  "html": "<p>In 2025.<a href=\"#reference-source\">1</a> Next sentence.</p>",
+  "document": {
+    "route": "/citations",
+    "title": "Citations",
+    "body": [
+      {
+        "markDefs": [
+          {
+            "_key": "ref",
+            "_type": "link",
+            "href": "#reference-source"
+          }
+        ],
+        "children": [
+          {
+            "_type": "span",
+            "text": "In 2025.",
+            "marks": []
+          },
+          {
+            "_type": "span",
+            "text": "1",
+            "marks": [
+              "ref"
+            ]
+          },
+          {
+            "_type": "span",
+            "text": " Next sentence.",
+            "marks": []
+          }
+        ]
+      }
+    ]
+  },
+  "expected_sentences": 2
+}

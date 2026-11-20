@@ -144,6 +144,15 @@ fn sentence_is_quoted(
             .any(|ch| matches!(ch, '"' | '«' | '»' | '“' | '”' | '‘'))
 }
 
+/// Whether an explicitly linked reference marker can be excluded from prose.
+pub(crate) fn numeric_reference_marker(href: &str, text: &str) -> bool {
+    href.starts_with("#reference-")
+        && text.bytes().any(|byte| byte.is_ascii_digit())
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'[' | b']' | b',' | b'-' | b' '))
+}
+
 fn for_each_sentence(
     text: &str,
     mut line: usize,

@@ -441,3 +441,9 @@ for (const [date, status] of [["2024-02-29", "passed"], ["2024-02-28", "failed"]
   assert.equal(report.gates[0].blocking, false);
 }
 console.log("WASM source review age check passed");
+
+// Shared fixture checks citation-adjacent sentence boundaries across adapters.
+const sharedCitations = JSON.parse(await readFile(new URL("../../../crates/aexeo-cli/tests/fixtures/cross-adapter-citations.json", import.meta.url), "utf8"));
+const sharedCitationReport = await evaluateContent(sharedCitations.document, "workflow", { workflow: sharedCitations.preset });
+assert.equal(sharedCitationReport.gates[0].measurements.sentence_count, sharedCitations.expected_sentences);
+console.log("WASM numeric citations match shared Markdown and HTML sentence boundaries");
