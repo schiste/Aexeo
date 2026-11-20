@@ -110,3 +110,21 @@ that the base declares completeness, not that the inventory is complete. Input
 reads are individually bounded and checked for observable changes; they are not
 an atomic multi-file snapshot. A successful result explicitly reports
 `publication_authorized: false`. No Python output is a publication decision.
+
+## Reconstructing offline artifact bytes for experimentation
+
+The resolved policy and host options are Aexeo-specific serialized values,
+not the original preset TOML or a portable policy format. A host can run its
+independently selected, trusted Aexeo executable against protected current
+inputs with `--offline-receipt --offline-receipt-bundle` and the same preset,
+options and evaluator identity, then extract `artifacts.resolved_policy`,
+`artifacts.host_options` and the other exact UTF-8 artifact bytes. The
+CLI/Python integration test exercises this separate invocation. The host must
+independently obtain and validate current change, collection and snapshot
+inputs; never use a bundle supplied with the previous verdict as evidence.
+
+This export is a private transport, not proof of evaluator authenticity, input
+provenance, complete dependencies or currentness. The CLI does not enforce an
+immutable multi-file snapshot. In particular, a producer and exporter using
+the same faulty or compromised implementation can agree on wrong semantics.
+Do not use this procedure as publication authorization.
