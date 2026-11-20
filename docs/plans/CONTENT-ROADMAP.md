@@ -97,6 +97,17 @@ is still required to inspect those pages. No CMS content was changed.
 
 ## Delivery tracker
 
+- [x] Extend the opt-in Portable Text literal Markdown review to recognize
+  certain unfinished HTTP(S), root-relative, dot-relative and fragment links
+  ([#630](https://github.com/schiste/Aexeo/pull/630),
+  [#632](https://github.com/schiste/Aexeo/pull/632)). Findings remain advisory;
+  the scanner can miss malformed links and does not validate targets or rendering.
+- [x] Exercise skipped heading levels with the same synthetic fixture across
+  Markdown, static HTML and EmDash/WASM, including source positions, empty or
+  unavailable inputs and aggregate mapping telemetry
+  ([#631](https://github.com/schiste/Aexeo/pull/631)). Real-host projection and
+  independent editorial validation remain open.
+
 - [x] Preserve the explicit `main` HTML scope in experimental portable v2
   verdicts ([#627](https://github.com/schiste/Aexeo/pull/627)). The real Aexeo
   CLI and independent Python comparator were tested, including rejection after
