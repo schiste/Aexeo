@@ -491,6 +491,8 @@ pub fn html_source_map_with_scope(
                 | "footer"
                 | "article"
                 | "blockquote"
+                | "figure"
+                | "figcaption"
                 | "section"
                 | "ul"
                 | "ol"
@@ -648,7 +650,8 @@ pub fn html_source_map_with_scope(
         // otherwise implicitly close or reparent elements and shift locations.
         if !closing {
             let parent = stack.last().map(String::as_str);
-            if (tag == "li" && !matches!(parent, Some("ul" | "ol")))
+            if (tag == "figcaption" && parent != Some("figure"))
+                || (tag == "li" && !matches!(parent, Some("ul" | "ol")))
                 || (matches!(parent, Some("ul" | "ol")) && tag != "li")
             {
                 return None;
@@ -1206,6 +1209,52 @@ mod tests {
                 html_source_map(html, adapted.input.text.as_deref().unwrap()).is_none(),
                 "{html}"
             );
+        }
+    }
+
+    #[test]
+    fn maps_explicit_figures_and_captions_conservatively() {
+        let html = "<main>\n<p>Avant.</p><figure><img alt='Schéma &amp; exemple'><figcaption>Voir <a href='/source'>la source</a>.</figcaption></figure><p>Après.</p>\n</main>";
+        for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+            let adapted = html_content_with_scope("x", html, scope).unwrap();
+            let projected = adapted.input.text.as_deref().unwrap();
+            let map = html_source_map_with_scope(html, projected, scope).unwrap();
+            let projected_index = crate::text_index::LineIndex::new(projected);
+            let source_index = crate::text_index::LineIndex::new(html);
+            for (needle, source_needle) in [
+                ("Avant", "Avant"),
+                ("Schéma", "Schéma"),
+                ("&", "&amp;"),
+                ("la source", "la source"),
+                ("Après", "Après"),
+            ] {
+                let (line, column) = projected_index
+                    .position(projected, projected.find(needle).unwrap())
+                    .unwrap();
+                assert_eq!(
+                    map.source_position(html, projected, line, column),
+                    source_index.position(html, html.find(source_needle).unwrap()),
+                    "{needle}"
+                );
+            }
+            assert_eq!(
+                map.link_starts,
+                vec![html.find("<a href='/source'>").unwrap()]
+            );
+        }
+        for html in [
+            "<main><figcaption>orphan</figcaption></main>",
+            "<main><figure><figcaption>unclosed</figure></figcaption></main>",
+            "<main><p><figure>reparented</figure></p></main>",
+        ] {
+            for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+                let adapted = html_content_with_scope("x", html, scope).unwrap();
+                assert!(
+                    html_source_map_with_scope(html, adapted.input.text.as_deref().unwrap(), scope)
+                        .is_none(),
+                    "{html}"
+                );
+            }
         }
     }
 
