@@ -170,6 +170,7 @@ pub fn html_content_with_scope_and_heading_levels(
                         if tag == "a"
                             && let Some(href) =
                                 attrs.iter().find(|attr| attr.name.local.as_ref() == "href")
+                            && href.value.starts_with("#reference-")
                             && let Some(label) = reference_label(&node)
                             && crate::content_gate::numeric_reference_marker(&href.value, &label)
                         {
