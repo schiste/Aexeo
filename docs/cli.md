@@ -320,6 +320,9 @@ Options:
       --experimental-bound-verdict
           Use an experimental input-bound offline envelope; not a portable v2 verdict
 
+      --draft-portable-verdict
+          Write a draft portable v2 envelope; not a publication authorization
+
       --candidate-base <candidate-base>
           Experimental host-supplied base candidate snapshot JSON
 

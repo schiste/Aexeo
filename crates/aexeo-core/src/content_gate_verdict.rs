@@ -905,13 +905,9 @@ pub struct CandidateDecisionContext<'a> {
     pub after: &'a [crate::content_candidate::CandidateItem],
 }
 
-fn candidate_binding(
-    context: &CandidateDecisionContext<'_>,
-    scope: HtmlContentScope,
-    external_evidence: Option<&[u8]>,
-) -> Result<String> {
+fn candidate_revisions(context: &CandidateDecisionContext<'_>) -> Result<([u8; 32], [u8; 32])> {
     use crate::content_candidate::overlay_candidate;
-    use crate::content_candidate_profile::{candidate_decision_binding, candidate_revision_digest};
+    use crate::content_candidate_profile::candidate_revision_digest;
     if !context.base.complete {
         bail!("candidate base inventory is not declared complete");
     }
@@ -948,10 +944,22 @@ fn candidate_binding(
             bail!("collection identities do not match candidate inventory");
         }
     }
-    let base_digest = candidate_revision_digest(context.base).map_err(anyhow::Error::msg)?;
+    let base = candidate_revision_digest(context.base).map_err(anyhow::Error::msg)?;
+    let candidate = candidate_revision_digest(&overlay.candidate).map_err(anyhow::Error::msg)?;
+    Ok((base, candidate))
+}
+
+fn candidate_binding(
+    context: &CandidateDecisionContext<'_>,
+    scope: HtmlContentScope,
+    external_evidence: Option<&[u8]>,
+) -> Result<String> {
+    use aexeo_contracts::content_gate_binding_v2::{
+        CANDIDATE_REVISION_PROFILE, candidate_snapshot_binding,
+    };
+    let (base_digest, candidate_digest) = candidate_revisions(context)?;
     let artifacts = context.decision.artifacts_with_html_scope(scope)?;
-    let binding = candidate_decision_binding(
-        &overlay.candidate,
+    let binding = candidate_snapshot_binding(
         &[
             ("change", Some(&artifacts.change)),
             ("resolved_policy", Some(&artifacts.resolved_policy)),
@@ -961,9 +969,33 @@ fn candidate_binding(
             ("external_evidence", external_evidence),
             ("candidate_base_revision_sha256", Some(&base_digest)),
         ],
+        Some(CANDIDATE_REVISION_PROFILE),
+        Some(&candidate_digest),
     )
     .map_err(anyhow::Error::msg)?;
     Ok(binding.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+/// Produce a draft portable envelope for an offline candidate evaluation.
+/// This is not connected to the CLI and is not a publication authorization.
+/// The host must independently establish input provenance, completeness,
+/// freshness, evaluator identity, dependency closure and publication atomicity.
+pub fn evaluate_draft_portable_candidate_verdict<P: ConfinedContentFiles>(
+    context: &CandidateDecisionContext<'_>,
+    provider: &mut P,
+    evaluated_at: &str,
+    scope: HtmlContentScope,
+) -> Result<aexeo_contracts::content_gate_portable_v2::BoundVerdict> {
+    use aexeo_contracts::content_gate_portable_v2::{BoundVerdict, CurrentInputs};
+    let (base, candidate) = candidate_revisions(context)?;
+    let artifacts = context.decision.artifacts_with_html_scope(scope)?;
+    let inputs = CurrentInputs {
+        artifacts: artifacts.as_inputs(),
+        base_revision_sha256: &base,
+        candidate_revision_sha256: &candidate,
+    };
+    let verdict = evaluate_offline_context(context.decision, provider, evaluated_at, scope)?;
+    BoundVerdict::new(verdict, &inputs).map_err(anyhow::Error::msg)
 }
 
 /// Evaluate changed content and bind the independently built candidate snapshot.
@@ -2459,6 +2491,20 @@ mod tests {
             )
             .is_ok()
         );
+        let portable = evaluate_draft_portable_candidate_verdict(
+            &ctx,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        assert_eq!(portable.binding_sha256, verdict.binding);
+        assert_eq!(portable.verdict, verdict.receipt.verdict);
+        let portable_bytes = serde_json::to_vec(&portable).unwrap();
+        let parsed =
+            aexeo_contracts::content_gate_portable_v2::BoundVerdict::parse(&portable_bytes)
+                .unwrap();
+        assert_eq!(parsed, portable);
         let encoded = serde_json::to_vec(&verdict).unwrap();
         let _: ExperimentalCandidateVerdict =
             aexeo_contracts::content_gate_change_validation::parse_lossless_json(&encoded).unwrap();

@@ -39,6 +39,8 @@ jobs:
           python3 docs/specs/content-gate/v2/test_verify_decision_inputs.py
           "$RUNNER_TEMP/aexeo-schema-venv/bin/python" docs/specs/content-gate/v2/test_compare_offline_receipts.py
           "$RUNNER_TEMP/aexeo-schema-venv/bin/python" docs/specs/content-gate/v2/test_verify_candidate_inputs.py
+          "$RUNNER_TEMP/aexeo-schema-venv/bin/python" docs/specs/content-gate/v2/test_portable_verdict.py
+          "$RUNNER_TEMP/aexeo-schema-venv/bin/python" docs/specs/content-gate/v2/test_verify_portable_verdict.py
 
   emdash-plugin:
     name: emdash-plugin (typecheck, test, audit)
@@ -244,6 +246,11 @@ jobs:
         run: sh scripts/check-repo.sh
       - name: Cross-check Rust receipt artifacts with Python verifier
         run: python3 docs/specs/content-gate/v2/test_receipt_interop.py
+      - name: Cross-check draft portable verdicts with independent Python comparator
+        run: |
+          python3 -m venv "$RUNNER_TEMP/aexeo-portable-venv"
+          "$RUNNER_TEMP/aexeo-portable-venv/bin/python" -m pip install -r docs/specs/content-gate/v2/requirements-test.txt
+          "$RUNNER_TEMP/aexeo-portable-venv/bin/python" docs/specs/content-gate/v2/test_portable_cli_interop.py
       - name: Run release install smoke
         run: sh scripts/pre-push.sh
       # performance-budget.json was dead weight: nothing in CI read it, so
