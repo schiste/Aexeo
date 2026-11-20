@@ -31,7 +31,14 @@ const LIMITATION = "Only local configured content checks run; runtime providers 
 export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRequest, options: RevisionAuditOptions) {
   const { collection, id, revision } = input;
   if (!ctx.content.get || !ctx.content.getRevision) return { status: "not_checked", reason: "revision_access_unavailable" } as const;
-  const [current, snapshot] = await Promise.all([ctx.content.get(collection, id), ctx.content.getRevision(collection, id, revision)]);
+  let current: Current | null;
+  let snapshot: Revision | null;
+  try {
+    [current, snapshot] = await Promise.all([ctx.content.get(collection, id), ctx.content.getRevision(collection, id, revision)]);
+  } catch {
+    // Host errors may contain private data; return only a bounded diagnostic.
+    return { status: "not_checked", reason: "revision_read_failed" } as const;
+  }
   if (!current || !snapshot || snapshot.id !== revision || snapshot.collection !== collection || snapshot.entryId !== id) {
     return { status: "not_checked", reason: "revision_unavailable" } as const;
   }
@@ -62,7 +69,7 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
   // It cannot safely be called for a historical revision without a revision-aware contract.
   const evidence = options.evidenceProviderConfigured ? undefined : options.preset?.evidenceSources;
   const report = await options.evaluate(adapted.document, selected.name, options.preset?.sources, evidence);
-  const latest = await ctx.content.get(collection, id);
+  const latest = await currentOrUnknown(ctx, collection, id);
   const auditId = crypto.randomUUID();
   const result = { status: "evaluated" as const, audit_id: auditId, collection, id, revision,
     preset: selected.name, selection_source: selected.source, locale_at_audit: localeAtAudit, scope: field === undefined ? "content" as const : "fragment" as const, ...(field === undefined ? {} : { field }), limitation: LIMITATION,
@@ -102,6 +109,14 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
   return { ...result, revision_status: revisionStatus(latest, revision), locale_status: localeStatus(result.locale_at_audit, latest) };
 }
 
+async function currentOrUnknown(ctx: RevisionContext, collection: string, id: string): Promise<Current | null> {
+  try {
+    return ctx.content.get ? await ctx.content.get(collection, id) : null;
+  } catch {
+    return null;
+  }
+}
+
 function revisionStatus(current: Current | null, revision: string): "draft" | "published" | "stale" | "unknown" {
   if (!current) return "unknown";
   if (current.draftRevisionId === revision) return "draft";
@@ -126,6 +141,6 @@ function localeStatus(audited: unknown, current: Current | null): "unchanged" | 
 export async function getRevisionAudit(ctx: RevisionContext, auditId: string) {
   const stored = await ctx.kv.get<{ collection: string; id: string; revision: string; locale_at_audit?: string | null }>(reportKey(auditId));
   if (!stored) return { status: "not_checked", reason: "audit_unavailable" } as const;
-  const current = ctx.content.get ? await ctx.content.get(stored.collection, stored.id) : null;
+  const current = await currentOrUnknown(ctx, stored.collection, stored.id);
   return { ...stored, revision_status: revisionStatus(current, stored.revision), locale_status: localeStatus(stored.locale_at_audit, current) };
 }

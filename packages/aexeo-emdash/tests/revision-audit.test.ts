@@ -159,6 +159,31 @@ describe("revision audits", () => {
     expect(evaluate).not.toHaveBeenCalled();
     expect(await auditRevision({ content: {}, kv: ctx.kv } as never, { collection: "posts", id: "one", revision: "rev1" }, { preset: { name: "article" }, evaluate })).toMatchObject({ reason: "revision_access_unavailable" });
   });
+  it.each(["get", "getRevision"] as const)("does not evaluate when initial %s fails", async (method) => {
+    const { ctx } = host();
+    ctx.content[method].mockRejectedValueOnce(new Error("private host error"));
+    const evaluate = vi.fn(async () => report);
+    const set = vi.spyOn(ctx.kv, "set");
+    const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, { preset: { name: "article" }, evaluate });
+    expect(result).toEqual({ status: "not_checked", reason: "revision_read_failed" });
+    expect(JSON.stringify(result)).not.toContain("private host error");
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(set).not.toHaveBeenCalled();
+  });
+  it("retains the report with unknown freshness if the later host read fails", async () => {
+    const { ctx, current } = host();
+    ctx.content.get.mockResolvedValueOnce(current).mockRejectedValueOnce(new Error("private host error"));
+    const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, { preset: { name: "article" }, evaluate: async () => report });
+    expect(result).toMatchObject({ status: "evaluated", revision_status: "unknown", locale_status: "unknown" });
+    expect(JSON.stringify(result)).not.toContain("private host error");
+    if (result.status !== "evaluated") throw new Error("expected report");
+    ctx.content.get.mockRejectedValueOnce(new Error("private host error"));
+    const retrieved = await getRevisionAudit(ctx as never, result.audit_id);
+    expect(retrieved).toMatchObject({ status: "evaluated", revision_status: "unknown", locale_status: "unknown" });
+    expect(JSON.stringify(retrieved)).not.toContain("private host error");
+    ctx.content.get.mockResolvedValueOnce(current);
+    expect(await getRevisionAudit(ctx as never, result.audit_id)).toMatchObject({ revision_status: "published", locale_status: "unchanged" });
+  });
   it.each([null, undefined, [], "body", 42])("does not evaluate malformed historical data: %s", async (data) => {
     const { ctx, revision } = host();
     ctx.content.getRevision.mockResolvedValue({ ...revision, data } as never);
@@ -238,6 +263,16 @@ describe("revision audits", () => {
     await plugin.routes["audit-revision"]!.handler({ content: {}, kv: {}, log: { info }, input: { collection: "posts", id: "one", revision: "rev1", field: "private-field" } });
     expect(info).toHaveBeenCalledWith("aexeo.revision_audit", expect.objectContaining({ status: "not_checked", scope: "fragment", duration_ms: expect.any(Number), gates: 0 }));
     expect(JSON.stringify(info.mock.calls)).not.toContain("private-field");
+  });
+  it("records a bounded read failure without logging host errors or identifiers", async () => {
+    const { ctx } = host();
+    ctx.content.getRevision.mockRejectedValueOnce(new Error("private host error"));
+    const info = vi.fn();
+    const plugin = createPlugin({ revisionAudits: true }) as { routes: Record<string, { handler(ctx: unknown): Promise<unknown> }> };
+    const result = await plugin.routes["audit-revision"]!.handler({ ...ctx, log: { info }, input: { collection: "private-collection", id: "private-id", revision: "private-revision" } });
+    expect(result).toEqual({ status: "not_checked", reason: "revision_read_failed" });
+    expect(info).toHaveBeenCalledWith("aexeo.revision_audit", expect.objectContaining({ status: "not_checked", reason: "revision_read_failed", gates: 0 }));
+    expect(JSON.stringify(info.mock.calls)).not.toMatch(/private/);
   });
   it("registers private MCP tools with schemas and explicit permissions", () => {
     const plugin = createPlugin({ revisionAudits: true }) as { capabilities: string[]; mcp?: { tools: Record<string, { route: string; input: { safeParse(value: unknown): { success: boolean } } }> }; routes: Record<string, { permission?: string; request?: { body?: string } }> };

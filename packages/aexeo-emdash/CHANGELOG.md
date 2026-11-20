@@ -6,6 +6,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- Report revision read failures without exposing host errors; retain evaluated reports with unknown currentness when a later status read fails. Revision audit telemetry includes the bounded reason or currentness status.
+
 - Return `revision_data_invalid` without evaluating or storing a report when a historical CMS revision contains non-object data.
 
 ## [0.9.5] - 2026-11-19
