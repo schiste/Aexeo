@@ -88,8 +88,8 @@ unavailable check may become a pass.
 
 As observed on 20 November 2026,
 [Aethyme #1800](https://github.com/schiste/Aethyme/pull/1800) implements a v1
-subject precheck, not the host-facing runner. Its CI is green and local
-validation is in progress; it is not merged.
+subject precheck, not the host-facing runner. It is merged after its CI and
+local contract and fast-guard validations passed.
 [Aethyme #1801](https://github.com/schiste/Aethyme/pull/1801) builds the
 native runner on that prerequisite. Its CI is green, but it remains a draft
 and must be resynchronized and validated after #1800 lands.
