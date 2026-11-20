@@ -23,6 +23,11 @@ MAX_ENVELOPE_BYTES = 8 * 1024 * 1024
 
 
 def validate_schema(value, path):
+    validate_schemas((value,), path)
+
+
+def validate_schemas(values, path):
+    """Validate every envelope against one schema snapshot per comparison."""
     try:
         from jsonschema import Draft202012Validator, FormatChecker
         from jsonschema.exceptions import ValidationError
@@ -33,7 +38,9 @@ def validate_schema(value, path):
         raise VerificationError('required format validation is unavailable')
     try:
         schema = json.loads(path.read_text(encoding='utf-8'))
-        Draft202012Validator(schema, format_checker=checker).validate(value)
+        validator = Draft202012Validator(schema, format_checker=checker)
+        for value in values:
+            validator.validate(value)
     except (OSError, ValueError, ValidationError, RecursionError) as error:
         raise VerificationError('invalid document schema') from error
 
@@ -49,8 +56,7 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
     if len(previous_bytes) > MAX_ENVELOPE_BYTES or len(fresh_bytes) > MAX_ENVELOPE_BYTES:
         raise VerificationError('bound verdict exceeds size limit')
     previous, fresh = parse(previous_bytes), parse(fresh_bytes)
-    for envelope in (previous, fresh):
-        validate_schema(envelope, HERE / 'bound-verdict.schema.json')
+    validate_schemas((previous, fresh), HERE / 'bound-verdict.schema.json')
     change = parse(artifacts['change'])
     validate_change_semantics(change)
     # V1 has open objects. The draft cannot understand extra change inputs or
