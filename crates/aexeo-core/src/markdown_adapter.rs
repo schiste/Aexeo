@@ -270,7 +270,7 @@ pub fn literal_markdown_link_offsets(source: &str) -> Result<Vec<usize>> {
             && let Some(position) = &text.position
             && let Some(raw) = source.get(position.start.offset..position.end.offset)
         {
-            explicit_reference_candidates(raw, position.start.offset, offsets);
+            literal_link_candidates(raw, position.start.offset, source, offsets);
         }
         if let Some(position) = position {
             let offset = position.start.offset;
@@ -290,9 +290,11 @@ pub fn literal_markdown_link_offsets(source: &str) -> Result<Vec<usize>> {
     Ok(offsets)
 }
 
-// Single-pass scan of an explicit two-bracket reference spelling. It is a
-// candidate, not evidence that a reference definition exists or will render.
-fn explicit_reference_candidates(raw: &str, base: usize, offsets: &mut Vec<usize>) {
+// Scan unresolved explicit references and unfinished inline HTTP(S) links in
+// one pass. These are review candidates, not evidence of host rendering.
+// Parsed links and Markdown code are excluded by the caller. The parser can
+// split text nodes, so this does not find every malformed link.
+fn literal_link_candidates(raw: &str, base: usize, source: &str, offsets: &mut Vec<usize>) {
     let bytes = raw.as_bytes();
     let mut index = 0;
     let mut start = None;
@@ -314,6 +316,30 @@ fn explicit_reference_candidates(raw: &str, base: usize, offsets: &mut Vec<usize
                 state = 0;
             }
             (2, b'[') => state = 3,
+            (2, b'(') => {
+                // GFM autolinks can split the URL into a sibling node. Inspect
+                // the adjacent source token rather than treating that split as
+                // the end of the candidate; do not cross whitespace.
+                let tail = &source.as_bytes()[base + index + 1..];
+                if tail.starts_with(b"http://") || tail.starts_with(b"https://") {
+                    if index + 1 == bytes.len() {
+                        if !tail
+                            .iter()
+                            .take_while(|b| !b.is_ascii_whitespace())
+                            .any(|&b| b == b')')
+                            && let Some(s) = start.take()
+                        {
+                            offsets.push(base + s);
+                        }
+                        state = 0;
+                    } else {
+                        state = 4;
+                    }
+                } else {
+                    start = None;
+                    state = 0;
+                }
+            }
             (2, _) => {
                 start = None;
                 state = 0;
@@ -329,9 +355,24 @@ fn explicit_reference_candidates(raw: &str, base: usize, offsets: &mut Vec<usize
                 start = None;
                 state = 0;
             }
+            (4, b')') => {
+                start = None;
+                state = 0;
+            }
+            (4, b' ' | b'\t' | b'\n' | b'\r') => {
+                if let Some(s) = start.take() {
+                    offsets.push(base + s);
+                }
+                state = 0;
+            }
             _ => {}
         }
         index += 1;
+    }
+    if state == 4
+        && let Some(s) = start
+    {
+        offsets.push(base + s);
     }
 }
 
@@ -1551,6 +1592,20 @@ mod explicit_reference_candidate_tests {
     fn ignores_code_images_escapes_and_bare_markers() {
         let source = r"`[code][ref]` ![image][ref] \[escaped][ref] [12]";
         assert!(literal_markdown_link_offsets(source).unwrap().is_empty());
+    }
+
+    #[test]
+    fn unfinished_http_link_candidates_are_advisory_and_ignore_code_and_citations() {
+        let source = "é [help](https://example.org\n[second](http://example.net";
+        assert_eq!(
+            literal_markdown_link_offsets(source).unwrap(),
+            vec![
+                source.find("[help]").unwrap(),
+                source.find("[second]").unwrap()
+            ]
+        );
+        let safe = r"[ok](https://example.org) \[escaped](https://example.org ![image](https://example.org `[code](https://example.org` [12]";
+        assert_eq!(literal_markdown_link_offsets(safe).unwrap(), vec![0]);
     }
 
     #[test]
