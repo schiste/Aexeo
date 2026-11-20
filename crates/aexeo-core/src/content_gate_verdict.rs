@@ -2754,6 +2754,63 @@ mod tests {
     }
 
     #[test]
+    fn portable_candidate_preserves_explicit_main_html_scope() {
+        use crate::content_candidate::{CandidateItem, CandidateSnapshot};
+        use sha2::{Digest, Sha256};
+        let mut input = change();
+        input.entries[0].media_type = "text/html".into();
+        let source = "<main><p>abc</p></main>";
+        let state = input.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let policy = preset(1);
+        let decision = OfflineDecisionContext {
+            change: &input,
+            preset: &policy,
+            max_entry_bytes: 1024,
+            max_total_bytes: 1024,
+            plain_text_paragraphs: false,
+            collection: None,
+            evaluator_identity: b"build",
+        };
+        let base = CandidateSnapshot {
+            scope: "site".into(),
+            site_id: "s".into(),
+            site_base_url: None,
+            base: input.base.clone(),
+            complete: true,
+            items: vec![],
+        };
+        let after = vec![CandidateItem {
+            entity_id: "article".into(),
+            public_path: "/article".into(),
+            media_type: "text/html".into(),
+            revision: None,
+            sha256: input.entries[0].after.as_ref().unwrap().sha256.clone(),
+            source: source.into(),
+            links: None,
+        }];
+        let candidate = CandidateDecisionContext {
+            decision: &decision,
+            base: &base,
+            after: &after,
+        };
+        let verdict = evaluate_draft_portable_candidate_verdict(
+            &candidate,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Main,
+        )
+        .unwrap();
+        assert_eq!(
+            verdict.verdict.extensions.as_ref().unwrap()["aexeo.html-content-scope.v1"],
+            "main"
+        );
+        let bytes = serde_json::to_vec(&verdict).unwrap();
+        assert!(aexeo_contracts::content_gate_portable_v2::BoundVerdict::parse(&bytes).is_ok());
+    }
+
+    #[test]
     fn candidate_rename_requires_matching_old_identity_and_bytes() {
         use crate::content_candidate::{CandidateItem, CandidateSnapshot};
         let mut input = change();

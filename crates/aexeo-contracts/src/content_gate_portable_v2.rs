@@ -14,8 +14,8 @@ pub const SCHEMA: &str = "content-gate.bound-verdict/v2";
 pub const PROFILE: &str = "content-gate.candidate-binding/v1";
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 
-/// This draft profile permits only the informational Aexeo offline-binding
-/// extension; all other extensions are rejected until specified.
+/// This draft profile permits the informational Aexeo offline-binding and
+/// explicit HTML main-scope extensions; other extensions are rejected.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BoundVerdict {
@@ -112,7 +112,14 @@ impl BoundVerdict {
             let digest = extensions
                 .get("aexeo.offline-input-binding.v1")
                 .and_then(serde_json::Value::as_str);
-            if extensions.len() != 1 || !digest.is_some_and(is_sha256) {
+            if !digest.is_some_and(is_sha256)
+                || extensions.keys().any(|key| {
+                    key != "aexeo.offline-input-binding.v1" && key != "aexeo.html-content-scope.v1"
+                })
+                || extensions
+                    .get("aexeo.html-content-scope.v1")
+                    .is_some_and(|value| value.as_str() != Some("main"))
+            {
                 return Err("unsupported or malformed verdict extension");
             }
         }
@@ -568,6 +575,17 @@ mod tests {
         let mut value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         value["verdict"]["subject"]["unknown"] = true.into();
         assert!(BoundVerdict::parse(&serde_json::to_vec(&value).unwrap()).is_err());
+        let mut scoped: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        scoped["verdict"]["extensions"]["aexeo.html-content-scope.v1"] = "main".into();
+        assert!(BoundVerdict::parse(&serde_json::to_vec(&scoped).unwrap()).is_ok());
+        for invalid in [
+            serde_json::json!("document"),
+            serde_json::json!(null),
+            serde_json::json!(true),
+        ] {
+            scoped["verdict"]["extensions"]["aexeo.html-content-scope.v1"] = invalid;
+            assert!(BoundVerdict::parse(&serde_json::to_vec(&scoped).unwrap()).is_err());
+        }
         let mut value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         value["verdict"]["extensions"] = serde_json::json!({"unknown": true});
         assert!(BoundVerdict::parse(&serde_json::to_vec(&value).unwrap()).is_err());

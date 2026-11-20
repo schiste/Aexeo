@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 from verify_candidate_inputs import VerificationError
-from verify_portable_verdict import compare
+from verify_portable_verdict import compare, validate_schema
 
 
 class PortableComparison(unittest.TestCase):
@@ -33,6 +33,21 @@ class PortableComparison(unittest.TestCase):
     def test_matching_independently_supplied_inputs_and_verdict(self):
         self.assertEqual(self.check(), {'input_binding': 'match', 'fresh_verdict_match': True,
                                        'required_check_count': 1, 'publication_authorized': False})
+
+    def test_schema_allows_only_explicit_main_scope(self):
+        envelope = copy.deepcopy(self.previous)
+        extensions = envelope['verdict']['extensions']
+        extensions['aexeo.html-content-scope.v1'] = 'main'
+        schema = Path(__file__).with_name('bound-verdict.schema.json')
+        validate_schema(envelope, schema)
+        for value in ('document', None, True):
+            extensions['aexeo.html-content-scope.v1'] = value
+            with self.subTest(value=value), self.assertRaises(VerificationError):
+                validate_schema(envelope, schema)
+        extensions['aexeo.html-content-scope.v1'] = 'main'
+        extensions['unknown'] = 'value'
+        with self.assertRaises(VerificationError):
+            validate_schema(envelope, schema)
 
     def test_changed_inputs_or_incomplete_inventory_fail_closed(self):
         for key in self.artifacts:
