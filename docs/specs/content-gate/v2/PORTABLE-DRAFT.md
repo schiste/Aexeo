@@ -101,6 +101,13 @@ fresh result. It is not consumed by a publication runner. The
 are exercised by Rust and Python tests. Full verdict validation, interoperable
 artifact profiles and end-to-end host integration remain unfinished.
 
+The experimental Rust `verify_passing` helper additionally parses the independently
+supplied change artifact, rejects unsupported change extensions, compares the
+complete v1 subject, requires caller-selected validator labels, a successful
+reported exit code, and explicitly named passing blocking checks. These labels
+and exit code are caller assertions. This helper does not inspect content bytes,
+authenticate execution, establish complete or fresh inputs, or authorize publication.
+
 ## Independent experimental comparator
 
 `verify_portable_verdict.py` compares a previous envelope to an independently
