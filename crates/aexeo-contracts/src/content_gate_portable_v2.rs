@@ -1,14 +1,14 @@
 //! Draft portable bound-verdict framing; not a publication verifier.
 //!
-//! This API is not connected to a CLI or runner. A matching binding does not
-//! validate the embedded verdict, authenticate inputs or establish freshness,
+//! A matching binding does not authenticate inputs or establish freshness,
 //! inventory completeness, dependency closure or publication atomicity.
 
 use crate::content_gate_binding_v2::{CANDIDATE_REVISION_PROFILE, candidate_snapshot_binding};
 use crate::content_gate_change_validation::parse_lossless_json;
 use crate::content_gate_decision_inputs::DecisionInputBytes;
-use crate::content_gate_protocol::{VERDICT_SCHEMA, Verdict};
+use crate::content_gate_protocol::{CheckStatus, VERDICT_SCHEMA, Verdict, VerdictStatus};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 pub const SCHEMA: &str = "content-gate.bound-verdict/v2";
 pub const PROFILE: &str = "content-gate.candidate-binding/v1";
@@ -65,8 +65,8 @@ fn is_sha256(digest: &str) -> bool {
 }
 
 impl BoundVerdict {
-    /// Construct framing for an already evaluated verdict. This does not
-    /// validate the verdict or the origin and completeness of the inputs.
+    /// Construct framing for an already evaluated, structurally consistent verdict.
+    /// This does not validate the origin or completeness of the inputs.
     pub fn new(verdict: Verdict, inputs: &CurrentInputs<'_>) -> Result<Self, &'static str> {
         let result = Self {
             schema: SCHEMA.into(),
@@ -74,18 +74,18 @@ impl BoundVerdict {
             binding_sha256: binding(inputs)?,
             verdict,
         };
-        result.validate_header()?;
+        result.validate_verdict()?;
         Ok(result)
     }
 
-    /// Reject oversized, duplicate-key, unknown-field and unsupported draft
-    /// envelopes. This does not validate the v1 verdict's schema or semantics.
+    /// Reject oversized, ambiguous, unsupported or inconsistent draft envelopes.
+    /// This does not authenticate inputs or authorize publication.
     pub fn parse(bytes: &[u8]) -> Result<Self, &'static str> {
         if bytes.len() > MAX_BYTES {
             return Err("bound verdict exceeds size limit");
         }
         let envelope: Self = parse_lossless_json(bytes).map_err(|_| "invalid bound verdict")?;
-        envelope.validate_header()?;
+        envelope.validate_verdict()?;
         Ok(envelope)
     }
 
@@ -110,10 +110,114 @@ impl BoundVerdict {
         Ok(())
     }
 
-    /// Compare a binding recomputed solely from current caller-supplied inputs.
-    /// A match is not a verdict validation or publication authorization.
-    pub fn verify_inputs(&self, inputs: &CurrentInputs<'_>) -> Result<(), &'static str> {
+    /// Validate the embedded verdict's supported fields and internal invariants.
+    /// This does not verify its subject against a change, required checks, trusted
+    /// validator identity, evaluator exit code, or publication authorization.
+    pub fn validate_verdict(&self) -> Result<(), &'static str> {
         self.validate_header()?;
+        let v = &self.verdict;
+        if v.schema != VERDICT_SCHEMA
+            || v.subject.change_id.is_empty()
+            || v.subject.base.revision.is_empty()
+            || v.subject.entries.is_empty()
+            || v.validator.name.is_empty()
+            || v.validator.version.is_empty()
+            || v.validator.profile.as_ref().is_some_and(String::is_empty)
+            || v.validator
+                .profile_sha256
+                .as_ref()
+                .is_some_and(|s| !is_sha256(s))
+            || v.reason.as_ref().is_some_and(String::is_empty)
+            || (matches!(v.status, VerdictStatus::NotChecked | VerdictStatus::Error)
+                && v.reason.is_none())
+            || time::OffsetDateTime::parse(
+                &v.evaluated_at,
+                &time::format_description::well_known::Rfc3339,
+            )
+            .is_err()
+        {
+            return Err("invalid embedded verdict fields");
+        }
+        let mut entities = BTreeSet::new();
+        for entry in &v.subject.entries {
+            if entry.entity_id.is_empty()
+                || !entities.insert(entry.entity_id.as_str())
+                || entry.sha256.as_ref().is_some_and(|s| !is_sha256(s))
+            {
+                return Err("invalid or duplicate verdict subject entry");
+            }
+        }
+        let mut ids = BTreeSet::new();
+        let (
+            mut passed,
+            mut failed,
+            mut not_checked,
+            mut blocking_failed,
+            mut blocking_not_checked,
+        ) = (0u64, 0u64, 0u64, 0u64, 0u64);
+        for check in &v.checks {
+            if check.id.is_empty() || !ids.insert(check.id.as_str()) {
+                return Err("invalid or duplicate check ID");
+            }
+            match check.status {
+                CheckStatus::Passed => passed += 1,
+                CheckStatus::Failed => {
+                    failed += 1;
+                    if check.blocking {
+                        blocking_failed += 1;
+                    }
+                }
+                CheckStatus::NotChecked => {
+                    not_checked += 1;
+                    if check.blocking {
+                        blocking_not_checked += 1;
+                    }
+                }
+            }
+        }
+        for finding in &v.findings {
+            if finding.rule_id.is_empty()
+                || finding.message.is_empty()
+                || finding.entity_id.as_ref().is_some_and(String::is_empty)
+                || finding
+                    .check_id
+                    .as_ref()
+                    .is_some_and(|id| id.is_empty() || !ids.contains(id.as_str()))
+                || finding
+                    .location
+                    .as_ref()
+                    .is_some_and(|loc| loc.line == 0 || loc.column == 0)
+            {
+                return Err("invalid verdict finding");
+            }
+        }
+        let summary = &v.summary;
+        if summary.checks != v.checks.len() as u64
+            || summary.passed != passed
+            || summary.failed != failed
+            || summary.not_checked != not_checked
+            || summary.blocking_failed != blocking_failed
+            || summary.blocking_not_checked != blocking_not_checked
+        {
+            return Err("inconsistent verdict summary");
+        }
+        let expected = if blocking_not_checked > 0 {
+            VerdictStatus::NotChecked
+        } else if blocking_failed > 0 {
+            VerdictStatus::Fail
+        } else {
+            VerdictStatus::Pass
+        };
+        if v.status != VerdictStatus::Error && v.status != expected {
+            return Err("inconsistent verdict status");
+        }
+        Ok(())
+    }
+
+    /// Compare a binding recomputed solely from current caller-supplied inputs.
+    /// A match does not establish a passing verdict or authorize publication.
+    pub fn verify_inputs(&self, inputs: &CurrentInputs<'_>) -> Result<(), &'static str> {
+        self.validate_verdict()?;
         if self.binding_sha256 != binding(inputs)? {
             return Err("decision inputs differ");
         }
@@ -183,6 +287,64 @@ mod tests {
         let mut changed = inputs();
         changed.artifacts.evaluator = b"";
         assert!(BoundVerdict::new(verdict(), &changed).is_err());
+    }
+
+    #[test]
+    fn rejects_inconsistent_embedded_verdicts_before_reuse() {
+        let envelope = BoundVerdict::new(verdict(), &inputs()).unwrap();
+        let original = serde_json::to_value(&envelope).unwrap();
+        let variants: Vec<Box<dyn Fn(&mut serde_json::Value)>> = vec![
+            Box::new(|v| v["verdict"]["summary"]["passed"] = 999.into()),
+            Box::new(|v| v["verdict"]["status"] = "fail".into()),
+            Box::new(|v| v["verdict"]["evaluated_at"] = "not-a-date".into()),
+            Box::new(|v| v["verdict"]["validator"]["name"] = "".into()),
+            Box::new(|v| v["verdict"]["subject"]["entries"][0]["sha256"] = "bad".into()),
+            Box::new(|v| {
+                let check = v["verdict"]["checks"][0].clone();
+                v["verdict"]["checks"].as_array_mut().unwrap().push(check);
+            }),
+            Box::new(
+                |v| v["verdict"]["findings"] = serde_json::json!([{ "rule_id": "r", "severity": "warning", "message": "m", "check_id": "missing" }]),
+            ),
+            Box::new(
+                |v| v["verdict"]["findings"] = serde_json::json!([{ "rule_id": "r", "severity": "warning", "message": "m", "location": {"line": 0, "column": 1} }]),
+            ),
+            Box::new(|v| {
+                let entry = v["verdict"]["subject"]["entries"][0].clone();
+                v["verdict"]["subject"]["entries"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(entry);
+            }),
+            Box::new(|v| v["verdict"]["status"] = "error".into()),
+        ];
+        for mutate in variants {
+            let mut changed = original.clone();
+            mutate(&mut changed);
+            assert!(
+                BoundVerdict::parse(&serde_json::to_vec(&changed).unwrap()).is_err(),
+                "{changed}"
+            );
+        }
+        let mut modified = envelope;
+        modified.verdict.summary.passed += 1;
+        assert!(modified.verify_inputs(&inputs()).is_err());
+        assert!(BoundVerdict::new(modified.verdict, &inputs()).is_err());
+    }
+
+    #[test]
+    fn accepts_consistent_nonpassing_verdicts_without_approving_them() {
+        let mut v = verdict();
+        v.checks[0].status = CheckStatus::NotChecked;
+        v.summary.passed = 0;
+        v.summary.not_checked = 1;
+        v.summary.blocking_not_checked = 1;
+        v.status = VerdictStatus::NotChecked;
+        v.reason = Some("not observed".into());
+        let bound = BoundVerdict::new(v, &inputs()).unwrap();
+        let parsed = BoundVerdict::parse(&serde_json::to_vec(&bound).unwrap()).unwrap();
+        assert_eq!(parsed.verdict.status, VerdictStatus::NotChecked);
+        assert!(parsed.verify_inputs(&inputs()).is_ok());
     }
 
     #[test]

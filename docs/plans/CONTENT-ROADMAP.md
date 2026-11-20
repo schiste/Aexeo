@@ -376,6 +376,9 @@ registry before considering the release delivered.
   binds content digests and base only; runners must independently retain and
   compare the other inputs or fail closed. Do not claim an optional extension
   protects legacy runners that ignore it.
+  The draft v2 Rust envelope rejects inconsistent embedded verdict fields,
+  summary counts and finding references before binding reuse. This validates
+  internal structure, not the intended subject, required checks or authorization.
   Experimental candidate-bound verdicts can also evaluate a host-projected
   collection whose identities match the candidate (a subset is allowed when
   explicitly incomplete). The collection bytes
