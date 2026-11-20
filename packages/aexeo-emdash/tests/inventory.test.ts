@@ -299,6 +299,50 @@ describe("conservative EmDash link inventory", () => {
     expect(onTelemetry).toHaveBeenCalledOnce();
   });
 
+  it("uses bounded asynchronous release classifications without confusing CMS and static status", async () => {
+    const list = vi.fn(async () => ({ items: [item("a"), item("b"), item("c"), item("d")], hasMore: false }));
+    const getPublicUrl = vi.fn(async (_collection: string, id: string) => `https://example.org/${id}`);
+    let active = 0;
+    let peak = 0;
+    const pending = new Map<string, () => void>();
+    const classify = vi.fn(async (entry: EmdashContentItem) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise<void>((resolve) => pending.set(entry.id, resolve));
+      active -= 1;
+      if (entry.id === "b") throw new Error("private status provider error");
+      return { disposition: entry.id === "a" ? "draft" as const : "published" as const };
+    });
+    const onTelemetry = vi.fn();
+    const resultPromise = exportLinkInventory({ list, getPublicUrl }, {
+      collections: ["posts"], identity: null, classify, classificationConcurrency: 2, onTelemetry,
+    });
+    await vi.waitFor(() => expect(pending.size).toBe(2));
+    pending.get("b")!();
+    await vi.waitFor(() => expect(pending.has("c")).toBe(true));
+    pending.get("c")!();
+    await vi.waitFor(() => expect(pending.has("d")).toBe(true));
+    pending.get("d")!();
+    pending.get("a")!();
+    const result = await resultPromise;
+    expect(peak).toBe(2);
+    expect(result.inventory.pages.map(({ url, disposition }) => [url, disposition])).toEqual([
+      ["https://example.org/a", "draft"], ["https://example.org/b", "unknown"],
+      ["https://example.org/c", "published"], ["https://example.org/d", "published"],
+    ]);
+    expect(result.inventory.complete).toBe(false);
+    expect(result.issues).toContain("classification_failed");
+    expect(onTelemetry.mock.calls[0]?.[0].classification_failures).toBe(1);
+    expect(onTelemetry.mock.calls[0]?.[0].classification_elapsed_ms).toBeGreaterThanOrEqual(0);
+    expect(JSON.stringify({ result, telemetry: onTelemetry.mock.calls })).not.toContain("private status provider error");
+  });
+
+  it.each([0, -1, 1.5, 101, Infinity])("rejects invalid classification concurrency %s", async (classificationConcurrency) => {
+    await expect(exportLinkInventory({ list: vi.fn(), getPublicUrl: vi.fn() }, {
+      collections: ["posts"], identity: null, classificationConcurrency,
+    })).rejects.toThrow("classificationConcurrency");
+  });
+
   it.each([0, -1, 1.5, 101, Infinity])("rejects invalid URL lookup concurrency %s", async (urlResolutionConcurrency) => {
     await expect(exportLinkInventory({ list: vi.fn(), getPublicUrl: vi.fn() }, {
       collections: ["posts"], identity: null, urlResolutionConcurrency,

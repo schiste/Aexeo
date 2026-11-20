@@ -260,4 +260,4 @@ export function aexeoPlugin(
 }
 
 export { exportLinkInventory } from "./inventory.js";
-export type { LinkInventoryDisposition, LinkInventoryExport, LinkInventoryIdentity, LinkInventoryPage } from "./inventory.js";
+export type { LinkInventoryClassification, LinkInventoryDisposition, LinkInventoryExport, LinkInventoryIdentity, LinkInventoryPage } from "./inventory.js";
