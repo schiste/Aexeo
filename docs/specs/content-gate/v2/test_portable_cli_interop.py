@@ -13,6 +13,67 @@ ROOT = HERE.parents[3]
 
 
 class PortableCliInterop(unittest.TestCase):
+    def test_html_main_scope_with_real_cli_and_independent_comparator(self):
+        fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
+        source = '<header>Ignored.</header><main><p>abc</p></main>'
+        digest = hashlib.sha256(source.encode()).hexdigest()
+        change = json.loads(fixture['artifacts']['change'])
+        change['entries'][0]['media_type'] = 'text/html'
+        change['entries'][0]['after'] = {'sha256': digest, 'inline': source}
+        fixture['after'][0].update(media_type='text/html', sha256=digest, source=source)
+        with tempfile.TemporaryDirectory(prefix='aexeo-v2-main-') as directory:
+            root = Path(directory)
+            for name in ('base', 'after'):
+                (root / name).write_text(json.dumps(fixture[name]), encoding='utf-8')
+            (root / 'change').write_text(json.dumps(change), encoding='utf-8')
+            (root / 'preset').write_text("version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n", encoding='utf-8')
+            binary = os.environ.get('AEXEO_CLI_BIN')
+            executable = [binary] if binary else ['cargo', 'run', '--locked', '--quiet', '-p', 'aexeo-cli', '--']
+            common = executable + ['content-change', '--preset', 'test', '--preset-source', 'test=' + str(root / 'preset'),
+                      '--offline-receipt', '--evaluator-identity', 'build', '--html-scope', 'main']
+            env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(root / 'change'))
+            export = subprocess.run(common + ['--offline-receipt-bundle'], cwd=ROOT,
+                        env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'bundle')),
+                        capture_output=True, text=True, check=False)
+            self.assertEqual(export.returncode, 0, export.stderr)
+            bundle = json.loads((root / 'bundle').read_text(encoding='utf-8'))
+            for name in ('change', 'resolved_policy', 'host_options', 'evaluator'):
+                (root / name).write_text(bundle['artifacts'][name], encoding='utf-8')
+            command = common + ['--experimental-bound-verdict', '--candidate-base', str(root / 'base'),
+                      '--candidate-after', str(root / 'after'), '--draft-portable-verdict']
+            for name in ('previous', 'fresh'):
+                result = subprocess.run(command, cwd=ROOT, env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / name)),
+                                        capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                verdict = json.loads((root / name).read_text(encoding='utf-8'))
+                self.assertEqual(verdict['verdict']['extensions']['aexeo.html-content-scope.v1'], 'main')
+            verify = [sys.executable, str(HERE / 'verify_portable_verdict.py')]
+            for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
+                verify += ['--' + name.replace('_', '-'), str(root / name)]
+            verify += ['--require-check', 'gate:7:article:words', '--validator-name', 'aexeo', '--validator-version', '0.0.24']
+            result = subprocess.run(verify, capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+            native = os.environ.get('AETHYME_CLI_BIN')
+            if native:
+                manifest = {name: str(root / name) for name in
+                            ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options')}
+                manifest.update(collection=None, evaluator_identity=str(root / 'evaluator'),
+                    validator_name='aexeo', validator_version='0.0.24',
+                    required_checks=['gate:7:article:words'], fresh_exit_code=0, fresh_timed_out=False)
+                (root / 'native-manifest').write_text(json.dumps(manifest), encoding='utf-8')
+                native_env = dict(os.environ)
+                native_env.pop('AETHYME_GATE_WORKER_ID', None)
+                result = subprocess.run([native, 'content-gate', 'compare-v2', str(root / 'native-manifest')],
+                                        env=native_env, capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+            options = root / 'host_options'
+            options.write_bytes(options.read_bytes() + b' ')
+            rejected = subprocess.run(verify, capture_output=True, text=True, check=False)
+            self.assertEqual(rejected.returncode, 2, rejected.stderr)
+            self.assertFalse(json.loads(rejected.stdout)['publication_authorized'])
+
     def test_actual_cli_and_python_comparator(self):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
         with tempfile.TemporaryDirectory(prefix='aexeo-v2-interop-') as directory:

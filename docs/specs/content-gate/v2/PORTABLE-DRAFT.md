@@ -26,7 +26,10 @@ schema must close every nested object and define which, if any, extensions are
 supported; an implementation must reject unrecognized extensions. The initial draft profile accepts only `aexeo.offline-input-binding.v1`, a
 64-character lowercase SHA-256 string. It is carried as informational legacy
 metadata; it does not replace the independently recomputed v2 binding or grant
-authority. Producers must not silently discard other extensions.
+authority. The profile also permits `aexeo.html-content-scope.v1` with the exact
+value `main` when that HTML scope was selected; the host options bind the scope.
+Consumers that do not recognize this extension must reject the envelope.
+Producers must not silently discard other extensions.
 
 ## Independently acquired decision inputs
 
