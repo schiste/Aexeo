@@ -7,7 +7,7 @@
 use crate::content_gate_binding_v2::{CANDIDATE_REVISION_PROFILE, candidate_snapshot_binding};
 use crate::content_gate_change_validation::parse_lossless_json;
 use crate::content_gate_decision_inputs::DecisionInputBytes;
-use crate::content_gate_protocol::Verdict;
+use crate::content_gate_protocol::{VERDICT_SCHEMA, Verdict};
 use serde::{Deserialize, Serialize};
 
 pub const SCHEMA: &str = "content-gate.bound-verdict/v2";
@@ -94,6 +94,9 @@ impl BoundVerdict {
         {
             return Err("invalid binding digest");
         }
+        if self.verdict.schema != VERDICT_SCHEMA {
+            return Err("unsupported embedded verdict schema");
+        }
         if self.verdict.extensions.is_some() {
             return Err("verdict extensions are not supported by this profile");
         }
@@ -150,6 +153,16 @@ mod tests {
         let mut changed = inputs();
         changed.artifacts.change = b"different";
         assert!(parsed.verify_inputs(&changed).is_err());
+        for index in 0..4 {
+            let mut changed = inputs();
+            match index {
+                0 => changed.artifacts.resolved_policy = b"different",
+                1 => changed.artifacts.host_options = b"different",
+                2 => changed.artifacts.evaluator = b"different",
+                _ => changed.artifacts.external_evidence = None,
+            }
+            assert!(parsed.verify_inputs(&changed).is_err());
+        }
         let mut changed = inputs();
         changed.artifacts.collection = Some(b"");
         assert!(parsed.verify_inputs(&changed).is_err());
@@ -159,6 +172,9 @@ mod tests {
         let mut changed = inputs();
         changed.candidate_revision_sha256 = &[3; 32];
         assert!(parsed.verify_inputs(&changed).is_err());
+        let mut bad_verdict = verdict();
+        bad_verdict.schema = "unsupported".into();
+        assert!(BoundVerdict::new(bad_verdict, &inputs()).is_err());
         let mut changed = inputs();
         changed.artifacts.evaluator = b"";
         assert!(BoundVerdict::new(verdict(), &changed).is_err());
