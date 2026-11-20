@@ -992,6 +992,30 @@ fn command_candidate_bound_verdict(
         base: &base,
         after: &after,
     };
+    if args.get_flag("draft-portable-verdict") {
+        let verdict = aexeo_core::content_gate_verdict::evaluate_draft_portable_candidate_verdict(
+            &context,
+            provider,
+            &iso_now(),
+            scope,
+        )
+        .user_context("draft portable verdict evaluation failed")?;
+        let bytes = serde_json::to_vec_pretty(&verdict)?;
+        aexeo_contracts::content_gate_portable_v2::BoundVerdict::parse(&bytes)
+            .map_err(anyhow::Error::msg)
+            .user_context(
+                "draft portable verdict exceeds its wire limits or cannot be represented",
+            )?;
+        write_atomic(output, &bytes).user_context("writing draft portable verdict")?;
+        if args.get_flag("telemetry") {
+            eprintln!(
+                "{}",
+                serde_json::json!({"event":"content_change_portable_draft", "version":1,
+                "status":verdict.verdict.status, "collection_supplied":decision.collection.is_some()})
+            );
+        }
+        return Ok(verdict_exit_code(verdict.verdict.status));
+    }
     let verdict = if let Some(path) = args.get_one::<String>("verify-offline-receipt") {
         let previous: ExperimentalCandidateVerdict =
             read_candidate_input(path, output, "previous candidate verdict")?;

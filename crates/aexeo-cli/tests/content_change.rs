@@ -2097,6 +2097,64 @@ fn candidate_bound_verdict_rebuilds_and_revalidates_inputs() {
 }
 
 #[test]
+fn draft_portable_candidate_cli_matches_existing_binding_and_rejects_unsupported_modes() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().join("base.json");
+    let after = dir.path().join("after.json");
+    fs::write(&base, serde_json::to_vec(&serde_json::json!({"scope":"site", "site_id":"site", "site_base_url":null, "base":{"kind":"opaque","revision":"r1"}, "complete":true, "items":[]})).unwrap()).unwrap();
+    fs::write(&after, serde_json::to_vec(&serde_json::json!([{"entity_id":"article", "public_path":"/article", "media_type":"text/plain", "revision":null, "sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "source":"abc", "links":null}])).unwrap()).unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n";
+    let opts = [
+        "--offline-receipt",
+        "--experimental-bound-verdict",
+        "--evaluator-identity",
+        "build",
+        "--candidate-base",
+        base.to_str().unwrap(),
+        "--candidate-after",
+        after.to_str().unwrap(),
+    ];
+    let baseline = run(dir.path(), &input(), policy, &opts);
+    assert_eq!(baseline.status.code(), Some(0));
+    let output = dir.path().join("verdict.json");
+    let prior: serde_json::Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    let mut portable = opts.to_vec();
+    portable.extend(["--draft-portable-verdict", "--telemetry"]);
+    let produced = run(dir.path(), &input(), policy, &portable);
+    assert_eq!(
+        produced.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&produced.stderr)
+    );
+    let bytes = fs::read(&output).unwrap();
+    let verdict = aexeo_contracts::content_gate_portable_v2::BoundVerdict::parse(&bytes).unwrap();
+    assert_eq!(verdict.binding_sha256, prior["binding"].as_str().unwrap());
+    assert_eq!(
+        serde_json::to_value(&verdict.verdict).unwrap()["subject"],
+        prior["receipt"]["verdict"]["subject"]
+    );
+    let telemetry = String::from_utf8_lossy(&produced.stderr);
+    assert!(telemetry.contains("content_change_portable_draft"));
+    assert!(!telemetry.contains("abc"));
+    assert!(!telemetry.contains(dir.path().to_str().unwrap()));
+    let mut conflict = portable.clone();
+    conflict.extend(["--verify-offline-receipt", base.to_str().unwrap()]);
+    assert_eq!(
+        run(dir.path(), &input(), policy, &conflict).status.code(),
+        Some(2)
+    );
+    assert_eq!(fs::read(&output).unwrap(), bytes);
+    let mut conflict = portable;
+    conflict.extend(["--link-observations", base.to_str().unwrap()]);
+    assert_eq!(
+        run(dir.path(), &input(), policy, &conflict).status.code(),
+        Some(2)
+    );
+    assert_eq!(fs::read(&output).unwrap(), bytes);
+}
+
+#[test]
 fn candidate_link_verdict_revalidates_and_refuses_changed_observations() {
     let dir = tempfile::tempdir().unwrap();
     let base = dir.path().join("base.json");
