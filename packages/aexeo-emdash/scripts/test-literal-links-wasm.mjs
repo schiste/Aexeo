@@ -24,4 +24,12 @@ const reference = { route: "/draft", title: "Draft", body: [{ children: [
 const referenceReport = await evaluateContent(reference, "portable-text-link-review");
 assert.equal(referenceReport.gates[0].measurements.candidates, 1);
 assert.deepEqual(referenceReport.source_locations[0], { gate_id: "structure.literal_markdown_links", finding_index: 0, block_index: 0, span_index: 1, utf16_offset: 0 });
+const unfinishedRelative = { route: "/draft", title: "Draft", body: [{ children: [
+  { _type: "span", text: "é " },
+  { _type: "span", text: "[Help](/guide" },
+  { _type: "span", text: " [code](/guide", marks: ["code"] },
+] }] };
+const relativeReport = await evaluateContent(unfinishedRelative, "portable-text-link-review");
+assert.equal(relativeReport.gates[0].measurements.candidates, 1);
+assert.deepEqual(relativeReport.source_locations[0], { gate_id: "structure.literal_markdown_links", finding_index: 0, block_index: 0, span_index: 1, utf16_offset: 0 });
 console.log("WASM literal Portable Text link review test passed");

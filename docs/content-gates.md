@@ -108,8 +108,9 @@ incomplete projection report `not_checked`. It does not validate link targets,
 rendered HTML or bare citation markers. Explicit two-bracket reference syntax is
 reported as a candidate even when a definition is unavailable; adjacent bracketed
 text can also match, so editors must review the context. Unfinished inline
-HTTP(S) link syntax is also reported when recognizable in source text; this narrow
-heuristic can miss other malformed links and does not validate URLs.
+HTTP(S), root-relative, dot-relative and fragment link syntax is also reported
+when recognizable in source text; this narrow heuristic can miss other malformed
+links and does not validate URLs.
 Compose it with another preset using `extends`, and enable it only where the
 host renders Portable Text as rich text rather than interpreting Markdown.
 
