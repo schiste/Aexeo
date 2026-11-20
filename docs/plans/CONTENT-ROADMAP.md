@@ -97,6 +97,14 @@ is still required to inspect those pages. No CMS content was changed.
 
 ## Delivery tracker
 
+- [x] Preserve the explicit `main` HTML scope in experimental portable v2
+  verdicts ([#627](https://github.com/schiste/Aexeo/pull/627)). The real Aexeo
+  CLI and independent Python comparator were tested, including rejection after
+  host options change. An additional local test passed against the candidate
+  native Aethyme comparator in [#1870](https://github.com/schiste/Aethyme/pull/1870);
+  that integration remains pending its own validation and merge. These offline
+  comparisons do not authorize publication or prove source freshness.
+
 - [x] Preserve exact HTML finding positions around unambiguous `<hr>`
   separators when source reconstruction matches the projection
   ([#625](https://github.com/schiste/Aexeo/pull/625)). Recovered or
