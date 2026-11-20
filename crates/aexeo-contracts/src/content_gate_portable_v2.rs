@@ -14,8 +14,8 @@ pub const SCHEMA: &str = "content-gate.bound-verdict/v2";
 pub const PROFILE: &str = "content-gate.candidate-binding/v1";
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 
-/// This draft profile currently defines no verdict extensions. Unknown
-/// extensions are rejected until their syntax and semantics are specified.
+/// This draft profile permits only the informational Aexeo offline-binding
+/// extension; all other extensions are rejected until specified.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BoundVerdict {
@@ -57,6 +57,13 @@ fn binding(inputs: &CurrentInputs<'_>) -> Result<String, &'static str> {
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
+fn is_sha256(digest: &str) -> bool {
+    digest.len() == 64
+        && digest
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 impl BoundVerdict {
     /// Construct framing for an already evaluated verdict. This does not
     /// validate the verdict or the origin and completeness of the inputs.
@@ -86,19 +93,19 @@ impl BoundVerdict {
         if self.schema != SCHEMA || self.binding_profile != PROFILE {
             return Err("unsupported bound verdict schema or profile");
         }
-        if self.binding_sha256.len() != 64
-            || !self
-                .binding_sha256
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-        {
+        if !is_sha256(&self.binding_sha256) {
             return Err("invalid binding digest");
         }
         if self.verdict.schema != VERDICT_SCHEMA {
             return Err("unsupported embedded verdict schema");
         }
-        if self.verdict.extensions.is_some() {
-            return Err("verdict extensions are not supported by this profile");
+        if let Some(extensions) = &self.verdict.extensions {
+            let digest = extensions
+                .get("aexeo.offline-input-binding.v1")
+                .and_then(serde_json::Value::as_str);
+            if extensions.len() != 1 || !digest.is_some_and(is_sha256) {
+                return Err("unsupported or malformed verdict extension");
+            }
         }
         Ok(())
     }
@@ -123,9 +130,7 @@ mod tests {
             "../../../docs/specs/content-gate/v2/candidate-verdict-vector.json"
         ))
         .unwrap();
-        let mut verdict = vector["candidate"]["receipt"]["verdict"].clone();
-        verdict.as_object_mut().unwrap().remove("extensions");
-        serde_json::from_value(verdict).unwrap()
+        serde_json::from_value(vector["candidate"]["receipt"]["verdict"].clone()).unwrap()
     }
 
     fn inputs() -> CurrentInputs<'static> {

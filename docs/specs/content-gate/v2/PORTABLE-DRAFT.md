@@ -23,9 +23,10 @@ schema or profile; it must not be accepted by silently falling back to v1.
 The current v1 verdict schema permits additional properties, so validating
 against it alone is insufficient for this stricter profile. The eventual v2
 schema must close every nested object and define which, if any, extensions are
-supported; an implementation must reject unrecognized extensions. The initial
-draft profile accepts no verdict extensions. Producers must not silently discard
-existing extensions; a migration must explicitly account for their semantics.
+supported; an implementation must reject unrecognized extensions. The initial draft profile accepts only `aexeo.offline-input-binding.v1`, a
+64-character lowercase SHA-256 string. It is carried as informational legacy
+metadata; it does not replace the independently recomputed v2 binding or grant
+authority. Producers must not silently discard other extensions.
 
 ## Independently acquired decision inputs
 
@@ -81,3 +82,9 @@ metadata, policy, evidence, base and candidate revisions, unsupported versions,
 unknown fields, duplicate keys and omitted versus absent inputs; demonstrate
 that required checks fail closed; and exercise the host's protected publication
 boundary. Record which checks actually ran; no digest implies whole-site coverage.
+
+The Rust API `evaluate_draft_portable_candidate_verdict` produces the draft
+envelope from an offline candidate using the existing overlay and evaluator.
+It is not exposed through the CLI or consumed by a publication runner. The
+independent wire schema, full verdict validation, interoperable artifact
+profiles and end-to-end host integration remain unfinished.
