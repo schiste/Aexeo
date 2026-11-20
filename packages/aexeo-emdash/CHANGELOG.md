@@ -6,6 +6,8 @@ and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- Return `revision_data_invalid` without evaluating or storing a report when a historical CMS revision contains non-object data.
+
 ## [0.9.5] - 2026-11-19
 
 - Treat unmapped CMS metadata as unobserved in content gates, while preserving explicit absent fields and legacy direct inputs. The sandbox plugin requires a worker that advertises this coverage support.
