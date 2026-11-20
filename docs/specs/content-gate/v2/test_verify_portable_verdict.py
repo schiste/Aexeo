@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from verify_candidate_inputs import VerificationError
 from verify_portable_verdict import compare, validate_schema
@@ -33,6 +34,21 @@ class PortableComparison(unittest.TestCase):
     def test_matching_independently_supplied_inputs_and_verdict(self):
         self.assertEqual(self.check(), {'input_binding': 'match', 'fresh_verdict_match': True,
                                        'required_check_count': 1, 'publication_authorized': False})
+
+    def test_both_verdicts_use_one_schema_snapshot(self):
+        original = Path.read_text
+        reads = []
+
+        def read_once(path, *args, **kwargs):
+            if path.name == 'bound-verdict.schema.json':
+                reads.append(path)
+                if len(reads) > 1:
+                    raise OSError('schema changed between reads')
+            return original(path, *args, **kwargs)
+
+        with patch.object(Path, 'read_text', read_once):
+            self.assertFalse(self.check()['publication_authorized'])
+        self.assertEqual(len(reads), 1)
 
     def test_schema_allows_only_explicit_main_scope(self):
         envelope = copy.deepcopy(self.previous)
