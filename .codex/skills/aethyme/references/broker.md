@@ -21,6 +21,13 @@ ownership history and explicit takeover requirements when liveness is unknown;
 never clear leases or force removal merely because a holder is ambiguous. Use
 native reclamation plans, which independently protect recent work and open files.
 
+A reported database schema version of zero is not, by itself, proof of
+corruption: an active broker operation can also leave the database locked.
+Inspect the live operation and use a read-only database check; a locked read
+does not establish the schema. Do not delete database, WAL or lock files or
+force-stop a live process. After it finishes, recheck the queue and retry the
+coordinated action only after confirming whether the earlier action completed.
+
 Before starting or delegating a fix for shared CI failures or generated
 files, use `aethyme broker status --compact --json` and open PRs on affected
 paths. Read the matching task, claimed paths and PR diff even when the graph
