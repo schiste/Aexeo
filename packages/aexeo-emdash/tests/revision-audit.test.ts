@@ -159,6 +159,20 @@ describe("revision audits", () => {
     expect(evaluate).not.toHaveBeenCalled();
     expect(await auditRevision({ content: {}, kv: ctx.kv } as never, { collection: "posts", id: "one", revision: "rev1" }, { preset: { name: "article" }, evaluate })).toMatchObject({ reason: "revision_access_unavailable" });
   });
+  it.each([null, undefined, [], "body", 42])("does not evaluate malformed historical data: %s", async (data) => {
+    const { ctx, revision } = host();
+    ctx.content.getRevision.mockResolvedValue({ ...revision, data } as never);
+    const evaluate = vi.fn(async () => report);
+    const set = vi.spyOn(ctx.kv, "set");
+    for (const field of [undefined, "intro"]) {
+      const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1", ...(field === undefined ? {} : { field }) }, {
+        preset: { name: "article", fragmentFieldsByCollection: { posts: { intro: "fragment-readable" } } }, evaluate,
+      });
+      expect(result).toMatchObject({ status: "not_checked", reason: "revision_data_invalid", revision: "rev1" });
+    }
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(set).not.toHaveBeenCalled();
+  });
   it("reports an unavailable preset instead of claiming a pass", async () => {
     const { ctx } = host();
     expect(await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, { evaluate: async () => report })).toMatchObject({ status: "not_checked", reason: "preset_not_configured" });
