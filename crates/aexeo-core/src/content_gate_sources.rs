@@ -191,6 +191,79 @@ impl fmt::Display for SourceError {
 }
 impl std::error::Error for SourceError {}
 
+/// Which declared state the host must acquire independently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContentPhase {
+    Before,
+    After,
+}
+
+/// The host supplies independently acquired bytes for each declared state.
+/// It must bind its response to the requested entity, phase and trusted snapshot;
+/// the verifier cannot authenticate the provider or make its reads atomic.
+pub trait IndependentContent {
+    type Reader: Read;
+    fn open(&mut self, entity_id: &str, phase: ContentPhase) -> io::Result<Self::Reader>;
+}
+
+/// Check all declared before/after bytes against independent host streams.
+/// Inline content must also match the independently obtained bytes exactly.
+/// Missing states are not invented, URI sources are not fetched, and snapshot
+/// authenticity, freshness, completeness and publication atomicity remain the host's responsibility.
+pub fn verify_declared_content<P: IndependentContent>(
+    change: &Change,
+    provider: &mut P,
+    max_state_bytes: usize,
+    max_total_bytes: usize,
+) -> Result<(), SourceError> {
+    validate_change_structure(change).map_err(|_| SourceError::InvalidChange)?;
+    let mut remaining = max_total_bytes;
+    let mut buffer = [0u8; 8192];
+    for entry in &change.entries {
+        for (phase, state) in [
+            (ContentPhase::Before, &entry.before),
+            (ContentPhase::After, &entry.after),
+        ] {
+            let Some(state) = state else { continue };
+            let limit = max_state_bytes.min(remaining);
+            let mut reader = provider
+                .open(&entry.entity_id, phase)
+                .map_err(|_| SourceError::Unavailable)?;
+            let mut hasher = Sha256::new();
+            let mut length = 0usize;
+            loop {
+                let count = reader
+                    .read(&mut buffer)
+                    .map_err(|_| SourceError::Unavailable)?;
+                if count == 0 {
+                    break;
+                }
+                let end = length.checked_add(count).ok_or(SourceError::TooLarge)?;
+                if end > limit {
+                    return Err(SourceError::TooLarge);
+                }
+                if let Some(inline) = &state.inline
+                    && inline.as_bytes().get(length..end) != Some(&buffer[..count])
+                {
+                    return Err(SourceError::DigestMismatch);
+                }
+                hasher.update(&buffer[..count]);
+                length = end;
+            }
+            if state
+                .inline
+                .as_ref()
+                .is_some_and(|inline| inline.len() != length)
+                || format!("{:x}", hasher.finalize()) != state.sha256
+            {
+                return Err(SourceError::DigestMismatch);
+            }
+            remaining -= length;
+        }
+    }
+    Ok(())
+}
+
 /// An evaluated entry's proposed text; a deletion has no proposed text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedEntry {
@@ -379,6 +452,83 @@ mod tests {
                 }
             }
         });
+    }
+
+    #[test]
+    fn checks_independent_declared_states_and_rejects_missing_wrong_or_oversized_content() {
+        struct IndependentFixture {
+            items: Vec<(&'static str, ContentPhase, Vec<u8>)>,
+        }
+        impl IndependentContent for IndependentFixture {
+            type Reader = Cursor<Vec<u8>>;
+            fn open(&mut self, entity: &str, phase: ContentPhase) -> io::Result<Self::Reader> {
+                self.items
+                    .iter()
+                    .find(|(id, side, _)| *id == entity && *side == phase)
+                    .map(|(_, _, bytes)| Cursor::new(bytes.clone()))
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "unavailable"))
+            }
+        }
+        let mut candidate = change();
+        candidate.entries[0].operation = aexeo_contracts::content_gate_protocol::Operation::Update;
+        candidate.entries[0].before = candidate.entries[0].after.clone();
+        let mut fixture = IndependentFixture {
+            items: vec![
+                ("inline", ContentPhase::Before, b"abc".to_vec()),
+                ("inline", ContentPhase::After, b"abc".to_vec()),
+                ("file", ContentPhase::After, b"abc".to_vec()),
+            ],
+        };
+        assert!(verify_declared_content(&candidate, &mut fixture, 3, 9).is_ok());
+        assert_eq!(
+            verify_declared_content(&candidate, &mut fixture, 2, 9),
+            Err(SourceError::TooLarge)
+        );
+        assert_eq!(
+            verify_declared_content(&candidate, &mut fixture, 3, 8),
+            Err(SourceError::TooLarge)
+        );
+        fixture.items[0].2 = b"abd".to_vec();
+        assert_eq!(
+            verify_declared_content(&candidate, &mut fixture, 3, 9),
+            Err(SourceError::DigestMismatch)
+        );
+        fixture.items[0].2 = b"abc".to_vec();
+        fixture.items.pop();
+        assert_eq!(
+            verify_declared_content(&candidate, &mut fixture, 3, 9),
+            Err(SourceError::Unavailable)
+        );
+        fixture
+            .items
+            .push(("file", ContentPhase::After, b"abd".to_vec()));
+        assert_eq!(
+            verify_declared_content(&candidate, &mut fixture, 3, 9),
+            Err(SourceError::DigestMismatch)
+        );
+        fixture.items[2].2 = b"abc".to_vec();
+        let file_state = candidate.entries[1].after.as_mut().unwrap();
+        file_state.file = None;
+        file_state.uri = Some("https://example.invalid/content".into());
+        assert!(verify_declared_content(&candidate, &mut fixture, 3, 9).is_ok());
+        candidate.entries[0].after.as_mut().unwrap().inline = Some("different".into());
+        assert_eq!(
+            verify_declared_content(&candidate, &mut fixture, 20, 30),
+            Err(SourceError::DigestMismatch)
+        );
+        let long = "a".repeat(8193);
+        candidate.entries.truncate(1);
+        candidate.entries[0].before = None;
+        let state = candidate.entries[0].after.as_mut().unwrap();
+        state.inline = Some(long.clone());
+        state.sha256 = format!("{:x}", Sha256::digest(long.as_bytes()));
+        fixture.items = vec![("inline", ContentPhase::After, long.into_bytes())];
+        assert!(verify_declared_content(&candidate, &mut fixture, 8193, 8193).is_ok());
+        fixture.items[0].2[8192] = b'b';
+        assert_eq!(
+            verify_declared_content(&candidate, &mut fixture, 8193, 8193),
+            Err(SourceError::DigestMismatch)
+        );
     }
 
     #[test]
