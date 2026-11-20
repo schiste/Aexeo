@@ -669,7 +669,9 @@ URL resolution runs at most eight CMS requests concurrently by default. Set
 `urlResolutionConcurrency` to an integer from 1 to 100 to suit the host's
 capacity; use 1 for sequential requests. Asynchronous classification has its own
 `classificationConcurrency` limit (1–100, default 8); results remain associated with their input entries
-and returned pages are sorted by URL. Pagination remains sequential.
+and returned pages are sorted by URL. Pagination remains sequential. The exporter
+does not impose a deadline or cancel a stalled host callback; hosts should set
+their own request deadlines.
 
 An optional `onTelemetry` callback receives only elapsed milliseconds and aggregate counts, including total classification phase time across batches. It is disabled by default and does not receive URLs or content.
 
