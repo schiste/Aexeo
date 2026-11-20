@@ -12,8 +12,8 @@ unavailable check may become a pass.
 - [x] Land the Aethyme v1 runner and exercise real-CLI interoperability for
   pass, fail, not checked and changed candidate content. The host must still
   independently establish its required checks and publication-time inputs.
-- [ ] Land and validate host-selected required check enforcement in the runner;
-  prove host-specific check coverage and publication-boundary integration.
+- [x] Land host-selected required check enforcement in the runner.
+- [ ] Prove host-specific check coverage and publication-boundary integration.
 - [ ] Agree and implement the portable v2 producer/runner protocol, including
   the exact semantics and authoritative provenance of every decision input,
   evaluator identity and a site revision-set bound to the decision.
@@ -108,6 +108,7 @@ for pass, fail, not checked and changed candidate content.
 The runner is a precheck, not a publication authorization: the host must
 establish the validator, complete decision inputs, current inventory and
 atomicity at its own boundary. [Aethyme #1865](https://github.com/schiste/Aethyme/pull/1865)
-proposes requiring explicit host-selected blocking check IDs. It is not yet
-merged; tests have exercised missing and downgraded checks and the real CLI.
+requires explicit host-selected blocking check IDs. It is merged after its CI,
+local contract and fast-guard checks passed; tests exercised missing and
+downgraded checks and the real CLI.
 The proposed v2 envelope is not yet consumed by this runner.

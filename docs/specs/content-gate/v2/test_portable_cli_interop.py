@@ -22,8 +22,24 @@ class PortableCliInterop(unittest.TestCase):
                 (root / name).write_text(data, encoding='utf-8')
             (root / 'preset').write_text("version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n", encoding='utf-8')
             binary = os.environ.get('AEXEO_CLI_BIN')
-            command = ([binary] if binary else ['cargo', 'run', '--locked', '--quiet', '-p', 'aexeo-cli', '--'])
-            command += ['content-change', '--preset', 'test', '--preset-source', 'test=' + str(root / 'preset'),
+            executable = [binary] if binary else ['cargo', 'run', '--locked', '--quiet', '-p', 'aexeo-cli', '--']
+            # Independently invoke the host-selected CLI on current inputs to
+            # produce the existing offline transport bundle. Its bytes are not
+            # independently authoritative; the host must trust this process.
+            export = executable + ['content-change', '--preset', 'test',
+                        '--preset-source', 'test=' + str(root / 'preset'), '--offline-receipt',
+                        '--offline-receipt-bundle', '--evaluator-identity', 'build']
+            exported = subprocess.run(export, cwd=ROOT, env=dict(os.environ,
+                CONTENT_GATE_CHANGE_FILE=str(root / 'change'),
+                CONTENT_GATE_VERDICT_FILE=str(root / 'artifacts-bundle')),
+                capture_output=True, text=True, check=False)
+            self.assertEqual(exported.returncode, 0, exported.stderr)
+            bundle = json.loads((root / 'artifacts-bundle').read_text(encoding='utf-8'))
+            self.assertEqual(bundle['schema'], 'aexeo.offline-receipt-bundle/v1')
+            for name, expected in fixture['artifacts'].items():
+                self.assertEqual(bundle['artifacts'][name], expected)
+                (root / name).write_text(bundle['artifacts'][name], encoding='utf-8')
+            command = executable + ['content-change', '--preset', 'test', '--preset-source', 'test=' + str(root / 'preset'),
                         '--offline-receipt', '--experimental-bound-verdict', '--candidate-base', str(root / 'base'),
                         '--candidate-after', str(root / 'after'), '--evaluator-identity', 'build', '--draft-portable-verdict']
             env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(root / 'change'))
