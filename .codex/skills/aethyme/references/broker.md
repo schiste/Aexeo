@@ -73,7 +73,9 @@ blocked.
    status and follow its `next_action` when dependencies are required:
    `aethyme broker submit prepare status --session <your-session-id> --json`.
    Worktrees do not inherit ignored dependencies such as `node_modules/` or
-   `.venv/` from the main checkout; preparation is explicit.
+   `.venv/` from the main checkout; preparation is explicit. Put temporary
+   test environments in this session's scratch directory: another session's
+   scratch can be removed as soon as that session is cleaned.
    Repeat `--path` for every file or trailing-slash directory known up front.
    The broker validates the whole set first, then creates the session plus
    explicit leases atomically. Omit `--path` only when no target is known yet.
