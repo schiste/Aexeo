@@ -267,6 +267,12 @@ mapping; `routable` alone cannot establish inclusion or snapshot equivalence.
 
 ## Remaining integration and validation
 
+The EmDash exporter accepts asynchronous host classifiers with independently
+bounded concurrency and aggregate classification-time telemetry. This lets a
+host consult its static publication status separately from native CMS status;
+the host must still bind that data to the intended release and snapshot. The
+export remains incomplete, and no deployed host mapping is implied.
+
 A runtime crawl now binds the typed, ordered inventory used as its seed to its
 attestation. An audit-derived report with a different or missing fingerprint
 cannot confirm an orphan, even when the declared identity and URLs match. New

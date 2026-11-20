@@ -658,8 +658,8 @@ issues do not establish orphan status or verify the supplied origin or target.
 Hosts whose rendered routes differ from EmDash's resolver can supply an async
 `resolveUrl(collection, item)` returning the actual public URL or `null` when
 no route is known. It replaces `getPublicUrl` for that export. The optional
-`classify(item, url, collection)` callback can use collection-specific rules
-and return `disposition`, `target`, and an explicit `locale` (including `null`
+`classify(item, url, collection)` callback can synchronously or asynchronously
+consult host-owned release status and collection-specific rules, then return `disposition`, `target`, and an explicit `locale` (including `null`
 for unknown); omitting `locale` retains the CMS value. Callback failures leave
 entries omitted or unclassified and are counted without exposing error details.
 These host-supplied values are assertions, not proof of rendered routes,
@@ -667,9 +667,13 @@ publication state, snapshot identity, or inventory completeness.
 
 URL resolution runs at most eight CMS requests concurrently by default. Set
 `urlResolutionConcurrency` to an integer from 1 to 100 to suit the host's
-capacity; use 1 for sequential requests. Pagination remains sequential.
+capacity; use 1 for sequential requests. Asynchronous classification has its own
+`classificationConcurrency` limit (1–100, default 8); results remain associated with their input entries
+and returned pages are sorted by URL. Pagination remains sequential. The exporter
+does not impose a deadline or cancel a stalled host callback; hosts should set
+their own request deadlines.
 
-An optional `onTelemetry` callback receives only elapsed milliseconds and aggregate counts. It is disabled by default and does not receive URLs or content.
+An optional `onTelemetry` callback receives only elapsed milliseconds and aggregate counts, including total classification phase time across batches. It is disabled by default and does not receive URLs or content.
 
 ### CMS coverage and rendered pages
 

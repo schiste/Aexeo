@@ -40,6 +40,12 @@ export interface LinkInventoryPage {
   locale: string | null;
 }
 
+export interface LinkInventoryClassification {
+  disposition: LinkInventoryDisposition;
+  target?: string | null;
+  locale?: string | null;
+}
+
 export interface LinkInventoryExport {
   inventory: {
     identity: LinkInventoryIdentity | null;
@@ -66,15 +72,13 @@ export async function exportLinkInventory(
     /** Maximum simultaneous public URL resolutions, from 1 to 100 (default 8). */
     urlResolutionConcurrency?: number;
     /** Optional aggregate-only local telemetry; no URLs or content are included. */
-    onTelemetry?: (event: { event: "link_inventory_export"; elapsed_ms: number; scanned: number; omitted: number; page_count: number; issue_count: number; classification_failures: number; batch_entries_omitted: number; malformed_entries: number; invalid_urls: number; duplicate_urls: number; cross_origin_urls: number; aliases_missing_target: number; invalid_alias_targets: number; cross_origin_alias_targets: number }) => void;
+    onTelemetry?: (event: { event: "link_inventory_export"; elapsed_ms: number; scanned: number; omitted: number; page_count: number; issue_count: number; classification_failures: number; classification_elapsed_ms: number; batch_entries_omitted: number; malformed_entries: number; invalid_urls: number; duplicate_urls: number; cross_origin_urls: number; aliases_missing_target: number; invalid_alias_targets: number; cross_origin_alias_targets: number }) => void;
     /** Override URL resolution when the host renderer uses a different route mapping. */
     resolveUrl?: (collection: string, item: EmdashContentItem) => Promise<string | null>;
+    /** Maximum simultaneous host classifications, from 1 to 100 (default 8). */
+    classificationConcurrency?: number;
     /** Classify using host-owned publication rules; locale defaults to the CMS value. */
-    classify?: (item: EmdashContentItem, url: string, collection: string) => {
-      disposition: LinkInventoryDisposition;
-      target?: string | null;
-      locale?: string | null;
-    };
+    classify?: (item: EmdashContentItem, url: string, collection: string) => LinkInventoryClassification | Promise<LinkInventoryClassification>;
   },
 ): Promise<LinkInventoryExport> {
   const started = options.onTelemetry ? Date.now() : 0;
@@ -90,11 +94,16 @@ export async function exportLinkInventory(
   if (!Number.isSafeInteger(concurrency) || concurrency < 1 || concurrency > 100) {
     throw new Error("urlResolutionConcurrency must be an integer between 1 and 100");
   }
+  const classificationConcurrency = options.classificationConcurrency ?? 8;
+  if (!Number.isSafeInteger(classificationConcurrency) || classificationConcurrency < 1 || classificationConcurrency > 100) {
+    throw new Error("classificationConcurrency must be an integer between 1 and 100");
+  }
   const pages: LinkInventoryPage[] = [];
   const issues = new Set<string>(["transactional_snapshot_unavailable"]);
   let scanned = 0;
   let omitted = 0;
   let classificationFailures = 0;
+  let classificationElapsedMs = 0;
   let batchEntriesOmitted = 0;
   let malformedEntries = 0;
   const origin = options.identity === null ? null : parseInventoryUrl(options.identity.origin, true);
@@ -159,6 +168,34 @@ export async function exportLinkInventory(
           }
         }
       }));
+      // Classifiers may need host I/O (for example a separate static-release
+      // status). Bound those calls independently and preserve result ordering.
+      const classifications: ({ value: LinkInventoryClassification } | { error: true } | undefined)[] = new Array(items.length);
+      if (options.classify) {
+        const classificationStarted = options.onTelemetry ? Date.now() : 0;
+        const classify = options.classify;
+        let nextClassification = 0;
+        await Promise.all(Array.from({ length: Math.min(classificationConcurrency, items.length) }, async () => {
+          for (;;) {
+            const index = nextClassification++;
+            if (index >= items.length) return;
+            const resolution = urls[index]!;
+            if (!("url" in resolution) || !resolution.url) continue;
+            try {
+              const value = await classify(items[index]!, resolution.url, collection);
+              if (!value || !DISPOSITIONS.has(value.disposition)
+                  || (value.target != null && typeof value.target !== "string")
+                  || (value.locale != null && typeof value.locale !== "string")) {
+                throw new Error("invalid inventory classification");
+              }
+              classifications[index] = { value };
+            } catch {
+              classifications[index] = { error: true };
+            }
+          }
+        }));
+        if (options.onTelemetry) classificationElapsedMs += Math.max(0, Date.now() - classificationStarted);
+      }
       for (const [index, item] of items.entries()) {
         scanned += 1;
         const resolution = urls[index]!;
@@ -182,23 +219,15 @@ export async function exportLinkInventory(
         let disposition: LinkInventoryDisposition = "unknown";
         let target: string | null = null;
         let locale = item.locale ?? null;
-        if (options.classify) {
-          try {
-            const classification = options.classify(item, url, collection);
-            if (!classification || !DISPOSITIONS.has(classification.disposition)
-                || (classification.target != null && typeof classification.target !== "string")
-                || (classification.locale != null && typeof classification.locale !== "string")) {
-              throw new Error("invalid inventory classification");
-            }
-            disposition = classification.disposition;
-            target = classification.target ?? null;
-            if (classification.locale !== undefined) locale = classification.locale;
-          } catch {
-            // A host failure cannot turn an unclassified page into a known one,
-            // nor discard other pages. Never expose host error details.
-            classificationFailures += 1;
-            issues.add("classification_failed");
-          }
+        const classification = classifications[index];
+        if (classification && "value" in classification) {
+          disposition = classification.value.disposition;
+          target = classification.value.target ?? null;
+          if (classification.value.locale !== undefined) locale = classification.value.locale;
+        } else if (classification && "error" in classification) {
+          // Host failures remain unknown and never expose provider details.
+          classificationFailures += 1;
+          issues.add("classification_failed");
         }
         const parsed = parseInventoryUrl(url);
         if (parsed === null) {
@@ -252,7 +281,7 @@ export async function exportLinkInventory(
   pages.sort((left, right) => left.url < right.url ? -1 : left.url > right.url ? 1 : 0);
   const result: LinkInventoryExport = { inventory: { identity: options.identity, complete: false, pages }, issues: [...issues].sort(), scanned, omitted };
   if (options.onTelemetry) {
-    emitTelemetry(options.onTelemetry, { event: "link_inventory_export", elapsed_ms: Math.max(0, Date.now() - started), scanned, omitted, page_count: pages.length, issue_count: issues.size, classification_failures: classificationFailures, batch_entries_omitted: batchEntriesOmitted, malformed_entries: malformedEntries, invalid_urls: invalidUrls, duplicate_urls: duplicateUrls, cross_origin_urls: crossOriginUrls, aliases_missing_target: aliasesMissingTarget, invalid_alias_targets: invalidAliasTargets, cross_origin_alias_targets: crossOriginAliasTargets });
+    emitTelemetry(options.onTelemetry, { event: "link_inventory_export", elapsed_ms: Math.max(0, Date.now() - started), scanned, omitted, page_count: pages.length, issue_count: issues.size, classification_failures: classificationFailures, classification_elapsed_ms: classificationElapsedMs, batch_entries_omitted: batchEntriesOmitted, malformed_entries: malformedEntries, invalid_urls: invalidUrls, duplicate_urls: duplicateUrls, cross_origin_urls: crossOriginUrls, aliases_missing_target: aliasesMissingTarget, invalid_alias_targets: invalidAliasTargets, cross_origin_alias_targets: crossOriginAliasTargets });
   }
   return result;
 }
