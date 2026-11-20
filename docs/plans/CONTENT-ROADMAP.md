@@ -443,6 +443,8 @@ registry before considering the release delivered.
   It does not produce a fresh evaluation,
   establish artifact freshness or authenticity, or authorize publication.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
+  Removed-route reference scans retain only the bounded sorted output prefix and
+  one truncation sentinel, preserving deterministic results and incomplete status.
   Conservatively map explicitly nested HTML blockquotes and their text and links;
   malformed or hidden structures remain unmapped, and static markup does not
   establish browser-rendered visibility.
