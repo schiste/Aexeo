@@ -89,3 +89,20 @@ It is not exposed through the CLI or consumed by a publication runner. The
 [draft wire schema](bound-verdict.schema.json) and [shared vector](portable-verdict-vector.json)
 are exercised by Rust and Python tests. Full verdict validation, interoperable
 artifact profiles and end-to-end host integration remain unfinished.
+
+## Independent experimental comparator
+
+`verify_portable_verdict.py` compares a previous envelope to an independently
+obtained fresh envelope and current base, after-projections and exact artifact
+bytes. Supply `--previous`, `--fresh`, `--base`, `--after`, `--change`,
+`--resolved-policy`, `--host-options`, `--evaluator`, optional `--collection`,
+repeatable `--require-check`, and `--validator-name` and `--validator-version`.
+The producer's artifact encodings are still Aexeo-specific; the host must
+obtain them independently rather than trust a bundle from the previous result.
+The comparator only supports offline evidence and rejects unknown change fields
+and extensions. It validates both verdicts and compares them except evaluation
+time, but does not itself invoke or authenticate the fresh evaluator. It checks
+that the base declares completeness, not that the inventory is complete. Input
+reads are individually bounded and checked for observable changes; they are not
+an atomic multi-file snapshot. A successful result explicitly reports
+`publication_authorized: false`. No Python output is a publication decision.

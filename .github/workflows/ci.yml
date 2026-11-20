@@ -40,6 +40,7 @@ jobs:
           "$RUNNER_TEMP/aexeo-schema-venv/bin/python" docs/specs/content-gate/v2/test_compare_offline_receipts.py
           "$RUNNER_TEMP/aexeo-schema-venv/bin/python" docs/specs/content-gate/v2/test_verify_candidate_inputs.py
           "$RUNNER_TEMP/aexeo-schema-venv/bin/python" docs/specs/content-gate/v2/test_portable_verdict.py
+          "$RUNNER_TEMP/aexeo-schema-venv/bin/python" docs/specs/content-gate/v2/test_verify_portable_verdict.py
 
   emdash-plugin:
     name: emdash-plugin (typecheck, test, audit)
