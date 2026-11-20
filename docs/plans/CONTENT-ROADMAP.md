@@ -110,11 +110,13 @@ is still required to inspect those pages. No CMS content was changed.
 
 - [x] Preserve the explicit `main` HTML scope in experimental portable v2
   verdicts ([#627](https://github.com/schiste/Aexeo/pull/627)). The real Aexeo
-  CLI and independent Python comparator were tested, including rejection after
-  host options change. An additional local test passed against the candidate
-  native Aethyme comparator in [#1870](https://github.com/schiste/Aethyme/pull/1870);
-  that integration remains pending its own validation and merge. These offline
-  comparisons do not authorize publication or prove source freshness.
+  CLI and independent Python comparator were tested. The synchronized Aexeo
+  CLI at `40b66931cbba` and candidate Aethyme comparator at `449186435d00`
+  also passed both portable interoperability scenarios, including HTML `main`
+  scope and rejection of modified base, after, verdict and host options. The
+  Aethyme integration in [#1870](https://github.com/schiste/Aethyme/pull/1870)
+  remains pending validation and merge. Offline comparison does not establish
+  source provenance, completeness or freshness, or authorize publication.
 
 - [x] Preserve exact HTML finding positions around unambiguous `<hr>`
   separators when source reconstruction matches the projection
