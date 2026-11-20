@@ -9,9 +9,11 @@ unavailable check may become a pass.
 
 ## Remaining outcomes
 
-- [ ] Land and validate the Aethyme v1 runner and its real-CLI interoperability
-  tests against the exact merged base; cover exit/status disagreements,
-  unavailable required checks, altered artifacts, revisions and policy.
+- [x] Land the Aethyme v1 runner and exercise real-CLI interoperability for
+  pass, fail, not checked and changed candidate content. The host must still
+  independently establish its required checks and publication-time inputs.
+- [ ] Land and validate host-selected required check enforcement in the runner;
+  prove host-specific check coverage and publication-boundary integration.
 - [ ] Agree and implement the portable v2 producer/runner protocol, including
   the exact semantics and authoritative provenance of every decision input,
   evaluator identity and a site revision-set bound to the decision.
@@ -27,6 +29,16 @@ unavailable check may become a pass.
   path-based baselines and advisory comparisons remain distinct.
 
 ## Aexeo delivery and limits
+
+- [#604](https://github.com/schiste/Aexeo/pull/604) adds an experimental
+  portable v2 draft envelope, strict schema, producer and independent Python
+  comparator, with shared vectors and real CLI interoperability. The comparator
+  reports no publication authorization and does not authenticate inputs, run a
+  trusted fresh evaluator or establish an atomic snapshot. Artifact semantics,
+  dependency closure and a host publication integration remain unfinished.
+- [#603](https://github.com/schiste/Aexeo/pull/603) permits incremental
+  evaluation of independent item gates when link projections are unavailable;
+  this does not establish whole-site or link-graph coverage.
 
 - [#520](https://github.com/schiste/Aexeo/pull/520),
   [#522](https://github.com/schiste/Aexeo/pull/522) and
@@ -87,21 +99,15 @@ unavailable check may become a pass.
 ## Aethyme status
 
 As observed on 20 November 2026,
-[Aethyme #1800](https://github.com/schiste/Aethyme/pull/1800) implements a v1
-subject precheck, not the host-facing runner. It is merged after its CI and
-local contract and fast-guard validations passed.
-[Aethyme #1801](https://github.com/schiste/Aethyme/pull/1801) builds the
-native runner on that prerequisite. Its CI is green, but it remains a draft
-and must be resynchronized and validated after #1800 lands.
+[Aethyme #1800](https://github.com/schiste/Aethyme/pull/1800) merged the v1
+subject precheck. [#1801](https://github.com/schiste/Aethyme/pull/1801) merged
+the native uncached runner, strict schema and decision-input comparison after
+local gates and CI passed. Real Aexeo 0.0.24 and Aethyme binaries were tested
+for pass, fail, not checked and changed candidate content.
 
-A reproducible interoperability script in #1801 was run locally using actual
-Aexeo 0.0.24 and Aethyme runner binaries: pass, fail, not-checked and changed
-candidate cases behaved as expected. A broker test also covers a surviving
-child process in the supervised group. These fixture results are not an
-atomic publication test, do not establish input provenance or freshness, and
-must be repeated against the final merged base. The runner requires a trusted
-validator and a host that inventories and protects all decision inputs.
-
-[Aethyme #1802](https://github.com/schiste/Aethyme/pull/1802) remains an open
-draft concerning test selection. It is distinct from the content-gate runner;
-its presence does not establish publication integration.
+The runner is a precheck, not a publication authorization: the host must
+establish the validator, complete decision inputs, current inventory and
+atomicity at its own boundary. [Aethyme #1865](https://github.com/schiste/Aethyme/pull/1865)
+proposes requiring explicit host-selected blocking check IDs. It is not yet
+merged; tests have exercised missing and downgraded checks and the real CLI.
+The proposed v2 envelope is not yet consumed by this runner.
