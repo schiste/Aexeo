@@ -961,6 +961,33 @@ fn candidate_binding(
     Ok(binding.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
+/// Verify an experimental passing envelope and every declared content state
+/// against independently acquired host streams. This is not a publication
+/// authorization: the host must establish execution identity, provenance,
+/// freshness, inventory completeness and atomicity at publication time.
+pub fn verify_draft_passing_with_content<P: crate::content_gate_sources::IndependentContent>(
+    envelope: &aexeo_contracts::content_gate_portable_v2::BoundVerdict,
+    inputs: &aexeo_contracts::content_gate_portable_v2::CurrentInputs<'_>,
+    requirements: &aexeo_contracts::content_gate_portable_v2::PassingRequirements<'_>,
+    provider: &mut P,
+    max_state_bytes: usize,
+    max_total_bytes: usize,
+) -> Result<()> {
+    envelope
+        .verify_passing(inputs, requirements)
+        .map_err(anyhow::Error::msg)?;
+    let change = aexeo_contracts::content_gate_change_validation::parse_strict_validated_change(
+        inputs.artifacts.change,
+    )?;
+    crate::content_gate_sources::verify_declared_content(
+        &change,
+        provider,
+        max_state_bytes,
+        max_total_bytes,
+    )?;
+    Ok(())
+}
+
 /// Produce a draft portable envelope for an offline candidate evaluation.
 /// This is not connected to the CLI and is not a publication authorization.
 /// The host must independently establish input provenance, completeness,
@@ -2512,6 +2539,29 @@ mod tests {
             exit_code: 0,
         };
         assert!(portable.verify_passing(&current, &requirements).is_ok());
+        struct IndependentBytes(Vec<u8>);
+        impl crate::content_gate_sources::IndependentContent for IndependentBytes {
+            type Reader = std::io::Cursor<Vec<u8>>;
+            fn open(
+                &mut self,
+                entity_id: &str,
+                phase: crate::content_gate_sources::ContentPhase,
+            ) -> std::io::Result<Self::Reader> {
+                assert_eq!(entity_id, "article");
+                assert_eq!(phase, crate::content_gate_sources::ContentPhase::After);
+                Ok(std::io::Cursor::new(self.0.clone()))
+            }
+        }
+        let mut bytes = IndependentBytes(b"abc".to_vec());
+        assert!(
+            verify_draft_passing_with_content(&portable, &current, &requirements, &mut bytes, 3, 3)
+                .is_ok()
+        );
+        bytes.0 = b"abd".to_vec();
+        assert!(
+            verify_draft_passing_with_content(&portable, &current, &requirements, &mut bytes, 3, 3)
+                .is_err()
+        );
         let mut forged = portable.clone();
         forged.verdict.subject.entries[0].entity_id = "other".into();
         assert!(forged.verify_inputs(&current).is_ok());

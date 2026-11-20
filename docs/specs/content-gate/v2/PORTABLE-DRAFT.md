@@ -108,6 +108,13 @@ reported exit code, and explicitly named passing blocking checks. These labels
 and exit code are caller assertions. This helper does not inspect content bytes,
 authenticate execution, establish complete or fresh inputs, or authorize publication.
 
+A separate Rust host helper, `verify_draft_passing_with_content`, checks each
+declared before and after state against a stream supplied independently for that
+entity and phase. It enforces per-state and aggregate byte limits and checks
+inline bytes as well as SHA-256. It does not fetch URIs or require an undeclared
+before state. Hosts must obtain and bind the streams to the intended snapshot;
+these reads do not authenticate provenance or guarantee atomic publication.
+
 ## Independent experimental comparator
 
 `verify_portable_verdict.py` compares a previous envelope to an independently

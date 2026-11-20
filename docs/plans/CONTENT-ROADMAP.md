@@ -382,6 +382,9 @@ registry before considering the release delivered.
   An opt-in Rust check also matches the bound change subject and requires named
   passing blocking checks and caller-supplied validator labels and exit status;
   those assertions do not authenticate execution or authorize publication.
+  A separate host-supplied streaming verifier checks each declared before and
+  after state's bytes within limits, including inline equality; it does not
+  establish absent states, input provenance, freshness or publication atomicity.
   Experimental candidate-bound verdicts can also evaluate a host-projected
   collection whose identities match the candidate (a subset is allowed when
   explicitly incomplete). The collection bytes
