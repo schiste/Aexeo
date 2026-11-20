@@ -293,7 +293,8 @@ mod tests {
     fn rejects_inconsistent_embedded_verdicts_before_reuse() {
         let envelope = BoundVerdict::new(verdict(), &inputs()).unwrap();
         let original = serde_json::to_value(&envelope).unwrap();
-        let variants: Vec<Box<dyn Fn(&mut serde_json::Value)>> = vec![
+        type VerdictMutation = Box<dyn Fn(&mut serde_json::Value)>;
+        let variants: Vec<VerdictMutation> = vec![
             Box::new(|v| v["verdict"]["summary"]["passed"] = 999.into()),
             Box::new(|v| v["verdict"]["status"] = "fail".into()),
             Box::new(|v| v["verdict"]["evaluated_at"] = "not-a-date".into()),
