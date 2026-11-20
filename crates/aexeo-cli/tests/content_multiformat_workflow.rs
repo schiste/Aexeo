@@ -267,6 +267,7 @@ fn shared_editorial_fixture_matches_markdown_and_html_cli_contracts() {
             report["gates"][2]["measurements"]["link_count"],
             fixture["expected"]["link_count"]
         );
+        assert_eq!(report["gates"][5]["measurements"]["skipped_levels"], 1);
         assert_eq!(
             report["source_mapping"],
             fixture["expected"]["source_mapping"]
@@ -275,7 +276,8 @@ fn shared_editorial_fixture_matches_markdown_and_html_cli_contracts() {
             report["source_locations"],
             serde_json::json!([
                 fixture["expected"][format!("{format}_location")].clone(),
-                fixture["expected"][format!("{format}_heading_location")].clone()
+                fixture["expected"][format!("{format}_heading_location")].clone(),
+                fixture["expected"][format!("{format}_hierarchy_location")].clone()
             ])
         );
         fs::write(&draft, fixture[format!("empty_{format}")].as_str().unwrap()).unwrap();
