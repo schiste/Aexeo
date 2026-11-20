@@ -461,6 +461,8 @@ registry before considering the release delivered.
   freshness independently; this does not add link evidence to offline receipts.
   Direct Rust collection uniqueness evaluation rejects ambiguous identities in
   the examined prefix, matching CLI and EmDash input validation.
+  Conservatively map explicitly closed inline editing and emphasis markup
+  (`del`, `ins`, `s`, `u`); ambiguous and hidden markup remains unmapped.
   Explicitly nested HTML figures and direct captions can retain source positions,
   including image alternatives and caption links; ambiguous markup remains unmapped.
   HTML image alt attributes and adjacent prose map to their source positions
