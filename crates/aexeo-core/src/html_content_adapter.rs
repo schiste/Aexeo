@@ -458,6 +458,11 @@ pub fn html_source_map_with_scope(
                 .find('<')
                 .map_or(source.len(), |n| cursor + n);
             let literal = &source[cursor..end];
+            // Definition-list text outside an explicitly closed term or
+            // description is not part of the supported mapping subset.
+            if stack.last().map(String::as_str) == Some("dl") && !literal.trim().is_empty() {
+                return None;
+            }
             if scope == HtmlContentScope::Main && selected_depth.is_none() {
                 if head_seen
                     && !body_seen
@@ -532,6 +537,9 @@ pub fn html_source_map_with_scope(
                 | "ul"
                 | "ol"
                 | "li"
+                | "dl"
+                | "dt"
+                | "dd"
                 | "div"
                 | "p"
                 | "h1"
@@ -694,6 +702,8 @@ pub fn html_source_map_with_scope(
             if (tag == "figcaption" && parent != Some("figure"))
                 || (tag == "li" && !matches!(parent, Some("ul" | "ol")))
                 || (matches!(parent, Some("ul" | "ol")) && tag != "li")
+                || (matches!(tag.as_str(), "dt" | "dd") && parent != Some("dl"))
+                || (parent == Some("dl") && !matches!(tag.as_str(), "dt" | "dd"))
             {
                 return None;
             }
@@ -751,7 +761,8 @@ pub fn html_source_map_with_scope(
                 && stack.iter().any(|parent| {
                     matches!(
                         parent.as_str(),
-                        "p" | "h1"
+                        "p" | "dt"
+                            | "h1"
                             | "h2"
                             | "h3"
                             | "h4"
@@ -1454,6 +1465,45 @@ mod tests {
             "<main><figcaption>orphan</figcaption></main>",
             "<main><figure><figcaption>unclosed</figure></figcaption></main>",
             "<main><p><figure>reparented</figure></p></main>",
+        ] {
+            for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+                let adapted = html_content_with_scope("x", html, scope).unwrap();
+                assert!(
+                    html_source_map_with_scope(html, adapted.input.text.as_deref().unwrap(), scope)
+                        .is_none(),
+                    "{html}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn maps_explicit_definition_lists_and_rejects_ambiguous_structure() {
+        let html = "<main>\n<dl><dt>Élan</dt><dd><p>Une <a href='/ref'>source</a> claire.</p></dd><dt>Terme</dt><dd>Définition</dd></dl>\n</main>";
+        for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+            let adapted = html_content_with_scope("x", html, scope).unwrap();
+            let projected = adapted.input.text.as_deref().unwrap();
+            let map = html_source_map_with_scope(html, projected, scope).unwrap();
+            let projected_index = crate::text_index::LineIndex::new(projected);
+            let source_index = crate::text_index::LineIndex::new(html);
+            for needle in ["Élan", "Une", "source", "claire", "Terme", "Définition"] {
+                let (line, column) = projected_index
+                    .position(projected, projected.find(needle).unwrap())
+                    .unwrap();
+                assert_eq!(
+                    map.source_position(html, projected, line, column),
+                    source_index.position(html, html.find(needle).unwrap()),
+                    "{needle}"
+                );
+            }
+            assert_eq!(map.link_starts, vec![html.find("<a href='/ref'>").unwrap()]);
+        }
+        for html in [
+            "<main><dt>orphan</dt></main>",
+            "<main><dl><dd>first<dt>second</dt></dd></dl></main>",
+            "<main><dl>stray<dt>term</dt></dl></main>",
+            "<main><dl><dt><div>block</div></dt></dl></main>",
+            "<main><dl><div><dt>wrapped</dt></div></dl></main>",
         ] {
             for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
                 let adapted = html_content_with_scope("x", html, scope).unwrap();
