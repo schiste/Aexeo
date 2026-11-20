@@ -23,7 +23,9 @@ schema or profile; it must not be accepted by silently falling back to v1.
 The current v1 verdict schema permits additional properties, so validating
 against it alone is insufficient for this stricter profile. The eventual v2
 schema must close every nested object and define which, if any, extensions are
-supported; an implementation must reject unrecognized extensions.
+supported; an implementation must reject unrecognized extensions. The initial
+draft profile accepts no verdict extensions. Producers must not silently discard
+existing extensions; a migration must explicitly account for their semantics.
 
 ## Independently acquired decision inputs
 

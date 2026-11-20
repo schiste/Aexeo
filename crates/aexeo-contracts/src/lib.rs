@@ -3,6 +3,7 @@
 pub mod content_gate_binding_v2;
 pub mod content_gate_change_validation;
 pub mod content_gate_decision_inputs;
+pub mod content_gate_portable_v2;
 pub mod content_gate_protocol;
 pub mod content_gate_revision_set;
 
