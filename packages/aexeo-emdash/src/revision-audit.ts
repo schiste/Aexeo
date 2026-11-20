@@ -35,6 +35,11 @@ export async function auditRevision(ctx: RevisionContext, input: RevisionAuditRe
   if (!current || !snapshot || snapshot.id !== revision || snapshot.collection !== collection || snapshot.entryId !== id) {
     return { status: "not_checked", reason: "revision_unavailable" } as const;
   }
+  // Host data is an external runtime boundary: malformed historical payloads
+  // are unavailable, never an empty document or an exception to the caller.
+  if (snapshot.data === null || typeof snapshot.data !== "object" || Array.isArray(snapshot.data)) {
+    return { status: "not_checked", reason: "revision_data_invalid", revision } as const;
+  }
   const localeAtAudit = observedLocale(current.locale);
   const field = input.field;
   const fragmentPreset = field === undefined ? undefined : selectFragmentPreset(options.preset, collection, field);
