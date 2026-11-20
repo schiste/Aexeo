@@ -770,6 +770,19 @@ fn map_transformed_text(
     (result == value).then_some(spans)
 }
 
+// Only unwrap a single, bounded chain of purely presentational markup.
+fn reference_label(mut children: &[Node]) -> Option<&str> {
+    for _ in 0..8 {
+        match children {
+            [Node::Text(text)] => return Some(&text.value),
+            [Node::Emphasis(node)] => children = &node.children,
+            [Node::Strong(node)] => children = &node.children,
+            _ => return None,
+        }
+    }
+    None
+}
+
 #[derive(Default)]
 struct Projection {
     text: String,
@@ -851,24 +864,26 @@ impl Projection {
                 source_map,
             ),
             Node::Link(link)
-                if matches!(link.children.as_slice(), [Node::Text(item)]
-                    if crate::content_gate::numeric_reference_marker(&link.url, &item.value)) =>
+                if reference_label(&link.children).is_some_and(|label| {
+                    crate::content_gate::numeric_reference_marker(&link.url, label)
+                }) =>
             {
                 self.link_count += 1;
-                if let [Node::Text(item)] = link.children.as_slice() {
-                    self.text.push_str(&" ".repeat(item.value.len()));
-                }
+                self.text
+                    .push_str(&" ".repeat(reference_label(&link.children).unwrap().len()));
             }
             Node::LinkReference(link)
-                if matches!(link.children.as_slice(), [Node::Text(item)]
-                    if normalize_reference(&link.identifier)
+                if reference_label(&link.children).is_some_and(|label| {
+                    normalize_reference(&link.identifier)
                         .and_then(|key| self.definitions.get(&key))
-                        .is_some_and(|href| crate::content_gate::numeric_reference_marker(href, &item.value))) =>
+                        .is_some_and(|href| {
+                            crate::content_gate::numeric_reference_marker(href, label)
+                        })
+                }) =>
             {
                 self.link_count += 1;
-                if let [Node::Text(item)] = link.children.as_slice() {
-                    self.text.push_str(&" ".repeat(item.value.len()));
-                }
+                self.text
+                    .push_str(&" ".repeat(reference_label(&link.children).unwrap().len()));
             }
             Node::Break(_) => self.text.push('\n'),
             Node::Html(_) => source_map.heading_levels_complete = false,
@@ -1305,6 +1320,41 @@ mod tests {
     }
 
     #[test]
+    fn formatted_reference_labels_keep_source_positions_and_ordinary_links() {
+        for source in [
+            "In 2025.[*1*](#reference-source) Next sentence.",
+            "In 2025.[**1**][ref] Next sentence.\n\n[ref]: #reference-source\n",
+        ] {
+            let adapted = markdown_input_with_source_map_and_destinations("x", source).unwrap();
+            let text = adapted.input.text.as_deref().unwrap();
+            assert!(text.contains("2025.  Next"), "{text}");
+            assert_eq!(adapted.link_count, 1);
+            let pos = crate::text_index::LineIndex::new(text)
+                .position(text, text.find("Next").unwrap())
+                .unwrap();
+            assert_eq!(
+                adapted
+                    .source_map
+                    .source_position(source, text, pos.0, pos.1),
+                crate::text_index::LineIndex::new(source)
+                    .position(source, source.find("Next").unwrap())
+            );
+        }
+        for source in [
+            "2025.[*1*](/ordinary) Next.",
+            "2025.[*1* item](#reference-source) Next.",
+        ] {
+            assert!(
+                markdown_input("x", source)
+                    .unwrap()
+                    .text
+                    .unwrap()
+                    .contains("2025.1")
+            );
+        }
+    }
+
+    #[test]
     fn resolved_numeric_references_preserve_source_positions_and_first_definition() {
         let source = "In 2025.[1][Source] Next 2.5 words. [42][other].\n\n[source]: #reference-proof\n[SOURCE]: /ignored\n[other]: /other\n";
         let adapted = markdown_input_with_source_map_and_destinations("x", source).unwrap();
@@ -1341,7 +1391,7 @@ mod tests {
                 .unwrap()
                 .text
                 .unwrap()
-                .contains("2025.1 Next")
+                .contains("2025.  Next")
         );
         let ordinary = "2025.[1][ref] Next.\n\n[ref]: /ordinary\n";
         assert!(
@@ -1382,7 +1432,7 @@ mod tests {
                 .unwrap()
                 .text
                 .unwrap()
-                .contains("2025.1 Next")
+                .contains("2025.  Next")
         );
     }
 

@@ -391,3 +391,34 @@ fn numeric_citations_do_not_merge_sentences_across_markdown_and_html() {
         );
     }
 }
+
+#[test]
+fn formatted_citations_preserve_sentence_count_in_both_formats() {
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/cross-adapter-citations.json")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("example");
+    let preset = dir.path().join("workflow.toml");
+    fs::write(&preset, fixture["preset"].as_str().unwrap()).unwrap();
+    for (format, text) in [
+        (
+            "html",
+            "<p>In 2025.<a href='#reference-source'><sup>1</sup></a> Next sentence.</p>",
+        ),
+        (
+            "markdown",
+            "In 2025.[*1*](#reference-source) Next sentence.",
+        ),
+        (
+            "markdown",
+            "In 2025.[**1**][ref] Next sentence.\n\n[ref]: #reference-source\n",
+        ),
+    ] {
+        fs::write(&draft, text).unwrap();
+        let (report, _) = evaluate(&draft, &preset, format);
+        assert_eq!(
+            report["gates"][0]["measurements"]["sentence_count"], 2,
+            "{text}"
+        );
+    }
+}
