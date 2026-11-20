@@ -296,7 +296,7 @@ export function createPlugin(options: ConfiguredPluginOptions = {}, runtime: Con
         handler: async (ctx: SandboxCtx & { input: { collection: string; id: string; revision: string; field?: string } }) => {
           const startedAt = Date.now();
           const result = await auditRevision(ctx as never, ctx.input, { preset: options.contentPreset, blockMappings: options.blockMappings, contentFieldsByCollection: options.contentFieldsByCollection, descriptionFieldsByCollection: options.descriptionFieldsByCollection, metadataFieldsByCollection: options.metadataFieldsByCollection, evidenceProviderConfigured: runtime.evidenceSources !== undefined, evaluate: evaluateContent });
-          try { ctx.log?.info("aexeo.revision_audit", { status: result.status, scope: ctx.input.field === undefined ? "content" : "fragment", duration_ms: Date.now() - startedAt, gates: result.status === "evaluated" ? result.report.gates.length : 0 }); } catch { /* telemetry is advisory */ }
+          try { ctx.log?.info("aexeo.revision_audit", { status: result.status, ...(result.status === "not_checked" ? { reason: result.reason } : { revision_status: result.revision_status }), scope: ctx.input.field === undefined ? "content" : "fragment", duration_ms: Date.now() - startedAt, gates: result.status === "evaluated" ? result.report.gates.length : 0 }); } catch { /* telemetry is advisory */ }
           return result;
         },
       },

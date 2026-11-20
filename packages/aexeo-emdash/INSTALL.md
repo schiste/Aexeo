@@ -778,7 +778,7 @@ error; it must not be interpreted as a clean assessment. `aexeo.preset_coverage`
 logs aggregate counts without routes, gate identifiers, reasons or content.
 
 If a historical revision has missing or malformed data instead of an object,
-the revision audit returns `not_checked` with reason `revision_data_invalid`.
+the revision audit returns `not_checked` with reason `revision_data_invalid`. A failed initial CMS read returns `not_checked` with reason `revision_read_failed`, without exposing the host error. If a later current-record read fails, an evaluated report remains available but revision and locale status are `unknown` until a subsequent read succeeds.
 It does not evaluate or store a report for that revision.
 
 ### Audit a CMS fragment
