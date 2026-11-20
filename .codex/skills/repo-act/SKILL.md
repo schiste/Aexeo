@@ -231,6 +231,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   Inspect test summaries for skipped cases, not just a successful exit; install
   the repository's pinned test requirements in an isolated environment and rerun
   affected schema-dependent tests without skips before claiming coverage.
+- For strict protocol JSON, reuse `parse_lossless_json` or
+  `parse_unique_json_value` in `aexeo-contracts::content_gate_change_validation`;
+  both reject duplicate keys recursively. Bound input size before parsing and
+  validate the applicable schema and semantics separately.
 - When revalidating JSON artifacts, test duplicate keys inside nested extension
   maps as well as typed fields, and verify rejection preserves prior output;
   ordinary map decoding can silently retain only one value.
