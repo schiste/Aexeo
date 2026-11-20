@@ -83,6 +83,13 @@ unknown fields, duplicate keys and omitted versus absent inputs; demonstrate
 that required checks fail closed; and exercise the host's protected publication
 boundary. Record which checks actually ran; no digest implies whole-site coverage.
 
+The Rust `BoundVerdict` constructor, parser and input comparison also reject
+internally inconsistent verdict fields, subject entries, check identities,
+finding references, summary counts, statuses and timestamps. They retain
+valid `fail`, `not_checked` and `error` verdicts; binding verification is not a
+passing result. The caller must still compare the subject to the intended change,
+require the appropriate blocking checks and authenticate and protect all inputs.
+
 The Rust API `evaluate_draft_portable_candidate_verdict` produces the draft
 envelope from an offline candidate using the existing overlay and evaluator.
 The CLI exposes it only with `--offline-receipt --experimental-bound-verdict
