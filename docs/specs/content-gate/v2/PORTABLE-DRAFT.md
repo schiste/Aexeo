@@ -128,3 +128,8 @@ provenance, complete dependencies or currentness. The CLI does not enforce an
 immutable multi-file snapshot. In particular, a producer and exporter using
 the same faulty or compromised implementation can agree on wrong semantics.
 Do not use this procedure as publication authorization.
+
+
+### Optional native CLI interoperability test
+
+`test_portable_cli_interop.py` always tests Aexeo against the Python comparator. Set `AETHYME_CLI_BIN` to an independently built Aethyme binary supporting `content-gate compare-v2` to additionally compare fresh envelopes produced by the actual Aexeo CLI with the native Aethyme CLI and reject changed policy bytes. Set `AEXEO_CLI_BIN` to a trusted built Aexeo executable to avoid a Cargo build. The test exercises offline comparison only; caller-supplied process status, input provenance, freshness, and publication atomicity remain outside its scope.
