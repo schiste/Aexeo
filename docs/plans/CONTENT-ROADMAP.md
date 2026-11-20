@@ -97,6 +97,11 @@ is still required to inspect those pages. No CMS content was changed.
 
 ## Delivery tracker
 
+- [x] Preserve exact HTML finding positions around unambiguous `<hr>`
+  separators when source reconstruction matches the projection
+  ([#625](https://github.com/schiste/Aexeo/pull/625)). Recovered or
+  hidden markup remains unmapped; this does not establish browser visibility.
+
 - [x] The built-in readability preset reports `not_checked` for sentences
   outside its conservative Latin character subset, retains findings on assessed
   sentences and measures skipped sentences ([#622](https://github.com/schiste/Aexeo/pull/622)).
