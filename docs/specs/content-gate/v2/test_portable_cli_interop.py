@@ -73,6 +73,12 @@ class PortableCliInterop(unittest.TestCase):
             rejected = subprocess.run(verify, capture_output=True, text=True, check=False)
             self.assertEqual(rejected.returncode, 2, rejected.stderr)
             self.assertFalse(json.loads(rejected.stdout)['publication_authorized'])
+            if native:
+                native_rejected = subprocess.run(
+                    [native, 'content-gate', 'compare-v2', str(root / 'native-manifest')],
+                    env=native_env, capture_output=True, text=True, check=False)
+                self.assertEqual(native_rejected.returncode, 2, native_rejected.stderr + native_rejected.stdout)
+                self.assertFalse(json.loads(native_rejected.stdout)['publication_authorized'])
 
     def test_actual_cli_and_python_comparator(self):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
