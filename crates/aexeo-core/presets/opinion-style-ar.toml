@@ -1,0 +1,23 @@
+version = 1
+name = "Opinion style review, Arabic"
+extends = ["news-style-ar", "opinion-style-adjustments"]
+
+# Preserve the Arabic boundary policy when overriding the shared examples.
+[[gates]]
+id = "editorial.sentence_variance"
+kind = "sentence_length_variance"
+window_size = 8
+min_stddev_words = 5
+delimiters = ".!?؟"
+allow_arabic_word_boundaries = true
+blocking = false
+
+[[gates]]
+id = "editorial.sentence_opening_window"
+kind = "sentence_opening_window"
+opening_words = 1
+window_size = 8
+max_occurrences = 3
+delimiters = ".!?؟"
+allow_arabic_word_boundaries = true
+blocking = false

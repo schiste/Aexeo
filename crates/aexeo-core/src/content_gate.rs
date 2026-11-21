@@ -156,14 +156,27 @@ fn opening_word_key(word: &str) -> String {
 // Positions refer to the projected adapter text, not necessarily the source file.
 // Restrict short-sentence certainty to scripts with whitespace word boundaries
 // that we explicitly recognize. Other scripts stay not_checked.
+fn is_simple_latin_char(ch: char) -> bool {
+    ch.is_ascii()
+        || ch.is_whitespace()
+        || matches!(ch, '«' | '»' | '“' | '”' | '‘' | '’' | '…' | '–' | '—')
+        || (ch.is_alphabetic() && matches!(ch, '\u{00c0}'..='\u{024f}' | '\u{1e00}'..='\u{1eff}'))
+        || matches!(ch, '\u{0300}'..='\u{036f}')
+}
+
 fn is_simple_latin_sentence(text: &str) -> bool {
+    text.chars().all(is_simple_latin_char)
+}
+
+// This is an explicit whitespace-token heuristic, not Arabic morphology or
+// language detection. Unsupported characters keep affected windows unchecked.
+fn has_supported_word_boundaries(text: &str, allow_arabic: bool) -> bool {
     text.chars().all(|ch| {
-        ch.is_ascii()
-            || ch.is_whitespace()
-            || matches!(ch, '«' | '»' | '“' | '”' | '‘' | '’' | '…' | '–' | '—')
-            || (ch.is_alphabetic()
-                && matches!(ch, '\u{00c0}'..='\u{024f}' | '\u{1e00}'..='\u{1eff}'))
-            || matches!(ch, '\u{0300}'..='\u{036f}')
+        is_simple_latin_char(ch)
+            || (allow_arabic
+                && ((matches!(ch, '\u{0600}'..='\u{06ff}' | '\u{0750}'..='\u{077f}' | '\u{08a0}'..='\u{08ff}' | '\u{fb50}'..='\u{fdff}' | '\u{fe70}'..='\u{feff}')
+                    && (ch.is_alphanumeric() || is_combining_mark(ch)))
+                    || matches!(ch, '،' | '؛' | '؟')))
     })
 }
 
@@ -468,6 +481,9 @@ pub enum ContentGate {
         window_across_paragraphs: bool,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         ignored_words: Vec<String>,
+        /// Opt in to whitespace-token counting for recognized Arabic script characters.
+        #[serde(default, skip_serializing_if = "is_false")]
+        allow_arabic_word_boundaries: bool,
         #[serde(default = "default_sentence_delimiters")]
         delimiters: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -519,6 +535,9 @@ pub enum ContentGate {
         blocking: bool,
         run_length: usize,
         tolerance_words: usize,
+        /// Opt in to whitespace-token counting for recognized Arabic script characters.
+        #[serde(default, skip_serializing_if = "is_false")]
+        allow_arabic_word_boundaries: bool,
         #[serde(default = "default_sentence_delimiters")]
         delimiters: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -543,6 +562,9 @@ pub enum ContentGate {
         random_max_stddev_words: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         random_seed: Option<u64>,
+        /// Opt in to whitespace-token counting for recognized Arabic script characters.
+        #[serde(default, skip_serializing_if = "is_false")]
+        allow_arabic_word_boundaries: bool,
         #[serde(default = "default_sentence_delimiters")]
         delimiters: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -567,6 +589,9 @@ pub enum ContentGate {
         random_max_stddev_words: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         random_seed: Option<u64>,
+        /// Opt in to whitespace-token counting for recognized Arabic script characters.
+        #[serde(default, skip_serializing_if = "is_false")]
+        allow_arabic_word_boundaries: bool,
         #[serde(default = "default_sentence_delimiters")]
         delimiters: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -3129,6 +3154,7 @@ impl ContentPreset {
                     random_seed,
                     delimiters,
                     abbreviations,
+                    allow_arabic_word_boundaries,
                     ..
                 }
                 | ContentGate::ProseSentenceLengthVariance {
@@ -3140,6 +3166,7 @@ impl ContentPreset {
                     random_seed,
                     delimiters,
                     abbreviations,
+                    allow_arabic_word_boundaries,
                     ..
                 } => {
                     let prose_only =
@@ -3220,7 +3247,10 @@ impl ContentPreset {
                                     if segment.trim().is_empty() {
                                         return;
                                     }
-                                    if !is_simple_latin_sentence(segment) {
+                                    if !has_supported_word_boundaries(
+                                        segment,
+                                        *allow_arabic_word_boundaries,
+                                    ) {
                                         lengths.clear();
                                         sum = 0;
                                         sum_squares = 0;
@@ -3316,6 +3346,7 @@ impl ContentPreset {
                     tolerance_words,
                     delimiters,
                     abbreviations,
+                    allow_arabic_word_boundaries,
                     ..
                 } => {
                     measurements.insert("run_length".into(), *run_length);
@@ -3351,7 +3382,10 @@ impl ContentPreset {
                                     if segment.trim().is_empty() {
                                         return;
                                     }
-                                    if !is_simple_latin_sentence(segment) {
+                                    if !has_supported_word_boundaries(
+                                        segment,
+                                        *allow_arabic_word_boundaries,
+                                    ) {
                                         lengths.clear();
                                         uncertain += 1;
                                         return;
@@ -3630,9 +3664,8 @@ impl ContentPreset {
                                         }
                                         words.push(opening_word_key(word));
                                     }
-                                    // A short sentence in the supported Latin subset cannot
-                                    // contain a complete opening. Other scripts may not use
-                                    // whitespace word boundaries and remain uncertain.
+                                    // A short sentence with supported boundaries cannot contain
+                                    // a complete opening. Other scripts remain uncertain.
                                     if bytes <= MAX_PARAGRAPH_OPENING_BYTES
                                         && words.len() < *opening_words
                                         && !words.is_empty()
@@ -3696,6 +3729,7 @@ impl ContentPreset {
                     ignored_words,
                     delimiters,
                     abbreviations,
+                    allow_arabic_word_boundaries,
                     ..
                 } => {
                     measurements.insert("opening_words".into(), *opening_words);
@@ -3747,7 +3781,10 @@ impl ContentPreset {
                                         }
                                         return;
                                     }
-                                    if !is_simple_latin_sentence(segment) {
+                                    if !has_supported_word_boundaries(
+                                        segment,
+                                        *allow_arabic_word_boundaries,
+                                    ) {
                                         skipped += 1;
                                         window.push_back(None);
                                         if window.len() > *window_size {
@@ -3773,13 +3810,15 @@ impl ContentPreset {
                                             break;
                                         }
                                     }
-                                    // A short sentence in the supported Latin subset cannot
-                                    // contain a complete opening. Other scripts may not use
-                                    // whitespace word boundaries and remain uncertain.
+                                    // A short sentence with supported boundaries cannot contain
+                                    // a complete opening. Other scripts remain uncertain.
                                     if bytes <= MAX_PARAGRAPH_OPENING_BYTES
                                         && words.len() < *opening_words
                                         && (!words.is_empty() || ignored_count > 0)
-                                        && is_simple_latin_sentence(segment)
+                                        && has_supported_word_boundaries(
+                                            segment,
+                                            *allow_arabic_word_boundaries,
+                                        )
                                         && words.iter().all(|word| !word.is_empty())
                                     {
                                         too_short += 1;
@@ -7528,6 +7567,43 @@ terms = ["bad"]
     }
 
     #[test]
+    fn arabic_prose_variance_respects_list_classification() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='v'\nkind='prose_sentence_length_variance'\nwindow_size=3\nmin_stddev_words=2\nallow_arabic_word_boundaries=true\ndelimiters='.؟'\n").unwrap();
+        let context = ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: "هذا نص واضح. هذا نص مفيد؟ هذا نص قصير.".into(),
+                line: 1,
+                column: 1,
+            }]),
+            ..Default::default()
+        };
+        let capabilities = ContentEvaluationContext {
+            adapter: Some(&context),
+            ..Default::default()
+        };
+        let input = ContentInput::default();
+        let run = |classification: Option<&[bool]>| {
+            preset
+                .evaluate_with_paragraph_list_items(
+                    &input,
+                    &capabilities,
+                    None,
+                    None,
+                    true,
+                    None,
+                    None,
+                    classification,
+                )
+                .unwrap()
+        };
+        assert_eq!(run(None).gates[0].status, GateStatus::NotChecked);
+        assert_eq!(run(Some(&[true])).gates[0].status, GateStatus::NotChecked);
+        let report = run(Some(&[false]));
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        assert_eq!(report.gates[0].measurements["windows_checked"], 1);
+    }
+
+    #[test]
     fn sentence_variance_rolling_windows_match_reference_counts() {
         let counts: Vec<usize> = (0..120).map(|i| 1 + (i * 17 % 13)).collect();
         let text = counts
@@ -7567,6 +7643,56 @@ terms = ["bad"]
             );
             assert_eq!(report.gates[0].findings.len(), expected);
         }
+    }
+
+    #[test]
+    fn explicit_arabic_whitespace_policy_enables_rhythm_but_withholds_other_scripts() {
+        let source = "version=1\nname='arabic'\n[[gates]]\nid='variance'\nkind='sentence_length_variance'\nwindow_size=3\nmin_stddev_words=1\ndelimiters='.!?؟'\nallow_arabic_word_boundaries=true\n[[gates]]\nid='rhythm'\nkind='similar_sentence_lengths'\nrun_length=2\ntolerance_words=0\ndelimiters='.!?؟'\nallow_arabic_word_boundaries=true\n[[gates]]\nid='window'\nkind='sentence_opening_window'\nopening_words=1\nwindow_size=3\nmax_occurrences=1\ndelimiters='.!?؟'\nallow_arabic_word_boundaries=true\n";
+        let preset = ContentPreset::from_toml(source).unwrap();
+        let input = ContentInput {
+            text: Some(String::new()),
+            ..Default::default()
+        };
+        let mut context = ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: "هذا مثال واحد؟ هذا مثال ثان؟ هذا مثال ثالث.".into(),
+                line: 1,
+                column: 1,
+            }]),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert!(
+            report
+                .gates
+                .iter()
+                .all(|gate| gate.status == GateStatus::Failed && !gate.blocking)
+        );
+        context.paragraphs.as_mut().unwrap()[0].text = "هذا مثال واحد؟ 你好世界。".into();
+        let report = preset
+            .evaluate_with_context(&input, None, None, Some(&context))
+            .unwrap();
+        assert!(
+            report
+                .gates
+                .iter()
+                .all(|gate| gate.status == GateStatus::NotChecked)
+        );
+        let default =
+            ContentPreset::from_toml(&source.replace("allow_arabic_word_boundaries=true\n", ""))
+                .unwrap();
+        context.paragraphs.as_mut().unwrap()[0].text =
+            "هذا مثال واحد؟ هذا مثال ثان؟ هذا مثال ثالث.".into();
+        assert!(
+            default
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap()
+                .gates
+                .iter()
+                .all(|gate| gate.status == GateStatus::NotChecked)
+        );
     }
 
     #[test]

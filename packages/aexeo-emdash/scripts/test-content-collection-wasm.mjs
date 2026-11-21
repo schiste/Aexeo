@@ -346,6 +346,23 @@ for (const [locale, text] of [
     assert.equal(transition?.blocking, false, `${style}-${locale}`);
   }
 }
+// Arabic profiles opt into whitespace tokens; unsupported scripts remain unassessed.
+const arabicRhythm = "هذا مثال واحد؟ هذا مثال ثان؟ هذا مثال ثالث؟ هذا مثال رابع؟ هذا مثال خامس؟ هذا مثال سادس؟ هذا مثال سابع؟ هذا مثال ثامن.";
+for (const preset of ["news-style-ar", "opinion-style-ar"]) {
+  const document = { route: "/arabic", title: "Arabic", body: [{ children: [{ _type: "span", text: arabicRhythm }] }] };
+  const report = await evaluateContent(document, preset);
+  for (const id of ["editorial.sentence_rhythm", "editorial.sentence_variance", "editorial.sentence_opening_window"]) {
+    const gate = report.gates.find(gate => gate.gate_id === id);
+    assert.equal(gate?.status, "failed", `${preset}: ${id}`);
+    assert.equal(gate?.blocking, false, `${preset}: ${id}`);
+    assert(report.source_locations.some(location => location.gate_id === id && location.block_index === 0), `${preset}: ${id}`);
+  }
+  const mixed = { ...document, body: [{ children: [{ _type: "span", text: `${arabicRhythm} 你好世界。` }] }] };
+  const mixedReport = await evaluateContent(mixed, preset);
+  for (const id of ["editorial.sentence_rhythm", "editorial.sentence_variance", "editorial.sentence_opening_window"]) {
+    assert.equal(mixedReport.gates.find(gate => gate.gate_id === id)?.status, "not_checked", `${preset}: ${id}`);
+  }
+}
 console.log("WASM localized transition starters preserve source locations");
 
 // Identical fixtures exercise Unicode normalization and location mapping across

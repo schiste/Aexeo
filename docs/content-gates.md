@@ -1567,7 +1567,7 @@ paragraphs; missing paragraphs are `not_checked`. Counts include punctuation
 inside quotations and other inline prose, and are not linguistic analysis. No
 punctuation is replaced. The composable `news-style-en`, `news-style-fr`, `opinion-style-en`, and
 `opinion-style-fr` starters, as well as the German and Italian `news-style-de`,
-`news-style-it`, `opinion-style-de` and `opinion-style-it` starters, combine this
+`news-style-it`, `opinion-style-de` and `opinion-style-it`, `news-style-ar` and `opinion-style-ar` starters, combine this
 gate with transition and opening review; their different
 limits are examples for projects to override, not universal standards.
 They also compose sentence variance and opening-window reviews. News uses a six-sentence
@@ -1575,6 +1575,18 @@ window with a six-word standard-deviation threshold and at most two identical op
 opinion uses eight sentences, a five-word threshold and at most three identical openings.
 These advisory examples are not calibrated recommendations. Override either gate in your
 preset to match your audience, language and editorial judgment.
+
+Arabic rhythm starters opt into `allow_arabic_word_boundaries = true` for
+`similar_sentence_lengths`, `sentence_length_variance`, and
+`sentence_opening_window`; it is also available on
+`prose_sentence_length_variance`. The default stays false. The option accepts a
+limited set of Arabic-script characters and punctuation and counts
+whitespace-separated tokens; it is not language detection, morphological word
+segmentation or a validated quality score. Configure `delimiters` separately,
+including `؟` when appropriate. Unsupported characters in a sentence still
+make affected checks `not_checked`. Other scripts and unusual Arabic marks may
+remain unassessed. Rust callers constructing these gate variants must supply
+this new field; serialized presets omitting it keep the previous behavior.
 
 ### English trailing clause review
 

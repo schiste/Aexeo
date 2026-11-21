@@ -273,6 +273,18 @@ pub fn builtin_content_presets() -> BTreeMap<String, String> {
             include_str!("../presets/transition-review-ar.toml").into(),
         ),
         (
+            "arabic-rhythm-review".into(),
+            include_str!("../presets/arabic-rhythm-review.toml").into(),
+        ),
+        (
+            "news-style-ar".into(),
+            include_str!("../presets/news-style-ar.toml").into(),
+        ),
+        (
+            "opinion-style-ar".into(),
+            include_str!("../presets/opinion-style-ar.toml").into(),
+        ),
+        (
             "news-style-de".into(),
             include_str!("../presets/news-style-de.toml").into(),
         ),
@@ -512,10 +524,12 @@ mod tests {
             ("news-style-fr", 2),
             ("news-style-de", 2),
             ("news-style-it", 2),
+            ("news-style-ar", 2),
             ("opinion-style-en", 3),
             ("opinion-style-fr", 3),
             ("opinion-style-de", 3),
             ("opinion-style-it", 3),
+            ("opinion-style-ar", 3),
         ] {
             let preset = resolve_content_preset(name, &sources).unwrap();
             assert!(preset.gates.iter().all(|gate| !gate.blocking()));
@@ -574,6 +588,39 @@ mod tests {
                 preset.evaluate(&input).unwrap().gates[0].status,
                 GateStatus::NotChecked
             );
+        }
+    }
+
+    #[test]
+    fn arabic_style_starters_apply_arabic_boundaries_to_composed_rhythm_gates() {
+        use crate::content_gate::{ContentContext, ContentInput, ContentParagraph, GateStatus};
+        let text = "هذا مثال واحد؟ هذا مثال ثان؟ هذا مثال ثالث؟ هذا مثال رابع؟ هذا مثال خامس؟ هذا مثال سادس؟ هذا مثال سابع؟ هذا مثال ثامن.";
+        let input = ContentInput {
+            text: Some(text.into()),
+            ..Default::default()
+        };
+        let context = ContentContext {
+            paragraphs: Some(vec![ContentParagraph {
+                text: text.into(),
+                line: 1,
+                column: 1,
+            }]),
+            ..Default::default()
+        };
+        for name in ["news-style-ar", "opinion-style-ar"] {
+            let preset = resolve_content_preset(name, &builtin_content_presets()).unwrap();
+            let report = preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap();
+            for id in [
+                "editorial.sentence_rhythm",
+                "editorial.sentence_variance",
+                "editorial.sentence_opening_window",
+            ] {
+                let gate = report.gates.iter().find(|gate| gate.gate_id == id).unwrap();
+                assert_eq!(gate.status, GateStatus::Failed, "{name}: {id}");
+                assert!(!gate.blocking);
+            }
         }
     }
 
