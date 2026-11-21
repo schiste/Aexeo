@@ -948,6 +948,34 @@ allow_relative=true
   assert.deepEqual(host.logged, []);
 }
 
+// Numeric citation labels remain available to literal gates without changing sentence rhythm.
+{
+  const preset = `version=1
+name="citation"
+[[gates]]
+id="required"
+kind="required_terms"
+terms=["[17]"]
+[[gates]]
+id="length"
+kind="sentence_length"
+max_words=20
+`;
+  const page = item("literal-reference", { data: { body: [{
+    _type: "block", _key: "p", style: "normal",
+    markDefs: [{ _key: "ref", _type: "link", href: "#reference-source" }],
+    children: [{ _type: "span", text: "Élan." }, { _type: "span", text: "[17]", marks: ["ref"] },
+      { _type: "span", text: " Next sentence." }],
+  }] } });
+  const host = fakeHost([page]);
+  const configured = createPlugin({ contentPreset: { name: "citation", sources: { citation: preset } } });
+  await configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  const assessment = host.store.get("findings:/literal-reference").assessment;
+  assert.equal(assessment.gates.find((gate) => gate.gate_id === "required").status, "passed");
+  assert.equal(assessment.gates.find((gate) => gate.gate_id === "length").measurements.sentence_count, 2);
+  assert.deepEqual(host.logged, []);
+}
+
 // Pacing binds the supplied structured snapshot to the CMS text projection.
 {
   const preset = `version=1
