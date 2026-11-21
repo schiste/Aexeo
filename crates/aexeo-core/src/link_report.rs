@@ -250,6 +250,58 @@ fn has_noindex(value: &str) -> bool {
         .any(|part| part.eq_ignore_ascii_case("noindex") || part.eq_ignore_ascii_case("none"))
 }
 
+// Dates are UTC calendar days; timestamps are normalized to UTC before comparison.
+fn snapshot_day(value: &str) -> Option<time::Date> {
+    if value.len() == 10 {
+        let bytes = value.as_bytes();
+        if bytes[4] != b'-'
+            || bytes[7] != b'-'
+            || !bytes
+                .iter()
+                .enumerate()
+                .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
+        {
+            return None;
+        }
+        let year = value[0..4].parse().ok()?;
+        let month = time::Month::try_from(value[5..7].parse::<u8>().ok()?).ok()?;
+        let day = value[8..10].parse().ok()?;
+        time::Date::from_calendar_date(year, month, day).ok()
+    } else {
+        time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
+            .ok()
+            .map(|value| value.to_offset(time::UtcOffset::UTC).date())
+    }
+}
+
+fn snapshot_window_issue(
+    window: Option<&aexeo_contracts::CrawlSnapshotWindow>,
+    declared: Option<&str>,
+) -> Option<&'static str> {
+    use time::format_description::well_known::Rfc3339;
+    let window = window?;
+    let start = window
+        .started_at
+        .as_deref()
+        .and_then(|value| time::OffsetDateTime::parse(value, &Rfc3339).ok());
+    let finish = time::OffsetDateTime::parse(&window.finished_at, &Rfc3339).ok();
+    let (Some(start), Some(finish)) = (start, finish) else {
+        return Some("audit_snapshot_window_unverified");
+    };
+    if start > finish {
+        return Some("audit_snapshot_window_invalid");
+    }
+    let start_day = start.to_offset(time::UtcOffset::UTC).date();
+    let finish_day = finish.to_offset(time::UtcOffset::UTC).date();
+    if declared
+        .and_then(snapshot_day)
+        .is_some_and(|day| day < start_day || day > finish_day)
+    {
+        return Some("audit_snapshot_date_mismatch");
+    }
+    None
+}
+
 fn http_origin(value: &str) -> Option<String> {
     Url::parse(value)
         .ok()
@@ -648,9 +700,19 @@ pub fn build_link_report_from_audit_with_static_urls(
         .or_else(|| {
             attestation
                 .and_then(|value| value.snapshot.as_ref()?.started_at.as_deref())
-                .and_then(|started_at| started_at.get(..10))
-                .map(str::to_string)
+                .and_then(snapshot_day)
+                .map(|date| date.to_string())
         });
+    let snapshot_issue = if static_urls.is_none() {
+        let window = attestation.and_then(|value| value.snapshot.as_ref());
+        if window.is_none() {
+            Some("audit_snapshot_window_unverified")
+        } else {
+            snapshot_window_issue(window, snapshot_date.as_deref())
+        }
+    } else {
+        None
+    };
     let input = LinkReportInput {
         version: 1,
         identity: Some(identity),
@@ -661,17 +723,25 @@ pub fn build_link_report_from_audit_with_static_urls(
     };
     let mut report = build_link_report(&input)?;
     report.static_url_mapping = mapping;
-    // An unconfirmed release, like a coverage gap, keeps every page ineligible.
+    // Unconfirmed release or contradictory snapshot evidence keeps pages ineligible.
+    let extra_issues: Vec<_> = release_issues
+        .iter()
+        .copied()
+        .chain(snapshot_issue)
+        .collect();
+    if let Some(issue) = snapshot_issue {
+        issues.insert(issue);
+    }
     if let Some(result) = report
         .reconciliation
         .as_mut()
-        .filter(|_| !release_issues.is_empty())
+        .filter(|_| !extra_issues.is_empty())
     {
         result.comparable = false;
         result.eligible_pages.clear();
         result
             .issues
-            .extend(release_issues.iter().map(|issue| (*issue).to_string()));
+            .extend(extra_issues.iter().map(|issue| (*issue).to_string()));
         result.issues.sort();
         result.issues.dedup();
         issues.insert("inventory_not_comparable");
@@ -1115,13 +1185,6 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
     if !input.crawl_complete {
         issues.push("crawl_incomplete".to_string());
     }
-    if input
-        .snapshot_date
-        .as_deref()
-        .is_none_or(|date| date.trim().is_empty())
-    {
-        issues.push("snapshot_date_missing".to_string());
-    }
     let mut seen = std::collections::BTreeSet::new();
     let mut evidence = Vec::new();
     let mut observations = Vec::<(HtmlLinkMetadata, bool, Option<String>)>::new();
@@ -1145,12 +1208,17 @@ pub fn build_link_report(input: &LinkReportInput) -> anyhow::Result<LinkReport> 
                 .map(|locale| (entry.url.as_str(), locale))
         })
         .collect::<std::collections::BTreeMap<_, _>>();
-    if input
-        .snapshot_date
-        .as_deref()
-        .is_none_or(|date| date.trim().is_empty())
-    {
-        coverage_issues.insert("snapshot_date_missing");
+    match input.snapshot_date.as_deref() {
+        None | Some("") => {
+            coverage_issues.insert("snapshot_date_missing");
+        }
+        Some(date) if date.trim().is_empty() => {
+            coverage_issues.insert("snapshot_date_missing");
+        }
+        Some(date) if snapshot_day(date).is_none() => {
+            coverage_issues.insert("snapshot_date_invalid");
+        }
+        Some(_) => {}
     }
     for page in &input.pages {
         if !seen.insert(&page.url) {
@@ -1809,7 +1877,7 @@ mod tests {
             "site":{"site_url":"https://example.org/", "root":"crawl", "deployment_model":"runtime_snapshot",
                 "crawl_meta":{"visited_pages":3, "max_pages":10, "discovered_internal_routes":3, "truncated":false},
                 "pages":[page("", "<main><a href='/a'>A</a></main>"), page("a", "<main>A</main>"), page("orphan", "<main>Orphan</main>")]},
-            "crawl_attestation":{"seeded_from":{"inventory_identity":attested_identity(), "url_count":3}, "engine":"http"}});
+            "crawl_attestation":{"seeded_from":{"inventory_identity":attested_identity(), "url_count":3}, "engine":"http", "snapshot":{"started_at":"2026-11-07T00:00:00Z", "finished_at":"2026-11-07T23:59:59Z"}}});
         let inventory_pages = ["", "a", "orphan"].map(|route| {
             serde_json::json!({"url":format!("https://example.org/{route}"), "disposition":"published", "target":null, "locale":"en"})
         });
@@ -2254,6 +2322,84 @@ mod tests {
     ];
 
     #[test]
+    fn invalid_snapshot_dates_withhold_inventory_eligibility() {
+        let (artifact, mut context) = attested_audit();
+        for value in ["tomorrow", "2026-02-30", "2026-11-07T25:00:00Z"] {
+            context.snapshot_date = Some(value.into());
+            let report = attested_report(&artifact, &context);
+            assert!(
+                report
+                    .issues
+                    .iter()
+                    .any(|issue| issue == "snapshot_date_invalid"),
+                "{value}"
+            );
+            let reconciliation = report.reconciliation.unwrap();
+            assert!(!reconciliation.comparable, "{value}");
+            assert!(reconciliation.eligible_pages.is_empty(), "{value}");
+        }
+    }
+
+    #[test]
+    fn declared_snapshot_date_must_not_contradict_observed_crawl_window() {
+        let (artifact, mut context) = audit_with_release(release(Some("r1"), 3, 0, &["r1"]));
+        for date in ["2026-11-06", "2026-11-07", "2026-11-08T00:30:00+02:00"] {
+            context.snapshot_date = Some(date.into());
+            let report = attested_report(&artifact, &context);
+            assert!(
+                report.reconciliation.unwrap().comparable,
+                "{date}: {:?}",
+                report.issues
+            );
+        }
+        for date in ["2026-11-05", "2026-11-08", "2026-11-08T00:30:00Z"] {
+            context.snapshot_date = Some(date.into());
+            let report = attested_report(&artifact, &context);
+            assert!(
+                report
+                    .issues
+                    .iter()
+                    .any(|issue| issue == "audit_snapshot_date_mismatch"),
+                "{date}"
+            );
+            let reconciliation = report.reconciliation.unwrap();
+            assert!(!reconciliation.comparable, "{date}");
+            assert!(reconciliation.eligible_pages.is_empty(), "{date}");
+        }
+    }
+
+    #[test]
+    fn missing_or_invalid_crawl_windows_withhold_inventory_eligibility() {
+        let (artifact, context) = attested_audit();
+        for (snapshot, issue) in [
+            (serde_json::Value::Null, "audit_snapshot_window_unverified"),
+            (
+                serde_json::json!({"started_at":null,"finished_at":"2026-11-07T00:00:00Z"}),
+                "audit_snapshot_window_unverified",
+            ),
+            (
+                serde_json::json!({"started_at":"bad","finished_at":"2026-11-07T00:00:00Z"}),
+                "audit_snapshot_window_unverified",
+            ),
+            (
+                serde_json::json!({"started_at":"2026-11-08T00:00:00Z","finished_at":"2026-11-07T00:00:00Z"}),
+                "audit_snapshot_window_invalid",
+            ),
+        ] {
+            let mut altered = artifact.clone();
+            altered["crawl_attestation"]["snapshot"] = snapshot;
+            let report = attested_report(&altered, &context);
+            assert!(
+                report.issues.iter().any(|actual| actual == issue),
+                "{issue}"
+            );
+            let reconciliation = report.reconciliation.unwrap();
+            assert!(!reconciliation.comparable, "{issue}");
+            assert!(reconciliation.eligible_pages.is_empty(), "{issue}");
+        }
+    }
+
+    #[test]
     fn an_attested_release_and_crawl_start_fill_the_identity_and_keep_eligibility() {
         let (artifact, mut context) = audit_with_release(release(Some("r1"), 3, 0, &["r1"]));
         context.identity.as_mut().unwrap().release = String::new();
@@ -2270,10 +2416,11 @@ mod tests {
         let reconciliation = report.reconciliation.as_ref().unwrap();
         assert!(reconciliation.comparable, "{:?}", reconciliation.issues);
         assert!(!reconciliation.eligible_pages.is_empty());
-        // A date the caller supplies still wins over the crawl's start.
+        // Preserve the declaration, but do not treat a conflicting day as comparable.
         context.snapshot_date = Some("2026-11-05".into());
         let report = attested_report(&artifact, &context);
         assert_eq!(report.snapshot_date.as_deref(), Some("2026-11-05"));
+        assert!(!report.reconciliation.unwrap().comparable);
         // An attested release never makes an unseeded crawl complete.
         let (mut artifact, context) = audit_with_release(release(Some("r1"), 3, 0, &["r1"]));
         artifact["crawl_attestation"]["seeded_from"]["url_count"] = 0.into();

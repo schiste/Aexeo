@@ -48,7 +48,9 @@ page served with a 2xx status and no noindex directive. A `draft` page observed
 with a 404 or 410 status is expected to be unserved: that status and its missing
 headers do not withhold eligibility. Matching caller-provided
 identities and completeness attestations cannot independently prove that a
-snapshot is correct.
+snapshot is correct. `snapshot_date` accepts an ISO calendar date (`YYYY-MM-DD`)
+or RFC 3339 timestamp; an invalid value raises `snapshot_date_invalid` and
+withholds eligibility. Timestamps are compared as UTC calendar dates.
 
 `requested_url` is optional on an input page and records the URL fetched when
 it differs from `url`. `redirect_chain` is also optional: the redirect responses
@@ -453,6 +455,16 @@ reconciliation not comparable, so no page is eligible:
 | Pages served more than one marker value | `audit_release_inconsistent` |
 | A page served no marker, or none did | `audit_release_unattested` |
 | A resumed segment saw a new release value | `audit_snapshot_spans_releases` |
+
+Independently of release markers, an HTTP or browser crawl audit also requires
+a valid, ordered observed crawl window for inventory eligibility. A missing,
+incomplete or unparseable window raises `audit_snapshot_window_unverified`; an inverted window
+raises `audit_snapshot_window_invalid`. A declared snapshot date outside the
+inclusive UTC days of that window raises `audit_snapshot_date_mismatch`.
+These checks preserve the declared date and the observations for review, but
+clear eligibility. A matching day does not establish the capture time, CMS
+freshness or snapshot provenance. Direct `link-graph` inputs still rely on the
+producer's completeness and snapshot assertions; they do not carry a crawl window.
 
 When no release is attested, the context's release, if any, stays in the
 identity. A release never grants completeness: `crawl_complete` still follows
