@@ -5,9 +5,12 @@ inputs, establish their provenance and freshness, and make publication atomic.
 This runner is not a sandbox and does not authenticate its child process.
 """
 import argparse
+import hashlib
+import hmac
 import json
 import math
 import os
+import re
 from pathlib import Path
 import subprocess
 import stat
@@ -52,11 +55,43 @@ def read_fresh(path):
     return data
 
 
-def run(paths, command, timeout, required_checks, expected_validator, content_files=None):
+def verify_executable(path, expected):
+    """Compare a host-pinned executable before/after use; this is not authentication."""
+    if (not hasattr(os, 'O_NOFOLLOW') or not os.path.isabs(path)
+            or not isinstance(expected, str) or re.fullmatch(r'[0-9a-f]{64}', expected) is None):
+        raise VerificationError('invalid executable pin or path')
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, 'O_NONBLOCK', 0))
+        with os.fdopen(fd, 'rb') as file:
+            before = os.fstat(file.fileno())
+            if not stat.S_ISREG(before.st_mode):
+                raise VerificationError('pinned executable is not a regular file')
+            digest = hashlib.sha256()
+            total = 0
+            while chunk := file.read(65536):
+                total += len(chunk)
+                if total > 1024 * 1024 * 1024:
+                    raise VerificationError('pinned executable exceeds size limit')
+                digest.update(chunk)
+            after = os.fstat(file.fileno())
+            current = os.stat(path, follow_symlinks=False)
+    except OSError as error:
+        raise VerificationError('cannot read pinned executable') from error
+    def identity(value):
+        return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns
+    if (identity(before) != identity(after) or identity(after) != identity(current)
+            or not hmac.compare_digest(digest.hexdigest(), expected)):
+        raise VerificationError('pinned executable changed or digest differs')
+
+
+def run(paths, command, timeout, required_checks, expected_validator, content_files=None,
+        executable_sha256=None):
     """Observe one direct process and compare independently supplied inputs."""
     if (not command or any(not isinstance(arg, str) or not arg for arg in command)
             or not math.isfinite(timeout) or not 0 < timeout <= 300):
         raise VerificationError('invalid evaluator command or timeout')
+    if executable_sha256 is not None:
+        verify_executable(command[0], executable_sha256)
     inputs = read_inputs(paths)
     map_bytes = read_stable(content_files) if content_files is not None else None
     content_bytes = read_mapped_content(content_files) if content_files is not None else None
@@ -72,6 +107,8 @@ def run(paths, command, timeout, required_checks, expected_validator, content_fi
                 env=env, timeout=timeout, check=False)
         except (OSError, subprocess.TimeoutExpired) as error:
             raise VerificationError('fresh evaluator did not complete successfully') from error
+        if executable_sha256 is not None:
+            verify_executable(command[0], executable_sha256)
         if completed.returncode != 0:
             raise VerificationError('fresh evaluator did not complete successfully')
         fresh = read_fresh(output)
@@ -102,6 +139,7 @@ def main():
     parser.add_argument('--validator-name', required=True)
     parser.add_argument('--validator-version', required=True)
     parser.add_argument('--timeout-seconds', type=float, required=True)
+    parser.add_argument('--executable-sha256', help='optional host-pinned SHA-256 of the absolute evaluator executable')
     parser.add_argument('--telemetry', action='store_true')
     parser.add_argument('command', nargs=argparse.REMAINDER,
                         help='trusted evaluator command after --')
@@ -113,7 +151,7 @@ def main():
     started = time.perf_counter()
     try:
         result = run(paths, command, args.timeout_seconds, args.require_check,
-                     (args.validator_name, args.validator_version), args.content_files)
+                     (args.validator_name, args.validator_version), args.content_files, args.executable_sha256)
     except (VerificationError, OSError, ValueError, TypeError, KeyError) as error:
         print(json.dumps({'matched': False, 'publication_authorized': False}))
         print(str(error), file=sys.stderr)
@@ -127,6 +165,7 @@ def main():
                  'required_check_count': len(args.require_check),
                  'collection_supplied': args.collection is not None,
                  'content_files_supplied': args.content_files is not None,
+                 'executable_pin_supplied': args.executable_sha256 is not None,
                  'external_evidence_supplied': args.external_evidence is not None}
         print(json.dumps(event, separators=(',', ':')), file=sys.stderr)
     return code
