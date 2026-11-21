@@ -935,19 +935,31 @@ pub struct CandidateDecisionContext<'a> {
 }
 
 fn candidate_revisions(context: &CandidateDecisionContext<'_>) -> Result<([u8; 32], [u8; 32])> {
+    candidate_revisions_inner(context, true)
+}
+
+// The relaxed mode is only valid when the caller independently verifies all
+// declared state bytes before accepting a verdict. It does not dereference URIs.
+fn candidate_revisions_inner(
+    context: &CandidateDecisionContext<'_>,
+    require_inline: bool,
+) -> Result<([u8; 32], [u8; 32])> {
     use crate::content_candidate::overlay_candidate;
     use crate::content_candidate_profile::candidate_revision_digest;
     if !context.base.complete {
         bail!("candidate base inventory is not declared complete");
     }
-    // Exact byte equality between the evaluated changes and projections must
-    // be checked even for deleted and renamed entities, which are not evaluated.
+    // Producers require inline bytes so the overlay can compare them exactly,
+    // including deleted and renamed entities. Independent verification may use
+    // references only when every state stream is checked before acceptance.
     for entry in &context.decision.change.entries {
         for state in [entry.before.as_ref(), entry.after.as_ref()]
             .into_iter()
             .flatten()
         {
-            if state.inline.is_none() || state.file.is_some() || state.uri.is_some() {
+            if require_inline
+                && (state.inline.is_none() || state.file.is_some() || state.uri.is_some())
+            {
                 bail!("candidate-bound changes require inline content states");
             }
         }
@@ -1058,7 +1070,10 @@ pub fn verify_draft_passing_candidate_with_content<
     if envelope.verdict.validator.version != env!("CARGO_PKG_VERSION") {
         anyhow::bail!("verdict validator version differs from the host options");
     }
-    let (base_digest, candidate_digest) = candidate_revisions(context)?;
+    // Referenced states may be reconstructed from candidate snapshots here only
+    // because verify_draft_passing_with_content checks every independent stream
+    // against the change digest before this function can return success.
+    let (base_digest, candidate_digest) = candidate_revisions_inner(context, false)?;
     let artifacts = context.decision.artifacts_with_html_scope(scope)?;
     let mut inputs = artifacts.as_inputs();
     inputs.external_evidence = external_evidence;
@@ -3156,6 +3171,229 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn independent_candidate_verifier_checks_referenced_state_bytes() {
+        use crate::content_candidate::{CandidateItem, CandidateSnapshot};
+        use crate::content_gate_sources::{ContentPhase, IndependentContent};
+        use aexeo_contracts::content_gate_portable_v2::{
+            BoundVerdict, CurrentInputs, PassingRequirements,
+        };
+        use std::io::{self, Cursor};
+
+        struct Missing;
+        impl IndependentContent for Missing {
+            type Reader = Cursor<Vec<u8>>;
+            fn open(&mut self, _: &str, _: ContentPhase) -> io::Result<Self::Reader> {
+                Err(io::Error::new(io::ErrorKind::NotFound, "unavailable"))
+            }
+        }
+        struct Bytes(Vec<u8>);
+        impl IndependentContent for Bytes {
+            type Reader = Cursor<Vec<u8>>;
+            fn open(&mut self, entity: &str, phase: ContentPhase) -> io::Result<Self::Reader> {
+                assert_eq!(entity, "article");
+                assert_eq!(phase, ContentPhase::After);
+                Ok(Cursor::new(self.0.clone()))
+            }
+        }
+        let input = change();
+        let policy = preset(1);
+        let decision = OfflineDecisionContext {
+            change: &input,
+            preset: &policy,
+            max_entry_bytes: 1024,
+            max_total_bytes: 1024,
+            plain_text_paragraphs: false,
+            collection: None,
+            evaluator_identity: b"build",
+        };
+        let base = CandidateSnapshot {
+            scope: "site".into(),
+            site_id: "s".into(),
+            site_base_url: None,
+            base: input.base.clone(),
+            complete: true,
+            items: vec![],
+        };
+        let after = vec![CandidateItem {
+            entity_id: "article".into(),
+            public_path: "/article".into(),
+            media_type: "text/plain".into(),
+            revision: None,
+            sha256: input.entries[0].after.as_ref().unwrap().sha256.clone(),
+            source: "abc".into(),
+            links: None,
+        }];
+        let original = CandidateDecisionContext {
+            decision: &decision,
+            base: &base,
+            after: &after,
+        };
+        let original = evaluate_draft_portable_candidate_verdict(
+            &original,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        let check = original
+            .verdict
+            .checks
+            .iter()
+            .find(|c| c.blocking && c.status == CheckStatus::Passed)
+            .unwrap()
+            .id
+            .clone();
+        let requirements = PassingRequirements {
+            validator_name: "aexeo",
+            validator_version: env!("CARGO_PKG_VERSION"),
+            required_checks: &[&check],
+            exit_code: 0,
+            timed_out: false,
+        };
+        for kind in ["file", "uri"] {
+            let mut change = input.clone();
+            let state = change.entries[0].after.as_mut().unwrap();
+            state.inline = None;
+            if kind == "file" {
+                state.file = Some("article.txt".into());
+                change.content_root = Some("/trusted".into());
+            } else {
+                state.uri = Some("https://example.invalid/article".into());
+            }
+            let decision = OfflineDecisionContext {
+                change: &change,
+                preset: &policy,
+                max_entry_bytes: 1024,
+                max_total_bytes: 1024,
+                plain_text_paragraphs: false,
+                collection: None,
+                evaluator_identity: b"build",
+            };
+            let ctx = CandidateDecisionContext {
+                decision: &decision,
+                base: &base,
+                after: &after,
+            };
+            assert!(candidate_revisions(&ctx).is_err()); // Producer stays inline-only.
+            let (base_digest, candidate_digest) = candidate_revisions_inner(&ctx, false).unwrap();
+            let artifacts = decision.artifacts().unwrap();
+            let current = CurrentInputs {
+                artifacts: artifacts.as_inputs(),
+                base_revision_sha256: &base_digest,
+                candidate_revision_sha256: &candidate_digest,
+            };
+            let portable = BoundVerdict::new(original.verdict.clone(), &current).unwrap();
+            for (content, limit, valid) in [
+                (b"abc".as_slice(), 3, true),
+                (b"wrong".as_slice(), 8, false),
+                (b"abc".as_slice(), 2, false),
+            ] {
+                let result = verify_draft_passing_candidate_with_content(
+                    &portable,
+                    &ctx,
+                    HtmlContentScope::Document,
+                    None,
+                    &requirements,
+                    &mut Bytes(content.to_vec()),
+                    limit,
+                    limit,
+                );
+                assert_eq!(result.is_ok(), valid, "{kind}");
+            }
+            assert!(
+                verify_draft_passing_candidate_with_content(
+                    &portable,
+                    &ctx,
+                    HtmlContentScope::Document,
+                    None,
+                    &requirements,
+                    &mut Missing,
+                    3,
+                    3,
+                )
+                .is_err()
+            );
+            let mut wrong_projection = after.clone();
+            wrong_projection[0].source = "other".into();
+            let wrong = CandidateDecisionContext {
+                after: &wrong_projection,
+                ..ctx
+            };
+            assert!(
+                verify_draft_passing_candidate_with_content(
+                    &portable,
+                    &wrong,
+                    HtmlContentScope::Document,
+                    None,
+                    &requirements,
+                    &mut Bytes(b"abc".to_vec()),
+                    3,
+                    3,
+                )
+                .is_err()
+            );
+        }
+        // An update must check both sides, even though only the after state is evaluated.
+        struct Phased {
+            wrong_before: bool,
+        }
+        impl IndependentContent for Phased {
+            type Reader = Cursor<Vec<u8>>;
+            fn open(&mut self, _: &str, phase: ContentPhase) -> io::Result<Self::Reader> {
+                let bytes = if phase == ContentPhase::Before && self.wrong_before {
+                    b"bad".to_vec()
+                } else {
+                    b"abc".to_vec()
+                };
+                Ok(Cursor::new(bytes))
+            }
+        }
+        let mut update = input.clone();
+        update.entries[0].operation = Operation::Update;
+        let mut before = update.entries[0].after.clone().unwrap();
+        before.inline = None;
+        before.uri = Some("https://example.invalid/before".into());
+        update.entries[0].before = Some(before);
+        let mut update_base = base.clone();
+        update_base.items = after.clone();
+        let update_decision = OfflineDecisionContext {
+            change: &update,
+            preset: &policy,
+            max_entry_bytes: 1024,
+            max_total_bytes: 1024,
+            plain_text_paragraphs: false,
+            collection: None,
+            evaluator_identity: b"build",
+        };
+        let ctx = CandidateDecisionContext {
+            decision: &update_decision,
+            base: &update_base,
+            after: &after,
+        };
+        let (base_digest, candidate_digest) = candidate_revisions_inner(&ctx, false).unwrap();
+        let artifacts = update_decision.artifacts().unwrap();
+        let current = CurrentInputs {
+            artifacts: artifacts.as_inputs(),
+            base_revision_sha256: &base_digest,
+            candidate_revision_sha256: &candidate_digest,
+        };
+        let portable = BoundVerdict::new(original.verdict.clone(), &current).unwrap();
+        for wrong_before in [false, true] {
+            let result = verify_draft_passing_candidate_with_content(
+                &portable,
+                &ctx,
+                HtmlContentScope::Document,
+                None,
+                &requirements,
+                &mut Phased { wrong_before },
+                3,
+                6,
+            );
+            assert_eq!(result.is_ok(), !wrong_before);
+        }
     }
 
     #[test]

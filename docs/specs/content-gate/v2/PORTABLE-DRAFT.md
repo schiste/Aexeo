@@ -148,10 +148,13 @@ also rejects a verdict whose declared HTML scope differs from the independently
 selected scope, whose validator profile differs from the resolved policy name,
 or whose validator version differs from the engine version in host options. These
 comparisons detect inconsistent labels; they do not authenticate the evaluator.
-It inherits the candidate implementation's inline-state restriction and Aexeo's
-non-portable artifact encodings. The caller must acquire and trust the context,
-bytes and optional evidence independently, establish snapshot completeness and
-freshness, and protect the publication boundary. The helper does not establish
+The helper accepts referenced states only when the caller independently supplies
+a stream for every declared state, including before states. The stream digest
+must match the change and candidate snapshot; no reference or URI is fetched.
+This uses Aexeo's non-portable artifact encodings, and the candidate-bound
+producer still requires inline states. The caller must acquire and trust the
+context, bytes and optional evidence independently, establish snapshot completeness
+and freshness, and protect the publication boundary. The helper does not establish
 those properties or grant publication authorization.
 
 ## Experimental fresh-process runner
