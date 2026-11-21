@@ -313,6 +313,9 @@ Options:
       --content-root <content-root>
           Authorize this absolute content root for local file references (Linux and supported macOS kernels)
 
+      --host-content-map <host-content-map>
+          Map every referenced state to a host-provided absolute path beneath the authorized content root; no URI is fetched
+
       --extension-results <extension-results>
           Load explicitly supplied, input-bound external gate results for change entries
 

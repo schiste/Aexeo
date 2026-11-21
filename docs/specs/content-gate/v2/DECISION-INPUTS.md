@@ -220,8 +220,10 @@ already-acquired content for a specific change entity, before/after phase and
 URI. Its default implementation returns unavailable. The engine does not fetch
 URIs or grant network access. The host must enforce its own acquisition policy,
 confine or otherwise secure any access, and establish the identity, provenance
-and freshness of the snapshot it supplies. Existing CLI file providers do not
-implement this method, so URI states remain unavailable through the CLI.
+and freshness of the snapshot it supplies. The CLI can opt in through
+`--host-content-map` and a separately authorized `--content-root`, without
+network access. See [the portable draft](PORTABLE-DRAFT.md#referenced-content-in-the-independent-python-verifier)
+for map coverage and confinement requirements.
 
 Candidate-bound draft evaluation checks every referenced before and after stream
 against its corresponding candidate snapshot with configured size limits; proposed

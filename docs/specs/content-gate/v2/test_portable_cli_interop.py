@@ -75,6 +75,164 @@ class PortableCliInterop(unittest.TestCase):
             self.assertNotEqual(rejected.returncode, 0)
             self.assertFalse((root / 'rejected').exists())
 
+    def test_uri_backed_candidate_with_real_cli_and_independent_runner(self):
+        fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
+        change = json.loads(fixture['artifacts']['change'])
+        with tempfile.TemporaryDirectory(prefix='aexeo-v2-uri-') as directory:
+            root = Path(directory)
+            state = change['entries'][0]['after']
+            source = state.pop('inline')
+            state['uri'] = 'https://example.invalid/private-content'
+            change['content_root'] = str(root)
+            (root / 'article.txt').write_text(source, encoding='utf-8')
+            for name in ('base', 'after'):
+                (root / name).write_text(json.dumps(fixture[name]), encoding='utf-8')
+            (root / 'change').write_text(json.dumps(change), encoding='utf-8')
+            (root / 'preset').write_text("version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n", encoding='utf-8')
+            (root / 'content-map').write_text(json.dumps([{'entry': 0, 'state': 'after',
+                'path': str(root / 'article.txt')}]), encoding='utf-8')
+            binary = os.environ.get('AEXEO_CLI_BIN')
+            executable = [binary] if binary else ['cargo', 'run', '--locked', '--quiet', '-p', 'aexeo-cli', '--']
+            common = executable + ['content-change', '--preset', 'test', '--preset-source', 'test=' + str(root / 'preset'),
+                '--offline-receipt', '--evaluator-identity', 'build', '--content-root', str(root),
+                '--host-content-map', str(root / 'content-map')]
+            env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(root / 'change'))
+            without_map = subprocess.run(common[:-2] + ['--offline-receipt-bundle'], cwd=ROOT,
+                env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'without-map')), capture_output=True, text=True)
+            self.assertNotEqual(without_map.returncode, 0)
+            self.assertFalse((root / 'without-map').exists())
+            export = subprocess.run(common + ['--offline-receipt-bundle'], cwd=ROOT,
+                env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'bundle')), capture_output=True, text=True)
+            self.assertEqual(export.returncode, 0, export.stderr)
+            bundle = json.loads((root / 'bundle').read_text(encoding='utf-8'))
+            for name in ('change', 'resolved_policy', 'host_options', 'evaluator'):
+                (root / name).write_text(bundle['artifacts'][name], encoding='utf-8')
+            command = common + ['--experimental-bound-verdict', '--candidate-base', str(root / 'base'),
+                '--candidate-after', str(root / 'after'), '--draft-portable-verdict', '--telemetry']
+            for name in ('previous', 'fresh'):
+                replay = ['--verify-draft-portable-verdict', str(root / 'previous')] if name == 'fresh' else []
+                result = subprocess.run(command + replay, cwd=ROOT,
+                    env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / name)), capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                events = [json.loads(line) for line in result.stderr.splitlines() if line.startswith('{')]
+                event = next(event for event in events if event.get('event') == 'content_change_portable_draft')
+                self.assertEqual(event['file_state_count'], 0)
+                self.assertEqual(event['uri_state_count'], 1)
+                self.assertNotIn('private-content', result.stderr)
+                self.assertNotIn(str(root), result.stderr)
+            verify = [sys.executable, str(HERE / 'verify_portable_verdict.py')]
+            for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
+                verify += ['--' + name.replace('_', '-'), str(root / name)]
+            verify += ['--content-files', str(root / 'content-map'), '--require-check', 'gate:7:article:words',
+                '--validator-name', 'aexeo', '--validator-version', '0.0.24', '--fresh-exit-code', '0',
+                '--fresh-timed-out', 'false']
+            result = subprocess.run(verify, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+            runner = [sys.executable, str(HERE / 'run_portable_verdict.py')]
+            for name in ('previous', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
+                runner += ['--' + name.replace('_', '-'), str(root / name)]
+            runner += ['--content-files', str(root / 'content-map'), '--require-check', 'gate:7:article:words',
+                '--validator-name', 'aexeo', '--validator-version', '0.0.24', '--timeout-seconds', '180', '--']
+            result = subprocess.run(runner + command, cwd=ROOT, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+            valid_map = [{'entry': 0, 'state': 'after', 'path': str(root / 'article.txt')}]
+            bad_maps = [[], valid_map * 2, [{'entry': 0, 'state': 'before', 'path': str(root / 'article.txt')}],
+                [{'entry': 0, 'state': 'after', 'path': str(root.parent / 'outside')}],
+                [{'entry': 0, 'state': 'after', 'path': str(root / '..' / 'outside')}],
+                [{'entry': 0, 'state': 'after', 'path': str(root / 'private-link')}]]
+            (root / 'private-link').symlink_to(root / 'article.txt')
+            for index, bad_map in enumerate(bad_maps):
+                (root / 'content-map').write_text(json.dumps(bad_map), encoding='utf-8')
+                output = root / ('invalid-map-' + str(index))
+                rejected = subprocess.run(command, cwd=ROOT,
+                    env=dict(env, CONTENT_GATE_VERDICT_FILE=str(output)), capture_output=True, text=True)
+                self.assertNotEqual(rejected.returncode, 0, bad_map)
+                self.assertFalse(output.exists())
+                self.assertNotIn('private-content', rejected.stderr)
+            # Never replace the map itself or a mapped content input with a verdict.
+            for output in (root / 'content-map', root / 'article.txt'):
+                (root / 'content-map').write_text(json.dumps(valid_map), encoding='utf-8')
+                before = output.read_bytes()
+                rejected = subprocess.run(command, cwd=ROOT,
+                    env=dict(env, CONTENT_GATE_VERDICT_FILE=str(output)), capture_output=True, text=True)
+                self.assertNotEqual(rejected.returncode, 0)
+                self.assertEqual(output.read_bytes(), before)
+            (root / 'content-map').write_text('[{"entry":0,"entry":0,"state":"after","path":"ignored"}]', encoding='utf-8')
+            rejected = subprocess.run(command, cwd=ROOT,
+                env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'duplicate-key')), capture_output=True, text=True)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertFalse((root / 'duplicate-key').exists())
+            (root / 'content-map').write_text(json.dumps(valid_map), encoding='utf-8')
+            (root / 'article.txt').write_text('substituted', encoding='utf-8')
+            self.assertEqual(subprocess.run(verify, capture_output=True, text=True).returncode, 2)
+            rejected = subprocess.run(command, cwd=ROOT,
+                env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'rejected')), capture_output=True, text=True)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertFalse((root / 'rejected').exists())
+
+    def test_mixed_file_uri_update_checks_both_phases(self):
+        fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
+        change = json.loads(fixture['artifacts']['change'])
+        entry = change['entries'][0]
+        old_source = 'previous version'
+        old_digest = hashlib.sha256(old_source.encode()).hexdigest()
+        entry['operation'] = 'update'
+        entry['before'] = {'uri': 'https://example.invalid/old', 'sha256': old_digest}
+        source = entry['after'].pop('inline')
+        entry['after']['file'] = 'new.txt'
+        old = dict(fixture['after'][0], source=old_source, sha256=old_digest)
+        fixture['base']['items'] = [old]
+        with tempfile.TemporaryDirectory(prefix='aexeo-v2-mixed-') as directory:
+            root = Path(directory)
+            change['content_root'] = str(root)
+            (root / 'old.txt').write_text(old_source, encoding='utf-8')
+            (root / 'new.txt').write_text(source, encoding='utf-8')
+            for name in ('base', 'after'):
+                (root / name).write_text(json.dumps(fixture[name]), encoding='utf-8')
+            (root / 'change').write_text(json.dumps(change), encoding='utf-8')
+            (root / 'preset').write_text("version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=1\n", encoding='utf-8')
+            mappings = [{'entry': 0, 'state': 'before', 'path': str(root / 'old.txt')},
+                        {'entry': 0, 'state': 'after', 'path': str(root / 'new.txt')}]
+            (root / 'content-map').write_text(json.dumps(mappings), encoding='utf-8')
+            binary = os.environ.get('AEXEO_CLI_BIN')
+            executable = [binary] if binary else ['cargo', 'run', '--locked', '--quiet', '-p', 'aexeo-cli', '--']
+            common = executable + ['content-change', '--preset', 'test', '--preset-source', 'test=' + str(root / 'preset'),
+                '--offline-receipt', '--evaluator-identity', 'build', '--content-root', str(root), '--host-content-map', str(root / 'content-map')]
+            env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(root / 'change'))
+            export = subprocess.run(common + ['--offline-receipt-bundle'], cwd=ROOT,
+                env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'bundle')), capture_output=True, text=True)
+            self.assertEqual(export.returncode, 0, export.stderr)
+            bundle = json.loads((root / 'bundle').read_text(encoding='utf-8'))
+            for name in ('change', 'resolved_policy', 'host_options', 'evaluator'):
+                (root / name).write_text(bundle['artifacts'][name], encoding='utf-8')
+            command = common + ['--experimental-bound-verdict', '--candidate-base', str(root / 'base'),
+                '--candidate-after', str(root / 'after'), '--draft-portable-verdict', '--telemetry']
+            for name in ('previous', 'fresh'):
+                run = subprocess.run(command, cwd=ROOT, env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / name)), capture_output=True, text=True)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                event = next(json.loads(line) for line in run.stderr.splitlines() if 'content_change_portable_draft' in line)
+                self.assertEqual((event['file_state_count'], event['uri_state_count']), (1, 1))
+            verify = [sys.executable, str(HERE / 'verify_portable_verdict.py')]
+            for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
+                verify += ['--' + name.replace('_', '-'), str(root / name)]
+            verify += ['--content-files', str(root / 'content-map'), '--require-check', 'gate:7:article:words',
+                '--validator-name', 'aexeo', '--validator-version', '0.0.24', '--fresh-exit-code', '0', '--fresh-timed-out', 'false']
+            checked = subprocess.run(verify, capture_output=True, text=True)
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+            (root / 'old.txt').write_text('substituted old version', encoding='utf-8')
+            self.assertEqual(subprocess.run(verify, capture_output=True, text=True).returncode, 2)
+            rejected = subprocess.run(command, cwd=ROOT, env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'rejected')), capture_output=True, text=True)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertFalse((root / 'rejected').exists())
+            (root / 'old.txt').write_text(old_source, encoding='utf-8')
+            mappings[0]['path'], mappings[1]['path'] = mappings[1]['path'], mappings[0]['path']
+            (root / 'content-map').write_text(json.dumps(mappings), encoding='utf-8')
+            rejected = subprocess.run(command, cwd=ROOT, env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / 'rejected')), capture_output=True, text=True)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertFalse((root / 'rejected').exists())
+
     def test_source_bound_links_with_real_cli_and_independent_comparator(self):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
         source = '[first](https://example.org/a)'

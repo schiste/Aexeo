@@ -210,8 +210,15 @@ coherent snapshot, or authenticate its source.
 The Aexeo candidate-bound producer supports local file states through its
 host-selected confined provider. A Rust host can also explicitly supply URI-state
 bytes by implementing `open_uri` on that provider; see [decision inputs](DECISION-INPUTS.md#host-supplied-uri-content-in-rust).
-The engine does not fetch URIs and the CLI leaves them unavailable. The host must pass
-`--content-root` to the CLI, independently acquire the map and snapshots, and
+The engine does not fetch URIs. For offline receipt and candidate verdict flows,
+the CLI can opt in with `--host-content-map map.json --content-root /trusted/root`.
+The same map may be passed to the independent verifier and runner as
+`--content-files map.json`. Every referenced state must occur exactly once; paths
+must be absolute, beneath the authorized root, and safely openable by the platform
+confined file provider. File references must map to their declared file, while URI
+references map to host-provided files. Missing, duplicate, extra, aliased or
+unconfined inputs fail closed. The map itself and its paths may be sensitive.
+The host must independently acquire the map and snapshots, and
 ensure that they describe the same candidate. The Python comparator and runner
 have been exercised against the real CLI. Other host implementations must add
 and test their own equivalent support. No mapping or successful match grants

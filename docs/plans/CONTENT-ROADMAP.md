@@ -885,6 +885,10 @@ missing fields retain observed prose but make body capabilities unavailable.
   draft candidate verdicts; the default remains unavailable, streams are phase-
   and entity-scoped, bounded and verified against candidate bytes and digests.
   Independent verification is still required; the CLI performs no URI retrieval.
+- [x] Allow the offline CLI to map URI-referenced states to confined local files,
+  using the same map as the independent Python verifier and runner. Reject
+  missing, extra, duplicate or unconfined mappings and emit aggregate URI counts.
+  This does not fetch content or establish snapshot provenance or freshness.
 - [ ] Establish equivalent referenced-content interoperability in other hosts;
   URI fetching, snapshot provenance and publication authorization remain separate
   concerns.

@@ -100,6 +100,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("preset").long("preset").required_unless_present("export-link-observations").help("Explicit content preset name"))
                 .arg(Arg::new("preset-source").long("preset-source").num_args(1).action(ArgAction::Append).help("Load a named TOML preset as NAME=PATH; may be repeated"))
                 .arg(Arg::new("content-root").long("content-root").help("Authorize this absolute content root for local file references (Linux and supported macOS kernels)"))
+                .arg(Arg::new("host-content-map").long("host-content-map").requires_all(["content-root", "offline-receipt"]).help("Map every referenced state to a host-provided absolute path beneath the authorized content root; no URI is fetched"))
                 .arg(Arg::new("extension-results").long("extension-results").num_args(1).help("Load explicitly supplied, input-bound external gate results for change entries"))
                 .arg(Arg::new("plain-text-paragraphs").long("plain-text-paragraphs").action(ArgAction::SetTrue).help("Interpret text/plain entries as blank-line-separated paragraphs"))
                 .arg(Arg::new("html-scope").long("html-scope").value_parser(["document", "main"]).default_value("document").help("Project each HTML entry as a whole document or its unique main element"))
