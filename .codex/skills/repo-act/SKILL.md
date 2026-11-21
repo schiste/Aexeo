@@ -95,6 +95,9 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   The build bundles private modules into public entry points instead of emitting
   every internal JavaScript file. Exercise integration tests through a shipped
   entry point such as `dist/configured.js`, not a private `dist/*.js` path.
+- For worker integration tests, close `createTestHarness` with `await harness.close()`
+  in `finally`; a nonexistent cleanup method can mask the original assertion and
+  leave the test process running.
 - For whole-word literal gates, test decomposed combining marks and lowercase
   expansions, both whole-word and substring modes, and confirm later match
   positions across CLI adapters and the rebuilt EmDash WASM bridge.
