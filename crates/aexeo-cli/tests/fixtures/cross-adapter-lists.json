@@ -1,0 +1,93 @@
+{
+  "preset": "version=1\nname='lists'\n[[gates]]\nid='review'\nkind='list_item_count'\nflagged_counts=[3]\n",
+  "cases": [
+    {
+      "name": "0 items",
+      "markdown": "",
+      "html": "<p>Intro</p>",
+      "document": {
+        "route": "/lists",
+        "title": "Lists",
+        "list_structure_complete": true,
+        "body": []
+      },
+      "expected": "passed"
+    },
+    {
+      "name": "2 items",
+      "markdown": "- one\n- two\n",
+      "html": "<ul><li>one</li><li>two</li></ul>",
+      "document": {
+        "route": "/lists",
+        "title": "Lists",
+        "list_structure_complete": true,
+        "body": [
+          {
+            "listItem": "bullet",
+            "level": 1,
+            "children": [
+              {
+                "_type": "span",
+                "text": "one"
+              }
+            ]
+          },
+          {
+            "listItem": "bullet",
+            "level": 1,
+            "children": [
+              {
+                "_type": "span",
+                "text": "two"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "passed"
+    },
+    {
+      "name": "3 items",
+      "markdown": "- one\n- two\n- three\n",
+      "html": "<ul><li>one</li><li>two</li><li>three</li></ul>",
+      "document": {
+        "route": "/lists",
+        "title": "Lists",
+        "list_structure_complete": true,
+        "body": [
+          {
+            "listItem": "bullet",
+            "level": 1,
+            "children": [
+              {
+                "_type": "span",
+                "text": "one"
+              }
+            ]
+          },
+          {
+            "listItem": "bullet",
+            "level": 1,
+            "children": [
+              {
+                "_type": "span",
+                "text": "two"
+              }
+            ]
+          },
+          {
+            "listItem": "bullet",
+            "level": 1,
+            "children": [
+              {
+                "_type": "span",
+                "text": "three"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": "failed"
+    }
+  ]
+}

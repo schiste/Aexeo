@@ -171,3 +171,45 @@ fn prose_variance_starter_is_available_to_cli() {
         1
     );
 }
+
+#[test]
+fn shared_list_cases_match_markdown_html_and_wasm() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/cross-adapter-lists.json")).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    let article = dir.path().join("article");
+    fs::write(&preset, fixture["preset"].as_str().unwrap()).unwrap();
+    for case in fixture["cases"].as_array().unwrap() {
+        for format in ["markdown", "html"] {
+            fs::write(&article, case[format].as_str().unwrap()).unwrap();
+            let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+                .args([
+                    "content",
+                    article.to_str().unwrap(),
+                    "--input-format",
+                    format,
+                    "--preset",
+                    "lists",
+                    "--preset-source",
+                    &format!("lists={}", preset.display()),
+                    "--format",
+                    "json",
+                ])
+                .output()
+                .unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(
+                report["gates"][0]["status"], case["expected"],
+                "{}: {format}",
+                case["name"]
+            );
+        }
+    }
+}

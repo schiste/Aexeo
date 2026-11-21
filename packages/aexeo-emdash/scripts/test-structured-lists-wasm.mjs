@@ -1,5 +1,6 @@
 // Exercises the built WASM bridge with complete and incomplete projections.
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { evaluateContent } from "../dist/content.js";
 
 const preset = `version=1
@@ -47,3 +48,13 @@ const starterReport = await evaluateContent({ ...mixed, list_structure_complete:
 assert.equal(starterReport.gates[0].status, "failed");
 assert.equal(starterReport.gates[0].measurements.list_paragraphs_excluded, 1);
 console.log("WASM built-in prose variance preset test passed");
+
+// Same cases run through the Markdown and HTML CLI adapters.
+const parity = JSON.parse(await readFile(new URL("../../../crates/aexeo-cli/tests/fixtures/cross-adapter-lists.json", import.meta.url), "utf8"));
+for (const scenario of parity.cases) {
+  const report = await evaluateContent(scenario.document, "lists", { lists: parity.preset });
+  assert.equal(report.gates[0].status, scenario.expected, scenario.name);
+  const unavailable = await evaluateContent({ ...scenario.document, list_structure_complete: false }, "lists", { lists: parity.preset });
+  assert.equal(unavailable.gates[0].status, "not_checked", scenario.name);
+}
+console.log("WASM structured lists match the shared CLI cases");
