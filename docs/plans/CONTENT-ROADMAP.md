@@ -100,6 +100,11 @@ is still required to inspect those pages. No CMS content was changed.
 
 ## Delivery tracker
 
+- [x] Project a numeric Portable Text reference across its complete contiguous
+  link label, including formatting span boundaries. Keep mixed prose and numeric
+  link labels and ambiguous overlapping links intact; preserve original literal
+  text and coordinates. This does not validate citations or their sources.
+
 - [x] Require an explicit offline or observed-link binding profile in both the
   Rust draft portable envelope and its independent JSON schema. Profile labels
   remain informational and do not authenticate execution or authorize publication.
