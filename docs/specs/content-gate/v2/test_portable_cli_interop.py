@@ -46,12 +46,14 @@ class PortableCliInterop(unittest.TestCase):
             command = common + ['--experimental-bound-verdict', '--candidate-base', str(root / 'base'),
                       '--candidate-after', str(root / 'after'), '--draft-portable-verdict', '--telemetry']
             for name in ('previous', 'fresh'):
-                run = subprocess.run(command, cwd=ROOT, env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / name)),
+                replay = ['--verify-draft-portable-verdict', str(root / 'previous')] if name == 'fresh' else []
+                run = subprocess.run(command + replay, cwd=ROOT, env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / name)),
                                      capture_output=True, text=True, check=False)
                 self.assertEqual(run.returncode, 0, run.stderr)
                 events = [json.loads(line) for line in run.stderr.splitlines() if line.startswith('{')]
                 telemetry = next(event for event in events if event.get('event') == 'content_change_portable_draft')
                 self.assertTrue(telemetry['link_snapshot_supplied'])
+                self.assertEqual(telemetry['revalidation'], name == 'fresh')
                 self.assertNotIn('example.org', run.stderr)
                 verdict = json.loads((root / name).read_text(encoding='utf-8'))
                 self.assertIn('aexeo.observed-link-binding.v1', verdict['verdict']['extensions'])
@@ -130,7 +132,8 @@ class PortableCliInterop(unittest.TestCase):
             command = common + ['--experimental-bound-verdict', '--candidate-base', str(root / 'base'),
                       '--candidate-after', str(root / 'after'), '--draft-portable-verdict']
             for name in ('previous', 'fresh'):
-                result = subprocess.run(command, cwd=ROOT, env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / name)),
+                replay = ['--verify-draft-portable-verdict', str(root / 'previous')] if name == 'fresh' else []
+                result = subprocess.run(command + replay, cwd=ROOT, env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / name)),
                                         capture_output=True, text=True, check=False)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 verdict = json.loads((root / name).read_text(encoding='utf-8'))
@@ -200,7 +203,8 @@ class PortableCliInterop(unittest.TestCase):
                         '--candidate-after', str(root / 'after'), '--evaluator-identity', 'build', '--draft-portable-verdict']
             env = dict(os.environ, CONTENT_GATE_CHANGE_FILE=str(root / 'change'))
             for name in ('previous', 'fresh'):
-                result = subprocess.run(command, cwd=ROOT, env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / name)),
+                replay = ['--verify-draft-portable-verdict', str(root / 'previous')] if name == 'fresh' else []
+                result = subprocess.run(command + replay, cwd=ROOT, env=dict(env, CONTENT_GATE_VERDICT_FILE=str(root / name)),
                                         capture_output=True, text=True, check=False)
                 self.assertEqual(result.returncode, 0, result.stderr)
             verify = [sys.executable, str(HERE / 'verify_portable_verdict.py')]
