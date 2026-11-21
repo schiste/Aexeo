@@ -41,6 +41,8 @@ pub struct PassingRequirements<'a> {
     pub validator_version: &'a str,
     pub required_checks: &'a [&'a str],
     pub exit_code: i32,
+    /// Whether the host observed the evaluator exceeding its deadline.
+    pub timed_out: bool,
 }
 
 fn binding(inputs: &CurrentInputs<'_>) -> Result<String, &'static str> {
@@ -264,6 +266,7 @@ impl BoundVerdict {
             || required.validator_version.is_empty()
             || required.required_checks.is_empty()
             || required.exit_code != 0
+            || required.timed_out
         {
             return Err("invalid or unsuccessful verification requirements");
         }
@@ -534,10 +537,16 @@ mod tests {
             validator_version: "0.0.24",
             required_checks: &ids,
             exit_code: 0,
+            timed_out: false,
         };
         let original = verdict();
         let envelope = BoundVerdict::new(original.clone(), &input).unwrap();
         assert!(envelope.verify_passing(&input, &requirements).is_ok());
+        let timed_out = PassingRequirements {
+            timed_out: true,
+            ..requirements
+        };
+        assert!(envelope.verify_passing(&input, &timed_out).is_err());
         for mutate in [0, 1, 2, 3] {
             let mut v = original.clone();
             match mutate {
@@ -564,6 +573,7 @@ mod tests {
                 validator_version: version,
                 required_checks: checks,
                 exit_code: exit,
+                timed_out: false,
             };
             assert!(envelope.verify_passing(&input, &req).is_err());
         }

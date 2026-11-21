@@ -125,8 +125,10 @@ The separate Python comparator remains an independent cross-implementation check
 The experimental Rust `verify_passing` helper additionally parses the independently
 supplied change artifact, rejects unsupported change extensions, compares the
 complete v1 subject, requires caller-selected validator labels, a successful
-reported exit code, and explicitly named passing blocking checks. These labels
-and exit code are caller assertions. This helper does not inspect content bytes,
+reported exit code, an explicit non-timeout observation, and explicitly named
+passing blocking checks. Rust callers constructing `PassingRequirements` must
+supply `timed_out`; a timeout is rejected even with exit code zero. The labels,
+exit code and timeout status are caller assertions. This helper does not inspect content bytes,
 authenticate execution, establish complete or fresh inputs, or authorize publication.
 
 A separate Rust host helper, `verify_draft_passing_with_content`, checks each

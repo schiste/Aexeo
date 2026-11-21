@@ -2752,6 +2752,7 @@ mod tests {
             validator_version: env!("CARGO_PKG_VERSION"),
             required_checks: &[required_check],
             exit_code: 0,
+            timed_out: false,
         };
         assert!(portable.verify_passing(&current, &requirements).is_ok());
         struct IndependentBytes(Vec<u8>);
@@ -2780,6 +2781,23 @@ mod tests {
                 3
             )
             .is_ok()
+        );
+        let timed_out = aexeo_contracts::content_gate_portable_v2::PassingRequirements {
+            timed_out: true,
+            ..requirements
+        };
+        assert!(
+            verify_draft_passing_candidate_with_content(
+                &portable,
+                &ctx,
+                HtmlContentScope::Document,
+                None,
+                &timed_out,
+                &mut bytes,
+                3,
+                3,
+            )
+            .is_err()
         );
         // Matching input hashes do not bind the verdict's scope declaration.
         let mut mismatched_scope = portable.clone();
@@ -5143,6 +5161,7 @@ mod tests {
             validator_version: env!("CARGO_PKG_VERSION"),
             required_checks: &[check_id],
             exit_code: 0,
+            timed_out: false,
         };
         struct IndependentBytes(Vec<u8>);
         impl crate::content_gate_sources::IndependentContent for IndependentBytes {

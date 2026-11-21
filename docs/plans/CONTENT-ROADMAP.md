@@ -100,6 +100,11 @@ is still required to inspect those pages. No CMS content was changed.
 
 ## Delivery tracker
 
+- [x] Require an explicit non-timeout observation for the experimental Rust
+  portable passing-verdict helper, including when a caller reports exit code
+  zero. This aligns the host assertion with the independent comparator; neither
+  authenticates execution or authorizes publication.
+
 - [x] Add opt-in aggregate telemetry to the experimental portable verdict
   comparator, including comparison outcome, duration and optional-input
   presence without check IDs, paths or content. The comparator remains
