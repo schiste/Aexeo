@@ -696,7 +696,14 @@ mod tests {
             calls: vec![],
         };
         assert_eq!(
-            verify_candidate_file_states(&input, &base, &[item.clone()], &mut provider, 3, 6),
+            verify_candidate_file_states(
+                &input,
+                &base,
+                std::slice::from_ref(&item),
+                &mut provider,
+                3,
+                6
+            ),
             Ok(())
         );
         assert_eq!(provider.calls, [ContentPhase::Before, ContentPhase::After]);
@@ -709,13 +716,27 @@ mod tests {
         assert_eq!(provider.calls.last(), Some(&ContentPhase::After));
         provider.wrong_before = true;
         assert_eq!(
-            verify_candidate_file_states(&input, &base, &[item.clone()], &mut provider, 3, 6),
+            verify_candidate_file_states(
+                &input,
+                &base,
+                std::slice::from_ref(&item),
+                &mut provider,
+                3,
+                6
+            ),
             Err(SourceError::DigestMismatch)
         );
         provider.wrong_before = false;
         provider.wrong_after = true;
         assert_eq!(
-            verify_candidate_file_states(&input, &base, &[item.clone()], &mut provider, 3, 6),
+            verify_candidate_file_states(
+                &input,
+                &base,
+                std::slice::from_ref(&item),
+                &mut provider,
+                3,
+                6
+            ),
             Err(SourceError::DigestMismatch)
         );
         assert_eq!(
@@ -724,7 +745,14 @@ mod tests {
         );
         provider.wrong_after = false;
         assert_eq!(
-            verify_candidate_file_states(&input, &base, &[item.clone()], &mut provider, 3, 5),
+            verify_candidate_file_states(
+                &input,
+                &base,
+                std::slice::from_ref(&item),
+                &mut provider,
+                3,
+                5
+            ),
             Err(SourceError::TooLarge)
         );
         assert_eq!(
