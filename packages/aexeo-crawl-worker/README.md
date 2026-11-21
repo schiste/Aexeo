@@ -105,6 +105,10 @@ unauthenticated `GET` routes back.**
    select a language-neutral fallback where needed. Opt into aggregate matching
    counts and success/error with `CONTENT_PRESET_SELECTION_TELEMETRY = "true"`;
    the event contains no document routes, locale values or content.
+   Set `CONTENT_PROSE_VARIANCE_TELEMETRY = "true"` to log aggregate
+   measured gates, excluded list paragraphs and checked windows per request.
+   The measurements are omitted when no such gate ran; the event contains no
+   document identifiers, text, locale or thresholds.
 
    To run trusted external gates, deploy your own provider as a Cloudflare Worker
    and explicitly add a service binding at the top level of `wrangler.toml`:

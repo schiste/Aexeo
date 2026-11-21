@@ -52,6 +52,7 @@ export interface Env {
   CONTENT_GATE_PROVIDER?: { fetch(input: string, init: RequestInit): Promise<Response> };
   CONTENT_GATE_TELEMETRY?: string;
   CONTENT_PRESET_SELECTION_TELEMETRY?: string;
+  CONTENT_PROSE_VARIANCE_TELEMETRY?: string;
 }
 
 export default {
