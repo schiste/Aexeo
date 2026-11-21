@@ -2858,6 +2858,10 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::{SocketAddr, TcpListener, TcpStream};
     use std::path::PathBuf;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -2883,46 +2887,91 @@ mod tests {
         stream.flush().unwrap();
     }
 
-    fn spawn_fixture_server<F>(min_requests: usize, handler: F) -> (String, thread::JoinHandle<()>)
+    struct FixtureServer {
+        stop: Arc<AtomicBool>,
+        thread: Option<thread::JoinHandle<()>>,
+    }
+
+    impl FixtureServer {
+        fn join(mut self) -> thread::Result<()> {
+            self.stop.store(true, Ordering::Release);
+            self.thread.take().expect("fixture thread").join()
+        }
+    }
+
+    impl Drop for FixtureServer {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Release);
+            if let Some(handle) = self.thread.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+
+    fn spawn_fixture_server<F>(handler: F) -> (String, FixtureServer)
     where
         F: Fn(TcpStream, String, SocketAddr) + Send + 'static,
     {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let address = listener.local_addr().unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
         let handle = thread::spawn(move || {
-            let mut served = 0usize;
-            let started = Instant::now();
-            let mut last_request = Instant::now();
-            loop {
+            while !thread_stop.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
                         stream.set_nonblocking(false).unwrap();
+                        stream
+                            .set_read_timeout(Some(Duration::from_secs(5)))
+                            .unwrap();
                         let mut buffer = [0_u8; 4096];
                         let size = stream.read(&mut buffer).unwrap();
                         let request = String::from_utf8_lossy(&buffer[..size]).into_owned();
-                        served += 1;
-                        last_request = Instant::now();
                         handler(stream, request, address);
                     }
                     Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                        if (served >= min_requests.max(1)
-                            && last_request.elapsed() > Duration::from_millis(150))
-                            || started.elapsed() > Duration::from_secs(30)
-                        {
-                            break;
-                        }
                         thread::sleep(Duration::from_millis(10));
                     }
                     Err(error) => panic!("server accept failed: {error}"),
                 }
             }
         });
-        (format!("http://{}", address), handle)
+        (
+            format!("http://{}", address),
+            FixtureServer {
+                stop,
+                thread: Some(handle),
+            },
+        )
     }
 
-    fn spawn_server(expected_requests: usize) -> (String, thread::JoinHandle<()>) {
-        spawn_fixture_server(expected_requests, |stream, request, _address| {
+    #[test]
+    fn fixture_server_remains_available_between_delayed_requests() {
+        let (base_url, server) = spawn_fixture_server(|stream, _, _| {
+            respond(stream, "200 OK", "text/plain", "ok", &[]);
+        });
+        let address = base_url.strip_prefix("http://").unwrap();
+        for attempt in 0..2 {
+            if attempt == 1 {
+                thread::sleep(Duration::from_millis(300));
+            }
+            let mut stream = TcpStream::connect(address).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+                .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                .unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).unwrap();
+            assert!(response.contains("200 OK"));
+        }
+        server.join().unwrap();
+    }
+
+    fn spawn_server() -> (String, FixtureServer) {
+        spawn_fixture_server(|stream, request, _address| {
             let path = request
                 .lines()
                 .next()
@@ -2969,8 +3018,8 @@ mod tests {
         })
     }
 
-    fn spawn_sitemap_index_server(expected_requests: usize) -> (String, thread::JoinHandle<()>) {
-        spawn_fixture_server(expected_requests, move |stream, request, address| {
+    fn spawn_sitemap_index_server() -> (String, FixtureServer) {
+        spawn_fixture_server(move |stream, request, address| {
             let path = request
                 .lines()
                 .next()
@@ -3273,7 +3322,7 @@ mod tests {
 
     #[test]
     fn runtime_audit_crawls_http_site() {
-        let (base_url, handle) = spawn_server(6);
+        let (base_url, handle) = spawn_server();
         let audit = run_runtime_audit(&base_url, 10, "http", &html_only_config()).unwrap();
         assert!(audit.site.has_route(""));
         assert!(audit.site.has_route("about"));
@@ -3355,7 +3404,7 @@ mod tests {
 
     #[test]
     fn runtime_audit_seeds_from_sitemap_indexes() {
-        let (base_url, handle) = spawn_sitemap_index_server(9);
+        let (base_url, handle) = spawn_sitemap_index_server();
         let audit = run_runtime_audit(&base_url, 10, "http", &html_only_config()).unwrap();
         assert!(audit.site.has_route(""));
         assert!(audit.site.has_route("from-sitemap"));
@@ -3408,7 +3457,7 @@ mod tests {
 
     #[test]
     fn runtime_audit_reports_truncated_crawl_coverage() {
-        let (base_url, handle) = spawn_server(1);
+        let (base_url, handle) = spawn_server();
         let mut config = html_only_config();
         config.checks.insert("links".to_string(), true);
         let audit = run_runtime_audit(&base_url, 1, "http", &config).unwrap();
@@ -3429,7 +3478,7 @@ mod tests {
 
     #[test]
     fn runtime_audit_emits_partial_artifacts_during_checkpoint_flushes() {
-        let (base_url, handle) = spawn_server(6);
+        let (base_url, handle) = spawn_server();
         let mut partial_artifacts = Vec::new();
         let mut artifact_callback =
             |artifact: &aexeo_contracts::AuditArtifact| -> anyhow::Result<()> {
@@ -3471,7 +3520,7 @@ mod tests {
     #[test]
     fn runtime_audit_handles_playwright_according_to_local_runtime() {
         if super::playwright_is_available() {
-            let (base_url, handle) = spawn_server(8);
+            let (base_url, handle) = spawn_server();
             let audit = run_runtime_audit(&base_url, 1, "playwright", &html_only_config())
                 .expect("playwright should run when the local runtime is installed");
             assert!(
@@ -3498,7 +3547,7 @@ mod tests {
         if !super::playwright_is_available() {
             return;
         }
-        let (base_url, handle) = spawn_server(8);
+        let (base_url, handle) = spawn_server();
         let audit = run_runtime_audit(&base_url, 2, "playwright", &html_only_config()).unwrap();
         assert!(audit.site.has_route(""));
         assert!(audit.site.has_route("about"));
