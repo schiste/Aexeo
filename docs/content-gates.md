@@ -1658,8 +1658,11 @@ The CLI and content-change entry points supply this observation for Markdown
 and HTML. Unsupported or incomplete structures, and plain-text inputs that do
 not establish list structure, remain `not_checked`. Opt-in CLI telemetry reports
 aggregate measured gates, excluded list paragraphs and checked windows without
-content or gate identifiers. Incremental candidate evaluation does not support
-this gate yet. Existing sentence-variance configurations retain their behavior.
+content or gate identifiers. The adapted in-process incremental evaluator can
+reuse unchanged Markdown and HTML reports when every evaluated item has complete
+list observations. Plain text, unrepresented list items and other missing
+capabilities make the incremental result `not_checked`. Existing sentence-variance
+configurations retain their behavior.
 
 ### Possible inline triples
 
