@@ -261,6 +261,38 @@ pub fn builtin_content_presets() -> BTreeMap<String, String> {
             include_str!("../presets/transition-review-fr.toml").into(),
         ),
         (
+            "transition-review-de".into(),
+            include_str!("../presets/transition-review-de.toml").into(),
+        ),
+        (
+            "transition-review-it".into(),
+            include_str!("../presets/transition-review-it.toml").into(),
+        ),
+        (
+            "transition-review-ar".into(),
+            include_str!("../presets/transition-review-ar.toml").into(),
+        ),
+        (
+            "news-style-de".into(),
+            include_str!("../presets/news-style-de.toml").into(),
+        ),
+        (
+            "news-style-it".into(),
+            include_str!("../presets/news-style-it.toml").into(),
+        ),
+        (
+            "opinion-style-adjustments".into(),
+            include_str!("../presets/opinion-style-adjustments.toml").into(),
+        ),
+        (
+            "opinion-style-de".into(),
+            include_str!("../presets/opinion-style-de.toml").into(),
+        ),
+        (
+            "opinion-style-it".into(),
+            include_str!("../presets/opinion-style-it.toml").into(),
+        ),
+        (
             "sentence-openings-review".into(),
             include_str!("../presets/sentence-openings-review.toml").into(),
         ),
@@ -478,8 +510,12 @@ mod tests {
         for (name, maximum) in [
             ("news-style-en", 2),
             ("news-style-fr", 2),
+            ("news-style-de", 2),
+            ("news-style-it", 2),
             ("opinion-style-en", 3),
             ("opinion-style-fr", 3),
+            ("opinion-style-de", 3),
+            ("opinion-style-it", 3),
         ] {
             let preset = resolve_content_preset(name, &sources).unwrap();
             assert!(preset.gates.iter().all(|gate| !gate.blocking()));
@@ -489,6 +525,54 @@ mod tests {
                     .gates
                     .iter()
                     .any(|gate| matches!(gate, ContentGate::SentenceOpeningTerms { .. }))
+            );
+        }
+    }
+
+    #[test]
+    fn localized_transition_starters_review_repetition_and_keep_missing_paragraphs_unchecked() {
+        use crate::content_gate::{ContentContext, ContentInput, ContentParagraph, GateStatus};
+        let sources = builtin_content_presets();
+        for (name, paragraph) in [
+            (
+                "transition-review-de",
+                "Außerdem ist es offen. Darüber hinaus bleibt es schwierig.",
+            ),
+            (
+                "transition-review-it",
+                "Inoltre è aperto. Di conseguenza resta difficile.",
+            ),
+            (
+                "transition-review-ar",
+                "بالإضافة إلى ذلك، هل الأمر واضح؟ علاوة على ذلك، يبقى صعباً.",
+            ),
+        ] {
+            let preset = resolve_content_preset(name, &sources).unwrap();
+            let input = ContentInput {
+                text: Some(paragraph.into()),
+                ..Default::default()
+            };
+            let context = ContentContext {
+                paragraphs: Some(vec![ContentParagraph {
+                    text: paragraph.into(),
+                    line: 4,
+                    column: 1,
+                }]),
+                ..Default::default()
+            };
+            let report = preset
+                .evaluate_with_context(&input, None, None, Some(&context))
+                .unwrap();
+            assert_eq!(report.gates[0].status, GateStatus::Failed, "{name}");
+            assert!(!report.gates[0].blocking, "{name}");
+            assert_eq!(
+                report.gates[0].measurements["matching_openings"], 2,
+                "{name}"
+            );
+            assert_eq!(report.gates[0].findings[0].line, 4, "{name}");
+            assert_eq!(
+                preset.evaluate(&input).unwrap().gates[0].status,
+                GateStatus::NotChecked
             );
         }
     }

@@ -318,6 +318,36 @@ const unavailableOpenings = await evaluateContent({ route: "/openings", title: "
 assert.equal(unavailableOpenings.gates[0].status, "not_checked");
 console.log("WASM sentence-opening preset preserves accented coverage and source location");
 
+// Localized transition starters stay advisory and preserve CMS text locations.
+for (const [preset, text, second] of [
+  ["transition-review-de", "Außerdem ist es offen. Darüber hinaus bleibt es schwierig.", "Darüber hinaus"],
+  ["transition-review-it", "Inoltre è aperto. Di conseguenza resta difficile.", "Di conseguenza"],
+  ["transition-review-ar", "بالإضافة إلى ذلك، هل الأمر واضح؟ علاوة على ذلك، يبقى صعباً.", "علاوة على ذلك"],
+]) {
+  const document = { route: "/localized", title: "Localized", body: [{ children: [{ _type: "span", text }] }] };
+  const report = await evaluateContent(document, preset);
+  assert.equal(report.gates[0].status, "failed", preset);
+  assert.equal(report.gates[0].blocking, false, preset);
+  assert.equal(report.gates[0].measurements.matching_openings, 2, preset);
+  assert.deepEqual(report.source_locations, [{ gate_id: "editorial.transition_openings", finding_index: 0, block_index: 0, span_index: 0, utf16_offset: text.indexOf(second) }], preset);
+  const single = { ...document, body: [{ children: [{ _type: "span", text: `${second}.` }] }] };
+  assert.equal((await evaluateContent(single, preset)).gates[0].status, "passed", preset);
+  assert.equal((await evaluateContent({ route: "/localized", title: "Localized" }, preset)).gates[0].status, "not_checked", preset);
+}
+for (const [locale, text] of [
+  ["de", "Außerdem ist es offen. Darüber hinaus bleibt es schwierig."],
+  ["it", "Inoltre è aperto. Di conseguenza resta difficile."],
+]) {
+  const document = { route: "/localized", title: "Localized", body: [{ children: [{ _type: "span", text }] }] };
+  for (const style of ["news", "opinion"]) {
+    const report = await evaluateContent(document, `${style}-style-${locale}`);
+    const transition = report.gates.find(gate => gate.gate_id === "editorial.transition_openings");
+    assert.equal(transition?.status, "failed", `${style}-${locale}`);
+    assert.equal(transition?.blocking, false, `${style}-${locale}`);
+  }
+}
+console.log("WASM localized transition starters preserve source locations");
+
 // Identical fixtures exercise Unicode normalization and location mapping across
 // Markdown, HTML and the actual EmDash WASM bridge, including split spans.
 const unicodeOpenings = JSON.parse(await readFile(new URL("../../../crates/aexeo-cli/tests/fixtures/cross-adapter-openings.json", import.meta.url), "utf8"));

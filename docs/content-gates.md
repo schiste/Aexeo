@@ -1522,8 +1522,9 @@ The Markdown CLI and content-change evaluator supply observations when the list 
 To opt in through the configured EmDash plugin, set `contentPreset.listStructureCompleteByCollection = ["blog_posts"]` only after verifying that the host projects every list block in those collections in order, including any custom components. A missing body or incomplete existing body capabilities still reports `not_checked`. This assertion defaults to off. Direct WASM hosts can set `list_structure_complete: true` on the document under the same condition.
 ### Repeated transition openings
 
-The opt-in `transition-review-en` and `transition-review-fr` presets flag
-configured connective expressions at the start of a sentence when their count
+The opt-in `transition-review-en`, `transition-review-fr`, `transition-review-de`,
+`transition-review-it` and `transition-review-ar` presets flag configured
+connective expressions at the start of a sentence when their count
 in a paragraph exceeds `max_per_paragraph`. Choose the preset for the actual
 content language; locale is not inferred. The `sentence_opening_terms` gate
 accepts a custom `terms` list, `max_per_paragraph`, `delimiters` and sentence
@@ -1534,6 +1535,11 @@ sentences containing or inside common double, curly or French quotation marks.
 A quotation left open at a paragraph boundary makes the result `not_checked`;
 straight single quotes are not tracked because they also mark contractions.
 Quotation recognition is heuristic and cannot establish every quoted span.
+The German, Italian and Arabic phrase lists are small, provisional examples,
+not comprehensive language models or validated measures of translation quality.
+The Arabic starter also recognizes the Arabic question mark as a sentence
+boundary; it does not provide full Arabic sentence segmentation or normalize
+diacritics. Choose or override expressions and delimiters for the publication.
 The gate never removes or rewrites a transition: it may express an essential causal or
 logical relationship. The finding is an invitation to review the paragraph,
 not evidence of AI authorship or a detector outcome.
@@ -1560,7 +1566,9 @@ paragraph and asks for review above the configured limit. The
 paragraphs; missing paragraphs are `not_checked`. Counts include punctuation
 inside quotations and other inline prose, and are not linguistic analysis. No
 punctuation is replaced. The composable `news-style-en`, `news-style-fr`, `opinion-style-en`, and
-`opinion-style-fr` starters combine this gate with transition and opening review; their different
+`opinion-style-fr` starters, as well as the German and Italian `news-style-de`,
+`news-style-it`, `opinion-style-de` and `opinion-style-it` starters, combine this
+gate with transition and opening review; their different
 limits are examples for projects to override, not universal standards.
 They also compose sentence variance and opening-window reviews. News uses a six-sentence
 window with a six-word standard-deviation threshold and at most two identical openings;

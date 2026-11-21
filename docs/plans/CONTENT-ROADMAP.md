@@ -100,6 +100,13 @@ is still required to inspect those pages. No CMS content was changed.
 
 ## Delivery tracker
 
+- [x] Add opt-in German, Italian and Arabic transition-review starters and
+  composable German and Italian news/opinion style starters. Rust and
+  EmDash/WASM tests cover repeated transitions, missing paragraphs and source
+  locations; these small, provisional phrase lists are not calibrated against
+  an independent corpus and do not assess translation quality. Arabic sentence
+  segmentation and diacritics remain only partially handled.
+
 - [x] Extend the opt-in Portable Text literal Markdown review to recognize
   certain unfinished HTTP(S), root-relative, dot-relative and fragment links
   ([#630](https://github.com/schiste/Aexeo/pull/630),
