@@ -184,7 +184,7 @@ fn evaluate_item(
         .any(|gate| matches!(gate, ContentGate::HeadingHierarchy { .. }));
     let mut heading_levels = None;
     let mut paragraph_list_items = None;
-    let structured_lists = if mode == ProjectionMode::Adapted
+    let mut structured_lists = if mode == ProjectionMode::Adapted
         && item.media_type == "text/markdown"
         && preset
             .gates
@@ -230,6 +230,19 @@ fn evaluate_item(
                     crate::html_content_adapter::HtmlContentScope::Document,
                 )
                 .map_err(unavailable)?;
+            if preset
+                .gates
+                .iter()
+                .any(|gate| matches!(gate, ContentGate::ListItemCount { .. }))
+            {
+                structured_lists = adapted.input.text.as_deref().and_then(|projected| {
+                    crate::html_content_adapter::html_structured_lists(
+                        &item.source,
+                        projected,
+                        crate::html_content_adapter::HtmlContentScope::Document,
+                    )
+                });
+            }
             paragraph_list_items = lists;
             heading_levels = Some(levels);
             let count = adapted.destinations.len();
@@ -2006,7 +2019,81 @@ mod tests {
         ));
         let mut html = snapshot;
         html.items[0].media_type = "text/html".into();
+        html.items[0].source = "<ul hidden><li>unknown</li></ul>".into();
+        html.items[0].sha256 = format!("{:x}", Sha256::digest(html.items[0].source.as_bytes()));
         assert!(IncrementalBaseline::prepare_adapted(html, preset).is_err());
+    }
+
+    #[test]
+    fn html_lists_incremental_matches_full_and_withholds_hidden_structure() {
+        let (mut snapshot, _, mut change) = fixture();
+        for item in &mut snapshot.items {
+            item.media_type = "text/html".into();
+            item.source = "<h1>Heading</h1><ul><li>one</li><li>two</li><li>three</li></ul>".into();
+            item.sha256 = format!("{:x}", Sha256::digest(item.source.as_bytes()));
+        }
+        let preset = ContentPreset::from_toml("version=1\nname='lists'\n[[gates]]\nid='lists'\nkind='list_item_count'\nflagged_counts=[3]\n").unwrap();
+        let baseline =
+            IncrementalBaseline::prepare_adapted(snapshot.clone(), preset.clone()).unwrap();
+        let mut next = snapshot.items[0].clone();
+        next.source = "<h1>Heading</h1><ul><li>one</li><li>two</li></ul>".into();
+        next.sha256 = format!("{:x}", Sha256::digest(next.source.as_bytes()));
+        let mut update = entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&next),
+        );
+        update.media_type = next.media_type.clone();
+        change.entries.push(update);
+        let scope = crate::html_content_adapter::HtmlContentScope::Document;
+        let (adapted, _, _) = crate::html_content_adapter::html_content_with_paragraph_list_items(
+            &next.entity_id,
+            &next.source,
+            scope,
+        )
+        .unwrap();
+        let lists = crate::html_content_adapter::html_structured_lists(
+            &next.source,
+            adapted.input.text.as_deref().unwrap(),
+            scope,
+        )
+        .unwrap();
+        let caps = ContentEvaluationContext {
+            adapter: Some(&adapted.context),
+            link_count: Some(adapted.destinations.len()),
+            ..Default::default()
+        };
+        let expected = preset
+            .evaluate_with_structured_lists(
+                &adapted.input,
+                &caps,
+                None,
+                None,
+                true,
+                None,
+                Some(&lists),
+            )
+            .unwrap();
+        let IncrementalEvaluation::Evaluated {
+            reports, reused, ..
+        } = baseline.evaluate(&change, std::slice::from_ref(&next))
+        else {
+            panic!("expected evaluated")
+        };
+        assert_eq!(
+            serde_json::to_value(&reports["a"]).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        assert_eq!(reports["a"].gates[0].status, GateStatus::Passed);
+        assert!(reused > 0);
+        next.source = "<ul hidden><li>unknown</li></ul>".into();
+        next.sha256 = format!("{:x}", Sha256::digest(next.source.as_bytes()));
+        change.entries[0].after = Some(state(&next));
+        assert!(matches!(
+            baseline.evaluate(&change, &[next]),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
     }
 
     #[test]
