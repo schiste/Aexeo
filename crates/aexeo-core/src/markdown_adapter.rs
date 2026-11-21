@@ -430,6 +430,31 @@ fn reference_definitions(node: &Node) -> std::collections::BTreeMap<String, Stri
     defs
 }
 
+// These exact void elements have no hidden text, links, headings or lists.
+// Do not generalize to attributes or surrounding HTML: those require a host
+// projection to establish what the rendered document contains.
+#[derive(Clone, Copy)]
+enum HtmlBreak {
+    Line,
+    Opportunity,
+}
+
+fn observed_html_break(value: &str) -> Option<HtmlBreak> {
+    if ["<br>", "<br/>", "<br />"]
+        .iter()
+        .any(|tag| value.eq_ignore_ascii_case(tag))
+    {
+        Some(HtmlBreak::Line)
+    } else if ["<wbr>", "<wbr/>", "<wbr />"]
+        .iter()
+        .any(|tag| value.eq_ignore_ascii_case(tag))
+    {
+        Some(HtmlBreak::Opportunity)
+    } else {
+        None
+    }
+}
+
 fn link_destinations_from_root(
     root: &Node,
     source: &str,
@@ -442,7 +467,7 @@ fn link_destinations_from_root(
         source: &str,
     ) -> Option<()> {
         match node {
-            Node::Html(_) => return None,
+            Node::Html(html) if observed_html_break(&html.value).is_none() => return None,
             Node::Link(link) if is_literal_email_autolink(link, source) => {}
             Node::Link(link) => links.push(ExtractedLink {
                 url: link.url.clone(),
@@ -477,7 +502,7 @@ pub struct StructuredList {
 }
 
 /// Observe Markdown list structure without treating unobserved HTML as empty.
-/// `None` means an embedded HTML node prevents complete list observation.
+/// `None` means an unobserved HTML node prevents complete list observation.
 /// A complete document without lists returns `Some(Vec::new())`.
 pub fn markdown_structured_lists(source: &str) -> Result<Option<Vec<StructuredList>>> {
     if source.len() > crate::content_gate::MAX_CONTENT_INPUT_BYTES {
@@ -487,7 +512,7 @@ pub fn markdown_structured_lists(source: &str) -> Result<Option<Vec<StructuredLi
     let mut lists = Vec::new();
     let mut pending = vec![(&root, 0usize)];
     while let Some((node, depth)) = pending.pop() {
-        if matches!(node, Node::Html(_)) {
+        if matches!(node, Node::Html(html) if observed_html_break(&html.value).is_none()) {
             return Ok(None);
         }
         let child_depth = if let Node::List(list) = node {
@@ -908,10 +933,14 @@ impl Projection {
                 }
             }
             Node::Break(_) => self.text.push('\n'),
-            Node::Html(_) => {
-                source_map.heading_levels_complete = false;
-                source_map.contains_html = true;
-            }
+            Node::Html(html) => match observed_html_break(&html.value) {
+                Some(HtmlBreak::Line) => self.text.push('\n'),
+                Some(HtmlBreak::Opportunity) => {}
+                None => {
+                    source_map.heading_levels_complete = false;
+                    source_map.contains_html = true;
+                }
+            },
             Node::Heading(heading) => {
                 if source_map.enabled {
                     source_map.heading_levels.push(heading.depth);
@@ -1024,6 +1053,76 @@ fn extract_markdown_from_root(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn safe_inline_html_breaks_preserve_text_links_lists_and_locations() {
+        for tag in ["<br>", "<BR>", "<br/>", "<br />"] {
+            let source = format!("Before{tag}after [link](https://example.org).\n\n- one\n- two\n");
+            let adapted = markdown_input_with_source_map_and_destinations("x", &source).unwrap();
+            let text = adapted.input.text.as_deref().expect("prose observed");
+            assert!(text.starts_with("Before\nafter link."), "{tag}: {text:?}");
+            assert_eq!(
+                adapted.source_map.source_position(&source, text, 2, 1),
+                Some((1, 7 + tag.len()))
+            );
+            assert_eq!(
+                markdown_link_destinations(&source).unwrap(),
+                Some(vec!["https://example.org".into()])
+            );
+            assert_eq!(
+                markdown_structured_lists(&source).unwrap().unwrap()[0].item_count,
+                2
+            );
+        }
+        let source = "inter<wbr>national";
+        let (input, _, _, map) = markdown_input_with_source_map("x", source).unwrap();
+        let text = input.text.as_deref().unwrap();
+        assert_eq!(text.trim(), "international");
+        assert_eq!(map.source_position(source, text, 1, 6), Some((1, 11)));
+    }
+
+    #[test]
+    fn inline_break_keeps_editorial_findings_at_original_source_position() {
+        use crate::content_gate::{ContentPreset, GateStatus};
+        let source = "Before<br>avoid this phrase.\n";
+        let (input, context, links, map) = markdown_input_with_source_map("x", source).unwrap();
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='g'\nkind='forbidden_terms'\nterms=['avoid this phrase']\n").unwrap();
+        let report = preset
+            .evaluate_with_links(&input, None, None, Some(&context), Some(links))
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::Failed);
+        let finding = &report.gates[0].findings[0];
+        assert_eq!(
+            map.source_position(
+                source,
+                input.text.as_deref().unwrap(),
+                finding.line,
+                finding.column
+            ),
+            Some((1, 11))
+        );
+    }
+
+    #[test]
+    fn html_break_with_unknown_markup_stays_unavailable() {
+        for source in [
+            "before<br class=\"x\">after",
+            "before<br>after <a href=\"/x\">x</a>",
+            "before<br></br>after",
+        ] {
+            let (input, context) = markdown_input_with_context("x", source).unwrap();
+            assert!(input.text.is_none(), "{source}");
+            assert!(context.paragraphs.is_none(), "{source}");
+            assert!(
+                markdown_link_destinations(source).unwrap().is_none(),
+                "{source}"
+            );
+            assert!(
+                markdown_structured_lists(source).unwrap().is_none(),
+                "{source}"
+            );
+        }
+    }
+
     #[test]
     fn embedded_html_withholds_editorial_inputs_but_keeps_source() {
         let source = "before\n\n<div>hidden projection</div>\n";
