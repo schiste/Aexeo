@@ -323,6 +323,9 @@ Options:
       --draft-portable-verdict
           Write a draft portable v2 envelope; not a publication authorization
 
+      --verify-draft-portable-verdict <verify-draft-portable-verdict>
+          Re-evaluate and compare a previous draft portable verdict; not publication authorization
+
       --candidate-base <candidate-base>
           Experimental host-supplied base candidate snapshot JSON
 

@@ -439,6 +439,10 @@ registry before considering the release delivered.
   explicitly incomplete). The collection bytes
   are bound and independently revalidated; matching identities do not establish
   metadata correctness, provenance or completeness.
+  The experimental CLI can strictly revalidate a prior draft portable verdict
+  against a reconstructed candidate and a fresh evaluation, preserving an
+  existing output on mismatch. Replay uses the same evaluator and does not
+  establish trust, source freshness or publication atomicity.
   An experimental Rust helper reconstructs the candidate from a supplied base
   and change before comparing the decision binding and independently supplied
   content streams. It does not authenticate inputs, prove completeness or

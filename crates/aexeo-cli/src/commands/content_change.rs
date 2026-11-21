@@ -993,7 +993,18 @@ fn command_candidate_bound_verdict(
         after: &after,
     };
     if args.get_flag("draft-portable-verdict") {
-        let verdict = if let Some(snapshots) = snapshots {
+        let verdict = if let Some(path) = args.get_one::<String>("verify-draft-portable-verdict") {
+            let previous: aexeo_contracts::content_gate_portable_v2::BoundVerdict =
+                read_candidate_input(path, output, "previous portable verdict")?;
+            aexeo_core::content_gate_verdict::revalidate_draft_portable_candidate(
+                &previous,
+                &context,
+                snapshots,
+                provider,
+                &iso_now(),
+                scope,
+            )
+        } else if let Some(snapshots) = snapshots {
             let links = CandidateLinkDecisionContext {
                 candidate: &context,
                 snapshots,
@@ -1025,7 +1036,7 @@ fn command_candidate_bound_verdict(
                 "{}",
                 serde_json::json!({"event":"content_change_portable_draft", "version":1,
                 "status":verdict.verdict.status, "collection_supplied":decision.collection.is_some(),
-                "link_snapshot_supplied":snapshots.is_some()})
+                "link_snapshot_supplied":snapshots.is_some(), "revalidation":args.contains_id("verify-draft-portable-verdict")})
             );
         }
         return Ok(verdict_exit_code(verdict.verdict.status));
