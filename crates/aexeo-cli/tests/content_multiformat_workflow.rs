@@ -422,3 +422,21 @@ fn formatted_citations_preserve_sentence_count_in_both_formats() {
         );
     }
 }
+
+#[test]
+fn embedded_html_links_are_not_misreported_as_absent_in_markdown() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("workflow.toml");
+    let draft = dir.path().join("article.md");
+    fs::write(&preset, "version=1\nname='workflow'\n[[gates]]\nid='links'\nkind='link_count'\nmin=1\nblocking=false\n[[gates]]\nid='destinations'\nkind='link_destinations'\nallowed_schemes=['https']\nblocking=false\n").unwrap();
+    fs::write(
+        &draft,
+        "Read <a href=\"https://example.org\">the source</a>.\n",
+    )
+    .unwrap();
+    let (report, telemetry) = evaluate(&draft, &preset, "markdown");
+    assert_eq!(report["gates"][0]["status"], "not_checked");
+    assert_eq!(report["gates"][1]["status"], "not_checked");
+    assert_eq!(telemetry["summary"]["not_checked"], 2);
+    assert!(!telemetry.to_string().contains("example.org"));
+}

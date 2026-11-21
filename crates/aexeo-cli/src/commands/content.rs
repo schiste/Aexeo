@@ -322,9 +322,9 @@ pub fn command_content(args: &ArgMatches) -> Result<i32> {
                 aexeo_core::markdown_adapter::markdown_input_with_source_map(id, &text)?
             };
             heading_levels = map.heading_levels().map(<[u8]>::to_vec);
+            link_count = map.links_complete().then_some(links);
             source_map = Some(map);
             context = Some(capabilities);
-            link_count = Some(links);
             input
         }
         (Some("html"), Some(text)) => {

@@ -1763,10 +1763,14 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
                 let adapted =
                     markdown_input_with_source_map_and_destinations(&entry.entity_id, &text)?;
                 heading_levels = adapted.source_map.heading_levels().map(<[u8]>::to_vec);
+                let link_count = adapted
+                    .source_map
+                    .links_complete()
+                    .then_some(adapted.link_count);
                 (
                     adapted.input,
                     Some(adapted.context),
-                    Some(adapted.link_count),
+                    link_count,
                     adapted.destinations,
                     Some(adapted.source_map),
                 )
@@ -4865,6 +4869,33 @@ mod tests {
                 "{source}"
             );
         }
+    }
+
+    #[test]
+    fn markdown_embedded_html_links_leave_change_verdict_unchecked() {
+        use sha2::{Digest, Sha256};
+        let source = "Read <a href=\"https://example.org\">the source</a>.";
+        let mut input = change();
+        input.entries[0].media_type = "text/markdown".into();
+        let state = input.entries[0].after.as_mut().unwrap();
+        state.inline = Some(source.into());
+        state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+        let policy = ContentPreset::from_toml(
+            "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_count'\nmin=1\n",
+        )
+        .unwrap();
+        let verdict = evaluate_change(
+            &input,
+            &mut NoFiles,
+            &policy,
+            "2026-01-01T00:00:00Z",
+            1024,
+            1024,
+        )
+        .unwrap();
+        assert_eq!(verdict.status, VerdictStatus::NotChecked);
+        assert_eq!(verdict.checks[0].status, CheckStatus::NotChecked);
+        assert!(verdict.findings.is_empty());
     }
 
     #[test]

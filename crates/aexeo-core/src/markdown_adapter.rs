@@ -31,9 +31,15 @@ pub struct MarkdownSourceMap {
     heading_starts: Vec<Option<usize>>,
     heading_levels: Vec<u8>,
     heading_levels_complete: bool,
+    links_complete: bool,
 }
 
 impl MarkdownSourceMap {
+    /// Whether Markdown exposed all link-bearing markup to the adapter.
+    pub fn links_complete(&self) -> bool {
+        self.links_complete
+    }
+
     /// Heading levels in the same order as the projected headings.
     pub fn heading_levels(&self) -> Option<&[u8]> {
         self.heading_levels_complete.then_some(&self.heading_levels)
@@ -436,6 +442,7 @@ fn link_destinations_from_root(
         source: &str,
     ) -> Option<()> {
         match node {
+            Node::Html(_) => return None,
             Node::Link(link) if is_literal_email_autolink(link, source) => {}
             Node::Link(link) => links.push(ExtractedLink {
                 url: link.url.clone(),
@@ -522,13 +529,24 @@ pub fn markdown_input_with_context(
     Ok((input, context))
 }
 
-/// Extract structural context and the number of hyperlinks without network access.
+/// Extract structural context and the number of Markdown hyperlinks without network access.
+/// Embedded HTML is excluded; use `markdown_input_with_observed_links` when
+/// the evaluation needs a complete count.
 pub fn markdown_input_with_links(
     id: impl Into<String>,
     source: &str,
 ) -> Result<(ContentInput, ContentContext, usize)> {
     let (input, context, links, _) = extract_markdown(id, source, false)?;
     Ok((input, context, links))
+}
+
+/// Extract structural context and a link count only when all markup was observed.
+pub fn markdown_input_with_observed_links(
+    id: impl Into<String>,
+    source: &str,
+) -> Result<(ContentInput, ContentContext, Option<usize>)> {
+    let (input, context, links, map) = extract_markdown(id, source, false)?;
+    Ok((input, context, map.links_complete().then_some(links)))
 }
 
 /// Extract content and a conservative mapping for exact source text spans.
@@ -888,7 +906,10 @@ impl Projection {
                 }
             }
             Node::Break(_) => self.text.push('\n'),
-            Node::Html(_) => source_map.heading_levels_complete = false,
+            Node::Html(_) => {
+                source_map.heading_levels_complete = false;
+                source_map.links_complete = false;
+            }
             Node::Heading(heading) => {
                 if source_map.enabled {
                     source_map.heading_levels.push(heading.depth);
@@ -939,6 +960,7 @@ fn extract_markdown_from_root(
     let mut source_map = MarkdownSourceMap {
         enabled: map_source,
         heading_levels_complete: map_source,
+        links_complete: true,
         ..Default::default()
     };
     let mut projection = Projection {
@@ -998,6 +1020,24 @@ fn extract_markdown_from_root(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn link_observation_withholds_embedded_html_and_preserves_markdown_links() {
+        let markdown = "[one](https://example.org)";
+        let (_, _, count) = markdown_input_with_observed_links("x", markdown).unwrap();
+        assert_eq!(count, Some(1));
+        assert_eq!(
+            markdown_link_destinations(markdown).unwrap().unwrap().len(),
+            1
+        );
+        let mixed = "[one](https://example.org) and <a href=\"https://example.net\">two</a>";
+        let (_, _, count) = markdown_input_with_observed_links("x", mixed).unwrap();
+        assert_eq!(count, None);
+        assert!(markdown_link_destinations(mixed).unwrap().is_none());
+        let adapted = markdown_input_with_source_map_and_destinations("x", mixed).unwrap();
+        assert!(!adapted.source_map.links_complete());
+        assert!(adapted.destinations.is_none());
+    }
+
     #[test]
     fn structured_lists_keep_nested_counts_and_reject_unobserved_html() {
         let source =
