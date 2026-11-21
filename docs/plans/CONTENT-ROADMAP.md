@@ -50,6 +50,9 @@ rendered metadata, full editorial quality, or a matching site snapshot.
   preset; missing or unmapped fields remain not checked. Exercise the actual
   configured plugin and WASM, and log scope and duration without field names
   ([#549](https://github.com/schiste/Aexeo/pull/549)).
+- [x] Add opt-in independent fragment audits to configured saves and refreshes,
+  with mapped findings, explicit unavailable results, aggregate telemetry and
+  regression coverage using the WASM engine.
 - [ ] Publish and install the tested npm package, enable the desired presets and
   revision access on the target host, then verify its connected MCP actions and
   permissions against a real revision. Repository support alone does not expose

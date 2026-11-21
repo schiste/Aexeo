@@ -405,6 +405,11 @@ function recordAssessmentCoverage(ctx: SandboxCtx, result: EvaluationOutcome, do
   }
   const collidingFindings = result.ok ? result.findings.filter((finding) => finding.aexeo_origin === "content_preset" &&
     (SITE_GRAPH_RULE_IDS.has(finding.rule_id) || !isLegacyCmsObservableFinding(finding))).length : 0;
+  if (result.ok && result.fragments) {
+    const totals = { evaluated: 0, not_checked: 0 };
+    for (const fragments of Object.values(result.fragments)) for (const fragment of fragments) totals[fragment.status]++;
+    try { ctx.log?.info?.("aexeo.fragment_coverage", totals); } catch { /* best effort */ }
+  }
   try { ctx.log?.info?.("aexeo.preset_coverage", { status: result.ok ? "evaluated" : "error", documents: documents.length, assessed_documents: assessedDocuments, missing_assessments: missingDocuments, assessment_errors: errorDocuments, passed, failed, not_checked: notChecked, colliding_findings: collidingFindings, mapping_reports: mappingReports, mapping_eligible: mappingEligible, mapping_mapped: mappingMapped, mapping_unmapped: mappingUnmapped }); } catch { /* best effort */ }
   // Keep the existing counter's semantics, and separately account for body
   // findings withheld because the corresponding document was incomplete or
@@ -580,7 +585,7 @@ export function isSiteGraphFinding(finding: Finding): boolean {
 }
 
 /** Bind projected positions only to unchanged source blocks or spans. */
-function withCmsSourceLocation(finding: Finding, stored: StoredDocument | undefined): Finding {
+export function withCmsSourceLocation(finding: Finding, stored: StoredDocument | undefined): Finding {
   if (finding.aexeo_cms_location !== undefined) {
     finding = { ...finding };
     delete finding.aexeo_cms_location;
@@ -632,6 +637,9 @@ export async function handleAfterSaveConfigured(
   contentFieldsUnavailable = false,
   metadataFields?: MetadataFields,
 ): Promise<void> {
+  // Freeze a configured fragment source before host calls can yield.
+  const sourceSnapshot = evaluator.captureSourceItem?.(event.content);
+  const content = sourceSnapshot ?? event.content;
   // Capture the prior identity before host calls: a later save or delete must
   // not be overwritten if adaptation fails while it is in progress.
   const prior = (await readAllStoredDocuments(ctx.kv)).filter((stored) =>
@@ -640,7 +648,7 @@ export async function handleAfterSaveConfigured(
   let adapted: Awaited<ReturnType<typeof adaptContentItemWithContext>>;
   try {
     adapted = await adaptContentItemWithContext(
-      event.content,
+      content,
       ctx.content,
       ctx.site?.locale,
       blockMappings,
@@ -681,7 +689,7 @@ export async function handleAfterSaveConfigured(
     return;
   }
 
-  const result = await evaluateSafely(evaluator, [document], { collections: [adapted.meta.collection] });
+  const result = await evaluateSafely(evaluator, [document], { collections: [adapted.meta.collection], sourceItems: [sourceSnapshot] });
   recordAssessmentCoverage(ctx, result, [document]);
   if (!result.ok) {
     log?.error?.(`afterSave evaluator failure (${result.reason})`, {
@@ -736,6 +744,7 @@ export async function handleAfterSaveConfigured(
     body_coverage: cmsBodyCoverage(document),
     ...(adapted.meta.unmappedComponents === undefined ? {} : { body_unmapped_components: adapted.meta.unmappedComponents }),
     ...(result.assessments?.[document.route] === undefined ? {} : { assessment: result.assessments[document.route] }),
+    ...(result.fragments?.[document.route] === undefined ? {} : { fragments: result.fragments[document.route] }),
   });
 }
 
@@ -760,7 +769,7 @@ export type DocumentAssessment =
   | { status: "error"; reason: string; detail: string };
 
 export type EvaluationOutcome =
-  | { ok: true; findings: Finding[]; assessments?: Record<string, DocumentAssessment> }
+  | { ok: true; findings: Finding[]; assessments?: Record<string, DocumentAssessment>; fragments?: Record<string, import("./fragment-evaluation.js").FragmentAssessment[]> }
   | { ok: false; reason: string; detail: string };
 
 // Pluggable evaluator. Two implementations live in this package:
@@ -776,10 +785,10 @@ export type EvaluationOutcome =
 //
 // evaluateAndPersistAll is symmetric across the two — only this
 // function differs.
-export type EvaluatorFn = (
+export type EvaluatorFn = ((
   documents: readonly EmdashDocument[],
-  context?: { collections: readonly string[] },
-) => Promise<EvaluationOutcome>;
+  context?: { collections: readonly string[]; sourceItems?: readonly (EmdashContentItem | undefined)[] },
+) => Promise<EvaluationOutcome>) & { captureSourceItem?: (item: EmdashContentItem) => EmdashContentItem | undefined };
 
 // Invalidate the evaluated snapshot as well as its findings, so an older
 // in-flight evaluation cannot subsequently restore results for that snapshot.
@@ -809,7 +818,7 @@ async function markAdaptationUnavailable(
 async function evaluateSafely(
   evaluator: EvaluatorFn,
   documents: readonly EmdashDocument[],
-  context: { collections: readonly string[] },
+  context: { collections: readonly string[]; sourceItems?: readonly (EmdashContentItem | undefined)[] },
 ): Promise<EvaluationOutcome> {
   try {
     return await evaluator(documents, context);
@@ -861,6 +870,7 @@ export async function evaluateAndPersistAll(
   //    permissions errors) are tolerated — they accrue to summary.errors.
   const documents: EmdashDocument[] = [];
   const documentCollections: string[] = [];
+  const sourceItems: (EmdashContentItem | undefined)[] = [];
   const adaptedByRoute = new Map<string, StoredDocument>();
   const documentRoutes = new Set<string>();
   const duplicateRoutes = new Set<string>();
@@ -887,8 +897,9 @@ export async function evaluateAndPersistAll(
             continue;
           }
           try {
+            const sourceSnapshot = options.evaluator.captureSourceItem?.(item);
             const adapted = await adaptContentItemWithContext(
-              item,
+              sourceSnapshot ?? item,
               ctx.content,
               ctx.site?.locale,
               options.blockMappings,
@@ -899,6 +910,7 @@ export async function evaluateAndPersistAll(
             if (options.contentFieldsUnavailable && adapted.document.body !== undefined) adapted.document.body_capabilities = [];
             documents.push(adapted.document);
             documentCollections.push(adapted.meta.collection);
+            sourceItems.push(sourceSnapshot);
             if (documentRoutes.has(adapted.document.route)) duplicateRoutes.add(adapted.document.route);
             documentRoutes.add(adapted.document.route);
             adaptedByRoute.set(adapted.document.route, {
@@ -989,10 +1001,12 @@ export async function evaluateAndPersistAll(
       if (withheldRoutes.has(documents[index]!.route)) continue;
       documents[kept] = documents[index]!;
       documentCollections[kept] = documentCollections[index]!;
+      sourceItems[kept] = sourceItems[index];
       kept++;
     }
     documents.length = kept;
     documentCollections.length = kept;
+    sourceItems.length = kept;
     const initial = new Map(storedAtStart.map((entry) => [entry.document.route, entry]));
     for (const route of withheldRoutes) {
       adaptedByRoute.delete(route);
@@ -1035,7 +1049,7 @@ export async function evaluateAndPersistAll(
   // 3. Evaluate via the supplied evaluator and group findings by
   //    route. The evaluator strategy (in-process WASM vs sidecar
   //    fetch) is the only configured-vs-sandboxed difference.
-  const result = await evaluateSafely(options.evaluator, documents, { collections: documentCollections });
+  const result = await evaluateSafely(options.evaluator, documents, { collections: documentCollections, sourceItems });
   recordAssessmentCoverage(ctx, result, documents);
   if (!result.ok) {
     log?.error?.(`aexeo evaluator failure (${result.reason})`, {
@@ -1135,6 +1149,7 @@ export async function evaluateAndPersistAll(
       route, findings: filtered,
       ...(stored === undefined ? {} : { body_coverage: cmsBodyCoverage(stored.document) }),
       ...(stored?.meta.unmappedComponents === undefined ? {} : { body_unmapped_components: stored.meta.unmappedComponents }),
+      ...(result.fragments?.[route] === undefined ? {} : { fragments: result.fragments[route] }),
       ...(route === "*" && globalAssessment !== undefined ? { assessment: globalAssessment } :
         result.assessments?.[route] === undefined ? {} : { assessment: result.assessments[route] }),
     });
