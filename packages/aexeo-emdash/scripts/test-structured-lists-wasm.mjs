@@ -36,4 +36,9 @@ const mixedReport = await assessProse({ ...mixed, list_structure_complete: true 
 assert.equal(mixedReport.gates[0].status, "failed");
 assert.equal(mixedReport.gates[0].measurements.windows_checked, 2);
 assert.equal(mixedReport.gates[0].measurements.list_paragraphs_excluded, 1);
+assert.equal(mixedReport.gates[0].required_capability, "classified_paragraphs");
+let telemetry;
+await evaluateContent({ ...mixed, list_structure_complete: true }, "prose", { prose: prosePreset }, undefined, event => { telemetry = event; });
+assert.deepEqual(telemetry.prose_variance, { measured_gates: 1, list_paragraphs_excluded: 1, windows_checked: 2 });
+assert.ok(!JSON.stringify(telemetry).includes("/prose"));
 console.log("WASM prose variance list boundaries test passed");
