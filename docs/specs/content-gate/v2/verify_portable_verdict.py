@@ -20,6 +20,7 @@ from verify_candidate_inputs import (LIMIT, VerificationError, binding, overlay,
 HERE = Path(__file__).resolve().parent
 REQUIRED = {'change', 'resolved_policy', 'host_options', 'evaluator'}
 MAX_ENVELOPE_BYTES = 8 * 1024 * 1024
+MAX_U64 = (1 << 64) - 1
 
 
 def validate_schema(value, path):
@@ -41,8 +42,21 @@ def validate_schemas(values, path):
         validator = Draft202012Validator(schema, format_checker=checker)
         for value in values:
             validator.validate(value)
+            validate_integer_fields(value['verdict'])
     except (OSError, ValueError, ValidationError, RecursionError) as error:
         raise VerificationError('invalid document schema') from error
+
+
+def validate_integer_fields(verdict):
+    """Match Rust's u64 decoding; JSON Schema accepts integral floats."""
+    values = list(verdict['summary'].values())
+    if 'findings_omitted' in verdict:
+        values.append(verdict['findings_omitted'])
+    for finding in verdict['findings']:
+        if 'location' in finding:
+            values.extend(finding['location'].values())
+    if any(type(value) is not int or not 0 <= value <= MAX_U64 for value in values):
+        raise VerificationError('invalid verdict integer field')
 
 
 def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
