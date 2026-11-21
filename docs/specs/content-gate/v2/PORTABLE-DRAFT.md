@@ -111,6 +111,17 @@ fresh result. It does not fetch links or verify their origin or freshness. It is
 are exercised by Rust and Python tests. Full verdict validation, interoperable
 artifact profiles and end-to-end host integration remain unfinished.
 
+The CLI can re-evaluate a prior draft using the same candidate inputs and
+`--draft-portable-verdict --verify-draft-portable-verdict PREVIOUS`. It strictly
+parses the prior envelope, compares the recomputed binding before evaluation,
+then compares the fresh verdict except its evaluation time. Input or verdict
+mismatches are user errors and leave an existing output unchanged. Passing,
+failing and not-checked fresh verdicts retain their normal exit statuses.
+This uses the same Aexeo implementation for replay; the host must independently
+select and protect the current inputs and evaluator. It neither authenticates
+results nor guarantees fresh sources, a complete snapshot or atomic publication.
+The separate Python comparator remains an independent cross-implementation check.
+
 The experimental Rust `verify_passing` helper additionally parses the independently
 supplied change artifact, rejects unsupported change extensions, compares the
 complete v1 subject, requires caller-selected validator labels, a successful
