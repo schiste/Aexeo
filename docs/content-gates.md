@@ -1758,3 +1758,33 @@ completeness, policy or binding to either artifact; a reported resolution can
 therefore reflect an incomplete audit. The host must establish these facts
 independently before using any comparison in a publication decision. In
 particular, these manifests do not attest freshness or ownership of an identity.
+
+### Experimental incremental batches
+
+`aexeo-cli content-incremental --input batch.json` evaluates independent proposals
+against the **same** host-provided base and resolved preset in one process. It
+prepares the base once and reuses unchanged item reports. Each proposal is an
+alternative against that base, not a sequence of edits. The bounded JSON input
+uses schema `aexeo.content-incremental-batch/v1-experimental`, with `snapshot`
+(a candidate snapshot), `preset` (a named built-in preset), optional
+`preset_sources` (name-to-TOML map, overriding built-ins), `mode` (`plain`,
+`paragraph_text`, `adapted`, or `adapted_main`), and `proposals` (an array of
+objects with `change` and `after`, as in `content-impact`). The batch is limited
+to 16 MiB, 256 base or projected items, and 16 proposals. Only inline change
+content is supported. No metadata, collection, site, source, or external gates
+are supplied by this interface; unsupported gates are `not_checked`.
+
+Stdout is newline-delimited JSON, one result per proposal, in input order. Each
+record has `schema`, `proposal_index`, and `result`. An `evaluated` result has
+item reports and `evaluated`/`reused` counts; individual gates can still report
+findings. Exit 0 means every proposal was evaluated without blocking failures; advisory
+findings can still exist. Exit 1 means at least one blocking gate failed. Exit 2
+means at least one proposal was not checked; invalid input or execution errors
+also produce a nonzero exit. Consumers must inspect all records and the exit
+status, and must not treat a partial stream as complete. `--telemetry` writes
+aggregate counts and timing to stderr without source text. Both the input and
+result reports may contain private information.
+
+The host asserts snapshot completeness and revision freshness; Aexeo does not
+authenticate them. These experimental item reports are not a publication
+verdict and do not establish collection, site, source, or publication safety.
