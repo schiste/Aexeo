@@ -90,6 +90,7 @@ export function withContentPreset(
   onEvidenceSourceTelemetry?: (event: EvidenceSourceTelemetry) => void,
   onPresetSelectionTelemetry?: (event: PresetSelectionTelemetry) => void,
   fragmentBlockMappings?: CustomBlockMappings,
+  onContentEvaluationTelemetry?: (event: ContentEvaluationTelemetry) => void,
 ): EvaluatorFn {
   if (!preset) return async (documents, context) => {
     const result = await base(documents, context);
@@ -133,9 +134,11 @@ export function withContentPreset(
         // A configured provider replaces static snapshots. Never fall back to
         // another document's evidence when the provider is unavailable.
         let evidenceSources = evidenceProvider ? undefined : preset.evidenceSources;
-        let report = evidenceSources === undefined
-          ? await evaluate(document, name, preset.sources)
-          : await evaluate(document, name, preset.sources, evidenceSources);
+        let report = onContentEvaluationTelemetry
+          ? await evaluate(document, name, preset.sources, evidenceSources, onContentEvaluationTelemetry)
+          : evidenceSources === undefined
+            ? await evaluate(document, name, preset.sources)
+            : await evaluate(document, name, preset.sources, evidenceSources);
         let evidenceFailure = false;
         if (evidenceProvider && report.gates.some((gate) => gate.required_capability === "text_and_evidence")) {
           const started = onEvidenceSourceTelemetry ? performance.now() : 0;
@@ -147,7 +150,9 @@ export function withContentPreset(
               throw new Error("invalid evidence sources");
             }
             evidenceSources = { ...sources };
-            report = await evaluate(document, name, preset.sources, evidenceSources);
+            report = onContentEvaluationTelemetry
+              ? await evaluate(document, name, preset.sources, evidenceSources, onContentEvaluationTelemetry)
+              : await evaluate(document, name, preset.sources, evidenceSources);
             status = "success";
           } catch {
             evidenceSources = undefined;
@@ -165,7 +170,7 @@ export function withContentPreset(
             if (!project) throw new Error("content gate projection is unavailable");
             externalResults = await provider({ input: await project(document, evidenceSources), preset: name, collection });
             if (!Array.isArray(externalResults)) throw new Error("external gate provider must return an array");
-            report = await evaluate(document, name, preset.sources, evidenceSources, undefined, externalResults);
+            report = await evaluate(document, name, preset.sources, evidenceSources, onContentEvaluationTelemetry, externalResults);
             status = "success";
           } catch {
             // Preserve local findings; external gates remain explicitly unchecked.
@@ -191,7 +196,7 @@ export function withContentPreset(
             } else {
               const observations = await linkProvider({ destinations: [...projection.destinations], route: document.route, locale: document.lang, preset: name, collection });
               if (!validLinkObservations(observations, projection.destinations.length)) throw new Error("invalid link observations");
-              report = await evaluate(document, name, preset.sources, evidenceSources, undefined,
+              report = await evaluate(document, name, preset.sources, evidenceSources, onContentEvaluationTelemetry,
                 externalResults, { ...projection, observations });
               status = "success";
             }

@@ -49,6 +49,11 @@ appropriate to each collection. Language selection does not translate content,
 infer its actual language, or establish that a heuristic is appropriate. Trusted
 runtime hosts may pass `onPresetSelectionTelemetry` to receive aggregate counts
 by matching level and success/error; it contains no locales, routes or content.
+The runtime can also supply `onContentEvaluationTelemetry` for aggregate local
+evaluation coverage, including measured prose-variance gates, list paragraphs
+excluded and windows checked. Events contain no document text, route or gate ID.
+One document can produce multiple events when an evaluation is repeated after
+obtaining host evidence. Unobserved prose coverage is omitted rather than zero.
 
 ## External gates in configured mode
 
