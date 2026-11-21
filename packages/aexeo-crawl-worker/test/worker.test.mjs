@@ -369,3 +369,35 @@ describe("empty locale preset selection", () => {
     });
   }
 });
+
+describe("sandbox list structure coverage", () => {
+  it("checks only complete attested list projections in workerd", async () => {
+    const preset = `version=1
+name="prose"
+[[gates]]
+id="variance"
+kind="prose_sentence_length_variance"
+window_size=3
+min_stddev_words=2
+`;
+    const text = (value, list = false) => ({ ...(list ? { listItem: "bullet", level: 1 } : {}), children: [{ _type: "span", text: value }] });
+    const body = [text("One two. Three four. Five six."), text("List one. List two. List three.", true), text("Seven eight. Nine ten. Eleven twelve.")];
+    const documents = [
+      { route: "/unknown", title: "Unknown", body },
+      { route: "/complete", title: "Complete", body, list_structure_complete: true },
+      { route: "/partial", title: "Partial", body, body_capabilities: ["text"], list_structure_complete: true },
+    ];
+    const harness = createTestHarness({ workers: [{ config: { name: "aexeo-prose", main: fileURLToPath(new URL("../src/worker.ts", import.meta.url)), compatibility_date: "2026-10-01",
+      vars: { SITE_URL, EVAL_TOKEN: TOKEN, CONTENT_PRESET: "prose", CONTENT_PRESET_SOURCES_JSON: JSON.stringify({ prose: preset }) } } }] });
+    try {
+      await harness.listen();
+      const response = await post(harness.getWorker("aexeo-prose"), JSON.stringify({ documents, collections: ["posts", "posts", "posts"], responseFormat: 2 }));
+      assert.equal(response.status, 200, await response.clone().text());
+      const result = await response.json();
+      assert.equal(result.assessments["/unknown"].gates[0].status, "not_checked");
+      assert.equal(result.assessments["/complete"].gates[0].status, "failed");
+      assert.equal(result.assessments["/complete"].gates[0].measurements.list_paragraphs_excluded, 1);
+      assert.equal(result.assessments["/partial"].gates[0].status, "not_checked");
+    } finally { await harness.close(); }
+  });
+});
