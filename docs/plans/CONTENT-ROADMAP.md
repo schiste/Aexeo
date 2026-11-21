@@ -439,6 +439,10 @@ registry before considering the release delivered.
   explicitly incomplete). The collection bytes
   are bound and independently revalidated; matching identities do not establish
   metadata correctness, provenance or completeness.
+  An experimental Rust helper reconstructs the candidate from a supplied base
+  and change before comparing the decision binding and independently supplied
+  content streams. It does not authenticate inputs, prove completeness or
+  freshness, or make verification and publication atomic.
   The experimental candidate binding also supports host-supplied ordered link
   snapshots, with a distinct envelope and offline revalidation. Independent
   Rust/Python byte-binding checks do not establish source authenticity,

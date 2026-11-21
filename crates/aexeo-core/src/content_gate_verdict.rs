@@ -988,6 +988,43 @@ pub fn verify_draft_passing_with_content<P: crate::content_gate_sources::Indepen
     Ok(())
 }
 
+/// Reconstruct the candidate and decision artifacts before verifying an experimental
+/// passing verdict and independently supplied content streams. The caller must
+/// independently obtain the context, evidence and streams, and establish their
+/// provenance, freshness, completeness, trusted execution and publication atomicity.
+/// This helper is not a publication authorization.
+#[allow(clippy::too_many_arguments)]
+pub fn verify_draft_passing_candidate_with_content<
+    P: crate::content_gate_sources::IndependentContent,
+>(
+    envelope: &aexeo_contracts::content_gate_portable_v2::BoundVerdict,
+    context: &CandidateDecisionContext<'_>,
+    scope: HtmlContentScope,
+    external_evidence: Option<&[u8]>,
+    requirements: &aexeo_contracts::content_gate_portable_v2::PassingRequirements<'_>,
+    provider: &mut P,
+    max_state_bytes: usize,
+    max_total_bytes: usize,
+) -> Result<()> {
+    let (base_digest, candidate_digest) = candidate_revisions(context)?;
+    let artifacts = context.decision.artifacts_with_html_scope(scope)?;
+    let mut inputs = artifacts.as_inputs();
+    inputs.external_evidence = external_evidence;
+    let current = aexeo_contracts::content_gate_portable_v2::CurrentInputs {
+        artifacts: inputs,
+        base_revision_sha256: &base_digest,
+        candidate_revision_sha256: &candidate_digest,
+    };
+    verify_draft_passing_with_content(
+        envelope,
+        &current,
+        requirements,
+        provider,
+        max_state_bytes,
+        max_total_bytes,
+    )
+}
+
 /// Produce a draft portable envelope for an offline candidate evaluation.
 /// The CLI exposes this through an experimental option. This is not a publication
 /// authorization.
@@ -2583,10 +2620,157 @@ mod tests {
         }
         let mut bytes = IndependentBytes(b"abc".to_vec());
         assert!(
+            verify_draft_passing_candidate_with_content(
+                &portable,
+                &ctx,
+                HtmlContentScope::Document,
+                None,
+                &requirements,
+                &mut bytes,
+                3,
+                3
+            )
+            .is_ok()
+        );
+        let incomplete_base = CandidateSnapshot {
+            complete: false,
+            ..base.clone()
+        };
+        let incomplete_ctx = CandidateDecisionContext {
+            base: &incomplete_base,
+            ..ctx
+        };
+        assert!(
+            verify_draft_passing_candidate_with_content(
+                &portable,
+                &incomplete_ctx,
+                HtmlContentScope::Document,
+                None,
+                &requirements,
+                &mut bytes,
+                3,
+                3
+            )
+            .is_err()
+        );
+        let mut other_base = base.clone();
+        other_base.site_id = "different-site".into();
+        let other_base_ctx = CandidateDecisionContext {
+            base: &other_base,
+            ..ctx
+        };
+        assert!(
+            verify_draft_passing_candidate_with_content(
+                &portable,
+                &other_base_ctx,
+                HtmlContentScope::Document,
+                None,
+                &requirements,
+                &mut bytes,
+                3,
+                3
+            )
+            .is_err()
+        );
+        let other_policy = preset(2);
+        let other_decision = OfflineDecisionContext {
+            preset: &other_policy,
+            collection: None,
+            ..decision
+        };
+        let other_policy_ctx = CandidateDecisionContext {
+            decision: &other_decision,
+            ..ctx
+        };
+        assert!(
+            verify_draft_passing_candidate_with_content(
+                &portable,
+                &other_policy_ctx,
+                HtmlContentScope::Document,
+                None,
+                &requirements,
+                &mut bytes,
+                3,
+                3
+            )
+            .is_err()
+        );
+        assert!(
+            verify_draft_passing_candidate_with_content(
+                &portable,
+                &ctx,
+                HtmlContentScope::Document,
+                None,
+                &requirements,
+                &mut bytes,
+                2,
+                3
+            )
+            .is_err()
+        );
+        let mut altered_after = after.clone();
+        altered_after[0].public_path = "/elsewhere".into();
+        let changed_ctx = CandidateDecisionContext {
+            after: &altered_after,
+            ..ctx
+        };
+        assert!(
+            verify_draft_passing_candidate_with_content(
+                &portable,
+                &changed_ctx,
+                HtmlContentScope::Document,
+                None,
+                &requirements,
+                &mut bytes,
+                3,
+                3
+            )
+            .is_err()
+        );
+        assert!(
+            verify_draft_passing_candidate_with_content(
+                &portable,
+                &ctx,
+                HtmlContentScope::Main,
+                None,
+                &requirements,
+                &mut bytes,
+                3,
+                3
+            )
+            .is_err()
+        );
+        assert!(
+            verify_draft_passing_candidate_with_content(
+                &portable,
+                &ctx,
+                HtmlContentScope::Document,
+                Some(b"unexpected"),
+                &requirements,
+                &mut bytes,
+                3,
+                3
+            )
+            .is_err()
+        );
+        assert!(
             verify_draft_passing_with_content(&portable, &current, &requirements, &mut bytes, 3, 3)
                 .is_ok()
         );
         bytes.0 = b"abd".to_vec();
+        assert!(
+            verify_draft_passing_candidate_with_content(
+                &portable,
+                &ctx,
+                HtmlContentScope::Document,
+                None,
+                &requirements,
+                &mut bytes,
+                3,
+                3
+            )
+            .is_err()
+        );
         assert!(
             verify_draft_passing_with_content(&portable, &current, &requirements, &mut bytes, 3, 3)
                 .is_err()
@@ -4521,7 +4705,7 @@ mod tests {
         state.inline = Some(source.into());
         state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
         let policy = ContentPreset::from_toml(
-            "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\n",
+            "version=1\nname='test'\n[[gates]]\nid='links'\nkind='link_reachability'\nblocking=true\n",
         )
         .unwrap();
         let base = CandidateSnapshot {
@@ -4599,6 +4783,87 @@ mod tests {
                 &mut NoFiles,
                 "2026-01-02T00:00:00Z",
                 scope
+            )
+            .is_err()
+        );
+        let portable = evaluate_draft_portable_candidate_link_verdict(
+            &context,
+            &mut NoFiles,
+            "2026-01-01T00:00:00Z",
+            scope,
+        )
+        .unwrap();
+        let evidence = LinkSnapshotDecisionContext {
+            offline: &decision,
+            snapshots: &snapshots,
+        }
+        .artifacts_with_html_scope(scope)
+        .unwrap()
+        .external_evidence;
+        let check_id = portable
+            .verdict
+            .checks
+            .iter()
+            .find(|check| check.blocking && check.status == CheckStatus::Passed)
+            .unwrap()
+            .id
+            .as_str();
+        let requirements = aexeo_contracts::content_gate_portable_v2::PassingRequirements {
+            validator_name: "aexeo",
+            validator_version: env!("CARGO_PKG_VERSION"),
+            required_checks: &[check_id],
+            exit_code: 0,
+        };
+        struct IndependentBytes(Vec<u8>);
+        impl crate::content_gate_sources::IndependentContent for IndependentBytes {
+            type Reader = std::io::Cursor<Vec<u8>>;
+            fn open(
+                &mut self,
+                entity: &str,
+                phase: crate::content_gate_sources::ContentPhase,
+            ) -> std::io::Result<Self::Reader> {
+                assert_eq!(entity, "article");
+                assert_eq!(phase, crate::content_gate_sources::ContentPhase::After);
+                Ok(std::io::Cursor::new(self.0.clone()))
+            }
+        }
+        let mut bytes = IndependentBytes(source.as_bytes().to_vec());
+        assert!(
+            verify_draft_passing_candidate_with_content(
+                &portable,
+                &candidate,
+                scope,
+                Some(&evidence),
+                &requirements,
+                &mut bytes,
+                1024,
+                1024
+            )
+            .is_ok()
+        );
+        assert!(
+            verify_draft_passing_candidate_with_content(
+                &portable,
+                &candidate,
+                scope,
+                None,
+                &requirements,
+                &mut bytes,
+                1024,
+                1024
+            )
+            .is_err()
+        );
+        assert!(
+            verify_draft_passing_candidate_with_content(
+                &portable,
+                &candidate,
+                scope,
+                Some(b"changed"),
+                &requirements,
+                &mut bytes,
+                1024,
+                1024
             )
             .is_err()
         );
