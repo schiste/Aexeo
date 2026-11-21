@@ -56,6 +56,8 @@ export interface ConfiguredPluginDescriptor {
 }
 
 import type { CustomBlockMappings, DescriptionField, MetadataFields } from "./adapter.js";
+import type { ContentPresetOptions } from "./content-evaluator.js";
+export type { ContentPresetOptions } from "./content-evaluator.js";
 export type { DescriptionField, MetadataFields, BodyCapability, CustomBlockMapping, CustomBlockMappings, CustomBlockField, InlineComponentField } from "./adapter.js";
 
 export interface AexeoPluginOptions {
@@ -67,7 +69,7 @@ export interface AexeoPluginOptions {
   /** Request historical revision access on a compatible EmDash host. */
   revisionAudits?: boolean;
   /** Add a portable content preset to configured-mode evaluation. */
-  contentPreset?: { name: string; autoAuditFragments?: boolean; sources?: Record<string, string>; evidenceSources?: Record<string, string>; byCollection?: Record<string, string>; byLocale?: Record<string, string>; byCollectionLocale?: Record<string, Record<string, string>>; fragmentFieldsByCollection?: Record<string, Record<string, string>>; collections?: readonly string[]; listStructureCompleteByCollection?: readonly string[]; fragmentListStructureCompleteByCollection?: Record<string, readonly string[]>; revisionListStructureCompleteByCollection?: readonly string[]; revisionFragmentListStructureCompleteByCollection?: Record<string, readonly string[]> };
+  contentPreset?: ContentPresetOptions;
   /**
    * emdash collections the plugin sweeps when an admin clicks
    * Refresh on the findings page. Order doesn't matter; the sweep
