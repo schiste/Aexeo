@@ -1006,7 +1006,9 @@ fn candidate_revisions_with_files<P: ConfinedContentFiles>(
         return candidate_revisions(context);
     }
     let revisions = candidate_revisions_inner(context, false)?;
-    crate::content_gate_sources::verify_candidate_file_states(
+    // candidate_revisions_inner already validated the overlay for these same
+    // immutable inputs; repeat only the bounded, confined file comparisons.
+    crate::content_gate_sources::verify_candidate_file_states_after_overlay(
         context.decision.change,
         context.base,
         context.after,
