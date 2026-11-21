@@ -1621,7 +1621,7 @@ change the seed deliberately to select another. The report records
 Neither the configuration nor findings establish authorship or guarantee any
 outcome from AI detectors. Review the passage before proposing an edit.
 
-### Prose-only sentence variance (host API)
+### Prose-only sentence variance
 
 The opt-in `prose_sentence_length_variance` gate accepts the same settings as
 `sentence_length_variance`, but excludes list paragraphs and breaks rolling
