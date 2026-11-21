@@ -54,6 +54,7 @@ pub struct IncrementalBaseline {
     preset: ContentPreset,
     reports: BTreeMap<String, ContentReport>,
     mode: ProjectionMode,
+    metadata_dependent: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -108,7 +109,20 @@ fn validate_scope(snapshot: &CandidateSnapshot, mode: ProjectionMode) -> Result<
     Ok(())
 }
 
-fn validate_preset(preset: &ContentPreset, mode: ProjectionMode) -> Result<(), NotChecked> {
+fn is_item_metadata_gate(gate: &ContentGate) -> bool {
+    matches!(
+        gate,
+        ContentGate::RequiredMetadata { .. }
+            | ContentGate::MetadataLength { .. }
+            | ContentGate::MetadataAge { .. }
+    )
+}
+
+fn validate_preset(
+    preset: &ContentPreset,
+    mode: ProjectionMode,
+    has_metadata: bool,
+) -> Result<(), NotChecked> {
     preset
         .validate()
         .map_err(|_| unavailable("invalid content preset"))?;
@@ -161,7 +175,8 @@ fn validate_preset(preset: &ContentPreset, mode: ProjectionMode) -> Result<(), N
                     | ContentGate::HeadingHierarchy { .. }
                     | ContentGate::DuplicateHeadings { .. }
             );
-        !text_gate && !paragraph_gate && !structured_gate
+        let metadata_gate = has_metadata && is_item_metadata_gate(gate);
+        !text_gate && !paragraph_gate && !structured_gate && !metadata_gate
     }) {
         return Err(unavailable(
             "preset contains gates outside the supported independent item scope",
@@ -174,6 +189,7 @@ fn evaluate_item(
     preset: &ContentPreset,
     item: &CandidateItem,
     mode: ProjectionMode,
+    metadata: Option<&BTreeMap<String, String>>,
 ) -> Result<ContentReport, NotChecked> {
     let classify_prose = preset
         .gates
@@ -202,7 +218,7 @@ fn evaluate_item(
     } else {
         None
     };
-    let (input, context, link_count) = match (mode, item.media_type.as_str()) {
+    let (mut input, context, link_count) = match (mode, item.media_type.as_str()) {
         (ProjectionMode::Adapted, "text/markdown") if wants_destinations => {
             let adapted = crate::markdown_adapter::markdown_input_with_source_map_and_destinations(
                 &item.entity_id,
@@ -303,6 +319,7 @@ fn evaluate_item(
             ));
         }
     };
+    input.metadata = metadata.cloned();
     let capabilities = ContentEvaluationContext {
         adapter: context.as_ref(),
         link_count,
@@ -334,7 +351,7 @@ impl IncrementalBaseline {
     /// Evaluate all base entities once. A host's completeness and link
     /// projection claims are prerequisites, not independently proven facts.
     pub fn prepare(snapshot: CandidateSnapshot, preset: ContentPreset) -> Result<Self, NotChecked> {
-        Self::prepare_with_mode(snapshot, preset, ProjectionMode::Plain)
+        Self::prepare_with_mode(snapshot, preset, ProjectionMode::Plain, None)
     }
 
     /// Interpret blank-line-separated plain text as paragraphs using the same
@@ -344,7 +361,7 @@ impl IncrementalBaseline {
         snapshot: CandidateSnapshot,
         preset: ContentPreset,
     ) -> Result<Self, NotChecked> {
-        Self::prepare_with_mode(snapshot, preset, ProjectionMode::ParagraphText)
+        Self::prepare_with_mode(snapshot, preset, ProjectionMode::ParagraphText, None)
     }
 
     /// Project Markdown and static HTML using the shared adapters; plain text
@@ -353,25 +370,57 @@ impl IncrementalBaseline {
         snapshot: CandidateSnapshot,
         preset: ContentPreset,
     ) -> Result<Self, NotChecked> {
-        Self::prepare_with_mode(snapshot, preset, ProjectionMode::Adapted)
+        Self::prepare_with_mode(snapshot, preset, ProjectionMode::Adapted, None)
+    }
+
+    /// Add explicit complete-or-unavailable metadata for every base identity.
+    /// The host must establish that each projection belongs to the base revision.
+    /// A map is an observed full projection (including absent keys); None means unavailable.
+    pub fn prepare_adapted_with_metadata(
+        snapshot: CandidateSnapshot,
+        metadata: BTreeMap<String, Option<BTreeMap<String, String>>>,
+        preset: ContentPreset,
+    ) -> Result<Self, NotChecked> {
+        Self::prepare_with_mode(snapshot, preset, ProjectionMode::Adapted, Some(metadata))
     }
 
     fn prepare_with_mode(
         snapshot: CandidateSnapshot,
         preset: ContentPreset,
         mode: ProjectionMode,
+        metadata: Option<BTreeMap<String, Option<BTreeMap<String, String>>>>,
     ) -> Result<Self, NotChecked> {
         validate_scope(&snapshot, mode)?;
-        validate_preset(&preset, mode)?;
+        if metadata.as_ref().is_some_and(|projections| {
+            projections.len() != snapshot.items.len()
+                || snapshot
+                    .items
+                    .iter()
+                    .any(|item| !projections.contains_key(&item.entity_id))
+        }) {
+            return Err(unavailable(
+                "metadata inventory does not match base identities",
+            ));
+        }
+        validate_preset(&preset, mode, metadata.is_some())?;
+        let metadata_dependent = preset.gates.iter().any(is_item_metadata_gate);
         let mut reports = BTreeMap::new();
         for item in &snapshot.items {
-            reports.insert(item.entity_id.clone(), evaluate_item(&preset, item, mode)?);
+            let fields = metadata
+                .as_ref()
+                .and_then(|values| values.get(&item.entity_id))
+                .and_then(Option::as_ref);
+            reports.insert(
+                item.entity_id.clone(),
+                evaluate_item(&preset, item, mode, fields)?,
+            );
         }
         Ok(Self {
             snapshot,
             preset,
             reports,
             mode,
+            metadata_dependent,
         })
     }
 
@@ -427,11 +476,29 @@ impl IncrementalBaseline {
             .iter()
             .map(|item| (item.entity_id.as_str(), item))
             .collect();
+        let changed_entries: BTreeMap<&str, &aexeo_contracts::content_gate_protocol::Entry> =
+            if self.metadata_dependent {
+                change
+                    .entries
+                    .iter()
+                    .filter(|entry| {
+                        !matches!(
+                            entry.operation,
+                            aexeo_contracts::content_gate_protocol::Operation::Delete
+                        )
+                    })
+                    .map(|entry| (entry.entity_id.as_str(), entry))
+                    .collect()
+            } else {
+                BTreeMap::new()
+            };
         let mut reports = BTreeMap::new();
         let mut evaluated = 0;
         let mut reused = 0;
         for item in &overlay.candidate.items {
-            let report = if baseline_items.get(item.entity_id.as_str()).copied() == Some(item) {
+            let report = if baseline_items.get(item.entity_id.as_str()).copied() == Some(item)
+                && (!self.metadata_dependent || !changed.contains(item.entity_id.as_str()))
+            {
                 reused += 1;
                 self.reports
                     .get(&item.entity_id)
@@ -444,7 +511,14 @@ impl IncrementalBaseline {
                     ));
                 }
                 evaluated += 1;
-                evaluate_item(&self.preset, item, self.mode)?
+                let fields = if self.metadata_dependent {
+                    changed_entries
+                        .get(item.entity_id.as_str())
+                        .and_then(|entry| entry.metadata.as_ref())
+                } else {
+                    None
+                };
+                evaluate_item(&self.preset, item, self.mode, fields)?
             };
             reports.insert(item.entity_id.clone(), report);
         }
@@ -691,7 +765,15 @@ impl ComposedBaseline {
                 "mixed preset must contain item and collection gates",
             ));
         }
-        let items = IncrementalBaseline::prepare_adapted(snapshot.clone(), items)?;
+        let items = if items.gates.iter().any(is_item_metadata_gate) {
+            IncrementalBaseline::prepare_adapted_with_metadata(
+                snapshot.clone(),
+                metadata.clone(),
+                items,
+            )?
+        } else {
+            IncrementalBaseline::prepare_adapted(snapshot.clone(), items)?
+        };
         let collection = CollectionBaseline::prepare(snapshot, metadata, collection)?;
         Ok(Self { items, collection })
     }
@@ -840,6 +922,209 @@ mod tests {
             })
             .collect()
     }
+    #[test]
+    fn metadata_only_changes_are_recomputed_and_missing_projections_fail_closed() {
+        let (snapshot, _, mut change) = fixture();
+        let preset = ContentPreset::from_toml("version=1\nname='metadata'\n[[gates]]\nid='required'\nkind='required_metadata'\nfields=['description']\n[[gates]]\nid='length'\nkind='metadata_length'\nfield='description'\nmin=4\n[[gates]]\nid='age'\nkind='metadata_age'\nfield='reviewed'\nas_of='2026-01-31'\nmax_days=30\n").unwrap();
+        let fields = BTreeMap::from([
+            ("description".into(), "long enough".into()),
+            ("reviewed".into(), "2026-01-20".into()),
+        ]);
+        let metadata: BTreeMap<_, _> = snapshot
+            .items
+            .iter()
+            .map(|item| (item.entity_id.clone(), Some(fields.clone())))
+            .collect();
+        assert!(IncrementalBaseline::prepare_adapted(snapshot.clone(), preset.clone()).is_err());
+        let mut incomplete = metadata.clone();
+        incomplete.remove("a");
+        assert!(
+            IncrementalBaseline::prepare_adapted_with_metadata(
+                snapshot.clone(),
+                incomplete,
+                preset.clone()
+            )
+            .is_err()
+        );
+        let mut unavailable = metadata.clone();
+        unavailable.insert("a".into(), None);
+        assert!(
+            IncrementalBaseline::prepare_adapted_with_metadata(
+                snapshot.clone(),
+                unavailable,
+                preset.clone()
+            )
+            .is_err()
+        );
+        let baseline = IncrementalBaseline::prepare_adapted_with_metadata(
+            snapshot.clone(),
+            metadata,
+            preset.clone(),
+        )
+        .unwrap();
+        let next = snapshot.items[0].clone();
+        let changed_fields = BTreeMap::from([
+            ("description".into(), "new".into()),
+            ("reviewed".into(), "2025-01-01".into()),
+        ]);
+        let mut update = entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&next),
+        );
+        update.metadata = Some(changed_fields.clone());
+        change.entries.push(update);
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate(&change, std::slice::from_ref(&next))
+        else {
+            panic!("expected evaluation")
+        };
+        assert_eq!((evaluated, reused), (1, snapshot.items.len() - 1));
+        assert_eq!(
+            reports["a"]
+                .gates
+                .iter()
+                .map(|gate| gate.status)
+                .collect::<Vec<_>>(),
+            vec![GateStatus::Passed, GateStatus::Failed, GateStatus::Failed]
+        );
+        let input = ContentInput {
+            id: next.entity_id.clone(),
+            text: Some(next.source.clone()),
+            source_text: Some(next.source.clone()),
+            metadata: Some(changed_fields),
+            ..Default::default()
+        };
+        let context = crate::plain_text_adapter::paragraph_text_context(&next.source).unwrap();
+        let capabilities = ContentEvaluationContext {
+            adapter: Some(&context),
+            ..Default::default()
+        };
+        let full = preset
+            .evaluate_with_paragraph_list_items(
+                &input,
+                &capabilities,
+                None,
+                None,
+                true,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&reports["a"]).unwrap(),
+            serde_json::to_value(full).unwrap()
+        );
+        change.entries[0].metadata = None;
+        assert!(matches!(
+            baseline.evaluate(&change, &[next]),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+    }
+
+    #[test]
+    fn metadata_follows_create_rename_and_delete_without_inheriting_old_fields() {
+        let (snapshot, _, mut change) = fixture();
+        let preset = ContentPreset::from_toml("version=1\nname='metadata'\n[[gates]]\nid='required'\nkind='required_metadata'\nfields=['description']\n").unwrap();
+        let metadata = snapshot
+            .items
+            .iter()
+            .map(|item| {
+                (
+                    item.entity_id.clone(),
+                    Some(BTreeMap::from([("description".into(), "old".into())])),
+                )
+            })
+            .collect();
+        let baseline =
+            IncrementalBaseline::prepare_adapted_with_metadata(snapshot.clone(), metadata, preset)
+                .unwrap();
+        let renamed = item("renamed", &snapshot.items[0].source, Some(vec![]));
+        let created = item("created", "new", Some(vec![]));
+        let mut rename = entry(
+            "renamed",
+            Operation::Rename,
+            Some(&snapshot.items[0]),
+            Some(&renamed),
+        );
+        rename.previous_entity_id = Some("a".into());
+        rename.metadata = Some(BTreeMap::new());
+        let mut create = entry("created", Operation::Create, None, Some(&created));
+        create.metadata = Some(BTreeMap::from([("description".into(), "new".into())]));
+        let delete = entry("b", Operation::Delete, Some(&snapshot.items[1]), None);
+        change.entries = vec![rename, create, delete];
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate(&change, &[renamed.clone(), created.clone()])
+        else {
+            panic!("expected evaluation")
+        };
+        assert_eq!(evaluated, 2);
+        assert_eq!(reused, snapshot.items.len() - 2);
+        assert!(!reports.contains_key("a") && !reports.contains_key("b"));
+        assert_eq!(reports["renamed"].gates[0].status, GateStatus::Failed);
+        assert_eq!(reports["created"].gates[0].status, GateStatus::Passed);
+        change.entries[0].metadata = None;
+        assert!(matches!(
+            baseline.evaluate(&change, &[renamed, created]),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+    }
+
+    #[test]
+    fn metadata_absence_is_distinct_from_unavailable_and_composes_with_collection() {
+        let (snapshot, _, mut change) = fixture();
+        let preset = ContentPreset::from_toml("version=1\nname='mixed'\n[[gates]]\nid='required'\nkind='required_metadata'\nfields=['description']\n[[gates]]\nid='unique'\nkind='unique_collection_metadata'\nfield='slug'\n").unwrap();
+        let metadata: BTreeMap<_, _> = snapshot
+            .items
+            .iter()
+            .map(|item| {
+                (
+                    item.entity_id.clone(),
+                    Some(BTreeMap::from([
+                        ("description".into(), "text".into()),
+                        ("slug".into(), item.entity_id.clone()),
+                    ])),
+                )
+            })
+            .collect();
+        let baseline =
+            ComposedBaseline::prepare_adapted(snapshot.clone(), metadata, preset).unwrap();
+        let next = snapshot.items[0].clone();
+        let mut update = entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&next),
+        );
+        update.metadata = Some(BTreeMap::from([("slug".into(), "a".into())]));
+        change.entries.push(update);
+        let result = baseline.evaluate(&change, std::slice::from_ref(&next));
+        let IncrementalEvaluation::Evaluated {
+            reports, evaluated, ..
+        } = result.items
+        else {
+            panic!("expected evaluated item report")
+        };
+        assert_eq!(evaluated, 1);
+        assert_eq!(reports["a"].gates[0].status, GateStatus::Failed);
+        change.entries[0].metadata = None;
+        let result = baseline.evaluate(&change, &[next]);
+        assert!(matches!(
+            result.items,
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+    }
+
     #[test]
     fn composed_candidate_reports_both_scopes_and_preserves_unavailable_collection() {
         let (snapshot, _, mut change) = fixture();

@@ -52,7 +52,7 @@ unobserved HTML and plain text cannot supply complete heading levels and cause
 any item causes `not_checked`, including link or heading checks on plain text.
 Destination checks use the complete per-item source projection and do not fetch links;
 Markdown containing unobserved HTML and plain text remain `not_checked` for this gate.
-Other formats, reachability checks, metadata, site, collection and external gates remain unsupported. Inline before/after
+Other formats, reachability checks, site, collection and external gates remain unsupported. Item metadata gates require the explicit mode below. Inline before/after
 content and the same complete, host-supplied inventory are still required.
 Route-link projections are not required for these item-local gates; any link
 count is extracted from that item's supplied source, not the host route graph.
@@ -63,6 +63,26 @@ markup is the rendered page. This API does not provide a publication verdict,
 a persistent cache, source freshness, or general site impact evaluation. The
 `evaluated` and `reused` counts remain aggregate work counters rather than a
 performance guarantee; no input text or identifiers are added to telemetry.
+
+## Item metadata projections
+
+`prepare_adapted_with_metadata` accepts the same adapted snapshot plus a map
+covering exactly its entity identities. Each value is either `Some(map)`, an
+explicit complete field projection (an absent key is observed absent), or
+`None`, meaning unavailable. The host must establish the projections' source,
+completeness and relation to the base revision. With that explicit input,
+`RequiredMetadata`, `MetadataLength` and `MetadataAge` compose with the
+supported item gates. A base whose required metadata cannot be assessed is
+rejected; this API does not claim a passing result.
+
+For each created, updated or renamed item, `Entry.metadata` is the full
+replacement projection. It is never silently inherited from the previous item.
+Missing projections cause `not_checked` for gates that need them. When item
+metadata gates are active, changed items are re-evaluated even when their content
+bytes and revision are unchanged.
+Unchanged items reuse the owned reports. `ComposedBaseline::prepare_adapted`
+uses the same host metadata for its item and collection gates. No projection is
+authenticated, made fresh, or bound to publication by these in-memory APIs.
 
 ## Host integration
 
