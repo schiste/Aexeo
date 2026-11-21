@@ -1,6 +1,8 @@
 //! Extract attributable links from rendered HTML without guessing unknown contexts.
 use crate::site::markup::tag_breaks_text;
-use html5ever::{ParseOpts, parse_document, tendril::TendrilSink, tree_builder::TreeBuilderOpts};
+use html5ever::{
+    ParseOpts, ns, parse_document, tendril::TendrilSink, tree_builder::TreeBuilderOpts,
+};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use serde::{Deserialize, Serialize};
 use std::rc::Rc;
@@ -245,7 +247,7 @@ pub fn extract_document(
                 attribute(&node, "lang").filter(|lang| !lang.trim().is_empty());
         }
         if base.is_none()
-            && matches!(&node.data, NodeData::Element { name, .. } if name.local.as_ref() == "base")
+            && matches!(&node.data, NodeData::Element { name, .. } if name.ns == ns!(html) && name.local.as_ref() == "base")
         {
             base = attribute(&node, "href");
         }
@@ -761,6 +763,27 @@ mod tests {
         assert!(
             metadata.robots_directives.is_empty(),
             "a scripting browser ignores <noscript> metadata"
+        );
+    }
+
+    #[test]
+    fn svg_base_does_not_change_page_link_resolution() {
+        let html =
+            "<svg><base href='https://other.example/'/></svg><main><a href='next'>next</a></main>";
+        let (links, metadata) = extract_document(
+            html,
+            "https://example.org/guide/",
+            "https://example.org",
+            None,
+        );
+        assert_eq!(metadata.base_href, None);
+        assert!(metadata.robots_directives.is_empty());
+        assert!(metadata.canonical_hrefs.is_empty());
+        assert_eq!(
+            links[0].resolution,
+            LinkResolution::Internal {
+                url: "https://example.org/guide/next".into()
+            }
         );
     }
 
