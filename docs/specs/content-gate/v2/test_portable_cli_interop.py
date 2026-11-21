@@ -68,6 +68,19 @@ class PortableCliInterop(unittest.TestCase):
             rejected = subprocess.run(verify, capture_output=True, text=True, check=False)
             self.assertEqual(rejected.returncode, 2)
             self.assertNotIn('example.org', rejected.stdout + rejected.stderr)
+            for field, value in (('source_sha256', '0' * 64),
+                                 ('destinations', ['https://example.org/other'])):
+                malformed = json.loads(json.dumps(snapshot))
+                malformed['entries']['article'][field] = value
+                (root / 'snapshot').write_text(json.dumps(malformed), encoding='utf-8')
+                output = root / ('invalid-' + field)
+                invalid = subprocess.run(command, cwd=ROOT,
+                                         env=dict(env, CONTENT_GATE_VERDICT_FILE=str(output)),
+                                         capture_output=True, text=True, check=False)
+                with self.subTest(field=field):
+                    self.assertNotEqual(invalid.returncode, 0)
+                    self.assertFalse(output.exists())
+                    self.assertNotIn('example.org', invalid.stdout + invalid.stderr)
 
     def test_html_main_scope_with_real_cli_and_independent_comparator(self):
         fixture = json.loads((HERE / 'portable-verdict-vector.json').read_text())
