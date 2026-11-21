@@ -550,6 +550,32 @@ pub fn markdown_structured_lists(source: &str) -> Result<Option<Vec<StructuredLi
     Ok(Some(lists))
 }
 
+/// Map list findings to the exact observed Markdown list openings.
+pub fn list_source_positions(
+    lists: &[StructuredList],
+    gate: &crate::content_gate::ContentGate,
+    result: &crate::content_gate::ContentGateResult,
+) -> Option<Vec<Option<(usize, usize)>>> {
+    let crate::content_gate::ContentGate::ListItemCount { flagged_counts, .. } = gate else {
+        return None;
+    };
+    if result.status != crate::content_gate::GateStatus::Failed {
+        return None;
+    }
+    let matching = lists
+        .iter()
+        .filter(|list| flagged_counts.contains(&list.item_count));
+    if matching.clone().count() != result.total_findings() {
+        return None;
+    }
+    Some(
+        matching
+            .take(result.findings.len())
+            .map(|list| Some((list.line, list.column)))
+            .collect(),
+    )
+}
+
 /// Extract prose and headings from Markdown, excluding code and front matter.
 /// If HTML is embedded, prose and headings are unavailable rather than partial;
 /// the original source remains available for source-based checks.

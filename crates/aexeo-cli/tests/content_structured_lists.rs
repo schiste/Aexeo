@@ -45,6 +45,44 @@ fn structured_list_gate_checks_markdown_and_withholds_unknown_structure() {
 }
 
 #[test]
+fn list_findings_identify_each_offending_markdown_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='lists'\n[[gates]]\nid='review'\nkind='list_item_count'\nflagged_counts=[3]\n").unwrap();
+    let article = dir.path().join("article.md");
+    fs::write(
+        &article,
+        "Intro.\n\n- one\n- two\n- three\n\nBetween.\n\n- another\n- list\n- here\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+        .args([
+            "content",
+            article.to_str().unwrap(),
+            "--input-format",
+            "markdown",
+            "--preset",
+            "custom",
+            "--preset-source",
+            &format!("custom={}", preset.display()),
+            "--format",
+            "json",
+            "--telemetry",
+        ])
+        .output()
+        .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["gates"][0]["status"], "failed");
+    assert_eq!(report["source_locations"][0]["line"], 3);
+    assert_eq!(report["source_locations"][1]["line"], 9);
+    let telemetry: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(telemetry["source_mapping"]["eligible"], 2);
+    assert_eq!(telemetry["source_mapping"]["mapped"], 2);
+    assert_eq!(telemetry["source_mapping"]["unmapped"], 0);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("another"));
+}
+
+#[test]
 fn prose_variance_observes_markdown_lists_and_withholds_unknown_structure() {
     let dir = tempfile::tempdir().unwrap();
     let preset = dir.path().join("preset.toml");

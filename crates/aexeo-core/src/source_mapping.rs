@@ -44,7 +44,8 @@ pub fn eligible_findings(
             prose_gate_has_positions(gate)
                 || matches!(
                     gate,
-                    ContentGate::HeadingHierarchy { .. }
+                    ContentGate::ListItemCount { .. }
+                        | ContentGate::HeadingHierarchy { .. }
                         | ContentGate::HeadingLength { .. }
                         | ContentGate::DuplicateHeadings { .. }
                         | ContentGate::LinkDestinations { .. }
