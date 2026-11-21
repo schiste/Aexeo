@@ -231,7 +231,11 @@ export function withContentPreset(
             ({ gate_id, status, blocking, scope, required_capability, reason, ...(measurements === undefined ? {} : { measurements }) })),
         };
         if (preset.autoAuditFragments === true && collection !== undefined) {
-          fragments[document.route] = await evaluateFragments(document, collection, sourceSnapshots?.[index], preset, evaluate, fragmentBlockMappings);
+          const evaluateFragment = onContentEvaluationTelemetry
+            ? (fragment: EmdashDocument, fragmentPreset: string, sources?: Record<string, string>) =>
+                evaluate(fragment, fragmentPreset, sources, undefined, onContentEvaluationTelemetry)
+            : evaluate;
+          fragments[document.route] = await evaluateFragments(document, collection, sourceSnapshots?.[index], preset, evaluateFragment, fragmentBlockMappings);
         }
         const locations = new Map((report.source_locations ?? []).map((location) => [
           `${location.gate_id}:${location.finding_index}`, location,

@@ -6,10 +6,13 @@ const current = { id: "one", type: "posts", locale: "en", draftRevisionId: "rev1
 const revision = { id: "rev1", collection: "posts", entryId: "one", data: { intro: "A useful short introduction.", content: "Another long article." } };
 const store = new Map();
 const ctx = { content: { get: async () => current, getRevision: async () => revision }, kv: { get: async key => store.get(key), set: async (key, value) => store.set(key, value) } };
-const plugin = createPlugin({ revisionAudits: true, contentPreset: { name: "article", fragmentFieldsByCollection: { posts: { intro: "fragment-readable" } } } });
+const telemetry = [];
+const plugin = createPlugin({ revisionAudits: true, contentPreset: { name: "article", fragmentFieldsByCollection: { posts: { intro: "fragment-readable" } } } }, { onContentEvaluationTelemetry: event => telemetry.push(event) });
 const input = { collection: "posts", id: "one", revision: "rev1", field: "intro" };
 const result = await plugin.routes["audit-revision"].handler({ ...ctx, input });
 assert.equal(result.status, "evaluated");
+assert.equal(telemetry.length, 1);
+assert.ok(!JSON.stringify(telemetry[0]).includes("one"));
 assert.equal(result.scope, "fragment");
 assert.equal(result.preset, "fragment-readable");
 assert.deepEqual(result.input_coverage.body.configured_fields, ["intro"]);

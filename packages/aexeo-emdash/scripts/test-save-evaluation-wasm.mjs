@@ -1070,10 +1070,11 @@ kind="metadata_length"
 field="title"
 max=1
 `;
+  const telemetry = [];
   const configured = createPlugin({ contentPreset: {
     name: "article", sources: { article, fragment }, autoAuditFragments: true,
     fragmentFieldsByCollection: { pages: { intro: "fragment", missing: "fragment" } },
-  } });
+  } }, { onContentEvaluationTelemetry: event => telemetry.push(event) });
   const page = item("fragment-save", { data: {
     body: [block("body", "The complete article body.")],
     intro: [block("intro", "A risk needs attention.")],
@@ -1081,6 +1082,8 @@ max=1
   const host = fakeHost([page]);
   const runSave = () => configured.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
   await runSave();
+  assert.equal(telemetry.length, 2);
+  assert.ok(!JSON.stringify(telemetry).includes("fragment-save"));
   let stored = host.store.get("findings:/fragment-save");
   assert.ok(stored.fragments, JSON.stringify({ stored, logged: host.logged }));
   assert.equal(stored.fragments[0].status, "evaluated");
