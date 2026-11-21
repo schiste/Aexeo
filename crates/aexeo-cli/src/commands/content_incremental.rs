@@ -170,9 +170,17 @@ impl Totals {
 pub fn command_content_incremental(args: &ArgMatches) -> Result<i32> {
     let started = std::time::Instant::now();
     let mut bytes = Vec::new();
-    File::open(required_arg(args, "input")?)?
-        .take(MAX_BYTES + 1)
-        .read_to_end(&mut bytes)?;
+    let input = required_arg(args, "input")?;
+    if input == "-" {
+        io::stdin()
+            .lock()
+            .take(MAX_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+    } else {
+        File::open(input)?
+            .take(MAX_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+    }
     if bytes.len() as u64 > MAX_BYTES {
         bail!("incremental batch exceeds size limit");
     }
