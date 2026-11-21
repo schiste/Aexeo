@@ -23,6 +23,10 @@ enum Event {
         start: usize,
         heading: Option<u8>,
         paragraph: bool,
+        in_list_item: bool,
+    },
+    EndListItem {
+        paragraphs_before: usize,
     },
 }
 
@@ -92,6 +96,19 @@ pub fn html_content_with_scope_and_heading_levels(
     source: &str,
     scope: HtmlContentScope,
 ) -> Result<(HtmlContent, Vec<u8>), &'static str> {
+    html_content_with_paragraph_list_items(id, source, scope)
+        .map(|(content, levels, _)| (content, levels))
+}
+
+/// Project the selected scope with optional ordered paragraph list membership.
+/// This observes static markup only; lists missing projected paragraphs are unknown.
+/// `Main` currently withholds classification because ancestors outside the selected
+/// subtree may themselves be list items.
+pub fn html_content_with_paragraph_list_items(
+    id: impl Into<String>,
+    source: &str,
+    scope: HtmlContentScope,
+) -> Result<(HtmlContent, Vec<u8>, Option<Vec<bool>>), &'static str> {
     if source.len() > MAX_CONTENT_INPUT_BYTES {
         return Err("HTML exceeds the content input byte limit");
     }
@@ -126,6 +143,8 @@ pub fn html_content_with_scope_and_heading_levels(
     let mut headings = Vec::new();
     let mut heading_levels = Vec::new();
     let mut ranges = Vec::new();
+    let mut list_item_depth = 0usize;
+    let mut unrepresented_list_item = false;
     let mut block_ends = Vec::new();
     let mut destinations = Vec::new();
     let mut visited = 0usize;
@@ -135,16 +154,21 @@ pub fn html_content_with_scope_and_heading_levels(
                 start,
                 heading,
                 paragraph,
+                in_list_item,
             } => {
                 if let Some(level) = heading {
                     headings.push(collapse_whitespace(&text[start..]));
                     heading_levels.push(level);
                 }
                 if paragraph {
-                    ranges.push((start, text.len()));
+                    ranges.push((start, text.len(), in_list_item));
                 }
                 block_ends.push(text.len());
                 text.push('\n');
+            }
+            Event::EndListItem { paragraphs_before } => {
+                list_item_depth -= 1;
+                unrepresented_list_item |= ranges.len() == paragraphs_before;
             }
             Event::Enter(node) => {
                 visited += 1;
@@ -158,6 +182,12 @@ pub fn html_content_with_scope_and_heading_levels(
                     NodeData::Text { contents } => text.push_str(&contents.borrow()),
                     NodeData::Element { name, attrs, .. } => {
                         let tag = name.local.as_ref();
+                        if tag == "li" {
+                            list_item_depth += 1;
+                            stack.push(Event::EndListItem {
+                                paragraphs_before: ranges.len(),
+                            });
+                        }
                         let attrs = attrs.borrow();
                         if tag == "a"
                             && let Some(href) =
@@ -204,6 +234,7 @@ pub fn html_content_with_scope_and_heading_levels(
                                 start: text.len(),
                                 heading,
                                 paragraph,
+                                in_list_item: list_item_depth > 0,
                             });
                         }
                     }
@@ -222,7 +253,9 @@ pub fn html_content_with_scope_and_heading_levels(
     }
     let (mut cursor, mut line, mut column) = (0, 1, 1);
     let mut paragraphs = Vec::with_capacity(ranges.len());
-    for (start, end) in ranges {
+    let mut paragraph_list_items = Vec::with_capacity(ranges.len());
+    for (start, end, list_item) in ranges {
+        paragraph_list_items.push(list_item);
         for ch in text[cursor..start].chars() {
             if ch == '\n' {
                 line += 1;
@@ -255,6 +288,8 @@ pub fn html_content_with_scope_and_heading_levels(
             destinations,
         },
         heading_levels,
+        (scope == HtmlContentScope::Document && !unrepresented_list_item)
+            .then_some(paragraph_list_items),
     ))
 }
 
@@ -925,6 +960,34 @@ pub fn gate_source_positions_with_links(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn paragraph_list_membership_withholds_unrepresented_html_items() {
+        use super::*;
+        let source = "<p>Before.</p><ul><li><p>First.</p><ul><li><p>Nested.</p></li></ul></li></ul><p>After.</p>";
+        let (content, _, items) =
+            html_content_with_paragraph_list_items("x", source, HtmlContentScope::Document)
+                .unwrap();
+        assert_eq!(content.context.paragraphs.unwrap().len(), 4);
+        assert_eq!(items, Some(vec![false, true, true, false]));
+        let (_, _, unknown) = html_content_with_paragraph_list_items(
+            "x",
+            "<p>Before.</p><ul><li>Unwrapped.</li></ul><p>After.</p>",
+            HtmlContentScope::Document,
+        )
+        .unwrap();
+        assert_eq!(unknown, None);
+        let (_, _, empty) =
+            html_content_with_paragraph_list_items("x", "<p>Text.</p>", HtmlContentScope::Document)
+                .unwrap();
+        assert_eq!(empty, Some(vec![false]));
+        let (_, _, scoped) = html_content_with_paragraph_list_items(
+            "x",
+            "<main><p>Text.</p></main>",
+            HtmlContentScope::Main,
+        )
+        .unwrap();
+        assert_eq!(scoped, None);
+    }
     use super::*;
 
     #[test]
