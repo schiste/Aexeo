@@ -265,6 +265,37 @@ mode="strict"
   console.log("WASM configured provider runs on refresh and save");
 }
 
+// External results are tied to the exact reference label seen by the provider.
+{
+  const preset = `version=1
+name="custom-reference"
+[[gates]]
+id="external"
+kind="custom"
+extension="example.rule"
+`;
+  let firstInput;
+  const plugin = createPlugin({ contentPreset: { name: "custom-reference", sources: { "custom-reference": preset } } }, {
+    externalGates: async ({ input }) => {
+      firstInput ??= input;
+      return [{ extension: "example.rule", parameters: {}, input: firstInput, diagnostics: [] }];
+    },
+  });
+  const page = item("external-reference", { data: { body: [{
+    _type: "block", _key: "p", style: "normal",
+    markDefs: [{ _key: "ref", _type: "link", href: "#reference-source" }],
+    children: [{ _type: "span", text: "Élan." }, { _type: "span", text: "[1]", marks: ["ref"] }],
+  }] } });
+  const host = fakeHost([page]);
+  const save = () => plugin.hooks["content:afterSave"].handler({ content: page, collection: "pages", isNew: false }, host.ctx);
+  await save();
+  assert.equal(firstInput.text, "Élan.[1]");
+  assert.equal(host.store.get("findings:/external-reference").assessment.gates[0].status, "passed");
+  page.data.body[0].children[1].text = "[2]";
+  await save();
+  assert.equal(host.store.get("findings:/external-reference").assessment.gates[0].status, "not_checked");
+}
+
 // A failing provider must not discard unrelated editorial findings.
 {
   const preset = `version=1

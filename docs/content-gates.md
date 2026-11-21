@@ -121,8 +121,13 @@ instead see those labels in Markdown, HTML and Portable Text, while keeping the
 original projected offsets. Rust hosts using the adapters directly must pass the
 optional literal projection to `evaluate_with_literal_projection`. Other checks still use their documented
 projection; this does not verify citations or source support. If a supplied
-literal projection is inconsistent with the observed text, the literal checks
-are `not_checked`.
+literal projection is inconsistent with the observed text, the literal and
+external checks are `not_checked`. External extensions receive the restored
+reference labels in their projected text, and results bound to an earlier label
+are stale when that label changes. EmDash also preserves labels in projected
+headings when headings are available independently of body text. Previously captured results that used masked
+labels must be regenerated. This binds the projection, not the full rendered
+page or the correctness of the extension's judgment.
 
 The opt-in `fragment-readable` preset is intended for an individual introduction, example, prerequisite, or other fragment. It composes only the advisory shared sentence-length check; it does not require article length or page metadata. Select it explicitly for fragments, and configure other checks according to the field and language. A clean result does not establish completeness or factual accuracy.
 

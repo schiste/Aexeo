@@ -2326,7 +2326,7 @@ impl ContentPreset {
         let mut word_count = None;
         let mut character_counts = [None, None];
         let mut literal_cache = None;
-        // Only validate the alternate projection when a literal gate can use it.
+        // Validate the alternate projection only when literal or external gates can use it.
         let literal_input = match (input.text.as_deref(), literal_projection) {
             (Some(projected), Some(literal))
                 if self.gates.iter().any(|gate| {
@@ -2335,6 +2335,7 @@ impl ContentPreset {
                         ContentGate::RepeatedTerms { .. }
                             | ContentGate::RequiredTerms { .. }
                             | ContentGate::ForbiddenTerms { .. }
+                            | ContentGate::Custom { .. }
                     )
                 }) =>
             {
@@ -2345,6 +2346,26 @@ impl ContentPreset {
                 }
             }
             (text, _) => Ok(text),
+        };
+        // External results bind to the exact text they evaluated. A masked
+        // citation must not make two different revisions appear identical.
+        let extension_input = if extensions.is_some()
+            && literal_projection.is_some()
+            && self
+                .gates
+                .iter()
+                .any(|gate| matches!(gate, ContentGate::Custom { .. }))
+        {
+            match literal_input {
+                Ok(Some(text)) => {
+                    let mut exact = input.clone();
+                    exact.text = Some(text.to_owned());
+                    Some(exact)
+                }
+                _ => None,
+            }
+        } else {
+            None
         };
         let block_ends = context
             .and_then(|context| context.block_ends.as_deref())
@@ -4386,17 +4407,28 @@ impl ContentPreset {
                     parameters,
                     ..
                 } => {
-                    match extensions
-                        .map(|host| host.evaluate(extension, parameters, input))
-                        .transpose()?
-                        .flatten()
-                    {
-                        Some(diagnostics) => {
-                            for diagnostic in diagnostics {
-                                emit(diagnostic.message, diagnostic.line, diagnostic.column);
+                    if literal_input.is_err() {
+                        reason =
+                            Some("literal text projection does not match the observed text".into());
+                    } else {
+                        match extensions
+                            .map(|host| {
+                                host.evaluate(
+                                    extension,
+                                    parameters,
+                                    extension_input.as_ref().unwrap_or(input),
+                                )
+                            })
+                            .transpose()?
+                            .flatten()
+                        {
+                            Some(diagnostics) => {
+                                for diagnostic in diagnostics {
+                                    emit(diagnostic.message, diagnostic.line, diagnostic.column);
+                                }
                             }
+                            None => reason = Some(format!("extension is unavailable: {extension}")),
                         }
-                        None => reason = Some(format!("extension is unavailable: {extension}")),
                     }
                 }
                 ContentGate::SiteGroup { group, .. } => match site {
@@ -5761,6 +5793,43 @@ max = 1
                 .iter()
                 .all(|gate| gate.status == GateStatus::NotChecked)
         );
+    }
+
+    #[test]
+    fn invalid_literal_projection_never_reaches_external_host() {
+        struct NoCall;
+        impl ContentGateExtensions for NoCall {
+            fn evaluate(
+                &self,
+                _: &str,
+                _: &BTreeMap<String, String>,
+                _: &ContentInput,
+            ) -> Result<Option<Vec<ExtensionDiagnostic>>> {
+                panic!("inconsistent projection reached extension host")
+            }
+        }
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='t'\n[[gates]]\nid='external'\nkind='custom'\nextension='test'\n",
+        )
+        .unwrap();
+        let capabilities = ContentEvaluationContext {
+            extensions: Some(&NoCall),
+            ..Default::default()
+        };
+        let report = preset
+            .evaluate_with_literal_projection(
+                &literal_input("abc"),
+                &capabilities,
+                None,
+                None,
+                true,
+                None,
+                None,
+                None,
+                Some("xyz"),
+            )
+            .unwrap();
+        assert_eq!(report.gates[0].status, GateStatus::NotChecked);
     }
 
     #[test]

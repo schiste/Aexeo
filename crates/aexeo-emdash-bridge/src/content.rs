@@ -122,7 +122,16 @@ fn content_input_with_context(
         }
         let block_text = text[block_start..].to_owned();
         if is_heading(&block.style) {
-            headings.push(collapse_whitespace(&block_text));
+            // Headings are an independently available capability. Preserve
+            // reference labels even when the host cannot supply body text.
+            let heading = block
+                .children
+                .iter()
+                .map(|child| match child {
+                    PortableTextChild::Span(span) => span.text.as_str(),
+                })
+                .collect::<String>();
+            headings.push(collapse_whitespace(&heading));
         }
         let next_line = line + block_text.chars().filter(|ch| *ch == '\n').count() + 1;
         offset += block_text.len();
@@ -766,7 +775,10 @@ pub fn extension_input(
     evidence_sources: Option<BTreeMap<String, String>>,
     capabilities: [bool; 4],
 ) -> ContentInput {
-    let mut input = content_input(document);
+    let (mut input, _, _, literal_text) = content_input_with_context(document);
+    if let Some(literal_text) = literal_text {
+        input.text = Some(literal_text);
+    }
     input.evidence_sources = evidence_sources;
     if !capabilities[0] {
         input.text = None;
@@ -1855,6 +1867,44 @@ field = "slug"
         assert_eq!(locations.len(), 31);
         assert_eq!((locations[1].span_index, locations[1].utf16_offset), (3, 0));
         assert_eq!(document.body[0].children.len(), 69);
+    }
+
+    #[test]
+    fn external_results_bind_to_exact_numeric_reference_labels() {
+        use aexeo_core::content_extensions::{ExternalGateResult, ExternalGateResults};
+        let make_document = |label: &str| -> EmdashDocument {
+            serde_json::from_value(serde_json::json!({"route":"/test","title":"Test","body":[{"markDefs":[{"_key":"r","_type":"link","href":"#reference-source"}],"children":[{"_type":"span","text":"Élan."},{"_type":"span","text":label,"marks":["r"]},{"_type":"span","text":" Next."}]}]})).unwrap()
+        };
+        let first = make_document("[1]");
+        let second = make_document("[2]");
+        let capabilities = [true; 4];
+        let projected = extension_input(&first, None, capabilities);
+        assert_eq!(projected.text.as_deref(), Some("Élan.[1] Next."));
+        assert_eq!(extension_input(&first, None, [false; 4]).text, None);
+        let preset = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='custom'\nkind='custom'\nextension='test.rule'\n").unwrap();
+        let host = ExternalGateResults::new(vec![ExternalGateResult {
+            extension: "test.rule".into(),
+            parameters: BTreeMap::new(),
+            input: projected,
+            diagnostics: vec![],
+        }])
+        .unwrap();
+        let current =
+            evaluate_content_with_extensions(&first, &preset, None, capabilities, Some(&host))
+                .unwrap();
+        assert_eq!(current.gates[0].status, GateStatus::Passed);
+        let stale =
+            evaluate_content_with_extensions(&second, &preset, None, capabilities, Some(&host))
+                .unwrap();
+        assert_eq!(stale.gates[0].status, GateStatus::NotChecked);
+    }
+
+    #[test]
+    fn extension_heading_only_input_preserves_reference_labels() {
+        let document: EmdashDocument = serde_json::from_str(r##"{"route":"/test","title":"Test","body":[{"style":"h2","markDefs":[{"_key":"r","_type":"link","href":"#reference-source"}],"children":[{"_type":"span","text":"Heading "},{"_type":"span","text":"[1]","marks":["r"]}]}]}"##).unwrap();
+        let input = extension_input(&document, None, [false, true, false, false]);
+        assert_eq!(input.text, None);
+        assert_eq!(input.headings.unwrap(), vec!["Heading [1]"]);
     }
 
     #[test]
