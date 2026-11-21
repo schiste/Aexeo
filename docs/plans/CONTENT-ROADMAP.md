@@ -457,9 +457,10 @@ registry before considering the release delivered.
   binds content digests and base only; runners must independently retain and
   compare the other inputs or fail closed. Do not claim an optional extension
   protects legacy runners that ignore it.
-  The Rust candidate verifier also checks supplied link-snapshot structure,
-  change and declared source identities after bounded binding verification;
-  it does not re-extract links or establish evidence authenticity or freshness.
+  The Rust candidate verifier checks link-snapshot structure, change and source
+  identities, and re-extracts ordered Markdown or scoped HTML destinations for
+  supplied observations. Missing snapshots remain unobserved; this does not
+  establish evidence authenticity, freshness or publication authorization.
   The optional cross-process test checks that the native Aethyme comparator
   also rejects unsuccessful, timed-out and missing fresh process status.
   The independent draft Python comparator also requires an explicitly supplied
