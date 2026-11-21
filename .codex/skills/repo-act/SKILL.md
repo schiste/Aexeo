@@ -212,6 +212,10 @@ description: Use after repo-onboarding or Explore when moving from orientation i
 - Keep real-content review packets awaiting people in a durable private directory,
   outside Git and temporary cleanup locations; verify restrictive permissions,
   preserve the corpus and rubric, and never treat placeholder labels as reviews.
+- For crawl and inventory timestamp tests, avoid a fixed date in a shared
+  fixture when the crawler records the real clock: omit the optional date and
+  assert the observed window, or control the clock. Separately test an explicit
+  conflicting date and verify orphan eligibility stays withheld end to end.
 - For link graph locale coverage, test inventory and rendered language as
   matching, conflicting, missing, malformed and differently specific values.
   Include a seeded HTTP crawl and assert both the reconciliation reason and
