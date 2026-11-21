@@ -245,6 +245,26 @@ Options:
           Print help
 ```
 
+## `content-incremental`
+
+Experimentally evaluate independent proposals against one reusable content baseline
+
+```text
+Experimentally evaluate independent proposals against one reusable content baseline
+
+Usage: content-incremental [OPTIONS] --input <input>
+
+Options:
+      --input <input>
+          Versioned JSON batch containing private content
+
+      --telemetry
+          Emit aggregate timing and counts to stderr
+
+  -h, --help
+          Print help
+```
+
 ## `content-impact`
 
 Compute experimental direct link impact from a host-provided candidate snapshot

@@ -80,6 +80,12 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue)),
         )
         .subcommand(
+            Command::new("content-incremental")
+                .about("Experimentally evaluate independent proposals against one reusable content baseline")
+                .arg(Arg::new("input").long("input").required(true).help("Versioned JSON batch containing private content"))
+                .arg(Arg::new("telemetry").long("telemetry").action(ArgAction::SetTrue).help("Emit aggregate timing and counts to stderr")),
+        )
+        .subcommand(
             Command::new("content-impact")
                 .about("Compute experimental direct link impact from a host-provided candidate snapshot")
                 .arg(Arg::new("input").long("input").required(true).help("Versioned JSON query file (may contain private content)"))
