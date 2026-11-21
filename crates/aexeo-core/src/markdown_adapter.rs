@@ -32,12 +32,22 @@ pub struct MarkdownSourceMap {
     heading_levels: Vec<u8>,
     heading_levels_complete: bool,
     contains_html: bool,
+    paragraph_list_items: Vec<bool>,
+    paragraph_list_items_complete: bool,
 }
 
 impl MarkdownSourceMap {
     /// Whether Markdown exposed all link-bearing markup to the adapter.
     pub fn links_complete(&self) -> bool {
         !self.contains_html
+    }
+
+    /// Classify projected paragraphs in order; `None` means markup was unobserved
+    /// or a list item did not produce any projected paragraph.
+    /// `true` denotes a paragraph inside a list item, including nested lists.
+    pub fn paragraph_list_items(&self) -> Option<&[bool]> {
+        self.paragraph_list_items_complete
+            .then_some(&self.paragraph_list_items)
     }
 
     /// Heading levels in the same order as the projected headings.
@@ -832,7 +842,9 @@ fn reference_label(mut children: &[Node]) -> Option<&str> {
 struct Projection {
     text: String,
     headings: Vec<String>,
-    ranges: Vec<(usize, usize)>,
+    ranges: Vec<(usize, usize, bool)>,
+    list_item_depth: usize,
+    unrepresented_list_item: bool,
     block_ends: Vec<usize>,
     link_count: usize,
     definitions: std::collections::BTreeMap<String, String>,
@@ -953,11 +965,19 @@ impl Projection {
                 self.headings.push(collapse_whitespace(&self.text[start..]));
                 self.end_block();
             }
+            Node::ListItem(_) => {
+                let paragraphs_before = self.ranges.len();
+                self.list_item_depth += 1;
+                self.visit_children(node, source, source_map);
+                self.list_item_depth -= 1;
+                self.unrepresented_list_item |= self.ranges.len() == paragraphs_before;
+            }
             Node::Paragraph(_) | Node::TableCell(_) => {
                 let start = self.text.len();
                 self.visit_children(node, source, source_map);
                 if matches!(node, Node::Paragraph(_)) {
-                    self.ranges.push((start, self.text.len()));
+                    self.ranges
+                        .push((start, self.text.len(), self.list_item_depth > 0));
                 }
                 self.end_block();
             }
@@ -1002,6 +1022,8 @@ fn extract_markdown_from_root(
         text,
         headings,
         ranges,
+        list_item_depth: _,
+        unrepresented_list_item,
         block_ends,
         link_count,
         definitions: _,
@@ -1012,7 +1034,8 @@ fn extract_markdown_from_root(
     }
     let (mut cursor, mut line, mut column) = (0, 1, 1);
     let mut paragraphs = Vec::with_capacity(ranges.len());
-    for (start, end) in ranges {
+    for (start, end, list_item) in ranges {
+        source_map.paragraph_list_items.push(list_item);
         for ch in text[cursor..start].chars() {
             if ch == '\n' {
                 line += 1;
@@ -1029,6 +1052,7 @@ fn extract_markdown_from_root(
         cursor = start;
     }
     let complete = !source_map.contains_html;
+    source_map.paragraph_list_items_complete = complete && !unrepresented_list_item;
     Ok((
         ContentInput {
             id: id.into(),
@@ -1053,6 +1077,49 @@ fn extract_markdown_from_root(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn projected_paragraphs_classify_nested_list_items_without_guessing_html() {
+        assert_eq!(MarkdownSourceMap::default().paragraph_list_items(), None);
+        let source = "Intro.\n\n- First.\n  - Nested.\n- Last.\n\nAfter.\n";
+        let (_, context, _, map) = markdown_input_with_source_map("x", source).unwrap();
+        let paragraphs = context.paragraphs.unwrap();
+        assert_eq!(
+            paragraphs
+                .iter()
+                .map(|p| p.text.as_str())
+                .collect::<Vec<_>>(),
+            ["Intro.", "First.", "Nested.", "Last.", "After."]
+        );
+        assert_eq!(
+            map.paragraph_list_items(),
+            Some(&[false, true, true, true, false][..])
+        );
+        let (_, _, _, incomplete) =
+            markdown_input_with_source_map("x", "Text.\n\n<div>hidden</div>").unwrap();
+        assert_eq!(incomplete.paragraph_list_items(), None);
+    }
+
+    #[test]
+    fn list_paragraph_classification_handles_loose_lists_and_safe_breaks() {
+        let source = "Before<br>here.\n\n- First paragraph.\n\n  Second paragraph.\n\n> Quoted prose.\n\nAfter.";
+        let (_, context, _, map) = markdown_input_with_source_map("x", source).unwrap();
+        assert_eq!(context.paragraphs.unwrap().len(), 5);
+        assert_eq!(
+            map.paragraph_list_items(),
+            Some(&[false, true, true, false, false][..])
+        );
+        let (_, _, _, empty) = markdown_input_with_source_map("x", "").unwrap();
+        assert_eq!(empty.paragraph_list_items(), Some(&[][..]));
+    }
+
+    #[test]
+    fn empty_list_items_withhold_paragraph_list_classification() {
+        let (_, context, _, map) =
+            markdown_input_with_source_map("x", "Before.\n\n- \n\nAfter.").unwrap();
+        assert_eq!(context.paragraphs.unwrap().len(), 2);
+        assert_eq!(map.paragraph_list_items(), None);
+    }
+
     #[test]
     fn safe_inline_html_breaks_preserve_text_links_lists_and_locations() {
         for tag in ["<br>", "<BR>", "<br/>", "<br />"] {
