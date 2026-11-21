@@ -1921,6 +1921,16 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
         }
         let mut heading_levels = None;
         let mut paragraph_list_items = None;
+        let structured_lists = if entry.media_type == "text/markdown"
+            && item_preset
+                .gates
+                .iter()
+                .any(|gate| matches!(gate, crate::content_gate::ContentGate::ListItemCount { .. }))
+        {
+            crate::markdown_adapter::markdown_structured_lists(&text)?
+        } else {
+            None
+        };
         let (mut input, context, link_count, destinations, source_map) = match entry
             .media_type
             .as_str()
@@ -2079,7 +2089,7 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
                 .as_ref()
                 .is_some_and(|collection| collection.complete),
             None,
-            None,
+            structured_lists.as_deref(),
             paragraph_list_items.as_deref(),
         )?;
         let identity_projection = input.text.as_deref().is_some()
@@ -2142,40 +2152,48 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
             } else {
                 None
             };
-            let positions = hierarchy_positions.or_else(|| {
-                source_map
-                    .as_ref()
-                    .and_then(|map| {
-                        gate_source_positions(
-                            map,
-                            input.source_text.as_deref()?,
-                            &input,
-                            definition,
-                            &gate,
-                            destinations.as_deref(),
-                            observations.as_deref(),
-                        )
-                    })
-                    .or_else(|| {
-                        crate::html_content_adapter::gate_source_positions_with_links(
-                            html_map.as_ref()?,
-                            input.source_text.as_deref()?,
-                            &input,
-                            definition,
-                            &gate,
-                            destinations.as_deref(),
-                            observations.as_deref(),
-                        )
-                    })
-                    .or_else(|| {
-                        crate::plain_text_adapter::gate_source_positions(
-                            plain_index.as_ref()?,
-                            input.text.as_deref()?,
-                            definition,
-                            &gate,
-                        )
-                    })
-            });
+            let positions = hierarchy_positions
+                .or_else(|| {
+                    crate::markdown_adapter::list_source_positions(
+                        structured_lists.as_deref()?,
+                        definition,
+                        &gate,
+                    )
+                })
+                .or_else(|| {
+                    source_map
+                        .as_ref()
+                        .and_then(|map| {
+                            gate_source_positions(
+                                map,
+                                input.source_text.as_deref()?,
+                                &input,
+                                definition,
+                                &gate,
+                                destinations.as_deref(),
+                                observations.as_deref(),
+                            )
+                        })
+                        .or_else(|| {
+                            crate::html_content_adapter::gate_source_positions_with_links(
+                                html_map.as_ref()?,
+                                input.source_text.as_deref()?,
+                                &input,
+                                definition,
+                                &gate,
+                                destinations.as_deref(),
+                                observations.as_deref(),
+                            )
+                        })
+                        .or_else(|| {
+                            crate::plain_text_adapter::gate_source_positions(
+                                plain_index.as_ref()?,
+                                input.text.as_deref()?,
+                                definition,
+                                &gate,
+                            )
+                        })
+                });
             let check_id = scoped_id("gate", &entry.entity_id, &gate.gate_id);
             omitted = omitted.saturating_add(
                 gate.measurements
@@ -5663,6 +5681,68 @@ mod tests {
                 column: 28
             })
         );
+    }
+
+    #[test]
+    fn markdown_list_verdict_reports_source_and_withholds_unknown_structure() {
+        use sha2::{Digest, Sha256};
+        let policy = ContentPreset::from_toml("version=1\nname='test'\n[[gates]]\nid='list'\nkind='list_item_count'\nflagged_counts=[3]\nblocking=true\n").unwrap();
+        for (media, source, status, location) in [
+            (
+                "text/markdown",
+                "Introduction.\n\n- one\n- two\n- three\n",
+                CheckStatus::Failed,
+                Some(protocol::Location { line: 3, column: 1 }),
+            ),
+            ("text/markdown", "- one\n- two\n", CheckStatus::Passed, None),
+            (
+                "text/markdown",
+                "<ul><li>unknown</li></ul>",
+                CheckStatus::NotChecked,
+                None,
+            ),
+            (
+                "text/html",
+                "<ul><li>one</li></ul>",
+                CheckStatus::NotChecked,
+                None,
+            ),
+            (
+                "text/plain",
+                "- one\n- two\n- three",
+                CheckStatus::NotChecked,
+                None,
+            ),
+        ] {
+            let mut input = change();
+            input.entries[0].media_type = media.into();
+            let state = input.entries[0].after.as_mut().unwrap();
+            state.inline = Some(source.into());
+            state.sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
+            let report = evaluate_change(
+                &input,
+                &mut NoFiles,
+                &policy,
+                "2026-01-01T00:00:00Z",
+                1024,
+                1024,
+            )
+            .unwrap();
+            let check = report
+                .checks
+                .iter()
+                .find(|check| check.id.ends_with(":list"))
+                .unwrap();
+            assert_eq!(check.status, status, "{media}: {source}");
+            assert_eq!(
+                report
+                    .findings
+                    .first()
+                    .and_then(|finding| finding.location.clone()),
+                location,
+                "{media}: {source}"
+            );
+        }
     }
 
     #[test]

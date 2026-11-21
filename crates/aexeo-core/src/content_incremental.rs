@@ -153,6 +153,7 @@ fn validate_preset(preset: &ContentPreset, mode: ProjectionMode) -> Result<(), N
             && matches!(
                 gate,
                 ContentGate::ProseSentenceLengthVariance { .. }
+                    | ContentGate::ListItemCount { .. }
                     | ContentGate::LinkCount { .. }
                     | ContentGate::RequiredHeadings { .. }
                     | ContentGate::HeadingLength { .. }
@@ -183,6 +184,18 @@ fn evaluate_item(
         .any(|gate| matches!(gate, ContentGate::HeadingHierarchy { .. }));
     let mut heading_levels = None;
     let mut paragraph_list_items = None;
+    let structured_lists = if mode == ProjectionMode::Adapted
+        && item.media_type == "text/markdown"
+        && preset
+            .gates
+            .iter()
+            .any(|gate| matches!(gate, ContentGate::ListItemCount { .. }))
+    {
+        crate::markdown_adapter::markdown_structured_lists(&item.source)
+            .map_err(|_| unavailable("Markdown list projection failed"))?
+    } else {
+        None
+    };
     let (input, context, link_count) = match (mode, item.media_type.as_str()) {
         (ProjectionMode::Adapted, "text/markdown") if classify_prose || wants_heading_levels => {
             let (input, context, count, map) =
@@ -259,7 +272,7 @@ fn evaluate_item(
             heading_levels.as_deref(),
             true,
             None,
-            None,
+            structured_lists.as_deref(),
             paragraph_list_items.as_deref(),
         )
         .map_err(|_| unavailable("content evaluation failed"))?;
@@ -1908,6 +1921,92 @@ mod tests {
             serde_json::to_value(expected).unwrap()
         );
         assert!(reused > 0);
+    }
+
+    #[test]
+    fn markdown_lists_incremental_matches_full_and_refuses_unknown_structure() {
+        let (mut snapshot, _, mut change) = fixture();
+        for item in &mut snapshot.items {
+            item.media_type = "text/markdown".into();
+            item.source = "# Heading\n\n- one\n- two\n- three\n".into();
+            item.sha256 = format!("{:x}", Sha256::digest(item.source.as_bytes()));
+        }
+        let preset = ContentPreset::from_toml("version=1\nname='mixed'\n[[gates]]\nid='lists'\nkind='list_item_count'\nflagged_counts=[3]\n[[gates]]\nid='heads'\nkind='heading_hierarchy'\n").unwrap();
+        let baseline =
+            IncrementalBaseline::prepare_adapted(snapshot.clone(), preset.clone()).unwrap();
+        let mut next = snapshot.items[0].clone();
+        next.source = "# Heading\n\n- one\n- two\n".into();
+        next.sha256 = format!("{:x}", Sha256::digest(next.source.as_bytes()));
+        let mut update = entry(
+            "a",
+            Operation::Update,
+            Some(&snapshot.items[0]),
+            Some(&next),
+        );
+        update.media_type = next.media_type.clone();
+        change.entries.push(update);
+        let candidate = overlay_candidate(&snapshot, &change, std::slice::from_ref(&next))
+            .unwrap()
+            .candidate;
+        let expected: BTreeMap<_, _> = candidate
+            .items
+            .iter()
+            .map(|item| {
+                let (input, context, count, map) =
+                    crate::markdown_adapter::markdown_input_with_source_map(
+                        &item.entity_id,
+                        &item.source,
+                    )
+                    .unwrap();
+                let lists = crate::markdown_adapter::markdown_structured_lists(&item.source)
+                    .unwrap()
+                    .unwrap();
+                let caps = ContentEvaluationContext {
+                    adapter: Some(&context),
+                    link_count: Some(count),
+                    ..Default::default()
+                };
+                (
+                    item.entity_id.clone(),
+                    preset
+                        .evaluate_with_structured_lists(
+                            &input,
+                            &caps,
+                            None,
+                            map.heading_levels(),
+                            true,
+                            None,
+                            Some(&lists),
+                        )
+                        .unwrap(),
+                )
+            })
+            .collect();
+        let IncrementalEvaluation::Evaluated {
+            reports,
+            evaluated,
+            reused,
+            ..
+        } = baseline.evaluate(&change, std::slice::from_ref(&next))
+        else {
+            panic!("expected evaluated")
+        };
+        assert_eq!(
+            serde_json::to_value(&reports).unwrap(),
+            serde_json::to_value(&expected).unwrap()
+        );
+        assert_eq!(reports["a"].gates[0].status, GateStatus::Passed);
+        assert!(evaluated > 0 && reused > 0);
+        next.source = "<ul><li>unknown</li></ul>".into();
+        next.sha256 = format!("{:x}", Sha256::digest(next.source.as_bytes()));
+        change.entries[0].after = Some(state(&next));
+        assert!(matches!(
+            baseline.evaluate(&change, &[next]),
+            IncrementalEvaluation::NotChecked { .. }
+        ));
+        let mut html = snapshot;
+        html.items[0].media_type = "text/html".into();
+        assert!(IncrementalBaseline::prepare_adapted(html, preset).is_err());
     }
 
     #[test]
