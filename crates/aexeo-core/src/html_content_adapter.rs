@@ -102,8 +102,8 @@ pub fn html_content_with_scope_and_heading_levels(
 
 /// Project the selected scope with optional ordered paragraph list membership.
 /// This observes static markup only; lists missing projected paragraphs are unknown.
-/// `Main` currently withholds classification because ancestors outside the selected
-/// subtree may themselves be list items.
+/// A main element inside a list item withholds classification because the list
+/// ancestor is outside the selected subtree.
 pub fn html_content_with_paragraph_list_items(
     id: impl Into<String>,
     source: &str,
@@ -113,11 +113,11 @@ pub fn html_content_with_paragraph_list_items(
         return Err("HTML exceeds the content input byte limit");
     }
     let dom = parse_document(RcDom::default(), Default::default()).one(source);
-    let root = if scope == HtmlContentScope::Main {
-        let mut pending = vec![dom.document.clone()];
+    let (root, root_inside_list) = if scope == HtmlContentScope::Main {
+        let mut pending = vec![(dom.document.clone(), false)];
         let mut selected = None;
         let mut visited = 0usize;
-        while let Some(node) = pending.pop() {
+        while let Some((node, inside_list)) = pending.pop() {
             visited += 1;
             if visited > MAX_HTML_CONTENT_NODES {
                 return Err("HTML exceeds the node limit");
@@ -130,13 +130,21 @@ pub fn html_content_with_paragraph_list_items(
                 if selected.is_some() {
                     return Err("HTML main scope is ambiguous: multiple main elements");
                 }
-                selected = Some(node.clone());
+                selected = Some((node.clone(), inside_list));
             }
-            pending.extend(node.children.borrow().iter().cloned());
+            let child_inside_list = inside_list
+                || matches!(&node.data, NodeData::Element { name, .. } if name.local.as_ref() == "li");
+            pending.extend(
+                node.children
+                    .borrow()
+                    .iter()
+                    .cloned()
+                    .map(|child| (child, child_inside_list)),
+            );
         }
         selected.ok_or("HTML main scope is unavailable: no main element")?
     } else {
-        dom.document.clone()
+        (dom.document.clone(), false)
     };
     let mut stack = vec![Event::Enter(root)];
     let mut text = String::new();
@@ -288,8 +296,7 @@ pub fn html_content_with_paragraph_list_items(
             destinations,
         },
         heading_levels,
-        (scope == HtmlContentScope::Document && !unrepresented_list_item)
-            .then_some(paragraph_list_items),
+        (!root_inside_list && !unrepresented_list_item).then_some(paragraph_list_items),
     ))
 }
 
@@ -986,7 +993,14 @@ mod tests {
             HtmlContentScope::Main,
         )
         .unwrap();
-        assert_eq!(scoped, None);
+        assert_eq!(scoped, Some(vec![false]));
+        let (_, _, inside_list) = html_content_with_paragraph_list_items(
+            "x",
+            "<ul><li><main><p>Text.</p></main></li></ul>",
+            HtmlContentScope::Main,
+        )
+        .unwrap();
+        assert_eq!(inside_list, None);
     }
     use super::*;
 
