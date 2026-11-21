@@ -15,6 +15,10 @@ The proposed envelope is a JSON object with exactly these required fields:
   status, subject, checks, findings and validator identity. Embedding v1 does
   not weaken the requirement to validate it, including every nested field.
 
+Verdict counts and source coordinates use unsigned 64-bit JSON integers. Integral
+floating-point spellings are rejected, matching the Rust decoder; JSON Schema
+integer constraints alone do not enforce that representation.
+
 Readers must reject duplicate keys at every nesting level, unrecognized fields,
 missing fields, unsupported profiles and algorithms, malformed digests and
 oversized inputs. JSON member order and whitespace do not change the binding.
