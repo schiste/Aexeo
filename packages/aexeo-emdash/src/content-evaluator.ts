@@ -56,7 +56,9 @@ export type LinkObservationProvider = (request: {
 /** Reject malformed or misaligned provider responses before they reach the evaluator. */
 const VALID_LINK_OBSERVATIONS = new Set(["reachable", "not_found", "not_checked", "not_applicable"]);
 export function validLinkObservations(value: unknown, count: number): value is BoundLinkObservations["observations"] {
-  return Array.isArray(value) && value.length === count && value.every((item) => VALID_LINK_OBSERVATIONS.has(item));
+  if (!Array.isArray(value) || value.length !== count) return false;
+  for (const item of value) if (!VALID_LINK_OBSERVATIONS.has(item)) return false;
+  return true;
 }
 
 export interface LinkProviderTelemetry {

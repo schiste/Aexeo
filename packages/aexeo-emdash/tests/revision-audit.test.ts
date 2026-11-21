@@ -51,9 +51,9 @@ describe("revision audits", () => {
   it("keeps revision link gates unchecked on missing projections and observer failures", async () => {
     const { ctx } = host();
     const initial = { ...report, gates: [{ gate_id: "links", status: "not_checked" as const, blocking: false, scope: "document" as const, required_capability: "link_reachability" as const, findings: [], reason: "unavailable" }] };
-    for (const mode of ["unavailable", "failed", "invalid"] as const) {
+    for (const mode of ["unavailable", "failed", "invalid", "sparse"] as const) {
       const evaluate = vi.fn(async () => initial);
-      const observer = vi.fn(async () => { if (mode === "failed") throw new Error("private-url"); return ["bogus"] as never; });
+      const observer = vi.fn(async () => { if (mode === "failed") throw new Error("private-url"); return (mode === "sparse" ? Array(1) : ["bogus"]) as never; });
       const events = vi.fn();
       const result = await auditRevision(ctx as never, { collection: "posts", id: "one", revision: "rev1" }, {
         preset: { name: "article" }, evaluate, revisionLinkObservations: observer, onLinkProviderTelemetry: events,
