@@ -1,3 +1,4 @@
+import { addProseVarianceMeasurements } from "../../aexeo-emdash/src/telemetry.js";
 import { emptyPresetSelectionCounts, selectContentPreset } from "../../aexeo-emdash/src/preset-selection.js";
 /** Optional content evaluation for the sandbox sidecar. */
 export interface ContentPresetEnv {
@@ -11,6 +12,7 @@ export interface ContentPresetEnv {
   CONTENT_GATE_PROVIDER?: { fetch(input: string, init: RequestInit): Promise<Response> };
   CONTENT_GATE_TELEMETRY?: string;
   CONTENT_PRESET_SELECTION_TELEMETRY?: string;
+  CONTENT_PROSE_VARIANCE_TELEMETRY?: string;
 }
 
 const MAX_PROVIDER_BYTES = 2 * 1024 * 1024;
@@ -83,6 +85,7 @@ export async function contentPresetFindings(
   const evidenceJson = evidence === undefined ? undefined : JSON.stringify(evidence);
   const counts = env.CONTENT_PRESET_SELECTION_TELEMETRY === "true" ? emptyPresetSelectionCounts() : undefined;
   let status = "error";
+  let proseVariance: ReturnType<typeof addProseVarianceMeasurements>;
   try {
     for (const [index, document] of documents.entries()) {
       const collection = Array.isArray(collections) ? collections[index] as string | undefined : undefined;
@@ -118,6 +121,9 @@ export async function contentPresetFindings(
           }
         }
       }
+      if (env.CONTENT_PROSE_VARIANCE_TELEMETRY === "true") {
+        proseVariance = addProseVarianceMeasurements(report.gates, proseVariance);
+      }
       if (assessments !== undefined) {
         if (typeof document !== "object" || document === null || !("route" in document) || typeof document.route !== "string") throw new Error("document route is required for assessments");
         assessments[document.route] = {
@@ -142,6 +148,9 @@ export async function contentPresetFindings(
     status = "success";
     return findings;
   } finally {
+    if (env.CONTENT_PROSE_VARIANCE_TELEMETRY === "true") {
+      try { console.info(JSON.stringify({ event: "content_prose_variance", status, ...(proseVariance === undefined ? {} : { prose_variance: proseVariance }) })); } catch { /* best-effort telemetry */ }
+    }
     if (counts) {
       try { console.info(JSON.stringify({ event: "content_preset_selection", status, counts })); } catch { /* best-effort telemetry */ }
     }

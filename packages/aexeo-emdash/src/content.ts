@@ -1,4 +1,4 @@
-import { emitTelemetry } from "./telemetry.js";
+import { addProseVarianceMeasurements, emitTelemetry } from "./telemetry.js";
 import { evaluateContent as evaluateContentWasm, evaluateContentCollection as evaluateCollectionWasm, projectContentInput as projectContentInputWasm, projectLinkDestinations as projectLinkDestinationsWasm } from "./wasm-init.js";
 import type { EmdashDocument, Finding } from "./types.js";
 
@@ -120,14 +120,9 @@ export async function evaluateContent(
       event.source_locations_eligible = report.source_mapping.eligible;
       event.source_locations_unmapped = report.source_mapping.unmapped;
     }
+    const proseVariance = addProseVarianceMeasurements(report.gates);
+    if (proseVariance !== undefined) event.prose_variance = proseVariance;
     for (const gate of report.gates) {
-      const excluded = gate.measurements?.list_paragraphs_excluded;
-      if (gate.required_capability === "classified_paragraphs" && excluded !== undefined) {
-        event.prose_variance ??= { measured_gates: 0, list_paragraphs_excluded: 0, windows_checked: 0 };
-        event.prose_variance.measured_gates += 1;
-        event.prose_variance.list_paragraphs_excluded += excluded;
-        event.prose_variance.windows_checked += gate.measurements?.windows_checked ?? 0;
-      }
       if (gate.required_capability === "link_reachability" && gate.measurements) {
         const { checked_destinations, not_found_destinations, unchecked_destinations } = gate.measurements;
         if (checked_destinations !== undefined && not_found_destinations !== undefined && unchecked_destinations !== undefined) {

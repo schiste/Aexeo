@@ -100,6 +100,24 @@ describe("sandbox content presets", () => {
       expect(JSON.stringify(event)).not.toContain("private");
     } finally { logger.mockRestore(); }
   });
+  it("emits opt-in aggregate prose metrics once after provider reevaluation", async () => {
+    const logger = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      const gate = { gate_id: "private", status: "passed", required_capability: "classified_paragraphs", findings: [], measurements: { list_paragraphs_excluded: 2, windows_checked: 3, threshold: 42 } };
+      const evaluate = (_doc: string, _name: string, _sources?: string | null, _evidence?: string | null, extensions?: string | null) => JSON.stringify({ gates: extensions ? [gate] : [gate, { required_capability: "extension" }] });
+      const env = { CONTENT_PRESET: "article", CONTENT_GATE_PROVIDER: { fetch: async () => new Response("[]") } };
+      await contentPresetFindings([{ route: "/private", text: "secret" }], undefined, env, evaluate, () => "{}");
+      expect(logger).not.toHaveBeenCalled();
+      await contentPresetFindings([{ route: "/private", text: "secret" }], undefined, { ...env, CONTENT_PROSE_VARIANCE_TELEMETRY: "true" }, evaluate, () => "{}");
+      expect(logger).toHaveBeenCalledOnce();
+      expect(JSON.parse(logger.mock.calls[0]![0] as string)).toEqual({ event: "content_prose_variance", status: "success", prose_variance: { measured_gates: 1, list_paragraphs_excluded: 2, windows_checked: 3 } });
+      logger.mockClear();
+      await contentPresetFindings([{ route: "/private" }], undefined, { CONTENT_PRESET: "article", CONTENT_PROSE_VARIANCE_TELEMETRY: "true" }, () => JSON.stringify({ gates: [{ required_capability: "classified_paragraphs", status: "not_checked", findings: [] }] }), undefined, {});
+      expect(JSON.parse(logger.mock.calls[0]![0] as string)).toEqual({ event: "content_prose_variance", status: "success" });
+      logger.mockImplementation(() => { throw new Error("logger unavailable"); });
+      await expect(contentPresetFindings([{}], undefined, { CONTENT_PRESET: "article", CONTENT_PROSE_VARIANCE_TELEMETRY: "true" }, () => '{"gates":[]}')).resolves.toEqual([]);
+    } finally { logger.mockRestore(); }
+  });
   it("fails closed when an older worker cannot honor observed metadata coverage", async () => {
     const doc = { route: "/page", title: "Page", observed_metadata_fields: ["title"] };
     const response = (value: unknown) => ({ fetch: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(value) }) });
