@@ -1221,8 +1221,12 @@ initial_level = 1
 
 Without `initial_level`, the first heading may have any level: this supports
 fragments whose surrounding template is unknown. Set it only when the host
-knows the immediately preceding heading level. The gate reports the heading
-count and number of skipped transitions. Markdown and static HTML adapters and
+knows the immediately preceding heading level. Measurements include the configured
+`initial_level` when supplied, and, for a complete observed sequence, the
+`heading_count` and `skipped_levels`. A nonempty complete sequence also reports
+`first_heading_level` and `deepest_heading_level`; those keys are omitted for
+empty or unavailable sequences instead of reporting a misleading zero. Markdown
+and static HTML adapters and
 the EmDash Portable Text adapter provide levels, with source positions when
 available. Markdown containing raw HTML and partially observed CMS headings
 are `not_checked`: the projected sequence cannot establish all headings.
