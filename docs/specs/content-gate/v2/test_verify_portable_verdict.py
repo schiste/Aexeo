@@ -38,6 +38,71 @@ class PortableComparison(unittest.TestCase):
         self.assertEqual(self.check(), {'input_binding': 'match', 'fresh_verdict_match': True,
                                        'required_check_count': 1, 'publication_authorized': False})
 
+    def test_independent_file_and_uri_states_are_bound_to_snapshot_bytes(self):
+        original = json.loads(self.artifacts['change'])
+        for kind in ('file', 'uri'):
+            change = copy.deepcopy(original)
+            state = change['entries'][0]['after']
+            content = state.pop('inline').encode()
+            state[kind] = 'article.txt' if kind == 'file' else 'https://example.test/article'
+            if kind == 'file':
+                change['content_root'] = '/trusted/content'
+            self.artifacts['change'] = self.encoded(change)
+            supplied = {(0, 'after'): content}
+            candidate = overlay(self.fixture['base'], change, self.fixture['after'], supplied)
+            inputs = dict(self.artifacts, collection=None, external_evidence=None,
+                candidate_base_revision_sha256=revision_digest(self.fixture['base']),
+                candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                candidate_revision_sha256=revision_digest(candidate))
+            self.previous['binding_sha256'] = self.fresh['binding_sha256'] = binding(inputs)
+            def check(contents):
+                return compare(self.encoded(self.previous), self.encoded(self.fresh),
+                    self.encoded(self.fixture['base']), self.encoded(self.fixture['after']),
+                    self.artifacts, self.required, self.identity, 0, False, contents)
+            with self.subTest(kind=kind):
+                self.assertFalse(check(supplied)['publication_authorized'])
+                for invalid in (None, {}, {(0, 'after'): b'wrong'},
+                                {(1, 'after'): content},
+                                {(0, 'after'): content, (0, 'before'): content}):
+                    with self.assertRaises(VerificationError):
+                        check(invalid)
+                modified = copy.deepcopy(self.fixture['after'])
+                modified[0]['source'] = 'other'
+                with self.assertRaises(VerificationError):
+                    overlay(self.fixture['base'], change, modified, supplied)
+
+    def test_before_and_after_references_are_checked_independently(self):
+        import hashlib
+        change = json.loads(self.artifacts['change'])
+        entry = change['entries'][0]
+        after = entry['after'].pop('inline').encode()
+        entry['after']['uri'] = 'https://example.invalid/after'
+        before = b'Old content.'
+        entry['operation'] = 'update'
+        entry['before'] = {'sha256': hashlib.sha256(before).hexdigest(),
+                           'uri': 'https://example.invalid/before'}
+        base = copy.deepcopy(self.fixture['base'])
+        old = copy.deepcopy(self.fixture['after'][0])
+        old.update(source=before.decode(), sha256=hashlib.sha256(before).hexdigest())
+        base['items'] = [old]
+        contents = {(0, 'before'): before, (0, 'after'): after}
+        candidate = overlay(base, change, self.fixture['after'], contents)
+        self.artifacts['change'] = self.encoded(change)
+        inputs = dict(self.artifacts, collection=None, external_evidence=None,
+                      candidate_base_revision_sha256=revision_digest(base),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        self.previous['binding_sha256'] = self.fresh['binding_sha256'] = binding(inputs)
+        def check(supplied):
+            return compare(self.encoded(self.previous), self.encoded(self.fresh),
+                self.encoded(base), self.encoded(self.fixture['after']), self.artifacts,
+                self.required, self.identity, 0, False, supplied)
+        self.assertFalse(check(contents)['publication_authorized'])
+        for supplied in ({(0, 'after'): after}, {(0, 'before'): before},
+                         {(0, 'before'): after, (0, 'after'): before}):
+            with self.assertRaises(VerificationError):
+                check(supplied)
+
     def test_fresh_process_must_complete_successfully(self):
         for code, timed_out in ((1, False), (2, False), (None, False), (True, False),
                                 (0.0, False), (0, True), (0, None), (0, 0), (0, "false")):

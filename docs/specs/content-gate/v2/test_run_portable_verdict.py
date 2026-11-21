@@ -7,6 +7,8 @@ import sys
 import tempfile
 import unittest
 
+from verify_candidate_inputs import binding, overlay, revision_digest
+
 HERE = Path(__file__).resolve().parent
 
 
@@ -64,6 +66,57 @@ class PortableRunner(unittest.TestCase):
             "p=Path(sys.argv[2]); p.write_bytes(p.read_bytes()+b' ')", [str(self.root / 'change')])
         self.assertEqual(result.returncode, 2)
         self.assertIn('inputs changed during evaluation', result.stderr)
+        self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+
+    def test_mapped_content_matches_rebound_reference_without_fetching(self):
+        change = json.loads((self.root / 'change').read_text())
+        state = change['entries'][0]['after']
+        content = state.pop('inline').encode()
+        state['uri'] = 'https://example.invalid/not-fetched'
+        (self.root / 'change').write_text(json.dumps(change))
+        file = self.root / 'host-content'
+        file.write_bytes(content)
+        mapping = self.root / 'content-map'
+        mapping.write_text(json.dumps([{'entry': 0, 'state': 'after', 'path': str(file)}]))
+        base = json.loads((self.root / 'base').read_text())
+        after = json.loads((self.root / 'after').read_text())
+        candidate = overlay(base, change, after, {(0, 'after'): content})
+        artifacts = {name: (self.root / name).read_bytes() for name in
+                     ('change', 'resolved_policy', 'host_options', 'evaluator')}
+        inputs = dict(artifacts, collection=None, external_evidence=None,
+                      candidate_base_revision_sha256=revision_digest(base),
+                      candidate_revision_profile=b'content-gate.candidate-revision/v1',
+                      candidate_revision_sha256=revision_digest(candidate))
+        previous = json.loads((self.root / 'previous').read_text())
+        previous['binding_sha256'] = binding(inputs)
+        (self.root / 'previous').write_text(json.dumps(previous))
+        self.flags += ['--content-files', str(mapping)]
+        command = "import os,sys; from pathlib import Path; Path(os.environ['CONTENT_GATE_VERDICT_FILE']).write_bytes(Path(sys.argv[1]).read_bytes())"
+        result = self.execute(command)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+        event = json.loads(result.stderr)
+        self.assertTrue(event['content_files_supplied'])
+        self.assertNotIn(str(file), result.stdout + result.stderr)
+        file.write_bytes(b'wrong')
+        result = self.execute(command)
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+        mapping.write_text(json.dumps([{'entry': 0, 'state': 'after', 'path': str(file)}] * 2))
+        self.assertEqual(self.execute(command).returncode, 2)
+
+    def test_mapped_content_changes_during_process_fail_closed(self):
+        content = self.root / 'independent-content'
+        content.write_text('abc', encoding='utf-8')
+        mapping = self.root / 'content-map'
+        mapping.write_text(json.dumps([{'entry': 0, 'state': 'after', 'path': str(content)}]))
+        self.flags += ['--content-files', str(mapping)]
+        result = self.execute("import os,sys; from pathlib import Path; "
+            "Path(os.environ['CONTENT_GATE_VERDICT_FILE']).write_bytes(Path(sys.argv[1]).read_bytes()); "
+            "Path(sys.argv[2]).write_text('changed')", [str(content)])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('content files changed during evaluation', result.stderr)
+        self.assertNotIn(str(content), result.stderr)
         self.assertFalse(json.loads(result.stdout)['publication_authorized'])
 
     def test_rejects_missing_command_and_invalid_timeout(self):

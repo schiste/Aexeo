@@ -14,7 +14,7 @@ import time
 
 from compare_offline_receipts import (_typed_equal, require_passed_checks,
     require_validator_identity, validate_change_semantics, validate_verdict,
-    verify_content_states)
+    verify_content_states, read_content_map)
 from verify_candidate_inputs import (LIMIT, VerificationError, binding, overlay,
     parse, read_stable, revision_digest, text, validate_collection_projection)
 
@@ -79,7 +79,7 @@ def validate_host_options(options):
 
 
 def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
-            required_checks, expected_validator, fresh_exit_code, fresh_timed_out):
+            required_checks, expected_validator, fresh_exit_code, fresh_timed_out, content_bytes=None):
     """Check both outputs against current inputs; never authorize publication."""
     if type(fresh_exit_code) is not int or fresh_exit_code != 0 or fresh_timed_out is not False:
         raise VerificationError('fresh evaluator did not complete successfully')
@@ -103,9 +103,10 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
     # V1 has open objects. The draft cannot understand extra change inputs or
     # arbitrary change extensions; reject them instead of silently discarding.
     _reject_unknown_change_fields(change)
-    verify_content_states(change, {})
+    if content_bytes is None:
+        verify_content_states(change, {})
     base, after = parse(base_bytes), parse(after_bytes)
-    candidate = overlay(base, change, after)
+    candidate = overlay(base, change, after, content_bytes=content_bytes)
     collection = artifacts.get('collection')
     if collection is not None:
         validate_collection_projection(parse(collection), candidate, change)
@@ -194,12 +195,29 @@ def _reject_unknown_change_fields(change):
                 fields(entry[name], {'revision', 'sha256', 'inline', 'file', 'uri'})
 
 
+
+def read_mapped_content(path):
+    """Snapshot host-selected local files; no reference or URI is fetched."""
+    try:
+        mapping = read_content_map(path)
+    except OSError as error:
+        raise VerificationError('cannot read content map') from error
+    contents, total = {}, 0
+    for key, filename in mapping.items():
+        data = read_stable(filename)
+        total += len(data)
+        if total > LIMIT:
+            raise VerificationError('mapped content exceeds size limit')
+        contents[key] = data
+    return contents
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved-policy',
                  'host-options', 'evaluator'):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--collection')
+    parser.add_argument('--content-files', help='host-provided local content file map; never fetches URIs')
     parser.add_argument('--external-evidence', help='independently obtained link snapshot artifact')
     parser.add_argument('--require-check', action='append', required=True)
     parser.add_argument('--validator-name', required=True)
@@ -217,6 +235,7 @@ def main():
                  'duration_ms': round((time.perf_counter() - started) * 1000, 3),
                  'required_check_count': len(args.require_check),
                  'collection_supplied': args.collection is not None,
+                 'content_files_supplied': args.content_files is not None,
                  'external_evidence_supplied': args.external_evidence is not None}
         try:
             print(json.dumps(event, separators=(',', ':')), file=sys.stderr)
@@ -232,7 +251,8 @@ def main():
         result = compare(read_stable(args.previous), read_stable(args.fresh),
                          read_stable(args.base), read_stable(args.after), artifacts,
                          args.require_check, (args.validator_name, args.validator_version),
-                         args.fresh_exit_code, args.fresh_timed_out == 'true')
+                         args.fresh_exit_code, args.fresh_timed_out == 'true',
+                         read_mapped_content(args.content_files) if args.content_files is not None else None)
     except (VerificationError, OSError, ValueError, TypeError, KeyError) as error:
         print(json.dumps({'matched': False, 'publication_authorized': False}), file=sys.stdout)
         print(str(error), file=sys.stderr)

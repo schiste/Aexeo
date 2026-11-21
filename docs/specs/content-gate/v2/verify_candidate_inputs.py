@@ -111,7 +111,7 @@ def item_map(items):
     return result
 
 
-def overlay(base, change, after):
+def overlay(base, change, after, content_bytes=None):
     if not isinstance(base, dict) or set(base) != {'scope', 'site_id', 'site_base_url', 'base', 'complete', 'items'}:
         raise VerificationError('invalid base snapshot fields')
     text(base['scope'], empty=False)
@@ -148,7 +148,27 @@ def overlay(base, change, after):
         raise VerificationError('invalid change entries')
     current, projected = item_map(base['items']), item_map(after)
     consumed, destination_ids = set(), set()
-    for entry in entries:
+    # References are accepted only when independently acquired bytes were
+    # supplied and matched the declared digest. Never dereference the change.
+    if content_bytes is not None:
+        from compare_offline_receipts import validate_change_semantics, verify_content_states
+        validate_change_semantics(change)
+        verify_content_states(change, content_bytes, in_memory=True)
+    def state_source(index, name, state):
+        if 'inline' in state:
+            if state.get('file') is not None or state.get('uri') is not None:
+                raise VerificationError('ambiguous content state')
+            return state['inline']
+        if content_bytes is None:
+            raise VerificationError('inline state required')
+        source = content_bytes.get((index, name))
+        if not isinstance(source, bytes):
+            raise VerificationError('independent content bytes required')
+        try:
+            return source.decode('utf-8')
+        except UnicodeDecodeError as error:
+            raise VerificationError('content is not UTF-8') from error
+    for index, entry in enumerate(entries):
         if not isinstance(entry, dict):
             raise VerificationError('invalid entry')
         identifier, operation = entry.get('entity_id'), entry.get('operation')
@@ -160,9 +180,10 @@ def overlay(base, change, after):
         for name in ('before', 'after'):
             state = entry.get(name)
             if state is not None:
-                if not isinstance(state, dict) or not isinstance(state.get('inline'), str) or state.get('file') is not None or state.get('uri') is not None:
-                    raise VerificationError('inline state required')
-                if state.get('sha256') != hashlib.sha256(text(state['inline'])).hexdigest():
+                if not isinstance(state, dict):
+                    raise VerificationError('invalid content state')
+                source = state_source(index, name, state)
+                if state.get('sha256') != hashlib.sha256(text(source)).hexdigest():
                     raise VerificationError('state digest differs')
         if operation == 'create':
             if entry.get('before') is not None or entry.get('after') is None:
@@ -175,17 +196,17 @@ def overlay(base, change, after):
         consumed.add(old_id)
         old = current.pop(old_id)
         before = entry.get('before')
-        if not isinstance(before, dict) or before['inline'] != old['source'] or before['sha256'] != old['sha256'] or (before.get('revision') is not None and before['revision'] != old['revision']):
+        if not isinstance(before, dict) or state_source(index, 'before', before) != old['source'] or before['sha256'] != old['sha256'] or (before.get('revision') is not None and before['revision'] != old['revision']):
             raise VerificationError('before state differs')
         if (operation == 'delete') != (entry.get('after') is None):
             raise VerificationError('invalid after state')
-    for entry in entries:
+    for index, entry in enumerate(entries):
         if entry['operation'] == 'delete':
             continue
         identifier = entry['entity_id']
         item = projected.pop(identifier, None)
         state = entry['after']
-        if (item is None or state['inline'] != item['source'] or state['sha256'] != item['sha256'] or
+        if (item is None or state_source(index, 'after', state) != item['source'] or state['sha256'] != item['sha256'] or
                 entry['media_type'] != item['media_type'] or
                 (state.get('revision') is not None and state['revision'] != item['revision']) or
                 (entry.get('public_path') is not None and entry['public_path'] != item['public_path']) or identifier in current):
