@@ -161,27 +161,33 @@
           "properties": {
             "checks": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 18446744073709551615
             },
             "passed": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 18446744073709551615
             },
             "failed": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 18446744073709551615
             },
             "not_checked": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 18446744073709551615
             },
             "blocking_failed": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 18446744073709551615
             },
             "blocking_not_checked": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 18446744073709551615
             }
           },
           "additionalProperties": false
@@ -259,11 +265,13 @@
                 "properties": {
                   "line": {
                     "type": "integer",
-                    "minimum": 1
+                    "minimum": 1,
+                    "maximum": 18446744073709551615
                   },
                   "column": {
                     "type": "integer",
-                    "minimum": 1
+                    "minimum": 1,
+                    "maximum": 18446744073709551615
                   }
                 },
                 "additionalProperties": false
@@ -280,7 +288,8 @@
         },
         "findings_omitted": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 18446744073709551615
         },
         "extensions": {
           "type": "object",

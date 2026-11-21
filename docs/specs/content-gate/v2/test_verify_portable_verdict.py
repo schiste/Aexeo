@@ -65,6 +65,52 @@ class PortableComparison(unittest.TestCase):
         with self.assertRaises(VerificationError):
             validate_schema(envelope, schema)
 
+    def test_integer_fields_require_bounded_json_integers(self):
+        self.assertFalse(self.check()['publication_authorized'])
+        schema = Path(__file__).with_name('bound-verdict.schema.json')
+        for field in ('checks', 'passed', 'failed', 'not_checked',
+                      'blocking_failed', 'blocking_not_checked'):
+            for value in (1.0, 1 << 64, True):
+                with self.subTest(field=field, value=value):
+                    envelope = copy.deepcopy(self.previous)
+                    envelope['verdict']['summary'][field] = value
+                    with self.assertRaises(VerificationError):
+                        validate_schema(envelope, schema)
+        for field in ('line', 'column', 'findings_omitted'):
+            for value in (1.0, 1 << 64, True):
+                with self.subTest(field=field, value=value):
+                    envelope = copy.deepcopy(self.previous)
+                    verdict = envelope['verdict']
+                    if field == 'findings_omitted':
+                        verdict[field] = value
+                    else:
+                        verdict['findings'] = [{'rule_id': 'r', 'severity': 'info',
+                                                'message': 'm', 'location': {'line': 1, 'column': 1}}]
+                        verdict['findings'][0]['location'][field] = value
+                    with self.assertRaises(VerificationError):
+                        validate_schema(envelope, schema)
+        for field in ('line', 'column', 'findings_omitted'):
+            with self.subTest(field=field, value='maximum'):
+                envelope = copy.deepcopy(self.previous)
+                verdict = envelope['verdict']
+                if field == 'findings_omitted':
+                    verdict[field] = (1 << 64) - 1
+                else:
+                    verdict['findings'] = [{'rule_id': 'r', 'severity': 'info',
+                                            'message': 'm', 'location': {'line': 1, 'column': 1}}]
+                    verdict['findings'][0]['location'][field] = (1 << 64) - 1
+                validate_schema(envelope, schema)
+        self.previous['verdict']['summary']['passed'] = 1.0
+        self.fresh['verdict']['summary']['passed'] = 1.0
+        with self.assertRaises(VerificationError):
+            self.check()
+        self.previous['verdict']['summary']['passed'] = 1
+        self.fresh['verdict']['summary']['passed'] = 1
+        self.previous['verdict']['findings_omitted'] = 1 << 64
+        self.fresh['verdict']['findings_omitted'] = 1 << 64
+        with self.assertRaises(VerificationError):
+            self.check()
+
     def test_changed_inputs_or_incomplete_inventory_fail_closed(self):
         for key in self.artifacts:
             with self.subTest(key=key):

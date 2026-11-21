@@ -360,6 +360,26 @@ mod tests {
     }
 
     #[test]
+    fn draft_verdict_integer_fields_follow_unsigned_64_bit_json() {
+        let envelope = BoundVerdict::new(verdict(), &inputs()).unwrap();
+        let mut value = serde_json::to_value(envelope).unwrap();
+        value["verdict"]["findings_omitted"] = u64::MAX.into();
+        value["verdict"]["findings"] = serde_json::json!([{
+            "rule_id": "r", "severity": "info", "message": "m",
+            "location": {"line": u64::MAX, "column": u64::MAX}
+        }]);
+        let encoded = serde_json::to_string(&value).unwrap();
+        assert!(BoundVerdict::parse(encoded.as_bytes()).is_ok());
+        for replacement in ["18446744073709551616", "1.0", "1e0", "true"] {
+            let changed = encoded.replacen("18446744073709551615", replacement, 1);
+            assert!(
+                BoundVerdict::parse(changed.as_bytes()).is_err(),
+                "{replacement}"
+            );
+        }
+    }
+
+    #[test]
     fn rejects_inconsistent_embedded_verdicts_before_reuse() {
         let envelope = BoundVerdict::new(verdict(), &inputs()).unwrap();
         let original = serde_json::to_value(&envelope).unwrap();
