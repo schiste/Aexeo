@@ -32,7 +32,8 @@
         "evaluated_at",
         "summary",
         "checks",
-        "findings"
+        "findings",
+        "extensions"
       ],
       "properties": {
         "schema": {

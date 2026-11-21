@@ -100,6 +100,10 @@ is still required to inspect those pages. No CMS content was changed.
 
 ## Delivery tracker
 
+- [x] Require an explicit offline or observed-link binding profile in both the
+  Rust draft portable envelope and its independent JSON schema. Profile labels
+  remain informational and do not authenticate execution or authorize publication.
+
 - [x] Require an explicit non-timeout observation for the experimental Rust
   portable passing-verdict helper, including when a caller reports exit code
   zero. This aligns the host assertion with the independent comparator; neither

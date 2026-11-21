@@ -112,7 +112,12 @@ impl BoundVerdict {
         if self.verdict.schema != VERDICT_SCHEMA {
             return Err("unsupported embedded verdict schema");
         }
-        if let Some(extensions) = &self.verdict.extensions {
+        {
+            let extensions = self
+                .verdict
+                .extensions
+                .as_ref()
+                .ok_or("missing verdict binding profile")?;
             let offline = extensions.get("aexeo.offline-input-binding.v1");
             let observed = extensions.get("aexeo.observed-link-binding.v1");
             let valid_offline = offline
@@ -412,6 +417,21 @@ mod tests {
                 "{replacement}"
             );
         }
+    }
+
+    #[test]
+    fn portable_verdict_requires_an_explicit_binding_profile() {
+        let mut missing = verdict();
+        missing.extensions = None;
+        assert!(BoundVerdict::new(missing, &inputs()).is_err());
+        let mut envelope = BoundVerdict::new(verdict(), &inputs()).unwrap();
+        envelope.verdict.extensions = None;
+        assert!(envelope.validate_verdict().is_err());
+        assert!(envelope.verify_inputs(&inputs()).is_err());
+        let mut value = serde_json::to_value(&envelope).unwrap();
+        assert!(BoundVerdict::parse(&serde_json::to_vec(&value).unwrap()).is_err());
+        value["verdict"]["extensions"] = serde_json::Value::Null;
+        assert!(BoundVerdict::parse(&serde_json::to_vec(&value).unwrap()).is_err());
     }
 
     #[test]

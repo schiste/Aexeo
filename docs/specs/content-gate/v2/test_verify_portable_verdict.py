@@ -122,6 +122,26 @@ class PortableComparison(unittest.TestCase):
         with self.assertRaises(VerificationError):
             self.check()
 
+    def test_binding_profile_must_be_explicit(self):
+        schema = Path(__file__).with_name('bound-verdict.schema.json')
+        validate_schema(self.previous, schema)
+        self.check()
+        for field in ('previous', 'fresh'):
+            original = copy.deepcopy(getattr(self, field))
+            for value in ('missing', 'null'):
+                envelope = copy.deepcopy(original)
+                if value == 'missing':
+                    del envelope['verdict']['extensions']
+                else:
+                    envelope['verdict']['extensions'] = None
+                with self.subTest(envelope=field, value=value):
+                    with self.assertRaises(VerificationError):
+                        validate_schema(envelope, schema)
+                    setattr(self, field, envelope)
+                    with self.assertRaises(VerificationError):
+                        self.check()
+                    setattr(self, field, original)
+
     def test_observed_link_extension_is_closed_and_exclusive(self):
         schema = Path(__file__).with_name('bound-verdict.schema.json')
         envelope = copy.deepcopy(self.previous)
