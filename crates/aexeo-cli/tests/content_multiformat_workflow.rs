@@ -456,6 +456,10 @@ fn markdown_with_html_does_not_treat_unobserved_prose_as_empty() {
         let (report, telemetry) = evaluate(&draft, &preset, "markdown");
         for gate in &report["gates"].as_array().unwrap()[..3] {
             assert_eq!(gate["status"], "not_checked", "{source}");
+            assert_eq!(
+                gate["reason"],
+                "embedded HTML is not observed by the Markdown adapter"
+            );
             assert!(gate["findings"].as_array().unwrap().is_empty());
         }
         assert_eq!(report["gates"][3]["status"], "passed");

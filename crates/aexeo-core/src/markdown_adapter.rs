@@ -1012,6 +1012,8 @@ fn extract_markdown_from_root(
         ContentContext {
             paragraphs: complete.then_some(paragraphs),
             block_ends: complete.then_some(block_ends),
+            input_limit: (!complete)
+                .then(|| "embedded HTML is not observed by the Markdown adapter".into()),
             ..Default::default()
         },
         link_count,
