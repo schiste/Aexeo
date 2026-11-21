@@ -477,6 +477,30 @@ pub enum ContentGate {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         abbreviations: Vec<String>,
     },
+    /// Reviews sentence variance in classified prose, excluding list paragraphs.
+    ProseSentenceLengthVariance {
+        id: String,
+        #[serde(default)]
+        severity: Severity,
+        #[serde(default)]
+        blocking: bool,
+        window_size: usize,
+        /// Restrict each rolling window to one observed paragraph.
+        #[serde(default, skip_serializing_if = "is_false")]
+        reset_at_paragraph: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        min_stddev_words: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        random_min_stddev_words: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        random_max_stddev_words: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        random_seed: Option<u64>,
+        #[serde(default = "default_sentence_delimiters")]
+        delimiters: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        abbreviations: Vec<String>,
+    },
     /// Flags surface-form candidates for three coordinated inline items.
     InlineTripleCandidates {
         id: String,
@@ -808,6 +832,7 @@ impl ContentGate {
             | Self::TrailingIngClause { severity, .. }
             | Self::SimilarSentenceLengths { severity, .. }
             | Self::SentenceLengthVariance { severity, .. }
+            | Self::ProseSentenceLengthVariance { severity, .. }
             | Self::InlineTripleCandidates { severity, .. }
             | Self::DuplicateParagraphs { severity, .. }
             | Self::ParagraphCharacterLength { severity, .. }
@@ -853,6 +878,7 @@ impl ContentGate {
             | Self::TrailingIngClause { blocking, .. }
             | Self::SimilarSentenceLengths { blocking, .. }
             | Self::SentenceLengthVariance { blocking, .. }
+            | Self::ProseSentenceLengthVariance { blocking, .. }
             | Self::InlineTripleCandidates { blocking, .. }
             | Self::DuplicateParagraphs { blocking, .. }
             | Self::ParagraphCharacterLength { blocking, .. }
@@ -913,6 +939,7 @@ impl ContentGate {
             | Self::SentenceLengthVariance { .. }
             | Self::InlineTripleCandidates { .. }
             | Self::DuplicateParagraphs { .. } => "paragraphs",
+            Self::ProseSentenceLengthVariance { .. } => "classified_paragraphs",
             Self::HeadingHierarchy { .. } => "heading_levels",
             Self::RequiredHeadings { .. }
             | Self::DuplicateHeadings { .. }
@@ -952,6 +979,7 @@ impl ContentGate {
             | Self::TrailingIngClause { id, .. }
             | Self::SimilarSentenceLengths { id, .. }
             | Self::SentenceLengthVariance { id, .. }
+            | Self::ProseSentenceLengthVariance { id, .. }
             | Self::InlineTripleCandidates { id, .. }
             | Self::DuplicateParagraphs { id, .. }
             | Self::ParagraphCharacterLength { id, .. }
@@ -1697,6 +1725,15 @@ impl ContentPreset {
                     random_seed,
                     delimiters,
                     ..
+                }
+                | ContentGate::ProseSentenceLengthVariance {
+                    window_size,
+                    min_stddev_words,
+                    random_min_stddev_words,
+                    random_max_stddev_words,
+                    random_seed,
+                    delimiters,
+                    ..
                 } if !(2..=64).contains(window_size)
                     || delimiters.is_empty()
                     || !matches!(
@@ -1796,6 +1833,7 @@ impl ContentPreset {
                 | ContentGate::TrailingIngClause { abbreviations, .. }
                 | ContentGate::SimilarSentenceLengths { abbreviations, .. }
                 | ContentGate::SentenceLengthVariance { abbreviations, .. }
+                | ContentGate::ProseSentenceLengthVariance { abbreviations, .. }
                 | ContentGate::InlineTripleCandidates { abbreviations, .. }
                     if abbreviations.iter().any(|abbr| {
                         abbr.strip_suffix('.').is_none_or(|word| {
@@ -2028,7 +2066,16 @@ impl ContentPreset {
         capabilities: &ContentEvaluationContext<'_>,
         destinations: Option<&[String]>,
     ) -> Result<ContentReport> {
-        self.evaluate_with_observer_inner(input, capabilities, destinations, true, None, None, None)
+        self.evaluate_with_observer_inner(
+            input,
+            capabilities,
+            destinations,
+            true,
+            None,
+            None,
+            None,
+            None,
+        )
     }
 
     /// Evaluate while notifying the host before and after each gate, in preset order.
@@ -2046,6 +2093,7 @@ impl ContentPreset {
             destinations,
             true,
             Some(observer),
+            None,
             None,
             None,
         )
@@ -2067,6 +2115,7 @@ impl ContentPreset {
             destinations,
             complete,
             observer,
+            None,
             None,
             None,
         )
@@ -2092,6 +2141,7 @@ impl ContentPreset {
             observer,
             heading_levels,
             None,
+            None,
         )
     }
 
@@ -2115,6 +2165,33 @@ impl ContentPreset {
             observer,
             heading_levels,
             lists,
+            None,
+        )
+    }
+
+    /// Evaluate with complete, ordered paragraph list membership, or `None` when
+    /// the adapter cannot establish that the body and its classifications are complete.
+    #[allow(clippy::too_many_arguments)] // Additive API retains all existing observations.
+    pub fn evaluate_with_paragraph_list_items(
+        &self,
+        input: &ContentInput,
+        capabilities: &ContentEvaluationContext<'_>,
+        destinations: Option<&[String]>,
+        heading_levels: Option<&[u8]>,
+        collection_complete: bool,
+        observer: Option<&mut dyn FnMut(GateObservation)>,
+        lists: Option<&[crate::markdown_adapter::StructuredList]>,
+        paragraph_list_items: Option<&[bool]>,
+    ) -> Result<ContentReport> {
+        self.evaluate_with_observer_inner(
+            input,
+            capabilities,
+            destinations,
+            collection_complete,
+            observer,
+            heading_levels,
+            lists,
+            paragraph_list_items,
         )
     }
 
@@ -2128,6 +2205,7 @@ impl ContentPreset {
         mut observer: Option<&mut dyn FnMut(GateObservation)>,
         heading_levels: Option<&[u8]>,
         lists: Option<&[crate::markdown_adapter::StructuredList]>,
+        paragraph_list_items: Option<&[bool]>,
     ) -> Result<ContentReport> {
         let site = capabilities.site;
         let extensions = capabilities.extensions;
@@ -2902,7 +2980,20 @@ impl ContentPreset {
                     delimiters,
                     abbreviations,
                     ..
+                }
+                | ContentGate::ProseSentenceLengthVariance {
+                    window_size,
+                    reset_at_paragraph,
+                    min_stddev_words,
+                    random_min_stddev_words,
+                    random_max_stddev_words,
+                    random_seed,
+                    delimiters,
+                    abbreviations,
+                    ..
                 } => {
+                    let prose_only =
+                        matches!(gate, ContentGate::ProseSentenceLengthVariance { .. });
                     let threshold = if let Some(value) = min_stddev_words {
                         *value
                     } else {
@@ -2924,9 +3015,12 @@ impl ContentPreset {
                     };
                     measurements.insert("window_size".into(), *window_size);
                     measurements.insert("effective_min_stddev_words".into(), threshold);
-                    if let Some(paragraphs) =
-                        context.and_then(|context| context.paragraphs.as_ref())
-                    {
+                    let paragraphs = context.and_then(|context| context.paragraphs.as_ref());
+                    let classification = paragraph_list_items
+                        .filter(|items| paragraphs.is_some_and(|p| items.len() == p.len()));
+                    if prose_only && classification.is_none() {
+                        reason = Some("complete paragraph list classification is unavailable from this adapter".into());
+                    } else if let Some(paragraphs) = paragraphs {
                         let mut bytes_seen = 0usize;
                         let mut flagged = 0usize;
                         let mut windows = 0usize;
@@ -2934,7 +3028,17 @@ impl ContentPreset {
                         let mut paragraphs_without_windows = 0usize;
                         let mut lengths = std::collections::VecDeque::new();
                         let (mut sum, mut sum_squares) = (0u128, 0u128);
-                        for paragraph in paragraphs.iter().take(MAX_PARAGRAPH_OPENINGS) {
+                        let mut excluded_list_paragraphs = 0usize;
+                        for (index, paragraph) in
+                            paragraphs.iter().take(MAX_PARAGRAPH_OPENINGS).enumerate()
+                        {
+                            if prose_only && classification.is_some_and(|items| items[index]) {
+                                excluded_list_paragraphs += 1;
+                                lengths.clear();
+                                sum = 0;
+                                sum_squares = 0;
+                                continue;
+                            }
                             if *reset_at_paragraph {
                                 lengths.clear();
                                 sum = 0;
@@ -3021,6 +3125,12 @@ impl ContentPreset {
                             }
                         }
                         measurements.insert("paragraph_count".into(), paragraphs.len());
+                        if prose_only {
+                            measurements.insert(
+                                "list_paragraphs_excluded".into(),
+                                excluded_list_paragraphs,
+                            );
+                        }
                         measurements.insert("windows_checked".into(), windows);
                         measurements.insert("low_variance_windows".into(), flagged);
                         if *reset_at_paragraph {
@@ -7046,6 +7156,68 @@ terms = ["bad"]
             );
             assert_eq!(report.gates[0].findings.len(), 1, "{text}");
         }
+    }
+
+    #[test]
+    fn prose_variance_excludes_list_paragraphs_and_requires_complete_classification() {
+        let preset = ContentPreset::from_toml("version=1\nname='t'\n[[gates]]\nid='v'\nkind='prose_sentence_length_variance'\nwindow_size=3\nmin_stddev_words=2\n").unwrap();
+        let context = ContentContext {
+            paragraphs: Some(vec![
+                ContentParagraph {
+                    text: "One two. Three four. Five six.".into(),
+                    line: 1,
+                    column: 1,
+                },
+                ContentParagraph {
+                    text: "List one. List two. List three.".into(),
+                    line: 2,
+                    column: 1,
+                },
+                ContentParagraph {
+                    text: "Seven eight. Nine ten. Eleven twelve.".into(),
+                    line: 3,
+                    column: 1,
+                },
+            ]),
+            ..Default::default()
+        };
+        let capabilities = ContentEvaluationContext {
+            adapter: Some(&context),
+            ..Default::default()
+        };
+        let input = ContentInput::default();
+        let run = |classification: Option<&[bool]>| {
+            preset
+                .evaluate_with_paragraph_list_items(
+                    &input,
+                    &capabilities,
+                    None,
+                    None,
+                    true,
+                    None,
+                    None,
+                    classification,
+                )
+                .unwrap()
+        };
+        for missing in [None, Some(&[false][..])] {
+            let report = run(missing);
+            assert_eq!(report.gates[0].status, GateStatus::NotChecked);
+            assert!(report.gates[0].findings.is_empty());
+        }
+        let report = run(Some(&[false, true, false]));
+        let gate = &report.gates[0];
+        assert_eq!(gate.status, GateStatus::Failed);
+        assert_eq!(gate.measurements["list_paragraphs_excluded"], 1);
+        assert_eq!(gate.measurements["windows_checked"], 2);
+        assert_eq!(
+            gate.findings.iter().map(|f| f.line).collect::<Vec<_>>(),
+            vec![1, 3]
+        );
+        let report = run(Some(&[true, true, true]));
+        assert_eq!(report.gates[0].status, GateStatus::NotChecked);
+        assert_eq!(report.gates[0].measurements["list_paragraphs_excluded"], 3);
+        assert!(report.gates[0].findings.is_empty());
     }
 
     #[test]
