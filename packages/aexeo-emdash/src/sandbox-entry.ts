@@ -1,3 +1,4 @@
+import { sandboxListCoverage } from "./sandbox-list-coverage.js";
 import type {
   EvaluatorFn,
   KvNamespace,
@@ -209,7 +210,7 @@ async function handleRefresh(ctx: DispatchCtx): Promise<BlockResponse> {
     return evaluateViaSidecar(
       ctx.ctx.http,
       { url: runtime.url, authToken: runtime.token, log: ctx.ctx.log },
-      documents,
+      await sandboxListCoverage(ctx.ctx, documents, context?.collections),
       context?.collections,
     );
   };

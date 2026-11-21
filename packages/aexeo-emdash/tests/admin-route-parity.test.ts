@@ -465,6 +465,19 @@ describe("Refresh applies suppressions on every path", () => {
     ]);
   });
 
+  it("applies sandbox list attestation on refresh only for explicitly configured collections", async () => {
+    const kv = fakeKv({ "config:evaluator_url": "https://evaluator.test" });
+    const settings = new Map<string, unknown>([["eval_token", "token"], ["list_structure_complete_collections", '["posts"]']]);
+    const ctx = fakeCtx(kv, settings);
+    const requests: any[] = [];
+    ctx.http.fetch = async (_url, init) => { requests.push(JSON.parse(init?.body ?? "{}")); return { ok: true, status: 200, text: async () => "[]" }; };
+    await sandboxAdmin()({ input: { type: "block_action", action_id: "refresh_findings" } }, ctx);
+    expect(requests[0].documents[0].list_structure_complete).toBe(true);
+    settings.set("list_structure_complete_collections", '["pages"]');
+    await sandboxAdmin()({ input: { type: "block_action", action_id: "refresh_findings" } }, ctx);
+    expect(requests[1].documents[0].list_structure_complete).toBeUndefined();
+  });
+
   it("passes sandbox description field settings into refresh evaluation", async () => {
     const kv = fakeKv({ "config:evaluator_url": "https://evaluator.test" });
     const settings = new Map<string, unknown>([

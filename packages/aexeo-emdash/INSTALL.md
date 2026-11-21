@@ -801,3 +801,17 @@ absence were observed; `unavailable_fields` overrides it. Missing keys outside
 the observed set are unknown. Keep the entire input unchanged in each result:
 Aexeo marks the gate `not_checked` if the coverage or projected input changed.
 Providers must handle unknown values rather than treating them as absent.
+
+### Sandboxed list structure coverage
+
+A sandbox host may set **Collections with complete list structure (JSON)** to
+an explicit JSON array such as `["posts"]`. This attests that the current
+body projection for those collections preserves every list boundary, including
+custom components. Save and Refresh forward the attestation to the sidecar;
+other collections and absent or invalid settings remain unassessed for gates
+that require list structure. Incomplete body capabilities still prevent these
+gates from running, even for an attested collection. The aggregate
+`aexeo.sandbox_list_coverage` log records configuration status and document
+counts without routes, content, or collection names. Configure an appropriate
+preset on the worker separately; this setting does not activate a preset,
+assess historical revisions or authorize publication.

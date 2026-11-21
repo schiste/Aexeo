@@ -1,3 +1,4 @@
+import { sandboxListCoverage, SETTINGS_LIST_STRUCTURE_KEY } from "./sandbox-list-coverage.js";
 import { cmsBodyCoverage, hasCompleteBody, isCmsObservableFinding, isLegacyCmsObservableFinding } from "./cms-coverage.js";
 import { isDescriptionField, validateMetadataFieldsByCollection, type CustomBlockMappings, type DescriptionField, type MetadataFields } from "./adapter.js";
 import type { SuppressionFilter } from "./suppressions.js";
@@ -148,6 +149,12 @@ export type PluginSettingField = SecretSettingField | {
 };
 
 export const PLUGIN_SETTINGS_SCHEMA: Record<string, PluginSettingField> = {
+  [SETTINGS_LIST_STRUCTURE_KEY]: {
+    type: "string",
+    label: "Collections with complete list structure (JSON)",
+    description: "Explicitly attest complete list projection for these current collections.",
+    multiline: true,
+  },
   [SETTINGS_CONTENT_FIELDS_KEY]: {
     type: "string",
     label: "Content fields by collection (JSON)",
@@ -543,12 +550,12 @@ export async function handleAfterSave(
   await handleAfterSaveConfigured(event, ctx, (documents, context) =>
     metadata.unavailable
       ? Promise.resolve({ ok: false, reason: "metadata_config_unavailable", detail: "metadata field settings are unavailable or invalid" })
-      : evaluateViaSidecar(
+      : sandboxListCoverage(ctx, documents, context?.collections).then((projected) => evaluateViaSidecar(
       ctx.http,
       { url: runtime.url, authToken: runtime.token, log: ctx.log },
-      documents,
+      projected,
       context?.collections,
-    ),
+    )),
     undefined,
     blockMappings,
     fields.fields?.[event.content.type],
