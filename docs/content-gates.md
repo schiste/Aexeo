@@ -1621,7 +1621,7 @@ change the seed deliberately to select another. The report records
 Neither the configuration nor findings establish authorship or guarantee any
 outcome from AI detectors. Review the passage before proposing an edit.
 
-### Prose-only sentence variance (host API)
+### Prose-only sentence variance
 
 The opt-in `prose_sentence_length_variance` gate accepts the same settings as
 `sentence_length_variance`, but excludes list paragraphs and breaks rolling
@@ -1640,9 +1640,26 @@ or list items omitted from paragraph projection remain `not_checked`. Configured
 plugins can use `listStructureCompleteByCollection` only for collections whose
 complete projection the host can establish.
 
-The CLI and content-change entry points do not yet pass this observation;
-incremental candidate evaluation does not support it yet. Existing
-sentence-variance configurations retain their behavior.
+The `prose-variance-review` starter is advisory, with a six-sentence window
+and a six-word threshold. Compose it after an existing style profile to replace
+that profile's variance gate while retaining its other checks, for example:
+
+```toml
+version = 1
+name = "News with prose-only variance"
+extends = ["news-style-en", "prose-variance-review"]
+```
+
+Override the gate in a project preset to select different fixed or seeded
+thresholds. These defaults are prompts for editorial review, not a measure of
+authorship or factual accuracy.
+
+The CLI and content-change entry points supply this observation for Markdown
+and HTML. Unsupported or incomplete structures, and plain-text inputs that do
+not establish list structure, remain `not_checked`. Opt-in CLI telemetry reports
+aggregate measured gates, excluded list paragraphs and checked windows without
+content or gate identifiers. Incremental candidate evaluation does not support
+this gate yet. Existing sentence-variance configurations retain their behavior.
 
 ### Possible inline triples
 
