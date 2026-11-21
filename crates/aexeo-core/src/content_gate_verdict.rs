@@ -1875,6 +1875,10 @@ pub fn evaluate_change_with_collection_and_html_scope<P: ConfinedContentFiles>(
                 let adapted =
                     markdown_input_with_source_map_and_destinations(&entry.entity_id, &text)?;
                 heading_levels = adapted.source_map.heading_levels().map(<[u8]>::to_vec);
+                paragraph_list_items = adapted
+                    .source_map
+                    .paragraph_list_items()
+                    .map(<[bool]>::to_vec);
                 let link_count = adapted
                     .source_map
                     .links_complete()

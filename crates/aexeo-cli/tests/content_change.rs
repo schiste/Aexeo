@@ -3077,3 +3077,40 @@ fn html_change_prose_variance_requires_complete_list_observation() {
         assert_eq!(verdict["findings"].as_array().unwrap().len(), findings);
     }
 }
+
+#[test]
+fn markdown_change_prose_variance_requires_complete_list_observation() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = "version=1\nname='test'\n[[gates]]\nid='variance'\nkind='prose_sentence_length_variance'\nblocking=true\nwindow_size=3\nmin_stddev_words=2\n";
+    for (source, digest, code, status, findings) in [
+        (
+            "One two. Three four. Five six.\n\n- List one. List two. List three.\n\nSeven eight. Nine ten. Eleven twelve.\n",
+            "353b63676da9a1e45385dd834a0f1fa542027c786995b362d6c4103414414665",
+            1,
+            "fail",
+            2,
+        ),
+        (
+            "One two. Three four. Five six.\n\n- \n\nSeven eight. Nine ten. Eleven twelve.\n",
+            "be9f054c9051292cbf8b6102068a65c333c31cb5b8ba63a3d19449efe02b4653",
+            2,
+            "not_checked",
+            0,
+        ),
+    ] {
+        let mut change = input();
+        change["entries"][0]["media_type"] = "text/markdown".into();
+        change["entries"][0]["after"] = serde_json::json!({"inline": source, "sha256": digest});
+        let result = run(dir.path(), &change, policy, &[]);
+        assert_eq!(
+            result.status.code(),
+            Some(code),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let verdict: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.path().join("verdict.json")).unwrap()).unwrap();
+        assert_eq!(verdict["status"], status);
+        assert_eq!(verdict["findings"].as_array().unwrap().len(), findings);
+    }
+}

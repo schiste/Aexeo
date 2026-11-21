@@ -43,3 +43,59 @@ fn structured_list_gate_checks_markdown_and_withholds_unknown_structure() {
         assert!(!String::from_utf8_lossy(&output.stderr).contains(content));
     }
 }
+
+#[test]
+fn prose_variance_observes_markdown_lists_and_withholds_unknown_structure() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("preset.toml");
+    fs::write(&preset, "version=1\nname='prose'\n[[gates]]\nid='variance'\nkind='prose_sentence_length_variance'\nwindow_size=3\nmin_stddev_words=2\n").unwrap();
+    for (format, content, status) in [
+        (
+            "markdown",
+            "One two. Three four. Five six.\n\n- List one. List two. List three.\n\nSeven eight. Nine ten. Eleven twelve.\n",
+            "failed",
+        ),
+        (
+            "markdown",
+            "One two. Three four. Five six.\n\n- \n\nSeven eight. Nine ten. Eleven twelve.\n",
+            "not_checked",
+        ),
+        ("text", "One two. Three four. Five six.", "not_checked"),
+    ] {
+        let article = dir.path().join("article");
+        fs::write(&article, content).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_aexeo-cli"))
+            .args([
+                "content",
+                article.to_str().unwrap(),
+                "--input-format",
+                format,
+                "--preset",
+                "custom",
+                "--preset-source",
+                &format!("custom={}", preset.display()),
+                "--format",
+                "json",
+            ])
+            .output()
+            .unwrap();
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["gates"][0]["status"], status, "{format}: {content}");
+        if status == "failed" {
+            assert_eq!(
+                report["gates"][0]["measurements"]["list_paragraphs_excluded"],
+                1
+            );
+            assert_eq!(report["gates"][0]["measurements"]["windows_checked"], 2);
+            assert_eq!(report["source_locations"][0]["line"], 1);
+            assert_eq!(report["source_locations"][1]["line"], 5);
+        } else {
+            assert!(
+                report["gates"][0]["findings"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
+}
