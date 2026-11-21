@@ -455,6 +455,9 @@ registry before considering the release delivered.
   binds content digests and base only; runners must independently retain and
   compare the other inputs or fail closed. Do not claim an optional extension
   protects legacy runners that ignore it.
+  The independent draft Python comparator also requires an explicitly supplied
+  successful fresh process exit and no timeout; these remain caller assertions,
+  not authenticated execution or publication authorization.
   The draft v2 Rust envelope rejects inconsistent embedded verdict fields,
   summary counts and finding references before binding reuse. This validates
   internal structure, not the intended subject, required checks or authorization.

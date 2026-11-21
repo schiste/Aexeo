@@ -60,8 +60,10 @@ def validate_integer_fields(verdict):
 
 
 def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
-            required_checks, expected_validator):
+            required_checks, expected_validator, fresh_exit_code, fresh_timed_out):
     """Check both outputs against current inputs; never authorize publication."""
+    if type(fresh_exit_code) is not int or fresh_exit_code != 0 or fresh_timed_out is not False:
+        raise VerificationError('fresh evaluator did not complete successfully')
     if (not isinstance(artifacts, dict) or not REQUIRED.issubset(artifacts)
             or set(artifacts) - REQUIRED - {'collection', 'external_evidence'}
             or any(not isinstance(value, bytes) for value in artifacts.values())
@@ -170,6 +172,8 @@ def main():
     parser.add_argument('--require-check', action='append', required=True)
     parser.add_argument('--validator-name', required=True)
     parser.add_argument('--validator-version', required=True)
+    parser.add_argument('--fresh-exit-code', type=int, required=True, help='exit code observed by the caller for the fresh evaluation')
+    parser.add_argument('--fresh-timed-out', choices=('true', 'false'), required=True, help='whether the fresh evaluation timed out')
     args = parser.parse_args()
     try:
         artifacts = {name: read_stable(getattr(args, name)) for name in REQUIRED}
@@ -179,7 +183,8 @@ def main():
             artifacts['external_evidence'] = read_stable(args.external_evidence)
         result = compare(read_stable(args.previous), read_stable(args.fresh),
                          read_stable(args.base), read_stable(args.after), artifacts,
-                         args.require_check, (args.validator_name, args.validator_version))
+                         args.require_check, (args.validator_name, args.validator_version),
+                         args.fresh_exit_code, args.fresh_timed_out == 'true')
     except (VerificationError, OSError, ValueError, TypeError, KeyError) as error:
         print(json.dumps({'matched': False, 'publication_authorized': False}), file=sys.stdout)
         print(str(error), file=sys.stderr)

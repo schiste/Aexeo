@@ -61,7 +61,7 @@ class PortableCliInterop(unittest.TestCase):
             for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy',
                          'host_options', 'evaluator', 'external_evidence'):
                 verify += ['--' + name.replace('_', '-'), str(root / name)]
-            verify += ['--require-check', 'gate:7:article:links', '--validator-name', 'aexeo', '--validator-version', '0.0.24']
+            verify += ['--require-check', 'gate:7:article:links', '--validator-name', 'aexeo', '--validator-version', '0.0.24', '--fresh-exit-code', str(run.returncode), '--fresh-timed-out', 'false']
             result = subprocess.run(verify, capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(json.loads(result.stdout)['publication_authorized'])
@@ -141,7 +141,7 @@ class PortableCliInterop(unittest.TestCase):
             verify = [sys.executable, str(HERE / 'verify_portable_verdict.py')]
             for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
                 verify += ['--' + name.replace('_', '-'), str(root / name)]
-            verify += ['--require-check', 'gate:7:article:words', '--validator-name', 'aexeo', '--validator-version', '0.0.24']
+            verify += ['--require-check', 'gate:7:article:words', '--validator-name', 'aexeo', '--validator-version', '0.0.24', '--fresh-exit-code', str(result.returncode), '--fresh-timed-out', 'false']
             result = subprocess.run(verify, capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(json.loads(result.stdout)['publication_authorized'])
@@ -210,7 +210,7 @@ class PortableCliInterop(unittest.TestCase):
             verify = [sys.executable, str(HERE / 'verify_portable_verdict.py')]
             for name in ('previous', 'fresh', 'base', 'after', 'change', 'resolved_policy', 'host_options', 'evaluator'):
                 verify += ['--' + name.replace('_', '-'), str(root / name)]
-            verify += ['--require-check', 'gate:7:article:words', '--validator-name', 'aexeo', '--validator-version', '0.0.24']
+            verify += ['--require-check', 'gate:7:article:words', '--validator-name', 'aexeo', '--validator-version', '0.0.24', '--fresh-exit-code', str(result.returncode), '--fresh-timed-out', 'false']
             result = subprocess.run(verify, capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)['publication_authorized'], False)
