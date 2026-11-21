@@ -1271,6 +1271,47 @@ mod tests {
     }
 
     #[test]
+    fn markdown_and_portable_text_keep_http_urls_in_sentence_measurements() {
+        let source = "See https://example.org/a.b?x=1. Next sentence.";
+        let document: EmdashDocument = serde_json::from_value(serde_json::json!({
+            "route":"/t", "title":"T", "body":[{"children":[
+                {"_type":"span", "text":"See https://example."},
+                {"_type":"span", "text":"org/a.b?x=1. "},
+                {"_type":"span", "text":"Next sentence."}
+            ]}]
+        }))
+        .unwrap();
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='t'\n[[gates]]\nid='s'\nkind='sentence_length'\nmax_words=1\n",
+        )
+        .unwrap();
+        let (input, context, links) = markdown_input_with_links("t.md", source).unwrap();
+        let markdown = preset
+            .evaluate_with_capabilities(
+                &input,
+                &ContentEvaluationContext {
+                    adapter: Some(&context),
+                    link_count: Some(links),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let emdash = evaluate_content(&document, &preset).unwrap();
+        assert_eq!(markdown.gates[0].measurements["sentence_count"], 2);
+        assert_eq!(emdash.gates[0].measurements, markdown.gates[0].measurements);
+        let locations = source_locations(&document, &preset, &emdash);
+        assert_eq!(locations.len(), 2);
+        assert_eq!(
+            (
+                locations[1].block_index,
+                locations[1].span_index,
+                locations[1].utf16_offset
+            ),
+            (0, 2, 0)
+        );
+    }
+
+    #[test]
     fn markdown_and_portable_text_agree_on_blocks_code_and_wrapped_terms() {
         let source = "## Option `a`\n\n- one two three four\n- five six seven eight\n\nThe best\nprice `wins`\n";
         let document: EmdashDocument = serde_json::from_str(r#"{"route":"/t","title":"T","body":[

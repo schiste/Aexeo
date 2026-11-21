@@ -1252,6 +1252,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn visible_http_url_keeps_sentence_measurement_and_source_position() {
+        use crate::content_gate::ContentPreset;
+        let source = "<p>See https://example.org/a.b?x=1. Next sentence.</p>";
+        let adapted = html_content("x", source).unwrap();
+        let text = adapted.input.text.as_deref().unwrap();
+        let preset = ContentPreset::from_toml(
+            "version=1\nname='t'\n[[gates]]\nid='s'\nkind='sentence_length'\nmax_words=1\n",
+        )
+        .unwrap();
+        let report = preset
+            .evaluate_with_context(&adapted.input, None, None, Some(&adapted.context))
+            .unwrap();
+        assert_eq!(report.gates[0].measurements["sentence_count"], 2);
+        let finding = &report.gates[0].findings[1];
+        let map = html_source_map(source, text).unwrap();
+        assert_eq!(
+            map.source_position(source, text, finding.line, finding.column),
+            crate::text_index::LineIndex::new(source)
+                .position(source, source.find("Next").unwrap())
+        );
+    }
+
+    #[test]
     fn formatted_reference_labels_preserve_sentence_boundaries_and_source_positions() {
         for tag in ["sup", "em", "strong"] {
             let source = format!(
