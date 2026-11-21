@@ -91,7 +91,8 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         raise VerificationError('bound verdict exceeds size limit')
     previous, fresh = parse(previous_bytes), parse(fresh_bytes)
     validate_schemas((previous, fresh), HERE / 'bound-verdict.schema.json')
-    html_scope = validate_host_options(parse(artifacts['host_options']))
+    host_options = parse(artifacts['host_options'])
+    html_scope = validate_host_options(host_options)
     change = parse(artifacts['change'])
     validate_change_semantics(change)
     # V1 has open objects. The draft cannot understand extra change inputs or
@@ -126,6 +127,8 @@ def compare(previous_bytes, fresh_bytes, base_bytes, after_bytes, artifacts,
         if observed != (evidence is not None):
             raise VerificationError('link evidence does not match the verdict profile')
         validate_verdict(verdict)
+        if verdict['validator']['version'] != host_options['engine_version']:
+            raise VerificationError('validator version does not match host options')
         require_passed_checks(verdict, required_checks)
         require_validator_identity(verdict, expected_validator)
         if not _typed_equal(verdict['subject'], subject):

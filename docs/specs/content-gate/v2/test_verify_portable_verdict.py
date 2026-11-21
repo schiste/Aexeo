@@ -233,7 +233,7 @@ class PortableComparison(unittest.TestCase):
                           candidate_revision_sha256=revision_digest(candidate))
             self.previous['binding_sha256'] = self.fresh['binding_sha256'] = binding(inputs)
 
-        for field, value in (('engine_version', ''), ('mode', 'online'),
+        for field, value in (('engine_version', ''), ('engine_version', '999.1'), ('mode', 'online'),
                              ('plain_text_paragraphs', 1), ('max_entry_bytes', True),
                              ('max_total_bytes', -1), ('max_total_bytes', 1 << 64),
                              ('html_scope', None), ('extra', True)):
