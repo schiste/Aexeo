@@ -235,6 +235,8 @@ description: Use after repo-onboarding or Explore when moving from orientation i
   Inspect test summaries for skipped cases, not just a successful exit; install
   the repository's pinned test requirements in an isolated environment and rerun
   affected schema-dependent tests without skips before claiming coverage.
+  For rejection tests, first validate a known-good input with the same checker;
+  otherwise a missing validator can make every negative case pass for the wrong reason.
 - For strict protocol JSON, reuse `parse_lossless_json` or
   `parse_unique_json_value` in `aexeo-contracts::content_gate_change_validation`;
   both reject duplicate keys recursively. Bound input size before parsing and
