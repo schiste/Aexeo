@@ -336,6 +336,8 @@ registry before considering the release delivered.
   Common semicolon-terminated named and non-control numeric entities map decoded characters to the opening ampersand; unsupported entities, hidden content and unsupported or malformed markup remain unmapped. Browser-rendered visibility remains unverified. CLI JSON and opt-in
   telemetry identify the mapping capability; telemetry also reports projection
   availability and aggregate heading, paragraph and link counts.
+- [x] Preserve HTML source positions through explicitly structured tables;
+  implicit or recovered table structures remain unmapped.
 - [x] Single-content HTML CLI can explicitly select one non-hidden `<main>`
   ([PR #381](https://github.com/schiste/Aexeo/pull/381)). Missing or ambiguous
   selection is `not_checked`; default document scope is unchanged. Static markup
