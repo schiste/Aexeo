@@ -2138,20 +2138,111 @@ fn draft_portable_candidate_cli_matches_existing_binding_and_rejects_unsupported
     assert!(telemetry.contains("content_change_portable_draft"));
     assert!(!telemetry.contains("abc"));
     assert!(!telemetry.contains(dir.path().to_str().unwrap()));
+    let previous = dir.path().join("previous-portable.json");
+    fs::write(&previous, &bytes).unwrap();
+    let mut verify = portable.clone();
+    verify.extend([
+        "--verify-draft-portable-verdict",
+        previous.to_str().unwrap(),
+    ]);
+    let repeated = run(dir.path(), &input(), policy, &verify);
+    assert_eq!(
+        repeated.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&repeated.stderr)
+    );
+    assert!(String::from_utf8_lossy(&repeated.stderr).contains("\"revalidation\":true"));
+    let saved = fs::read(&output).unwrap();
+    let mut tampered: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    tampered["verdict"]["validator"]["name"] = "tampered".into();
+    fs::write(&previous, serde_json::to_vec(&tampered).unwrap()).unwrap();
+    let rejected = run(dir.path(), &input(), policy, &verify);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("draft portable verdict differs"));
+    assert_eq!(fs::read(&output).unwrap(), saved);
+    let duplicate = String::from_utf8(bytes.clone()).unwrap().replacen(
+        "\"schema\":",
+        "\"schema\":\"duplicate\",\"schema\":",
+        1,
+    );
+    fs::write(&previous, duplicate).unwrap();
+    let rejected = run(dir.path(), &input(), policy, &verify);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("invalid candidate input"));
+    assert_eq!(fs::read(&output).unwrap(), saved);
+    fs::write(&previous, &bytes).unwrap();
+    let mut changed_base: serde_json::Value =
+        serde_json::from_slice(&fs::read(&base).unwrap()).unwrap();
+    changed_base["site_id"] = "another".into();
+    fs::write(&base, serde_json::to_vec(&changed_base).unwrap()).unwrap();
+    let rejected = run(dir.path(), &input(), policy, &verify);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("draft portable decision inputs differ")
+    );
+    assert_eq!(fs::read(&output).unwrap(), saved);
+    changed_base["site_id"] = "site".into();
+    fs::write(&base, serde_json::to_vec(&changed_base).unwrap()).unwrap();
     let mut conflict = portable.clone();
     conflict.extend(["--verify-offline-receipt", base.to_str().unwrap()]);
     assert_eq!(
         run(dir.path(), &input(), policy, &conflict).status.code(),
         Some(2)
     );
-    assert_eq!(fs::read(&output).unwrap(), bytes);
+    assert_eq!(fs::read(&output).unwrap(), saved);
     let mut conflict = portable;
     conflict.extend(["--link-observations", base.to_str().unwrap()]);
     assert_eq!(
         run(dir.path(), &input(), policy, &conflict).status.code(),
         Some(2)
     );
-    assert_eq!(fs::read(&output).unwrap(), bytes);
+    assert_eq!(fs::read(&output).unwrap(), saved);
+    let failing_policy =
+        "version=1\nname='test'\n[[gates]]\nid='words'\nkind='word_count'\nmin=20\nblocking=true\n";
+    let mut failing = opts.to_vec();
+    failing.push("--draft-portable-verdict");
+    assert_eq!(
+        run(dir.path(), &input(), failing_policy, &failing)
+            .status
+            .code(),
+        Some(1)
+    );
+    fs::copy(&output, &previous).unwrap();
+    failing.extend([
+        "--verify-draft-portable-verdict",
+        previous.to_str().unwrap(),
+    ]);
+    let repeated_failure = run(dir.path(), &input(), failing_policy, &failing);
+    assert_eq!(
+        repeated_failure.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&repeated_failure.stderr)
+    );
+    let mut unsupported = input();
+    unsupported["entries"][0]["media_type"] = "application/pdf".into();
+    let mut unsupported_after: serde_json::Value =
+        serde_json::from_slice(&fs::read(&after).unwrap()).unwrap();
+    unsupported_after[0]["media_type"] = "application/pdf".into();
+    fs::write(&after, serde_json::to_vec(&unsupported_after).unwrap()).unwrap();
+    let mut unchecked = opts.to_vec();
+    unchecked.push("--draft-portable-verdict");
+    let first_unchecked = run(dir.path(), &unsupported, failing_policy, &unchecked);
+    assert_eq!(first_unchecked.status.code(), Some(2));
+    let unchecked_result: serde_json::Value =
+        serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert_eq!(unchecked_result["verdict"]["status"], "not_checked");
+    fs::copy(&output, &previous).unwrap();
+    unchecked.extend([
+        "--verify-draft-portable-verdict",
+        previous.to_str().unwrap(),
+    ]);
+    let repeated_unchecked = run(dir.path(), &unsupported, failing_policy, &unchecked);
+    assert_eq!(repeated_unchecked.status.code(), Some(2));
+    let unchecked_result: serde_json::Value =
+        serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+    assert_eq!(unchecked_result["verdict"]["status"], "not_checked");
 }
 
 #[test]
@@ -2259,9 +2350,38 @@ fn candidate_link_verdict_revalidates_and_refuses_changed_observations() {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
+    let mut portable = opts.to_vec();
+    portable.push("--draft-portable-verdict");
+    let result = run(dir.path(), &change, policy, &portable);
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let portable_prior = dir.path().join("portable-prior.json");
+    fs::copy(&output, &portable_prior).unwrap();
+    let mut portable_verify = portable.clone();
+    portable_verify.extend([
+        "--verify-draft-portable-verdict",
+        portable_prior.to_str().unwrap(),
+    ]);
+    let result = run(dir.path(), &change, policy, &portable_verify);
+    assert_eq!(
+        result.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
     let saved = fs::read(&output).unwrap();
     data["entries"]["article"]["observations"][0] = "not_found".into();
     fs::write(&snapshot, serde_json::to_vec(&data).unwrap()).unwrap();
+    let rejected = run(dir.path(), &change, policy, &portable_verify);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("draft portable decision inputs differ")
+    );
+    assert_eq!(fs::read(&output).unwrap(), saved);
     assert_eq!(
         run(dir.path(), &change, policy, &verify).status.code(),
         Some(2)

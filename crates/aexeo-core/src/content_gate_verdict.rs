@@ -1072,6 +1072,56 @@ pub fn evaluate_draft_portable_candidate_link_verdict<P: ConfinedContentFiles>(
     BoundVerdict::new(verdict, &inputs).map_err(anyhow::Error::msg)
 }
 
+/// Reconstruct current inputs, rerun the evaluator and compare the complete
+/// prior draft verdict except its evaluation timestamp. The supplied candidate
+/// and observations are host assertions; this does not authorize publication.
+pub fn revalidate_draft_portable_candidate<P: ConfinedContentFiles>(
+    previous: &aexeo_contracts::content_gate_portable_v2::BoundVerdict,
+    context: &CandidateDecisionContext<'_>,
+    snapshots: Option<&ChangeLinkSnapshots>,
+    provider: &mut P,
+    evaluated_at: &str,
+    scope: HtmlContentScope,
+) -> Result<aexeo_contracts::content_gate_portable_v2::BoundVerdict> {
+    previous.validate_verdict().map_err(anyhow::Error::msg)?;
+    let evidence = snapshots
+        .map(|snapshots| {
+            LinkSnapshotDecisionContext {
+                offline: context.decision,
+                snapshots,
+            }
+            .artifacts_with_html_scope(scope)
+        })
+        .transpose()?;
+    let binding = candidate_binding(
+        context,
+        scope,
+        evidence.as_ref().map(|a| a.external_evidence.as_slice()),
+    )?;
+    if previous.binding_sha256 != binding {
+        bail!("draft portable decision inputs differ");
+    }
+    let fresh = if let Some(snapshots) = snapshots {
+        evaluate_draft_portable_candidate_link_verdict(
+            &CandidateLinkDecisionContext {
+                candidate: context,
+                snapshots,
+            },
+            provider,
+            evaluated_at,
+            scope,
+        )?
+    } else {
+        evaluate_draft_portable_candidate_verdict(context, provider, evaluated_at, scope)?
+    };
+    let mut old = previous.verdict.clone();
+    old.evaluated_at = fresh.verdict.evaluated_at.clone();
+    if old != fresh.verdict || previous.binding_sha256 != fresh.binding_sha256 {
+        bail!("draft portable verdict differs from fresh evaluation");
+    }
+    Ok(fresh)
+}
+
 /// Evaluate changed content and bind the independently built candidate snapshot.
 pub fn evaluate_experimental_candidate_verdict<P: ConfinedContentFiles>(
     context: &CandidateDecisionContext<'_>,
