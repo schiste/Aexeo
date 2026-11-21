@@ -440,3 +440,43 @@ fn embedded_html_links_are_not_misreported_as_absent_in_markdown() {
     assert_eq!(telemetry["summary"]["not_checked"], 2);
     assert!(!telemetry.to_string().contains("example.org"));
 }
+
+#[test]
+fn markdown_with_html_does_not_treat_unobserved_prose_as_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("workflow.toml");
+    let draft = dir.path().join("article.md");
+    fs::write(&preset, "version=1\nname='workflow'\n[[gates]]\nid='words'\nkind='word_count'\nmin=3\nblocking=false\n[[gates]]\nid='paragraphs'\nkind='paragraph_count'\nmin=1\nblocking=false\n[[gates]]\nid='heading'\nkind='heading_length'\nmax_chars=3\nblocking=false\n[[gates]]\nid='newline'\nkind='final_newline'\nblocking=false\n").unwrap();
+    for source in [
+        "<div>These words are present in HTML.</div>\n",
+        "Visible Markdown.\n\n<div>More text.</div>\n",
+        "A <em>marked</em> word.\n",
+    ] {
+        fs::write(&draft, source).unwrap();
+        let (report, telemetry) = evaluate(&draft, &preset, "markdown");
+        for gate in &report["gates"].as_array().unwrap()[..3] {
+            assert_eq!(gate["status"], "not_checked", "{source}");
+            assert!(gate["findings"].as_array().unwrap().is_empty());
+        }
+        assert_eq!(report["gates"][3]["status"], "passed");
+        assert_eq!(telemetry["summary"]["not_checked"], 3);
+        assert!(!telemetry.to_string().contains("present in HTML"));
+    }
+}
+
+#[test]
+fn markdown_html_preserves_independent_composition_unavailability_reason() {
+    let dir = tempfile::tempdir().unwrap();
+    let preset = dir.path().join("workflow.toml");
+    let draft = dir.path().join("article.md");
+    fs::write(&preset, "version=1\nname='workflow'\n[[gates]]\nid='pacing'\nkind='editorial_pacing'\nsource='composition'\nblocking=false\nprofile={version=1,name='short',fields=[{name='hook',max_characters=3}]}\n").unwrap();
+    fs::write(&draft, "<div>Text in HTML.</div>\n").unwrap();
+    let (report, telemetry) = evaluate(&draft, &preset, "markdown");
+    assert_eq!(report["gates"][0]["status"], "not_checked");
+    assert_eq!(
+        report["gates"][0]["reason"],
+        "document or structured composition is unavailable"
+    );
+    assert_eq!(telemetry["summary"]["not_checked"], 1);
+    assert!(!telemetry.to_string().contains("Text in HTML"));
+}
