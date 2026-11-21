@@ -82,6 +82,7 @@ def verify_executable(path, expected):
     if (identity(before) != identity(after) or identity(after) != identity(current)
             or not hmac.compare_digest(digest.hexdigest(), expected)):
         raise VerificationError('pinned executable changed or digest differs')
+    return identity(after)
 
 
 def run(paths, command, timeout, required_checks, expected_validator, content_files=None,
@@ -90,8 +91,8 @@ def run(paths, command, timeout, required_checks, expected_validator, content_fi
     if (not command or any(not isinstance(arg, str) or not arg for arg in command)
             or not math.isfinite(timeout) or not 0 < timeout <= 300):
         raise VerificationError('invalid evaluator command or timeout')
-    if executable_sha256 is not None:
-        verify_executable(command[0], executable_sha256)
+    executable_identity = (verify_executable(command[0], executable_sha256)
+                           if executable_sha256 is not None else None)
     inputs = read_inputs(paths)
     map_bytes = read_stable(content_files) if content_files is not None else None
     content_bytes = read_mapped_content(content_files) if content_files is not None else None
@@ -107,8 +108,9 @@ def run(paths, command, timeout, required_checks, expected_validator, content_fi
                 env=env, timeout=timeout, check=False)
         except (OSError, subprocess.TimeoutExpired) as error:
             raise VerificationError('fresh evaluator did not complete successfully') from error
-        if executable_sha256 is not None:
-            verify_executable(command[0], executable_sha256)
+        if (executable_sha256 is not None and
+                verify_executable(command[0], executable_sha256) != executable_identity):
+            raise VerificationError('pinned executable changed during evaluation')
         if completed.returncode != 0:
             raise VerificationError('fresh evaluator did not complete successfully')
         fresh = read_fresh(output)

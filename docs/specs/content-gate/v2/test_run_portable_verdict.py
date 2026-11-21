@@ -162,6 +162,23 @@ class PortableRunner(unittest.TestCase):
         self.assertIn('digest differs', result.stderr)
         self.assertFalse(json.loads(result.stdout)['publication_authorized'])
 
+    def test_executable_pin_rejects_identical_replacement_during_execution(self):
+        script = self.root / 'evaluator'
+        script.write_text('#!' + str(Path(sys.executable).resolve()) + "\n"
+            "import os,sys\nfrom pathlib import Path\n"
+            "Path(os.environ['CONTENT_GATE_VERDICT_FILE']).write_bytes(Path(sys.argv[1]).read_bytes())\n"
+            "p=Path(sys.argv[0]); replacement=p.with_suffix('.new'); "
+            "replacement.write_bytes(p.read_bytes()); replacement.chmod(0o700); os.replace(replacement,p)\n")
+        script.chmod(0o700)
+        pin = hashlib.sha256(script.read_bytes()).hexdigest()
+        flags = self.flags + ['--executable-sha256', pin]
+        result = subprocess.run([sys.executable, str(HERE / 'run_portable_verdict.py'),
+                                 *flags, '--', str(script), str(self.root / 'previous')],
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('pinned executable changed during evaluation', result.stderr)
+        self.assertFalse(json.loads(result.stdout)['publication_authorized'])
+
     def test_rejects_missing_command_and_invalid_timeout(self):
         for timeout in ('0', 'nan', '301'):
             flags = self.flags.copy()
