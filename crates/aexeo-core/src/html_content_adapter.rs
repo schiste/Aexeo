@@ -5,7 +5,7 @@
 use crate::content_gate::{
     ContentContext, ContentInput, ContentParagraph, MAX_CONTENT_INPUT_BYTES, collapse_whitespace,
 };
-use html5ever::{parse_document, tendril::TendrilSink};
+use html5ever::{ns, parse_document, tendril::TendrilSink};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
 /// Maximum number of DOM nodes traversed for one projection.
@@ -141,7 +141,7 @@ pub fn html_content_with_literal_projection(
             if excluded_element(&node) {
                 continue;
             }
-            if matches!(&node.data, NodeData::Element { name, .. } if name.local.as_ref() == "main")
+            if matches!(&node.data, NodeData::Element { name, .. } if name.ns == ns!(html) && name.local.as_ref() == "main")
             {
                 if selected.is_some() {
                     return Err("HTML main scope is ambiguous: multiple main elements");
@@ -1642,6 +1642,24 @@ mod tests {
                 .is_none()
             );
         }
+    }
+
+    #[test]
+    fn main_scope_ignores_svg_main_elements() {
+        let source = "<svg><main>foreign</main></svg><main><p>article</p></main>";
+        let content = html_content_with_scope("x", source, HtmlContentScope::Main).unwrap();
+        assert_eq!(
+            content.input.text.as_deref().map(str::trim),
+            Some("article")
+        );
+        assert!(
+            html_content_with_scope(
+                "x",
+                "<svg><main>foreign</main></svg>",
+                HtmlContentScope::Main
+            )
+            .is_err()
+        );
     }
 
     #[test]
