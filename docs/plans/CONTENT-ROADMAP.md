@@ -501,6 +501,9 @@ registry before considering the release delivered.
   It does not produce a fresh evaluation,
   establish artifact freshness or authenticity, or authorize publication.
 - [ ] Expand collection and adapter capabilities, including cross-adapter source mapping.
+  Conservatively map explicitly nested HTML `aside` and `address` containers;
+  hidden and malformed structures remain unmapped. This is static source
+  mapping, not a browser visibility guarantee.
   The conservative HTML source mapper supports explicitly closed definition
   lists with direct terms and descriptions, including links and Unicode.
   Ambiguous structures and content outside an explicit item remain unmapped.

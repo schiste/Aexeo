@@ -530,6 +530,8 @@ pub fn html_source_map_with_scope(
                 | "nav"
                 | "footer"
                 | "article"
+                | "address"
+                | "aside"
                 | "blockquote"
                 | "figure"
                 | "figcaption"
@@ -1036,6 +1038,50 @@ mod tests {
             "<main><ul><li>one<li>two</li></ul></main>",
             "<main><div><li>one</li></div></main>",
             "<main><ul><li hidden>one</li></ul></main>",
+        ] {
+            let adapted = html_content("x", source).unwrap();
+            assert!(
+                html_source_map(source, adapted.input.text.as_deref().unwrap()).is_none(),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn maps_explicit_aside_and_address_without_guessing_recovered_structure() {
+        use crate::source_mapping::ContentSourceMap;
+        let source = "<main>\n<p>Avant.</p><aside><p>Élan &amp; <a href='/evidence'>preuve</a>.</p></aside><address>Contact : Équipe.</address><p>Après.</p></main>";
+        for scope in [HtmlContentScope::Document, HtmlContentScope::Main] {
+            let adapted = html_content_with_scope("x", source, scope).unwrap();
+            let text = adapted.input.text.as_deref().unwrap();
+            let map = html_source_map_with_scope(source, text, scope).unwrap();
+            let input_index = crate::text_index::LineIndex::new(source);
+            let output_index = crate::text_index::LineIndex::new(text);
+            for (projected, original) in [
+                ("Élan", "Élan"),
+                ("&", "&amp;"),
+                ("preuve", "preuve"),
+                ("Équipe", "Équipe"),
+                ("Après", "Après"),
+            ] {
+                let (line, column) = output_index
+                    .position(text, text.find(projected).unwrap())
+                    .unwrap();
+                assert_eq!(
+                    map.source_position(source, text, line, column),
+                    input_index.position(source, source.find(original).unwrap())
+                );
+            }
+            assert_eq!(
+                map.link_position(source, 0),
+                input_index.position(source, source.find("<a ").unwrap())
+            );
+        }
+        for source in [
+            "<main><aside hidden><p>texte</p></aside></main>",
+            "<main><aside><p>texte</aside></p></main>",
+            "<main><p>texte<aside>suite</aside></p></main>",
+            "<main><p>texte<address>suite</address></p></main>",
         ] {
             let adapted = html_content("x", source).unwrap();
             assert!(
